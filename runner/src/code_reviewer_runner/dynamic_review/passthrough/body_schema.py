@@ -21,6 +21,9 @@ by the engine test), and everything else is refused:
   or a file id is a part the provider can fetch. A URL that is text stays text;
 - `n` and `candidateCount` are exactly 1, `store` is `false`, there is no `service_tier`,
   `background`, `previous_response_id`, `cachedContent` or routing field (none is a key of the set);
+- `stream` is `true` and present on the three families that have the key (the engine always
+  streams, and the tee reads a stream); a number is finite and at most 2^53; no `cache_control.ttl`
+  (a one-hour cache write is priced separately, #553);
 - exactly one spelling of the output cap, within the job's allowance. A second spelling of the same
   field (`max_tokens` and `max_completion_tokens`, `generationConfig.maxOutputTokens` and its
   snake-case twin) is refused, whatever its value.
@@ -45,6 +48,7 @@ class NotAllowed(Exception):
 
 
 Check = Callable[[Any], None]
+_LARGEST_NUMBER: Final = 2**53
 
 
 def _no() -> NotAllowed:
@@ -63,7 +67,13 @@ def boolean(value: Any) -> None:
 
 def number(value: Any) -> None:
     # A boolean is an int in Python and no number in JSON.
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _no()
+    # An int too large for a float would make `isfinite` raise; no option takes a number that big.
+    if isinstance(value, int):
+        if abs(value) > _LARGEST_NUMBER:
+            raise _no()
+    elif not math.isfinite(value):
         raise _no()
 
 
@@ -92,9 +102,9 @@ def literal(*allowed: Any) -> Check:
     return check
 
 
-def bounded(maximum: int) -> Check:
+def bounded(maximum: int, minimum: int = 1) -> Check:
     def check(value: Any) -> None:
-        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
             raise _no()
 
     return check
@@ -138,7 +148,7 @@ def obj(fields: Mapping[str, Check], required: Collection[str] = ()) -> Check:
     return check
 
 
-_CACHE_CONTROL: Final = obj({"type": literal("ephemeral"), "ttl": literal("5m", "1h")}, ("type",))
+_CACHE_CONTROL: Final = obj({"type": literal("ephemeral")}, ("type",))
 _SAMPLING: Final = {"temperature": number, "top_p": number, "top_k": number}
 
 
@@ -203,7 +213,7 @@ def _chat(allowance: int) -> Check:
             "messages": array(message),
             "tools": array(tool),
             "tool_choice": choice,
-            "stream": boolean,
+            "stream": literal(True),
             "stream_options": obj({"include_usage": boolean}),
             # OpenRouter asks for its usage (and cost) this way instead of `stream_options`.
             "usage": obj({"include": literal(True)}, ("include",)),
@@ -212,7 +222,7 @@ def _chat(allowance: int) -> Check:
             "n": literal(1),
             **_SAMPLING,
         },
-        ("model", "messages"),
+        ("model", "messages", "stream"),
     )
 
 
@@ -279,7 +289,7 @@ def _responses(allowance: int) -> Check:
             "instructions": text,
             "tools": array(tool),
             "tool_choice": choice,
-            "stream": boolean,
+            "stream": literal(True),
             "store": literal(False),
             "prompt_cache_key": text,
             "include": array(literal("reasoning.encrypted_content")),
@@ -290,7 +300,7 @@ def _responses(allowance: int) -> Check:
             "temperature": number,
             "top_p": number,
         },
-        ("model", "input"),
+        ("model", "input", "stream"),
     )
 
 
@@ -372,10 +382,10 @@ def _messages(allowance: int) -> Check:
             "tools": array(tool),
             "tool_choice": choice,
             "thinking": thinking,
-            "stream": boolean,
+            "stream": literal(True),
             **_SAMPLING,
         },
-        ("model", "messages"),
+        ("model", "messages", "stream"),
     )
 
 
@@ -416,7 +426,11 @@ def _google(allowance: int) -> Check:
             "topK": number,
             "candidateCount": literal(1),
             "thinkingConfig": obj(
-                {"includeThoughts": boolean, "thinkingLevel": text, "thinkingBudget": count}
+                {
+                    "includeThoughts": boolean,
+                    "thinkingLevel": text,
+                    "thinkingBudget": bounded(allowance, 0),
+                }
             ),
         },
         ("maxOutputTokens",),

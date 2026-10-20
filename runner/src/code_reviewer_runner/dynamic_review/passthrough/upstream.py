@@ -76,9 +76,10 @@ class UpstreamResponse(Protocol):
     status: int
     headers: list[tuple[str, str]]
 
-    def read(self, size: int) -> bytes:
-        """The next bytes of the body as they arrive, `b""` at the end. `UpstreamError` when the
-        connection stops before the body is complete."""
+    def read(self, size: int, timeout: float | None = None) -> bytes:
+        """The next bytes of the body as they arrive, `b""` at the end. `timeout` is how long this
+        read may wait (the proxy sets it before every read, to the budget of the call or what the
+        job has left). `UpstreamError` when the connection stops before the body is complete."""
         ...
 
     def close(self) -> None: ...
@@ -210,7 +211,10 @@ class HttpUpstreamResponse:
             else None
         )
 
-    def read(self, size: int) -> bytes:
+    def read(self, size: int, timeout: float | None = None) -> bytes:
+        sock = self._connection.sock
+        if timeout is not None and sock is not None:
+            sock.settimeout(timeout)
         try:
             data = self._response.read1(size)
         except TimeoutError:

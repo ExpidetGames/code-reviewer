@@ -554,3 +554,72 @@ def test_a_google_function_call_mode_is_the_engines() -> None:
     document = captured(WireFamily.GOOGLE)
     document["toolConfig"]["retrievalConfig"] = {"latLng": {}}
     assert refused(WireFamily.GOOGLE, document).code is RefusalCode.REQUEST_NOT_ALLOWED
+
+
+# -- round 2 of the security review ----
+
+
+# #550-R2-S2
+@pytest.mark.parametrize(
+    "family", [WireFamily.OPENAI_CHAT, WireFamily.OPENAI_RESPONSES, WireFamily.ANTHROPIC_MESSAGES]
+)
+def test_a_body_that_does_not_stream_is_refused_because_the_engine_always_does(
+    family: WireFamily,
+) -> None:
+    for change in ("absent", False):
+        document = captured(family)
+        if change == "absent":
+            del document["stream"]
+        else:
+            document["stream"] = False
+        assert refused(family, document).code is RefusalCode.REQUEST_NOT_ALLOWED
+
+
+# #550-R2-S4
+def test_a_cache_control_ttl_is_refused_until_the_one_hour_price_exists() -> None:
+    document = captured(WireFamily.ANTHROPIC_MESSAGES)
+    document["system"][0]["cache_control"]["ttl"] = "1h"
+    assert refused(WireFamily.ANTHROPIC_MESSAGES, document).code is RefusalCode.REQUEST_NOT_ALLOWED
+    document["system"][0]["cache_control"] = {"type": "ephemeral"}
+    assert admit(WireFamily.ANTHROPIC_MESSAGES, document).body
+
+
+# #550-R2-N1
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.parametrize("value", [10**400, -(10**400), 10**30, 1e999, -1e999])
+def test_a_number_too_large_for_a_float_is_a_refusal_not_a_crash(
+    family: WireFamily, value: Any
+) -> None:
+    document = captured(family)
+    if family is WireFamily.GOOGLE:
+        document["generationConfig"]["temperature"] = value
+    else:
+        document["temperature"] = value
+    raw = json.dumps(document).replace("Infinity", "1e999").encode()
+    target = PassthroughTarget(family=family, model=model_of(family), output_allowance=ALLOWANCE)
+    admission = Admission(target, CAPABILITY)
+    head = admission.head(
+        "POST",
+        spec_of(family).engine_target(model_of(family)),
+        [
+            (spec_of(family).key_header, spec_of(family).key_value(CAPABILITY)),
+            ("content-type", "application/json"),
+            ("content-length", str(len(raw))),
+        ],
+        8 * 1024 * 1024,
+    )
+    with pytest.raises(Refused) as raised:
+        admission.body(head, raw)
+    assert (raised.value.status, raised.value.code) == (403, RefusalCode.REQUEST_NOT_ALLOWED)
+    assert raised.value.error.value == "dynamic_policy_violation"
+
+
+# #550-R2-N2
+@pytest.mark.parametrize("budget", [ALLOWANCE + 1, 10**9, -1, 1.5, True, "1000"])
+def test_a_google_thinking_budget_above_the_allowance_is_refused(budget: Any) -> None:
+    document = captured(WireFamily.GOOGLE)
+    document["generationConfig"]["thinkingConfig"] = {"thinkingBudget": budget}
+    assert refused(WireFamily.GOOGLE, document).code is RefusalCode.REQUEST_NOT_ALLOWED
+    for fine in (0, 1, ALLOWANCE):
+        document["generationConfig"]["thinkingConfig"] = {"thinkingBudget": fine}
+        assert admit(WireFamily.GOOGLE, document).body

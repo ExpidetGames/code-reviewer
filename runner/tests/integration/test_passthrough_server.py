@@ -244,7 +244,6 @@ def test_an_engine_that_closes_its_connection_does_not_hide_the_usage_of_the_cal
             assert response.read1(65536).startswith(b"data: ")
             connection.close()
             gated.release.set()
-            assert gated.client_closed.wait(10), "the provider's connection was not closed"
             deadline = time.monotonic() + 5
             while f.ledger.usage(MODEL).ai_calls == 0 and time.monotonic() < deadline:
                 time.sleep(0.05)
@@ -418,11 +417,56 @@ def test_a_second_request_while_the_first_is_streaming_is_refused_with_a_429() -
 
 
 # #550-S06-S02
-def test_an_idle_connection_is_closed_by_the_server() -> None:
-    with fake_provider() as provider, front(provider.url, server={"idle_timeout": 0.4}) as f:
-        idle = _raw(f)
-        assert _closed_within(idle, 4.0)
-        idle.close()
+def test_a_connection_that_says_nothing_is_closed_after_the_short_first_wait() -> None:
+    with (
+        fake_provider() as provider,
+        front(provider.url, server={"first_request_timeout": 0.4, "idle_timeout": 30.0}) as f,
+    ):
+        silent = _raw(f)
+        assert _closed_within(silent, 4.0)
+        silent.close()
+
+
+# #550-R2-N7
+def test_a_connection_that_has_served_a_request_may_idle_longer_than_a_new_one() -> None:
+    with (
+        fake_provider() as provider,
+        front(provider.url, server={"first_request_timeout": 0.4, "idle_timeout": 30.0}) as f,
+    ):
+        connection = f.connection()
+        connection.request("POST", "/v1/chat/completions", f.body(), f.headers())
+        assert connection.getresponse().read() and True
+        time.sleep(1.0)  # longer than the first wait
+        connection.request("POST", "/v1/chat/completions", f.body(), f.headers())
+        assert connection.getresponse().status == 200
+
+
+# #550-S06-S02
+def test_a_connection_that_idles_after_a_request_is_closed_after_the_idle_wait() -> None:
+    with (
+        fake_provider() as provider,
+        front(provider.url, server={"first_request_timeout": 5.0, "idle_timeout": 0.5}) as f,
+    ):
+        raw = _raw(f)
+        body = f.body()
+        head = (
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+            f"Authorization: Bearer {f.capability}\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n"
+        )
+        raw.sendall(head.encode() + body)
+        raw.settimeout(5)
+        assert raw.recv(4096).startswith(b"HTTP/1.1 200")
+        # The rest of the answer, then silence: the server closes after the idle wait.
+        deadline = time.monotonic() + 4.0
+        closed = False
+        while time.monotonic() < deadline and not closed:
+            try:
+                closed = raw.recv(65536) == b""
+            except TimeoutError:
+                break
+        assert closed
+        raw.close()
 
 
 # #550-S06-S03

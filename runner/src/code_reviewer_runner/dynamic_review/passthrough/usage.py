@@ -48,11 +48,6 @@ class TapResult:
 class UsageTap(Protocol):
     def feed(self, data: bytes) -> None: ...
 
-    @property
-    def complete(self) -> bool:
-        """The answer has reached its end and stated its usage: nothing more is needed from it."""
-        ...
-
     def finish(self) -> TapResult: ...
 
 
@@ -163,7 +158,8 @@ def is_error_event(raw: bytes) -> bool:
         return True
     try:
         value: Any = json.loads(event.data)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Unreadable (or nested deeper than the parser goes) is not an error event we can see.
         return False
     document = _object(value)
     return document is not None and _is_error(event.name, document)
@@ -247,8 +243,9 @@ class _StreamTap:
             return
         try:
             value: Any = json.loads(event.data)
-        except ValueError:
-            # An error event with a text body is still an error.
+        except (ValueError, RecursionError):
+            # An error event with a text body is still an error; one nested too deep to parse is
+            # unreadable, which is "no usage" and no crash.
             self._reading.errored = self._reading.errored or event.name == "error"
             return
         self._reading.see(event.name, value)
@@ -268,15 +265,11 @@ class _DocumentTap:
     def feed(self, data: bytes) -> None:
         self._body += data
 
-    @property
-    def complete(self) -> bool:
-        return False
-
     def finish(self) -> TapResult:
         reading = _Reading(self._family)
         try:
             reading.see(None, json.loads(bytes(self._body)))
-        except ValueError:
+        except (ValueError, RecursionError):
             return TapResult(usage=None, errored=False, terminated=False)
         reading.terminated = not reading.errored
         return _result(reading)

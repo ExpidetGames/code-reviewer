@@ -66,7 +66,7 @@ class Scripted:
     headers: list[tuple[str, str]] = field(
         default_factory=lambda: [("content-type", "text/event-stream")]
     )
-    chunks: Sequence[bytes | Exception] = ()
+    chunks: Sequence[bytes | Exception | Callable[[], None]] = ()
     # Raised by `send` instead of answering.
     fails: UpstreamError | None = None
 
@@ -79,18 +79,30 @@ class ScriptedResponse:
         self._timeline = timeline
         self.closed = False
         self.reads = 0
+        # The timeout each read was given (the proxy sets it before every read).
+        self.read_timeouts: list[float | None] = []
 
-    def read(self, size: int) -> bytes:
+    def read(self, size: int, timeout: float | None = None) -> bytes:
         self.reads += 1
-        if not self._chunks:
+        self.read_timeouts.append(timeout)
+        # A chunk that is a function is something that happens between two reads (the clock moves).
+        chunk = self._next()
+        if chunk is None:
             self._timeline.append("read:end")
             return b""
-        chunk = self._chunks.pop(0)
         if isinstance(chunk, Exception):
             self._timeline.append("read:error")
             raise chunk
         self._timeline.append(f"read:{len(self._timeline)}")
         return chunk
+
+    def _next(self) -> bytes | Exception | None:
+        while self._chunks:
+            chunk = self._chunks.pop(0)
+            if isinstance(chunk, (bytes, Exception)):
+                return chunk
+            chunk()
+        return None
 
     def close(self) -> None:
         self.closed = True

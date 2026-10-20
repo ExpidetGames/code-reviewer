@@ -163,7 +163,6 @@ def test_only_the_headers_of_the_pinned_engine_are_forwarded(family: WireFamily)
     forwarded = admit_head(family, headers=[*engine_headers(family), *unknown]).headers
     allowed = {
         "accept",
-        "content-type",
         "user-agent",
         "x-opencode-session-id",
         "x-session-id",
@@ -172,9 +171,15 @@ def test_only_the_headers_of_the_pinned_engine_are_forwarded(family: WireFamily)
         "anthropic-beta",
     }
     assert set(forwarded) <= allowed
-    assert {"content-type", "x-session-id"} <= set(forwarded)
-    # The proxy sets these itself (the length, the host, the identity encoding).
-    assert not {"host", "connection", "content-length", "accept-encoding"} & set(forwarded)
+    assert "x-session-id" in forwarded
+    # The proxy sets these itself (the length, the host, the identity encoding, the content type).
+    assert not {
+        "host",
+        "connection",
+        "content-length",
+        "accept-encoding",
+        "content-type",
+    } & set(forwarded)
 
 
 # #550-T03

@@ -59,6 +59,7 @@ def providers() -> list[Provider]:
         # The same chat family, three more providers: faults leave their mark on a ledger.
         Provider("chat", id="acme-retry", model="acme-retry-9"),
         Provider("chat", id="acme-quote", model="acme-quote-9"),
+        Provider("chat", id="acme-errevent", model="acme-errevent-9"),
     ]
 
 
@@ -74,6 +75,12 @@ def plan() -> list[Step]:
             "acme-retry",
             "acme-retry-9",
             faults=lambda upstream: upstream.fail_next(429, 429),
+        ),
+        Step(
+            "errevent",
+            "acme-errevent",
+            "acme-errevent-9",
+            faults=lambda upstream: upstream.error_in_stream(after_events=1, times=1),
         ),
         Step(
             "quote",
@@ -196,3 +203,22 @@ def test_a_model_the_engine_does_not_offer_is_unknown_and_reaches_no_provider(ru
     assert unknown.records == []
     assert model_not_found_for_turn(unknown.http_status, unknown.reply, upstream_calls=0)
     assert engine.front(DEFAULT_IDS["chat"][0]).ledger.failure is None
+
+
+# #550-R2-N3
+def test_an_error_event_in_a_stream_reaches_the_engine_as_our_fixed_event_and_is_retried(
+    run: Any,
+) -> None:
+    engine: PassthroughEngine
+    engine, outcomes, _ = run
+    outcome = outcomes["errevent"]
+    # The fixed event is an error to the engine like the provider's was: it retries the call.
+    assert outcome.http_status == 200
+    assert [tool for step in outcome.assistants for tool in step.tools] == TOOL_ORDER
+    assert len(outcome.records) == 8  # the call with the error event, then the seven of the loop
+    front = engine.front("acme-errevent")
+    assert front.ledger.unknown_calls == 1
+    # The call may have been billed and its usage is unknown: a managed run ends there.
+    assert front.ledger.failure is not None
+    assert front.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+    assert "overloaded" not in engine.log()

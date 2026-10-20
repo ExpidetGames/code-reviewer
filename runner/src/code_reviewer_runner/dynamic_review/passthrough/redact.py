@@ -2,7 +2,7 @@
 
 """Cutting the real key out of the few things of the provider's that reach the engine (#550, T10).
 
-An error event or a header may quote the key it was sent, whole or masked (`sk-proj-****abcd`):
+A header may quote the key it was sent, whole or masked (`sk-proj-****abcd`):
 OpenAI does, and the spike showed the key arrive unredacted in the engine's error message through a
 pure relay. A "part" of the key is any run of at least `MIN_PART` characters of it, so a masked
 quote is cut as well; shorter runs are ordinary text.
@@ -10,9 +10,9 @@ quote is cut as well; shorter runs are ordinary text.
 **Redaction is never applied to content.** If the proxy cut the key out of a normal answer, an
 engine that writes guesses of the key into its output would see the cut where a guess is right: the
 proxy would be an oracle for the key, one character run at a time. So a successful answer is
-relayed unchanged, and this is used only on what no model writes: the events of an error stream
-and the headers of an answer. What the provider says in an error *body* is not passed on at all
-(`proxy.py`), so there is nothing left to cut there.
+relayed unchanged, and this is used only on what no model writes: the headers of an answer. What
+the provider says in an error *body* or an error *event* is not passed on at all (`proxy.py`: the
+engine gets a status and a fixed sentence or event of ours), so there is nothing left to cut there.
 """
 
 import re

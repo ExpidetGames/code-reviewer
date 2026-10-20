@@ -21,21 +21,22 @@ For every request the engine makes, in this order:
    usage from the same bytes. **A successful answer is never changed** (`redact.py`: redaction of
    content is an oracle for the key).
 5. **Settlement**: a complete answer with a usage and a price settles the reservation; a refusal
-   from the provider with a 4xx (not 408), a 429 or a 500/502/503/529 that is only a status (before
-   any byte of an answer) costs nothing. Everything else that was sent and whose usage was not read
-   (a cut stream, an error event, a 408, 504 or 524, a timeout after the request went out) is
-   **unknown**: booked at its worst case, not at what it was expected to cost, and for
-   a managed key the run ends (`dynamic_accounting_failed`); relaxing that for an own key is #553.
-   An engine that hangs up does not make a call unknown: the proxy keeps reading the provider's
-   answer, without forwarding it, until its usage event or the byte and deadline bounds, and then
-   settles normally.
+   from the provider with a 4xx (not 408), a 429 or a 500/502/503/529 that is only a status (soon,
+   not an event stream, no usage in its body: `_billed`) costs nothing. Everything else that was
+   sent and whose usage was not read (a cut stream, an error event, a 408, 504 or 524, a timeout
+   after the request went out) is **unknown**: booked at its worst case, not at what it was
+   expected to cost, and for a managed key the run ends (`dynamic_accounting_failed`); relaxing
+   that for an own key is #553. An engine that hangs up does not make a call unknown: the proxy
+   keeps reading the provider's answer, without forwarding it, to its end or the byte and deadline
+   bounds, and then settles normally.
 
 What the provider says about an error is not passed on: the engine gets the status, a code and a
-sentence of ours, and the retry hint (`retry-after`), nothing else. Error events inside a 200
-stream and the headers of an answer have the key cut out of them. A refusal that ends the run (a
-policy violation, a limit, a provider error that no retry will help) is recorded in the ledger with
-a stable `ErrorCode`; one the engine retries by itself (429, a cut stream) is not, and its code is
-kept in `last_upstream_error` for the caller to name when the engine gives up. No file here logs.
+sentence of ours, and the retry hint (`retry-after`), nothing else. An error event inside a 200
+stream is replaced by a fixed event of ours; the headers of an answer have the key cut out. A
+refusal that ends the run (a policy violation, a limit, a provider error that no retry will help)
+is recorded in the ledger with a stable `ErrorCode`; one the engine retries by itself (429, a cut
+stream) is not, and its code is kept in `last_upstream_error` for the caller to name when the
+engine gives up. No file here logs.
 
 Not done here: how a final call is told to answer (#552: a call is never rewritten on this path, so
 the ledger is asked with `can_wrap_up=False` and a call the limit cannot hold is refused); the
@@ -64,7 +65,7 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     RefusalCode,
     Refused,
 )
-from code_reviewer_runner.dynamic_review.passthrough.families import spec_of
+from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 from code_reviewer_runner.dynamic_review.passthrough.redact import MIN_KEY_CHARS, Redactor
 from code_reviewer_runner.dynamic_review.passthrough.sink import ClientGone, ResponseSink
@@ -110,6 +111,11 @@ _MAX_HEADER_VALUE: Final = 1024
 # Server errors that are not billed when they arrive as a status before any byte of the answer.
 # Open point (live checklist L13): whether a real provider ever bills one.
 _UNBILLED_SERVER_ERRORS: Final = frozenset({500, 502, 503, 529})
+# ... and only when the status line came this soon after the request: a provider that thought about
+# it for longer may have been generating.
+_STATUS_WITHIN_SECONDS: Final = 15.0
+_USAGE_KEYS: Final = frozenset({"usage", "usageMetadata", "usage_metadata"})
+_SHORTEST_READ: Final = 0.05
 # The only things of a provider's error that reach the engine: when to retry, as a number.
 _RETRY_HINTS: Final = {
     "retry-after": re.compile(r"[0-9]{1,6}(\.[0-9]{1,3})?"),
@@ -123,6 +129,53 @@ _REFUSAL_DETAIL: Final = {
     RefusalCode.LENGTH_REQUIRED: "the request has no length that can be measured",
     RefusalCode.CALL_IN_FLIGHT: "another call is in flight; the calls of a job are serial",
 }
+
+
+# What the engine is told in the place of an error the provider sent inside a 200 answer. The
+# events are ours: the engine's retry logic reads their shape, and nothing the provider wrote (nor
+# any word of what the request said) is in them. The shapes are those of the fakes, which the
+# pinned engine is known to read as an error (spike #546); a real capture is live item L7.
+_ERROR_SENTENCE: Final = "the model provider reported an error"
+
+
+def _sse(name: str | None, data: object) -> bytes:
+    head = b"" if name is None else f"event: {name}\n".encode()
+    return head + b"data: " + json.dumps(data).encode("utf-8") + b"\n\n"
+
+
+def fixed_error_event(family: WireFamily) -> bytes:
+    """The event the engine gets in the place of an error event of the provider's."""
+    if family is WireFamily.ANTHROPIC_MESSAGES:
+        return _sse(
+            "error",
+            {"type": "error", "error": {"type": "api_error", "message": _ERROR_SENTENCE}},
+        )
+    if family is WireFamily.OPENAI_RESPONSES:
+        return _sse(
+            "error",
+            {
+                "type": "error",
+                "code": "server_error",
+                "message": _ERROR_SENTENCE,
+                "sequence_number": 0,
+            },
+        )
+    if family is WireFamily.GOOGLE:
+        return _sse(
+            None, {"error": {"code": 500, "message": _ERROR_SENTENCE, "status": "INTERNAL"}}
+        )
+    return _sse(
+        None, {"error": {"message": _ERROR_SENTENCE, "type": "api_error", "code": "server_error"}}
+    )
+
+
+def _fixed_error_document() -> bytes:
+    return json.dumps(
+        {
+            "type": "error",
+            "error": {"type": "api_error", "code": "server_error", "message": _ERROR_SENTENCE},
+        }
+    ).encode("utf-8")
 
 
 def _error_kind(status: int) -> str:
@@ -142,6 +195,27 @@ def _error_body(code: str, detail: str, kind: str = "invalid_request_error") -> 
     return json.dumps(
         {"type": "error", "error": {"type": kind, "code": code, "message": detail}}
     ).encode("utf-8")
+
+
+def _states_usage(body: bytes) -> bool:
+    """Whether an error body states a usage. JSON: an object under `usage`/`usageMetadata`
+    anywhere in it. Anything that does not parse (an HTML page, a cut or too deep document): the
+    word `usage` anywhere in it, since a body we cannot read may state one."""
+    try:
+        document: object = json.loads(body)
+    except (ValueError, RecursionError):
+        return b"usage" in body.lower()
+    pending: list[object] = [document]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():  # pyright: ignore[reportUnknownVariableType]
+                if key in _USAGE_KEYS and isinstance(value, dict):
+                    return True
+                pending.append(value)  # pyright: ignore[reportUnknownArgumentType]
+        elif isinstance(node, list):
+            pending.extend(node)  # pyright: ignore[reportUnknownArgumentType]
+    return False
 
 
 class PassthroughProxy:
@@ -292,11 +366,13 @@ class PassthroughProxy:
     ) -> None:
         started_ms = int(self.ledger.elapsed_seconds() * 1000)
         outgoing = dict(head.headers)
-        outgoing.setdefault("content-type", "application/json")
+        # The content type is ours: the engine's is checked at admission and not passed on.
+        outgoing["content-type"] = "application/json"
         outgoing[self._spec.key_header] = self._spec.key_value(self._key)
         # A tee that reads the usage cannot read an answer that was compressed for the engine.
         outgoing["accept-encoding"] = "identity"
         timeout = min(self._call_timeout, self.ledger.remaining_seconds())
+        sent_at = self.ledger.elapsed_seconds()
         try:
             response = self._upstream.send(
                 UpstreamRequest(head.upstream_path, outgoing, admitted.body), timeout
@@ -304,10 +380,28 @@ class PassthroughProxy:
         except UpstreamError as error:
             self._no_answer(sink, error, reservation, started_ms)
             return
+        except Exception:
+            self._no_answer(
+                sink, UpstreamError(UpstreamFailure.CUT, sent=True), reservation, started_ms
+            )
+            return
+        latency = self.ledger.elapsed_seconds() - sent_at
         try:
-            self._answer(response, admitted, reservation, started_ms, sink)
+            self._answer(response, admitted, reservation, started_ms, latency, sink)
+        except Exception:
+            # The request was sent: whatever broke, the call may have been billed. It is booked
+            # (once: a call the normal path already settled is not settled again) and the engine's
+            # connection is dropped, so the run ends with `dynamic_accounting_failed` and not with
+            # a generic `runner_error` that says nothing about the cost.
+            self._unknown(reservation, started_ms)
+            sink.abort()
         finally:
             response.close()
+
+    def _read_timeout(self) -> float:
+        """What the next read of the provider's answer may wait: the budget of a call, or what the
+        job has left."""
+        return max(min(self._call_timeout, self.ledger.remaining_seconds()), _SHORTEST_READ)
 
     def _no_answer(
         self, sink: ResponseSink, error: UpstreamError, reservation: Reservation, started_ms: int
@@ -341,6 +435,7 @@ class PassthroughProxy:
         admitted: Admitted,
         reservation: Reservation,
         started_ms: int,
+        latency: float,
         sink: ResponseSink,
     ) -> None:
         status = response.status
@@ -356,7 +451,7 @@ class PassthroughProxy:
             self._respond(sink, 502, _error_body(problem.code.value, problem.detail, "api_error"))
             return
         if not 200 <= status < 300:
-            self._provider_error(response, status, reservation, started_ms, sink)
+            self._provider_error(response, status, reservation, started_ms, latency, sink)
             return
         if headers.get("content-encoding", "identity").lower() != "identity":
             problem = LimitError(
@@ -397,12 +492,14 @@ class PassthroughProxy:
         status: int,
         reservation: Reservation,
         started_ms: int,
+        latency: float,
         sink: ResponseSink,
     ) -> None:
-        # The body is read to tell a too-long request from other refusals. It is read here and not
-        # passed on: what a provider writes about an error can quote what the request said, so
-        # the engine (which wrote the request) gets a status, our sentence and the retry hint.
-        body, _ = self._read_bounded(response, self.ledger.limits.max_response_bytes)
+        # The body is read to tell a too-long request from other refusals, and to see whether the
+        # provider states a usage. It is read here and not passed on: what a provider writes about
+        # an error can quote what the request said, so the engine (which wrote the request) gets
+        # a status, our sentence and the retry hint.
+        body, complete = self._read_bounded(response, self.ledger.limits.max_response_bytes)
         text = body.decode("utf-8", errors="replace")
         code = (
             ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED
@@ -411,14 +508,10 @@ class PassthroughProxy:
         )
         self.last_upstream_error = code
         # The engine retries these itself; any other refusal ends its turn, and so the run.
-        if not (status in (408, 409, 429) or status >= 500):
+        if status >= 200 and not (status in (408, 409, 429) or status >= 500):
             self.ledger.record_failure(LimitError(code, "the model provider refused the request"))
-        # A status line that arrives before any byte of an answer is a call the provider failed
-        # before it generated anything, and the providers do not bill these: 4xx, 429 and the
-        # server errors in `_UNBILLED_SERVER_ERRORS`. A timeout status (408, 504, 524) says the
-        # provider may have been working on it, and so does any status we have no reason to trust.
-        billed = status == 408 or (status >= 500 and status not in _UNBILLED_SERVER_ERRORS)
-        if billed:
+        content_type = dict((n.lower(), v) for n, v in response.headers).get("content-type", "")
+        if self._billed(status, latency, content_type, body, complete):
             self._unknown(reservation, started_ms)
         else:
             self.ledger.settle_unbilled(reservation)
@@ -438,12 +531,36 @@ class PassthroughProxy:
         )
 
     @staticmethod
-    def _read_bounded(response: UpstreamResponse, limit: int) -> tuple[bytes, bool]:
+    def _billed(
+        status: int, latency: float, content_type: str, body: bytes, complete: bool
+    ) -> bool:
+        """Whether a call that was answered with this error status may have been billed.
+
+        A 4xx (not 408) and a 429 are refused before anything is generated. A 500, 502, 503 or 529
+        is the same, when it really is only a status: it came soon (`_STATUS_WITHIN_SECONDS`), it
+        is not an event stream, and its body, read whole, states no usage. Everything else (408,
+        504, 524, a status below 200 or any other 5xx, and a 5xx that fails one of those three
+        conditions) says the provider may have been working on the call.
+        """
+        if status < 200 or status == 408:
+            return True
+        if status < 500:
+            return False
+        if status not in _UNBILLED_SERVER_ERRORS:
+            return True
+        return (
+            latency > _STATUS_WITHIN_SECONDS
+            or content_type.lower().startswith("text/event-stream")
+            or not complete
+            or _states_usage(body)
+        )
+
+    def _read_bounded(self, response: UpstreamResponse, limit: int) -> tuple[bytes, bool]:
         """At most `limit` bytes of the body. The flag is False when it ended early or ran past."""
         body = b""
         try:
             while len(body) <= limit:
-                data = response.read(_READ_BYTES)
+                data = response.read(_READ_BYTES, self._read_timeout())
                 if not data:
                     return body, True
                 body += data
@@ -467,7 +584,7 @@ class PassthroughProxy:
         body = b""
         try:
             while True:
-                data = response.read(_READ_BYTES)
+                data = response.read(_READ_BYTES, self._read_timeout())
                 if not data:
                     break
                 body += data
@@ -480,8 +597,8 @@ class PassthroughProxy:
             return
         result = tap.finish()
         # Content is never changed; an answer that is an error (a 200 with an `error` object) is
-        # the provider's words about a failure, with the key cut out of them.
-        shown = self._redactor.redact(body) if result.errored else body
+        # the provider's words about a failure, and the engine gets a fixed document of ours.
+        shown = _fixed_error_document() if result.errored else body
         self._settle(result, reservation, started_ms)
         try:
             sink.start(status, self._forwarded_headers(response), len(shown))
@@ -492,8 +609,9 @@ class PassthroughProxy:
 
     def _guarded(self, event: bytes) -> bytes:
         """One event of the stream as the engine gets it: unchanged, unless it is an error event
-        (never a word of the model's: see `is_error_event`)."""
-        return self._redactor.redact(event) if is_error_event(event) else event
+        (decided by the provider's structure, never by a word of the model's: see
+        `is_error_event`), which is replaced by a fixed one of ours."""
+        return fixed_error_event(self._family) if is_error_event(event) else event
 
     def _stream(
         self,
@@ -523,7 +641,7 @@ class PassthroughProxy:
                 if self.ledger.expired():
                     self._deadline(reservation, started_ms, sink)
                     return
-                data = response.read(_READ_BYTES)
+                data = response.read(_READ_BYTES, self._read_timeout())
                 if not data:
                     break
                 total += len(data)
@@ -532,8 +650,7 @@ class PassthroughProxy:
                     return
                 tap.feed(data)
                 if not engine_here:
-                    if tap.complete:
-                        break
+                    # Read on to the end of the answer, forwarding nothing.
                     continue
                 try:
                     for event in framer.feed(data):
@@ -571,7 +688,8 @@ class PassthroughProxy:
         case, in the trace with nothing known about it, and for a managed key the end of the run.
         `reason` (a limit that was hit) is recorded first, since the first failure is the one that
         is reported."""
-        self.ledger.settle_unknown(reservation)
+        if not self.ledger.settle_unknown(reservation):
+            return  # settled already: nothing more to book, and the run's failure is recorded
         self._trace_failed(started_ms, reservation)
         if reason is not None:
             self.ledger.record_failure(reason)

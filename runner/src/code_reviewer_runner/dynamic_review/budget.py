@@ -279,6 +279,9 @@ class Reservation:
     # True when that final call is the recovery of a turn without an answer (#309), which carries
     # the recovery instruction instead of the wrap-up one.
     recovery: bool = False
+    # Which reservation this is (0: none). The ledger settles each once, so a call that an error
+    # handler settles again after the normal path already did is booked once (#550).
+    serial: int = 0
 
 
 @dataclass
@@ -419,6 +422,8 @@ class BudgetLedger:
         self._started = clock()
         self._counters = _Counters()
         self._lock = threading.Lock()
+        self._serials = 0
+        self._open: set[int] = set()
         # What each call was, without content (#541); filled by the proxy and the audit, read by
         # nothing in the run.
         self.trace = CallTrace()
@@ -615,6 +620,7 @@ class BudgetLedger:
                     self._stopped_early = reason
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            serial = self._issue()
         return Reservation(
             input_tokens=estimate,
             output_tokens=allowance,
@@ -623,6 +629,7 @@ class BudgetLedger:
             cost=cost,
             final=final,
             recovery=recovery,
+            serial=serial,
         )
 
     def try_reserve_final_retry(
@@ -654,6 +661,7 @@ class BudgetLedger:
                 self._retried_past_limit = True
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            serial = self._issue()
         return Reservation(
             input_tokens=estimate,
             output_tokens=allowance,
@@ -661,6 +669,7 @@ class BudgetLedger:
             request_bytes=size,
             cost=cost,
             final=True,
+            serial=serial,
         )
 
     def _final_admissible(self, held: Decimal) -> bool:
@@ -773,6 +782,8 @@ class BudgetLedger:
         cannot be bounded by money: the tokens are recorded, then the run is stopped, and it is
         never read as zero.
         """
+        if not self._is_open(reservation):
+            return  # settled already (an error handler came after the normal path)
         if prompt_tokens is None or completion_tokens is None:
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider did not report usage"
@@ -793,6 +804,7 @@ class BudgetLedger:
         read, written = _cache_tokens(cache_read_tokens, cache_write_tokens, prompt_tokens)
         counters = self._counters
         with self._lock:
+            self._close(reservation)
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
@@ -837,12 +849,27 @@ class BudgetLedger:
         """
         with self._lock:
             counters = self._counters
+            self._close(reservation)
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
             counters.cost = _SUM.add(counters.cost, reservation.cost if cost is None else cost)
             if cost is not None:
                 counters.priced_calls += 1
+
+    def _issue(self) -> int:
+        """A serial for a new reservation. Call with the lock held."""
+        self._serials += 1
+        self._open.add(self._serials)
+        return self._serials
+
+    def _is_open(self, reservation: Reservation) -> bool:
+        with self._lock:
+            return reservation.serial == 0 or reservation.serial in self._open
+
+    def _close(self, reservation: Reservation) -> None:
+        """The reservation is settled. Call with the lock held."""
+        self._open.discard(reservation.serial)
 
     def settle_unbilled(self, reservation: Reservation) -> None:
         """Release the reservation of a call the provider refused before it generated anything
@@ -853,6 +880,9 @@ class BudgetLedger:
         cost nothing, and what was held for it is free again.
         """
         with self._lock:
+            if reservation.serial and reservation.serial not in self._open:
+                return
+            self._close(reservation)
             self._counters.reserved_cost = _SUM.subtract(
                 self._counters.reserved_cost, reservation.cost
             )
@@ -867,21 +897,26 @@ class BudgetLedger:
             cache_in_use=True,
         )
 
-    def settle_unknown(self, reservation: Reservation) -> None:
+    def settle_unknown(self, reservation: Reservation) -> bool:
         """Settle a call whose usage was never seen (a cut stream, an error inside a stream, a
         timeout after the request was sent, a server error) (#550).
 
         The provider may have billed it, and an engine that can make a call's usage unreadable
         must not thereby make it free: the call is booked at its **worst case**, not at what it was
         expected to cost, and counted as unknown. Like any call without a reported cost it makes
-        the cost of the whole run unknown, never a partial sum.
+        the cost of the whole run unknown, never a partial sum. Returns False (and books nothing)
+        for a reservation that was settled already.
         """
         worst = self.worst_case_cost(reservation)
         with self._lock:
+            if reservation.serial and reservation.serial not in self._open:
+                return False  # settled already: an error handler came after the normal path
+            self._close(reservation)
             counters = self._counters
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
             counters.unknown_calls += 1
+        return True
 
     @property
     def unknown_calls(self) -> int:

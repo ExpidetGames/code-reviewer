@@ -307,7 +307,8 @@ untrusted side):
 - **How.** Request headers are built from an allow-list (`accept`, `content-type`, `user-agent`, the three
   `x-*session*` headers; for Messages `anthropic-version` and `anthropic-beta`, whose values must be on a list: the two
   the pinned OpenCode sends). Every credential, cookie and proxy header is dropped; the proxy sets the one key header
-  of the family, `accept-encoding: identity` (the tee cannot read a compressed answer) and the length itself. The
+  of the family, `content-type: application/json` (the engine's is checked, then dropped, so no parameter of its choosing
+  reaches the provider), `accept-encoding: identity` (the tee cannot read a compressed answer) and the length itself. The
   body length must be measurable before it is read (a chunked body is a 411, one above `max_request_bytes` a 413).
 - **The body.** Read as JSON and walked against a **closed schema per family** (`passthrough/body_schema.py`): the
   keys the pinned OpenCode sends (`fakes/wire/engine_requests.json` is one captured body per family), compared
@@ -318,7 +319,7 @@ untrusted side):
   Messages none or `custom`, Google `functionDeclarations`); no web search, code execution, MCP, computer use,
   `mcp_servers` or `container`. Content parts are text, the tool exchange of the family and the engine's reasoning
   blocks; **no image, audio, file or document part at all** (the model entries are text-only; a part that can carry a
-  URL is a part the provider can fetch). `n` and `candidateCount` are 1, `store` is `false`; no `service_tier`,
+  URL is a part the provider can fetch). `stream` is present and `true` (the engine always streams; a non-stream call is refused), `n` and `candidateCount` are 1, `store` is `false`, a number is finite and no larger than 2^53, Google's `thinkingBudget` is within the allowance, `cache_control` has no `ttl` (a 1-hour write needs its own price, #553); no `service_tier`,
   `background`, `previous_response_id`, `cachedContent`, `metadata`, `response_format` or OpenRouter routing. A key
   given twice and a non-object are refused. The walk only checks: the bytes that go out are the bytes that came in.
   What the engine sends for a provider that no capture has covered fails closed as `request_not_allowed`, and its key
@@ -352,8 +353,9 @@ wrong. Everything the app refuses is refused here too.
 with none makes no lookup and no connection): the name lookup runs in a thread that is given up on (`getaddrinfo` has
 no timeout; at most one call is in flight, so a hanging resolver costs one idle thread), each connection attempt gets
 what is left of the budget after the attempts before it, the TLS handshake what is left after the connection, then
-each read gets the budget. On the engine's side of the loopback socket (`server.py`) a connection that says nothing is
-closed after 30 s, reading a body and writing an answer each wait at most 60 s and never longer than the job has left
+the socket timeout is set again before **every** read of the answer (the call's budget or what the job has left,
+whichever is less; the body of an error and a document included). On the engine's side of the loopback socket (`server.py`) a connection that says nothing is
+closed after 5 s (one that has been served may idle for 30 s), reading a body and writing an answer each wait at most 60 s and never longer than the job has left
 (a timeout there is an engine that went away), and no more than 16 connections are served at once; one over is closed
 at once.
 
@@ -365,8 +367,8 @@ settled:
 | What happened | Settled as |
 |---|---|
 | a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
-| the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (before any byte of a body or stream), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
-| 408, 504, 524 (and any other status), every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
+| the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (all of: the status line came within 15 s of the request, the content type is not `text/event-stream`, and the bounded body, read whole, states no usage object), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
+| 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
 | a complete answer without a readable usage or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
 
 The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
@@ -374,15 +376,18 @@ the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_
 a call's usage unreadable must not make the call free, so a call that may have been billed and was not read ends a
 managed run. *Why a 500/502/503/529 status is not such a call:* it arrives as a status line before any byte of an
 answer, so the provider failed the request before it generated anything, and the providers do not bill that (a
-transient overload is the commonest event of a long run, and the engine retries it as a call of its own). A timeout
+transient overload is the commonest event of a long run, and the engine retries it as a call of its own). It is
+trusted only while it looks like that: a status line that took more than 15 s, an event-stream content type, or a body
+that states a usage (JSON with a `usage`/`usageMetadata` object anywhere, or, for a body that does not parse, the word
+`usage`; a body longer than the bound or cut counts too) means the provider may have been generating. A timeout
 status (408, 504, 524) and anything after the first byte of a stream or body say the provider may have been generating,
 so they stay unknown. The assumption is unproven for real providers and is item L13 of the live checklist. The hook
 for #553 is `PassthroughProxy(unknown_cost_ends_run=)`, on by default and set by nothing yet. The whole-run cost stays
 unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
 
 **A hang-up does not hide a cost.** When the engine disconnects mid-stream, the call to the provider is **not**
-cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap until the usage event, or the
-byte bound or the deadline, and then settles the call normally. Cancelling at once would let a hostile engine
+cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap to the end of the answer (bounded by the
+byte bound, the deadline and the per-read timeout), and then settles the call normally. Cancelling at once would let a hostile engine
 turn any call into an unknown (or free) one by hanging up after the first event, and an unknown call is booked at its
 worst case and ends a managed run. If the usage still cannot be read, the call is unknown as above.
 
@@ -399,13 +404,23 @@ answer are filtered to a few (`content-type`, `retry-after`, `retry-after-ms`, `
 what the provider answers, an engine that writes guesses of the key into its output would see the cut where a guess is
 right: the proxy would be an oracle, one character run at a time. So **a successful answer is never changed**.
 Redaction (`redact.py`: the key and any run of eight or more characters of it) is used only on what no model writes:
-the events of an error stream (an `error` event, or JSON with an `error` key, `type: error` or
-`response.failed`: decided by the provider's structure, never by the model's words) and the headers of an answer. For a
-non-2xx answer the provider's body is read locally (to tell a too-long request from other refusals) and **not passed
-on at all**: the engine gets the status, a code and a sentence of the proxy's own, and the plain-number `retry-after`
-and `retry-after-ms`, nothing else. The residual: an error event inside a 200 stream is still the provider's text with
-the key cut out, because the engine's retry logic reads its shape and no capture of one exists yet (live item L7); it
-can only be an oracle if a provider quotes request content in such an event.
+the headers of a successful answer. An error event inside a 200 stream (an `error` event, or JSON with an `error` key,
+`type: error` or `response.failed`: decided by the provider's structure, never by the model's words) is **replaced by a
+fixed event of ours** (`fixed_error_event`, one per family, the shapes of the fakes), and a 200 document that is an
+error by a fixed document: nothing the provider wrote is passed on, so an event cannot be an oracle either. The tap still
+reads the original bytes, so the call is settled as unknown. The engine retries a fixed chat event as it did the
+provider's (engine test); the types in the fixed events of the other families are what a live capture (L7) has
+to confirm. For a non-2xx answer the provider's body is read locally (to tell a too-long request from other refusals,
+and to see whether it states a usage) and **not passed on at all**: the engine gets the status, a code and a sentence
+of the proxy's own, and the plain-number `retry-after` and `retry-after-ms`, nothing else.
+
+*An exception after the request was sent.* Whatever breaks while an answer is relayed (a bug, an unreadable shape) the
+call may have been billed: it is booked as unknown (once: the ledger settles a reservation a single time, so an error
+handler after the normal path books nothing twice), the engine's connection is dropped, and the run ends with
+`dynamic_accounting_failed` and not with a generic `runner_error`. Neither code is retried by the app (only
+`runner_shutdown` is given back to the queue; both are free of charge for the member), but the first says in the run's
+copy that the usage could not be accounted for. An event nested deeper than the JSON parser goes is unreadable, not a
+crash.
 
 **Stable codes the caller branches on.** A provider status maps by the table of the legacy path (`llm_auth`,
 `llm_rate_limit`, `llm_unavailable`, `llm_timeout`, `llm_context_length_exceeded`, `llm_bad_request`); a 404, and the

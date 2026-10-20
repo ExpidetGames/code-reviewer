@@ -8,11 +8,12 @@ hands the answer on as it arrives (a stream chunk by chunk), and drops the conne
 terminator of a complete answer, when the proxy aborts a call. It never logs a request line.
 
 The engine is the untrusted side of this socket, so every wait on it is bounded: a connection that
-says nothing is closed after `idle_timeout`; reading a request body and writing an answer each wait
-at most `io_timeout`, and never longer than the job has left; and no more than `max_connections` are
-served at once (a connection over the bound is closed at once, as the thread it would take is not
-there to give). Without these a stalled engine holds the one call the job may have, and a flood of
-connections holds a thread each.
+says nothing is closed after `first_request_timeout` (a served one may idle for `idle_timeout`);
+reading a request body and writing an answer each wait at most `io_timeout`, and never longer than
+the job has left; and no more than `max_connections` are served at once (a connection over the
+bound is closed at once, as the thread it would take is not there to give). Without these a
+stalled engine holds the one call the job may have, and a flood of connections holds a thread
+each.
 """
 
 import contextlib
@@ -27,6 +28,8 @@ from code_reviewer_runner.dynamic_review.passthrough.proxy import PassthroughPro
 from code_reviewer_runner.dynamic_review.passthrough.sink import ClientGone
 from code_reviewer_runner.result import ErrorCode
 
+# A new connection has to send its first request line at once; one that has been served may idle.
+FIRST_REQUEST_TIMEOUT_SECONDS: Final = 5.0
 IDLE_TIMEOUT_SECONDS: Final = 30.0
 IO_TIMEOUT_SECONDS: Final = 60.0
 # The engine keeps a few connections alive; nothing legitimate needs more than this at once.
@@ -105,10 +108,12 @@ class _Server(ThreadingHTTPServer):
         proxy: PassthroughProxy,
         *,
         max_connections: int,
+        first_request_timeout: float,
         idle_timeout: float,
         io_timeout: float,
     ) -> None:
         self.proxy = proxy
+        self.first_request_timeout = first_request_timeout
         self.idle_timeout = idle_timeout
         self.io_timeout = io_timeout
         self._slots = threading.BoundedSemaphore(max_connections)
@@ -142,7 +147,7 @@ class _Handler(BaseHTTPRequestHandler):
     def setup(self) -> None:
         # The wait for a request line and its headers (and for the next request of a connection).
         super().setup()
-        self.connection.settimeout(cast(_Server, self.server).idle_timeout)
+        self.connection.settimeout(cast(_Server, self.server).first_request_timeout)
 
     def _handle(self) -> None:
         server = cast(_Server, self.server)
@@ -199,6 +204,7 @@ class PassthroughServer:
         port: int,
         *,
         max_connections: int = MAX_CONNECTIONS,
+        first_request_timeout: float = FIRST_REQUEST_TIMEOUT_SECONDS,
         idle_timeout: float = IDLE_TIMEOUT_SECONDS,
         io_timeout: float = IO_TIMEOUT_SECONDS,
     ) -> None:
@@ -207,6 +213,7 @@ class PassthroughServer:
             (host, port),
             proxy,
             max_connections=max_connections,
+            first_request_timeout=first_request_timeout,
             idle_timeout=idle_timeout,
             io_timeout=io_timeout,
         )

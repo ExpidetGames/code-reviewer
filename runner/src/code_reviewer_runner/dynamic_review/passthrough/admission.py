@@ -237,8 +237,11 @@ class Admission:
             ):
                 raise _not_allowed()
             forwarded[name] = value
+        # The engine's content type is checked and then dropped: the proxy sends
+        # `application/json` itself, so the provider never sees a parameter (a boundary, a charset)
+        # the engine chose.
         if (
-            not forwarded.get("content-type", "application/json")
+            not forwarded.pop("content-type", "application/json")
             .lower()
             .startswith("application/json")
         ):
@@ -282,7 +285,7 @@ class Admission:
                 raise Refused(RefusalCode.MODEL_NOT_ALLOWED)
         try:
             output_cap = check_body(self._target.family, document, self._target.output_allowance)
-        except NotAllowed:
+        except (NotAllowed, OverflowError, RecursionError):
             raise _not_allowed() from None
         return Admitted(body=body, model=model, output_cap=output_cap)
 

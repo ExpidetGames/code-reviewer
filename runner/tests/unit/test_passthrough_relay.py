@@ -38,6 +38,7 @@ from passthrough_support import (
 from code_reviewer_runner.dynamic_review.budget import DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
+from code_reviewer_runner.dynamic_review.passthrough.proxy import fixed_error_event
 from code_reviewer_runner.dynamic_review.passthrough.upstream import UpstreamError, UpstreamFailure
 from code_reviewer_runner.dynamic_review.passthrough.usage import CallUsage
 from code_reviewer_runner.result import ErrorCode
@@ -255,7 +256,8 @@ def test_an_error_inside_a_200_stream_is_a_failed_call(family: WireFamily) -> No
     r = rig(family, Scripted(chunks=events))
     sink = r.post()
     assert sink.status == 200 and sink.ended
-    assert sink.body == b"".join(events)  # the engine sees the error, as it does from a provider
+    # The engine sees an error, as it does from a provider: one of ours, in the place of the event.
+    assert sink.body == b"".join(events[:2]) + fixed_error_event(family)
     assert r.ledger.failure is not None
     assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     assert r.ledger.usage(MODEL).cost_usd is None
@@ -396,7 +398,7 @@ def test_an_error_body_that_quotes_the_key_reaches_the_engine_without_it(
 
 # #550-T10
 @pytest.mark.parametrize("family", FAMILIES)
-def test_an_error_event_that_quotes_the_key_is_redacted_in_the_stream(
+def test_an_error_event_that_quotes_the_key_reaches_the_engine_as_a_fixed_event(
     family: WireFamily,
 ) -> None:
     events = stream(FAKE[family], TURN, 1, MODEL)[:2]
@@ -405,7 +407,7 @@ def test_an_error_event_that_quotes_the_key_is_redacted_in_the_stream(
     sink = r.post()
     assert REAL_KEY.encode() not in sink.body
     assert REAL_KEY[:12].encode() not in sink.body
-    assert b"[redacted]" in sink.body
+    assert b"invalid key" not in sink.body
     # What the engine got of the events before it is unchanged.
     assert sink.body.startswith(b"".join(events[:2]))
 
