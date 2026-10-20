@@ -84,6 +84,8 @@ import {
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ModelFieldset } from "./model-fieldset.tsx";
 import { ModelChoice, ModelChoiceNote } from "./model-choice.tsx";
+import { CatalogModelPicker } from "../../native-providers/ui/catalog-model-picker.tsx";
+import type { NativeFormData } from "../../native-providers/form-data.ts";
 import { providerOptions } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import {
@@ -182,6 +184,7 @@ export function SettingsForm({
   readOnly = false,
   dynamicReviewEnabled = false,
   keyedProviders,
+  nativeCatalog,
   providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
 }: {
@@ -205,6 +208,12 @@ export function SettingsForm({
    * chosen provider that is not in the list; unknown (not given) warns about nothing.
    */
   keyedProviders?: readonly string[];
+  /**
+   * The models.dev catalog as far as this project form needs it (#555): the catalog providers the workspace holds a key for, the
+   * token cap and whether billing is on. Only a project form of a workspace on its own key gets it; the Dynamic provider select
+   * then offers those providers next to the registry's and the model is picked from a list. The Diff provider is not affected.
+   */
+  nativeCatalog?: NativeFormData;
   /** Only tests pass this: the providers the selects offer, the registry's by default. */
   providers?: ReadonlyArray<
     Pick<LlmProviderDescriptor, "id" | "label" | "defaultModels"> &
@@ -226,6 +235,11 @@ export function SettingsForm({
   const providerChoices = useMemo(
     () => providerOptions(providerDescriptors, keyedProviders),
     [providerDescriptors, keyedProviders],
+  );
+  // The Dynamic provider select also offers the catalog providers (#555); the Diff select keeps the registry's.
+  const dynamicProviderChoices = useMemo(
+    () => [...providerChoices, ...(nativeCatalog?.providers ?? [])],
+    [providerChoices, nativeCatalog],
   );
   // The models to pick from for a provider and a review kind (none for a provider the form does not know).
   const suggestionsOf = (providerId: string, reviewKind: ProjectReviewKind) => {
@@ -503,6 +517,13 @@ export function SettingsForm({
       : (providerDefaultModel(chosenDynamicProvider, "dynamic") ??
         projectView?.defaults.dynamicModel ??
         "");
+  // A Dynamic provider outside the registry is a catalog provider: its model is picked from the catalog's list (#555).
+  const chosenNative =
+    nativeCatalog === undefined || chosenDynamicProvider === ""
+      ? undefined
+      : nativeCatalog.providers.find(
+          (provider) => provider.id === chosenDynamicProvider,
+        );
   const kindHandlers: ReviewKindHandlers = {
     setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
     setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
@@ -585,7 +606,25 @@ export function SettingsForm({
             kindError={kindError}
             handlers={kindHandlers}
             workspaceSlug={workspaceSlug}
-            providers={providerChoices}
+            providers={dynamicProviderChoices}
+            nativeProvidersHint={nativeCatalog !== undefined}
+            {...(nativeCatalog === undefined || chosenNative === undefined
+              ? {}
+              : {
+                  nativeModelField: (
+                    <CatalogModelPicker
+                      workspaceSlug={workspaceSlug}
+                      provider={chosenNative.id}
+                      providerLabel={chosenNative.label}
+                      value={state.dynamic.dynamicModel}
+                      onChange={kindHandlers.setModel}
+                      error={errors.dynamicModel}
+                      disabled={disabled}
+                      tokenCap={nativeCatalog.tokenCap}
+                      billingOn={nativeCatalog.billingOn}
+                    />
+                  ),
+                })}
             datalistId={`${datalistId}-dynamic-${state.dynamic.dynamicProvider}`}
             suggestedModels={suggestionsOf(
               state.dynamic.dynamicProvider,
