@@ -89,6 +89,8 @@ _MODEL_KEYS = {
     "interleaved",
 }
 _REQUIRED_MODEL_KEYS = _MODEL_KEYS - {"interleaved"}
+# The keys a model of the engine's configuration may have (the same set the entry is read with).
+MODEL_KEYS = frozenset(_MODEL_KEYS)
 
 
 class JobModelEntryError(ValueError):
