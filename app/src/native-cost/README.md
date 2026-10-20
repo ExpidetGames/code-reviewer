@@ -75,14 +75,22 @@ before any VM starts), and the Worker's fetch ends a job that carries a policy w
 is older (a VM was started for nothing, once; nothing ran). The rollout order is therefore: runners and Worker images first, then the
 wiring that makes an entry native.
 
-## What #555, #571 and the wiring still need
+## What #555 did, and what the wiring still needs
 
-- A native slug must be accepted by the selection (`llm/selection.ts` knows only the registry's providers) and by the settings of a
-  project, and the key per native provider must be stored and loaded (`keyFor`); `catalogRefOf` is the map they use.
-- The claim must also send the job model entry (`buildJobModelEntry`) and start the native engine; the runner's `build_native_ledger`
-  and `PassthroughProxy(prices=policy.book, unknown_cost_ends_run=policy.unknown_cost_ends_run)` are the two joints, and `reasoning`
-  of the entry goes to `build_native_ledger(reasoning=...)`.
-- #555 says in its screen that the own-key cost limit cannot bind without a price, and shows the token cap (`ownKeyTokenCap` of the
-  admin settings read model; a member sees the cap, never a price).
+- **Done in #555.** The selection accepts a catalog slug for a Dynamic job on the own key (`llm/selection.ts`, `nativeModels`, the
+  selection carries `catalog: true`); the project settings store a catalog provider and model for Dynamic Review
+  (`review-settings/native-choice.ts`, `MODEL_NOT_IN_CATALOG`); the key per catalog provider is stored and revealed
+  (`native-providers/lookup.ts`, `keyFor`); the claim resolves the stored row into the per-job entry (`buildJobModelEntry`, through
+  `native-providers/catalog.ts` `resolve`) **before any key is loaded** and fails closed (`llm_model_unavailable` for a row that is
+  gone, `llm_provider_unsupported` for a provider that cannot carry a key); the workspace UI shows the token cap and the price
+  source (`native-providers/ui/own-key-cost-note.tsx`).
+- **The joint the wiring uses.** `ClaimDeps.nativeCatalog` (with `nativeCost`) makes a catalog selection possible: **the running server
+  leaves it out** (`runner-api/shared.ts`), so a project that names a catalog provider still fails closed with
+  `llm_provider_unsupported` until the wiring of the passthrough proxy passes it, behind its switch. `Checked.modelEntry` holds the
+  entry; the job input does not carry it yet, and `buildJobInput` reads no provider metadata for such a job.
+- **Still to do by the wiring.** Send the entry (`buildJobModelEntry`'s result) and start the native engine; the runner's
+  `build_native_ledger` and `PassthroughProxy(prices=policy.book, unknown_cost_ends_run=policy.unknown_cost_ends_run)` are the two joints,
+  and `reasoning` of the entry goes to `build_native_ledger(reasoning=...)`. The caller must also say it can run a catalog model (the
+  claim should pass `nativeCatalog` only to a caller that does); a Diff job never takes the path (#558).
 - #554: the catalog view already says why a model is refused (`MANAGED_REASON_COPY`, including the two cache reasons); the
   correction form should suggest the input price as the upper bound for a missing cache read (a hint, nothing is filled in).
