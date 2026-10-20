@@ -44,6 +44,8 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     PassthroughTarget,
     output_allowance,
 )
+from code_reviewer_runner.dynamic_review.passthrough.cost_policy import CostPolicy
+from code_reviewer_runner.dynamic_review.passthrough.native_run import build_native_run
 from code_reviewer_runner.dynamic_review.passthrough.proxy import PassthroughProxy
 from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughServer
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs
@@ -153,6 +155,7 @@ def native_run(
     limit: str = "5.00",
     family: Family = "messages",
     react: Reaction | None = None,
+    policy: CostPolicy | None = None,
 ) -> Generator[NativeRun]:
     """Run one review on the native path against a provider that follows `script(export)`."""
     export = make_export(scratch)
@@ -172,27 +175,45 @@ def native_run(
             )
         )
         scene.upstream = upstream
-        ledger = BudgetLedger(
-            DynamicLimits(max_cost_usd=Decimal(limit)),
-            window_tokens=1_000_000,
-            output_tokens=output_allowance(OUTPUT_LIMIT),
-            unit_costs=PRICES,
-            clock=lambda: time.monotonic() + scene.clock_offset,
-        )
-        scene.ledger = ledger
         capability = new_proxy_capability()
-        proxy = PassthroughProxy(
-            ledger=ledger,
-            target=PassthroughTarget(
-                family=WIRE[family],
-                model=provider.model_id,
-                output_allowance=output_allowance(OUTPUT_LIMIT),
-            ),
-            upstream=LoopbackUpstream(upstream.url + BASE_PATH[family]),
-            upstream_api_key=REAL_KEY,
-            capability=capability,
-            prices=PRICES,
+        limits = DynamicLimits(max_cost_usd=Decimal(limit))
+        target = PassthroughTarget(
+            family=WIRE[family],
+            model=provider.model_id,
+            output_allowance=output_allowance(OUTPUT_LIMIT),
         )
+        hop = LoopbackUpstream(upstream.url + BASE_PATH[family])
+        if policy is None:
+            ledger = BudgetLedger(
+                limits,
+                window_tokens=1_000_000,
+                output_tokens=output_allowance(OUTPUT_LIMIT),
+                unit_costs=PRICES,
+                clock=lambda: time.monotonic() + scene.clock_offset,
+            )
+            proxy = PassthroughProxy(
+                ledger=ledger,
+                target=target,
+                upstream=hop,
+                upstream_api_key=REAL_KEY,
+                capability=capability,
+                prices=PRICES,
+            )
+        else:
+            # A native job under its cost policy (#553): the ledger and the proxy of one policy.
+            made = build_native_run(
+                policy,
+                limits,
+                window_tokens=1_000_000,
+                output_tokens=output_allowance(OUTPUT_LIMIT),
+                target=target,
+                upstream=hop,
+                upstream_api_key=REAL_KEY,
+                capability=capability,
+                clock=lambda: time.monotonic() + scene.clock_offset,
+            )
+            ledger, proxy = made.ledger, made.proxy
+        scene.ledger = ledger
         server = PassthroughServer(proxy, "127.0.0.1", 0).start()
         stack.callback(server.stop)
         block = provider_block(provider, server.url)

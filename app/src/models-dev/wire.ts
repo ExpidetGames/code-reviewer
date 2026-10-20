@@ -14,6 +14,9 @@ export const WIRE_FAMILIES = [
 ] as const;
 export type WireFamily = (typeof WIRE_FAMILIES)[number];
 
+/** The family whose engine writes the cache itself, so a book needs a cache write price too (#553). */
+export const CACHE_WRITING_FAMILY: WireFamily = "anthropic-messages";
+
 /** The header a family's SDK sends the key in: the three the proxy of #550 swaps. */
 export const AUTH_HEADERS = [
   "Authorization",

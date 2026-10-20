@@ -190,6 +190,17 @@ describe("the check run of a finished review", () => {
     expect(check.summary).toMatch(/incomplete/);
   });
 
+  // #553-R07
+  it("says that a review stopped at its token limit may be incomplete, and still succeeds", () => {
+    const check = describeCheck(
+      subject({ status: "succeeded", stoppedEarly: "token_limit" }),
+    );
+
+    expect(check.conclusion).toBe("success");
+    expect(check.summary).toMatch(/token limit/);
+    expect(check.summary).toMatch(/incomplete/);
+  });
+
   it("leaves out a link that is not a web address", () => {
     for (const commentUrl of [
       "javascript:alert(1)",

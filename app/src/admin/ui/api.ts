@@ -37,6 +37,8 @@ export type SettingChange =
     }
   | { signInMethods: { emailPassword: boolean; github: boolean } }
   | { limits: { maxWorkspacesPerUser: number } }
+  /** The tokens a run on a workspace's own key may use when the price of its model is not known (#553). */
+  | { ownKeyTokenCap: number }
   /** The Dynamic Review rollout gate of the instance. */
   | { dynamicReview: { enabled: boolean } }
   /** The page "Manage plan" hands people over to (#284); `null` removes it. */

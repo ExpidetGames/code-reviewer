@@ -41,6 +41,11 @@ from enum import StrEnum
 from typing import Any, NoReturn, cast
 from urllib.parse import SplitResult, urlsplit
 
+from code_reviewer_runner.dynamic_review.passthrough.cost_policy import (
+    CostPolicy,
+    CostPolicyError,
+    parse_cost_policy,
+)
 from code_reviewer_runner.dynamic_review.prompts import MAX_SKILL_BYTES as MAX_DYNAMIC_SKILL_BYTES
 from code_reviewer_runner.llm_providers import (
     LlmProviderSpec,
@@ -75,7 +80,7 @@ _LLM_FIELDS = {
     "maxTokens",
     "fallbackModels",
 }
-_DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities"}
+_DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities", "cost"}
 _CAPABILITY_FIELDS = {
     "toolChoiceRequired",
     "structuredOutput",
@@ -188,6 +193,8 @@ class DynamicReview:
     skill: str
     limits: DynamicLimits
     capabilities: JobCapabilities | None = None
+    # Whose key pays and what bounds the cost of a native job (#553); None for a job of today.
+    cost: CostPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -521,7 +528,19 @@ def _dynamic_review(data: dict[str, Any]) -> DynamicReview:
         skill=skill,
         limits=DynamicLimits(max_findings=max_findings),
         capabilities=_job_capabilities(dynamic),
+        cost=_job_cost_policy(dynamic),
     )
+
+
+def _job_cost_policy(dynamic: dict[str, Any]) -> CostPolicy | None:
+    """The cost policy of a native job (#553), or None. Strict: a policy that is not exactly one
+    is a refused job, never a run that guesses a price or runs without a bound."""
+    if "cost" not in dynamic:
+        return None
+    try:
+        return parse_cost_policy(dynamic["cost"])
+    except CostPolicyError as error:
+        raise _invalid(error.detail) from None
 
 
 def _capability_integer(document: dict[str, Any], key: str, upper: int) -> int:

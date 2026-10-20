@@ -893,6 +893,117 @@ def test_the_claim_request_may_advertise_that_the_runner_reads_model_capabilitie
     assert "features" in _example("ClaimRequest")
 
 
+DYNAMIC_JOB_COST_MANAGED = DYNAMIC_JOB.parent / "dynamic-review-job-cost-managed.json"
+DYNAMIC_JOB_COST_OWN = DYNAMIC_JOB.parent / "dynamic-review-job-cost-own.json"
+COST_POLICY_ADVERTISEMENT = "dynamic_cost_policy"
+
+
+# #553-T02: a native job carries its cost policy: the confirmed book of the managed key, the token
+# cap of an own key. Both are valid for the contract and read by the runner as what they say.
+def test_a_dynamic_job_may_carry_the_cost_policy_of_its_key() -> None:
+    managed = _load(DYNAMIC_JOB_COST_MANAGED)
+    own = _load(DYNAMIC_JOB_COST_OWN)
+    for job in (managed, own):
+        assert _accepts("ClaimResponse", _claim_for(job))
+    parsed = runner_job.parse_job(json.dumps(managed)).dynamic
+    assert parsed is not None and parsed.cost is not None
+    assert parsed.cost.key_mode.value == "managed"
+    assert parsed.cost.book is not None and parsed.cost.book.base.input == 3_000_000
+    assert parsed.cost.max_total_tokens is None
+    parsed = runner_job.parse_job(json.dumps(own)).dynamic
+    assert parsed is not None and parsed.cost is not None
+    assert parsed.cost.key_mode.value == "own"
+    assert parsed.cost.book is None and parsed.cost.max_total_tokens == 4_000_000
+
+
+# #553-T02: a job of today has no cost policy and nothing about it changes.
+def test_a_dynamic_job_without_a_cost_policy_is_read_as_before() -> None:
+    parsed = runner_job.parse_job(json.dumps(_load(DYNAMIC_JOB))).dynamic
+    assert parsed is not None and parsed.cost is None
+
+
+def _cost_mutations() -> list[tuple[str, Callable[[Document], None]]]:
+    return [
+        ("unknown key", lambda cost: cost.update(command="x")),
+        ("no key mode", lambda cost: cost.pop("keyMode")),
+        ("bad key mode", lambda cost: cost.update(keyMode="operator")),
+        ("no price book key", lambda cost: cost.pop("priceBook")),
+        ("no cap key", lambda cost: cost.pop("maxTotalTokens")),
+        ("cap as text", lambda cost: cost.update(maxTotalTokens="4000000")),
+        ("cap zero", lambda cost: cost.update(maxTotalTokens=0)),
+        ("cap fractional", lambda cost: cost.update(maxTotalTokens=1.5)),
+        ("cap boolean", lambda cost: cost.update(maxTotalTokens=True)),
+        ("cap too large", lambda cost: cost.update(maxTotalTokens=10**12)),
+    ]
+
+
+# #553-T02: the cost policy is closed and typed the same way on both sides.
+@pytest.mark.parametrize(("name", "mutate"), _cost_mutations(), ids=lambda value: str(value))
+def test_the_runner_and_the_contract_refuse_the_same_bad_cost_policy(
+    name: str, mutate: Callable[[Document], None]
+) -> None:
+    del name
+    job = _load(DYNAMIC_JOB_COST_OWN)
+    mutate(job["dynamic"]["cost"])
+    assert not _accepts("ClaimResponse", _claim_for(job))
+    with pytest.raises(runner_job.JobError):
+        runner_job.parse_job(json.dumps(job))
+
+
+def _managed_book_mutations() -> list[tuple[str, Callable[[Document], None]]]:
+    return [
+        ("no book", lambda cost: cost.update(priceBook=None)),
+        ("a cap on the managed key", lambda cost: cost.update(maxTotalTokens=4_000_000)),
+        ("input as a number", lambda cost: cost["priceBook"].update(input=3)),
+        ("a decimal amount", lambda cost: cost["priceBook"].update(input="3.5")),
+        ("a negative amount", lambda cost: cost["priceBook"].update(output="-1")),
+        ("a leading zero", lambda cost: cost["priceBook"].update(output="015")),
+        ("no output price", lambda cost: cost["priceBook"].pop("output")),
+        ("an unknown price", lambda cost: cost["priceBook"].update(cacheBlend="1")),
+        ("a tier without a size", lambda cost: cost["priceBook"].update(tiers=[{"input": "1"}])),
+    ]
+
+
+# #553-T02: the managed key never runs without a confirmed book, and the book is read exactly.
+@pytest.mark.parametrize(
+    ("name", "mutate"), _managed_book_mutations(), ids=lambda value: str(value)
+)
+def test_the_runner_and_the_contract_refuse_the_same_bad_managed_policy(
+    name: str, mutate: Callable[[Document], None]
+) -> None:
+    del name
+    job = _load(DYNAMIC_JOB_COST_MANAGED)
+    mutate(job["dynamic"]["cost"])
+    assert not _accepts("ClaimResponse", _claim_for(job))
+    with pytest.raises(runner_job.JobError):
+        runner_job.parse_job(json.dumps(job))
+
+
+# #553-T02: a runner says it enforces the policy; an older runner names no such feature.
+def test_the_claim_request_may_advertise_that_the_runner_enforces_the_cost_policy() -> None:
+    assert _accepts(
+        "ClaimRequest", {"engines": ["opencode"], "features": [COST_POLICY_ADVERTISEMENT]}
+    )
+    schema: Document = _load(SCHEMA_PATH)
+    assert COST_POLICY_ADVERTISEMENT in schema["$defs"]["KnownClaimFeature"]["enum"]
+    from code_reviewer_runner.job_loop.api import CLAIM_FEATURES
+    from code_reviewer_runner.job_loop.worker_api import WORKER_FEATURES
+
+    assert COST_POLICY_ADVERTISEMENT in CLAIM_FEATURES
+    assert COST_POLICY_ADVERTISEMENT in WORKER_FEATURES
+
+
+# #553-T05: a run stopped by its token cap says so, and the contract and the runner agree on it.
+def test_the_token_limit_is_a_reason_a_run_may_stop_early_for() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    reasons = schema["$defs"]["RunnerUsage"]["properties"]["stoppedEarly"]["enum"]
+    assert "token_limit" in reasons
+
+    from code_reviewer_runner.job_loop.reporting import STOPPED_EARLY_REASONS
+
+    assert {reason for reason in reasons if reason is not None} == set(STOPPED_EARLY_REASONS)
+
+
 # #396-T14: the feature a runner names to be superseded gracefully, the field of the heartbeat
 # answer and the code.
 def test_the_contract_knows_the_supersede_feature_the_heartbeat_field_and_the_result_code() -> None:

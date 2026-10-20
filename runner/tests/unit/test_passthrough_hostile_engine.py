@@ -283,16 +283,21 @@ def test_a_cut_stream_is_booked_at_its_worst_case_and_ends_a_managed_run(
     assert r.proxy.last_upstream_error is ErrorCode.LLM_UNAVAILABLE
 
 
-# #550-B3-U01
-def test_an_own_key_run_keeps_going_after_an_unknown_call_with_the_worst_case_booked() -> None:
-    """The relaxation for an own key is #553; the hook it will use is here and off by default."""
+# #550-B3-U01, #553-T05
+def test_an_own_key_run_keeps_going_after_an_unknown_call_with_what_it_was_expected_to_cost() -> (
+    None
+):
+    """The relaxation for an own key (#553): an unknown call books what it was expected to cost and
+    its expected tokens, not its worst case, which one cut stream would turn into the end of a run
+    that the user pays for and the token cap bounds. The cost of the run is unknown."""
     family = WireFamily.OPENAI_CHAT
     events = stream(FAKE[family], TURN, 1, MODEL)
     cut = Scripted(chunks=[*events[:2], UpstreamError(UpstreamFailure.CUT, sent=True)])
     r = rig(family, cut, unknown_cost_ends_run=False)
     body = r.body()
     r.post(body)
-    assert spent(r.ledger) == worst_case(len(body))
+    assert 0 < spent(r.ledger) < worst_case(len(body))
+    assert r.ledger.unknown_calls == 1
     assert r.ledger.failure is None
     assert r.ledger.usage(MODEL).cost_usd is None
 

@@ -66,6 +66,9 @@ export function InstanceForm({
   const [limitText, setLimitText] = useState(
     String(settings.maxWorkspacesPerUser.value),
   );
+  const [tokenCapText, setTokenCapText] = useState(
+    String(settings.ownKeyTokenCap.value),
+  );
   const [dynamicEnabled, setDynamicEnabled] = useState(
     settings.dynamicReview.value,
   );
@@ -95,6 +98,10 @@ export function InstanceForm({
     if (limitText !== String(settings.maxWorkspacesPerUser.value)) {
       wanted.push("limits");
       changes.push({ limits: { maxWorkspacesPerUser: Number(limitText) } });
+    }
+    if (tokenCapText !== String(settings.ownKeyTokenCap.value)) {
+      wanted.push("limits");
+      changes.push({ ownKeyTokenCap: Number(tokenCapText) });
     }
     // Turning the gate on needs the operator's confirmation of the rollout order (contracts/README.md).
     const turningOn = dynamicEnabled && !settings.dynamicReview.value;
@@ -144,6 +151,11 @@ export function InstanceForm({
       ? results.limits.issues.find(
           (issue) => issue.field === "maxWorkspacesPerUser",
         )
+      : undefined;
+
+  const tokenCapIssue =
+    results.limits?.kind === "failed"
+      ? results.limits.issues.find((issue) => issue.field === "ownKeyTokenCap")
       : undefined;
 
   const planIssue =
@@ -251,6 +263,28 @@ export function InstanceForm({
             ) : null}
           </Field>
           <LastChanged setting={settings.maxWorkspacesPerUser} />
+          <Field>
+            <FieldLabel htmlFor={`${ids}-token-cap`}>
+              Token limit for a run on a workspace&apos;s own key
+            </FieldLabel>
+            <Input
+              id={`${ids}-token-cap`}
+              inputMode="numeric"
+              value={tokenCapText}
+              onChange={(event) => setTokenCapText(event.target.value)}
+              aria-invalid={tokenCapIssue !== undefined}
+              aria-describedby={`${ids}-token-cap-hint`}
+            />
+            <FieldDescription id={`${ids}-token-cap-hint`}>
+              The default is 4,000,000 tokens. It bounds a Dynamic run on a
+              workspace&apos;s own key when the price of its model is not known,
+              so the dollar limit cannot apply. Between 100,000 and 100,000,000.
+            </FieldDescription>
+            {tokenCapIssue ? (
+              <FieldError>{describeAdminIssue(tokenCapIssue)}</FieldError>
+            ) : null}
+          </Field>
+          <LastChanged setting={settings.ownKeyTokenCap} />
           <SaveResult status={results.limits} />
         </CardContent>
       </Card>

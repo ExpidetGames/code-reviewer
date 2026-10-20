@@ -95,6 +95,28 @@ def test_a_dynamic_job_without_an_engine_is_refused_and_pr_agent_is_never_used()
     assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
 
 
+# #553-R08
+def test_a_job_with_a_cost_policy_is_refused_where_nothing_enforces_it() -> None:
+    # Only the passthrough path reads the policy. A job that carries one and would reach the legacy
+    # wire must not run with a bound it never read: it ends before anything is prepared.
+    document = dynamic_document()
+    document["dynamic"]["cost"] = {"keyMode": "own", "priceBook": None, "maxTotalTokens": 4_000_000}
+    result = runner.run_dynamic_job(
+        parse_job(json.dumps(document)),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_CONFIG_INVALID
+
+
 # #197-T04
 def test_a_dynamic_job_without_an_injected_preparer_needs_the_root_supervisor() -> None:
     # The default is the production preparation: it seals the export for the dedicated user, which

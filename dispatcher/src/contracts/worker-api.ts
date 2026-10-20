@@ -139,6 +139,20 @@ export interface DynamicReview {
     maxFindings: number;
   };
   capabilities?: DynamicModelCapabilities;
+  /**
+   * #553: whose key pays for a native job (a job that runs through the passthrough proxy) and what bounds its cost. Optional, additive, and sent only to a caller that named the claim feature `dynamic_cost_policy`; a job without it is a job of today. A closed object. `managed` (the instance operator's key, which we pay): `priceBook` is the confirmed price of the model (the app's price confirmation, #549) and is the runner's **only** price source, never the engine's own cost and never models.dev; an unknown cost ends the run with `dynamic_accounting_failed`, which billing treats as our fault; there is no token cap. `own` (the workspace's key, the user pays the provider): `priceBook` is the catalog's price when it states one, else null; an unknown cost does not end the run, it is bound by `maxTotalTokens` (prompt, cache and completion tokens in all) and the clock, and the result reports `costUsd: null`, which billing charges as minutes only. A call that stated no usage at all still fails the run.
+   */
+  cost?:
+    | {
+        keyMode: "managed";
+        priceBook: DynamicPriceBook;
+        maxTotalTokens: null;
+      }
+    | {
+        keyMode: "own";
+        priceBook: DynamicPriceBook | null;
+        maxTotalTokens: number;
+      };
 }
 /**
  * #279: what the app read from the provider's public metadata about the job's Dynamic model, so any tool-capable model runs without the operator describing it. Optional, and sent only to a runner that advertised the `dynamic_capabilities` feature in its claim. It comes from the app, never from the repository or the model. The runner can only narrow with it: it is intersected with the operator's RUNNER_DYNAMIC_CAPABILITIES (both booleans must hold, the smaller number wins for the limits, the higher unit price wins) and never widens what that allows. `maxOutputTokens` is the output allowance of one call, chosen by the app within the model's stated limit. The two unit prices come together or not at all; a model without them (outside the runner's built-in default) is refused by the runner with dynamic_config_invalid. A closed object.
@@ -156,6 +170,65 @@ export interface DynamicModelCapabilities {
    * US dollars per million tokens as an exact decimal text (no exponent, no sign), for example "0.02016". Zero is a free model.
    */
   outputUsdPerMtok?: string;
+}
+/**
+ * #553: a price book in the JSON form of the app (`priceBookToJson`; `fakes/fixtures/price-books.json` is read by the app's and the runner's readers): the base level, models.dev's older `contextOver200k` level and up to 64 tiers, each for a prompt above `contextOver` tokens, from the smallest up. The runner reads it strictly and, for the book of a claim, does not price a cache read as input when the level has no read price (the call is then unpriced).
+ */
+export interface DynamicPriceBook {
+  /**
+   * #553: a price in whole micro-USD per million tokens as digits only (2.50 USD is "2500000"); at most 100000 USD per million tokens.
+   */
+  input: string;
+  /**
+   * #553: a price in whole micro-USD per million tokens as digits only (2.50 USD is "2500000"); at most 100000 USD per million tokens.
+   */
+  output: string;
+  cacheRead?: string | null;
+  cacheWrite5m?: string | null;
+  cacheWrite1h?: string | null;
+  reasoning?: string | null;
+  inputAudio?: string | null;
+  outputAudio?: string | null;
+  contextOver200k?: DynamicPriceLevel | null;
+  /**
+   * @maxItems 64
+   */
+  tiers?: {
+    contextOver: number;
+    /**
+     * #553: a price in whole micro-USD per million tokens as digits only (2.50 USD is "2500000"); at most 100000 USD per million tokens.
+     */
+    input: string;
+    /**
+     * #553: a price in whole micro-USD per million tokens as digits only (2.50 USD is "2500000"); at most 100000 USD per million tokens.
+     */
+    output: string;
+    cacheRead?: string | null;
+    cacheWrite5m?: string | null;
+    cacheWrite1h?: string | null;
+    reasoning?: string | null;
+    inputAudio?: string | null;
+    outputAudio?: string | null;
+  }[];
+}
+/**
+ * #553: the prices of one level of a price book. `input` and `output` are required, every other price may be null or left out and then means "not priced", never zero. The audio prices are read and not used: a call with audio tokens is unknown.
+ */
+export interface DynamicPriceLevel {
+  /**
+   * #553: a price in whole micro-USD per million tokens as digits only (2.50 USD is "2500000"); at most 100000 USD per million tokens.
+   */
+  input: string;
+  /**
+   * #553: a price in whole micro-USD per million tokens as digits only (2.50 USD is "2500000"); at most 100000 USD per million tokens.
+   */
+  output: string;
+  cacheRead?: string | null;
+  cacheWrite5m?: string | null;
+  cacheWrite1h?: string | null;
+  reasoning?: string | null;
+  inputAudio?: string | null;
+  outputAudio?: string | null;
 }
 /**
  * #195: the checkout facts a Dynamic job carries, pinned when the job was queued or claimed and bounded. `headSha` is the exact queued head; `baseRef` is the branch the pull request merges into (the exact base SHA is resolved during checkout, #196). `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null. `attemptedShas` (#255, optional: absent means none, and the app leaves it out when empty) are the heads of the earlier jobs of the pull request that ran and did not succeed, newest first; the publisher accepts such a head as the state of the summary comment, because a run may have written it and then ended without success. `attemptedShasTruncated` (#257, optional: absent means false, and the app leaves it out unless it is true) says that more heads qualified than the list holds; only then does the publisher rewrite a bot-owned summary whose state head it cannot account for, with a full review, instead of refusing it. `comparison` is the *declared* mode: a hint for preparation, never proof that the comparison is complete — the checkout verifies that before it trusts it.
@@ -438,13 +511,13 @@ export interface RunnerUsage {
   aiCalls: number;
   fallbackUsed: boolean;
   /**
-   * The cost in US dollars, or null when it is not known. A Dynamic Review and a Diff Review report the exact sum of the charges their model provider stated for every call, and null when any call has no stated charge or ended without an answer that could have been billed; neither estimates one from tokens or a price table.
+   * The cost in US dollars, or null when it is not known. A Dynamic Review and a Diff Review report the exact sum of the charges their model provider stated for every call, and null when any call has no stated charge or ended without an answer that could have been billed; neither estimates one from tokens or a price table. #553: a native Dynamic Review reports null when its model is not priced or any call could not be priced; on the managed key such a run ends with `dynamic_accounting_failed` instead of succeeding, and the app refuses a managed success with a null cost.
    */
   costUsd: number | null;
   /**
-   * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
+   * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit, its time limit or (#553, an own key whose price is not known) its token limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
    */
-  stoppedEarly?: "cost_limit" | "time_limit" | null;
+  stoppedEarly?: "cost_limit" | "time_limit" | "token_limit" | null;
   /**
    * #540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
    */

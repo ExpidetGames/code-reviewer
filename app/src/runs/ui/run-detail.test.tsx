@@ -114,6 +114,8 @@ describe("the usage of a run", () => {
   it.each([
     ["cost_limit", /cost limit/],
     ["time_limit", /time limit/],
+    // #553-R07
+    ["token_limit", /token limit/],
   ] as const)(
     "says in neutral words that a review stopped early at its %s and may be incomplete",
     (stoppedEarly, limit) => {
