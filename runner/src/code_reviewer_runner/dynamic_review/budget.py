@@ -114,10 +114,14 @@ is never passed.
 with the exact runner text it is about to send). The mark is one call and needs nothing in flight;
 a second mark exists for the one repair of an answer that is not the review, there is no third.
 It belongs to the request that **holds that text as a JSON body holds it** (quotes and line breaks
-escaped, with or without non-ASCII escapes) **and is no larger than the history the run had**: the
-last settled request, plus one output allowance (the model's last answer), plus the tool results
-the audit saw since that call, plus the message, plus `RECOVERY_REQUEST_SLACK_BYTES` for the
-engine's framing. Any other request is a normal call: it must fit the limit or it is refused, and
+escaped, with or without non-ASCII escapes, with or without the HTML-safe escapes of `<`, `>`, `&`
+and `'`), **holds a random token of that message once in the whole body and in its last user
+message** (the proxy parses the body; the system prompt, a tool result, what the assistant said or
+an earlier message holding the token does not count, and the announcement carries no token),
+**and is no larger than the history the run had**: the last settled request, plus one output
+allowance (the model's last answer), plus the tool results the audit saw since that call (frozen
+when the mark is armed, so reports after it widen nothing), plus the message, plus
+`RECOVERY_REQUEST_SLACK_BYTES` for the engine's framing. Any other request is a normal call: it must fit the limit or it is refused, and
 the mark stays armed. So an engine cannot spend the mark on a request of its own choosing, and a
 request cannot make itself final; a result the engine does not report widens nothing (the final
 call is then refused and the run ends without a review, which a hostile engine does to itself). A
@@ -656,14 +660,14 @@ class BudgetLedger:
 
         The final call is admitted past the cost limit (see "The bound"), once. The adapter marks
         it after it aborted the turn, so nothing is in flight; the call that follows is the
-        engine's answer to the adapter's message. `message` is that message, exactly: the mark
-        belongs to the first request that holds it (see "The mark") and is no larger than the
-        history the run had plus that message. Any other request is a normal call.
+        engine's answer to the adapter's message. `message` is that message, exactly, and `token`
+        the random one inside it: the mark belongs to the request whose last user message holds
+        the token, once in the whole body, with the message in it, and which is no larger than the
+        history the run had plus that message (see "The mark"). Any other request is a normal call.
 
         Not possible: a call is in flight, the mark is armed already, both marks (the answer and
-        its one repair) are used, the deadline has passed, the run failed, or the spend already
-        passes the limit without a normal call having settled over it (a cost that was only booked
-        at its worst case).
+        its one repair) are used, the deadline has passed, or the run failed. `final_refusal` says
+        which.
         """
         with self._lock:
             if self._failure is not None or self._final_armed or self._open:

@@ -539,7 +539,7 @@ what the model or the pull request wrote. That includes a field name the model c
 field". Findings that are all invalid are an answer that is not the review, repaired like an invalid envelope. A second
 failure ends the run with the codes of today (`dynamic_policy_violation` for an invalid envelope, `llm_output_invalid`
 otherwise). The engine's own error (`info.error`) is not an answer and is not repaired. The run never shows the engine's error
-text: only its name as a plain identifier, and the stable code the ledger recorded (`ledger.failure`), or the proxy's
+text: only its name, when it is one of the names the pinned engine has (otherwise `other`), and the stable code the ledger recorded (`ledger.failure`), or the proxy's
 `last_upstream_error` for a provider that failed (`provider_error=`). That code is the last call's: a call that went through
 clears it.
 
@@ -548,9 +548,16 @@ clears it.
 user message to the running turn (`POST /session/{id}/prompt_async`, the "finish now, answer as JSON" text). The tools, the
 tool choice and the system prompt are untouched, so the provider's cache prefix and the binding of thinking blocks stay valid.
 The announcement is best effort: an engine that cannot take it, or does not answer within its timeout (10 s), leaves the model
-unasked, which is not a failure of the run (the guard's refusal follows if the model keeps calling tools), and the reason is
-kept as `stoppedEarly` (`cost_limit` / `time_limit`) only for an announcement that was made. The end of a turn waits for a
-running announcement, so none can reach the engine after the abort and the mark.
+unasked, which is not a failure of the run (the guard's refusal follows if the model keeps calling tools). The reason is kept
+as `stoppedEarly` (`cost_limit` / `time_limit`) only where the adapter acts: for an announcement the engine took while the turn
+ran, and for a refusal it answers with the final call; not for a refusal nobody acts on (a stray retry after a review) and not
+for an announcement the engine took only after the turn had ended. The end of a turn waits for a running announcement, so none
+can reach the engine after the abort and the mark, and when one was taken and no refusal followed, the adapter aborts the
+session and waits for the proxy to be idle before it reads the review, so nothing of that turn is left running (an
+announcement the engine takes while the model call that writes the review is in flight can still make it take one more step
+inside the same turn; that call is accounted like any other). If the final call cannot be marked the run ends with the cause
+in the ledger's words: a failure it recorded, a model call of the aborted turn still running after 30 s
+(`dynamic_engine_unavailable`), the deadline, or both marks used (`dynamic_budget_exceeded`).
 
 **A run never ends without a review because of the cost guard** (#540, #542). A model that ignores the message meets the
 ledger's refusal of its next call. With `enable_final_above_wire()` (called by the engine) that refusal is a
@@ -559,10 +566,14 @@ turn starts and reacts only to an increase, so a refusal between two turns is no
 the session, waits (bounded by the deadline) until the proxy and the ledger have nothing in flight, **marks the next call as
 final** (`arm_final`) and sends one "answer now" message. The ledger admits that call under the final-call exemption of #542
 although the limit is passed, and the passthrough proxy relays it as it relays any call (one call in flight, the closed
-schema, nothing rewritten, the body byte for byte). The mark belongs to the request that holds that exact text and is no larger
-than the history the run had plus the message (see the ledger's "The mark"); any other request is a normal call that must fit,
-and the mark stays. A marked call that the provider turns away unbilled (429, 5xx) gives its mark back, at most twice per
-mark. If the turn ends with the mark unused (the engine made no call: the session was still winding down), the message goes
+schema, nothing rewritten, the body byte for byte). The message of the final call and of the repair carries a random token of its own
+(`<runner-wrap-up id="…">`; the announcement carries none). The mark belongs to the request that holds that exact text, holds
+the token once in the whole body **and in its last user message** (the proxy reads the parsed body, `passthrough/last_user.py`;
+the system prompt, a tool result, assistant text or an earlier message holding it does not count), and is no larger than the
+history the run had plus the message, where the tool results the audit saw since the last call are frozen when the mark is
+armed (see the ledger's "The mark"); any other request is a normal call that must fit, and the mark stays. A marked call that the provider turns away unbilled (429, 5xx) gives its mark back, at most twice per
+mark. A call booked at its worst case because its usage was never seen (an own key goes on after one) that passes the limit
+ends the agent phase like a call that settled over it, and the final call is still admitted. If the turn ends with the mark unused (the engine made no call: the session was still winding down), the message goes
 out once more, and only once. A second mark exists only for the one repair (no third). A refusal after the final call is a
 tool call when the audit saw the model ask for a tool in that turn (class `tool_call`), and otherwise its own class
 (`final_call_refused`: the engine asked the model again, e.g. a retry, and the guard refused); either is followed by the one
