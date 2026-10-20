@@ -65,10 +65,12 @@ describe("verifyStripeSignature", () => {
 
   // #500-T07
   it("accepts an uppercase digest, spaces around the parts and a scheme it does not know", () => {
-    expect(verify(`t=${T}, v1=${KNOWN_V1.toUpperCase()}, v2=anything`)).toEqual({
-      ok: true,
-      timestamp: T,
-    });
+    expect(verify(`t=${T}, v1=${KNOWN_V1.toUpperCase()}, v2=anything`)).toEqual(
+      {
+        ok: true,
+        timestamp: T,
+      },
+    );
   });
 
   // #500-T07
@@ -174,9 +176,9 @@ describe("verifyStripeSignature", () => {
 
   // #500-T07
   it("refuses two v1 values where none is valid", () => {
-    expect(
-      verify(`t=${T},v1=${OTHER_SECRET_V1},v1=${"1".repeat(64)}`),
-    ).toEqual({ ok: false, code: "signature_mismatch" });
+    expect(verify(`t=${T},v1=${OTHER_SECRET_V1},v1=${"1".repeat(64)}`)).toEqual(
+      { ok: false, code: "signature_mismatch" },
+    );
   });
 
   // #500-T07
@@ -226,9 +228,9 @@ describe("verifyStripeSignature", () => {
       ok: false,
       code: "signature_mismatch",
     });
-    expect(verify(`t=${T},v1=${KNOWN_V1}`, { now: old, rawBody: "{}" })).toEqual(
-      { ok: false, code: "signature_mismatch" },
-    );
+    expect(
+      verify(`t=${T},v1=${KNOWN_V1}`, { now: old, rawBody: "{}" }),
+    ).toEqual({ ok: false, code: "signature_mismatch" });
   });
 
   // #500-T07
