@@ -1,0 +1,21 @@
+{
+  "id": "dp_FakeTemplate",
+  "object": "dispute",
+  "amount": 0,
+  "balance_transactions": [],
+  "charge": null,
+  "created": 1700000000,
+  "currency": "usd",
+  "evidence_details": {
+    "due_by": 1701000000,
+    "has_evidence": false,
+    "past_due": false,
+    "submission_count": 0
+  },
+  "is_charge_refundable": false,
+  "livemode": false,
+  "metadata": {},
+  "payment_intent": null,
+  "reason": "general",
+  "status": "needs_response"
+}
