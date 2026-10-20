@@ -19,7 +19,7 @@
       "npm": "@ai-sdk/anthropic",
       "family": "anthropic-messages",
       "authHeader": "x-api-key",
-      "upstreamBaseUrl": "https://api.anthropic.com",
+      "upstreamBaseUrl": "https://api.anthropic.com/v1",
       "modelId": "claude-sonnet-5-5",
       "model": {
         "name": "Claude Sonnet 5.5",

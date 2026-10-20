@@ -20,7 +20,7 @@ ENTRY: dict[str, Any] = {
     "npm": "@ai-sdk/anthropic",
     "family": "anthropic-messages",
     "authHeader": "x-api-key",
-    "upstreamBaseUrl": "https://api.anthropic.com",
+    "upstreamBaseUrl": "https://api.anthropic.com/v1",
     "modelId": MODEL,
     "model": {
         "name": "Claude Sonnet 5.5",
@@ -31,6 +31,17 @@ ENTRY: dict[str, Any] = {
         "limit": {"context": 200000, "output": 8192},
         "modalities": {"input": ["text"], "output": ["text"]},
     },
+}
+CHAT_MODEL = "acme/chat-9"
+# The same shape for the registry's other provider, which speaks the chat protocol.
+CHAT_ENTRY: dict[str, Any] = {
+    **ENTRY,
+    "providerId": "openrouter",
+    "npm": "@openrouter/ai-sdk-provider",
+    "family": "openai-chat",
+    "authHeader": "Authorization",
+    "upstreamBaseUrl": "https://openrouter.ai/api/v1",
+    "modelId": CHAT_MODEL,
 }
 # The levels of a price book are whole micro-USD per million tokens, as the app writes them.
 BOOK: dict[str, Any] = {

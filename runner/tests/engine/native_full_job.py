@@ -55,7 +55,7 @@ ENTRIES: dict[Family, dict[str, Any]] = {
         "npm": "@ai-sdk/anthropic",
         "family": "anthropic-messages",
         "authHeader": "x-api-key",
-        "upstreamBaseUrl": "https://api.anthropic.com",
+        "upstreamBaseUrl": "https://api.anthropic.com/v1",
         "model": "acme-claude-9",
     },
     "chat": {

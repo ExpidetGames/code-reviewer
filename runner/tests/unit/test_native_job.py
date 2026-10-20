@@ -193,7 +193,7 @@ def test_the_proxy_is_built_from_the_entry_and_the_address_is_the_entrys(tmp_pat
         upstream_for=upstream_for(ScriptedUpstream(streamed(FAMILY)), seen),
     )
 
-    assert seen == ["https://api.anthropic.com"]
+    assert seen == ["https://api.anthropic.com/v1"]
     assert native.entry.model_id == MODEL
     assert native.capability != API_KEY
     assert len(native.capability) >= 43
