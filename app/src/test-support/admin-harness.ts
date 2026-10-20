@@ -32,6 +32,11 @@ import { createModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { createCatalogAdminService } from "../model-catalog/admin-service.ts";
 import { createCatalogRouteHandlers } from "../model-catalog/admin-http.ts";
+import { createModelPriceRouteHandlers } from "../model-prices/admin-http.ts";
+import { createModelsDevRouteHandlers } from "../models-dev/admin-http.ts";
+import { createModelsDevAdminService } from "../models-dev/admin-service.ts";
+import type { RefreshOptions, RefreshOutcome } from "../models-dev/service.ts";
+import { createModelPriceService } from "../model-prices/service.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
 import { createGithubRouteHandlers } from "../github-config/http.ts";
@@ -216,6 +221,54 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           label: llmProviderDescriptors.labelOf(id),
         })),
     }),
+  });
+  // The routes of the catalog prices and the enablement of catalog models (#549), the audit lines of a write kept in a list.
+  const modelPriceLog: string[] = [];
+  const modelPrices = createModelPriceService({
+    db,
+    log: { info: (line) => modelPriceLog.push(line) },
+  });
+  const modelPriceRoutes = createModelPriceRouteHandlers({
+    access: async () =>
+      adminAccessOf(await lookupSession(auth, current.headers, setup.gates)),
+    notFound: () => {
+      throw new NotFoundSignal();
+    },
+    service: modelPrices,
+  });
+  // The routes of the models.dev catalog (#554): the providers, the confirmation of an address and "fetch now". The fetch
+  // itself is a double the test scripts, and the audit lines are kept in a list.
+  const modelsDevLog: string[] = [];
+  const modelsDevFetch: {
+    calls: RefreshOptions[];
+    outcome: RefreshOutcome;
+  } = {
+    calls: [],
+    outcome: { status: "skipped", reason: "fetch_off" },
+  };
+  const modelsDevAdmin = createModelsDevAdminService({
+    db,
+    models: {
+      refresh: async (options = {}) => {
+        modelsDevFetch.calls.push(options);
+        return modelsDevFetch.outcome;
+      },
+    },
+    rateLimits: createRateLimitsRepository(db),
+    settings: () => ({
+      enabled: true,
+      url: "http://127.0.0.1:1/api.json",
+      warnings: [],
+    }),
+    log: { info: (line) => modelsDevLog.push(line) },
+  });
+  const modelsDevRoutes = createModelsDevRouteHandlers({
+    access: async () =>
+      adminAccessOf(await lookupSession(auth, current.headers, setup.gates)),
+    notFound: () => {
+      throw new NotFoundSignal();
+    },
+    service: modelsDevAdmin,
   });
   // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
   // know is whether a request got as far as the synchronization.
@@ -475,6 +528,30 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
             : await catalogRoutes.retire(request, id);
         }
       }
+      if (pathname === "/api/instance-portal/catalog-models") {
+        if (request.method === "GET")
+          return await modelPriceRoutes.list(request);
+      }
+      if (request.method === "POST") {
+        if (pathname === "/api/instance-portal/catalog-models/enablement")
+          return await modelPriceRoutes.setEnabled(request);
+        if (pathname === "/api/instance-portal/catalog-models/enablement/reset")
+          return await modelPriceRoutes.resetDecision(request);
+        if (pathname === "/api/instance-portal/catalog-models/price/confirm")
+          return await modelPriceRoutes.confirmPrice(request);
+        if (pathname === "/api/instance-portal/catalog-models/price/correct")
+          return await modelPriceRoutes.correctPrice(request);
+      }
+      if (
+        pathname === "/api/instance-portal/catalog-providers/url/confirm" &&
+        request.method === "POST"
+      )
+        return await modelsDevRoutes.confirmUrl(request);
+      if (
+        pathname === "/api/instance-portal/catalog-fetch" &&
+        request.method === "POST"
+      )
+        return await modelsDevRoutes.fetchNow(request);
       if (pathname.startsWith("/api/instance-portal/github")) {
         const { routes } = await github();
         if (
@@ -591,6 +668,13 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     /** The model catalog service the catalog routes use (#429) and the audit lines it wrote. */
     catalog,
     catalogLog,
+    /** The catalog price service the price routes use (#549) and the audit lines it wrote. */
+    modelPrices,
+    modelPriceLog,
+    /** The admin side of the models.dev catalog (#554), its audit lines, and the fetch it calls (a double the test scripts). */
+    modelsDevAdmin,
+    modelsDevLog,
+    modelsDevFetch,
     credentials,
     /** The fake GitHub behind the GitHub routes (started on first use). */
     fakeGithub: async () => (await github()).fake,

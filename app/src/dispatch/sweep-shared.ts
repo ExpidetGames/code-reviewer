@@ -10,6 +10,7 @@ import { getCheckRunService } from "../check-runs/shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { cleanUpExpiredRows } from "../maintenance/cleanup.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { getModelsDevService } from "../models-dev/shared.ts";
 import { getRefusalNoticeService } from "../refusal-notices/shared.ts";
 import { DispatchConfigError, getDispatchService } from "./shared.ts";
 import { createDispatchSweep, type DispatchSweep } from "./sweep.ts";
@@ -38,6 +39,8 @@ export function getDispatchSweep(
     notices: getRefusalNoticeService(),
     // #405: the check runs and review verdicts of the jobs the steps before ended or no request named.
     checks: getCheckRunService(),
+    // #548: the daily fetch of the models.dev catalog, last.
+    modelsDev: getModelsDevService(),
     cleanup: () =>
       cleanUpExpiredRows(db, undefined, {
         // Read when it matters, never remembered: the admin can add or remove the mail server at any time.

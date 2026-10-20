@@ -9,7 +9,7 @@
 // released when the work ends, when the client is closed or when its connection dies, so a crashed instance
 // cannot leave it locked (a transaction lock, not a session lock, so a pooler cannot strand it). Keys are two integers; the namespaces in use are listed here so that none is used
 // twice: 195 is the Dynamic Review gate (`dynamic-review-lock.ts`), 328 the sweep (id 1) and the repair work
-// of other requests (id 2, #395).
+// of other requests (id 2, #395), 548 the models.dev fetch (id 1, #548).
 //
 // SQLite: one process owns the file, so a set of keys held in memory is the same guarantee.
 import type { Kysely } from "kysely";
@@ -28,6 +28,9 @@ export const SWEEP_LOCK: LockKey = { namespace: 328, id: 1 };
  * key at that moment would make the whole sweep a no-op. The two may overlap; each step of both is safe to repeat.
  */
 export const OPPORTUNISTIC_LOCK: LockKey = { namespace: 328, id: 2 };
+
+/** The one run of the models.dev fetch at a time (#548); the sweep calls it while it holds `SWEEP_LOCK`. */
+export const MODELS_DEV_LOCK: LockKey = { namespace: 548, id: 1 };
 
 export type TryLockResult<T> =
   { acquired: true; value: T } | { acquired: false };

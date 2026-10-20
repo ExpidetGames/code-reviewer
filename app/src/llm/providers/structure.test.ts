@@ -35,6 +35,10 @@ const PROVIDERS = [
         "the list of vendor words that copy for a member must never say, the provider's name among them",
       "app/src/review-settings/runner-settings.ts":
         "a comment that names PR-Agent's own key variable (the runner side of the provider, the next issue)",
+      "app/src/ci/opencode-providers/derive.ts":
+        "the table of the SDKs the pinned engine bundles, by package name (`@openrouter/ai-sdk-provider`), from which the supported-provider file is derived (#548)",
+      "app/src/models-dev/wire.ts":
+        "the list of the SDKs the pinned engine bundles (`BUNDLED_NPM`), by package name (`@openrouter/ai-sdk-provider`): an allow-list for the job entry (#548)",
     } as Readonly<Record<string, string>>,
   },
   {
@@ -55,6 +59,12 @@ const PROVIDERS = [
         "generated from the runner API contract, whose `KnownLlmProvider` lists the slugs of this release (#424)",
       "app/src/copy/member-copy-scan.ts":
         "the list of vendor words that copy for a member must never say, the provider's name among them",
+      "app/src/ci/opencode-providers/derive.ts":
+        "the table of the SDKs the pinned engine bundles and the address each one defaults to, by package name (#548)",
+      "app/src/models-dev/wire.ts":
+        "`anthropic-messages`, the name of a wire family (the Messages API format), which other providers speak too (#548)",
+      "app/src/models-dev/generic-adapter.ts":
+        "the `anthropic-version` header that the Messages wire family carries, for any provider that speaks it (#548)",
     } as Readonly<Record<string, string>>,
   },
 ] as const;

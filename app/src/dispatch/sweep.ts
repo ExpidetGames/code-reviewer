@@ -18,6 +18,9 @@
 //  6. `checks`: the check runs and review verdicts of jobs whose GitHub state is behind (#405): jobs the steps above
 //     ended or requeued, jobs no request named, syncs whose retry is due. At most one batch, within a time budget.
 //  7. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
+//  8. `models_dev`: the daily fetch of the models.dev catalog (#548), when the last one is more than a day old. Last, so
+//     that a slow answer from the internet never delays the steps that move jobs. A fetch that fails records its own
+//     failure (`models_dev_fetch_state`) and is not a failed step; a step fails only when the fetch itself threw.
 //
 // A step that fails is logged by its name and does not stop the others; the next run tries again. Nothing a
 // database or an answer said is ever logged: a connection string can be in it.
@@ -27,6 +30,7 @@ import type { JobDispatchesRepository } from "../db/repositories/job-dispatches-
 import type { ExpiryReport } from "../db/repositories/runner-jobs-repository.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { CleanupResult } from "../maintenance/cleanup.ts";
+import type { RefreshOutcome } from "../models-dev/service.ts";
 import { DEFAULT_SEND_LIMIT, type DispatchService } from "./service.ts";
 
 /** How long a stopped dispatch rests before the Dispatcher is asked about it again. */
@@ -36,7 +40,13 @@ export const STOPPED_REVIVE_MS = 10 * 60 * 1000;
 export const CLEANUP_HOUR_KEY = "maintenance.sweep_cleanup_hour";
 const HOUR_MS = 60 * 60 * 1000;
 /** The sweep runs in an internal route (five minutes), so the check runs may have most of a minute (#405). */
-const CHECKS_BUDGET_MS = 40_000;
+export const CHECKS_BUDGET_MS = 40_000;
+/**
+ * The deadline of the models.dev run: the fetch, the lookups and the write together (#548). The route has 300 seconds; the
+ * check runs take 40 of them at most, the other steps are single queries and calls with limits of their own, and this
+ * leaves the rest as headroom. A run that needs longer fails with `models_dev_timeout`, writes nothing and is tried again.
+ */
+export const MODELS_DEV_BUDGET_MS = 90_000;
 
 export const SWEEP_STEPS = [
   "expire",
@@ -46,6 +56,7 @@ export const SWEEP_STEPS = [
   "notices",
   "checks",
   "cleanup",
+  "models_dev",
 ] as const;
 export type SweepStep = (typeof SWEEP_STEPS)[number];
 
@@ -66,6 +77,8 @@ export type SweepReport = {
   /** How many jobs had their check run or review verdict synced with GitHub (#405). */
   checksSynced: number;
   cleanedUp: boolean;
+  /** What the daily models.dev fetch did (#548); null when this sweep has no fetch. */
+  modelsDev: RefreshOutcome["status"] | null;
   /** The steps that failed in this run. */
   failedSteps: SweepStep[];
 };
@@ -89,6 +102,10 @@ export type SweepDependencies = {
   checks?: {
     reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
   };
+  /** #548: the daily fetch of the models.dev catalog. Left out, none is made. */
+  modelsDev?: {
+    refreshIfDue(options?: { deadlineMs?: number }): Promise<RefreshOutcome>;
+  };
   settings: SweepSettings;
   log?: SweepLog;
 };
@@ -108,6 +125,7 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       noticesTried: 0,
       checksSynced: 0,
       cleanedUp: false,
+      modelsDev: null,
       failedSteps: [],
     };
     const step = async (name: SweepStep, work: () => Promise<void>) => {
@@ -167,6 +185,13 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       await deps.meta.set(CLEANUP_HOUR_KEY, String(hour));
       report.cleanedUp = true;
     });
+    const modelsDev = deps.modelsDev;
+    if (modelsDev !== undefined)
+      await step("models_dev", async () => {
+        report.modelsDev = (
+          await modelsDev.refreshIfDue({ deadlineMs: MODELS_DEV_BUDGET_MS })
+        ).status;
+      });
 
     const expired = report.expired;
     const changed =
