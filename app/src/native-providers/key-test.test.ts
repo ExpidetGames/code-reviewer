@@ -2,6 +2,7 @@
 
 // The key test of a catalog provider (#555): the generic adapter's cheap authenticated read, answered as a class. The
 // requests go through an injected fetch; nothing leaves the process.
+import { Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import type { StoredProvider } from "../models-dev/catalog.ts";
 import { createNativeKeyTester } from "./key-test.ts";
@@ -113,5 +114,95 @@ describe("the key test of a catalog provider", () => {
     expect(await legacy.tester.test("openrouter", KEY)).toBe("unavailable");
     for (const t of [blocked, missing, legacy])
       expect(t.fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // #555-T02 (the review round of #548: the key is sent from the app server, so the default transport judges the address)
+  describe("with the transport the running server uses", () => {
+    type Lookup = (
+      host: string,
+      options: object,
+      callback: (
+        error: Error | null,
+        address?: string,
+        family?: number,
+      ) => void,
+    ) => void;
+
+    // The test setup stops every connection to a host before the OS would resolve it. This stands in for the OS: it asks the
+    // `lookup` the request was given, the way Node's connect does, records the address a connection would go to, and ends.
+    function fakeConnect(connectedTo: string[]) {
+      return vi.spyOn(Socket.prototype, "connect").mockImplementation(function (
+        this: Socket,
+        ...args: unknown[]
+      ) {
+        const [options] = (Array.isArray(args[0]) ? args[0] : args) as [
+          { host: string; lookup: Lookup },
+        ];
+        options.lookup(options.host, {}, (error, address) => {
+          if (error === null && address !== undefined)
+            connectedTo.push(address);
+          this.destroy(error ?? new Error("Stopped after the lookup."));
+        });
+        return this;
+      });
+    }
+
+    function testerFor(address: string) {
+      const resolveAddresses = vi.fn(() =>
+        Promise.resolve([{ address, family: 4 }]),
+      );
+      const tester = createNativeKeyTester({
+        models: {
+          // A name that passes the check made on the literal address; what it resolves to is judged at the connection.
+          getProvider: () =>
+            Promise.resolve(
+              provider({
+                url: {
+                  state: "trusted",
+                  trustedUrl: "https://api.deepseek.com",
+                  pendingUrl: null,
+                  problem: null,
+                },
+              }),
+            ),
+        },
+        legacyProviders: ["openrouter", "anthropic"],
+        resolveAddresses,
+        // No fetchImpl: this is the transport of the running server.
+      });
+      return { tester, resolveAddresses };
+    }
+
+    // #555-T02
+    it("answers unreachable for a name that resolves to a private address, and the key never leaves the process", async () => {
+      const connectedTo: string[] = [];
+      const connect = fakeConnect(connectedTo);
+      const written = vi.spyOn(Socket.prototype, "write");
+      const { tester, resolveAddresses } = testerFor("10.0.0.7");
+
+      try {
+        expect(await tester.test("deepseek", KEY)).toBe("unreachable");
+        expect(resolveAddresses).toHaveBeenCalledWith("api.deepseek.com");
+        expect(connectedTo).toEqual([]);
+        expect(written).not.toHaveBeenCalled();
+      } finally {
+        written.mockRestore();
+        connect.mockRestore();
+      }
+    });
+
+    // #555-T02
+    it("connects to the public address it vetted (the positive control of the test above)", async () => {
+      const connectedTo: string[] = [];
+      const connect = fakeConnect(connectedTo);
+      const { tester } = testerFor("93.184.216.34");
+
+      try {
+        await tester.test("deepseek", KEY);
+        expect(connectedTo).toEqual(["93.184.216.34"]);
+      } finally {
+        connect.mockRestore();
+      }
+    });
   });
 });
