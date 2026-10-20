@@ -83,9 +83,7 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   `dynamic_capabilities` (`features` next to `engines`), which tells the app this runner reads the model
   descriptor of a Dynamic job (#279); an app from before ignores the key and sends none. The claim also names
   `dynamic_cost_policy` (#553): the runner reads `dynamic.cost` (the price book of the managed key, the token cap of an own
-  key; `dynamic_review/passthrough/cost_policy.py`) and, next to it, `dynamic.modelEntry` (#578): a job with both is native and
-  runs through the passthrough proxy and the plain-final engine path (`dynamic_review/native_job.py`, `docs/dynamic-review.md`,
-  "The native path of a job"); a job that carries a cost policy but no entry would reach the legacy wire and is refused
+  key; `dynamic_review/passthrough/cost_policy.py`), and a job that carries one but would reach the legacy wire is refused
   with `dynamic_config_invalid`. A runner that cannot run a
   kind is never handed such a job by the app; a Dynamic job that arrives anyway is refused locally and
   never run by PR-Agent.

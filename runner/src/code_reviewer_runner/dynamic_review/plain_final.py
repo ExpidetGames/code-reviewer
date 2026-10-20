@@ -60,7 +60,6 @@ from code_reviewer_runner.dynamic_review.final_messages import (
     repair_message,
     validator_detail,
 )
-from code_reviewer_runner.dynamic_review.finalization_log import FinalizationRecord
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
@@ -141,8 +140,6 @@ class PlainFinalization:
         # What the ledger counted when the running turn started: only an increase is this turn's.
         self._refusals_before = 0
         self._tool_calls_before = 0
-        # How the review was ended, for the one log line of the run (`finalization_log.py`).
-        self.record = FinalizationRecord()
 
     def run(self) -> DynamicFindings:
         """The review, or an exception: `NoFinalAnswer`, `EnvelopeError`, `LimitError`."""
@@ -152,12 +149,10 @@ class PlainFinalization:
             # The guard refused a call: the agent phase is over, the answer is still owed. The run
             # stopped early now: the adapter acts on the refusal (and on no other).
             self._ledger.note_wrap_up(self._ledger.refusal_reason or STOPPED_EARLY_COST)
-            self.record.final_call = "exempt"
             self._ask(final_message, abort=True)
             outcome = self._read() or self._after_the_final_call()
         if isinstance(outcome, DynamicFindings):
             return outcome
-        self.record.first = outcome.problem.value
         return self._repair(outcome)
 
     def _repair(self, first: _Verdict) -> DynamicFindings:
@@ -166,12 +161,9 @@ class PlainFinalization:
             lambda token: repair_message(first.problem, first.detail, self._max_findings, token),
             abort=False,
         )
-        self.record.repaired = True
         second = self._read() or self._after_the_final_call()
         if isinstance(second, DynamicFindings):
-            self.record.second = "ok"
             return second
-        self.record.second = second.problem.value
         note = f"after one repair; the first message: {first.problem}; the repair: {second.problem}"
         if second.problem is Problem.ENVELOPE_INVALID:
             raise EnvelopeError(ErrorCode.DYNAMIC_POLICY_VIOLATION, f"{note}; {second.detail}")

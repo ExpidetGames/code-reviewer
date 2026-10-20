@@ -38,8 +38,7 @@ other way round, so a change to the format has to change the file and both sides
 checks the example, the closed object and the rules the engine imposes (both limits or none, a status it does not drop,
 `npm` always set, an https upstream address) in `app/integration-tests/compatibility/job-model-entry-contract.integration.test.ts`;
 the runner checks that its reader and the file give the same verdict for the same documents in
-`runner/tests/contract/test_job_model_entry_contract.py`. Since #578 the claim carries the entry as `dynamic.modelEntry`
-(`DynamicModelEntry` in `runner-api.v1.json`, an object that is not repeated there: both suites hold every example against this file).
+`runner/tests/contract/test_job_model_entry_contract.py`. The claim does not carry the entry yet: that is #550.
 
 ## The operator API contract
 
@@ -267,13 +266,6 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
   `app/src/native-cost/README.md`), so no job of today carries one. `token_limit` is only reported by a run that had a token
   cap, which only a new app sends. `fakes/fixtures/dynamic-review-job-cost-managed.json` and `-cost-own.json` are validated by
   both suites; the price book is the form of `fakes/fixtures/price-books.json`.
-
-- #578 adds the optional `DynamicReview.modelEntry` (`DynamicModelEntry`: the `JobModelEntry` of `job-model-entry.v1.json`, which holds
-  no key). It travels with `cost` (`dependentRequired`), so it is sent only to a caller that named `dynamic_cost_policy`, and the
-  rule is the one of `cost`: `RunnerJobInput` is closed, the **app** never sends the field to a caller without the feature, and an old
-  runner gets exactly the previous payload. Only a native job carries it (the app's switch `NATIVE_OPENCODE_PROVIDERS`, default off,
-  `app/src/native-cost/README.md`). `fakes/fixtures/dynamic-review-job-native-managed.json` and `-native-own.json` are validated by
-  both suites, the entry inside them against `job-model-entry.v1.json` too.
 
 - #424 grows v1 without breaking a reader: `RunnerJobInput.llm.provider` changes from the enum
   `["openrouter"]` to a slug (`LlmProviderId`, `^[a-z][a-z0-9_]{1,31}$`), and `ClaimRequest` and the

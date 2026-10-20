@@ -41,11 +41,6 @@ from enum import StrEnum
 from typing import Any, NoReturn, cast
 from urllib.parse import SplitResult, urlsplit
 
-from code_reviewer_runner.dynamic_review.job_model_entry import (
-    JobModelEntry,
-    JobModelEntryError,
-    parse_job_model_entry,
-)
 from code_reviewer_runner.dynamic_review.passthrough.cost_policy import (
     CostPolicy,
     CostPolicyError,
@@ -56,7 +51,6 @@ from code_reviewer_runner.llm_providers import (
     LlmProviderSpec,
     provider_for,
     registered_provider_ids,
-    upstream_base_is_the_providers,
     without_prefix,
 )
 from code_reviewer_runner.platforms import PLATFORMS
@@ -86,7 +80,7 @@ _LLM_FIELDS = {
     "maxTokens",
     "fallbackModels",
 }
-_DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities", "cost", "modelEntry"}
+_DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities", "cost"}
 _CAPABILITY_FIELDS = {
     "toolChoiceRequired",
     "structuredOutput",
@@ -201,9 +195,6 @@ class DynamicReview:
     capabilities: JobCapabilities | None = None
     # Whose key pays and what bounds the cost of a native job (#553); None for a job of today.
     cost: CostPolicy | None = None
-    # The provider and the one model of a native job (#548, #578), without a key; None for a job of
-    # today. A native job always has a cost policy too.
-    model_entry: JobModelEntry | None = None
 
 
 @dataclass(frozen=True)
@@ -538,7 +529,6 @@ def _dynamic_review(data: dict[str, Any]) -> DynamicReview:
         limits=DynamicLimits(max_findings=max_findings),
         capabilities=_job_capabilities(dynamic),
         cost=_job_cost_policy(dynamic),
-        model_entry=_job_model_entry(dynamic),
     )
 
 
@@ -551,34 +541,6 @@ def _job_cost_policy(dynamic: dict[str, Any]) -> CostPolicy | None:
         return parse_cost_policy(dynamic["cost"])
     except CostPolicyError as error:
         raise _invalid(error.detail) from None
-
-
-def _job_model_entry(dynamic: dict[str, Any]) -> JobModelEntry | None:
-    """The model entry of a native job (#578), or None. Strict, and never without the cost policy
-    that bounds the run: an entry alone would be a native run with no price and no cap."""
-    if "modelEntry" not in dynamic:
-        return None
-    if "cost" not in dynamic:
-        raise _invalid("dynamic.modelEntry needs dynamic.cost")
-    try:
-        return parse_job_model_entry(dynamic["modelEntry"])
-    except JobModelEntryError:
-        raise _invalid("dynamic.modelEntry is not a job model entry") from None
-
-
-def _entry_matches(dynamic: DynamicReview, llm: LlmAccess) -> None:
-    """The entry names the model of the job and the provider the key belongs to. The key goes to
-    the entry's address, so an entry of another provider would send it there."""
-    entry = dynamic.model_entry
-    if entry is None:
-        return
-    if entry.model_id != dynamic.model or entry.model_id != llm.model:
-        raise _invalid("dynamic.modelEntry is not the model of the job")
-    if entry.provider_id != llm.provider.replace("_", "-"):
-        raise _invalid("dynamic.modelEntry is not of the provider of llm.provider")
-    # The key is the registry provider's, so it goes to the registry's address and to no other.
-    if not upstream_base_is_the_providers(llm.provider, entry.upstream_base_url):
-        raise _invalid("dynamic.modelEntry.upstreamBaseUrl is not the address of the provider")
 
 
 def _capability_integer(document: dict[str, Any], key: str, upper: int) -> int:
@@ -709,8 +671,6 @@ def parse_job(raw: str) -> Job:
         base = None
     git = _git_access(job)
     llm = _llm_access(job)
-    if dynamic is not None:
-        _entry_matches(dynamic, llm)
     return Job(
         pr_url=_pr_url(job, git),
         command=command,

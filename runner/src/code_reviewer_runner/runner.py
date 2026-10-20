@@ -49,11 +49,7 @@ from code_reviewer_runner.dynamic_findings import (
     DynamicFindings,
 )
 from code_reviewer_runner.dynamic_review import findings_schema
-from code_reviewer_runner.dynamic_review.adapter import (
-    DynamicEngine,
-    EngineAnswer,
-    shutdown_engines,
-)
+from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
 from code_reviewer_runner.dynamic_review.budget import (
     TOTAL_DEADLINE_SECONDS,
     BudgetLedger,
@@ -61,17 +57,10 @@ from code_reviewer_runner.dynamic_review.budget import (
     LimitError,
     max_cost_from_environment,
 )
-from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.failure_note import FAILURE_SENTENCES
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
-from code_reviewer_runner.dynamic_review.native_job import (
-    NativeSeams,
-    NativeStartError,
-    build_native_job,
-    run_native_engine,
-)
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
@@ -513,7 +502,6 @@ def run_dynamic_job(
     publish_failure: Callable[[Job, ErrorCode, str | None], Published | None] | None = None,
     usage_probe: UsageProbe | None = None,
     superseded: SupersedeSignal = PROCESS_SIGNAL,
-    native: NativeSeams | None = None,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
@@ -527,10 +515,6 @@ def run_dynamic_job(
     reaches a runner). This function does not rely on that alone: `engines` is what the runner
     advertised, and a Dynamic job is refused unless it contains `opencode`, whatever else is
     configured. The default (nothing advertised) refuses.
-
-    A job whose claim carries a model entry (#578) is native: it runs through the passthrough proxy
-    and the plain-final engine path (`native_job.py`), with the same checks before and the same
-    conclusion after. A job without one is a job of today and runs exactly as before.
 
     A failure that a developer can understand or act on also leaves a short note in the pull
     request's summary comment (#299, `add_failure_note`); the note never changes the result.
@@ -552,7 +536,6 @@ def run_dynamic_job(
         lease_check=lease_check,
         usage_probe=usage_probe or UsageProbe(),
         superseded=superseded,
-        native=native,
     )
     # A run that was superseded (#396) ends `superseded` with its ledger's usage and writes nothing,
     # not even the note of a failure: that code has no sentence.
@@ -630,7 +613,6 @@ def _run_dynamic_job(
     lease_check: LeaseCheck | None = None,
     usage_probe: UsageProbe,
     superseded: SupersedeSignal = PROCESS_SIGNAL,
-    native: NativeSeams | None = None,
 ) -> JobResult:
     dynamic = job.dynamic
     base = job.base
@@ -652,11 +634,10 @@ def _run_dynamic_job(
             started,
             capture,
         )
-    if dynamic.cost is not None and dynamic.model_entry is None:
-        # #553: the cost policy is enforced by the passthrough path alone (`build_native_ledger`),
-        # which a job takes when its claim carries the model entry (#578). A job that carries a
-        # policy and would reach the legacy wire is refused: it must not run with a bound it never
-        # read.
+    if dynamic.cost is not None:
+        # #553: the cost policy is enforced by the passthrough path alone (`build_native_ledger`).
+        # Until a claim's native job runs through it, a job that carries one and would reach the
+        # legacy wire is refused: it must not run with a bound it never read.
         return _failure(
             ErrorCode.DYNAMIC_CONFIG_INVALID,
             "a cost policy needs the native provider path, which this job does not take",
@@ -668,22 +649,6 @@ def _run_dynamic_job(
     ripgrep = (
         Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
     )
-    if dynamic.model_entry is not None:
-        return _run_native_dynamic_job(
-            job,
-            capture,
-            started,
-            environment,
-            timeout_seconds,
-            command=command,
-            ripgrep=ripgrep,
-            prepare=prepare,
-            publish=publish,
-            lease_check=lease_check,
-            usage_probe=usage_probe,
-            superseded=superseded,
-            seams=native or NativeSeams(),
-        )
     # The descriptor describes the destination the request really goes to, so it is chosen by the
     # upstream model (`llm.model`); `dynamic.model` is the logical name the engine sees, and the app
     # sends the same name in both.
@@ -706,9 +671,18 @@ def _run_dynamic_job(
     # own deadline, with the clean result and what it used, before the watchdog could end it; the
     # wrap-up and the recovery reserve of the ledger are taken from this deadline, so they stay
     # consistent with it.
-    deadline = _deadline_of(timeout_seconds, started, capture, usage_probe)
-    if isinstance(deadline, JobResult):
-        return deadline
+    deadline = TOTAL_DEADLINE_SECONDS
+    if timeout_seconds is not None:
+        remaining = timeout_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            return _failure(
+                ErrorCode.TIMEOUT,
+                "the command did not finish in time",
+                started,
+                capture,
+                usage=usage_probe.usage(),
+            )
+        deadline = min(deadline, remaining)
     try:
         ledger = dynamic_ledger(capabilities, environment, deadline)
     except LimitError as error:
@@ -802,155 +776,6 @@ def _run_dynamic_job(
             usage=usage_probe.usage(),
         )
 
-    return _conclude_dynamic_job(
-        job,
-        answer,
-        ledger,
-        content,
-        started,
-        capture,
-        publish=publish,
-        lease_check=lease_check,
-        usage_probe=usage_probe,
-        superseded=superseded,
-        turn_note=turn_note,
-        recovery_note=recovery_note,
-        cache_line=cache_line,
-    )
-
-
-def _deadline_of(
-    timeout_seconds: float | None,
-    started: float,
-    capture: LogCapture | None,
-    usage_probe: UsageProbe,
-) -> float | JobResult:
-    """What is left of the run's time, or the `timeout` result when nothing is."""
-    deadline = TOTAL_DEADLINE_SECONDS
-    if timeout_seconds is None:
-        return deadline
-    remaining = timeout_seconds - (time.monotonic() - started)
-    if remaining <= 0:
-        return _failure(
-            ErrorCode.TIMEOUT,
-            "the command did not finish in time",
-            started,
-            capture,
-            usage=usage_probe.usage(),
-        )
-    return min(deadline, remaining)
-
-
-def _run_native_dynamic_job(
-    job: Job,
-    capture: LogCapture | None,
-    started: float,
-    environment: Mapping[str, str],
-    timeout_seconds: float | None,
-    *,
-    command: list[str],
-    ripgrep: Path | None,
-    prepare: ContentPreparer | None,
-    publish: Callable[[Job, DynamicFindings], Published] | None,
-    lease_check: LeaseCheck | None,
-    usage_probe: UsageProbe,
-    superseded: SupersedeSignal,
-    seams: NativeSeams,
-) -> JobResult:
-    """A Dynamic job whose claim carries the model entry (#578): the passthrough proxy and the
-    engine's plain-final path, between the same checks and the same conclusion as the legacy path.
-
-    The legacy capability descriptor is not read: the entry states the window, the output bound and
-    the flags of the model, and the cost policy of the claim states the prices (or the token cap).
-    """
-    deadline = _deadline_of(timeout_seconds, started, capture, usage_probe)
-    if isinstance(deadline, JobResult):
-        return deadline
-    try:
-        native = build_native_job(
-            job,
-            deadline=deadline,
-            environment=environment,
-            superseded=superseded.is_set,
-            upstream_for=seams.upstream_for,
-        )
-    except LimitError as error:
-        # The destination cannot serve the run: fail before the engine starts, with no fallback.
-        return _failure(error.code, error.detail, started, capture)
-    ledger = native.ledger
-    # From here on every failure says what the model calls so far cost (nothing before the first).
-    usage_probe.watch(lambda: ledger.usage(job.llm.model))
-    prepare = prepare or production_preparer(
-        environment, cancelled=lambda: ledger.remaining_seconds() <= 0
-    )
-    try:
-        with prepare(job) as prepared:
-            prepared = prepared if isinstance(prepared, Prepared) else Prepared(prepared)
-            try:
-                outcome = run_native_engine(
-                    native,
-                    job,
-                    command=command,
-                    content=prepared.content,
-                    launch=prepared.launch,
-                    node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
-                    ripgrep=ripgrep,
-                    superseded=superseded.is_set,
-                    engine_factory=seams.engine_factory,
-                )
-            except NativeStartError as error:
-                return _failure(error.code, error.detail, started, capture)
-            content = prepared.content
-    except CheckoutError as error:
-        return _failure(
-            error.code,
-            "the pull request could not be prepared",
-            started,
-            capture,
-            reason=error.reason.value,
-            facts=[f"checkout: {error.metrics.describe()}"] if error.metrics else [],
-            usage=usage_probe.usage(),
-        )
-    return _conclude_dynamic_job(
-        job,
-        outcome.answer,
-        ledger,
-        content,
-        started,
-        capture,
-        publish=publish,
-        lease_check=lease_check,
-        usage_probe=usage_probe,
-        superseded=superseded,
-        turn_note=outcome.turn_note,
-        recovery_note=outcome.recovery_note,
-        cache_line=outcome.cache_line,
-        finalization=outcome.finalization,
-    )
-
-
-def _conclude_dynamic_job(
-    job: Job,
-    answer: EngineAnswer,
-    ledger: BudgetLedger,
-    content: PreparedContent,
-    started: float,
-    capture: LogCapture | None,
-    *,
-    publish: Callable[[Job, DynamicFindings], Published] | None,
-    lease_check: LeaseCheck | None,
-    usage_probe: UsageProbe,
-    superseded: SupersedeSignal,
-    turn_note: str,
-    recovery_note: str | None,
-    cache_line: str | None,
-    finalization: str | None = None,
-) -> JobResult:
-    """What follows the engine's answer, the same for the legacy and the native path: the verdict
-    of the run, the lease check, the one write and the summary line. `finalization` is the native
-    path's log line (#578); the legacy path has none and its result is unchanged."""
-    base = job.base
-    assert base is not None  # parse_job guarantees the tagged shape
     if answer.error is not None:
         detail = answer.error.detail + (f" [{turn_note}]" if turn_note else "")
         return _failure(
@@ -959,7 +784,7 @@ def _conclude_dynamic_job(
             started,
             capture,
             usage=usage_probe.usage(),
-            facts=[line for line in (cache_line, finalization) if line],
+            facts=[cache_line] if cache_line else [],
         )
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
@@ -1026,8 +851,6 @@ def _conclude_dynamic_job(
     summary += f"\ncheckout: {content.metrics.describe()}"
     if cache_line:
         summary += f"\n{cache_line}"
-    if finalization:
-        summary += f"\n{finalization}"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),

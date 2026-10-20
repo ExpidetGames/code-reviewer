@@ -769,10 +769,10 @@ class PassthroughProxy:
             if self._unknown_ends_run:
                 self._unknown(reservation, started_ms)
             else:
-                self._tokens_only(usage, reservation, started_ms, result.finish_reason)
+                self._tokens_only(usage, reservation, started_ms)
             return
         if self._prices is None:
-            self._tokens_only(usage, reservation, started_ms, result.finish_reason, risk=False)
+            self._tokens_only(usage, reservation, started_ms, risk=False)
             return
         priced = price_call(usage, self._prices)
         if priced.drift:
@@ -786,7 +786,7 @@ class PassthroughProxy:
             if self._unknown_ends_run:
                 self._unknown(reservation, started_ms)
             else:
-                self._tokens_only(usage, reservation, started_ms, result.finish_reason)
+                self._tokens_only(usage, reservation, started_ms)
             return
         # Noted before the settlement: a call the ledger then stops the run for is in the trace too.
         self.ledger.trace.model_call(
@@ -796,7 +796,7 @@ class PassthroughProxy:
             cache_write=usage.cache_write,
             completion_tokens=usage.completion_tokens,
             cost=cost,
-            finish_reason=result.finish_reason,
+            finish_reason=None,
             final=reservation.final,
             tool_names=[],
         )
@@ -824,13 +824,7 @@ class PassthroughProxy:
         self.last_upstream_error = None
 
     def _tokens_only(
-        self,
-        usage: CallUsage,
-        reservation: Reservation,
-        started_ms: int,
-        finish_reason: str | None,
-        *,
-        risk: bool = True,
+        self, usage: CallUsage, reservation: Reservation, started_ms: int, *, risk: bool = True
     ) -> None:
         """Settle a call of an own key by its tokens (#553): the provider stated its usage and
         nobody can say what it cost. The tokens count against the cap, the cost of the run
@@ -846,7 +840,7 @@ class PassthroughProxy:
             cache_write=usage.cache_write,
             completion_tokens=usage.completion_tokens,
             cost=None,
-            finish_reason=finish_reason,
+            finish_reason=None,
             final=reservation.final,
             tool_names=[],
         )

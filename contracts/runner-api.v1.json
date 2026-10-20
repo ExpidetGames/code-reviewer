@@ -97,7 +97,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["model", "skill", "limits"],
-      "dependentRequired": { "modelEntry": ["cost"] },
       "properties": {
         "model": {
           "type": "string",
@@ -115,14 +114,8 @@
           }
         },
         "capabilities": { "$ref": "#/$defs/DynamicModelCapabilities" },
-        "cost": { "$ref": "#/$defs/DynamicCostPolicy" },
-        "modelEntry": { "$ref": "#/$defs/DynamicModelEntry" }
+        "cost": { "$ref": "#/$defs/DynamicCostPolicy" }
       }
-    },
-    "DynamicModelEntry": {
-      "description": "#578: the provider and the one model of a native job, the `JobModelEntry` of job-model-entry.v1.json (the closed object the runner reads strictly; this file does not repeat it, and both suites check every example against that file). Optional and additive: sent exactly when `cost` is, so only to a caller that named the claim feature `dynamic_cost_policy`; a job without it is a job of today. It holds no key. `upstreamBaseUrl` is the address the runner's supervisor connects to; the engine is never told it. Its `modelId` is `dynamic.model` and `llm.model`, and its `providerId` is the provider of `llm.provider` (the underscore of a slug is the hyphen of the id).",
-      "type": "object",
-      "required": ["version", "providerId", "npm", "family", "authHeader", "upstreamBaseUrl", "modelId", "model"]
     },
     "DynamicCostPolicy": {
       "description": "#553: whose key pays for a native job (a job that runs through the passthrough proxy) and what bounds its cost. Optional, additive, and sent only to a caller that named the claim feature `dynamic_cost_policy`; a job without it is a job of today. A closed object. `managed` (the instance operator's key, which we pay): `priceBook` is the confirmed price of the model (the app's price confirmation, #549) and is the runner's **only** price source, never the engine's own cost and never models.dev; an unknown cost ends the run with `dynamic_accounting_failed`, which billing treats as our fault; there is no token cap. `own` (the workspace's key, the user pays the provider): `priceBook` is the catalog's price when it states one, else null; an unknown cost does not end the run, it is bound by `maxTotalTokens` (prompt, cache and completion tokens in all) and the clock, and the result reports `costUsd: null`, which billing charges as minutes only. A call that stated no usage at all still fails the run.",

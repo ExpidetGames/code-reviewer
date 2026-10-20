@@ -129,7 +129,6 @@ export async function handleFetch(
     await deps.claimedKeys.remember(job.id, outcome.input.llm.apiKey);
     if (outcome.entryModel !== null)
       await deps.claimedKeys.rememberModel(job.id, outcome.entryModel);
-    await deps.claimedKeys.rememberNative(job.id, outcome.native);
     const current = await deps.queue.get(job.id);
     if (current?.leaseExpiresAt == null)
       throw new Error(`Job ${job.id} has no lease expiry at fetch.`);

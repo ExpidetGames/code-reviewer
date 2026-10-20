@@ -21,9 +21,6 @@
 // the job really got is kept to mask it in the result, whichever app instance serves the completion. An app instance
 // of the previous release reads `keys` and ignores `models`.
 //
-// #578: and whether the claim handed the job a **native** model entry (`native` in the same sealed text), so that the report
-// holds a native run to the rules of one (a managed success reports its cost) however the switch of the native path stands by then.
-//
 // The value is never logged and never leaves this module except as the lists `keysOf` and `modelsOf` return to the
 // code that masks a result. A row that cannot be read (another `APP_SECRET`, a changed row) is skipped: masking is best
 // effort, and the shape of a credential is still masked (`redact.ts`).
@@ -53,18 +50,9 @@ export type ClaimedKeys = {
   rememberModel(jobId: string, model: string): Promise<void>;
   /** The entry models handed out for the job, oldest first (empty if none, unknown or unreadable). */
   modelsOf(jobId: string): Promise<string[]>;
-  /**
-   * Remembers whether the claim handed the job a native model entry (#578). What the report applies to a native run (a
-   * managed success with no cost is not a success) is decided by this, not by the switch of the moment the report arrives:
-   * the switch may have been turned off while the run was going. Every claim and every Worker fetch writes it, `false`
-   * included: a job claimed again after the switch was turned off is no longer native.
-   */
-  rememberNative(jobId: string, native: boolean): Promise<void>;
-  /** Whether the claim handed the job a native model entry (false if unknown or unreadable). */
-  wasNative(jobId: string): Promise<boolean>;
 };
 
-type Sealed = { keys: string[]; models: string[]; native: boolean };
+type Sealed = { keys: string[]; models: string[] };
 
 function strings(value: unknown): string[] | undefined {
   return Array.isArray(value) &&
@@ -81,14 +69,13 @@ function contentOf(text: string): Sealed {
       const keys = strings(parsed.keys);
       if (keys !== undefined) {
         const models = "models" in parsed ? strings(parsed.models) : undefined;
-        const native = "native" in parsed && parsed.native === true;
-        return { keys, models: models ?? [], native };
+        return { keys, models: models ?? [] };
       }
     }
   } catch {
     // Not JSON: a key of the earlier format.
   }
-  return { keys: [text], models: [], native: false };
+  return { keys: [text], models: [] };
 }
 
 export function createClaimedKeys({
@@ -111,7 +98,7 @@ export function createClaimedKeys({
     jobId: string,
   ): Promise<Sealed> {
     const row = await rows.get(jobId);
-    if (row === undefined) return { keys: [], models: [], native: false };
+    if (row === undefined) return { keys: [], models: [] };
     try {
       return contentOf(
         decryptSecret(appSecret(), location(jobId), {
@@ -121,20 +108,26 @@ export function createClaimedKeys({
         }),
       );
     } catch {
-      return { keys: [], models: [], native: false };
+      return { keys: [], models: [] };
     }
   }
-  /** Changes what is remembered and writes all of it, in one transaction, so two fetches do not drop each other's. */
-  async function update(
+  /** Adds a value to one of the two lists and writes both, in one transaction, so two fetches do not drop each other's. */
+  async function add(
     jobId: string,
-    change: (known: Sealed) => Sealed,
+    list: keyof Sealed,
+    value: string,
   ): Promise<void> {
     await db.transaction().execute(async (trx) => {
       const rows = createJobClaimedKeysRepository(trx, now);
+      const known = await read(rows, jobId);
+      const current = known[list];
+      const next = current.includes(value)
+        ? current
+        : [...current, value].slice(-CLAIMED_KEYS_PER_JOB);
       const sealed = encryptSecret(
         appSecret(),
         location(jobId),
-        JSON.stringify(change(await read(rows, jobId))),
+        JSON.stringify({ ...known, [list]: next }),
       );
       await rows.put({
         jobId,
@@ -144,14 +137,6 @@ export function createClaimedKeys({
       });
     });
   }
-  /** Adds a value to one of the two lists: the newest `CLAIMED_KEYS_PER_JOB` are kept, a value already there takes no place. */
-  const add = (jobId: string, list: "keys" | "models", value: string) =>
-    update(jobId, (known) => ({
-      ...known,
-      [list]: known[list].includes(value)
-        ? known[list]
-        : [...known[list], value].slice(-CLAIMED_KEYS_PER_JOB),
-    }));
   return {
     remember: (jobId, apiKey) => add(jobId, "keys", apiKey),
     rememberModel: (jobId, model) => add(jobId, "models", model),
@@ -159,9 +144,5 @@ export function createClaimedKeys({
       (await read(createJobClaimedKeysRepository(db, now), jobId)).keys,
     modelsOf: async (jobId) =>
       (await read(createJobClaimedKeysRepository(db, now), jobId)).models,
-    rememberNative: (jobId, native) =>
-      update(jobId, (known) => ({ ...known, native })),
-    wasNative: async (jobId) =>
-      (await read(createJobClaimedKeysRepository(db, now), jobId)).native,
   };
 }

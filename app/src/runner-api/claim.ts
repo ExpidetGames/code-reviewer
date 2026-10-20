@@ -63,7 +63,6 @@ import {
 } from "../model-catalog/token-budget.ts";
 import type { NativeCostService } from "../native-cost/service.ts";
 import type { CostPolicyJson } from "../native-cost/policy.ts";
-import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
@@ -197,10 +196,7 @@ export type ClaimDeps = {
    * Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked,
    * and the model of a catalog entry (#280, #432), so it can be masked in the result even if the operator changes the entry.
    */
-  claimedKeys: Pick<
-    ClaimedKeys,
-    "remember" | "rememberModel" | "rememberNative"
-  >;
+  claimedKeys: Pick<ClaimedKeys, "remember" | "rememberModel">;
   /**
    * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
    * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
@@ -211,7 +207,10 @@ export type ClaimDeps = {
    * #553: the cost policy of a native job (a job whose selection names a catalog model, src/native-cost/). Left out, no job
    * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
    */
-  nativeCost?: Pick<NativeCostService, "refOf" | "policyFor" | "entryFor">;
+  nativeCost?: Pick<
+    NativeCostService,
+    "refOf" | "policyFor" | "isNativeProvider"
+  >;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -224,12 +223,7 @@ export type Refusal =
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
 type Prepared =
-  | {
-      kind: "ready";
-      response: ClaimResponse;
-      entryModel: string | null;
-      native: boolean;
-    }
+  | { kind: "ready"; response: ClaimResponse; entryModel: string | null }
   /** #320: the claim of a Dispatcher: the credential and no input. */
   | { kind: "split"; response: SplitClaimResponse }
   | Refusal;
@@ -248,8 +242,6 @@ export type Checked = {
   dynamic: DynamicReviewOptions | null;
   /** #553: the cost policy of a native Dynamic job (`dynamic.cost`); null for every other job. */
   cost: CostPolicyJson | null;
-  /** #578: the entry of the model of a native Dynamic job (`dynamic.modelEntry`); null exactly when `cost` is. */
-  modelEntry: JobModelEntry | null;
   integration: Integration;
   repo: RepoRef;
   prUrl: string;
@@ -263,8 +255,6 @@ export type Built = {
   tokenExpiresAt: string | null;
   /** The model of the catalog entry the job runs on, or null for an own job; remembered for masking (#280, #432). */
   entryModel: string | null;
-  /** #578: the input carries a native model entry (`dynamic.modelEntry`); remembered for the report. */
-  native: boolean;
 };
 
 function refuse(errorCode: string, detail?: string): Refusal {
@@ -465,8 +455,6 @@ type CostDecision =
   | {
       kind: "decided";
       policy: CostPolicyJson | null;
-      /** #578: the entry of the model of a native job; absent exactly when `policy` is null. */
-      entry?: JobModelEntry;
       /** Which confirmation priced a managed run, for the log. */
       confirmation?: { id: number; hashVersion: number };
     }
@@ -491,44 +479,21 @@ async function costOf(
   const ref = native.refOf(selection);
   if (ref === null) return { kind: "decided", policy: null };
   const outcome = await native.policyFor(selection.keyMode, ref);
-  if (!outcome.ok) {
-    // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
-    if (outcome.reason === "check_failed") return { kind: "retry" };
+  if (outcome.ok)
     return {
-      kind: "refused",
-      errorCode: MANAGED_MODEL_UNAVAILABLE,
-      detail: `${whose(selection)}kind=${selection.kind} reason=${outcome.code}:${outcome.reason}`,
+      kind: "decided",
+      policy: outcome.policy,
+      ...(outcome.confirmation === null
+        ? {}
+        : { confirmation: outcome.confirmation }),
     };
-  }
-  // #578: what the runner is told about the model. The price is judged first, so a managed model with no confirmed price
-  // keeps the refusal it always had. A model the catalog cannot describe (or whose provider's address is not trusted) is
-  // refused like an unavailable one: on the operator's key, which we pay, as `managed_model_unavailable` (free); on the
-  // workspace's own key as a model Dynamic Review cannot use. No key exists yet in either case.
-  const entry = await native.entryFor(ref);
-  if (!entry.ok) {
-    if (entry.code === "check_failed") return { kind: "retry" };
-    return {
-      kind: "refused",
-      errorCode:
-        selection.keyMode === "managed"
-          ? MANAGED_MODEL_UNAVAILABLE
-          : "dynamic_model_features_unsupported",
-      detail: `${whose(selection)}kind=${selection.kind} reason=entry_${entry.code}`,
-    };
-  }
+  // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
+  if (outcome.reason === "check_failed") return { kind: "retry" };
   return {
-    kind: "decided",
-    policy: outcome.policy,
-    entry: entry.entry,
-    ...(outcome.confirmation === null
-      ? {}
-      : { confirmation: outcome.confirmation }),
+    kind: "refused",
+    errorCode: MANAGED_MODEL_UNAVAILABLE,
+    detail: `${selection.keyMode === "managed" ? `entry=${selection.entry.id} ` : ""}kind=${selection.kind} reason=${outcome.code}:${outcome.reason}`,
   };
-}
-
-/** The opaque id of the catalog entry for the log of a job on the operator's key; nothing for an own key. */
-function whose(selection: Selection): string {
-  return selection.keyMode === "managed" ? `entry=${selection.entry.id} ` : "";
 }
 
 /**
@@ -694,7 +659,6 @@ export async function checkJob(
     llmOptions,
     dynamic,
     cost: cost.policy,
-    modelEntry: cost.entry ?? null,
     integration,
     repo,
     prUrl,
@@ -722,7 +686,6 @@ export async function buildJobInput(
     llmOptions,
     dynamic,
     cost,
-    modelEntry,
     integration,
     repo,
   } = checked;
@@ -737,11 +700,7 @@ export async function buildJobInput(
   // local refusal above, and still before the git credentials are created. A job on the operator's key (#280, #432) reads
   // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read serves
   // both (a Dynamic job's model is the entry's). The metadata is read from the selection's provider.
-  // A native job (#578) reads none: its entry states the window, the output bound and the flags of the model.
-  const modelToRead =
-    (dynamic !== null || managed) && modelEntry === null
-      ? selection.model
-      : null;
+  const modelToRead = dynamic !== null || managed ? selection.model : null;
   // The claim of a job on the operator's key asks as a claim (an outage costs one wait, not one per claim) and names the
   // entry in the log line instead of the model.
   const metadata =
@@ -839,7 +798,6 @@ export async function buildJobInput(
             ...dynamic,
             ...(capabilities === undefined ? {} : { capabilities }),
             ...(cost === null ? {} : { cost }),
-            ...(modelEntry === null ? {} : { modelEntry }),
           },
           base: claimBaseOf(
             repo.fullName,
@@ -867,7 +825,6 @@ export async function buildJobInput(
     input,
     tokenExpiresAt: git.expiresAt,
     entryModel: managed ? selection.model : null,
-    native: modelEntry !== null,
   };
 }
 
@@ -919,7 +876,6 @@ async function prepare(
   return {
     kind: "ready",
     entryModel: built.entryModel,
-    native: built.native,
     response: {
       version: RUNNER_API_VERSION,
       job: {
@@ -1113,7 +1069,6 @@ export async function handleClaim(
           claimed.job.id,
           prepared.entryModel,
         );
-      await deps.claimedKeys.rememberNative(claimed.job.id, prepared.native);
       deps.logger.info(
         `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );

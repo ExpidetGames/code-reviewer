@@ -20,24 +20,7 @@ models.dev (the underscore of a slug is the hyphen of the id; an id with an unde
 slug) and the provider must be in `contracts/opencode-providers.v1.json` and **not** in the legacy registry (`openrouter`,
 `anthropic`). Those two stay on their wires until #556, so nothing about their claim changes. Only a Dynamic job is native (a Diff
 job runs PR-Agent). **The registry does not accept a native slug in a selection yet**, so on the running server no job is native
-and the claim is the claim of today, unless the switch below turns the two registry providers native; #555 lifts the rest.
-
-## The switch (#578)
-
-`NATIVE_OPENCODE_PROVIDERS` in the environment of the app (`1`, `true` or `on`; anything else is off, `switch.ts`). **Default off.**
-Off, `legacyProvidersFor` returns the registry's providers, `catalogRefOf` names none of them and every claim is exactly the claim
-of today (no `dynamic.cost`, no `dynamic.modelEntry`, no price check, the legacy capability metadata is read as before). On, the
-legacy list is empty: a **Dynamic** job on `openrouter` or `anthropic` is native, their ids being models.dev provider ids that the
-supported-provider file lists. The variable is read at every claim (`getNativeCost()` is built per request), so it can be turned
-off again with the next deployment without a migration. A native slug of another provider still needs #555.
-
-A native claim sends, next to the policy below, the **entry of the chosen model** (`dynamic.modelEntry`, `entryFor` of the service,
-the last known catalog row through `buildJobModelEntry`, so a model models.dev no longer lists is still served). The price is judged
-first, so a managed model without a confirmed price keeps its refusal; then an entry that cannot be built ends the job before any
-credential exists: `managed_model_unavailable` on the managed key (free), `dynamic_model_features_unsupported` on an own key, with
-`reason=entry_<code>` in the log (`model_not_in_catalog`, `provider_url_blocked`, `provider_unsupported`, `entry_invalid`). A failed read
-of the catalog gives the job back like a failed price check. A native job does not read the legacy capability metadata of the
-provider: the entry states the window, the output bound and the flags.
+and the claim is the claim of today; the wiring of the passthrough proxy and #555 lift that (below).
 
 ## The managed key (we pay)
 
@@ -55,8 +38,7 @@ The confirmed **book** goes into the claim (`dynamic.cost.priceBook`) and is the
 `cost`, never models.dev. An unknown cost ends the run with `dynamic_accounting_failed`, which billing treats as our fault. There is
 no token cap. The result is checked once more when it comes back: the success of a **native** managed Dynamic job that reports a
 null cost is stored as `dynamic_accounting_failed` (`runner-api/managed-cost-guard.ts`); it can never settle with a null cost. Whether
-a job was native is what its claim stored (`claimedKeys.wasNative`, set when the claim sends `dynamic.modelEntry`), not the switch of the moment the
-report arrives, so a native run that finishes after the switch was turned off is still held to its cost, and a job on the legacy wires is unchanged.
+a job was native is read from the provider its usage record remembers (`isNativeProvider`), so a job on the legacy wires is unchanged.
 
 **Cache prices (decision).** A cache read without a confirmed read price is not priced as input (the upper bound #569 left open),
 because the member would be charged a price nobody confirmed. So "selectable" includes the cache prices, defined once in
@@ -93,10 +75,13 @@ before any VM starts), and the Worker's fetch ends a job that carries a policy w
 is older (a VM was started for nothing, once; nothing ran). The rollout order is therefore: runners and Worker images first, then the
 wiring that makes an entry native.
 
-## What #555 and #571 still need
+## What #555, #571 and the wiring still need
 
 - A native slug must be accepted by the selection (`llm/selection.ts` knows only the registry's providers) and by the settings of a
   project, and the key per native provider must be stored and loaded (`keyFor`); `catalogRefOf` is the map they use.
+- The claim must also send the job model entry (`buildJobModelEntry`) and start the native engine; the runner's `build_native_ledger`
+  and `PassthroughProxy(prices=policy.book, unknown_cost_ends_run=policy.unknown_cost_ends_run)` are the two joints, and `reasoning`
+  of the entry goes to `build_native_ledger(reasoning=...)`.
 - #555 says in its screen that the own-key cost limit cannot bind without a price, and shows the token cap (`ownKeyTokenCap` of the
   admin settings read model; a member sees the cap, never a price).
 - #554: the catalog view already says why a model is refused (`MANAGED_REASON_COPY`, including the two cache reasons); the
