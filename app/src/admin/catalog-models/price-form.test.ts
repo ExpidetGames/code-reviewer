@@ -16,6 +16,7 @@ import {
   bookFromForm,
   emptyLevelForm,
   formFromBook,
+  hasFreeAmount,
   type PriceForm,
 } from "./price-form.ts";
 
@@ -61,6 +62,7 @@ describe("the form of a book", () => {
       contextOver200k: null,
       tiers: [],
       reason: "",
+      freeConfirmed: false,
     });
   });
 
@@ -329,5 +331,77 @@ describe("the book of a form", () => {
 
     expect(result).toMatchObject({ ok: true, price: original });
     expect(parsePriceBookJson(result.ok ? result.price : null).ok).toBe(true);
+  });
+});
+
+describe("a price of zero", () => {
+  // #554-T03
+  it.each(["0", "0.0", "0.000000", " 0 "])(
+    "needs an explicit confirmation that the model is free when input is %j",
+    (typed) => {
+      const result = bookFromForm(form({ input: typed }));
+
+      expect(result).toEqual({
+        ok: false,
+        issues: [{ field: "freeConfirmed", code: "free_not_confirmed" }],
+      });
+    },
+  );
+
+  // #554-T03
+  it("needs it for output too, once however many fields are zero", () => {
+    const result = bookFromForm(form({ input: "0", output: "0" }));
+
+    expect(result).toEqual({
+      ok: false,
+      issues: [{ field: "freeConfirmed", code: "free_not_confirmed" }],
+    });
+  });
+
+  // #554-T03
+  it("makes the book with the zero once the admin confirmed that it is free", () => {
+    const result = bookFromForm(
+      form({ input: "0", output: "0", freeConfirmed: true }),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      price: { input: "0", output: "0", cacheRead: "250000" },
+    });
+  });
+
+  // #554-T03
+  it("needs it for a zero in a tier or in the older price over 200k tokens, not for an optional field", () => {
+    const tiered = form({
+      tiers: [{ ...formFromBook(BOOK), contextOver: "200000", output: "0" }],
+    });
+    const older = form({
+      contextOver200k: { ...emptyLevelForm(), input: "0", output: "1" },
+    });
+
+    for (const typed of [tiered, older])
+      expect(bookFromForm(typed)).toMatchObject({
+        ok: false,
+        issues: [{ field: "freeConfirmed", code: "free_not_confirmed" }],
+      });
+    expect(bookFromForm(form({ cacheRead: "0" }))).toMatchObject({ ok: true });
+  });
+
+  // #554-T03
+  it("does not ask when nothing is zero, and ignores a confirmation that was not needed", () => {
+    expect(bookFromForm(form())).toMatchObject({ ok: true });
+    expect(bookFromForm(form({ freeConfirmed: true }))).toMatchObject({
+      ok: true,
+    });
+  });
+
+  // #554-T03
+  it("tells the form when to show the confirmation: when input or output of any level reads as zero", () => {
+    expect(hasFreeAmount(form())).toBe(false);
+    expect(hasFreeAmount(form({ input: "0.00" }))).toBe(true);
+    expect(hasFreeAmount(form({ output: "0" }))).toBe(true);
+    expect(hasFreeAmount(form({ cacheRead: "0" }))).toBe(false);
+    expect(hasFreeAmount(form({ input: "" }))).toBe(false);
+    expect(hasFreeAmount(form({ input: "abc" }))).toBe(false);
   });
 });

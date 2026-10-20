@@ -429,6 +429,59 @@ describe("correcting the price", () => {
   });
 
   // #554-T03
+  it("asks whether the model is free when input or output is zero, and sends nothing until the admin says so", async () => {
+    const { user, api, form } = await openForm();
+    expect(form.queryByRole("checkbox")).toBeNull();
+    const input = form.getByLabelText("Input (USD per million tokens)");
+    await user.clear(input);
+    await user.type(input, "0");
+    await user.type(
+      form.getByLabelText("Reason"),
+      "Free tier of the provider.",
+    );
+
+    const free = form.getByRole("checkbox", {
+      name: /The model is free: I mean 0 for input or output/,
+    });
+    await user.click(
+      form.getByRole("button", { name: "Save corrected price" }),
+    );
+
+    expect(api.correctPrice).not.toHaveBeenCalled();
+    expect(
+      await form.findByText(/A price of 0 means the model is free/),
+    ).toBeTruthy();
+    expect(free.getAttribute("aria-invalid")).toBe("true");
+
+    await user.click(free);
+    await user.click(
+      form.getByRole("button", { name: "Save corrected price" }),
+    );
+
+    await waitFor(() => expect(api.correctPrice).toHaveBeenCalledTimes(1));
+    expect(api.correctPrice).toHaveBeenCalledWith(
+      IDS,
+      "v2:abc123",
+      book("0", "1200000", { cacheRead: "60000" }),
+      "Free tier of the provider.",
+    );
+  });
+
+  // #554-T03
+  it("stops asking once the zero is gone", async () => {
+    const { user, form } = await openForm();
+    const input = form.getByLabelText("Input (USD per million tokens)");
+    await user.clear(input);
+    await user.type(input, "0");
+    expect(form.getByRole("checkbox")).toBeTruthy();
+
+    await user.clear(input);
+    await user.type(input, "0.5");
+
+    expect(form.queryByRole("checkbox")).toBeNull();
+  });
+
+  // #554-T03
   it("sends whole micro-USD digit strings, the reason and the hash of the price it started from", async () => {
     const { user, api, form } = await openForm();
     const input = form.getByLabelText("Input (USD per million tokens)");

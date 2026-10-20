@@ -32,6 +32,8 @@ export type PriceForm = LevelForm & {
   contextOver200k: LevelForm | null;
   tiers: TierForm[];
   reason: string;
+  /** The admin said that a 0 for input or output is meant: the model is free. Only asked while such a 0 is typed. */
+  freeConfirmed: boolean;
 };
 
 export const LEVEL_FIELDS = [
@@ -62,6 +64,8 @@ export const PRICE_FORM_ISSUE_CODES = [
   "tiers_not_ascending",
   "too_many_tiers",
   "reason_invalid",
+  /** Input or output is 0 and the admin has not confirmed that the model is free. */
+  "free_not_confirmed",
 ] as const;
 export type PriceFormIssueCode = (typeof PRICE_FORM_ISSUE_CODES)[number];
 export type PriceFormIssue = { field: string; code: PriceFormIssueCode };
@@ -106,6 +110,7 @@ export function formFromBook(book: PriceBookJson | null): PriceForm {
       contextOver200k: null,
       tiers: [],
       reason: "",
+      freeConfirmed: false,
     };
   return {
     ...levelFormOf(book),
@@ -116,7 +121,28 @@ export function formFromBook(book: PriceBookJson | null): PriceForm {
       contextOver: String(tier.contextOver),
     })),
     reason: "",
+    freeConfirmed: false,
   };
+}
+
+/** Whether a typed amount reads as zero ("0", "0.0", " 0 "); an empty or wrong text does not. */
+function isZero(text: string): boolean {
+  const amount = amountOf(text, false);
+  return amount.ok && amount.micro === "0";
+}
+
+/**
+ * Whether input or output of any level (the price, the older price over 200k tokens, a tier) is typed as zero. A free model is
+ * possible, but a zero is also what a slip of the finger makes, and the managed key would run the model without cost to
+ * anybody noticing: the form asks once (`freeConfirmed`).
+ */
+export function hasFreeAmount(form: PriceForm): boolean {
+  const levels: LevelForm[] = [
+    form,
+    ...(form.contextOver200k === null ? [] : [form.contextOver200k]),
+    ...form.tiers,
+  ];
+  return levels.some((level) => isZero(level.input) || isZero(level.output));
 }
 
 /** One typed amount: its micro-USD as digits, null when it is empty and optional, or the reason it is refused. */
@@ -186,6 +212,8 @@ export function bookFromForm(form: PriceForm): PriceFormResult {
     else previous = size;
     return { contextOver: size, ...level };
   });
+  if (hasFreeAmount(form) && !form.freeConfirmed)
+    issues.push({ field: "freeConfirmed", code: "free_not_confirmed" });
   const reason = form.reason.trim();
   if (
     reason === "" ||

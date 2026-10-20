@@ -25,7 +25,9 @@ import {
   FieldError,
   FieldLabel,
 } from "../../components/ui/field.tsx";
+import { Checkbox } from "../../components/ui/checkbox.tsx";
 import { Input } from "../../components/ui/input.tsx";
+import { Label } from "../../components/ui/label.tsx";
 import type { CatalogModelView } from "../../model-prices/admin-view.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import { useFocusFirstError } from "../ui/focus-first-error.tsx";
@@ -48,6 +50,7 @@ import {
   bookFromForm,
   emptyLevelForm,
   formFromBook,
+  hasFreeAmount,
   type LevelField,
   type LevelForm,
   type PriceForm,
@@ -510,6 +513,26 @@ function CorrectionForm({
         </Button>
         {errorOf("tiers")}
       </div>
+
+      {hasFreeAmount(form) ? (
+        <Field data-invalid={issueOf("freeConfirmed") !== undefined}>
+          <span className="flex items-start gap-2">
+            <Checkbox
+              id={controlId("freeConfirmed")}
+              checked={form.freeConfirmed}
+              aria-invalid={issueOf("freeConfirmed") !== undefined}
+              aria-describedby={describedBy("freeConfirmed")}
+              onCheckedChange={(checked) =>
+                setForm({ ...form, freeConfirmed: checked === true })
+              }
+            />
+            <Label htmlFor={controlId("freeConfirmed")} className="font-normal">
+              The model is free: I mean 0 for input or output
+            </Label>
+          </span>
+          {errorOf("freeConfirmed")}
+        </Field>
+      ) : null}
 
       <Field
         data-invalid={

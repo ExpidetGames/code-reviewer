@@ -296,6 +296,8 @@ export const FORM_ISSUE_COPY: Record<PriceFormIssueCode, string> = {
   tiers_not_ascending: "A tier must start above the one before it.",
   too_many_tiers: "A price has at most 64 tiers.",
   reason_invalid: "Enter a reason of 1 to 500 characters on one line.",
+  free_not_confirmed:
+    "A price of 0 means the model is free. Tick the box to say that this is meant.",
 };
 
 /** The sentence for an issue the route reports for a field of the request. */
