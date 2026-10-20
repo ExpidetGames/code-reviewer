@@ -2,7 +2,6 @@
 
 // Puts the layers together: built-in values, global defaults, project overrides. Pure.
 import type { ReviewCommand } from "../integrations/types.ts";
-import type { LlmProvider } from "../llm/config.ts";
 import {
   REVIEW_SETTING_FIELDS,
   type ProjectDynamicOverrides,
