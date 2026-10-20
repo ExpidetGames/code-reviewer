@@ -12,14 +12,23 @@ base URL (`address.check_base_url`). Every call opens its own connection and:
 3. speaks TLS to the name (certificate and name verified), and sends the request without following a
    redirect: a 3xx is a status like any other and its `Location` is never read.
 
+Every wait is bounded by the **budget of the call** (`send`'s `timeout`, which the proxy takes as
+the smaller of its own limit and the time the job has left): the name lookup (a thread that is
+given up on after the budget: `getaddrinfo` has no timeout of its own), each connection attempt
+(the budget that is left after the attempts before it, never a fallback), the TLS handshake (what is
+left after the connection) and then each read of the answer. A call with no budget makes no
+lookup and no connection.
+
 The seam (`Upstream`) is what the proxy sees; tests put a loopback double behind it. The
-resolver, the TCP connect and the TLS wrap are injectable for the same reason, and the defaults
-are the real ones.
+resolver, the TCP connect, the TLS wrap and the clock are injectable for the same reason, and the
+defaults are the real ones.
 """
 
 import http.client
 import socket
 import ssl
+import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -97,15 +106,35 @@ def _tcp_connect(address: tuple[str, int], timeout: float) -> socket.socket:
     return socket.create_connection(address, timeout=timeout)
 
 
-def _checked_addresses(host: str, resolve: Resolver) -> list[str]:
-    literal = host.startswith("[") or host.replace(".", "").isdigit()
-    if literal:
-        addresses = [host.strip("[]")]
-    else:
+def _resolve_within(resolve: Resolver, host: str, budget: float) -> list[str]:
+    """The addresses of `host`, or a timeout when the lookup takes longer than `budget`.
+
+    `getaddrinfo` cannot be given a timeout, so the lookup runs in a thread that is given up on
+    (it is a daemon and ends with its lookup). At most one call is in flight per job, and a call
+    waits for this at most once, so a hanging resolver costs one idle thread per call.
+    """
+    found: list[list[str]] = []
+    failed: list[BaseException] = []
+
+    def lookup() -> None:
         try:
-            addresses = resolve(host)
-        except (OSError, UnicodeError):
-            raise UpstreamError(UpstreamFailure.UNREACHABLE) from None
+            found.append(resolve(host))
+        except BaseException as error:
+            failed.append(error)
+
+    thread = threading.Thread(target=lookup, daemon=True)
+    thread.start()
+    thread.join(budget)
+    if thread.is_alive():
+        raise UpstreamError(UpstreamFailure.TIMEOUT)
+    if failed or not found:
+        raise UpstreamError(UpstreamFailure.UNREACHABLE)
+    return found[0]
+
+
+def _checked_addresses(host: str, resolve: Resolver, budget: float) -> list[str]:
+    literal = host.startswith("[") or host.replace(".", "").isdigit()
+    addresses = [host.strip("[]")] if literal else _resolve_within(resolve, host, budget)
     if not addresses:
         raise UpstreamError(UpstreamFailure.UNREACHABLE)
     if not all(is_public_address(address) for address in addresses):
@@ -117,23 +146,44 @@ class _PinnedConnection(http.client.HTTPSConnection):
     """An HTTPS connection that connects to an address it judged itself, not to the name."""
 
     def __init__(
-        self, host: str, timeout: float, resolve: Resolver, connect: Connector, tls: TlsWrapper
+        self,
+        host: str,
+        timeout: float,
+        resolve: Resolver,
+        connect: Connector,
+        tls: TlsWrapper,
+        clock: Callable[[], float],
     ) -> None:
         super().__init__(host, 443, timeout=timeout)
-        self._resolve, self._connect, self._tls = resolve, connect, tls
+        self._resolve, self._connect, self._tls, self._clock = resolve, connect, tls, clock
 
     def connect(self) -> None:
+        budget = float(self.timeout or 0)
+        started = self._clock()
+
+        def left() -> float:
+            remaining = budget - (self._clock() - started)
+            if remaining <= 0:
+                raise UpstreamError(UpstreamFailure.TIMEOUT)
+            return remaining
+
         failure = UpstreamError(UpstreamFailure.UNREACHABLE)
-        for address in _checked_addresses(self.host, self._resolve):
+        for address in _checked_addresses(self.host, self._resolve, left()):
             try:
-                raw = self._connect((address, 443), float(self.timeout or 0) or 120.0)
+                raw = self._connect((address, 443), left())
             except TimeoutError:
                 failure = UpstreamError(UpstreamFailure.TIMEOUT)
                 continue
             except OSError:
                 continue
             try:
+                # What is left of the budget bounds the handshake; then each read gets the budget.
+                raw.settimeout(left())
                 self.sock = self._tls(raw, self.host)
+                self.sock.settimeout(budget)
+            except UpstreamError:
+                raw.close()
+                raise
             except TimeoutError:
                 raw.close()
                 raise UpstreamError(UpstreamFailure.TIMEOUT) from None
@@ -189,18 +239,24 @@ class HttpsUpstream:
         resolve: Resolver = _system_resolve,
         connect: Connector = _tcp_connect,
         tls: TlsWrapper | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         parts = urlsplit(check_base_url(base_url))
         self._host = parts.netloc
         self._base_path = parts.path
-        self._resolve, self._connect = resolve, connect
+        self._resolve, self._connect, self._clock = resolve, connect, clock
         context = ssl.create_default_context()
         self._tls: TlsWrapper = tls or (
             lambda raw, hostname: context.wrap_socket(raw, server_hostname=hostname)
         )
 
     def send(self, request: UpstreamRequest, timeout: float) -> UpstreamResponse:
-        connection = _PinnedConnection(self._host, timeout, self._resolve, self._connect, self._tls)
+        if timeout <= 0:
+            # No budget is no wait at all (a falsy timeout once fell back to 120 seconds).
+            raise UpstreamError(UpstreamFailure.TIMEOUT)
+        connection = _PinnedConnection(
+            self._host, timeout, self._resolve, self._connect, self._tls, self._clock
+        )
         try:
             # Connecting first, apart from sending, tells a call that never left from one that did.
             connection.connect()

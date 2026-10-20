@@ -6,30 +6,57 @@ Reaching the port is not enough: only the holder of the job's capability gets an
 reads nothing for a caller that proved nothing and nothing beyond the measured length for the rest,
 hands the answer on as it arrives (a stream chunk by chunk), and drops the connection, without the
 terminator of a complete answer, when the proxy aborts a call. It never logs a request line.
+
+The engine is the untrusted side of this socket, so every wait on it is bounded: a connection that
+says nothing is closed after `idle_timeout`; reading a request body and writing an answer each wait
+at most `io_timeout`, and never longer than the job has left; and no more than `max_connections` are
+served at once (a connection over the bound is closed at once, as the thread it would take is not
+there to give). Without these a stalled engine holds the one call the job may have, and a flood of
+connections holds a thread each.
 """
 
 import contextlib
 import socket
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from code_reviewer_runner.dynamic_review.budget import LimitError
 from code_reviewer_runner.dynamic_review.passthrough.proxy import PassthroughProxy
 from code_reviewer_runner.dynamic_review.passthrough.sink import ClientGone
 from code_reviewer_runner.result import ErrorCode
 
+IDLE_TIMEOUT_SECONDS: Final = 30.0
+IO_TIMEOUT_SECONDS: Final = 60.0
+# The engine keeps a few connections alive; nothing legitimate needs more than this at once.
+MAX_CONNECTIONS: Final = 16
+# 0 would make a socket non-blocking, so no wait is shorter than this.
+_SHORTEST_WAIT: Final = 0.05
+
+
+def bounded_wait(remaining: float, limit: float) -> float:
+    """How long one wait on the engine's socket may last: `limit`, or what the job has left."""
+    return max(min(limit, remaining), _SHORTEST_WAIT)
+
 
 class _Sink:
-    def __init__(self, handler: BaseHTTPRequestHandler) -> None:
+    def __init__(
+        self, handler: BaseHTTPRequestHandler, time_left: Callable[[], float], io_limit: float
+    ) -> None:
         self._handler = handler
+        self._time_left = time_left
+        self._io_limit = io_limit
         self._chunked = False
+
+    def _bound(self) -> None:
+        self._handler.connection.settimeout(bounded_wait(self._time_left(), self._io_limit))
 
     def start(self, status: int, headers: Sequence[tuple[str, str]], length: int | None) -> None:
         handler = self._handler
         self._chunked = length is None
         try:
+            self._bound()
             handler.send_response(status)
             for name, value in headers:
                 handler.send_header(name, value)
@@ -46,6 +73,7 @@ class _Sink:
         if not data:
             return
         try:
+            self._bound()
             if self._chunked:
                 data = f"{len(data):x}\r\n".encode() + data + b"\r\n"
             self._handler.wfile.write(data)
@@ -55,6 +83,7 @@ class _Sink:
 
     def end(self) -> None:
         try:
+            self._bound()
             if self._chunked:
                 self._handler.wfile.write(b"0\r\n\r\n")
             self._handler.wfile.flush()
@@ -68,25 +97,72 @@ class _Sink:
 
 
 class _Server(ThreadingHTTPServer):
-    proxy: PassthroughProxy
+    daemon_threads = True
+
+    def __init__(
+        self,
+        address: tuple[str, int],
+        proxy: PassthroughProxy,
+        *,
+        max_connections: int,
+        idle_timeout: float,
+        io_timeout: float,
+    ) -> None:
+        self.proxy = proxy
+        self.idle_timeout = idle_timeout
+        self.io_timeout = io_timeout
+        self._slots = threading.BoundedSemaphore(max_connections)
+        super().__init__(address, _Handler)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # A connection the engine reset is not news, and the default prints the traceback to stderr.
+        return
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "code-reviewer-proxy/1"
     protocol_version = "HTTP/1.1"
 
+    def setup(self) -> None:
+        # The wait for a request line and its headers (and for the next request of a connection).
+        super().setup()
+        self.connection.settimeout(cast(_Server, self.server).idle_timeout)
+
     def _handle(self) -> None:
-        proxy = cast(_Server, self.server).proxy
+        server = cast(_Server, self.server)
+        proxy = server.proxy
         read: list[int] = []
 
         def read_body(length: int) -> bytes:
             read.append(length)
-            data = self.rfile.read(length)
+            self.connection.settimeout(
+                bounded_wait(proxy.ledger.remaining_seconds(), server.io_timeout)
+            )
+            try:
+                data = self.rfile.read(length)
+            except OSError:  # includes the timeout of a body that stalls
+                raise ClientGone from None
             if len(data) != length:
                 raise ClientGone
             return data
 
-        sink = _Sink(self)
+        sink = _Sink(self, proxy.ledger.remaining_seconds, server.io_timeout)
         try:
             proxy.handle(self.command, self.path, list(self.headers.items()), read_body, sink)
         except ClientGone:
@@ -103,6 +179,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.close_connection = True
         if self.headers.get("Transfer-Encoding"):
             self.close_connection = True
+        # Back to the wait for the next request of this connection.
+        with contextlib.suppress(OSError):
+            self.connection.settimeout(server.idle_timeout)
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _handle
 
@@ -113,11 +192,24 @@ class _Handler(BaseHTTPRequestHandler):
 class PassthroughServer:
     """A running loopback proxy. `url` is what the engine's provider is pointed at."""
 
-    def __init__(self, proxy: PassthroughProxy, host: str, port: int) -> None:
+    def __init__(
+        self,
+        proxy: PassthroughProxy,
+        host: str,
+        port: int,
+        *,
+        max_connections: int = MAX_CONNECTIONS,
+        idle_timeout: float = IDLE_TIMEOUT_SECONDS,
+        io_timeout: float = IO_TIMEOUT_SECONDS,
+    ) -> None:
         self._proxy = proxy
-        self._server = _Server((host, port), _Handler)
-        self._server.daemon_threads = True
-        self._server.proxy = proxy
+        self._server = _Server(
+            (host, port),
+            proxy,
+            max_connections=max_connections,
+            idle_timeout=idle_timeout,
+            io_timeout=io_timeout,
+        )
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property

@@ -74,7 +74,9 @@ class Front:
 
 
 @contextmanager
-def front(upstream_url: str, **limits: Any) -> Generator[Front]:
+def front(
+    upstream_url: str, *, server: dict[str, Any] | None = None, **limits: Any
+) -> Generator[Front]:
     ledger = BudgetLedger(
         DynamicLimits(max_cost_usd=Decimal(5), **limits),
         window_tokens=1_000_000,
@@ -90,11 +92,11 @@ def front(upstream_url: str, **limits: Any) -> Generator[Front]:
         capability=capability,
         prices=PRICES,
     )
-    server = PassthroughServer(proxy, "127.0.0.1", 0).start()
+    running = PassthroughServer(proxy, "127.0.0.1", 0, **(server or {})).start()
     try:
-        yield Front(proxy, server, capability)
+        yield Front(proxy, running, capability)
     finally:
-        server.stop()
+        running.stop()
 
 
 class Gated:
@@ -368,3 +370,98 @@ def test_a_chunked_request_and_an_oversized_one_are_refused_before_the_body_is_r
         response.read()
         assert response.status == 413
         assert provider.records == []
+
+
+# -- B4 and the limits of the server, on a real socket ----
+
+
+def _raw(f: Front) -> socket.socket:
+    host, port = f.server.url.removeprefix("http://").split(":")
+    return socket.create_connection((host, int(port)), timeout=5)
+
+
+def _closed_within(connection: socket.socket, seconds: float) -> bool:
+    """Whether the server closes the connection (a read of b"" or a reset) within `seconds`."""
+    connection.settimeout(seconds)
+    try:
+        return connection.recv(1) == b""
+    except (ConnectionError, OSError) as error:
+        return not isinstance(error, TimeoutError)
+
+
+# #550-B4-P03
+def test_a_second_request_while_the_first_is_streaming_is_refused_with_a_429() -> None:
+    gated = Gated()
+    try:
+        with front(gated.url) as f:
+            first = f.connection()
+            first.request("POST", "/v1/chat/completions", f.body(), f.headers())
+            response = first.getresponse()
+            assert gated.first_sent.wait(5)
+            assert response.read1(65536).startswith(b"data: ")
+            second = f.connection()
+            second.request("POST", "/v1/chat/completions", f.body(), f.headers())
+            refused = second.getresponse()
+            data = json.loads(refused.read())
+            assert refused.status == 429 and refused.getheader("retry-after") == "1"
+            assert data["error"]["code"] == "call_in_flight"
+            assert gated.requests == 1
+            gated.release.set()
+            assert b"[DONE]" in response.read()
+            assert f.ledger.failure is None and f.ledger.model_calls == 1
+            # The call is over: the next one is served.
+            again = f.connection()
+            again.request("POST", "/v1/chat/completions", f.body(), f.headers())
+            assert again.getresponse().status == 200
+    finally:
+        gated.stop()
+
+
+# #550-S06-S02
+def test_an_idle_connection_is_closed_by_the_server() -> None:
+    with fake_provider() as provider, front(provider.url, server={"idle_timeout": 0.4}) as f:
+        idle = _raw(f)
+        assert _closed_within(idle, 4.0)
+        idle.close()
+
+
+# #550-S06-S03
+def test_a_body_that_stalls_is_cut_and_frees_the_one_call() -> None:
+    with fake_provider() as provider, front(provider.url, server={"io_timeout": 0.4}) as f:
+        stalled = _raw(f)
+        body = f.body()
+        head = (
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+            f"Authorization: Bearer {f.capability}\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n"
+        )
+        stalled.sendall(head.encode() + body[:10])
+        assert _closed_within(stalled, 4.0), "a stalled body held the connection"
+        stalled.close()
+        assert f.ledger.model_calls == 0
+        # The slot of the one call is free again: a whole request is served at once.
+        connection = f.connection()
+        connection.request("POST", "/v1/chat/completions", f.body(), f.headers())
+        assert connection.getresponse().status == 200
+
+
+# #550-S06-S04
+def test_more_connections_than_the_server_allows_are_closed_at_once() -> None:
+    with (
+        fake_provider() as provider,
+        front(provider.url, server={"max_connections": 2, "idle_timeout": 30.0}) as f,
+    ):
+        held = [_raw(f), _raw(f)]
+        time.sleep(0.2)
+        extra = _raw(f)
+        assert _closed_within(extra, 3.0), "a third connection was served"
+        extra.close()
+        # When one goes, the next one is served again.
+        held[0].close()
+        time.sleep(0.3)
+        connection = f.connection()
+        connection.request(
+            "POST", "/v1/chat/completions", f.body(), {"Content-Type": "application/json"}
+        )
+        assert connection.getresponse().status == 401
+        held[1].close()
