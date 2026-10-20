@@ -11,11 +11,13 @@ but the final answer and at most one repair are. The bound of #542 is unchanged:
 the excess of the last normal call, plus the final call (plus the one repair).
 """
 
+import json
 from decimal import Decimal
 
 import pytest
 
 from code_reviewer_runner.dynamic_review.budget import (
+    MAX_MARK_RETURNS,
     WRAP_UP_RESERVE_SECONDS,
     BudgetLedger,
     DynamicLimits,
@@ -59,6 +61,20 @@ def call(budget: BudgetLedger, cost: str, request: bytes = REQUEST) -> Reservati
     reservation = budget.reserve_call(request, output_tokens=1_024)
     budget.settle_call(reservation, prompt_tokens=1000, completion_tokens=100, cost=Decimal(cost))
     return reservation
+
+
+def carrying(message: str = MESSAGE, *, base: int = len(REQUEST), more: int = 0) -> bytes:
+    """A request body that holds `message` the way a JSON body does (escaped inside a string)."""
+    escaped = json.dumps(message)[1:-1].encode()
+    return b"x" * (base + more) + b'"text":"' + escaped + b'"'
+
+
+def over_the_limit() -> BudgetLedger:
+    """A ledger whose last normal call settled over the limit and whose next call was refused."""
+    budget = ledger()
+    call(budget, "0.15")
+    refused(budget)
+    return budget
 
 
 def refused(budget: BudgetLedger, request: bytes = REQUEST) -> RefusedForFinal:
@@ -112,7 +128,7 @@ def test_the_marked_call_is_admitted_past_the_limit_as_the_final_call_and_once()
     refused(budget)
 
     assert budget.arm_final(MESSAGE) is True
-    final = budget.reserve_call(REQUEST, output_tokens=1_024)
+    final = budget.reserve_call(carrying(), output_tokens=1_024)
     assert final.final is True
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.20"))
 
@@ -143,7 +159,7 @@ def test_the_marked_call_is_admitted_when_only_its_expected_cost_does_not_fit() 
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
     assert budget.arm_final(MESSAGE) is True
-    final = budget.reserve_call(REQUEST, output_tokens=1_024)
+    final = budget.reserve_call(carrying(), output_tokens=1_024)
     assert final.final is True
 
 
@@ -153,11 +169,11 @@ def test_the_repair_is_admitted_after_the_final_call_and_then_nothing() -> None:
     call(budget, "0.15")
     refused(budget)
     assert budget.arm_final(MESSAGE) is True
-    final = budget.reserve_call(REQUEST, output_tokens=1_024)
+    final = budget.reserve_call(carrying(), output_tokens=1_024)
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.20"))
 
     assert budget.arm_final(MESSAGE) is True  # the repair, although the spend is over the limit
-    repair = budget.reserve_call(REQUEST, output_tokens=1_024)
+    repair = budget.reserve_call(carrying(), output_tokens=1_024)
     assert repair.final is True
     budget.settle_call(repair, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.01"))
 
@@ -171,7 +187,7 @@ def test_a_repair_inside_the_limit_is_marked_like_the_final_call_and_does_not_st
     call(budget, "0.01")
 
     assert budget.arm_final(MESSAGE) is True
-    repair = budget.reserve_call(REQUEST, output_tokens=1_024)
+    repair = budget.reserve_call(carrying(), output_tokens=1_024)
 
     assert repair.final is True
     assert budget.stopped_early is None
@@ -200,7 +216,7 @@ def test_an_armed_mark_is_consumed_by_exactly_one_call() -> None:
     assert budget.arm_final(MESSAGE) is True
     assert budget.arm_final(MESSAGE) is False  # armed already
 
-    first = budget.reserve_call(REQUEST, output_tokens=1_024)
+    first = budget.reserve_call(carrying(), output_tokens=1_024)
     assert first.final is True
     with pytest.raises(RefusedForFinal):
         budget.reserve_call(REQUEST, output_tokens=1_024)
@@ -278,10 +294,10 @@ def test_the_overshoot_stays_within_the_excess_of_the_last_call_the_final_call_a
 
     final_cost = Decimal("0.03")
     assert budget.arm_final(MESSAGE) is True
-    final = budget.reserve_call(REQUEST, output_tokens=1_024)
+    final = budget.reserve_call(carrying(), output_tokens=1_024)
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=final_cost)
     assert budget.arm_final(MESSAGE) is True
-    repair = budget.reserve_call(REQUEST, output_tokens=1_024)
+    repair = budget.reserve_call(carrying(), output_tokens=1_024)
     repair_cost = Decimal("0.02")
     budget.settle_call(repair, prompt_tokens=1000, completion_tokens=100, cost=repair_cost)
     refused(budget)  # a tool call in the repair turn
@@ -307,3 +323,119 @@ def test_no_call_is_reserved_once_the_run_has_failed() -> None:
     assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert "per-result byte bound" in raised.value.detail
     assert budget.arm_final(MESSAGE) is False
+
+
+# #552-S2: the mark is for the adapter's message, not for whatever request comes next
+def test_a_big_body_without_the_runner_text_is_not_admitted_as_the_final_call() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(b"y" * 3_000_000, output_tokens=1_024)
+
+    # ... and the mark was not spent: the adapter's own request is still the final call.
+    final = budget.reserve_call(carrying(), output_tokens=1_024)
+    assert final.final is True
+
+
+# #552-S2: the text in a body that is far larger than the history the run had is no final call
+def test_a_body_with_the_text_but_much_larger_than_the_last_call_is_not_the_final_call() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(carrying(more=3_000_000), output_tokens=1_024)
+
+    assert budget.reserve_call(carrying(), output_tokens=1_024).final is True
+
+
+# #552-S2: the text is matched the way a JSON body holds it, quotes and line breaks escaped
+def test_the_runner_text_is_found_in_a_body_as_json_escapes_it() -> None:
+    message = '<runner-wrap-up>\nSay "done" at once.\n</runner-wrap-up>'
+    budget = over_the_limit()
+    assert budget.arm_final(message) is True
+
+    final = budget.reserve_call(carrying(message), output_tokens=1_024)
+
+    assert final.final is True
+
+
+# #552-S2: the history grows by what the tools returned since the last call; that is allowed
+def test_the_final_request_may_be_larger_by_the_results_the_audit_saw_since_the_last_call() -> None:
+    budget = over_the_limit()
+    budget.add_result_bytes(60_000)
+    assert budget.arm_final(MESSAGE) is True
+
+    final = budget.reserve_call(carrying(more=60_000), output_tokens=1_024)
+
+    assert final.final is True
+
+
+# #552-S2: results the audit did not see are not allowed for: fail closed, the mark stays
+def test_results_the_audit_never_saw_do_not_widen_what_the_final_request_may_be() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(carrying(more=60_000), output_tokens=1_024)
+
+
+# #552-S2: a request that is not the adapter's message is a normal call, whatever the mark says
+def test_a_request_without_the_text_is_a_normal_call_that_must_fit_and_the_mark_stays() -> None:
+    budget = ledger()
+    call(budget, "0.01")
+    assert budget.arm_final(MESSAGE) is True  # a repair inside the limit
+
+    normal = budget.reserve_call(REQUEST, output_tokens=1_024)
+    assert normal.final is False
+    budget.settle_call(normal, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.001"))
+
+    assert budget.reserve_call(carrying(), output_tokens=1_024).final is True
+
+
+# #552-S1: a marked call the provider turned away (429/5xx) before it generated anything is not
+# the final call that was used: the mark comes back
+def test_a_marked_call_settled_as_unbilled_gives_the_mark_back() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+    first = budget.reserve_call(carrying(), output_tokens=1_024)
+    assert first.final is True
+    budget.settle_unbilled(first)  # the provider said 429
+
+    retry = budget.reserve_call(carrying(), output_tokens=1_024)  # the engine's own retry
+
+    assert retry.final is True
+    assert budget.failure is None
+
+
+# #552-S1: ... a bounded number of times per mark
+def test_the_mark_comes_back_a_bounded_number_of_times() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+    for _ in range(MAX_MARK_RETURNS + 1):
+        reservation = budget.reserve_call(carrying(), output_tokens=1_024)
+        assert reservation.final is True
+        budget.settle_unbilled(reservation)
+
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(carrying(), output_tokens=1_024)
+
+
+# #552-S1: a call that was billed or whose usage was never seen keeps the mark spent
+def test_a_marked_call_that_may_have_been_billed_does_not_give_the_mark_back() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+    reservation = budget.reserve_call(carrying(), output_tokens=1_024)
+    budget.settle_unknown(reservation)
+
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(carrying(), output_tokens=1_024)
+
+
+# #552-S1: an unbilled normal call has no mark to give back
+def test_an_unbilled_normal_call_arms_nothing() -> None:
+    budget = ledger()
+    normal = budget.reserve_call(REQUEST, output_tokens=1_024)
+    budget.settle_unbilled(normal)
+
+    assert budget.reserve_call(carrying(), output_tokens=1_024).final is False

@@ -99,16 +99,19 @@ class Engine:
         self.client = client
         self.prompts: list[str | None] = []
         self.turns: list[Callable[[Engine], None]] = []
+        # What the turn that runs now was told: the engine's next request carries it.
+        self.told = b""
 
     def send(self, prompt: str | None) -> None:
         self.prompts.append(prompt)
+        self.told = b"" if prompt is None else json.dumps(prompt)[1:-1].encode()
         self.turns[len(self.prompts) - 1](self)
 
     # -- what a turn can do ----------------------------------------------------
 
     def call(self, cost: str) -> None:
         """One model call the way the proxy makes it: reserved, and settled at `cost`."""
-        reservation = self.ledger.reserve_call(REQUEST, output_tokens=1_024)
+        reservation = self.ledger.reserve_call(REQUEST + self.told, output_tokens=1_024)
         self.ledger.settle_call(
             reservation, prompt_tokens=1000, completion_tokens=100, cost=Decimal(cost)
         )
