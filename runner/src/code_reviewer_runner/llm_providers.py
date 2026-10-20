@@ -283,7 +283,9 @@ def upstream_base_is_the_providers(provider_id: str, upstream_base_url: str) -> 
     the legacy path always used (`default_api_base`); an entry that names another address would
     send the key there, so only the registry's address passes (a trailing slash aside). A provider
     the registry has no entry for is not judged here: its address stays under the rules of the
-    entry (#548: https, a public host, checked on every connection)."""
+    entry (#548: https, a public host, checked on every connection). That makes this helper open
+    for an unregistered provider, so a caller that sends a key must refuse such a provider itself
+    (`build_native_job` does; #555 defines the rule for providers outside the registry)."""
     provider = provider_for(provider_id)
     if provider is None:
         return True

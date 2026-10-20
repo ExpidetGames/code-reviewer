@@ -135,3 +135,32 @@ def test_the_pin_compares_the_address_and_nothing_but_a_trailing_slash() -> None
     assert not upstream_base_is_the_providers("anthropic", ATTACKER)
     assert not upstream_base_is_the_providers("openrouter", ANTHROPIC.default_api_base)
     assert upstream_base_is_the_providers("openrouter", OPENROUTER.default_api_base)
+
+
+# #578-T32
+def test_the_builder_refuses_a_provider_the_registry_has_no_entry_for() -> None:
+    # `parse_job` refuses such a job today; the builder must not rely on it. The helper above
+    # does not judge an unregistered provider, so the builder fails closed on its own: the key of
+    # a provider nobody registered goes nowhere (#555 defines its own destination rule).
+    job = native_job()
+    assert job.dynamic is not None and job.dynamic.model_entry is not None
+    entry = dataclasses.replace(
+        job.dynamic.model_entry, upstream_base_url="https://api.deepseek.com"
+    )
+    forged = dataclasses.replace(
+        job,
+        llm=dataclasses.replace(job.llm, provider="deepseek"),
+        dynamic=dataclasses.replace(job.dynamic, model_entry=entry),
+    )
+    made: list[str] = []
+
+    def upstream_for(base_url: str) -> Any:
+        made.append(base_url)
+        raise AssertionError("no connection may be prepared for this provider")
+
+    with pytest.raises(LimitError) as caught:
+        build_native_job(forged, deadline=600.0, environment={}, upstream_for=upstream_for)
+
+    assert caught.value.code is ErrorCode.DYNAMIC_CONFIG_INVALID
+    assert caught.value.detail == "the model provider of the job cannot be used"
+    assert made == []

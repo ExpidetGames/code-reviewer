@@ -55,7 +55,7 @@ from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughSe
 from code_reviewer_runner.dynamic_review.passthrough.upstream import HttpsUpstream, Upstream
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.job import Job
-from code_reviewer_runner.llm_providers import upstream_base_is_the_providers
+from code_reviewer_runner.llm_providers import provider_for, upstream_base_is_the_providers
 from code_reviewer_runner.result import ErrorCode
 from code_reviewer_runner.supersede_timing import SUPERSEDED_DRAIN_SECONDS
 
@@ -127,7 +127,11 @@ def build_native_job(
     entry = dynamic.model_entry
     try:
         # The key goes only where the registry says its provider is (`parse_job` checked it too);
-        # nothing is prepared for any other address.
+        # nothing is prepared for any other address. A provider the registry has no entry for
+        # fails closed here: the helper does not judge it. The BYOK destination rule for providers
+        # outside the registry is #555's (PR #579) to define when it integrates; this path has none.
+        if provider_for(job.llm.provider) is None:
+            raise ValueError("the provider of the job is not in the registry")
         if not upstream_base_is_the_providers(job.llm.provider, entry.upstream_base_url):
             raise ValueError("the entry names an address that is not the provider's")
         target = target_from_entry(entry)
