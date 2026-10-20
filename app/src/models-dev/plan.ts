@@ -6,7 +6,7 @@
 // day writes nothing. The guard says whether the plan is implausible: it would unlist a large share of what is listed,
 // make the catalog grow by half, block the addresses of many providers at once, or the body held a provider of
 // absurd size; the service then refuses to apply it (the old state stays) unless an admin accepts it.
-import type { GuardReason } from "./errors.ts";
+import type { GuardFigures, GuardReason } from "./errors.ts";
 import type {
   CatalogWrite,
   FetchSummary,
@@ -49,10 +49,23 @@ export type Guard = {
   tripped: boolean;
   /** Why, in a fixed order; empty when the fetch may be applied. */
   reasons: GuardReason[];
-  /** The models this fetch would unlist, and the models that were listed before it. */
-  unlisted: number;
-  listed: number;
-};
+} & GuardFigures;
+
+/** What the guard measured, without its verdict: for the admin who decides whether to accept a refused fetch. */
+export function guardFigures(guard: Guard): GuardFigures {
+  return {
+    unlisted: guard.unlisted,
+    listed: guard.listed,
+    listedAfter: guard.listedAfter,
+    providersUnlisted: guard.providersUnlisted,
+    providersListed: guard.providersListed,
+    enabledUnlisted: guard.enabledUnlisted,
+    enabledListed: guard.enabledListed,
+    newlyBlocked: guard.newlyBlocked,
+    providers: guard.providers,
+    oversizedProviders: guard.oversizedProviders,
+  };
+}
 
 export type CatalogPlan = {
   write: CatalogWrite;
@@ -309,6 +322,14 @@ function guardOf(
     reasons,
     unlisted: models.unlisted,
     listed: models.listedBefore,
+    listedAfter,
+    providersUnlisted: providers.unlisted,
+    providersListed: providers.listedBefore,
+    enabledUnlisted: models.enabledUnlisted,
+    enabledListed: models.enabledListedBefore,
+    newlyBlocked: providers.newlyBlocked,
+    providers: input.parsed.providers.length,
+    oversizedProviders: input.parsed.skipped.oversizedProviders,
   };
 }
 

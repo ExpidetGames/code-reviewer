@@ -154,8 +154,10 @@ served to a workspace (`src/model-prices/visibility.test.ts` fails when anything
 - **The fetch**: the state of the last attempt (success, or failure with its stable code as a sentence) and _Fetch now_
   (`POST /api/admin/catalog-fetch`): `refresh({ deadlineMs: 45 s })` (the route runs 60 s on the hosted deployment,
   `vercel.json`, pinned by a test), at most 6 times in 10 minutes for the whole instance (`rate_limits`, key
-  `models-dev-fetch-now`). A fetch the guard stopped (`models_dev_guard_*`) is **not** applied silently: the page asks, and the
-  second request carries `acceptLargeChange: true`.
+  `models-dev-fetch-now`). A fetch the guard stopped (`models_dev_guard_*`) is **not** applied silently: the answer (409)
+  carries `reasons` (the code of every reason that tripped) and `details` (the figures the guard measured), the page lists them
+  and asks, and the second request carries `acceptReasons`, the codes the admin accepted. A reason that is new in that fetch, or
+  one that was not named, refuses it again.
 - **A provider whose address changed** (`url_changed`, or a new one that was refused) is shown with the trusted and the new
   address next to each other as text, and with the reason in words. _Confirm the new address_ asks first and is a guarded update
   of the one provider row in a transaction of its own (`POST /api/admin/catalog-providers/url/confirm`,

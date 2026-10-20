@@ -11,8 +11,9 @@
 // after it; on SQLite every transaction begins `begin immediate`.
 //
 // **Fetch now** is `refresh()` with a deadline that fits the function limit of the route (`FETCH_NOW_DEADLINE_MS`, below
-// the 60 seconds of `vercel.json`), counted in the shared rate limits, with `acceptLargeChange` for a fetch the guard
-// refused and the admin has looked at. Every write leaves one line in the log: the person, the provider and the addresses
+// the 60 seconds of `vercel.json`), counted in the shared rate limits. A fetch the guard refused is answered with every
+// reason that tripped and what it measured; the admin who has looked at them repeats the request with `acceptReasons`, the
+// reasons they accept, and a reason that is new or not named refuses it again. Every write leaves one line in the log: the person, the provider and the addresses
 // (which passed the address check) or the outcome; never a name or an answer of models.dev.
 import "server-only";
 import type { Kysely } from "kysely";
@@ -23,7 +24,14 @@ import type { Database } from "../db/schema.ts";
 import { secondsLeft } from "../auth/sign-in-limit.ts";
 import type { ModelsDevAdminErrorCode } from "./admin-errors.ts";
 import type { FetchSummary, StoredProvider } from "./catalog.ts";
-import type { ModelsDevFetchErrorCode } from "./errors.ts";
+import {
+  GUARD_ERROR_CODES,
+  guardReasonOfCode,
+  type GuardCode,
+  type GuardFigures,
+  type GuardReason,
+  type ModelsDevFetchErrorCode,
+} from "./errors.ts";
 import type { ModelsDevService, RefreshOutcome } from "./service.ts";
 import { loadModelsDevSettings, type ModelsDevSettings } from "./settings.ts";
 import type { UrlProblem, UrlState } from "./upstream-url.ts";
@@ -36,6 +44,8 @@ export const FETCH_NOW_DEADLINE_MS = 45_000;
 export const FETCH_NOW_MAX = 6;
 export const FETCH_NOW_WINDOW_MS = 10 * 60 * 1000;
 const FETCH_NOW_KEY = "models-dev-fetch-now";
+/** The guard has five reasons; a longer list cannot be a valid one. */
+const MAX_ACCEPTED_REASONS = 5;
 /** How long a confirmation waits for the fetch's lock on Postgres before it gives up with `fetch_in_progress`. */
 export const DEFAULT_LOCK_TIMEOUT_MS = 5000;
 
@@ -84,15 +94,24 @@ export type FetchNowRefusalCode = Extract<
   | "fetch_in_progress"
   | "fetch_rate_limited"
 >;
+/** Why the guard stopped a fetch, as the admin reads it: the stable code of every reason and what the guard measured. */
+export type GuardDetails = { reasons: GuardCode[]; details: GuardFigures };
+
 export type FetchNowResult =
   | { ok: true; outcome: "applied"; summary: FetchSummary }
-  | { ok: false; code: FetchNowRefusalCode; retryAfterSeconds?: number };
+  | {
+      ok: false;
+      code: FetchNowRefusalCode;
+      retryAfterSeconds?: number;
+      /** Present when the guard stopped the fetch. */
+      guard?: GuardDetails;
+    };
 
 export type ModelsDevAdminService = {
   providers(): Promise<ProviderList>;
   /** `{ providerId, pendingUrl }`: trusts the address the admin saw. */
   confirmUrl(actorId: string, input: unknown): Promise<UrlConfirmResult>;
-  /** `{}` or `{ acceptLargeChange: boolean }`. */
+  /** `{}` or `{ acceptReasons: GuardCode[] }`: the guard's codes the admin accepts, each at most once. */
   fetchNow(actorId: string, input: unknown): Promise<FetchNowResult>;
 };
 
@@ -109,6 +128,28 @@ export type ModelsDevAdminServiceDependencies = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The guard reasons a request accepts: none when it names none, `undefined` when the body is not the documented one (a field
+ * other than `acceptReasons`, a list that is not made of the guard's codes, a code twice).
+ */
+function acceptedReasons(
+  input: Record<string, unknown>,
+): GuardReason[] | undefined {
+  const keys = Object.keys(input);
+  if (keys.length === 0) return [];
+  if (keys.length !== 1 || keys[0] !== "acceptReasons") return undefined;
+  const list = input.acceptReasons;
+  if (!Array.isArray(list) || list.length > MAX_ACCEPTED_REASONS)
+    return undefined;
+  const reasons: GuardReason[] = [];
+  for (const code of list as unknown[]) {
+    const reason = guardReasonOfCode(code);
+    if (reason === undefined || reasons.includes(reason)) return undefined;
+    reasons.push(reason);
+  }
+  return reasons;
 }
 
 function viewOf(provider: StoredProvider, models: number): ProviderView {
@@ -237,13 +278,8 @@ export function createModelsDevAdminService(
 
     async fetchNow(actorId, input) {
       if (!isRecord(input)) return { ok: false, code: "request_invalid" };
-      const keys = Object.keys(input);
-      if (
-        keys.some((key) => key !== "acceptLargeChange") ||
-        (keys.length === 1 && typeof input.acceptLargeChange !== "boolean")
-      )
-        return { ok: false, code: "request_invalid" };
-      const accept = input.acceptLargeChange === true;
+      const accepted = acceptedReasons(input);
+      if (accepted === undefined) return { ok: false, code: "request_invalid" };
       if (!settings().enabled) return { ok: false, code: "fetch_off" };
       const hit = await deps.rateLimits.hit(FETCH_NOW_KEY, FETCH_NOW_WINDOW_MS);
       if (hit.count > FETCH_NOW_MAX)
@@ -258,16 +294,29 @@ export function createModelsDevAdminService(
         };
       const outcome = await deps.models.refresh({
         deadlineMs: FETCH_NOW_DEADLINE_MS,
-        ...(accept ? { acceptLargeChange: true } : {}),
+        ...(accepted.length > 0 ? { acceptReasons: accepted } : {}),
       });
       const result: FetchNowResult =
         outcome.status === "applied"
           ? { ok: true, outcome: "applied", summary: outcome.summary }
           : outcome.status === "failed"
-            ? { ok: false, code: outcome.code }
+            ? {
+                ok: false,
+                code: outcome.code,
+                ...(outcome.guard === undefined
+                  ? {}
+                  : {
+                      guard: {
+                        reasons: outcome.guard.reasons.map(
+                          (reason) => GUARD_ERROR_CODES[reason],
+                        ),
+                        details: outcome.guard.figures,
+                      },
+                    }),
+              }
             : { ok: false, code: NOT_AN_OUTCOME[outcome.reason] };
       log.info(
-        `models.dev: FETCH_NOW by=${actorId} accept_large_change=${String(accept)} outcome=${result.ok ? "applied" : result.code}`,
+        `models.dev: FETCH_NOW by=${actorId} accept_reasons=${accepted.map((reason) => GUARD_ERROR_CODES[reason]).join(",") || "none"} outcome=${result.ok ? "applied" : result.code}`,
       );
       return result;
     },

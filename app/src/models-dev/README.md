@@ -48,8 +48,8 @@ sees a model id from here (principle 2 of #420); the admin screens (#554, `src/a
   `models_dev_timeout`: nothing is half written.
 - `refresh()` fetches now. It is what the admin's "fetch now" action calls (#554: `admin-service.ts` and
   `POST /api/admin/catalog-fetch`, with a deadline of 45 seconds under the 60 of the route and a limit of 6 in 10 minutes), also
-  for a model that is newer than the last fetch (#555). `acceptLargeChange` applies a fetch the guard refused; the page asks the
-  admin first.
+  for a model that is newer than the last fetch (#555). `acceptReasons` names the guard reasons an admin accepted (see below); the page
+  asks the admin first.
 
 | Variable           | Meaning                                                                                                                                                                                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -104,9 +104,11 @@ is **not applied**. The old rows stay, `models_dev_fetch_state` records `last_st
 | `provider_size`          | `models_dev_guard_provider_size`     | a provider states more than **2,000** models (`MAX_MODELS_PER_PROVIDER` in `parse.ts`; the largest has 621 today): that provider is not read at all, and the fetch is refused                                           |
 
 The guard counts the models an admin enabled for the managed key first (#549, `model_enablements`): the catalog-wide
-share can stay small while the models in use vanish, so `planCatalog` also looks at the enabled ones alone. `refresh({ acceptLargeChange: true })` applies a fetch the guard refused (a large removal,
-growth, a mass change of addresses; a provider that was too large is still left out): for an admin who has looked at it
-(#554). A small catalog is guarded as strictly: the loss of one provider out of six is more than a tenth.
+share can stay small while the models in use vanish, so `planCatalog` also looks at the enabled ones alone. A refused fetch is `{ status: "failed", code, guard: { reasons, figures } }`: every reason that tripped (fixed order) and the
+numbers the guard measured (`GuardFigures`, never a name or an address), `code` being the first reason that is not accepted.
+`refresh({ acceptReasons: [...] })` applies a fetch only when **every** reason that trips is named (a large removal, growth, a
+mass change of addresses; a provider that was too large is still left out): for an admin who has looked at them (#554). A
+reason that is not named, or a new one in the next fetch, refuses it again. A small catalog is guarded as strictly: the loss of one provider out of six is more than a tenth.
 
 ## The address of a provider
 

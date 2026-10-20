@@ -459,9 +459,26 @@ describe.each(MODELS_DEV_ENGINES)(
       expect(t.fake.requests).toBe(FETCH_NOW_MAX);
     });
 
+    /** Three models gone and ten new ones: two reasons trip at once. */
+    function removalAndGrowth(t: Awaited<ReturnType<typeof setup>>) {
+      const body = t.body();
+      delete body.xai?.models["grok-4.5"];
+      delete body.openai?.models["gpt-5.5"];
+      delete body.openai?.models["gpt-5-mini"];
+      const template = (body.deepseek!.models["deepseek-v4-pro"] ??
+        {}) as Record<string, unknown>;
+      for (let i = 0; i < 10; i += 1)
+        body.deepseek!.models[`filler-${String(i)}`] = {
+          ...template,
+          id: `filler-${String(i)}`,
+          name: `Filler ${String(i)}`,
+        };
+      t.fake.respondWith(body);
+    }
+
     // #554-T08
     it_(
-      "applies a fetch the guard refused only when the admin accepts the large change",
+      "applies a fetch the guard refused only when the admin accepts the reasons that tripped",
       async () => {
         const t = await setup();
         await t.admin.fetchNow(ACTOR, {});
@@ -480,30 +497,101 @@ describe.each(MODELS_DEV_ENGINES)(
 
         const refused = await t.admin.fetchNow(ACTOR, {});
         const accepted = await t.admin.fetchNow(ACTOR, {
-          acceptLargeChange: true,
+          acceptReasons: ["models_dev_guard_growth"],
         });
 
-        expect(refused).toEqual({ ok: false, code: "models_dev_guard_growth" });
+        expect(refused).toEqual({
+          ok: false,
+          code: "models_dev_guard_growth",
+          guard: {
+            reasons: ["models_dev_guard_growth"],
+            details: expect.objectContaining({ listed: 13, listedAfter: 21 }),
+          },
+        });
         expect(accepted).toMatchObject({ ok: true, outcome: "applied" });
         expect(t.calls.at(-1)).toEqual({
           deadlineMs: FETCH_NOW_DEADLINE_MS,
-          acceptLargeChange: true,
+          acceptReasons: ["growth"],
         });
         expect((await t.repository.listModels()).length).toBe(13 + 8);
+        expect(
+          t.lines.some((line) =>
+            line.includes("accept_reasons=models_dev_guard_growth"),
+          ),
+        ).toBe(true);
       },
     );
 
     // #554-T08
     it_(
-      "accepts nothing but an optional boolean acceptLargeChange",
+      "answers every reason that tripped with the figures, and refuses again unless the second request names all of them",
+      async () => {
+        const t = await setup();
+        await t.admin.fetchNow(ACTOR, {});
+        const before = await t.repository.listModels();
+        t.advance(DAY);
+        removalAndGrowth(t);
+
+        const refused = await t.admin.fetchNow(ACTOR, {});
+        const partly = await t.admin.fetchNow(ACTOR, {
+          acceptReasons: ["models_dev_guard_unlisted_share"],
+        });
+
+        const guard = {
+          reasons: [
+            "models_dev_guard_unlisted_share",
+            "models_dev_guard_growth",
+          ],
+          details: expect.objectContaining({
+            unlisted: 3,
+            listed: 13,
+            listedAfter: 20,
+          }),
+        };
+        expect(refused).toEqual({
+          ok: false,
+          code: "models_dev_guard_unlisted_share",
+          guard,
+        });
+        expect(partly).toEqual({
+          ok: false,
+          code: "models_dev_guard_growth",
+          guard,
+        });
+        expect(await t.repository.listModels()).toEqual(before);
+        expect(
+          await t.admin.fetchNow(ACTOR, {
+            acceptReasons: [
+              "models_dev_guard_growth",
+              "models_dev_guard_unlisted_share",
+            ],
+          }),
+        ).toMatchObject({ ok: true, outcome: "applied" });
+      },
+    );
+
+    // #554-T08
+    it_(
+      "accepts nothing but an optional list of the guard's codes called acceptReasons",
       async () => {
         const t = await setup();
 
         for (const input of [
           null,
           [],
-          { acceptLargeChange: "yes" },
-          { acceptLargeChange: true, extra: 1 },
+          { acceptReasons: "models_dev_guard_growth" },
+          { acceptReasons: [true] },
+          { acceptReasons: ["growth"] },
+          { acceptReasons: ["models_dev_timeout"] },
+          {
+            acceptReasons: [
+              "models_dev_guard_growth",
+              "models_dev_guard_growth",
+            ],
+          },
+          { acceptReasons: ["models_dev_guard_growth"], extra: 1 },
+          // The boolean that accepted everything is gone.
+          { acceptLargeChange: true },
           { other: true },
         ])
           expect(await t.admin.fetchNow(ACTOR, input)).toEqual({

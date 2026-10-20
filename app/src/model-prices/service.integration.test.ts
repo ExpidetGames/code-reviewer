@@ -12,6 +12,7 @@ import {
 } from "../../../fakes/models-dev/server.ts";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { createModelPriceConfirmationsRepository } from "../db/repositories/model-price-confirmations-repository.ts";
+import { GUARD_REASONS } from "../models-dev/errors.ts";
 import { createModelsDevService } from "../models-dev/service.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
 import { ModelOverridesError, type ModelOverride } from "./overrides.ts";
@@ -106,7 +107,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         const body = this.body();
         change(body);
         fake.respondWith(body);
-        return modelsDev.refresh({ acceptLargeChange: true });
+        return modelsDev.refresh({ acceptReasons: GUARD_REASONS });
       },
     };
   }
@@ -1528,7 +1529,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
         const [confirmation, fetch] = await Promise.all([
           t.service.confirmPrice(ADMIN, { ...SONNET, referenceHash: seen }),
-          t.modelsDev.refresh({ acceptLargeChange: true }),
+          t.modelsDev.refresh({ acceptReasons: GUARD_REASONS }),
         ]);
 
         expect(fetch).toMatchObject({ status: "applied" });

@@ -6,12 +6,13 @@
 //
 //   GET  /api/admin/catalog-providers              every provider of the catalog with the state of its address
 //   POST /api/admin/catalog-providers/url/confirm  { providerId, pendingUrl }: trust the address the admin saw
-//   POST /api/admin/catalog-fetch                  {} or { acceptLargeChange: true }: fetch the catalog now
+//   POST /api/admin/catalog-fetch                  {} or { acceptReasons: [guard code, ...] }: fetch the catalog now
 //
 // Order: the admin first (nothing is read before the caller is known: not signed in is 401, signed in but not an admin
 // is a 404 like for any path that does not exist), then for a change where the request comes from, its content type and
 // its body (an object, at most 4 KB), then the service. Every refusal is `{ "error": <code> }` with a stable code from
-// admin-errors.ts (`fetch_rate_limited` adds `retryAfterSeconds`), every answer is `Cache-Control: no-store`. Nothing is
+// admin-errors.ts (`fetch_rate_limited` adds `retryAfterSeconds`; a fetch the guard stopped, 409, adds `reasons`, the code
+// of every reason that tripped, and `details`, the figures it measured), every answer is `Cache-Control: no-store`. Nothing is
 // reachable by a member of a workspace or by the operator API: provider addresses are the operator's alone.
 import "server-only";
 import type { AdminAccess } from "../admin/access.ts";
@@ -115,12 +116,14 @@ export function createModelsDevRouteHandlers({
       change(request, async (who, body) => {
         const result = await service.fetchNow(who.id, body);
         if (result.ok) return Response.json(result, { headers: NO_STORE });
-        return refusal(
-          result.code,
-          result.retryAfterSeconds === undefined
+        return refusal(result.code, {
+          ...(result.retryAfterSeconds === undefined
             ? {}
-            : { retryAfterSeconds: result.retryAfterSeconds },
-        );
+            : { retryAfterSeconds: result.retryAfterSeconds }),
+          ...(result.guard === undefined
+            ? {}
+            : { reasons: result.guard.reasons, details: result.guard.details }),
+        });
       }),
   };
 }

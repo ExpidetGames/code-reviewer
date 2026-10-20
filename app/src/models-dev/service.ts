@@ -21,6 +21,8 @@ import { MODELS_DEV_LOCK, tryWithLock } from "../db/try-lock.ts";
 import type { FetchSummary } from "./catalog.ts";
 import {
   GUARD_ERROR_CODES,
+  type GuardFigures,
+  type GuardReason,
   ModelsDevDeadlineError,
   type ModelsDevFetchErrorCode,
 } from "./errors.ts";
@@ -31,7 +33,7 @@ import {
   type ParsedModelsDev,
   type ReducedProvider,
 } from "./parse.ts";
-import { planCatalog } from "./plan.ts";
+import { guardFigures, planCatalog, type Guard } from "./plan.ts";
 import { loadModelsDevSettings, type ModelsDevSettings } from "./settings.ts";
 import {
   checkUpstreamUrl,
@@ -56,16 +58,23 @@ export const DEFAULT_DEADLINE_MS = 90_000;
 /** What the lookups leave of the deadline for the write: 6,500 rows in batches of 100 take a few seconds at most. */
 export const WRITE_RESERVE_MS = 10_000;
 
+/** Why the guard stopped a fetch: every reason that tripped (fixed order) and what it measured. */
+export type GuardStop = { reasons: GuardReason[]; figures: GuardFigures };
+
 export type RefreshOutcome =
   | { status: "skipped"; reason: "fetch_off" | "not_due" | "already_running" }
   | { status: "applied"; summary: FetchSummary }
-  | { status: "failed"; code: ModelsDevFetchErrorCode };
+  /** `guard` is there when the guard stopped the fetch: `code` is the first reason that was not accepted. */
+  | { status: "failed"; code: ModelsDevFetchErrorCode; guard?: GuardStop };
 
 export type RefreshOptions = {
   /** The time the whole run may take (fetch, lookups and write together); `DEFAULT_DEADLINE_MS` when left out. */
   deadlineMs?: number;
-  /** Apply a fetch the guard refused (a large removal, growth, a mass change of addresses): an admin who has looked at it (#554). */
-  acceptLargeChange?: boolean;
+  /**
+   * The guard reasons an admin who looked at them accepts (#554). A fetch is applied only when every reason that trips is
+   * in this list; one that is not, or a reason that is new, refuses it again with the full list of what tripped.
+   */
+  acceptReasons?: readonly GuardReason[];
 };
 
 export type ModelsDevService = {
@@ -180,6 +189,7 @@ export function createModelsDevService(
   async function fail(
     code: ModelsDevFetchErrorCode,
     detail = "",
+    guard?: GuardStop,
   ): Promise<RefreshOutcome> {
     try {
       await repository.recordFailure(code, now());
@@ -191,7 +201,16 @@ export function createModelsDevService(
     log.error(
       `[models-dev] MODELS_DEV_FETCH_FAILED code=${code}${detail === "" ? "" : ` ${detail}`}; the catalog is unchanged.`,
     );
-    return { status: "failed", code };
+    return guard === undefined
+      ? { status: "failed", code }
+      : { status: "failed", code, guard };
+  }
+
+  /** The first reason that tripped and was not accepted: the fetch is refused for it. `undefined` when it may be applied. */
+  function notAccepted(guard: Guard, options: RefreshOptions) {
+    return guard.reasons.find(
+      (reason) => !(options.acceptReasons ?? []).includes(reason),
+    );
   }
 
   async function work(options: RefreshOptions): Promise<RefreshOutcome> {
@@ -229,11 +248,16 @@ export function createModelsDevService(
       if (error instanceof ModelsDevDeadlineError) return fail(error.code);
       throw error;
     }
-    if (planned.guard.tripped && options.acceptLargeChange !== true)
+    const refusedFor = notAccepted(planned.guard, options);
+    if (refusedFor !== undefined) {
+      const { reasons } = planned.guard;
+      const figures = guardFigures(planned.guard);
       return fail(
-        GUARD_ERROR_CODES[planned.guard.reasons[0] ?? "unlisted_share"],
-        `reasons=${planned.guard.reasons.join(",")} unlisted=${String(planned.guard.unlisted)} listed=${String(planned.guard.listed)}`,
+        GUARD_ERROR_CODES[refusedFor],
+        `reasons=${reasons.join(",")} unlisted=${String(figures.unlisted)} listed=${String(figures.listed)}`,
+        { reasons, figures },
       );
+    }
     const s = planned.summary;
     log.info(
       `[models-dev] fetched: providers=${String(s.providers)} models=${String(s.models)} new=${String(s.newModels)} changed=${String(s.changedModels)} unlisted=${String(s.unlistedModels)} returned=${String(s.returnedModels)} blocked_providers=${String(s.blockedProviders)} rejected_providers=${String(s.rejectedProviders)} lookups_cut=${String(cut)}.`,
@@ -263,8 +287,7 @@ export function createModelsDevService(
       });
       const summary: FetchSummary = { ...plan.summary, lookupsSkipped };
       const result = { ...plan, summary };
-      if (plan.guard.tripped && options.acceptLargeChange !== true)
-        return result;
+      if (notAccepted(plan.guard, options) !== undefined) return result;
       await transactional.apply(
         plan.write,
         { summary, at: now() },

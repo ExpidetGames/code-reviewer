@@ -12,6 +12,7 @@ import type { CatalogModelView } from "../../model-prices/admin-view.ts";
 import type { PriceBookJson } from "../../model-prices/price-book.ts";
 import type { ProviderView } from "../../models-dev/admin-service.ts";
 import type { FetchSummary } from "../../models-dev/catalog.ts";
+import type { GuardCode } from "../../models-dev/errors.ts";
 
 export type ModelIds = { providerId: string; modelId: string };
 
@@ -48,9 +49,9 @@ export type CatalogModelsApi = {
     providerId: string;
     pendingUrl: string;
   }): Promise<RequestResult<ProviderChanged>>;
-  /** Fetches the catalog now; `acceptLargeChange` applies a fetch the guard refused, after the admin looked at it. */
+  /** Fetches the catalog now; `acceptReasons` names the guard's reasons the admin looked at and accepts. */
   fetchNow(options?: {
-    acceptLargeChange: true;
+    acceptReasons: readonly GuardCode[];
   }): Promise<RequestResult<FetchApplied>>;
 };
 
@@ -94,7 +95,7 @@ export function createCatalogModelsApi(fetchImpl: FetchLike): CatalogModelsApi {
         fetchImpl,
         "POST",
         "/api/admin/catalog-fetch",
-        options?.acceptLargeChange === true ? { acceptLargeChange: true } : {},
+        options === undefined ? {} : { acceptReasons: options.acceptReasons },
       ),
   };
 }

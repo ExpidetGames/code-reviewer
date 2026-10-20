@@ -310,20 +310,67 @@ describe("fetching now through the route", () => {
   });
 
   // #554-T08
-  it("passes the admin's acceptance of a large change on", async () => {
+  it("passes the reasons the admin accepted on", async () => {
     const portal = await start();
     portal.modelsDevFetch.outcome = { status: "applied", summary: {} };
 
-    await call(portal, "POST", "/catalog-fetch", { acceptLargeChange: true });
+    await call(portal, "POST", "/catalog-fetch", {
+      acceptReasons: ["models_dev_guard_growth"],
+    });
 
     expect(portal.modelsDevFetch.calls).toEqual([
-      { deadlineMs: FETCH_NOW_DEADLINE_MS, acceptLargeChange: true },
+      { deadlineMs: FETCH_NOW_DEADLINE_MS, acceptReasons: ["growth"] },
     ]);
     expect(portal.modelsDevLog).toEqual([
       expect.stringMatching(
-        /^models\.dev: FETCH_NOW by=\S+ accept_large_change=true outcome=applied$/,
+        /^models\.dev: FETCH_NOW by=\S+ accept_reasons=models_dev_guard_growth outcome=applied$/,
       ),
     ]);
+  });
+
+  // #554-T08
+  it("answers a guard stop with every reason that tripped and the figures", async () => {
+    const portal = await start();
+    portal.modelsDevFetch.outcome = {
+      status: "failed",
+      code: "models_dev_guard_unlisted_share",
+      guard: {
+        reasons: ["unlisted_share", "growth"],
+        figures: {
+          unlisted: 3,
+          listed: 13,
+          listedAfter: 20,
+          providersUnlisted: 0,
+          providersListed: 6,
+          enabledUnlisted: 0,
+          enabledListed: 0,
+          newlyBlocked: 0,
+          providers: 6,
+          oversizedProviders: 0,
+        },
+      },
+    };
+
+    const response = await call(portal, "POST", "/catalog-fetch", {});
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: "models_dev_guard_unlisted_share",
+      reasons: ["models_dev_guard_unlisted_share", "models_dev_guard_growth"],
+      details: {
+        unlisted: 3,
+        listed: 13,
+        listedAfter: 20,
+        providersUnlisted: 0,
+        providersListed: 6,
+        enabledUnlisted: 0,
+        enabledListed: 0,
+        newlyBlocked: 0,
+        providers: 6,
+        oversizedProviders: 0,
+      },
+    });
   });
 
   // #554-T08
@@ -392,7 +439,7 @@ describe("fetching now through the route", () => {
     const portal = await start();
 
     const response = await call(portal, "POST", "/catalog-fetch", {
-      acceptLargeChange: "yes",
+      acceptReasons: "yes",
     });
 
     expect(response.status).toBe(422);

@@ -45,6 +45,20 @@ const refused = (
   ...(details === undefined ? {} : { details }),
 });
 
+/** What the route answers a guard stop with (`details`): the figures the guard measured. */
+const FIGURES = {
+  unlisted: 3,
+  listed: 13,
+  listedAfter: 20,
+  providersUnlisted: 0,
+  providersListed: 6,
+  enabledUnlisted: 0,
+  enabledListed: 0,
+  newlyBlocked: 0,
+  providers: 6,
+  oversizedProviders: 0,
+};
+
 function fakeApi(...answers: Array<RequestResult<FetchApplied>>) {
   const fetchNow = vi.fn();
   for (const answer of answers) fetchNow.mockResolvedValueOnce(answer);
@@ -218,7 +232,164 @@ describe("a fetch the guard stopped", () => {
     expect(await screen.findByText("The catalog was fetched.")).toBeTruthy();
     expect(api.fetchNow).toHaveBeenNthCalledWith(1);
     expect(api.fetchNow).toHaveBeenNthCalledWith(2, {
-      acceptLargeChange: true,
+      acceptReasons: ["models_dev_guard_unlisted_share"],
+    });
+  });
+
+  // #554-T08
+  it("lists every reason that tripped with its figures, and the second request names exactly those reasons", async () => {
+    const api = fakeApi(
+      refused("models_dev_guard_unlisted_share", 409, {
+        reasons: ["models_dev_guard_unlisted_share", "models_dev_guard_growth"],
+        details: FIGURES,
+      }),
+      APPLIED,
+    );
+    render(<FetchPanel fetch={FETCH_OK} fetchEnabled api={api} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+    const dialog = within(await screen.findByRole("alertdialog"));
+
+    const items = dialog
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(items).toEqual([
+      expect.stringContaining("unlist an unusually large share of the catalog"),
+      expect.stringContaining("grow the listed models by more than half"),
+    ]);
+    expect(items[0]).toContain("It would unlist 3 of 13 listed models.");
+    expect(items[1]).toContain(
+      "The listed models would grow from 13 to 20 (+54%).",
+    );
+    await userEvent.click(dialog.getByRole("button", { name: "Apply anyway" }));
+
+    expect(await screen.findByText("The catalog was fetched.")).toBeTruthy();
+    expect(api.fetchNow).toHaveBeenNthCalledWith(2, {
+      acceptReasons: [
+        "models_dev_guard_unlisted_share",
+        "models_dev_guard_growth",
+      ],
+    });
+  });
+
+  // #554-T08
+  it.each([
+    [
+      "models_dev_guard_enabled_unlisted",
+      "It would unlist 4 of the 5 models you enabled.",
+    ],
+    [
+      "models_dev_guard_url_changed_share",
+      "It would block the address of 3 of 6 providers.",
+    ],
+    [
+      "models_dev_guard_provider_size",
+      "2 provider(s) hold more models than any provider has and would be left out.",
+    ],
+  ])("shows the figures of %s", async (code, sentence) => {
+    const api = fakeApi(
+      refused(code, 409, {
+        reasons: [code],
+        details: {
+          ...FIGURES,
+          enabledUnlisted: 4,
+          enabledListed: 5,
+          newlyBlocked: 3,
+          providers: 6,
+          oversizedProviders: 2,
+        },
+      }),
+    );
+    render(<FetchPanel fetch={FETCH_OK} fetchEnabled api={api} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+
+    expect(
+      within(await screen.findByRole("alertdialog")).getByText(
+        new RegExp(sentence.replaceAll("(", "\\(").replaceAll(")", "\\)")),
+      ),
+    ).toBeTruthy();
+  });
+
+  // #554-T08
+  it("asks again, and marks what is new, when the second fetch trips a reason the admin did not accept", async () => {
+    const api = fakeApi(
+      refused("models_dev_guard_unlisted_share", 409, {
+        reasons: ["models_dev_guard_unlisted_share"],
+        details: FIGURES,
+      }),
+      refused("models_dev_guard_unlisted_share", 409, {
+        reasons: ["models_dev_guard_unlisted_share", "models_dev_guard_growth"],
+        details: FIGURES,
+      }),
+      APPLIED,
+    );
+    render(<FetchPanel fetch={FETCH_OK} fetchEnabled api={api} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Apply anyway",
+      }),
+    );
+
+    await waitFor(() => expect(api.fetchNow).toHaveBeenCalledTimes(2));
+    expect(api.fetchNow).toHaveBeenNthCalledWith(2, {
+      acceptReasons: ["models_dev_guard_unlisted_share"],
+    });
+    const dialog = within(await screen.findByRole("alertdialog"));
+    const items = dialog.getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).not.toContain("New since you looked");
+    expect(items[1]?.textContent).toContain("New since you looked");
+    await userEvent.click(dialog.getByRole("button", { name: "Apply anyway" }));
+
+    await waitFor(() => expect(api.fetchNow).toHaveBeenCalledTimes(3));
+    expect(api.fetchNow).toHaveBeenNthCalledWith(3, {
+      acceptReasons: [
+        "models_dev_guard_unlisted_share",
+        "models_dev_guard_growth",
+      ],
+    });
+  });
+
+  // #554-T08
+  it("falls back to the code alone when the answer carries no list of reasons", async () => {
+    const api = fakeApi(refused("models_dev_guard_growth"), APPLIED);
+    render(<FetchPanel fetch={FETCH_OK} fetchEnabled api={api} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Apply anyway",
+      }),
+    );
+
+    await waitFor(() => expect(api.fetchNow).toHaveBeenCalledTimes(2));
+    expect(api.fetchNow).toHaveBeenNthCalledWith(2, {
+      acceptReasons: ["models_dev_guard_growth"],
+    });
+  });
+
+  // #554-T08
+  it("ignores a list of reasons that holds anything but the guard's codes", async () => {
+    const api = fakeApi(
+      refused("models_dev_guard_growth", 409, {
+        reasons: ["models_dev_guard_growth", "<img src=x>", 7],
+        details: { listed: "many" },
+      }),
+      APPLIED,
+    );
+    render(<FetchPanel fetch={FETCH_OK} fetchEnabled api={api} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Fetch now" }));
+    const dialog = within(await screen.findByRole("alertdialog"));
+    expect(dialog.getAllByRole("listitem")).toHaveLength(1);
+    await userEvent.click(dialog.getByRole("button", { name: "Apply anyway" }));
+
+    await waitFor(() => expect(api.fetchNow).toHaveBeenCalledTimes(2));
+    expect(api.fetchNow).toHaveBeenNthCalledWith(2, {
+      acceptReasons: ["models_dev_guard_growth"],
     });
   });
 

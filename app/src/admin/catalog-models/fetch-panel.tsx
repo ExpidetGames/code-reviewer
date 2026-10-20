@@ -3,8 +3,9 @@
 "use client";
 // The fetch of the models.dev catalog (#554): when it last worked, when it was last tried, how it ended (the stable code,
 // as a sentence) and "Fetch now". A fetch the guard stopped (a large removal, growth, a mass change of addresses) is not
-// applied silently: the admin is asked first, with what the guard saw, and the second request carries the explicit
-// acceptance. The route has a deadline below its function limit and is rate limited; both come back as codes.
+// applied silently: the admin is asked first, with every reason that tripped and the figures the guard measured, and the
+// second request names the reasons the admin accepted. A reason that is new in that second fetch asks again. The route has
+// a deadline below its function limit and is rate limited; both come back as codes.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
@@ -29,19 +30,81 @@ import {
 } from "../../components/ui/card.tsx";
 import { DescriptionList } from "../../components/description-list.tsx";
 import type { FetchState } from "../../models-dev/catalog.ts";
-import { isModelsDevFetchErrorCode } from "../../models-dev/errors.ts";
+import {
+  isModelsDevFetchErrorCode,
+  type GuardFigures,
+} from "../../models-dev/errors.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import { browserCatalogModelsApi, type CatalogModelsApi } from "./api.ts";
 import {
   FETCH_ERROR_COPY,
   describeCatalogError,
+  describeGuardFigures,
   isGuardCode,
+  type GuardCode,
 } from "./messages.ts";
 
 type Outcome =
   | { kind: "applied"; text: string }
   | { kind: "failed"; text: string; retry: boolean };
+
+/** A fetch the guard stopped: every reason that tripped, what it measured, and which reasons the admin did not accept before. */
+type GuardStop = {
+  reasons: readonly GuardCode[];
+  figures: GuardFigures | null;
+  fresh: readonly GuardCode[];
+};
+
+const FIGURE_KEYS = [
+  "unlisted",
+  "listed",
+  "listedAfter",
+  "providersUnlisted",
+  "providersListed",
+  "enabledUnlisted",
+  "enabledListed",
+  "newlyBlocked",
+  "providers",
+  "oversizedProviders",
+] as const satisfies readonly (keyof GuardFigures)[];
+
+/** The figures of an answer, or null unless every one is a whole number: nothing else is shown from the answer. */
+function figuresOf(value: unknown): GuardFigures | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const figures: Partial<Record<keyof GuardFigures, number>> = {};
+  for (const key of FIGURE_KEYS) {
+    const figure = record[key];
+    if (
+      typeof figure !== "number" ||
+      !Number.isSafeInteger(figure) ||
+      figure < 0
+    )
+      return null;
+    figures[key] = figure;
+  }
+  return figures as GuardFigures;
+}
+
+/** What the page shows of a 409 of the guard: only the guard's own codes and numbers, whatever else the answer says. */
+function guardStopOf(
+  code: GuardCode,
+  details: Record<string, unknown> | undefined,
+  accepted: readonly GuardCode[],
+): GuardStop {
+  const listed = Array.isArray(details?.reasons)
+    ? (details.reasons as unknown[]).filter(isGuardCode)
+    : [];
+  const reasons = [...new Set(listed)];
+  if (reasons.length === 0) reasons.push(code);
+  return {
+    reasons,
+    figures: figuresOf(details?.details),
+    fresh:
+      accepted.length === 0 ? [] : reasons.filter((r) => !accepted.includes(r)),
+  };
+}
 
 function whenOf(iso: string | null): string {
   return iso === null ? "never" : formatUtc(iso);
@@ -76,13 +139,14 @@ export function FetchPanel({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [guard, setGuard] = useState<string | null>(null);
+  const [guard, setGuard] = useState<GuardStop | null>(null);
 
-  async function run(accept: boolean) {
+  /** `accept` is what the admin looked at and accepts; none for a plain "Fetch now". */
+  async function run(accept: readonly GuardCode[] = []) {
     setBusy(true);
     setOutcome(null);
-    const result: RequestResult<unknown> = await (accept
-      ? api.fetchNow({ acceptLargeChange: true })
+    const result: RequestResult<unknown> = await (accept.length > 0
+      ? api.fetchNow({ acceptReasons: accept })
       : api.fetchNow());
     setBusy(false);
     if (result.ok) {
@@ -92,7 +156,7 @@ export function FetchPanel({
     }
     // The guard stopped it and recorded the failure: show the state, then ask.
     if (isGuardCode(result.code)) {
-      setGuard(result.code);
+      setGuard(guardStopOf(result.code, result.details, accept));
       router.refresh();
       return;
     }
@@ -184,7 +248,7 @@ export function FetchPanel({
             loading={busy}
             loadingLabel="Fetching"
             disabled={!fetchEnabled}
-            onClick={() => void run(false)}
+            onClick={() => void run()}
           >
             Fetch now
           </Button>
@@ -202,7 +266,7 @@ export function FetchPanel({
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => void run(false)}
+                  onClick={() => void run()}
                 >
                   Try again
                 </Button>
@@ -220,21 +284,33 @@ export function FetchPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Apply this fetch anyway?</AlertDialogTitle>
             <AlertDialogDescription>
-              {guard !== null && isModelsDevFetchErrorCode(guard)
-                ? FETCH_ERROR_COPY[guard]
-                : ""}{" "}
               Nothing was changed. Applying it overrides the guard that protects
-              the catalog from a broken answer of models.dev: look at what it
-              would do first. The change is written to the server log with your
-              account.
+              the catalog from a broken answer of models.dev: read what it would
+              do first. You accept exactly the reasons below; if the next fetch
+              trips another one, you are asked again. The change is written to
+              the server log with your account.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <ul className="flex flex-col gap-2 text-sm">
+            {guard?.reasons.map((reason) => (
+              <li key={reason}>
+                {FETCH_ERROR_COPY[reason]}{" "}
+                {guard.figures === null
+                  ? null
+                  : describeGuardFigures(reason, guard.figures)}{" "}
+                {guard.fresh.includes(reason) ? (
+                  <Badge variant="warning">New since you looked</Badge>
+                ) : null}
+              </li>
+            ))}
+          </ul>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep the catalog as it is</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
+                const accepted = guard?.reasons ?? [];
                 setGuard(null);
-                void run(true);
+                void run(accepted);
               }}
             >
               Apply anyway

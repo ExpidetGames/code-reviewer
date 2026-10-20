@@ -12,7 +12,13 @@ import type {
   PriceStatus,
 } from "../../model-prices/effective-price.ts";
 import type { ModelsDevAdminErrorCode } from "../../models-dev/admin-errors.ts";
-import type { ModelsDevFetchErrorCode } from "../../models-dev/errors.ts";
+import {
+  GUARD_ERROR_CODES,
+  GUARD_REASONS,
+  type GuardCode,
+  type GuardFigures,
+  type ModelsDevFetchErrorCode,
+} from "../../models-dev/errors.ts";
 import type { UrlProblem, UrlState } from "../../models-dev/upstream-url.ts";
 import type { TransportErrorCode } from "../../ui/json-request.ts";
 import type { PriceFormIssueCode } from "./price-form.ts";
@@ -152,17 +158,35 @@ export const FETCH_ERROR_COPY: Record<ModelsDevFetchErrorCode, string> = {
 };
 
 /** The fetch codes that mean the guard stopped the fetch: the admin may look at it and accept it. */
-export const GUARD_CODES = [
-  "models_dev_guard_unlisted_share",
-  "models_dev_guard_enabled_unlisted",
-  "models_dev_guard_growth",
-  "models_dev_guard_url_changed_share",
-  "models_dev_guard_provider_size",
-] as const satisfies readonly ModelsDevFetchErrorCode[];
-export type GuardCode = (typeof GUARD_CODES)[number];
+export const GUARD_CODES: readonly GuardCode[] = GUARD_REASONS.map(
+  (reason) => GUARD_ERROR_CODES[reason],
+);
+export type { GuardCode };
 
-export function isGuardCode(code: string): code is GuardCode {
-  return (GUARD_CODES as readonly string[]).includes(code);
+export function isGuardCode(code: unknown): code is GuardCode {
+  return (GUARD_CODES as readonly unknown[]).includes(code);
+}
+
+const percent = (part: number, whole: number) =>
+  whole === 0 ? "" : ` (+${String(Math.round((part / whole) * 100))}%)`;
+
+/** What the guard measured for one reason, as a sentence: the figures are numbers, never text from models.dev. */
+export function describeGuardFigures(code: GuardCode, f: GuardFigures): string {
+  const n = String;
+  switch (code) {
+    case "models_dev_guard_unlisted_share":
+      return f.providersUnlisted > 0
+        ? `It would unlist ${n(f.unlisted)} of ${n(f.listed)} listed models and ${n(f.providersUnlisted)} of ${n(f.providersListed)} providers.`
+        : `It would unlist ${n(f.unlisted)} of ${n(f.listed)} listed models.`;
+    case "models_dev_guard_enabled_unlisted":
+      return `It would unlist ${n(f.enabledUnlisted)} of the ${n(f.enabledListed)} models you enabled.`;
+    case "models_dev_guard_growth":
+      return `The listed models would grow from ${n(f.listed)} to ${n(f.listedAfter)}${percent(f.listedAfter - f.listed, f.listed)}.`;
+    case "models_dev_guard_url_changed_share":
+      return `It would block the address of ${n(f.newlyBlocked)} of ${n(f.providers)} providers.`;
+    case "models_dev_guard_provider_size":
+      return `${n(f.oversizedProviders)} provider(s) hold more models than any provider has and would be left out.`;
+  }
 }
 
 /** The codes a route of the catalog answers with (and the transport's). */
