@@ -25,6 +25,7 @@ A refusal never carries the address: it says only that the address may not hold 
 
 import re
 from typing import Final
+from urllib.parse import urlsplit
 
 from code_reviewer_runner.dynamic_review.job_model_entry import JobModelEntry
 from code_reviewer_runner.dynamic_review.passthrough.address import UpstreamRefused, check_base_url
@@ -45,6 +46,11 @@ def key_destination(provider: str, entry: JobModelEntry) -> str:
         # The connection (`HttpsUpstream`) judges the form of the registry's address as well.
         return address
     destination = check_base_url(address)
+    # A provider of the catalog has a name: an IP literal of any kind (IPv4, bracketed IPv6, mapped, with a zone id) is
+    # refused, as the app does, so neither side has to agree on which literals count as public.
+    host = urlsplit(destination).netloc
+    if host.startswith("[") or re.fullmatch(r"[0-9.]+", host):
+        raise UpstreamRefused("the entry names an IP address, not the name of the provider")
     if destination != address:
         raise UpstreamRefused(
             "the entry names an address in another spelling than the canonical one"

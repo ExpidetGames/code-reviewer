@@ -15,6 +15,7 @@ before a key is used or a connection is made. The registry providers keep their 
 
 import dataclasses
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -339,3 +340,21 @@ def test_the_vectors_both_sides_accept_are_accepted(address: str) -> None:
 @pytest.mark.parametrize("address", VECTORS["refused"])
 def test_the_vectors_both_sides_refuse_are_refused(address: str) -> None:
     assert destination_accepts(address) is False
+
+
+# #555-T14
+def test_an_ip_literal_of_any_kind_is_refused_and_the_vectors_keep_it_on_the_refused_side() -> None:
+    literal = re.compile(r"^https://(\[|[0-9.x]+(/|$))", re.IGNORECASE)
+    assert [a for a in VECTORS["accepted"] if literal.match(a)] == []
+    for address in (
+        "https://93.184.216.34/v1",
+        "https://1572395042/v1",
+        "https://0x5db8d822/v1",
+        "https://[2606:4700:4700:0:0:0:0:1111]/v1",
+        "https://[2606:4700:4700::1111%25eth0]/v1",
+        "https://[::ffff:93.184.216.34]/v1",
+        "https://[2002:5db8:d822::1]/v1",
+        "https://[64:ff9b::5db8:d822]/v1",
+    ):
+        assert address in VECTORS["refused"]
+        assert destination_accepts(address) is False

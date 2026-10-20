@@ -17,7 +17,6 @@ import { UPSTREAM_BASE_URL } from "../models-dev/upstream-url.ts";
 const PATH = /^(\/[A-Za-z0-9._~-]+)*$/;
 const NAME =
   /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
-const DOTTED_IPV4 = /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/;
 const NUMBERS = /^[0-9.]+$/;
 
 /** Whether `address` is a plain public https address in the one spelling the app writes it (`normalizedAddress` of itself). */
@@ -40,8 +39,9 @@ export function isCanonicalCatalogAddress(address: string): boolean {
     return false;
   if (!isPublicHttpsUrl(address)) return false;
   const host = url.hostname;
-  if (host.startsWith("[")) return true;
-  if (NUMBERS.test(host)) return DOTTED_IPV4.test(host);
+  // A catalog provider has a name: an IP literal of any kind (IPv4 or bracketed IPv6, mapped, with a zone id, in a number
+  // spelling) is refused on both sides, so neither has to agree on which literals count as public (#555).
+  if (host.startsWith("[") || NUMBERS.test(host)) return false;
   const top = host.slice(host.lastIndexOf(".") + 1);
   return NAME.test(host) && /[a-z]/.test(top) && !top.startsWith("0x");
 }
