@@ -31,7 +31,12 @@ of the live checklist in docs/spike/544-passthrough.md):
 Usage faults (#551): `answer` and `stream` take a `usage_fault` that leaves the usage out
 (`missing`), adds a field that could carry a price and that the parsers do not know
 (`unknown_field`) or damages one count (`bad_value`), for every family, so that the parsers and the
-ledger are tested against the answers they must refuse.
+ledger are tested against the answers they must refuse. Two more are about the events of a stream
+and leave a whole document as it is: `duplicate` states the usage a second time with less output (a
+replay of an older count), and `out_of_order` puts the usage where the family never has it (Chat:
+before the chunk that finishes; Messages: a `message_delta` before the `message_start`; Google: the
+chunk that finishes first, the partial one after it). A Responses stream has one event with the
+usage, so it has no `out_of_order`.
 
 Variants of the framing, so that a parser is not written against the tidy case: the events can be
 re-chunked at arbitrary byte boundaries (`upstream.py`), a stream can use CRLF line ends (Google's
@@ -46,7 +51,9 @@ from typing import Any, Final, Literal
 Family = Literal["chat", "responses", "messages", "google"]
 # What a test can do to the usage of an answer (#551): leave it out, add a field nobody can price,
 # or put something into a count that is no count. Every family has all three.
-UsageFault = Literal["missing", "unknown_field", "bad_value"]
+UsageFault = Literal["missing", "unknown_field", "bad_value", "duplicate", "out_of_order"]
+# The faults about the events of a stream: a document states its usage once, in one place.
+ORDER_FAULTS: Final[tuple[UsageFault, ...]] = ("duplicate", "out_of_order")
 FAMILIES: Final[tuple[Family, ...]] = ("chat", "responses", "messages", "google")
 
 # The header that carries the key. The swap table of the proxy has these three entries.
@@ -99,7 +106,7 @@ def _faulted(
     family: Family, usage: dict[str, Any], fault: UsageFault | None
 ) -> dict[str, Any] | None:
     """The usage with the fault applied; None when it is to be left out."""
-    if fault is None:
+    if fault is None or fault in ORDER_FAULTS:
         return usage
     if fault == "missing":
         return None
@@ -123,6 +130,16 @@ def _faulted(
     else:
         faulty["promptTokenCount"] = True
     return faulty
+
+
+def _replayed(usage: dict[str, Any], output_key: str) -> dict[str, Any]:
+    """An older statement of `usage`: one token less output (and total), as a replay would be."""
+    older = json.loads(json.dumps(usage))
+    older[output_key] -= 1
+    for total in ("total_tokens", "totalTokenCount"):
+        if total in older:
+            older[total] -= 1
+    return older
 
 
 def _with_usage(document: dict[str, Any], key: str, usage: dict[str, Any] | None) -> dict[str, Any]:
@@ -321,7 +338,14 @@ def _chat_stream(
         closing = chunk({})
         closing["choices"] = []
         closing["usage"] = closing_usage
-        events.append((None, closing))
+        if fault == "out_of_order":
+            events.insert(len(events) - 1, (None, closing))  # before the chunk that finishes
+        else:
+            events.append((None, closing))
+        if fault == "duplicate":
+            events.append(
+                (None, {**closing, "usage": _replayed(closing_usage, "completion_tokens")})
+            )
     events.append((None, "[DONE]"))
     return _sse(events)
 
@@ -381,6 +405,8 @@ def _responses_answer(
 def _responses_stream(
     turn: Turn, call: int, model: str, fault: UsageFault | None = None
 ) -> list[bytes]:
+    if fault == "out_of_order":
+        raise ValueError("a Responses stream states its usage once: it has no order to break")
     base = {"id": f"resp_{call}", "created_at": 1, "model": model}
     opening = _responses_item(turn, call, "in_progress")
     if turn.tool:
@@ -451,6 +477,9 @@ def _responses_stream(
         _responses_usage(call, fault),
     )
     events.append(("response.completed", {"type": "response.completed", "response": completed}))
+    if fault == "duplicate" and "usage" in completed:
+        older = {**completed, "usage": _replayed(completed["usage"], "output_tokens")}
+        events.append(("response.completed", {"type": "response.completed", "response": older}))
     return _sse(events)
 
 
@@ -559,7 +588,16 @@ def _messages_stream(
     }
     if usage is not None:
         delta["usage"] = {"output_tokens": usage["output_tokens"]}
-    events.append(("message_delta", delta))
+    if fault == "out_of_order":
+        events.insert(0, ("message_delta", delta))
+    else:
+        events.append(("message_delta", delta))
+        if fault == "duplicate" and usage is not None:
+            again = {
+                **delta,
+                "usage": _replayed({"output_tokens": usage["output_tokens"]}, "output_tokens"),
+            }
+            events.append(("message_delta", again))
     events.append(("message_stop", {"type": "message_stop"}))
     return _sse(events)
 
@@ -621,6 +659,8 @@ def _google_stream(
     """
     first = _google_answer(turn, call, model, fault)
     del first["candidates"][0]["finishReason"]
+    # A stream out of order needs a partial usage on the chunk that comes after the finish.
+    cumulative = cumulative or fault == "out_of_order"
     if cumulative and "usageMetadata" in first:
         first["usageMetadata"] = {
             **first["usageMetadata"],
@@ -630,7 +670,13 @@ def _google_stream(
     else:
         first.pop("usageMetadata", None)
     last = _google_answer(Turn(text=""), call, model, fault)
-    return _sse([(None, first), (None, last)])
+    if fault == "out_of_order":
+        return _sse([(None, last), (None, first)])
+    chunks: list[tuple[str | None, Any]] = [(None, first), (None, last)]
+    if fault == "duplicate" and "usageMetadata" in last:
+        older = _replayed(last["usageMetadata"], "candidatesTokenCount")
+        chunks.append((None, {"usageMetadata": older}))
+    return _sse(chunks)
 
 
 def answer(
@@ -660,7 +706,8 @@ def stream(
     """The events of a streaming call, each a complete `event:`/`data:` block with a blank line.
 
     `include_usage` only matters for Chat (the closing usage chunk exists only when the request
-    asked for it), `cumulative_usage` only for Google, `crlf` and `usage_fault` for every family.
+    asked for it), `cumulative_usage` only for Google, `crlf` and `usage_fault` for every family
+    (`out_of_order` for every family but Responses, which raises `ValueError` for it).
     """
     if family == "chat":
         return _with_line_ends(_chat_stream(turn, call, model, include_usage, usage_fault), crlf)

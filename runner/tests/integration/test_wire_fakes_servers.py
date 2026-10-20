@@ -669,7 +669,7 @@ def test_restarting_the_script_and_resetting_the_faults_make_the_upstream_ready_
 
 # #551-F02
 @pytest.mark.parametrize("family", FAMILIES)
-@pytest.mark.parametrize("fault", ["missing", "unknown_field", "bad_value"])
+@pytest.mark.parametrize("fault", ["missing", "unknown_field", "bad_value", "duplicate"])
 def test_the_upstream_can_answer_with_a_usage_fault_in_a_document_and_in_a_stream(
     family: Family, fault: str
 ) -> None:
