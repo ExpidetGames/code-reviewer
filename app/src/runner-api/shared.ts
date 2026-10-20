@@ -137,7 +137,8 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
-    // #553: the cost policy of a native job. A selection names a catalog model only while the switch of the native path is on.
+    // #553: the cost policy and the entry of a native job. A provider outside the registry (#555) is always native, there is no
+    // legacy wire for it; the two registry providers are native only while the switch of the native path is on (#578).
     nativeCost,
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.

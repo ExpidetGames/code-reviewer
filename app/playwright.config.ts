@@ -89,6 +89,7 @@ export default defineConfig({
         /e2e\/admin\/catalog\.e2e\.ts$/,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
+        /e2e\/settings\/native-provider\.e2e\.ts$/,
         /e2e\/upgrade\//,
         /e2e\/operator\//,
       ],
@@ -122,6 +123,14 @@ export default defineConfig({
       testMatch: /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
       dependencies: ["prepare", "mail"],
     },
+    // The journey of a catalog provider (#555) opens a pull request and has a script claim its Dynamic job, so it puts a run
+    // into the queue of the first app: it runs after the Runs journeys, which expect an empty queue when they start.
+    {
+      name: "native-provider",
+      use: browser,
+      testMatch: /e2e\/settings\/native-provider\.e2e\.ts$/,
+      dependencies: ["chromium", "runs", "reviews"],
+    },
     // The journey of the invitations changes who belongs to the workspace of the first app and needs its
     // sign-up rule to be "everyone", which the admin portal journey changes for a while: it runs after
     // every journey of that app.
@@ -129,7 +138,7 @@ export default defineConfig({
       name: "invitations",
       use: browser,
       testMatch: /e2e\/workspaces\/invite-and-accept\.e2e\.ts$/,
-      dependencies: ["chromium", "runs", "reviews"],
+      dependencies: ["chromium", "runs", "reviews", "native-provider"],
     },
     // The journeys of the workspaces in a multi-tenant instance have an app of their own (the fifth): people
     // create workspaces there, and a single-tenant instance does not let them.

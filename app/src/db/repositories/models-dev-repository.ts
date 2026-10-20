@@ -62,6 +62,8 @@ export type ModelsDevRepository = {
   listProviders(options?: { forUpdate?: boolean }): Promise<StoredProvider[]>;
   /** Every model, listed or not. */
   listModels(): Promise<StoredModel[]>;
+  /** The models of one provider, listed or not, by id: the picker of a workspace reads one provider, never the catalog. */
+  listModelsOf(providerId: string): Promise<StoredModel[]>;
   /**
    * How many listed models each provider has, counted by the database (`group by`) and not by loading the catalog: for a
    * screen that needs the numbers only. A provider with none is not in the map. `providerId` limits it to that provider.
@@ -286,6 +288,16 @@ export function createModelsDevRepository(
         .selectFrom("models_dev_models")
         .selectAll()
         .orderBy("provider_id")
+        .orderBy("model_id")
+        .execute();
+      return rows.map(modelOf);
+    },
+
+    async listModelsOf(providerId) {
+      const rows = await db
+        .selectFrom("models_dev_models")
+        .selectAll()
+        .where("provider_id", "=", providerId)
         .orderBy("model_id")
         .execute();
       return rows.map(modelOf);

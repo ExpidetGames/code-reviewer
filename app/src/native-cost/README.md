@@ -91,13 +91,42 @@ never handed a policy; a native job needs the new runner anyway (it needs the pa
 Dispatcher's claim cannot know what its Worker can do: it runs the checks (so a managed model without a confirmed price is refused
 before any VM starts), and the Worker's fetch ends a job that carries a policy with `dynamic_engine_unavailable` if the Worker image
 is older (a VM was started for nothing, once; nothing ran). The rollout order is therefore: runners and Worker images first, then the
-wiring that makes an entry native.
+wiring that makes an entry native. A runner of the release of #578 that does not know #555 refuses a job of a provider outside the registry as `invalid_job` (it reads `llm.provider` against its registry), so the same order holds for catalog providers: the runner and the Worker image first.
 
-## What #555 and #571 still need
+## Where the key goes (#578, #555; needs a security review)
 
-- A native slug must be accepted by the selection (`llm/selection.ts` knows only the registry's providers) and by the settings of a
-  project, and the key per native provider must be stored and loaded (`keyFor`); `catalogRefOf` is the map they use.
-- #555 says in its screen that the own-key cost limit cannot bind without a price, and shows the token cap (`ownKeyTokenCap` of the
-  admin settings read model; a member sees the cap, never a price).
+The key of a native job is held by the supervisor in the VM and sent to one address; the engine never sees the key or the address. The
+rule for that address depends on the provider, and the same rule is applied by the app (before the claim carries an entry) and by the
+runner (before the key is used):
+
+- **A registry provider** (`anthropic`, `openrouter`): the registry's own API address (`registry-addresses.ts`; the runner pins the
+  same, `llm_providers.py`). The catalog's address is not trusted for them; one that differs ends the job
+  (`upstream_not_registry`).
+- **Any other provider of the catalog** (BYOK, #555): exactly the address #548 **trusts** for it, which only the catalog's rules can
+  set: the first safe address seen (https, port 443, a public host), changed only by an admin's confirmation (`url_changed`
+  and `rejected` providers carry no entry: `provider_url_blocked`). A workspace types no address; a project names a provider and a
+  model and nothing else. The claim carries the address in `dynamic.modelEntry.upstreamBaseUrl`. Two more checks, the same on both sides
+  (`catalog-address.ts`, `runner/.../passthrough/destination.py`, held to the shared `contracts/key-destination-vectors.json`):
+  the address is a plain public https address in **exactly one spelling** (lower-case name of at least two labels, no default port, no
+  trailing slash, a plain path of letters, digits and `. _ ~ -`, and **never an IP address of any kind**: IPv4 or IPv6, bracketed, with a zone id,
+  mapped or in a number spelling, so that neither side has to agree on which literals count as public; an address a row holds in any other spelling ends the job
+  `upstream_invalid`, and the runner refuses it as `invalid_job`); and the entry is of the provider the key is for (the id of the entry
+  is the slug with hyphens). The runner then connects to that exact string; the connection resolves the name, judges **every**
+  address it resolves to, connects to the address it judged, speaks TLS to the name and follows no redirect
+  (`passthrough/upstream.py`).
+- **What this does not do.** The runner has no address list of its own for such a provider, so it cannot tell a trusted public name
+  from another public name; that is the catalog's trust record (the app never builds an entry from an address that is not trusted).
+  The residual risk is the one #548 accepted: the first safe address models.dev states for a provider is trusted (except for the providers whose SDK address `contracts/opencode-providers.v1.json` records: that address is the trusted one from the start, and a different address models.dev states waits for an admin, `models-dev/plan.ts`). The picker, the key and the choice offer a provider only if the claim would build its entry (`native-providers/catalog.ts`, the canonical address). A committed
+  address per provider (a pin like the registry's) would remove it at the cost of a hand-kept list; it is a follow-up for the
+  security review, not part of this rule.
+
+## What #555 added
+
+- **Done in #555.** The selection accepts a catalog slug for a Dynamic job on the own key (`llm/selection.ts`, `nativeModels`; the
+  selection carries `catalog: true`); the project settings store a catalog provider and model for Dynamic Review
+  (`review-settings/native-choice.ts`, `MODEL_NOT_IN_CATALOG`); the key per catalog provider is stored and revealed
+  (`native-providers/lookup.ts`, `keyFor`); the claim's `costOf` builds the entry with `entryFor` and answers a catalog selection
+  with `llm_model_unavailable` (a row that is gone) or `llm_provider_unsupported` (a provider that cannot carry a key); the workspace
+  UI shows the token cap and the price source (`native-providers/ui/own-key-cost-note.tsx`).
 - #554: the catalog view already says why a model is refused (`MANAGED_REASON_COPY`, including the two cache reasons); the
   correction form should suggest the input price as the upper bound for a missing cache read (a hint, nothing is filled in).

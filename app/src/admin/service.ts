@@ -29,7 +29,7 @@ import {
   llmProviderDescriptors,
 } from "../llm/providers/index.ts";
 import type { LlmKeyTestResult } from "../llm/key-test.ts";
-import type { ProviderLookup } from "../llm/workspace-key.ts";
+import type { OperatorProviderLookup } from "../llm/workspace-key.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
@@ -233,7 +233,7 @@ export type AdminServiceOptions = {
   /** The numbers of the model catalog for the overview (src/model-catalog/service.ts, #429). */
   catalogSummary: () => Promise<CatalogSummary>;
   /** The providers the app supports; a test passes its own. */
-  providers?: ProviderLookup;
+  providers?: OperatorProviderLookup;
   now?: () => Date;
 };
 

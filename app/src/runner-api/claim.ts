@@ -114,6 +114,8 @@ export const CLAIM_FAILURE_CODES = [
   "managed_model_unavailable",
   // #432: the provider an own project selected is one the app does not know or the runner did not advertise.
   "llm_provider_unsupported",
+  // #555: an own job names a catalog model the catalog no longer serves (its row is gone). Never a move to another model.
+  "llm_model_unavailable",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -509,13 +511,15 @@ async function costOf(
     if (entry.code === "check_failed") return { kind: "retry" };
     return {
       kind: "refused",
-      errorCode:
-        selection.keyMode === "managed"
-          ? MANAGED_MODEL_UNAVAILABLE
-          : "dynamic_model_features_unsupported",
+      errorCode: entryRefusalCode(selection, entry.code),
       detail: `${whose(selection)}kind=${selection.kind} reason=entry_${entry.code}`,
     };
   }
+  // #555 (decision of 2026-10-19 on #548): a model models.dev stopped listing keeps being served from its last known row.
+  if (entry.unlisted === true)
+    deps.logger.info(
+      `[runner-api] job=${job.id} selection model no longer listed by the catalog; the last known row serves`,
+    );
   return {
     kind: "decided",
     policy: outcome.policy,
@@ -524,6 +528,29 @@ async function costOf(
       ? {}
       : { confirmation: outcome.confirmation }),
   };
+}
+
+/**
+ * The code a job ends with when its entry cannot be built. The operator's key: `managed_model_unavailable` (free). The own key of a
+ * catalog provider (#555) names what the member can act on: a model the catalog does not describe (its row is gone, or makes no
+ * entry) is `llm_model_unavailable`, and a provider that cannot carry a key (not supported, blocked by `url_changed` or a refused
+ * address, an address that is not the plain public https one, `upstream_not_registry`) is `llm_provider_unsupported`. The own key
+ * of a registry provider keeps `dynamic_model_features_unsupported` (#578).
+ */
+function entryRefusalCode(
+  selection: Selection,
+  code: Extract<
+    Awaited<ReturnType<NativeCostService["entryFor"]>>,
+    { ok: false }
+  >["code"],
+): string {
+  if (selection.keyMode === "managed") return MANAGED_MODEL_UNAVAILABLE;
+  if (selection.catalog !== true) return "dynamic_model_features_unsupported";
+  return code === "model_not_in_catalog" ||
+    code === "entry_invalid" ||
+    code === "model_not_of_provider"
+    ? "llm_model_unavailable"
+    : "llm_provider_unsupported";
 }
 
 /** The opaque id of the catalog entry for the log of a job on the operator's key; nothing for an own key. */
@@ -559,7 +586,9 @@ export async function checkJob(
   // (#276, #432). Any failure ends the job closed: no move to another entry, provider or the instance's model. The key
   // follows only a selection that succeeded.
   const options = await deps.jobOptions.optionsFor(job);
-  const selected = await selectModel(deps, job, {
+  // A catalog model needs the native path: its entry from the catalog and its cost policy (the token cap) come from `nativeCost`.
+  const nativeModels = deps.nativeCost !== undefined;
+  const selected = await selectModel({ ...deps, nativeModels }, job, {
     options,
     entitlements,
     runnerProviders:

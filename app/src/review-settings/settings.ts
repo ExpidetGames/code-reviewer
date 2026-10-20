@@ -126,7 +126,8 @@ export type ProjectDynamicSettings = {
   reviewKind: ProjectReviewKind;
   dynamicModel: string;
   /** The provider of `dynamicModel` (#430); absent in storage means the default provider. */
-  dynamicProvider: LlmProvider;
+  /** A provider of the registry, or (#555) the slug of a catalog provider. */
+  dynamicProvider: string;
   /**
    * The catalog entry the project selects per kind on the operator's key (#430); `null` is none, so the instance
    * default entry of the kind applies at the claim (#432). There is no workspace-level default (decision C3).
@@ -151,7 +152,7 @@ export type ProjectDynamicPatch = {
   reviewKind?: ProjectReviewKind;
   dynamicModel?: string | null;
   /** `null` clears the override, so the default provider applies again (#430). */
-  dynamicProvider?: LlmProvider | null;
+  dynamicProvider?: string | null;
   /** `null` clears the selection, so the instance default entry applies again (#430). */
   catalogEntryDiff?: string | null;
   catalogEntryDynamic?: string | null;

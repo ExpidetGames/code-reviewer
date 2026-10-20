@@ -378,6 +378,33 @@ keeps the typed values of the others). Global defaults still use `buildPatch` (`
 skill, where each comes from, the shipped defaults, whether the skill is the default, the default
 skill's identity and the size limit.
 
+## A catalog provider and model for Dynamic Review (#555)
+
+A workspace on its **own key** may choose, for Dynamic Review only, any provider of the models.dev catalog that OpenCode supports
+with a static key (`contracts/opencode-providers.v1.json`) and one of that provider's tool-calling models. The catalog is read by
+`src/native-providers/` (its README has the whole picture); this module only checks and stores the pair.
+
+- `dynamicProvider` may be a catalog provider's slug (`validate.ts`: `nativeDynamicProvider`; the model is held to the shape of a
+  job entry, `isCatalogModelId`), and `dynamicModel` is then required. A provider of the registry keeps its own path, **Diff is
+  unchanged** (its fields keep their two providers until #558), and a catalog provider is never accepted for Diff.
+- **The save** (`service.ts`: `refuseUnfitNativeChoice`, pure part in `native-choice.ts`) puts the pair to
+  `NativeCatalogReader.checkSelection` when the save sets the provider or the model. A model the catalog does not list
+  (released today before the next daily fetch, or no longer listed) is refused with `MODEL_NOT_IN_CATALOG` on `dynamicModel`
+  and nothing is stored; the admin's "Refresh now" (#554) is the way to get it sooner. A missing model is `EMPTY`. The provider's own
+  model metadata is not asked (the catalog is the list), so `checkDynamicModel` skips a catalog provider. A pair that is already
+  stored is **not** checked again by a save that does not touch it, so an unrelated save does not fail because a model has left the
+  catalog since.
+- **Retired later.** A stored model that models.dev stopped listing keeps being served by the claim from its last known row (the
+  decision of #548, see `src/runner-api/README.md`, "A catalog model on the workspace's own key"); the picker shows a warning.
+  Only a row that is gone fails closed (`llm_model_unavailable`).
+- **A workspace on the operator's key never gets this**: it chooses named catalog entries, the save does not read the catalog
+  of providers and the form shows no provider or model id (a save naming a provider or a model is refused with `MODEL_MANAGED_BY_INSTANCE`, #283).
+- **The form.** The Dynamic card shows the provider (the registry's two and the catalog providers the workspace holds a key for,
+  `native-providers/form-data.ts`), then, for a catalog provider, `CatalogModelPicker` (search, name, context, price when known)
+  instead of the free-text model field, and `OwnKeyCostNote`: with an unknown price the run is bounded by the token cap and the time
+  limit and the own-key cost limit does not apply; with a known price the cost limit applies as before and the price source is shown;
+  with billing on the note says that a run on the own key is charged for infrastructure minutes only (no rate, no formula).
+
 ## The pages
 
 The workspace settings are sub-pages with a sub-nav (#178). `/w/:workspace/settings` is **General** (the
@@ -431,7 +458,7 @@ The claim of the runner API and the webhook intake use `service.resolveForReposi
 `validate.test.ts`, `effective.test.ts`, `runner-settings.test.ts`, `cost.test.ts`, `catalog-selection.test.ts` and
 `dynamic-check.test.ts` (unit, pure),
 `service.integration.test.ts`, `selection.integration.test.ts` (the provider and catalog selection, a real catalog),
-`dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
+`validate-native.test.ts` and `native-model.integration.test.ts` (#555: a catalog provider and model, the refusal of a model outside the catalog, a managed workspace refused; SQLite), `dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
 `src/db/repositories/`, and in `integration-tests/http/` the proxy in front of the routes
 (`review-settings-route.integration.test.ts`) and the real route files
 (`review-settings-route-file.integration.test.ts`). The test cases that need the real PR-Agent against the

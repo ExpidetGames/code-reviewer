@@ -11,7 +11,7 @@
 // A request changes one provider's key: none or several entries are refused rather than half applied. The provider
 // is named by its id exactly (the registry's, no trimming and no case folding), so a spelling that is not an id
 // never reaches a secret name. The value of the key itself is the key service's to judge (src/llm/operator-key.ts).
-import type { ProviderLookup } from "../llm/workspace-key.ts";
+import type { OperatorProviderLookup } from "../llm/workspace-key.ts";
 import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 
@@ -35,7 +35,7 @@ const invalid = (field: string): OperatorKeyChange => ({
 export function parseOperatorKeyChange(
   setting: "operatorLlmKey" | "operatorLlmKeys",
   value: unknown,
-  providers: ProviderLookup,
+  providers: OperatorProviderLookup,
 ): OperatorKeyChange {
   if (setting === "operatorLlmKey") {
     if (value === null)

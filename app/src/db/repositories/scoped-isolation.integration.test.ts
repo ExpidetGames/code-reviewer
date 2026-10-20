@@ -868,6 +868,13 @@ const CASES: Case[] = [
       }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
+  // #555: the names of a catalog provider's key slots are listed for one workspace only
+  {
+    name: "workspaceSecrets.names",
+    run: (a) => a.workspaceSecrets.names(),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual(["llm_api_key", "llm_api_key.fakeai"]),
+  },
   {
     name: "workspaceSecrets.remove",
     run: (a) => a.workspaceSecrets.remove("llm_api_key"),

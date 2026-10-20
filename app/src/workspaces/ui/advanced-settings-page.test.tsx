@@ -191,3 +191,43 @@ describe("the Advanced settings sub-page", () => {
     });
   });
 });
+
+describe("the Advanced sub-page with a key of a catalog provider (#555)", () => {
+  // #555-T02
+  it("lists the removal of a catalog provider's key by the name the catalog gives it, and removes that provider's key only", async () => {
+    const user = userEvent.setup();
+    const api = fakeKeyApi();
+    renderAdvanced({
+      removeApi: api,
+      keys: [
+        { provider: "openrouter", configured: true },
+        { provider: "deepseek", configured: true, label: "DeepSeek" },
+      ],
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove the DeepSeek key…" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
+
+    await waitFor(() => expect(api.remove).toHaveBeenCalledWith("deepseek"));
+    expect(api.remove).toHaveBeenCalledTimes(1);
+  });
+
+  // #555-T08
+  it("names no provider for a workspace on the instance's access, not even for a catalog key it stored earlier", () => {
+    const view = renderAdvanced({
+      instanceAccess: "provided",
+      keys: [
+        { provider: "openrouter", configured: false },
+        { provider: "deepseek", configured: true, label: "DeepSeek" },
+      ],
+    });
+
+    expect(view.container.textContent).not.toContain("DeepSeek");
+    expect(view.container.textContent).not.toContain("deepseek");
+    expect(
+      screen.getByRole("button", { name: "Remove the stored key…" }),
+    ).toBeTruthy();
+  });
+});

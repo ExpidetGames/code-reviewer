@@ -18,6 +18,7 @@ import {
   type ResolvedEntitlements,
 } from "../workspaces/entitlements.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
+import { getNativeCatalog } from "../native-providers/shared.ts";
 import { catalogSelectionFrom } from "./catalog-selection.ts";
 import {
   createReviewSettingsService,
@@ -59,6 +60,8 @@ export function reviewSettingsServiceFor(
     catalog: catalogSelectionFrom(catalog, async (id) =>
       entryAllowed(await readEntitlements(), { id }),
     ),
+    // #555: the catalog of providers and models a workspace on its own key picks for Dynamic Review.
+    nativeCatalog: getNativeCatalog(),
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });

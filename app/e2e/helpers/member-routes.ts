@@ -106,6 +106,13 @@ export function addressesOf(
             );
           return values.runIds.map((value) => ({ value, refused: false }));
         case "provider":
+          // The models of a catalog provider (#555) exist only for a workspace on its own key; the workspace read here is on
+          // the operator's key, so every address of the route answers a 4xx, and the answer is scanned like any other.
+          if (route.pattern.includes("/llm-catalog/"))
+            return [
+              { value: "openrouter", refused: true },
+              { value: "no-such-provider", refused: true },
+            ];
           return [
             { value: "openrouter", refused: false },
             { value: "no-such-provider", refused: true },

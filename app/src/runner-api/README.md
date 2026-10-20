@@ -116,7 +116,9 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
      `JobOptions.selection.layers`, built by `review-settings-job-options.ts`) over the instance's model
      (`ClaimDeps.builtInModel`). A model counts only for the provider it was set for; a model next to a provider of
      another layer ends the job `job_llm_options_invalid` (the save refuses the same pairing, `MODEL_PROVIDER_MISMATCH`).
-     The catalog is not read and the plan's `modelAccess` is not evaluated (#432-T06, T16).
+     The plan's `modelAccess` is not evaluated (#432-T06, T16), and the entry catalog of the operator is not read. **A Dynamic project
+     may name a catalog provider and model** (#555, `src/native-providers/README.md`); that selection is carried through the
+     claim as a catalog model, see "A catalog model on the workspace's own key" below. A Diff job never is one.
    - **Operator's key:** the entry the project selected for the kind (`catalogEntryDiff`, `catalogEntryDynamic`), else the
      instance default entry of the kind, read from the catalog (`ClaimDeps.catalog`: the one entry, and the defaults only
      when the project names none). It must exist, be released, serve the kind, be allowed by the plan's `modelAccess`
@@ -170,10 +172,31 @@ reason=<catalog_price_unconfirmed|catalog_model_unavailable>:<reason>`), with no
    **The model entry of a native job (#578).** After the policy, the same decision step asks `nativeCost.entryFor` for the entry of
    the model (the last known catalog row, no key, no price) and sends it as `dynamic.modelEntry` with the policy. An entry that
    cannot be built ends the job like an unavailable model (`managed_model_unavailable` on the operator's key, with
-   `reason=entry_<code>` in the log; `dynamic_model_features_unsupported` on an own key), before any key or token exists; a failed
-   read gives the job back. The two registry providers keep their API address whatever the catalog trusts: an entry whose address is not the
-   registry's is refused with `reason=entry_upstream_not_registry` (`src/native-cost/registry-addresses.ts`). A native job does not read the provider's model metadata. Whether a registry provider is native at all
-   is the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off; `src/native-cost/README.md`).
+   `reason=entry_<code>` in the log; `dynamic_model_features_unsupported` on an own key of a registry provider), before any key or
+   token exists; a failed read gives the job back. The two registry providers keep their API address whatever the catalog trusts: an
+   entry whose address is not the registry's is refused with `reason=entry_upstream_not_registry`
+   (`src/native-cost/registry-addresses.ts`). A native job does not read the provider's model metadata. Whether a registry provider
+   is native at all is the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off; `src/native-cost/README.md`).
+
+   **A catalog model on the workspace's own key (#555).** A Dynamic job on the workspace's own key may name a provider of the
+   models.dev catalog and one of its models (`contracts/opencode-providers.v1.json`; the project settings save only a pair the
+   catalog lists, `MODEL_NOT_IN_CATALOG` otherwise). The sequence, all before any key, token or VM exists:
+   1. `resolveModelSelection` accepts the provider only when `ClaimDeps.nativeCost` is wired (`SelectionDeps.nativeModels`) and
+      marks the selection as a catalog model (`catalog: true`).
+   2. `costOf` builds the per-job entry of #548 with `nativeCost.entryFor` (`Checked.modelEntry`, sent as `dynamic.modelEntry`). **A
+      model that models.dev stopped listing keeps being served** from its last known row (decision of 2026-10-19 on #548; the claim
+      logs it and the settings page warns), because a provider's retirement is not the catalog's housekeeping. For a catalog
+      selection the refusals have their own codes: **a row that is gone** ends the job `llm_model_unavailable`, and **a provider that
+      cannot carry a key** (blocked by `url_changed` or `rejected`, no longer supported, an address that is not the trusted one in its
+      canonical form) ends it `llm_provider_unsupported`. The log names the kind and the stable reason (`entry_model_not_in_catalog`,
+      `entry_provider_url_blocked`, ...), never a provider or a model. There is no move to another model, provider or key.
+   3. The cost policy of #553 is judged first (an own key is never refused for a price; an unknown price gets the token cap).
+   4. `keyFor` reveals **only the chosen provider's key** (`llm_api_key.<slug>`). A workspace that has a key for another provider but
+      not for this one ends `llm_not_configured`; the key of provider B is never used for provider A.
+      The Runs copy for `llm_model_unavailable` says the model is no longer offered and asks the workspace to pick another one
+      (`runs/error-copy.ts`).
+   5. **Where the key goes.** For a provider outside the registry the destination is exactly the catalog's trusted address
+      (`src/native-cost/README.md`, "Where the key goes"); the workspace types none.
 
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
@@ -490,6 +513,8 @@ jobs the policy let through.
 - `integration-tests/http/runner-api-claim.integration.test.ts`, `-report`, `-security` and
   `-route-files`: the real handlers with a real SQLite file and the fake GitHub; the route files with
   the wiring of the running server and a delivery that goes through the webhook route first.
+- `integration-tests/http/runner-api-native-own.integration.test.ts` (#555): a catalog model on the own key: the entry, the one key revealed,
+  `llm_not_configured` for a key of another provider, `llm_model_unavailable`, an unlisted model still served.
 - `integration-tests/http/runner-api-projects.integration.test.ts`: the wiring to the projects, the
   review settings and the LLM configuration (CR-46).
 - `integration-tests/compatibility/runner-api-contract.integration.test.ts`: the contract.
