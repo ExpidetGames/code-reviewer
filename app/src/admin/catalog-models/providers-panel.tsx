@@ -100,8 +100,8 @@ export function ProvidersPanel({
     provider: string;
     text: string;
   } | null>(null);
+  // The name of the provider whose address was trusted last. Kept outside the list: the confirmed provider leaves it.
   const [saved, setSaved] = useState<string | null>(null);
-  if (providers.length === 0) return null;
   const listed = providers.slice(0, MAX_LISTED);
 
   async function confirm(provider: ProviderView) {
@@ -124,150 +124,167 @@ export function ProvidersPanel({
       router.refresh();
       return;
     }
-    setSaved(provider.id);
+    setSaved(truncateText(provider.name, 60).text);
     router.refresh();
   }
 
-  return (
-    <Card role="region" aria-label="Provider addresses that need you">
-      <CardHeader>
-        <CardTitle>
-          <h2 className="text-lg font-semibold tracking-tight">
-            Provider addresses that need you
-          </h2>
-        </CardTitle>
-        <CardDescription>
-          These providers are blocked: no key is sent to them, and none of their
-          models can run, until the address is trusted. Confirming sends the
-          keys of that provider to the new address.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <ul className="flex flex-col gap-4">
-          {listed.map((provider) => {
-            const canConfirm =
-              provider.url.state === "url_changed" &&
-              provider.url.problem === null &&
-              provider.url.pendingUrl !== null;
-            return (
-              <li
-                key={provider.id}
-                className="flex flex-col gap-2 rounded-lg border border-border p-4"
-                aria-label={`Address of ${truncateText(provider.name, 60).text}`}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">
-                    {truncateText(provider.name, 60).text}
-                  </span>
-                  <Badge variant={URL_BADGE[provider.url.state]}>
-                    {URL_STATE_LABEL[provider.url.state]}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {`${String(provider.models)} model(s) blocked`}
-                  </span>
-                </div>
-                <dl className="grid gap-2 text-sm sm:grid-cols-2">
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">Trusted address</dt>
-                    <dd>
-                      <Address text={provider.url.trustedUrl} />
-                    </dd>
+  // The notice is in the page before the first confirmation and stays after the last blocked provider is gone, when the
+  // card is not rendered any more: the page reloads its data right after the confirmation.
+  const notice = (
+    <div
+      role="status"
+      aria-live="polite"
+      data-slot="provider-address-status"
+      className="text-sm text-success"
+    >
+      {saved === null
+        ? null
+        : `The new address of ${saved} is trusted.${providers.length === 0 ? " No provider address needs a decision now." : ""}`}
+    </div>
+  );
+  const card =
+    providers.length === 0 ? null : (
+      <Card role="region" aria-label="Provider addresses that need you">
+        <CardHeader>
+          <CardTitle>
+            <h2 className="text-lg font-semibold tracking-tight">
+              Provider addresses that need you
+            </h2>
+          </CardTitle>
+          <CardDescription>
+            These providers are blocked: no key is sent to them, and none of
+            their models can run, until the address is trusted. Confirming sends
+            the keys of that provider to the new address.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <ul className="flex flex-col gap-4">
+            {listed.map((provider) => {
+              const canConfirm =
+                provider.url.state === "url_changed" &&
+                provider.url.problem === null &&
+                provider.url.pendingUrl !== null;
+              return (
+                <li
+                  key={provider.id}
+                  className="flex flex-col gap-2 rounded-lg border border-border p-4"
+                  aria-label={`Address of ${truncateText(provider.name, 60).text}`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">
+                      {truncateText(provider.name, 60).text}
+                    </span>
+                    <Badge variant={URL_BADGE[provider.url.state]}>
+                      {URL_STATE_LABEL[provider.url.state]}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {`${String(provider.models)} model(s) blocked`}
+                    </span>
                   </div>
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">
-                      {provider.url.problem === null
-                        ? "New address"
-                        : "Address models.dev states (refused)"}
-                    </dt>
-                    <dd>
-                      {/* The new address is text only; a refused one is the raw text of models.dev. */}
-                      {provider.url.pendingUrl === null ? (
-                        <span className="text-muted-foreground">none</span>
-                      ) : (
-                        <code className="font-mono text-xs break-all">
-                          {addressText(provider.url.pendingUrl, canConfirm)}
-                        </code>
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-                {provider.url.problem === null ? null : (
-                  <p className="text-sm">
-                    {URL_PROBLEM_COPY[provider.url.problem]} It cannot be
-                    confirmed.
-                  </p>
-                )}
-                {canConfirm ? (
-                  <div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={busy}
-                      aria-label={`Confirm the new address of ${truncateText(provider.name, 60).text}`}
-                      onClick={() => setConfirming(provider)}
-                    >
-                      Confirm the new address
-                    </Button>
-                  </div>
-                ) : null}
-                {failed?.provider === provider.id ? (
-                  <Alert variant="destructive">
-                    <AlertDescription>{failed.text}</AlertDescription>
-                  </Alert>
-                ) : null}
-                {saved === provider.id ? (
-                  <p role="status" className="text-sm text-success">
-                    The new address is trusted.
-                  </p>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-        {providers.length > listed.length ? (
-          <p className="text-sm text-muted-foreground">
-            {`${String(providers.length - listed.length)} more providers are blocked.`}
-          </p>
-        ) : null}
-      </CardContent>
+                  <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <dt className="text-muted-foreground">Trusted address</dt>
+                      <dd>
+                        <Address text={provider.url.trustedUrl} />
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-muted-foreground">
+                        {provider.url.problem === null
+                          ? "New address"
+                          : "Address models.dev states (refused)"}
+                      </dt>
+                      <dd>
+                        {/* The new address is text only; a refused one is the raw text of models.dev. */}
+                        {provider.url.pendingUrl === null ? (
+                          <span className="text-muted-foreground">none</span>
+                        ) : (
+                          <code className="font-mono text-xs break-all">
+                            {addressText(provider.url.pendingUrl, canConfirm)}
+                          </code>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                  {provider.url.problem === null ? null : (
+                    <p className="text-sm">
+                      {URL_PROBLEM_COPY[provider.url.problem]} It cannot be
+                      confirmed.
+                    </p>
+                  )}
+                  {canConfirm ? (
+                    <div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy}
+                        aria-label={`Confirm the new address of ${truncateText(provider.name, 60).text}`}
+                        onClick={() => setConfirming(provider)}
+                      >
+                        Confirm the new address
+                      </Button>
+                    </div>
+                  ) : null}
+                  {failed?.provider === provider.id ? (
+                    <Alert variant="destructive">
+                      <AlertDescription>{failed.text}</AlertDescription>
+                    </Alert>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          {providers.length > listed.length ? (
+            <p className="text-sm text-muted-foreground">
+              {`${String(providers.length - listed.length)} more providers are blocked.`}
+            </p>
+          ) : null}
+        </CardContent>
 
-      <AlertDialog
-        open={confirming !== null}
-        onOpenChange={(open) => (open ? undefined : setConfirming(null))}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Trust the new address?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The keys of{" "}
-              {confirming === null
-                ? "this provider"
-                : truncateText(confirming.name, 60).text}{" "}
-              will be sent to{" "}
-              <code className="font-mono break-all">
-                {confirming?.url.pendingUrl === null ||
-                confirming?.url.pendingUrl === undefined
-                  ? ""
-                  : addressText(confirming.url.pendingUrl, true)}
-              </code>
-              . Confirm only an address you recognise. The change is written to
-              the server log with your account.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep it blocked</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const provider = confirming;
-                setConfirming(null);
-                if (provider !== null) void confirm(provider);
-              }}
-            >
-              Trust the new address
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
+        <AlertDialog
+          open={confirming !== null}
+          onOpenChange={(open) => (open ? undefined : setConfirming(null))}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Trust the new address?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The keys of{" "}
+                {confirming === null
+                  ? "this provider"
+                  : truncateText(confirming.name, 60).text}{" "}
+                will be sent to{" "}
+                <code className="font-mono break-all">
+                  {confirming?.url.pendingUrl === null ||
+                  confirming?.url.pendingUrl === undefined
+                    ? ""
+                    : addressText(confirming.url.pendingUrl, true)}
+                </code>
+                . Confirm only an address you recognise. The change is written
+                to the server log with your account.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep it blocked</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const provider = confirming;
+                  setConfirming(null);
+                  if (provider !== null) void confirm(provider);
+                }}
+              >
+                Trust the new address
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Card>
+    );
+  // One shape whatever the list holds, so the status element is the same one before and after the last confirmation.
+  return (
+    <>
+      {notice}
+      {card}
+    </>
   );
 }

@@ -290,7 +290,12 @@ test.describe("the models.dev catalog in the admin portal", () => {
         .getByRole("alertdialog")
         .getByRole("button", { name: "Trust the new address" })
         .click();
-      await expect(page.getByText("The new address is trusted.")).toBeVisible();
+      // The notice lives outside the list the confirmed provider leaves, so it is there whenever the page reloads.
+      await expect(
+        page.locator('[data-slot="provider-address-status"]'),
+      ).toHaveText(
+        "The new address of DeepSeek is trusted. No provider address needs a decision now.",
+      );
       await expect(
         page.getByRole("region", { name: "Provider addresses that need you" }),
       ).toHaveCount(0);

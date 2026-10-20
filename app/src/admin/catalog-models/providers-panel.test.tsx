@@ -95,8 +95,47 @@ describe("a provider whose address changed", () => {
         pendingUrl: MOVED,
       }),
     );
-    expect(await screen.findByText("The new address is trusted.")).toBeTruthy();
+    expect(
+      await screen.findByText("The new address of DeepSeek is trusted."),
+    ).toBeTruthy();
     expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  // #554-T06
+  it("keeps saying the address is trusted when the confirmed provider was the last one in the list", async () => {
+    const api = fakeApi();
+    const { rerender, container } = render(
+      <ProvidersPanel providers={[changed]} api={api} />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Confirm the new address of DeepSeek",
+      }),
+    );
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Trust the new address",
+      }),
+    );
+    await waitFor(() => expect(api.confirmUrl).toHaveBeenCalled());
+
+    // The page reloads its data: no address needs a decision any more, so the list is empty.
+    rerender(<ProvidersPanel providers={[]} api={api} />);
+
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe(
+      "The new address of DeepSeek is trusted. No provider address needs a decision now.",
+    );
+    expect(container.querySelector('[role="region"]')).toBeNull();
+  });
+
+  // #554-T06
+  it("has the status region in the page before anything is confirmed, so the notice is announced", () => {
+    render(<ProvidersPanel providers={[]} api={fakeApi()} />);
+
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toBe("");
   });
 
   // #554-T06
