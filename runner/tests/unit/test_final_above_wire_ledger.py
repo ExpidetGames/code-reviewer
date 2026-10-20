@@ -554,3 +554,43 @@ def test_the_runner_text_is_found_in_a_body_with_the_html_safe_escapes() -> None
     final = budget.reserve_call(body, output_tokens=1_024, last_user_text=message)
 
     assert final.final is True
+
+
+# #552-F8: why no mark could be set is told in the ledger's own words, one per cause
+def test_the_refusal_of_a_mark_says_why_for_every_cause() -> None:
+    running = ledger()
+    running.reserve_call(REQUEST, output_tokens=1_024)
+    assert running.arm_final(MESSAGE, TOKEN) is False
+    error = running.final_refusal()
+    assert error.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE and "still running" in error.detail
+
+    clock = Clock()
+    late = ledger(clock=clock)
+    clock.now = late.limits.deadline_seconds + 1
+    assert late.arm_final(MESSAGE, TOKEN) is False
+    error = late.final_refusal()
+    assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED and "deadline" in error.detail
+
+    used = over_the_limit()
+    assert used.arm_final(MESSAGE, TOKEN) and used.arm_final(MESSAGE, TOKEN) is False
+    consumed = used.reserve_call(carrying(), output_tokens=1_024, last_user_text=MESSAGE)
+    used.settle_call(consumed, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.01"))
+    assert used.arm_final(MESSAGE, TOKEN)
+    repair = used.reserve_call(carrying(), output_tokens=1_024, last_user_text=MESSAGE)
+    used.settle_call(repair, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.01"))
+    assert used.arm_final(MESSAGE, TOKEN) is False
+    error = used.final_refusal()
+    assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED and "its repair" in error.detail
+
+    unseen = ledger()
+    booked = unseen.reserve_call(b"x" * 150_000, output_tokens=1_024)
+    unseen.settle_unknown(booked)
+    assert unseen.arm_final(MESSAGE, TOKEN) is False
+    error = unseen.final_refusal()
+    assert error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED and "not known" in error.detail
+
+    failed = ledger()
+    cause = LimitError(ErrorCode.DYNAMIC_POLICY_VIOLATION, "a rule")
+    failed.record_failure(cause)
+    assert failed.arm_final(MESSAGE, TOKEN) is False
+    assert failed.final_refusal() is cause

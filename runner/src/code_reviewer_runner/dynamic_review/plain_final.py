@@ -182,9 +182,7 @@ class PlainFinalization:
         token = self._new_token()
         text = build(token)
         if not self._ledger.arm_final(text, token):
-            raise LimitError(
-                ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "no call was left for the answer to the run"
-            )
+            raise self._ledger.final_refusal()
         self._turn(text)
         if not self._ledger.final_armed:
             return

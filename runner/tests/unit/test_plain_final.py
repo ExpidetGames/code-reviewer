@@ -371,8 +371,8 @@ def test_the_repair_is_a_call_the_ledger_marks_reserves_and_counts() -> None:
     assert engine.ledger.arm_final(MESSAGE, "tok0") is False
 
 
-# #552-T05: no room for the repair means the run ends with the ledger's code, not a lost review
-def test_a_repair_the_ledger_cannot_mark_ends_the_run_with_the_budget_code(
+# #552-T05, #552-F8: a call of the aborted turn that never ends is named for what it is
+def test_a_call_that_never_ends_after_the_abort_is_an_engine_that_is_not_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(plain_final, "IDLE_WAIT_SECONDS", 0.1)  # the stuck call is not waited for
@@ -387,7 +387,8 @@ def test_a_repair_the_ledger_cannot_mark_ends_the_run_with_the_budget_code(
     with pytest.raises(LimitError) as raised:
         final.run()
 
-    assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert raised.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+    assert "still running" in raised.value.detail
 
 
 # #552-T06: the limit is announced by a message while the turn runs, and recorded as the reason
@@ -574,6 +575,7 @@ def test_a_refusal_with_no_call_left_for_the_answer_ends_with_the_budget_code() 
         final.run()
 
     assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert "deadline" in raised.value.detail
     assert len(engine.prompts) == 1
 
 

@@ -676,6 +676,38 @@ class BudgetLedger:
             self._marks_used += 1
             return True
 
+    def final_refusal(self) -> LimitError:
+        """Why `arm_final` said no, with the code and the words of that cause (#552). Call it after
+        `arm_final` returned False: the failure of the run if there is one, a call of the aborted
+        turn that is still running, the deadline, both marks used, or a spend over the limit that
+        is not known (a call booked at its worst case)."""
+        with self._lock:
+            if self._failure is not None:
+                return self._failure
+            if self._open:
+                return LimitError(
+                    ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+                    "a model call of the aborted turn was still running when the answer was due",
+                )
+            if self.remaining_seconds() <= 0:
+                return LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the whole-job deadline was reached before the answer could be asked for",
+                )
+            if self._marks_used >= MAX_FINAL_MARKS:
+                return LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the call for the answer and its repair are used",
+                )
+            if self._final_armed:
+                return LimitError(
+                    ErrorCode.RUNNER_ERROR, "a call for the answer was marked already"
+                )
+            return LimitError(
+                ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
+                "the spend passes the cost limit and the cost of a call is not known",
+            )
+
     @property
     def final_armed(self) -> bool:
         """True while a mark waits for the call that carries the adapter's message."""
