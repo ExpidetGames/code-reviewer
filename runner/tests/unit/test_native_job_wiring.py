@@ -156,6 +156,7 @@ def job_of(family: WireFamily, **options: Any) -> Job:
 
 
 # #578-T19
+@pytest.mark.parametrize("cost", [MANAGED_COST, OWN_COST], ids=["managed", "own-key"])
 @pytest.mark.parametrize(
     ("family", "last", "expected"),
     [
@@ -166,9 +167,9 @@ def job_of(family: WireFamily, **options: Any) -> Job:
     ],
 )
 def test_the_trace_and_the_finalization_line_say_why_the_last_call_ended(
-    tmp_path: Path, family: WireFamily, last: Turn, expected: str
+    tmp_path: Path, family: WireFamily, last: Turn, expected: str, cost: dict[str, Any]
 ) -> None:
-    job = job_of(family)
+    job = job_of(family, cost=cost)
     upstream = scripted(family, TOOL, last)
     with started(tmp_path, job, upstream) as (native, job, _upstream):
         outcome, engine = drive(native, job, tmp_path, calls=2)
