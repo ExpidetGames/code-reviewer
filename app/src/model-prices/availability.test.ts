@@ -56,7 +56,7 @@ function confirmed(cost = model.cost): PriceConfirmation {
     source: "catalog",
     book: reference,
     reference,
-    referenceHash: referenceHash(reference),
+    referenceHash: referenceHash(reference, { reasoning: false }),
     reason: null,
     confirmedBy: "admin-1",
     confirmedAt: "2026-10-20T09:00:00.000Z",
@@ -80,6 +80,7 @@ function check(
     enabled: patch.enabled ?? true,
     override,
     price: effectivePrice({
+      reasoning: false,
       cost: row?.cost ?? null,
       override,
       confirmation:

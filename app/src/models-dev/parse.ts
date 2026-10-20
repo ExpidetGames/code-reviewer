@@ -24,7 +24,13 @@ export const MAX_MODELS_PER_PROVIDER = 2000;
 const MAX_LIMIT = 100_000_000;
 /** USD per million tokens; far above any real price, so a typo cannot become a charge. */
 const MAX_PRICE = 100_000;
-const MAX_TIERS = 8;
+/**
+ * The most tiers of one price that are stored. Real models have one to three; a body above this is flagged (`unknown`), so
+ * that a poisoned model cannot make a row large and a model with more tiers than we hold is never priced from a cut list.
+ */
+export const MAX_COST_TIERS = 64;
+/** The most names listed in `ModelCost.unknown`. */
+const MAX_UNKNOWN_NAMES = 16;
 
 export const MODELS_DEV_STATUSES = [
   "alpha",
@@ -36,22 +42,36 @@ export type ModelsDevStatus = (typeof MODELS_DEV_STATUSES)[number];
 export const MODALITIES = ["text", "audio", "image", "video", "pdf"] as const;
 export type Modality = (typeof MODALITIES)[number];
 
-export type PriceTier = {
-  /** The tier applies to a prompt above this many tokens. */
-  contextOver: number;
+/** The prices of one level (the base price, a tier or the older `context_over_200k`) as models.dev names them, camel-cased. */
+export type CostAmounts = {
   input: string;
   output: string;
   cacheRead?: string;
   cacheWrite?: string;
+  reasoning?: string;
+  inputAudio?: string;
+  outputAudio?: string;
 };
 
-/** USD per million tokens as exact decimal strings (no float rounding enters a price). */
-export type ModelCost = {
-  input: string;
-  output: string;
-  cacheRead?: string;
-  cacheWrite?: string;
+export type PriceTier = CostAmounts & {
+  /** The tier applies to a prompt above this many tokens. */
+  contextOver: number;
+};
+
+/**
+ * USD per million tokens as exact decimal strings (no float rounding enters a price). Everything models.dev states about a
+ * price is kept, so that a change to any of it is seen: the price of reasoning tokens, audio, the older
+ * `context_over_200k` and every tier, in the order models.dev lists them.
+ */
+export type ModelCost = CostAmounts & {
+  contextOver200k?: CostAmounts;
   tiers?: PriceTier[];
+  /**
+   * Names of what the price states and we cannot read: a price field or a tier of a kind we do not know, a malformed tier,
+   * more tiers than we hold. Sorted, plain names only (`cost.input_video`, `tier_type.time_of_day`, `tier`). A model that
+   * has any is not priced for the managed key (`price-book.ts`): we cannot bill what we do not understand. Absent when empty.
+   */
+  unknown?: string[];
 };
 
 export type Interleaved = true | { field: InterleavedField };
@@ -124,21 +144,17 @@ function text(max: number) {
 const count = z.number().int().min(1).max(MAX_LIMIT);
 const price = z.number().min(0).max(MAX_PRICE);
 
-const costSchema = z.object({
-  input: price,
-  output: price,
-  cache_read: price.optional(),
-  cache_write: price.optional(),
-  tiers: z.array(z.unknown()).optional(),
-});
-
-const tierSchema = z.object({
-  input: price,
-  output: price,
-  cache_read: price.optional(),
-  cache_write: price.optional(),
-  tier: z.object({ type: z.literal("context"), size: count }),
-});
+// The base price is validated as before (a bad input, output or cache price makes the model invalid); everything else it
+// states is read by `amountsOf`, so that a key we do not know is seen and not lost.
+const costSchema = z
+  .object({
+    input: price,
+    output: price,
+    cache_read: price.optional(),
+    cache_write: price.optional(),
+    tiers: z.array(z.unknown()).optional(),
+  })
+  .catchall(z.unknown());
 
 const modelSchema = z.object({
   id: z.string().optional(),
@@ -178,34 +194,107 @@ function decimal(value: number): string {
   return value.toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+const AMOUNT_FIELDS = {
+  input: "input",
+  output: "output",
+  cache_read: "cacheRead",
+  cache_write: "cacheWrite",
+  reasoning: "reasoning",
+  input_audio: "inputAudio",
+  output_audio: "outputAudio",
+} as const satisfies Record<string, keyof CostAmounts>;
+type AmountKey = keyof typeof AMOUNT_FIELDS;
+
+const isAmountKey = (key: string): key is AmountKey =>
+  Object.hasOwn(AMOUNT_FIELDS, key);
+
+/** A name from the body as it may appear in a stored list: short and plain, never the body's own text. */
+function plainName(name: unknown): string {
+  return typeof name === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(name)
+    ? name
+    : "invalid_name";
+}
+
+/** The prices a level states, and the names of what in it is not a price we know. `skip` are keys read elsewhere. */
+function amountsOf(
+  level: Record<string, unknown>,
+  skip: readonly string[],
+  scope: string,
+): { amounts: Partial<Record<keyof CostAmounts, string>>; unknown: string[] } {
+  const amounts: Partial<Record<keyof CostAmounts, string>> = {};
+  const unknown: string[] = [];
+  for (const [key, value] of Object.entries(level)) {
+    if (skip.includes(key)) continue;
+    const parsed = isAmountKey(key) ? price.safeParse(value) : undefined;
+    if (!isAmountKey(key) || parsed === undefined || !parsed.success)
+      unknown.push(`${scope}.${plainName(key)}`);
+    else amounts[AMOUNT_FIELDS[key]] = decimal(parsed.data);
+  }
+  return { amounts, unknown };
+}
+
+/** A level that states an input and an output price, or undefined (and the names of what was wrong). */
+function levelOf(
+  value: unknown,
+  skip: readonly string[],
+  scope: string,
+): { level: CostAmounts | undefined; unknown: string[] } {
+  if (!isRecord(value)) return { level: undefined, unknown: [scope] };
+  const { amounts, unknown } = amountsOf(value, skip, scope);
+  const { input, output, ...rest } = amounts;
+  if (input === undefined || output === undefined)
+    return { level: undefined, unknown: [...unknown, scope] };
+  return { level: { input, output, ...rest }, unknown };
+}
+
+function tierOf(candidate: unknown): {
+  tier: PriceTier | undefined;
+  unknown: string[];
+} {
+  if (!isRecord(candidate)) return { tier: undefined, unknown: ["tier"] };
+  const kind = candidate.tier;
+  if (!isRecord(kind)) return { tier: undefined, unknown: ["tier"] };
+  // A tier of a kind we do not know (by time of day, by region, ...) never replaces the base price, and the model is not
+  // priced: its real price may be that one.
+  if (kind.type !== "context")
+    return {
+      tier: undefined,
+      unknown: [`tier_type.${plainName(kind.type)}`],
+    };
+  const size = count.safeParse(kind.size);
+  const { level, unknown } = levelOf(candidate, ["tier"], "tier");
+  if (!size.success || level === undefined)
+    return { tier: undefined, unknown: [...unknown, "tier"] };
+  return { tier: { contextOver: size.data, ...level }, unknown };
+}
+
 function costOf(parsed: z.infer<typeof costSchema>): ModelCost {
+  const { tiers: candidates = [], cache_read, cache_write, ...stated } = parsed;
+  const { input, output, context_over_200k, ...others } = stated;
+  const { amounts, unknown } = amountsOf(others, [], "cost");
+  const names = new Set(unknown);
   const cost: ModelCost = {
-    input: decimal(parsed.input),
-    output: decimal(parsed.output),
+    ...amounts,
+    input: decimal(input),
+    output: decimal(output),
   };
-  if (parsed.cache_read !== undefined)
-    cost.cacheRead = decimal(parsed.cache_read);
-  if (parsed.cache_write !== undefined)
-    cost.cacheWrite = decimal(parsed.cache_write);
+  if (cache_read !== undefined) cost.cacheRead = decimal(cache_read);
+  if (cache_write !== undefined) cost.cacheWrite = decimal(cache_write);
+  if (context_over_200k !== undefined) {
+    const older = levelOf(context_over_200k, [], "context_over_200k");
+    if (older.level !== undefined) cost.contextOver200k = older.level;
+    for (const name of older.unknown) names.add(name);
+  }
   const tiers: PriceTier[] = [];
-  for (const candidate of (parsed.tiers ?? []).slice(0, MAX_TIERS)) {
-    // A tier of a kind we do not know is ignored; it never replaces the base price.
-    const tier = tierSchema.safeParse(candidate);
-    if (!tier.success) continue;
-    const { data } = tier;
-    tiers.push({
-      contextOver: data.tier.size,
-      input: decimal(data.input),
-      output: decimal(data.output),
-      ...(data.cache_read === undefined
-        ? {}
-        : { cacheRead: decimal(data.cache_read) }),
-      ...(data.cache_write === undefined
-        ? {}
-        : { cacheWrite: decimal(data.cache_write) }),
-    });
+  if (candidates.length > MAX_COST_TIERS) names.add("tiers_over_limit");
+  for (const candidate of candidates.slice(0, MAX_COST_TIERS)) {
+    const read = tierOf(candidate);
+    if (read.tier !== undefined) tiers.push(read.tier);
+    for (const name of read.unknown) names.add(name);
   }
   if (tiers.length > 0) cost.tiers = tiers;
+  if (names.size > 0)
+    cost.unknown = [...names].sort().slice(0, MAX_UNKNOWN_NAMES);
   return cost;
 }
 

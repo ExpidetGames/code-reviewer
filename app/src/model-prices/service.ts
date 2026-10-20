@@ -219,6 +219,7 @@ export function createModelPriceService(
       const before = await history.latest(ids.providerId, ids.modelId);
       const today = effectivePrice({
         cost: model.cost,
+        reasoning: model.reasoning,
         override: overrideOf(ids.providerId, ids.modelId),
         confirmation: null,
       }).reference;
@@ -428,6 +429,7 @@ export function createModelPriceService(
         override,
         price: effectivePrice({
           cost: model?.cost ?? null,
+          reasoning: model?.reasoning ?? false,
           override,
           confirmation: confirmation ?? null,
         }),

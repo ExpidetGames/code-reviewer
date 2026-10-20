@@ -18,7 +18,7 @@ import {
   priceBookToJson,
   type PriceBook,
 } from "./price-book.ts";
-import { referenceHash } from "./price-hash.ts";
+import { HASH_VERSION, hashVersionOf, referenceHash } from "./price-hash.ts";
 
 export const PRICE_STATUSES = [
   "confirmed",
@@ -37,6 +37,10 @@ export const PRICE_FIELDS = [
   "cacheRead",
   "cacheWrite5m",
   "cacheWrite1h",
+  "reasoning",
+  "inputAudio",
+  "outputAudio",
+  "contextOver200k",
   "tiers",
 ] as const;
 export type PriceField = (typeof PRICE_FIELDS)[number];
@@ -64,6 +68,8 @@ export type EffectivePrice = {
 
 export type EffectivePriceInput = {
   cost: ModelCost | null;
+  /** models.dev's `reasoning` flag of the model: part of the reference, because it changes the request. */
+  reasoning: boolean;
   override: ModelOverride | undefined;
   confirmation: PriceConfirmation | null;
 };
@@ -84,12 +90,18 @@ function sourcesOfReference(
         : override?.cacheWrite1h == null
           ? "catalog"
           : "override",
+    reasoning: book.reasoning === null ? null : "catalog",
+    inputAudio: book.inputAudio === null ? null : "catalog",
+    outputAudio: book.outputAudio === null ? null : "catalog",
+    contextOver200k: book.contextOver200k === null ? null : "catalog",
     tiers: book.tiers.length === 0 ? null : "catalog",
   };
 }
 
 const tiersText = (book: PriceBook | null) =>
   book === null ? null : JSON.stringify(priceBookToJson(book).tiers);
+const olderTierText = (book: PriceBook | null) =>
+  book === null ? null : JSON.stringify(priceBookToJson(book).contextOver200k);
 
 /** The sources of a confirmed book: the reference's, except for the fields an admin's correction changed or added. */
 function sourcesOfConfirmed(
@@ -128,6 +140,26 @@ function sourcesOfConfirmed(
       book.cacheWrite1h !== null,
       was?.cacheWrite1h !== book.cacheWrite1h,
     ),
+    reasoning: sourceOf(
+      "reasoning",
+      book.reasoning !== null,
+      was?.reasoning !== book.reasoning,
+    ),
+    inputAudio: sourceOf(
+      "inputAudio",
+      book.inputAudio !== null,
+      was?.inputAudio !== book.inputAudio,
+    ),
+    outputAudio: sourceOf(
+      "outputAudio",
+      book.outputAudio !== null,
+      was?.outputAudio !== book.outputAudio,
+    ),
+    contextOver200k: sourceOf(
+      "contextOver200k",
+      book.contextOver200k !== null,
+      olderTierText(was) !== olderTierText(book),
+    ),
     tiers: sourceOf(
       "tiers",
       book.tiers.length > 0,
@@ -145,7 +177,7 @@ export function effectivePrice(input: EffectivePriceInput): EffectivePrice {
   const referenceSources = sourcesOfReference(referenceBook, override);
   const reference = {
     book: referenceBook,
-    hash: referenceHash(referenceBook),
+    hash: referenceHash(referenceBook, { reasoning: input.reasoning }),
     sources: referenceSources,
   };
   if (confirmation === null)
@@ -156,9 +188,12 @@ export function effectivePrice(input: EffectivePriceInput): EffectivePrice {
       reference,
       confirmation: null,
     };
+  // A hash of another version cannot be compared with today's, so it is stale whatever it looks like (price-hash.ts).
+  const current =
+    hashVersionOf(confirmation.referenceHash) === HASH_VERSION &&
+    confirmation.referenceHash === reference.hash;
   return {
-    status:
-      confirmation.referenceHash === reference.hash ? "confirmed" : "stale",
+    status: current ? "confirmed" : "stale",
     book: confirmation.book,
     sources: sourcesOfConfirmed(confirmation, referenceSources),
     reference,

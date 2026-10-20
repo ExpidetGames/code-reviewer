@@ -8,7 +8,7 @@ import type { ModelCost } from "../models-dev/parse.ts";
 import { effectivePrice } from "./effective-price.ts";
 import type { ModelOverride } from "./overrides.ts";
 import { priceBookFromCatalog, type PriceBook } from "./price-book.ts";
-import { referenceHash } from "./price-hash.ts";
+import { HASH_VERSION, hashVersionOf, referenceHash } from "./price-hash.ts";
 import type { PriceConfirmation } from "./confirmation.ts";
 
 const COST: ModelCost = {
@@ -40,7 +40,7 @@ function confirmationOf(
     source: "catalog",
     book: reference as PriceBook,
     reference,
-    referenceHash: referenceHash(reference),
+    referenceHash: referenceHash(reference, { reasoning: false }),
     reason: null,
     confirmedBy: "admin-1",
     confirmedAt: "2026-10-20T09:00:00.000Z",
@@ -52,6 +52,7 @@ describe("effectivePrice", () => {
   // #549-T02
   it("is unconfirmed until an admin confirms, and then proposes the catalog price with its sources", () => {
     const price = effectivePrice({
+      reasoning: false,
       cost: COST,
       override: OVERRIDE,
       confirmation: null,
@@ -71,10 +72,16 @@ describe("effectivePrice", () => {
       cacheRead: "catalog",
       cacheWrite5m: "catalog",
       cacheWrite1h: "override",
+      reasoning: null,
+      inputAudio: null,
+      outputAudio: null,
+      contextOver200k: null,
       tiers: null,
     });
     expect(price.confirmation).toBeNull();
-    expect(price.reference.hash).toBe(referenceHash(price.reference.book));
+    expect(price.reference.hash).toBe(
+      referenceHash(price.reference.book, { reasoning: false }),
+    );
   });
 
   // #549-T02
@@ -82,6 +89,7 @@ describe("effectivePrice", () => {
     const confirmation = confirmationOf(COST, OVERRIDE);
 
     const price = effectivePrice({
+      reasoning: false,
       cost: COST,
       override: OVERRIDE,
       confirmation,
@@ -110,6 +118,7 @@ describe("effectivePrice", () => {
     });
 
     const price = effectivePrice({
+      reasoning: false,
       cost: COST,
       override: OVERRIDE,
       confirmation,
@@ -129,6 +138,7 @@ describe("effectivePrice", () => {
   // #549-T02
   it("prefers the override to the catalog for the 1-hour cache write", () => {
     const price = effectivePrice({
+      reasoning: false,
       cost: COST,
       override: { ...OVERRIDE, cacheWrite1h: BigInt(6_000_000) },
       confirmation: null,
@@ -141,6 +151,7 @@ describe("effectivePrice", () => {
   // #549-T03
   it("leaves the 1-hour cache write unpriced without an override", () => {
     const price = effectivePrice({
+      reasoning: false,
       cost: COST,
       override: undefined,
       confirmation: null,
@@ -156,6 +167,7 @@ describe("effectivePrice", () => {
     const moved: ModelCost = { ...COST, input: "2.2" };
 
     const price = effectivePrice({
+      reasoning: false,
       cost: moved,
       override: OVERRIDE,
       confirmation,
@@ -177,6 +189,7 @@ describe("effectivePrice", () => {
     const confirmation = confirmationOf(COST, OVERRIDE);
 
     const price = effectivePrice({
+      reasoning: false,
       cost: { ...COST, ...change },
       override: OVERRIDE,
       confirmation,
@@ -190,6 +203,7 @@ describe("effectivePrice", () => {
     const confirmation = confirmationOf(COST, OVERRIDE);
 
     const price = effectivePrice({
+      reasoning: false,
       cost: COST,
       override: { ...OVERRIDE, cacheWrite1h: BigInt(4_500_000) },
       confirmation,
@@ -203,8 +217,12 @@ describe("effectivePrice", () => {
     const confirmation = confirmationOf(COST, OVERRIDE);
 
     expect(
-      effectivePrice({ cost: { ...COST }, override: OVERRIDE, confirmation })
-        .status,
+      effectivePrice({
+        reasoning: false,
+        cost: { ...COST },
+        override: OVERRIDE,
+        confirmation,
+      }).status,
     ).toBe("confirmed");
   });
 
@@ -218,6 +236,7 @@ describe("effectivePrice", () => {
     });
 
     const price = effectivePrice({
+      reasoning: false,
       cost: { ...COST, input: "2.5" },
       override: undefined,
       confirmation,
@@ -230,6 +249,7 @@ describe("effectivePrice", () => {
   // #549-T02
   it("is unpriced when the catalog states no price and nobody has stated one", () => {
     const price = effectivePrice({
+      reasoning: false,
       cost: null,
       override: undefined,
       confirmation: null,
@@ -244,6 +264,7 @@ describe("effectivePrice", () => {
   // #549-T02
   it("is unpriced when the catalog's price cannot be held exactly", () => {
     const price = effectivePrice({
+      reasoning: false,
       cost: { input: "0.0000001", output: "1" },
       override: undefined,
       confirmation: null,
@@ -263,11 +284,143 @@ describe("effectivePrice", () => {
     });
 
     expect(
-      effectivePrice({ cost: null, override: undefined, confirmation }).status,
+      effectivePrice({
+        reasoning: false,
+        cost: null,
+        override: undefined,
+        confirmation,
+      }).status,
     ).toBe("confirmed");
     expect(
-      effectivePrice({ cost: COST, override: undefined, confirmation }).status,
+      effectivePrice({
+        reasoning: false,
+        cost: COST,
+        override: undefined,
+        confirmation,
+      }).status,
     ).toBe("stale");
+  });
+});
+
+describe("what makes a confirmation stale", () => {
+  const reasoningCost: ModelCost = { ...COST, reasoning: "12" };
+  const confirmedFor = (cost: ModelCost, reasoning: boolean) =>
+    confirmationOf(cost, undefined, {
+      referenceHash: referenceHash(priceBookFromCatalog(cost, undefined), {
+        reasoning,
+      }),
+    });
+
+  // #549-T05
+  it("sees a changed price of reasoning tokens", () => {
+    const confirmation = confirmedFor(reasoningCost, true);
+
+    const same = effectivePrice({
+      cost: reasoningCost,
+      reasoning: true,
+      override: undefined,
+      confirmation,
+    });
+    const changed = effectivePrice({
+      cost: { ...reasoningCost, reasoning: "14" },
+      reasoning: true,
+      override: undefined,
+      confirmation,
+    });
+
+    expect(same.status).toBe("confirmed");
+    expect(changed.status).toBe("stale");
+  });
+
+  // #549-T05
+  it("sees a change of the reasoning flag of the model", () => {
+    const confirmation = confirmedFor(COST, false);
+
+    const price = effectivePrice({
+      cost: COST,
+      reasoning: true,
+      override: undefined,
+      confirmation,
+    });
+
+    expect(price.status).toBe("stale");
+  });
+
+  // #549-T05
+  it("sees a changed audio price, a changed older 200k tier and a tier added late", () => {
+    const base: ModelCost = {
+      ...COST,
+      tiers: Array.from({ length: 12 }, (_, index) => ({
+        contextOver: (index + 1) * 1000,
+        input: "3",
+        output: "4",
+      })),
+    };
+    const confirmation = confirmedFor(base, false);
+    const statusOf = (cost: ModelCost) =>
+      effectivePrice({
+        cost,
+        reasoning: false,
+        override: undefined,
+        confirmation,
+      }).status;
+
+    expect(statusOf(base)).toBe("confirmed");
+    expect(statusOf({ ...base, inputAudio: "1" })).toBe("stale");
+    expect(
+      statusOf({ ...base, contextOver200k: { input: "3", output: "4" } }),
+    ).toBe("stale");
+    expect(
+      statusOf({
+        ...base,
+        tiers: [
+          ...(base.tiers ?? []).slice(0, 11),
+          { contextOver: 12000, input: "3", output: "5" },
+        ],
+      }),
+    ).toBe("stale");
+  });
+
+  // #549-T05
+  it("is unpriced while the catalog states a price it cannot read, and stale for a model confirmed before", () => {
+    const unreadable: ModelCost = { ...COST, unknown: ["cost.input_video"] };
+
+    const fresh = effectivePrice({
+      cost: unreadable,
+      reasoning: false,
+      override: undefined,
+      confirmation: null,
+    });
+    const confirmed = effectivePrice({
+      cost: unreadable,
+      reasoning: false,
+      override: undefined,
+      confirmation: confirmedFor(COST, false),
+    });
+
+    expect(fresh.status).toBe("unpriced");
+    expect(confirmed.status).toBe("stale");
+  });
+
+  // #549-T13
+  it("counts a confirmation made with the first version of the hash as stale, however the price looks", () => {
+    const current = referenceHash(priceBookFromCatalog(COST, undefined), {
+      reasoning: false,
+    });
+    const confirmation = confirmationOf(COST, undefined, {
+      referenceHash: current.replace(/^v2:/, ""),
+    });
+
+    const price = effectivePrice({
+      cost: COST,
+      reasoning: false,
+      override: undefined,
+      confirmation,
+    });
+
+    expect(price.status).toBe("stale");
+    expect(hashVersionOf(confirmation.referenceHash)).toBe(1);
+    expect(hashVersionOf(current)).toBe(HASH_VERSION);
   });
 });
 
@@ -281,9 +434,13 @@ describe("referenceHash", () => {
       BigInt(4_000_000),
     );
 
-    expect(referenceHash(a)).toBe(referenceHash(b));
-    expect(referenceHash(a)).not.toBe(referenceHash(c));
-    expect(referenceHash(null)).not.toBe(referenceHash(a));
-    expect(referenceHash(a)).toMatch(/^[0-9a-f]{64}$/);
+    const plain = { reasoning: false };
+    expect(referenceHash(a, plain)).toBe(referenceHash(b, plain));
+    expect(referenceHash(a, plain)).not.toBe(referenceHash(c, plain));
+    expect(referenceHash(null, plain)).not.toBe(referenceHash(a, plain));
+    expect(referenceHash(a, plain)).toMatch(/^v2:[0-9a-f]{64}$/);
+    expect(referenceHash(a, { reasoning: true })).not.toBe(
+      referenceHash(a, plain),
+    );
   });
 });

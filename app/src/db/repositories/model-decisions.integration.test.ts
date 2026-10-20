@@ -84,7 +84,7 @@ describe.each(MODELS_DEV_ENGINES)(
       source: "catalog" as const,
       book: REFERENCE,
       reference: REFERENCE,
-      referenceHash: referenceHash(REFERENCE),
+      referenceHash: referenceHash(REFERENCE, { reasoning: false }),
       reason: null,
       confirmedBy: "admin-1",
       ...patch,
@@ -201,7 +201,7 @@ describe.each(MODELS_DEV_ENGINES)(
             source: "catalog",
             book: REFERENCE,
             reference: REFERENCE,
-            referenceHash: referenceHash(REFERENCE),
+            referenceHash: referenceHash(REFERENCE, { reasoning: false }),
             reason: null,
             confirmedBy: "admin-1",
             confirmedAt: T1.toISOString(),
@@ -278,14 +278,16 @@ describe.each(MODELS_DEV_ENGINES)(
             confirm({
               source: "admin",
               reference: null,
-              referenceHash: referenceHash(null),
+              referenceHash: referenceHash(null, { reasoning: false }),
               reason: "From the provider's page.",
             }),
             T1,
           );
 
           expect(saved.reference).toBeNull();
-          expect(saved.referenceHash).toBe(referenceHash(null));
+          expect(saved.referenceHash).toBe(
+            referenceHash(null, { reasoning: false }),
+          );
         },
       );
 
@@ -350,7 +352,10 @@ describe.each(MODELS_DEV_ENGINES)(
           ).rejects.toThrow();
           await expect(
             confirmations.append(
-              confirm({ reference: null, referenceHash: referenceHash(null) }),
+              confirm({
+                reference: null,
+                referenceHash: referenceHash(null, { reasoning: false }),
+              }),
               T1,
             ),
           ).rejects.toThrow();

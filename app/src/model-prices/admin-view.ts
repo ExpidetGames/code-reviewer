@@ -93,6 +93,7 @@ export function toModelView(input: ModelViewInput): CatalogModelView {
   const { provider, model, enablement, confirmation, override } = input;
   const price = effectivePrice({
     cost: model.cost,
+    reasoning: model.reasoning,
     override,
     confirmation: confirmation ?? null,
   });

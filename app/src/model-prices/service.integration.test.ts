@@ -15,13 +15,25 @@ import { createModelPriceConfirmationsRepository } from "../db/repositories/mode
 import { createModelsDevService } from "../models-dev/service.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
 import type { ModelOverride } from "./overrides.ts";
-import type { PriceBookJson } from "./price-book.ts";
+import {
+  parsePriceBookJson,
+  type PriceBook,
+  type PriceBookJson,
+} from "./price-book.ts";
 import { createModelPriceService } from "./service.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 const T1 = new Date("2026-10-19T03:00:00.000Z");
 const PUBLIC = async () => ["93.184.216.34"];
 const ADMIN = "admin-1";
+
+/** A book of the view's JSON form, as the repository takes it. */
+function parsedBook(json: PriceBookJson | null) {
+  if (json === null) return null;
+  const parsed = parsePriceBookJson(json);
+  if (!parsed.ok) throw new Error("not a book");
+  return parsed.book;
+}
 
 const fakes: ModelsDevFake[] = [];
 afterEach(async () => {
@@ -113,7 +125,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
               cacheWrite5m: "2500000",
               cacheWrite1h: null,
             },
-            reference: { hash: expect.stringMatching(/^[0-9a-f]{64}$/) },
+            reference: { hash: expect.stringMatching(/^v2:[0-9a-f]{64}$/) },
             confirmation: null,
           },
           managed: { selectable: false, reason: "model_not_enabled" },
@@ -761,6 +773,129 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         expect(again).toMatchObject({
           ok: true,
           model: { price: { status: "confirmed", book: { input: "2200000" } } },
+        });
+        expect(
+          await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
+        ).toHaveLength(2);
+      },
+    );
+
+    // #549-T05
+    it_(
+      "counts as stale when only the price of reasoning tokens changed",
+      async () => {
+        const t = await setup();
+        await t.service.confirmPrice(ADMIN, {
+          ...DEEPSEEK,
+          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+        });
+        expect((await view(t, DEEPSEEK)).price.status).toBe("confirmed");
+
+        await t.fetchChanged((body) => {
+          const cost = body.deepseek!.models["deepseek-v4-pro"]!.cost as Record<
+            string,
+            unknown
+          >;
+          cost.reasoning = 2.5;
+        });
+
+        const stale = await view(t, DEEPSEEK);
+        expect(stale.price.status).toBe("stale");
+        expect(stale.price.book?.reasoning).toBe("1980000");
+        expect(stale.price.reference.book?.reasoning).toBe("2500000");
+      },
+    );
+
+    // #549-T05
+    it_(
+      "counts as stale when only the reasoning flag of the model changed",
+      async () => {
+        const t = await setup();
+        await t.service.confirmPrice(ADMIN, {
+          ...DEEPSEEK,
+          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+        });
+
+        await t.fetchChanged((body) => {
+          body.deepseek!.models["deepseek-v4-pro"]!.reasoning = false;
+        });
+
+        expect((await view(t, DEEPSEEK)).price.status).toBe("stale");
+      },
+    );
+
+    // #549-T05
+    it_(
+      "refuses the managed key when the catalog adds a price we cannot read, and prices nothing new from it",
+      async () => {
+        const t = await setup();
+        await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+        expect(
+          await t.service.availability("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({
+          selectable: true,
+        });
+
+        await t.fetchChanged((body) => {
+          const cost = body.anthropic!.models["claude-sonnet-5-5"]!
+            .cost as Record<string, unknown>;
+          cost.tiers = [
+            { input: 4, output: 20, tier: { type: "time_of_day", size: 12 } },
+          ];
+        });
+
+        const model = await view(t);
+        expect(model.price.status).toBe("stale");
+        expect(model.price.reference.book).toBeNull();
+        expect(model.managed).toEqual({
+          selectable: false,
+          reason: "price_unconfirmed",
+        });
+        expect(
+          await t.service.confirmPrice(ADMIN, {
+            ...SONNET,
+            referenceHash: model.price.reference.hash,
+          }),
+        ).toEqual({ ok: false, code: "price_missing" });
+      },
+    );
+
+    // #549-T13
+    it_(
+      "counts a confirmation of the first hash version as stale until it is confirmed again",
+      async () => {
+        const t = await setup();
+        const shown = await view(t);
+        await t.confirmations.append(
+          {
+            providerId: "anthropic",
+            modelId: "claude-sonnet-5-5",
+            source: "catalog",
+            book: parsedBook(shown.price.book) as PriceBook,
+            reference: parsedBook(shown.price.reference.book),
+            // What the first version wrote: the bare digest.
+            referenceHash: shown.price.reference.hash.replace(/^v2:/, ""),
+            reason: null,
+            confirmedBy: ADMIN,
+          },
+          T1,
+        );
+
+        const old = await view(t);
+        expect(old.price.status).toBe("stale");
+        expect(old.managed).toMatchObject({ selectable: false });
+
+        const again = await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: old.price.reference.hash,
+        });
+        expect(again).toMatchObject({
+          ok: true,
+          model: { price: { status: "confirmed" } },
         });
         expect(
           await t.confirmations.history("anthropic", "claude-sonnet-5-5"),

@@ -38,6 +38,10 @@ describe("priceBookFromCatalog", () => {
       cacheRead: BigInt(10_000),
       cacheWrite5m: BigInt(125_000),
       cacheWrite1h: null,
+      reasoning: null,
+      inputAudio: null,
+      outputAudio: null,
+      contextOver200k: null,
       tiers: [
         {
           contextOver: 100000,
@@ -46,6 +50,9 @@ describe("priceBookFromCatalog", () => {
           cacheRead: BigInt(50_000),
           cacheWrite5m: BigInt(625_000),
           cacheWrite1h: null,
+          reasoning: null,
+          inputAudio: null,
+          outputAudio: null,
         },
       ],
     });
@@ -86,6 +93,59 @@ describe("priceBookFromCatalog", () => {
     );
 
     expect(book).toBeNull();
+  });
+
+  // #549-T05
+  it("reads the price of reasoning and of audio, and the older 200k tier, into the book", () => {
+    const book = priceBookFromCatalog(
+      {
+        input: "1",
+        output: "2",
+        reasoning: "3",
+        inputAudio: "4",
+        outputAudio: "5",
+        contextOver200k: { input: "6", output: "7", cacheRead: "0.5" },
+        tiers: [
+          { contextOver: 1000, input: "8", output: "9", reasoning: "10" },
+        ],
+      },
+      undefined,
+    ) as PriceBook;
+
+    expect(book).toMatchObject({
+      reasoning: BigInt(3_000_000),
+      inputAudio: BigInt(4_000_000),
+      outputAudio: BigInt(5_000_000),
+      contextOver200k: {
+        input: BigInt(6_000_000),
+        output: BigInt(7_000_000),
+        cacheRead: BigInt(500_000),
+      },
+    });
+    expect(book.tiers[0]?.reasoning).toBe(BigInt(10_000_000));
+  });
+
+  // #549-T05
+  it("leaves what the catalog does not state as null", () => {
+    const book = priceBookFromCatalog(
+      { input: "1", output: "2" },
+      undefined,
+    ) as PriceBook;
+
+    expect(book.reasoning).toBeNull();
+    expect(book.inputAudio).toBeNull();
+    expect(book.outputAudio).toBeNull();
+    expect(book.contextOver200k).toBeNull();
+  });
+
+  // #549-T05
+  it("has no book when the catalog states a price we do not understand, so the model is unpriced", () => {
+    expect(
+      priceBookFromCatalog(
+        { input: "1", output: "2", unknown: ["tier_type.time_of_day"] },
+        undefined,
+      ),
+    ).toBeNull();
   });
 
   // #549-T03
@@ -156,6 +216,10 @@ describe("the JSON form of a book", () => {
       cacheRead: "10000",
       cacheWrite5m: "125000",
       cacheWrite1h: "200000",
+      reasoning: null,
+      inputAudio: null,
+      outputAudio: null,
+      contextOver200k: null,
       tiers: [
         {
           contextOver: 100000,
@@ -164,6 +228,9 @@ describe("the JSON form of a book", () => {
           cacheRead: "50000",
           cacheWrite5m: "625000",
           cacheWrite1h: null,
+          reasoning: null,
+          inputAudio: null,
+          outputAudio: null,
         },
       ],
     });
@@ -175,6 +242,57 @@ describe("the JSON form of a book", () => {
     const text = JSON.stringify(priceBookToJson(book));
 
     expect(parsePriceBookJson(JSON.parse(text))).toEqual({ ok: true, book });
+  });
+});
+
+describe("the JSON form of a book, with every price models.dev states", () => {
+  // #549-T05
+  it("round-trips the price of reasoning and audio and the older 200k tier", () => {
+    const book = priceBookFromCatalog(
+      {
+        input: "1",
+        output: "2",
+        reasoning: "3",
+        inputAudio: "4",
+        contextOver200k: { input: "6", output: "7" },
+      },
+      undefined,
+    ) as PriceBook;
+
+    const json = priceBookToJson(book);
+
+    expect(json).toMatchObject({
+      reasoning: "3000000",
+      inputAudio: "4000000",
+      outputAudio: null,
+      contextOver200k: { input: "6000000", output: "7000000", reasoning: null },
+    });
+    expect(parsePriceBookJson(json)).toEqual({ ok: true, book });
+  });
+
+  // #549-T05
+  it("reads a book an earlier release stored without these prices", () => {
+    expect(parsePriceBookJson({ input: "1", output: "2" })).toMatchObject({
+      ok: true,
+      book: { reasoning: null, contextOver200k: null, tiers: [] },
+    });
+  });
+
+  // #549-T05
+  it("holds as many tiers as the parser stores, and no more", () => {
+    const tiers = (length: number) =>
+      Array.from({ length }, (_, index) => ({
+        contextOver: index + 1,
+        input: "1",
+        output: "2",
+      }));
+
+    expect(
+      parsePriceBookJson({ input: "1", output: "2", tiers: tiers(64) }).ok,
+    ).toBe(true);
+    expect(
+      parsePriceBookJson({ input: "1", output: "2", tiers: tiers(65) }).ok,
+    ).toBe(false);
   });
 });
 
@@ -205,7 +323,7 @@ describe("parsePriceBookJson", () => {
     ["a missing input", { output: "1" }],
     ["a missing output", { input: "1" }],
     ["an amount above the sanity bound", { ...valid, input: "100000000001" }],
-    ["an unknown field", { ...valid, reasoning: "1" }],
+    ["an unknown field", { ...valid, speed: "1" }],
     ["a cache price above the bound", { ...valid, cacheRead: "100000000001" }],
     ["null", null],
     ["an array", []],
@@ -260,7 +378,7 @@ describe("parsePriceBookJson", () => {
     expect(
       parsePriceBookJson({
         ...valid,
-        tiers: Array.from({ length: 9 }, (_, index) =>
+        tiers: Array.from({ length: 65 }, (_, index) =>
           tier({ contextOver: 1000 + index }),
         ),
       }),
