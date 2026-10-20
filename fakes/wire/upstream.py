@@ -254,12 +254,14 @@ class ScriptedUpstream:
                 document, answer(self.family, turn, call, self.model, usage_fault=self.usage_fault)
             )
         if not is_stream(self.family, path, document):
+            # The turn is used up before the answer leaves: a client that asks again, or a test that
+            # restarts the script, the moment it has the answer must find it counted (#567).
+            self._served_one(bool(tools))
             self._send_json(
                 handler,
                 200,
                 answer(self.family, turn, call, self.model, usage_fault=self.usage_fault),
             )
-            self._served_one(bool(tools))
             return
         if self._on_answer is not None:
             self._on_answer(
@@ -276,8 +278,7 @@ class ScriptedUpstream:
             crlf=self.crlf,
             usage_fault=self.usage_fault,
         )
-        if self._send_stream(handler, events):
-            self._served_one(bool(tools))
+        self._send_stream(handler, events, used_up=lambda: self._served_one(bool(tools)))
 
     def _served_one(self, with_tools: bool) -> None:
         if with_tools:
@@ -334,15 +335,16 @@ class ScriptedUpstream:
     def _accepts_gzip(self, handler: BaseHTTPRequestHandler) -> bool:
         return self.compress and "gzip" in (handler.headers.get("Accept-Encoding") or "")
 
-    def _send_stream(self, handler: BaseHTTPRequestHandler, events: list[bytes]) -> bool:
-        """Send the events as a chunked stream. False when it did not end well, on purpose."""
+    def _send_stream(
+        self,
+        handler: BaseHTTPRequestHandler,
+        events: list[bytes],
+        used_up: Callable[[], None],
+    ) -> None:
+        """Send the events as a chunked stream. `used_up` counts the turn, before the first byte
+        leaves, unless the stream is to end badly on purpose (a cut or an error event): that one
+        leaves the turn for the retry."""
         encoder = zlib.compressobj(wbits=31) if self._accepts_gzip(handler) else None
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Transfer-Encoding", "chunked")
-        if encoder is not None:
-            handler.send_header("Content-Encoding", "gzip")
-        handler.end_headers()
         with self._lock:
             cut_after = self._cut_after if self._cuts_left > 0 else None
             error_after = self._error_after if self._errors_left > 0 else None
@@ -356,6 +358,14 @@ class ScriptedUpstream:
             with self._lock:
                 self._cuts_left -= 1
             pieces, completed, cut = pieces[:cut_after], False, True
+        if completed:
+            used_up()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Transfer-Encoding", "chunked")
+        if encoder is not None:
+            handler.send_header("Content-Encoding", "gzip")
+        handler.end_headers()
         for data in self._framed(pieces):
             if encoder is not None:
                 data = encoder.compress(data) + encoder.flush(zlib.Z_SYNC_FLUSH)
@@ -364,13 +374,12 @@ class ScriptedUpstream:
         if cut:
             handler.close_connection = True
             handler.connection.shutdown(2)
-            return False
+            return
         if encoder is not None:
             tail = encoder.flush()
             if tail:
                 handler.wfile.write(f"{len(tail):x}\r\n".encode() + tail + b"\r\n")
         handler.wfile.write(b"0\r\n\r\n")
-        return completed
 
     def _framed(self, events: list[bytes]) -> list[bytes]:
         """The HTTP chunks of a stream: one per event, or `rechunk` bytes each at any boundary."""
