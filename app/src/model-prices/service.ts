@@ -29,7 +29,7 @@ import {
   managedAvailabilityToJson,
   type ManagedAvailabilityJson,
 } from "./availability.ts";
-import type { PriceConfirmation } from "./confirmation.ts";
+import { isUnreadable, type PriceConfirmation } from "./confirmation.ts";
 import { toModelView, type CatalogModelView } from "./admin-view.ts";
 import { effectivePrice, type PriceStatus } from "./effective-price.ts";
 import type { ModelPriceErrorCode } from "./errors.ts";
@@ -234,7 +234,9 @@ export function createModelPriceService(
       if (provider === undefined || model === undefined)
         return refuse("model_unknown");
       const history = createModelPriceConfirmationsRepository(trx);
-      const before = await history.latest(ids.providerId, ids.modelId);
+      const latest = await history.latest(ids.providerId, ids.modelId);
+      // A row that cannot be read is replaced by the new confirmation, never compared with it.
+      const before = isUnreadable(latest) ? undefined : latest;
       const today = effectivePrice({
         cost: model.cost,
         reasoning: model.reasoning,
@@ -464,7 +466,9 @@ export function createModelPriceService(
               cost: model?.cost ?? null,
               reasoning: model?.reasoning ?? false,
               override,
-              confirmation: confirmation ?? null,
+              confirmation: isUnreadable(confirmation)
+                ? null
+                : (confirmation ?? null),
             }),
             now: now(),
           }),

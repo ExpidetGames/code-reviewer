@@ -311,6 +311,34 @@ describe("enabling, confirming and correcting through the routes", () => {
   });
 
   // #549-T04
+  it("still answers the list when the latest confirmation of one model cannot be read, with a warning on that model", async () => {
+    const portal = await start();
+    await portal.db
+      .insertInto("model_price_confirmations")
+      .values({
+        provider_id: "deepseek",
+        model_id: "deepseek-v4-pro",
+        source: "catalog",
+        price: "{not json",
+        reference_price: "{}",
+        reference_hash: "h",
+        reason: null,
+        confirmed_by: null,
+        confirmed_at: T,
+      })
+      .execute();
+
+    const response = await call(portal, "GET", "");
+
+    expect(response.status).toBe(200);
+    expect(
+      ((await response.json()) as { models: View[] }).models[0],
+    ).toMatchObject({
+      price: { status: "unconfirmed", warnings: ["confirmation_unreadable"] },
+    });
+  });
+
+  // #549-T04
   it("corrects the price with a reason", async () => {
     const portal = await start();
     const shown = await viewOf(portal);

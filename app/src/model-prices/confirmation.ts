@@ -30,3 +30,25 @@ export type PriceConfirmation = {
   confirmedBy: string | null;
   confirmedAt: string;
 };
+
+/**
+ * The latest row of a model whose price cannot be read back (edited outside the app, or damaged). It is neither "no
+ * confirmation" nor the row before it: the model is not priced until an admin confirms it again, which repairs it, and the
+ * list shows it with a warning instead of failing as a whole.
+ */
+export type UnreadableConfirmation = {
+  unreadable: true;
+  /** The order number of the row. */
+  id: number;
+  providerId: string;
+  modelId: string;
+};
+
+/** The confirmation that counts for a model: readable or not. */
+export type LatestConfirmation = PriceConfirmation | UnreadableConfirmation;
+
+export function isUnreadable(
+  confirmation: LatestConfirmation | undefined | null,
+): confirmation is UnreadableConfirmation {
+  return confirmation != null && "unreadable" in confirmation;
+}

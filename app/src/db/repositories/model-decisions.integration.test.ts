@@ -92,6 +92,29 @@ describe.each(MODELS_DEV_ENGINES)(
 
     describe("enablement", () => {
       // #549-T06
+      it_("takes a decision back and says whether there was one", async () => {
+        const { enablements } = await setup();
+        await enablements.set(
+          {
+            providerId: "deepseek",
+            modelId: "deepseek-v4-pro",
+            enabled: false,
+            changedBy: "admin-1",
+          },
+          T1,
+        );
+
+        const first = await enablements.clear("deepseek", "deepseek-v4-pro");
+        const again = await enablements.clear("deepseek", "deepseek-v4-pro");
+
+        expect(first).toBe(true);
+        expect(again).toBe(false);
+        expect(
+          await enablements.get("deepseek", "deepseek-v4-pro"),
+        ).toBeUndefined();
+      });
+
+      // #549-T06
       it_("has no decision until the admin makes one", async () => {
         const { enablements } = await setup();
 
@@ -370,10 +393,11 @@ describe.each(MODELS_DEV_ENGINES)(
 
       // #549-T04
       it_(
-        "fails closed on a row whose price was damaged outside the app",
+        "reports a row whose price was damaged outside the app as unreadable, never as no confirmation and never as the row before it",
         async () => {
           const { db, confirmations } = await setup();
-          await db
+          await confirmations.append(confirm({}), T1);
+          const damaged = await db
             .insertInto("model_price_confirmations")
             .values({
               provider_id: "deepseek",
@@ -386,11 +410,22 @@ describe.each(MODELS_DEV_ENGINES)(
               confirmed_by: null,
               confirmed_at: T1.toISOString(),
             })
-            .execute();
+            .returning("seq")
+            .executeTakeFirstOrThrow();
 
-          await expect(
-            confirmations.latest("deepseek", "deepseek-v4-pro"),
-          ).rejects.toThrow();
+          const latest = await confirmations.latest(
+            "deepseek",
+            "deepseek-v4-pro",
+          );
+          const all = await confirmations.listLatest();
+
+          expect(latest).toEqual({
+            unreadable: true,
+            id: Number(damaged.seq),
+            providerId: "deepseek",
+            modelId: "deepseek-v4-pro",
+          });
+          expect(all).toEqual([latest]);
         },
       );
     });

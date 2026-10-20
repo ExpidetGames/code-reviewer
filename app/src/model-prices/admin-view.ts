@@ -12,7 +12,11 @@ import {
   managedAvailability,
   type ManagedUnavailableReason,
 } from "./availability.ts";
-import type { PriceConfirmation } from "./confirmation.ts";
+import {
+  isUnreadable,
+  type LatestConfirmation,
+  type PriceConfirmation,
+} from "./confirmation.ts";
 import {
   effectivePrice,
   type PriceSources,
@@ -32,6 +36,13 @@ export type PriceConfirmationView = {
   confirmedBy: string | null;
   confirmedAt: string;
 };
+
+/** Something about a model's price that an admin should know before they decide. */
+export const PRICE_WARNINGS = [
+  /** The latest confirmation cannot be read back: the model counts as unconfirmed until it is confirmed again. */
+  "confirmation_unreadable",
+] as const;
+export type PriceWarning = (typeof PRICE_WARNINGS)[number];
 
 export type CatalogModelView = {
   providerId: string;
@@ -54,6 +65,7 @@ export type CatalogModelView = {
   enablement: { changedBy: string | null; changedAt: string } | null;
   price: {
     status: PriceStatus;
+    warnings: PriceWarning[];
     /** What the managed key prices from when `confirmed`; otherwise the old price of a stale one, or the proposal. */
     book: PriceBookJson | null;
     sources: PriceSources | null;
@@ -79,7 +91,7 @@ export type ModelViewInput = {
   provider: StoredProvider;
   model: StoredModel;
   enablement: ModelEnablement | undefined;
-  confirmation: PriceConfirmation | undefined;
+  confirmation: LatestConfirmation | undefined;
   override: ModelOverride | undefined;
   /** When the first model was seen: models first seen after it are new. */
   firstFetchAt: string | null;
@@ -90,7 +102,11 @@ const json = (book: Parameters<typeof priceBookToJson>[0] | null) =>
   book === null ? null : priceBookToJson(book);
 
 export function toModelView(input: ModelViewInput): CatalogModelView {
-  const { provider, model, enablement, confirmation, override } = input;
+  const { provider, model, enablement, override } = input;
+  // A confirmation that cannot be read is no confirmation for the price, and a warning for the admin.
+  const confirmation = isUnreadable(input.confirmation)
+    ? undefined
+    : input.confirmation;
   const price = effectivePrice({
     cost: model.cost,
     reasoning: model.reasoning,
@@ -130,6 +146,9 @@ export function toModelView(input: ModelViewInput): CatalogModelView {
         : { changedBy: enablement.changedBy, changedAt: enablement.changedAt },
     price: {
       status: price.status,
+      warnings: isUnreadable(input.confirmation)
+        ? ["confirmation_unreadable"]
+        : [],
       book: json(price.book),
       sources: price.sources,
       reference: {

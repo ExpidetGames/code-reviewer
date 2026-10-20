@@ -523,9 +523,14 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
           "anthropic",
           "claude-sonnet-5-5",
         );
-        expect(stored?.referenceHash).toBe(shown.price.reference.hash);
-        expect(stored?.source).toBe("catalog");
-        expect(stored?.confirmedAt).toBe(T1.toISOString());
+        expect(stored).not.toHaveProperty("unreadable");
+        expect(
+          stored && "referenceHash" in stored && stored.referenceHash,
+        ).toBe(shown.price.reference.hash);
+        expect(stored).toMatchObject({
+          source: "catalog",
+          confirmedAt: T1.toISOString(),
+        });
       },
     );
 
@@ -1037,6 +1042,93 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         expect(model.listed).toBe(false);
         expect(model.price.status).toBe("confirmed");
         expect(model.managed).toMatchObject({ selectable: true });
+      },
+    );
+  });
+
+  describe("a confirmation that cannot be read", () => {
+    const damage = (t: Awaited<ReturnType<typeof setup>>, id = SONNET) =>
+      t.db
+        .insertInto("model_price_confirmations")
+        .values({
+          provider_id: id.providerId,
+          model_id: id.modelId,
+          source: "catalog",
+          price: "{not json",
+          reference_price: "{}",
+          reference_hash: "h",
+          reason: null,
+          confirmed_by: null,
+          confirmed_at: T1.toISOString(),
+        })
+        .execute();
+
+    // #549-T04
+    it_(
+      "shows that one row with a warning and leaves the rest of the list as it is",
+      async () => {
+        const t = await setup();
+        await t.service.confirmPrice(ADMIN, {
+          ...DEEPSEEK,
+          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+        });
+        await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+        await damage(t);
+
+        const list = await t.service.list({});
+
+        const broken = list.models.find((m) => m.modelId === SONNET.modelId);
+        expect(broken?.price).toMatchObject({
+          status: "unconfirmed",
+          warnings: ["confirmation_unreadable"],
+          confirmation: null,
+        });
+        expect(broken?.managed).toEqual({
+          selectable: false,
+          reason: "model_not_enabled",
+        });
+        const fine = list.models.find((m) => m.modelId === DEEPSEEK.modelId);
+        expect(fine?.price).toMatchObject({
+          status: "confirmed",
+          warnings: [],
+        });
+        expect(list.total).toBeGreaterThan(2);
+      },
+    );
+
+    // #549-T07
+    it_(
+      "does not select the model, and a new confirmation repairs it",
+      async () => {
+        const t = await setup();
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+        await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+        await damage(t);
+
+        expect(
+          await t.service.availability("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({
+          selectable: false,
+          code: "catalog_price_unconfirmed",
+        });
+        const repaired = await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: (await view(t)).price.reference.hash,
+        });
+
+        expect(repaired).toMatchObject({
+          ok: true,
+          model: { price: { status: "confirmed", warnings: [] } },
+        });
+        expect(
+          await t.service.availability("anthropic", "claude-sonnet-5-5"),
+        ).toMatchObject({ selectable: true });
       },
     );
   });

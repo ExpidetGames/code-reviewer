@@ -3,14 +3,16 @@
 // The admin's price confirmations of catalog models (#549, src/model-prices/README.md): an append-only history, and the
 // latest row of a model is the one that counts. Instance level: configuration of the installation, not customer data. The
 // database refuses an update and a delete of a row (a trigger), so a mistake is a new confirmation. A row is written only
-// from a validated price book; a row whose price cannot be read back (edited outside the app) fails closed: it is an
-// error, never "no confirmation" and never the row before it.
+// from a validated price book; a row whose price cannot be read back (edited outside the app) fails closed: `latest` and
+// `listLatest` hand it out as an `UnreadableConfirmation`, never as "no confirmation" and never as the row before it, so that
+// one bad row cannot take the whole list down and a new confirmation repairs it. `history` still throws on such a row.
 import "server-only";
 import type { Kysely, Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import {
   CONFIRMATION_SOURCES,
   type ConfirmationSource,
+  type LatestConfirmation,
   type PriceConfirmation,
 } from "../../model-prices/confirmation.ts";
 import {
@@ -38,9 +40,9 @@ export type ModelPriceConfirmationsRepository = {
   latest(
     providerId: string,
     modelId: string,
-  ): Promise<PriceConfirmation | undefined>;
+  ): Promise<LatestConfirmation | undefined>;
   /** The confirmation that counts for every model that has one. */
-  listLatest(): Promise<PriceConfirmation[]>;
+  listLatest(): Promise<LatestConfirmation[]>;
   /** Every confirmation of a model, the latest first. */
   history(providerId: string, modelId: string): Promise<PriceConfirmation[]>;
 };
@@ -84,6 +86,20 @@ function confirmationOf(row: Row): PriceConfirmation {
   };
 }
 
+/** A row as the latest of its model: when its price cannot be read it is unreadable, not an error. */
+function latestOf(row: Row): LatestConfirmation {
+  try {
+    return confirmationOf(row);
+  } catch {
+    return {
+      unreadable: true,
+      id: Number(row.seq),
+      providerId: row.provider_id,
+      modelId: row.model_id,
+    };
+  }
+}
+
 export function createModelPriceConfirmationsRepository(
   db: Kysely<Database>,
 ): ModelPriceConfirmationsRepository {
@@ -119,7 +135,7 @@ export function createModelPriceConfirmationsRepository(
         .orderBy("seq", "desc")
         .limit(1)
         .executeTakeFirst();
-      return row === undefined ? undefined : confirmationOf(row);
+      return row === undefined ? undefined : latestOf(row);
     },
 
     async listLatest() {
@@ -135,7 +151,7 @@ export function createModelPriceConfirmationsRepository(
         .orderBy("provider_id")
         .orderBy("model_id")
         .execute();
-      return rows.map(confirmationOf);
+      return rows.map(latestOf);
     },
 
     async history(providerId, modelId) {
