@@ -21,6 +21,7 @@ import {
   book,
   model,
   staleModel,
+  staleModelBetween,
   TODAY,
 } from "../../test-support/catalog-models-fixtures.ts";
 import type { CatalogModelsApi } from "./api.ts";
@@ -126,6 +127,57 @@ describe("the price a model is shown with", () => {
     expect(
       dialog.getByText(/Price you confirmed before \(no longer current\)/),
     ).toBeTruthy();
+  });
+
+  // #554-T05
+  it("marks the fields that moved in both tables and says in which fields the price differs", async () => {
+    const { dialog } = await openPrice(
+      staleModelBetween(
+        book("500000", "1000000", { cacheRead: "50000" }),
+        book("500000", "1000000", { cacheRead: "60000", reasoning: "2000000" }),
+      ),
+    );
+
+    expect(
+      dialog.getByText(
+        "Differs from your confirmation in: cache read, reasoning.",
+      ),
+    ).toBeTruthy();
+    const now = within(dialog.getByRole("table", { name: "Price now" }));
+    for (const field of ["Cache read", "Reasoning"])
+      expect(
+        within(now.getByText(field).closest("tr")!).getByText("Changed"),
+      ).toBeTruthy();
+    for (const field of ["Input", "Output"])
+      expect(
+        within(now.getByText(field).closest("tr")!).queryByText("Changed"),
+      ).toBeNull();
+    const before = within(
+      dialog.getByRole("table", { name: "Price confirmed before" }),
+    );
+    expect(
+      within(before.getByText("Cache read").closest("tr")!).getByText(
+        "Changed",
+      ),
+    ).toBeTruthy();
+    expect(before.getAllByText("Changed")).toHaveLength(1);
+  });
+
+  // #554-T05
+  it("says that no amount differs when the confirmation is stale for another reason", async () => {
+    const same = book("500000", "1000000", { cacheRead: "50000" });
+    const { dialog } = await openPrice(staleModelBetween(same, { ...same }));
+
+    expect(dialog.getByText(/No amount differs/)).toBeTruthy();
+    expect(dialog.queryByText("Changed")).toBeNull();
+  });
+
+  // #554-T05
+  it("marks nothing for a price that is not stale", async () => {
+    const { dialog } = await openPrice(model());
+
+    expect(dialog.queryByText("Changed")).toBeNull();
+    expect(dialog.queryByText(/Differs from your confirmation/)).toBeNull();
   });
 
   // #554-T05

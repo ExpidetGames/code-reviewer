@@ -12,7 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from "../../components/ui/table.tsx";
-import type { PriceSources } from "../../model-prices/effective-price.ts";
+import type {
+  PriceField,
+  PriceSources,
+} from "../../model-prices/effective-price.ts";
 import type {
   PriceBookJson,
   PriceLevelJson,
@@ -51,13 +54,31 @@ function SourceBadge({ source }: { source: PriceSources[keyof PriceSources] }) {
   );
 }
 
+/** The label of a row, with a "Changed" badge when the field differs from the price it is compared with. */
+function RowLabel({ text, changed }: { text: string; changed: boolean }) {
+  return (
+    <>
+      {text}
+      {changed ? (
+        <>
+          {" "}
+          <Badge variant="warning">Changed</Badge>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export function PriceTable({
   book,
   sources,
   label,
+  changed = [],
 }: {
   book: PriceBookJson;
   sources: PriceSources | null;
+  /** The fields that differ from the price the admin confirmed (a stale price); marked in their rows. */
+  changed?: readonly PriceField[];
   /** Names the table for assistive technology and tells two tables of one dialog apart. */
   label: string;
 }) {
@@ -73,7 +94,12 @@ export function PriceTable({
       <TableBody>
         {LEVEL_FIELDS.filter((field) => book[field] !== null).map((field) => (
           <TableRow key={field}>
-            <TableCell>{PRICE_FIELD_LABEL[field]}</TableCell>
+            <TableCell>
+              <RowLabel
+                text={PRICE_FIELD_LABEL[field]}
+                changed={changed.includes(field)}
+              />
+            </TableCell>
             <TableCell className="font-mono">
               {formatUsdPerMTok(book[field] ?? "")}
             </TableCell>
@@ -84,7 +110,12 @@ export function PriceTable({
         ))}
         {book.contextOver200k === null ? null : (
           <TableRow>
-            <TableCell>{PRICE_FIELD_LABEL.contextOver200k}</TableCell>
+            <TableCell>
+              <RowLabel
+                text={PRICE_FIELD_LABEL.contextOver200k}
+                changed={changed.includes("contextOver200k")}
+              />
+            </TableCell>
             <TableCell>{levelSummary(book.contextOver200k)}</TableCell>
             <TableCell>
               <SourceBadge source={sources?.contextOver200k ?? null} />
@@ -93,7 +124,12 @@ export function PriceTable({
         )}
         {book.tiers.map((tier) => (
           <TableRow key={tier.contextOver}>
-            <TableCell>{`Above ${String(tier.contextOver)} tokens`}</TableCell>
+            <TableCell>
+              <RowLabel
+                text={`Above ${String(tier.contextOver)} tokens`}
+                changed={changed.includes("tiers")}
+              />
+            </TableCell>
             <TableCell>{levelSummary(tier)}</TableCell>
             <TableCell>
               <SourceBadge source={sources?.tiers ?? null} />

@@ -101,6 +101,25 @@ export const PRICE_FIELD_LABEL: Record<PriceField, string> = {
   tiers: "Context tiers",
 };
 
+/** The fields as they run in a sentence ("differs in: cache read, reasoning"): lower case, no comma inside one. */
+export const PRICE_FIELD_SENTENCE: Record<PriceField, string> = {
+  input: "input",
+  output: "output",
+  cacheRead: "cache read",
+  cacheWrite5m: "cache write 5 min",
+  cacheWrite1h: "cache write 1 h",
+  reasoning: "reasoning",
+  inputAudio: "audio in",
+  outputAudio: "audio out",
+  contextOver200k: "price over 200k tokens",
+  tiers: "context tiers",
+};
+
+/** What a stale price differs in, as a sentence part: "cache read, reasoning". */
+export function describeChangedFields(fields: readonly PriceField[]): string {
+  return fields.map((field) => PRICE_FIELD_SENTENCE[field]).join(", ");
+}
+
 /** Why the managed key refuses a model right now. */
 export const MANAGED_REASON_COPY: Record<ManagedUnavailableReason, string> = {
   model_unknown: "The catalog has no such model.",

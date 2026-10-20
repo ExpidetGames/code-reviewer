@@ -82,16 +82,18 @@ export function model(
   };
 }
 
-/** A model whose price was confirmed at `old` and has moved to `now` since. */
-export function staleModel(): CatalogModelView {
-  const old = book("500000", "1000000", { cacheRead: "50000" });
+/** A model whose price was confirmed at `old` and is `now` since (null: the catalog states none any more). */
+export function staleModelBetween(
+  old: PriceBookJson,
+  now: PriceBookJson | null,
+): CatalogModelView {
   return model({
     price: {
       status: "stale",
       warnings: [],
       book: old,
       sources: CATALOG_SOURCES,
-      reference: { book: TODAY, hash: "v2:newhash", sources: CATALOG_SOURCES },
+      reference: { book: now, hash: "v2:newhash", sources: CATALOG_SOURCES },
       confirmation: {
         id: 1,
         source: "catalog",
@@ -105,6 +107,14 @@ export function staleModel(): CatalogModelView {
     enabled: true,
     managed: { selectable: false, reason: "price_unconfirmed" },
   });
+}
+
+/** A model whose price was confirmed at 0.50 / 1.00 and has moved to `TODAY` since. */
+export function staleModel(): CatalogModelView {
+  return staleModelBetween(
+    book("500000", "1000000", { cacheRead: "50000" }),
+    TODAY,
+  );
 }
 
 export function provider(changes: Partial<ProviderView> = {}): ProviderView {

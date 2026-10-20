@@ -8,10 +8,12 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AT,
+  book,
   list,
   model,
   provider,
   staleModel,
+  staleModelBetween,
 } from "../../test-support/catalog-models-fixtures.ts";
 import { AdminCatalogContent } from "./catalog-content.tsx";
 import { PAGE_SIZE, type CatalogQuery } from "./query.ts";
@@ -147,6 +149,36 @@ describe("the models of the catalog", () => {
     expect(row.getByText(/Input \$0\.60 · Output \$1\.20/)).toBeTruthy();
     expect(row.getByText("You confirmed:")).toBeTruthy();
     expect(row.getByText("Now:")).toBeTruthy();
+  });
+
+  // #554-T05
+  it("says in which fields a stale price differs, even when input and output did not move", () => {
+    renderPage([
+      staleModelBetween(
+        book("500000", "1000000", { cacheRead: "50000" }),
+        book("500000", "1000000", { cacheRead: "60000", reasoning: "2000000" }),
+      ),
+    ]);
+
+    const row = within(screen.getByRole("row", { name: /DeepSeek V4 Pro/ }));
+    expect(row.getByText("Differs in: cache read, reasoning")).toBeTruthy();
+  });
+
+  // #554-T05
+  it("says that no amount differs when a price is stale for another reason", () => {
+    const same = book("500000", "1000000", { cacheRead: "50000" });
+    renderPage([staleModelBetween(same, { ...same })]);
+
+    const row = within(screen.getByRole("row", { name: /DeepSeek V4 Pro/ }));
+    expect(row.getByText(/No amount differs/)).toBeTruthy();
+  });
+
+  // #554-T05
+  it("says that the catalog states no price now for a stale price that lost its price", () => {
+    renderPage([staleModelBetween(book("500000", "1000000"), null)]);
+
+    const row = within(screen.getByRole("row", { name: /DeepSeek V4 Pro/ }));
+    expect(row.getByText(/models\.dev states no price now/)).toBeTruthy();
   });
 
   // #554-T06

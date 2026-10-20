@@ -37,6 +37,7 @@ import {
   PRICE_STATUS_LABEL,
   PRICE_WARNING_COPY,
   describeCatalogError,
+  describeChangedFields,
   describeIssue,
   canRetry,
   mustReload,
@@ -52,6 +53,7 @@ import {
   type PriceForm,
   type PriceFormIssue,
 } from "./price-form.ts";
+import { changedPriceFields } from "./price-diff.ts";
 import { PriceTable } from "./price-table.tsx";
 import { STATUS_BADGE } from "./status-badges.ts";
 
@@ -123,6 +125,12 @@ export function PriceDialog({
 
   const confirmed = price.status === "confirmed";
   const hasConfirmation = price.confirmation !== null;
+  // A stale price: what the confirmed price (`price.book`) differs in from the price now.
+  const confirmedBook = price.status === "stale" ? price.book : null;
+  const stale = confirmedBook !== null;
+  const changed = stale
+    ? changedPriceFields(confirmedBook, reference.book)
+    : [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -144,6 +152,16 @@ export function PriceDialog({
             <AlertDescription>{PRICE_WARNING_COPY[warning]}</AlertDescription>
           </Alert>
         ))}
+
+        {stale ? (
+          <p className="text-sm font-medium">
+            {reference.book === null
+              ? "models.dev states no price now."
+              : changed.length === 0
+                ? "No amount differs from your confirmation: it is stale for another reason (the price format or a source changed). Confirm it again to renew it."
+                : `Differs from your confirmation in: ${describeChangedFields(changed)}.`}
+          </p>
+        ) : null}
 
         {confirmed && price.book !== null ? (
           // What the managed key prices from: the confirmed book, which a correction may have made different from the catalog.
@@ -169,6 +187,7 @@ export function PriceDialog({
                 book={reference.book}
                 sources={reference.sources}
                 label="Price now"
+                changed={changed}
               />
             )}
           </section>
@@ -198,6 +217,7 @@ export function PriceDialog({
               book={price.book}
               sources={price.sources}
               label="Price confirmed before"
+              changed={changed}
             />
           </section>
         ) : null}

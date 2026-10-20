@@ -16,8 +16,10 @@ import {
 import type { CatalogModelView } from "../../model-prices/admin-view.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import { formatUsdPerMTok, truncateText } from "./format.ts";
+import { changedPriceFields } from "./price-diff.ts";
 import {
   MANAGED_REASON_COPY,
+  describeChangedFields,
   MODEL_STATE_LABEL,
   MODEL_WARNING_LABEL,
   PRICE_STATUS_LABEL,
@@ -40,6 +42,19 @@ function inOut(book: CatalogModelView["price"]["book"]): string | null {
   return book === null
     ? null
     : `Input ${formatUsdPerMTok(book.input)} · Output ${formatUsdPerMTok(book.output)}`;
+}
+
+/** Where a stale price differs from the one that was confirmed; the amounts in the line above may well be the same. */
+function differsText(
+  confirmed: CatalogModelView["price"]["book"],
+  now: CatalogModelView["price"]["book"],
+): string {
+  if (confirmed === null) return "";
+  if (now === null) return "models.dev states no price now";
+  const fields = changedPriceFields(confirmed, now);
+  return fields.length === 0
+    ? "No amount differs: confirm again to renew the confirmation"
+    : `Differs in: ${describeChangedFields(fields)}`;
 }
 
 /** Text that is cut where it is shown; the whole of it stays available as the title. */
@@ -158,6 +173,13 @@ export function ModelsTable({
                       <br />
                       <span className="text-muted-foreground">Now: </span>
                       {now ?? "no price"}
+                      <br />
+                      <span className="font-medium">
+                        {differsText(
+                          model.price.book,
+                          model.price.reference.book,
+                        )}
+                      </span>
                     </span>
                   ) : (
                     <span className="text-xs">
