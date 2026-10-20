@@ -9,6 +9,7 @@ Without them a stalled engine or a hanging resolver holds the one call the job m
 it the whole review.
 """
 
+import re
 import socket
 import threading
 from typing import Any
@@ -66,6 +67,10 @@ class Wire:
             received = b""
             while b"\r\n\r\n" not in received:
                 received += server.recv(65536)
+            head, _, rest = received.partition(b"\r\n\r\n")
+            length = re.search(rb"(?i)content-length: *(\d+)", head)
+            while length and len(rest) < int(length.group(1)):
+                rest += server.recv(65536)
             server.sendall(ANSWER)
 
     def upstream(self, resolve: Any = None) -> HttpsUpstream:

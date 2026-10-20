@@ -9,6 +9,7 @@ change what it resolves to between two calls). The rules are those of
 ranges, NAT64, 6to4 and port 443 only.
 """
 
+import re
 import socket
 import threading
 from collections.abc import Callable
@@ -314,6 +315,12 @@ class Wire:
             received = b""
             while b"\r\n\r\n" not in received:
                 received += server.recv(65536)
+            # The whole request is read before the answer and the close: a close with request bytes
+            # still unread is a reset, which the client would take for a cut answer.
+            head, _, rest = received.partition(b"\r\n\r\n")
+            length = re.search(rb"(?i)content-length: *(\d+)", head)
+            while length and len(rest) < int(length.group(1)):
+                rest += server.recv(65536)
             self.requests.append(received)
             server.sendall(self._answer)
 
