@@ -23,6 +23,7 @@ import type { AddressInfo } from "node:net";
 import { StripeHttpError, type StripeErrorBody } from "./errors.ts";
 import { createFaults, type Faults, type RawAnswer } from "./faults.ts";
 import { canonicalize, parseForm } from "./form.ts";
+import { isLoopbackHostname, isLoopbackUrl } from "./loopback.ts";
 import { createRoutes } from "./routes.ts";
 import {
   NO_REQUEST,
@@ -49,6 +50,8 @@ export type StripeFakeOptions = {
   sleep?: (ms: number) => Promise<void>;
   /** A fixed port, for an app under test that has to know it when it starts. Default: any free port. */
   port?: number;
+  /** Where to listen. Only a loopback address is accepted (the fake never opens a port to a network). Default: 127.0.0.1. */
+  host?: string;
 };
 
 export type RecordedRequest = {
@@ -91,6 +94,8 @@ export type DeliveryResult = {
   endpointId: string;
   /** The status the receiver answered; null when it could not be reached. */
   status: number | null;
+  /** Set when the fake did not even try: the endpoint is not on the loopback, and no event leaves this machine. */
+  refused?: "not_loopback";
   /** How often this event was sent to this endpoint, this send included. */
   attempt: number;
 };
@@ -202,6 +207,11 @@ const errorAnswer = (
 export async function startStripeFake(
   options: StripeFakeOptions = {},
 ): Promise<StripeFake> {
+  const host = options.host ?? "127.0.0.1";
+  if (!isLoopbackHostname(host))
+    throw new Error(
+      `The fake Stripe API listens on the loopback only, not on ${host}.`,
+    );
   const apiKey = options.apiKey ?? DEFAULT_API_KEY;
   const now = options.now ?? Date.now;
   const sleep =
@@ -479,6 +489,18 @@ export async function startStripeFake(
           store.deliveries.get(key)?.delivered === true
         )
           continue;
+        // "No real network" is structural: an endpoint that is not on this machine gets nothing, whatever a test says.
+        if (!isLoopbackUrl(target.url)) {
+          results.push({
+            eventId: event.id,
+            type: event.type,
+            endpointId: endpoint.id,
+            status: null,
+            refused: "not_loopback",
+            attempt: store.deliveries.get(key)?.attempts ?? 0,
+          });
+          continue;
+        }
         const secret = store.secretOf(endpoint.id) ?? "";
         for (let copy = 0; copy <= (delivery.duplicates ?? 0); copy += 1) {
           if (delivery.delayMs !== undefined && delivery.delayMs > 0)
@@ -634,9 +656,9 @@ export async function startStripeFake(
     });
   });
   await new Promise<void>((resolve) =>
-    server.listen(options.port ?? 0, "127.0.0.1", resolve),
+    server.listen(options.port ?? 0, host, resolve),
   );
-  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  origin = `http://${host.includes(":") ? `[${host}]` : host}:${(server.address() as AddressInfo).port}`;
 
   const values = (map: Map<string, FakeObject>) =>
     structuredClone([...map.values()]);

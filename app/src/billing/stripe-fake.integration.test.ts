@@ -517,7 +517,7 @@ describe("what Managed Payments does not support", () => {
     ["payment_method_types[0]", "card"],
     ["custom_text[submit][message]", "Thanks"],
   ] as const)(
-    "refuses %s on a managed one-time session like Stripe does, and creates nothing",
+    "refuses %s on a managed one-time session as the documentation says, and creates nothing",
     async (name, value) => {
       const fake = await startTestStripe();
       const answer = await rawPost(

@@ -39,20 +39,26 @@ The first real adapter (#501, #502) talks to Stripe through `stripe-client.ts` a
   we read (`stripe-schemas.ts`): a field we do not list cannot reach the app, a listed one with another type is refused
   (`invalid_response`). Nothing personal is read (no email, address or card).
 - **Base URL.** Injected, no default: the client reaches no host it was not given. `STRIPE_API_BASE_URL` is Stripe's one
-  address (the same for test and live); a test passes the address of `fakes/stripe`.
+  address (the same for test and live); a test passes the address of `fakes/stripe`. Plain `http:` is accepted for the loopback
+  only (`localhost`, `127.0.0.0/8`, `::1`); any other host must be `https:`, or the client is not configured
+  (`invalid_configuration`): the key is a bearer token.
 - **API version.** Every request pins `Stripe-Version: 2025-03-31.basil; managed_payments_preview=v1`
   (`managedPayments: false` leaves the preview flag out). Checkout also needs `managed_payments[enabled]=true` in the body and
   an eligible product `tax_code`; `CreateCheckoutSessionInput` has no field for what Managed Payments does not support
   (`tax_id_collection`, `invoice_creation`, `customer_update`, `payment_method_types`, `custom_text`), so none can be sent by accident.
 - **The key and its environment.** The environment is read from the prefix (`sk_test_`/`rk_test_` is `test`, `sk_live_`/
   `rk_live_` is `live`, anything else is none). Stripe has one address for both, so the caller states the environment it is
-  configured for (`environment`); on `STRIPE_API_BASE_URL` a key of another environment, or of an unknown prefix, throws
-  `environment_mismatch` when the client is made, and the environment is required. On any other address (the fake) any key is accepted.
+  configured for (`environment`); on a Stripe host a key of another environment, or of an unknown prefix, throws
+  `environment_mismatch` when the client is made, and the environment is required. A Stripe host is judged by the parsed host,
+  not by the text: `stripe.com` and everything below it, in any case, with trailing dots or percent-escapes
+  (`api.stripe.com.`, `API.STRIPE.COM%2e:443`). Only a host that is not Stripe's (the fake on the loopback) accepts any key.
 - **Idempotency.** Every POST carries an `Idempotency-Key`: the caller's (`{ idempotencyKey }`; #501 derives it from the top-up
   intent), or a fresh one made for the call and kept for every retry of it. That is why a POST may be repeated after a lost
-  answer or a 5xx and still creates one object.
+  answer or a 5xx and still creates one object. For the two calls that move money, `createCheckoutSession` and
+  `createRefund`, the key is a required argument (`MoneyWriteOptions`; the type refuses a call without it), because a key made
+  per call would not survive a restart of the caller.
 - **Retries.** A 429 is retried after `Retry-After` (default 1 s, at most 30 s, else it fails at once); a 5xx, a lost connection
-  and a timeout are retried with 0.5 s, 1 s, ... unless Stripe says `Stripe-Should-Retry: false`; a 4xx is never retried. Two
+  and a timeout are retried with 0.5 s, 1 s, ... unless Stripe says `Stripe-Should-Retry: false`; any other 4xx is never retried. Two
   retries by default (`maxRetries`). The wait is injectable (`sleep`).
 - **Limits.** 10 s for a request, all of it (connect, answer, body); no redirect is followed (`redirect_refused`); a body past
   2,000,000 bytes is refused (`response_too_large`), also while it streams; a list is followed for at most 20 pages.

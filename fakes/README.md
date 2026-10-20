@@ -59,8 +59,12 @@ no webhooks, so it does not replace it. The app's client (`app/src/billing/strip
   (`Received unknown parameter: x`), a required one that is missing is named, an unknown object is a 404 `resource_missing`, a
   list is newest first with `limit` and `starting_after`. Ids and times are the same every run (`cus_Fake00000001`).
 - **Idempotency.** The same `Idempotency-Key` with the same parameters answers the saved response (with
-  `Idempotent-Replayed: true`); with other parameters it answers the `idempotency_error`. Only the answers of requests that ran
-  are saved.
+  `Idempotent-Replayed: true`); with other parameters it answers the `idempotency_error`. Known differences from Stripe:
+  the fake saves only **2xx** answers, while Stripe replays the result of any request that began executing (also a 4xx or
+  5xx; not a failed validation of the parameters, not a refusal because of a concurrent request), so a repeat of a refused
+  request is run again here and replayed there; a saved answer never expires (Stripe: 24 hours); the fake runs one request
+  at a time and never answers the 409 for a concurrent request with the same key. Code that relies on the replay of an
+  error must not take the fake as proof.
 - **Managed Payments.** A one-time Checkout session with `managed_payments[enabled]=true` is refused when it carries
   `tax_id_collection`, `invoice_creation`, `customer_update`, `payment_method_types`, `custom_text` and the other parameters
   Stripe's documentation lists as unsupported, or a line item without an eligible product `tax_code`. The Stripe sandbox
@@ -74,12 +78,15 @@ no webhooks, so it does not replace it. The app's client (`app/src/billing/strip
   `failRefund`, `openDispute` and `closeDispute` are what Stripe or the operator's dashboard does on their own
   (`charge.refunded`, `refund.created`/`updated`/`failed`, `charge.dispute.created`/`funds_withdrawn`/`closed`/
   `funds_reinstated`). A refund the app asks for through the API makes the same events, with the request on them.
+- **Loopback only.** The fake listens on the loopback (`host`/`STRIPE_FAKE_HOST` may only name one; anything else is
+  refused when it starts) and `flush` sends to endpoints on the loopback only: an endpoint at any other host gets nothing
+  and its `DeliveryResult` says `refused: "not_loopback"`. "No real network" does not depend on a test being careful.
 - **Delivery.** Events wait in the store until `fake.flush(options)` sends them, signed with `Stripe-Signature`
   (`t=<unix seconds>,v1=<hex>,v0=<hex>`, HMAC-SHA256 over `t.body` with the secret of the endpoint), to the webhook endpoints
   the app created through the API; the secret is in the answer to the create (and `fake.secretOf`). Options: `duplicates`,
   `order: "reversed"`, `delayMs`, `eventIds` (a resend), and a `fault` of the signature: `stale_timestamp`, `bad_signature`,
   `two_v1_valid_first`, `two_v1_valid_last`, `altered_body`, `missing_signature`, `malformed_signature`. The signer is written
   out again in `webhooks.ts` and does not import the app's verifier, so a delivery that verifies proves that both follow the
-  documented scheme. The real API wants a public https address for an endpoint; the fake takes any http(s) one.
+  documented scheme. The real API wants a public https address for an endpoint; the fake takes any http(s) one at create, but delivers to the loopback only.
 - **As a process.** `main.ts` (`STRIPE_FAKE_PORT`, `STRIPE_FAKE_API_KEY`) is controlled over HTTP under `/__fake/`: `GET health`,
   `GET events`, `POST pay`, `refund`, `dispute`, `dispute/close`, `flush`, `reset`.

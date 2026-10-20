@@ -4,10 +4,16 @@
 // signed delivery (duplicate, reordered, delayed, every fault of the signature) and the buyer helper, checked with the
 // app's own verifier. The fake signs with a copy of the scheme of its own, so a delivery that verifies here proves that
 // the two follow the same documented rule.
+import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { describe, expect, it } from "vitest";
-import type { StripeEvent } from "../../../fakes/stripe/server.ts";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { describe, expect, it, vi } from "vitest";
+import {
+  startStripeFake,
+  type StripeEvent,
+} from "../../../fakes/stripe/server.ts";
 import {
   clientFor,
   startTestStripe,
@@ -724,5 +730,69 @@ describe("the fake as a process", () => {
     expect((await post("/reset", {})).status).toBe(200);
     expect(fake.events()).toHaveLength(0);
     expect(fake.checkoutSessions()).toHaveLength(0);
+  });
+});
+
+describe("the fake stays on this machine", () => {
+  // #500-T18
+  it("sends no event to an endpoint that is not on the loopback, and says so", async () => {
+    const fake = await startTestStripe();
+    const client = clientFor(fake);
+    const endpoints = await Promise.all(
+      [
+        "http://203.0.113.9:9/hook",
+        "https://webhooks.example.test/hook",
+        "http://127.0.0.1.example.test/hook",
+      ].map((url) =>
+        client.createWebhookEndpoint({ url, enabled_events: ["*"] }),
+      ),
+    );
+    const session = await client.createCheckoutSession(SESSION_INPUT, {
+      idempotencyKey: uniqueIdempotencyKey(),
+    });
+    fake.buyer.pay(session.id);
+    const outgoing = vi.spyOn(globalThis, "fetch");
+    try {
+      const results = await fake.flush();
+      expect(outgoing).not.toHaveBeenCalled();
+      expect(results.length).toBeGreaterThan(0);
+      for (const result of results) {
+        expect(result.status).toBeNull();
+        expect(result.refused).toBe("not_loopback");
+      }
+      expect(new Set(results.map((r) => r.endpointId))).toEqual(
+        new Set(endpoints.map((e) => e.id)),
+      );
+    } finally {
+      outgoing.mockRestore();
+    }
+  });
+
+  // #500-T18
+  it("does not listen anywhere but on the loopback, as a library and as a process", async () => {
+    for (const host of ["0.0.0.0", "::", "192.0.2.1", "example.test"])
+      await expect(startStripeFake({ host }), host).rejects.toThrow(/loopback/);
+    const fake = await startStripeFake({ host: "127.0.0.1" });
+    try {
+      expect(fake.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    } finally {
+      await fake.close();
+    }
+    const main = fileURLToPath(
+      new URL("../../../fakes/stripe/main.ts", import.meta.url),
+    );
+    const refused = await promisify(execFile)(process.execPath, [main], {
+      env: {
+        ...process.env,
+        STRIPE_FAKE_PORT: "1",
+        STRIPE_FAKE_HOST: "0.0.0.0",
+      },
+      timeout: 20_000,
+    }).then(
+      () => null,
+      (error: { code?: number; stderr?: string }) => error,
+    );
+    expect(refused?.code).toBe(1);
+    expect(refused?.stderr).toMatch(/loopback/);
   });
 });
