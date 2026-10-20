@@ -11,6 +11,7 @@
 // (src/models-dev/startup.ts) both call `refreshIfDue`; an admin's "fetch now" (#554) calls `refresh`.
 import "server-only";
 import type { Kysely } from "kysely";
+import { createModelEnablementsRepository } from "../db/repositories/model-enablements-repository.ts";
 import {
   createModelsDevRepository,
   type ModelsDevRepository,
@@ -257,6 +258,8 @@ export function createModelsDevService(
         },
         urlChecks,
         now: now(),
+        // The models an admin enabled come first in the guard (#549).
+        enabled: await createModelEnablementsRepository(trx).listEnabled(),
       });
       const summary: FetchSummary = { ...plan.summary, lookupsSkipped };
       const result = { ...plan, summary };

@@ -16,6 +16,8 @@ export const MODELS_DEV_FETCH_ERROR_CODES = [
   "models_dev_invalid_body",
   /** Applying the body would unlist an implausibly large share of the catalog; the old state stays. */
   "models_dev_guard_unlisted_share",
+  /** Applying the body would unlist an implausibly large share of the models an admin enabled for the managed key (#549); the old state stays. */
+  "models_dev_guard_enabled_unlisted",
   /** Applying the body would make the listed models grow by more than half in one fetch; the old state stays. */
   "models_dev_guard_growth",
   /** Applying the body would block the addresses of an implausibly large share of the providers at once. */
@@ -41,6 +43,7 @@ export function isModelsDevFetchErrorCode(
 /** Why the guard refuses a fetch (`plan.ts`), and the stable code each reason is recorded as. */
 export const GUARD_ERROR_CODES = {
   unlisted_share: "models_dev_guard_unlisted_share",
+  enabled_unlisted_share: "models_dev_guard_enabled_unlisted",
   growth: "models_dev_guard_growth",
   url_changed_share: "models_dev_guard_url_changed_share",
   provider_size: "models_dev_guard_provider_size",

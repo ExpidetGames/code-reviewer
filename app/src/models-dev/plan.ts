@@ -21,6 +21,13 @@ import { nextUrlState, type UrlCheck, type UrlRecord } from "./upstream-url.ts";
 /** A fetch that would unlist more than this share of the listed models (or of the listed providers) is not applied. */
 export const UNLISTED_SHARE_LIMIT = 0.1;
 /**
+ * A fetch that would unlist more than `UNLISTED_SHARE_LIMIT` of the models an admin enabled for the managed key (#549) is not
+ * applied either, however few they are among all: they are the ones in use and paid for, so they come first. It takes at
+ * least this many of them at once: one or two retired by their provider is the normal case and must reach the admin as
+ * "no longer listed", not stop the day's fetch.
+ */
+export const ENABLED_UNLISTED_MIN_COUNT = 3;
+/**
  * A fetch that would make the listed models grow by more than this share is not applied either: the catalog grows by a
  * few models a week, so half in one fetch is a poisoned or broken body, and it would be a way to fill the tables. The first
  * fetch into an empty database is exempt.
@@ -62,6 +69,8 @@ type Input = {
   /** The verdict on the address of each provider in `parsed`, by provider id. */
   urlChecks: ReadonlyMap<string, UrlCheck>;
   now: Date;
+  /** The models an admin enabled (#549); the guard looks at them first. Left out, the guard is the catalog-wide one only. */
+  enabled?: readonly { providerId: string; modelId: string }[];
 };
 
 /** Stable JSON: keys sorted at every level, so two equal values give one text. */
@@ -228,19 +237,34 @@ function planModels(input: Input, stamp: string) {
       updatedAt: stamp,
     });
   }
+  const enabled = new Set(
+    (input.enabled ?? []).map((model) => key(model.providerId, model.modelId)),
+  );
   let unlisted = 0;
   let listedBefore = 0;
+  let enabledListedBefore = 0;
+  let enabledUnlisted = 0;
   for (const previous of stored.models) {
-    if (previous.unlistedAt === null) listedBefore += 1;
-    if (
-      seen.has(key(previous.providerId, previous.id)) ||
-      previous.unlistedAt !== null
-    )
-      continue;
+    const id = key(previous.providerId, previous.id);
+    if (previous.unlistedAt === null) {
+      listedBefore += 1;
+      if (enabled.has(id)) enabledListedBefore += 1;
+    }
+    if (seen.has(id) || previous.unlistedAt !== null) continue;
     unlisted += 1;
+    if (enabled.has(id)) enabledUnlisted += 1;
     writes.push({ ...previous, unlistedAt: stamp, updatedAt: stamp });
   }
-  return { writes, added, changed, returned, unlisted, listedBefore };
+  return {
+    writes,
+    added,
+    changed,
+    returned,
+    unlisted,
+    listedBefore,
+    enabledUnlisted,
+    enabledListedBefore,
+  };
 }
 
 function guardOf(
@@ -256,6 +280,12 @@ function guardOf(
     share(providers.unlisted, providers.listedBefore) > UNLISTED_SHARE_LIMIT
   )
     reasons.push("unlisted_share");
+  if (
+    models.enabledUnlisted >= ENABLED_UNLISTED_MIN_COUNT &&
+    share(models.enabledUnlisted, models.enabledListedBefore) >
+      UNLISTED_SHARE_LIMIT
+  )
+    reasons.push("enabled_unlisted_share");
   const listedAfter =
     models.listedBefore - models.unlisted + models.added + models.returned;
   // A database with rows but none listed has nothing to grow from: any listed model afterwards is growth.
