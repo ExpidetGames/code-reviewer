@@ -365,16 +365,20 @@ settled:
 | What happened | Settled as |
 |---|---|
 | a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
-| the provider refused with a 4xx (not 408) or a 429, a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
-| 408, any 5xx (524 included), a cut stream, an error event in a 200, a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
+| the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (before any byte of a body or stream), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
+| 408, 504, 524 (and any other status), every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
 | a complete answer without a readable usage or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
 
 The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
 the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_case_cost`). An engine that can make
-a call's usage unreadable must not make the call free; the price of that is that a transient 5xx ends a managed run,
-which is the safe side until #553 prices an own key's calls another way (`PassthroughProxy(unknown_cost_ends_run=)`
-is that hook; it is on by default and nothing sets it off yet). The whole-run cost stays unknown after any unknown call
-(`usage.cost_usd` is `None`), never a partial sum.
+a call's usage unreadable must not make the call free, so a call that may have been billed and was not read ends a
+managed run. *Why a 500/502/503/529 status is not such a call:* it arrives as a status line before any byte of an
+answer, so the provider failed the request before it generated anything, and the providers do not bill that (a
+transient overload is the commonest event of a long run, and the engine retries it as a call of its own). A timeout
+status (408, 504, 524) and anything after the first byte of a stream or body say the provider may have been generating,
+so they stay unknown. The assumption is unproven for real providers and is item L13 of the live checklist. The hook
+for #553 is `PassthroughProxy(unknown_cost_ends_run=)`, on by default and set by nothing yet. The whole-run cost stays
+unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
 
 **A hang-up does not hide a cost.** When the engine disconnects mid-stream, the call to the provider is **not**
 cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap until the usage event, or the
@@ -407,7 +411,7 @@ can only be an oracle if a provider quotes request content in such an event.
 `llm_rate_limit`, `llm_unavailable`, `llm_timeout`, `llm_context_length_exceeded`, `llm_bad_request`); a 404, and the
 engine's own "500 `UnknownError` with no call upstream" for a model its config does not offer
 (`engine_errors.model_not_found_for_turn`), is `model_unknown`. Status that the engine retries itself (408, 409, 429,
-5xx) do not end the run by themselves (a 408 or 5xx is an unknown call, see the ledger); the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
+5xx) do not end the run by themselves (a 408/504/524 is an unknown call, see the ledger); the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
 engine gives up. Everything else ends the run with its code, the text of the provider in none of it.
 
 **Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native

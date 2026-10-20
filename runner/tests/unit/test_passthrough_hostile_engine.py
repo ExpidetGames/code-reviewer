@@ -333,8 +333,8 @@ def test_a_refusal_before_anything_was_generated_costs_nothing(status: int) -> N
 
 
 # #550-B3-S02
-@pytest.mark.parametrize("status", [408, 500, 502, 503, 504, 524, 529])
-def test_a_timeout_or_server_error_may_have_been_billed_so_it_is_booked_at_its_worst_case(
+@pytest.mark.parametrize("status", [408, 504, 524])
+def test_a_timeout_status_may_have_been_billed_so_it_is_booked_at_its_worst_case(
     status: int,
 ) -> None:
     family = WireFamily.ANTHROPIC_MESSAGES
@@ -345,6 +345,40 @@ def test_a_timeout_or_server_error_may_have_been_billed_so_it_is_booked_at_its_w
     assert spent(r.ledger) == worst_case(len(body))
     assert r.ledger.unknown_calls == 1
     assert r.ledger.usage(MODEL).cost_usd is None
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #550-B3-S03
+@pytest.mark.parametrize("status", [500, 502, 503, 529])
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_server_error_that_is_only_a_status_before_any_byte_is_unbilled_and_the_run_goes_on(
+    family: WireFamily, status: int
+) -> None:
+    """The providers do not bill these: the engine retries as usual and the run continues."""
+    r = rig(family, failing(family, status), streamed(family, 2))
+    first = r.post()
+    assert first.status == status
+    assert spent(r.ledger) == 0
+    assert r.ledger.unknown_calls == 0
+    assert r.ledger.failure is None
+    assert r.proxy.last_upstream_error is ErrorCode.LLM_UNAVAILABLE
+    # The retry is a call of its own and settles at the provider's usage.
+    assert r.post().status == 200
+    assert r.ledger.failure is None
+    assert r.ledger.usage(MODEL).cost_usd == pytest.approx(
+        float(call_cost(usage_expected(2, family), PRICES) or 0)
+    )
+
+
+# #550-B3-S03
+def test_an_error_after_the_first_byte_of_a_stream_stays_unknown() -> None:
+    family = WireFamily.OPENAI_CHAT
+    events = stream(FAKE[family], TURN, 1, MODEL)
+    r = rig(family, Scripted(chunks=[events[0], UpstreamError(UpstreamFailure.CUT, sent=True)]))
+    body = r.body()
+    r.post(body)
+    assert spent(r.ledger) == worst_case(len(body))
     assert r.ledger.failure is not None
     assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
 

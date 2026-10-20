@@ -21,9 +21,10 @@ For every request the engine makes, in this order:
    usage from the same bytes. **A successful answer is never changed** (`redact.py`: redaction of
    content is an oracle for the key).
 5. **Settlement**: a complete answer with a usage and a price settles the reservation; a refusal
-   from the provider with a 4xx (not 408) or 429 costs nothing. Everything else that was sent and
-   whose usage was not read (a cut stream, an error event, a 408, a 5xx, a timeout after the request
-   went out) is **unknown**: booked at its worst case, not at what it was expected to cost, and for
+   from the provider with a 4xx (not 408), a 429 or a 500/502/503/529 that is only a status (before
+   any byte of an answer) costs nothing. Everything else that was sent and whose usage was not read
+   (a cut stream, an error event, a 408, 504 or 524, a timeout after the request went out) is
+   **unknown**: booked at its worst case, not at what it was expected to cost, and for
    a managed key the run ends (`dynamic_accounting_failed`); relaxing that for an own key is #553.
    An engine that hangs up does not make a call unknown: the proxy keeps reading the provider's
    answer, without forwarding it, until its usage event or the byte and deadline bounds, and then
@@ -106,6 +107,9 @@ _RESPONSE_HEADERS: Final = frozenset(
     }
 )
 _MAX_HEADER_VALUE: Final = 1024
+# Server errors that are not billed when they arrive as a status before any byte of the answer.
+# Open point (live checklist L13): whether a real provider ever bills one.
+_UNBILLED_SERVER_ERRORS: Final = frozenset({500, 502, 503, 529})
 # The only things of a provider's error that reach the engine: when to retry, as a number.
 _RETRY_HINTS: Final = {
     "retry-after": re.compile(r"[0-9]{1,6}(\.[0-9]{1,3})?"),
@@ -409,22 +413,21 @@ class PassthroughProxy:
         # The engine retries these itself; any other refusal ends its turn, and so the run.
         if not (status in (408, 409, 429) or status >= 500):
             self.ledger.record_failure(LimitError(code, "the model provider refused the request"))
-        if status in (429, 408) or (400 <= status < 500 and status != 408):
-            billed = status == 408
-        else:
-            billed = True
+        # A status line that arrives before any byte of an answer is a call the provider failed
+        # before it generated anything, and the providers do not bill these: 4xx, 429 and the
+        # server errors in `_UNBILLED_SERVER_ERRORS`. A timeout status (408, 504, 524) says the
+        # provider may have been working on it, and so does any status we have no reason to trust.
+        billed = status == 408 or (status >= 500 and status not in _UNBILLED_SERVER_ERRORS)
         if billed:
-            # A timeout or a server error may have been billed: its usage is not known.
             self._unknown(reservation, started_ms)
         else:
-            # Refused before it generated anything: the call cost nothing.
             self.ledger.settle_unbilled(reservation)
             self._trace_failed(started_ms, reservation)
         sentence = (
             "the model provider is rate limiting requests"
             if status == 429
             else "the model provider did not answer the request"
-            if billed
+            if status >= 500 or status == 408
             else "the model provider refused the request"
         )
         self._respond(

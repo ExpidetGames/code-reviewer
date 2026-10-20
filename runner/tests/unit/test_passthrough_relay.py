@@ -301,10 +301,10 @@ def test_the_retries_of_the_engine_are_calls_of_their_own_in_the_ledger() -> Non
         (400, ErrorCode.LLM_BAD_REQUEST, ErrorCode.LLM_BAD_REQUEST),
         (422, ErrorCode.LLM_BAD_REQUEST, ErrorCode.LLM_BAD_REQUEST),
         (429, ErrorCode.LLM_RATE_LIMIT, None),
-        # A server error may have been billed: the call is unknown and a managed run ends.
-        (500, ErrorCode.LLM_UNAVAILABLE, ErrorCode.DYNAMIC_ACCOUNTING_FAILED),
-        (503, ErrorCode.LLM_UNAVAILABLE, ErrorCode.DYNAMIC_ACCOUNTING_FAILED),
-        (529, ErrorCode.LLM_UNAVAILABLE, ErrorCode.DYNAMIC_ACCOUNTING_FAILED),
+        # A server error that is only a status is not billed by the providers: the run goes on.
+        (500, ErrorCode.LLM_UNAVAILABLE, None),
+        (503, ErrorCode.LLM_UNAVAILABLE, None),
+        (529, ErrorCode.LLM_UNAVAILABLE, None),
     ],
 )
 def test_a_provider_error_gets_a_stable_code_and_keeps_its_status_for_the_engine(
