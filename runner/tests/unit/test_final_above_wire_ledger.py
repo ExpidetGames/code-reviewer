@@ -534,3 +534,23 @@ def test_a_token_that_stands_twice_in_the_body_is_not_the_final_call() -> None:
     twice = carrying() + b" " + TOKEN.encode()
     with pytest.raises(RefusedForFinal):
         budget.reserve_call(twice, output_tokens=1_024, last_user_text=MESSAGE)
+
+
+# #552-F6: an encoder that escapes `<`, `>`, `&` and `'` (the HTML-safe spelling) still holds it
+def test_the_runner_text_is_found_in_a_body_with_the_html_safe_escapes() -> None:
+    message = f'<runner-wrap-up id="{TOKEN}">\nSay it & don\'t wait >\n</runner-wrap-up>'
+    budget = over_the_limit()
+    assert budget.arm_final(message, TOKEN) is True
+    escaped = (
+        json.dumps(message)[1:-1]
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("'", "\\u0027")
+    )
+    body = b"x" * len(REQUEST) + b'"text":"' + escaped.encode() + b'"'
+    assert b"\\u003c" in body and b"<" not in body
+
+    final = budget.reserve_call(body, output_tokens=1_024, last_user_text=message)
+
+    assert final.final is True

@@ -441,9 +441,20 @@ def reserved_tokens(text: str) -> int:
 
 def _json_forms(message: str) -> tuple[bytes, ...]:
     """The bytes a JSON body holds `message` as: the inside of a JSON string, with or without the
-    non-ASCII characters escaped (an encoder is free to do either)."""
-    forms = {json.dumps(message, ensure_ascii=flag)[1:-1].encode("utf-8") for flag in (True, False)}
+    non-ASCII characters escaped, and with or without the HTML-safe escapes of `<`, `>`, `&` and
+    `'` (an encoder is free to do any of these; the text is the same to whoever decodes it)."""
+    forms: set[bytes] = set()
+    for ascii_only in (True, False):
+        plain = json.dumps(message, ensure_ascii=ascii_only)[1:-1]
+        forms.add(plain.encode("utf-8"))
+        safe = plain
+        for character, escape in _HTML_SAFE:
+            safe = safe.replace(character, escape)
+        forms.add(safe.encode("utf-8"))
     return tuple(sorted(forms))
+
+
+_HTML_SAFE = (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), ("'", "\\u0027"))
 
 
 def _byte_size(text: str | bytes) -> int:

@@ -172,16 +172,32 @@ def _parser_detail(error: Exception) -> str:
     return "not valid JSON"
 
 
-_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,39}")
+# The names of the errors the pinned engine puts on an assistant message (`MessageV2` and the
+# provider errors, OpenCode 1.19.0). Only these are named; a name the engine does not have is
+# `other`, however much it looks like one, because the name is the one thing of the engine's error
+# the run keeps.
+KNOWN_ENGINE_ERRORS = frozenset(
+    {
+        "APIError",
+        "ContentFilterError",
+        "ContextOverflowError",
+        "MessageAbortedError",
+        "MessageOutputLengthError",
+        "ProviderAuthError",
+        "StructuredOutputError",
+        "UnknownError",
+    }
+)
 
 
 def engine_error_name(message: dict[str, Any]) -> str | None:
-    """The name of the engine's own error in the message that ended a turn, as a plain identifier
-    (`other` when it is not one), or None when there is none. The engine's text next to it (its
-    sentence, the body of a provider's answer) is never read: it can carry anything."""
+    """The name of the engine's own error in the message that ended a turn when it is one of
+    `KNOWN_ENGINE_ERRORS` (`other` when it is not), or None when there is none. The engine's text
+    next to it (its sentence, the body of a provider's answer) is never read: it can carry
+    anything."""
     info: Any = message.get("info")
     error: Any = cast("dict[str, Any]", info).get("error") if isinstance(info, dict) else None
     if error is None:
         return None
     name: Any = cast("dict[str, Any]", error).get("name") if isinstance(error, dict) else None
-    return name if isinstance(name, str) and _IDENTIFIER.fullmatch(name) else "other"
+    return name if isinstance(name, str) and name in KNOWN_ENGINE_ERRORS else "other"
