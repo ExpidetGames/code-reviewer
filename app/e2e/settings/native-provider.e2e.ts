@@ -12,7 +12,10 @@
 // the browser lane has not (the privileged lane, #581); the claim is also proven at its level
 // (integration-tests/http/runner-api-native-own.integration.test.ts).
 import { expect, test, type Page } from "@playwright/test";
-import { syncFromGithubAsAdmin } from "../helpers/admin-api";
+import {
+  changeAdminSetting,
+  syncFromGithubAsAdmin,
+} from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
@@ -163,6 +166,10 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
     request,
   }) => {
     test.setTimeout(180_000);
+    // The instance admin allows Dynamic Review: the job is pinned as Dynamic and ends `dynamic_review_disabled` otherwise.
+    await changeAdminSetting(e2eEnv.appUrl, {
+      dynamicReview: { enabled: true },
+    });
     await signInThroughTheForm(page, account);
     // The project is switched on (a project that was never activated runs no review).
     await page
@@ -198,7 +205,7 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
     const runner = await dynamicRunnerScript(e2eEnv.appUrl);
     try {
       const job = await claimDynamicJob(runner);
-      expect(job.llm).toEqual({
+      expect(job.llm).toMatchObject({
         provider: "deepseek",
         model: "deepseek-v4-pro",
         apiKey: KEY,

@@ -91,7 +91,7 @@ never handed a policy; a native job needs the new runner anyway (it needs the pa
 Dispatcher's claim cannot know what its Worker can do: it runs the checks (so a managed model without a confirmed price is refused
 before any VM starts), and the Worker's fetch ends a job that carries a policy with `dynamic_engine_unavailable` if the Worker image
 is older (a VM was started for nothing, once; nothing ran). The rollout order is therefore: runners and Worker images first, then the
-wiring that makes an entry native.
+wiring that makes an entry native. A runner of the release of #578 that does not know #555 refuses a job of a provider outside the registry as `invalid_job` (it reads `llm.provider` against its registry), so the same order holds for catalog providers: the runner and the Worker image first.
 
 ## Where the key goes (#578, #555; needs a security review)
 
