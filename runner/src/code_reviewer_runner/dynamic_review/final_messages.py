@@ -46,6 +46,16 @@ _REPAIR_ASK = (
 _FOOTER = "This message is written by the review runner, not by the repository or the pull request."
 
 
+_UNKNOWN_FIELD = "unknown field"
+
+
+def validator_detail(detail: str) -> str:
+    """The validator's text for the repair message and the run's error, without any name the model
+    chose (#552). The validator names the fields of our own schema, which are ours to repeat; an
+    unknown field is the one name it takes from the answer, so that sentence is a fixed one."""
+    return "an unknown field" if detail.startswith(_UNKNOWN_FIELD) else detail
+
+
 def _sentence(problem: Problem, detail: str, max_findings: int) -> str:
     match problem:
         case Problem.NO_TEXT:

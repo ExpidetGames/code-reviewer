@@ -41,7 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
-from code_reviewer_runner.dynamic_findings import DynamicFindings, EnvelopeError
+from code_reviewer_runner.dynamic_findings import DynamicFindings, EnvelopeError, FindingsError
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.final_json import (
     Problem,
@@ -51,6 +51,7 @@ from code_reviewer_runner.dynamic_review.final_json import (
 from code_reviewer_runner.dynamic_review.final_messages import (
     FINISH_NOW_INSTRUCTION,
     repair_message,
+    validator_detail,
 )
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
@@ -186,8 +187,10 @@ class PlainFinalization:
             return _Verdict(extraction.problem, extraction.detail)
         try:
             findings = self._parse(extraction.document)
-        except EnvelopeError as error:
-            return _Verdict(Problem.ENVELOPE_INVALID, error.detail)
+        except FindingsError as error:
+            # Not only the envelope: findings that are all invalid are the model's mistake too, and
+            # exactly as repairable. The detail names our fields, never a name the model chose.
+            return _Verdict(Problem.ENVELOPE_INVALID, validator_detail(error.detail))
         if len(findings.findings) > self._max_findings:
             return _Verdict(Problem.TOO_MANY_FINDINGS)
         return findings
