@@ -262,6 +262,32 @@ def test_the_engine_can_ask_the_proxy_why_the_provider_failed(tmp_path: Path) ->
     assert ask() is native.run.proxy.last_upstream_error
 
 
+# #578-T23
+def test_the_engine_is_given_the_wait_for_idle_of_the_proxy_of_this_job(tmp_path: Path) -> None:
+    with started(tmp_path) as (native, job, _upstream):
+        drive(native, job, tmp_path, calls=0)
+
+    # A bound method is made anew at every access, so equality (same function, same proxy) it is.
+    assert FakeEngine.made[0].options["wait_idle"] == native.run.proxy.wait_idle
+
+
+# #578-T23
+def test_the_ledger_runs_on_the_clock_the_builder_was_given() -> None:
+    now = [1000.0]
+    ledger = build_native_job(
+        native_job(),
+        deadline=600.0,
+        environment={},
+        upstream_for=upstream_for(scripted_none()),
+        clock=lambda: now[0],
+    ).ledger
+
+    now[0] += 100.0
+
+    assert ledger.elapsed_seconds() == 100.0
+    assert ledger.remaining_seconds() == 500.0
+
+
 # -- 4. the limits of the model ----------------------------------------
 
 
