@@ -234,12 +234,19 @@ class EngineClient:
     """The verified HTTP surface of one engine server. Only the endpoints the run needs."""
 
     def __init__(
-        self, base_url: str, directory: str, *, transport: Transport = _http_request
+        self,
+        base_url: str,
+        directory: str,
+        *,
+        transport: Transport = _http_request,
+        provider_id: str = PROXY_PROVIDER_ID,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.directory = directory
         self.last_message: bytes = b""
         self._transport = transport
+        # The provider the message names: the legacy proxy provider, or the one of a native job.
+        self._provider_id = provider_id
 
     def _call(
         self,
@@ -331,7 +338,7 @@ class EngineClient:
         """
         body: dict[str, Any] = {
             "agent": REVIEW_AGENT,
-            "model": {"providerID": PROXY_PROVIDER_ID, "modelID": model},
+            "model": {"providerID": self._provider_id, "modelID": model},
             "parts": parts,
         }
         if schema is not None:
@@ -361,7 +368,7 @@ class EngineClient:
         the engine accepted it."""
         body = {
             "agent": REVIEW_AGENT,
-            "model": {"providerID": PROXY_PROVIDER_ID, "modelID": model},
+            "model": {"providerID": self._provider_id, "modelID": model},
             "parts": [{"type": "text", "text": text}],
         }
         status, _ = self._call(
@@ -590,6 +597,7 @@ class DynamicEngine:
         superseded: Callable[[], bool] = lambda: False,
         plain_final: bool = False,
         engine_config: Mapping[str, Any] | None = None,
+        provider_id: str = PROXY_PROVIDER_ID,
         provider_error: Callable[[], ErrorCode | None] = lambda: None,
     ) -> None:
         if job.dynamic is None or job.base is None:
@@ -626,6 +634,7 @@ class DynamicEngine:
             ledger.enable_final_above_wire()
         # The trusted configuration of a native job; None: the legacy proxy provider (`start`).
         self._engine_config = engine_config
+        self._provider_id = provider_id
         # The stable code the proxy kept for a provider that failed (`PassthroughProxy`), named
         # when the engine gives up; the engine's own error text is never shown.
         self._provider_error = provider_error
@@ -718,7 +727,10 @@ class DynamicEngine:
                 self.launch.confine(_port_of(self.proxy_url), port)
             self._spawn(environment, port)
             client = EngineClient(
-                f"http://127.0.0.1:{port}", self.directory, transport=self._transport
+                f"http://127.0.0.1:{port}",
+                self.directory,
+                transport=self._transport,
+                provider_id=self._provider_id,
             )
             try:
                 client.wait_healthy(self.startup_seconds, self._is_running)
