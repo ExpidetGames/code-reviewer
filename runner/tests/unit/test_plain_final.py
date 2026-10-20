@@ -880,3 +880,24 @@ def test_an_announcement_that_outlives_its_timeout_fails_the_run_and_nothing_is_
     assert raised.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
     assert engine.client.aborted == 0
     assert len(engine.prompts) == 1  # no answer was asked for around the announcement
+
+
+# #552-F4: an own key goes on with the worst case booked for a call whose usage was never seen; the
+# worst case can pass the limit, and the run still ends with a review (the PoC of the review)
+def test_a_call_booked_at_its_worst_case_over_the_limit_still_ends_with_a_delivered_review() -> (
+    None
+):
+    final, engine = make()
+
+    def unseen_usage(engine: Engine) -> None:
+        call = engine.ledger.reserve_call(b"x" * 250_000, output_tokens=1_024)
+        engine.ledger.settle_unknown(call)  # the stream was cut: booked at 250k tokens, $0.25
+        engine.refused_call()
+
+    engine.turns = [unseen_usage, says(review(), cost="0.03")]
+
+    findings = final.run()
+
+    assert len(findings.findings) == 1
+    assert engine.prompts == [None, FINAL]
+    assert engine.ledger.failure is None

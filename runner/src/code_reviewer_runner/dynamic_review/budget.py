@@ -679,8 +679,8 @@ class BudgetLedger:
     def final_refusal(self) -> LimitError:
         """Why `arm_final` said no, with the code and the words of that cause (#552). Call it after
         `arm_final` returned False: the failure of the run if there is one, a call of the aborted
-        turn that is still running, the deadline, both marks used, or a spend over the limit that
-        is not known (a call booked at its worst case)."""
+        turn that is still running, the deadline, both marks used, or a spend that leaves no call
+        for the answer (not reachable today: every way over the limit ends the agent phase)."""
         with self._lock:
             if self._failure is not None:
                 return self._failure
@@ -704,8 +704,8 @@ class BudgetLedger:
                     ErrorCode.RUNNER_ERROR, "a call for the answer was marked already"
                 )
             return LimitError(
-                ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
-                "the spend passes the cost limit and the cost of a call is not known",
+                ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                "the spend passes the cost limit and no call is left for the answer",
             )
 
     @property
@@ -1252,6 +1252,15 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
             counters.unknown_calls += 1
+            if (
+                self._above_wire
+                and counters.cost > self.limits.max_cost_usd
+                and not reservation.final
+            ):
+                # The worst case passes the limit: like a call that settled over it, this ends the
+                # agent phase, and the final call is still admitted (#552). An own key goes on
+                # after an unknown call; the review must not be lost to its booking.
+                self._overshot = True
         return True
 
     @property

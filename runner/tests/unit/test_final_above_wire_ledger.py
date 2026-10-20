@@ -474,14 +474,31 @@ def test_a_path_longer_than_any_real_one_fails_closed() -> None:
     assert raised.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
 
 
-# #552-T1: a spend that passes the limit only as a worst case booked for a call whose usage was
-# never seen is no ground for a final call: the mark is refused
-def test_the_mark_is_refused_when_only_a_worst_case_booking_passes_the_limit() -> None:
+# #552-F4: a spend that passes the limit only as a worst case booked for a call whose usage was
+# never seen ends the agent phase like a call that settled over the limit, and the final call is
+# still admitted (an own key goes on after such a call; the review is not lost)
+def test_the_mark_is_admitted_when_only_a_worst_case_booking_passes_the_limit() -> None:
     budget = ledger()
     unseen = budget.reserve_call(b"x" * 150_000, output_tokens=1_024)  # its expected cost fits
     budget.settle_unknown(unseen)  # booked at its worst case, which is above the limit
 
-    assert budget.arm_final(MESSAGE, TOKEN) is False
+    refused(budget)  # no normal call follows
+    assert budget.arm_final(MESSAGE, TOKEN) is True
+    final = budget.reserve_call(carrying(), output_tokens=1_024, last_user_text=MESSAGE)
+    assert final.final is True
+
+
+# #552-F4: the legacy ledger is not changed by it
+def test_without_the_mode_a_worst_case_booking_does_not_end_the_agent_phase() -> None:
+    budget = ledger(above_wire=False)
+    unseen = budget.reserve_call(b"x" * 150_000, output_tokens=1_024)
+    budget.settle_unknown(unseen)
+
+    with pytest.raises(LimitError) as raised:  # as before: the final call is not admitted either
+        budget.reserve_call(
+            REQUEST, output_tokens=1_024, can_wrap_up=True, wrap_up_text="Answer now."
+        )
+    assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
 
 # #552-T1: nobody is asked for the answer while a mark waits for the call that carries it
@@ -581,13 +598,6 @@ def test_the_refusal_of_a_mark_says_why_for_every_cause() -> None:
     assert used.arm_final(MESSAGE, TOKEN) is False
     error = used.final_refusal()
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED and "its repair" in error.detail
-
-    unseen = ledger()
-    booked = unseen.reserve_call(b"x" * 150_000, output_tokens=1_024)
-    unseen.settle_unknown(booked)
-    assert unseen.arm_final(MESSAGE, TOKEN) is False
-    error = unseen.final_refusal()
-    assert error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED and "not known" in error.detail
 
     failed = ledger()
     cause = LimitError(ErrorCode.DYNAMIC_POLICY_VIOLATION, "a rule")
