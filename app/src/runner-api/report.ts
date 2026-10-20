@@ -53,6 +53,12 @@ export type ReportDeps = {
     job: Job,
   ) => Promise<{ managed: boolean; models: readonly string[] }>;
   /**
+   * #553: whether the job was a native job (its selection named a catalog model, `src/native-cost/`), read from the provider
+   * its usage record remembers. Left out, no job is native. Only a native job is held to the rule that a managed run never
+   * settles with an unknown cost.
+   */
+  isNative?: (job: Job) => Promise<boolean>;
+  /**
    * #395: a job ended or went back to the queue through this call. The running server uses it to send the jobs that
    * were waiting for the slot, after the response; it never throws and never delays the answer.
    */
@@ -234,6 +240,7 @@ export async function finishJob(
       // #553: a managed Dynamic run never settles with an unknown cost; a success that reports none is stored as the failure.
       withoutUnaccountedManagedSuccess(reported, {
         managed: onManagedKey,
+        native: onManagedKey && (await deps.isNative?.(job)) === true,
         reviewKind: job.reviewKind,
       }),
       models,

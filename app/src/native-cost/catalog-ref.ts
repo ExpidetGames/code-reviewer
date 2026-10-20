@@ -19,7 +19,8 @@ import { supportedProvider } from "../models-dev/opencode-providers.ts";
 export type CatalogRef = { providerId: string; modelId: string };
 
 const SLUG = /^[a-z][a-z0-9_]{1,31}$/;
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$/;
+// The charset of the job entry's model id, without `..` (it would walk out of a path the id is put into).
+const MODEL_ID = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}$/;
 
 /** The models.dev provider id a registry slug stands for, or null when the text is no slug. */
 export function catalogProviderIdOf(slug: string): string | null {
@@ -34,18 +35,29 @@ export function providerSlugOf(providerId: string): string | null {
 }
 
 /**
- * The catalog model a selection names, or null when the job does not take the native path: the provider is one of the legacy
- * registry (`legacyProviders`), no slug, not a provider the pinned engine can drive, or the model id is not one a job entry
- * can carry.
+ * The models.dev provider id of a registry slug that takes the native path, or null: the provider is one of the legacy
+ * registry (`legacyProviders`), no slug, or not a provider the pinned engine can drive.
+ */
+export function nativeProviderIdOf(
+  slug: string,
+  legacyProviders: readonly string[],
+): string | null {
+  if (legacyProviders.includes(slug)) return null;
+  const providerId = catalogProviderIdOf(slug);
+  if (providerId === null || supportedProvider(providerId) === undefined)
+    return null;
+  return providerId;
+}
+
+/**
+ * The catalog model a selection names, or null when the job does not take the native path: its provider is not a native
+ * one (`nativeProviderIdOf`) or the model id is not one a job entry can carry.
  */
 export function catalogRefOf(
   selection: { provider: string; model: string },
   legacyProviders: readonly string[],
 ): CatalogRef | null {
-  if (legacyProviders.includes(selection.provider)) return null;
-  const providerId = catalogProviderIdOf(selection.provider);
-  if (providerId === null || supportedProvider(providerId) === undefined)
-    return null;
-  if (!MODEL_ID.test(selection.model)) return null;
+  const providerId = nativeProviderIdOf(selection.provider, legacyProviders);
+  if (providerId === null || !MODEL_ID.test(selection.model)) return null;
   return { providerId, modelId: selection.model };
 }

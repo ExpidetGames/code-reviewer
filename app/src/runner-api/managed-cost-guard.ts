@@ -13,15 +13,17 @@ export const UNACCOUNTED_MANAGED_RUN_MESSAGE =
   "the cost of the run could not be accounted for";
 
 /**
- * The result as it is stored: unchanged, unless the job ran on the operator's key, is a Dynamic review, claims to have
+ * The result as it is stored: unchanged, unless the job ran on the operator's key, is a **native** Dynamic review (the claim
+ * gave it a price book and the runner promised to account for every call; a job on the legacy wires never did), claims to have
  * succeeded and reports a usage with a null cost. A failure keeps the runner's code: its cost may well be unknown, and the
  * code decides how it bills.
  */
 export function withoutUnaccountedManagedSuccess(
   result: RunnerResult,
-  job: { managed: boolean; reviewKind: string },
+  job: { managed: boolean; native: boolean; reviewKind: string },
 ): RunnerResult {
-  if (!job.managed || job.reviewKind !== "dynamic") return result;
+  if (!job.managed || !job.native || job.reviewKind !== "dynamic")
+    return result;
   if (result.errorCode !== null) return result;
   if (result.usage === null || result.usage.costUsd !== null) return result;
   return {

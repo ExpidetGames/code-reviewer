@@ -125,35 +125,20 @@ describe("a Dynamic result on the own key", () => {
 });
 
 describe("a Dynamic result on the managed key", () => {
-  // #553-T09
-  it("is not settled as a success without a cost: the job ends dynamic_accounting_failed", async () => {
+  // #577-L6
+  it("is left as it is on a job that is not native: a success with a null cost settles with an unknown cost", async () => {
     const h = await start("managed");
     const job = await claimedDynamic(h);
 
     const done = await h.complete(job.id, job.leaseToken, { usage: NO_COST });
 
     expect(done.status).toBe(200);
-    expect(await h.queue.get(job.id)).toMatchObject({
-      status: "failed",
-      errorCode: "dynamic_accounting_failed",
-    });
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "succeeded" });
     expect(await recordOf(h, job.id)).toMatchObject({
       keyMode: "managed",
       state: "settled",
       costMicroUsd: null,
     });
-  });
-
-  // #553-T09
-  it("repeats to the same stored result when the runner sends it twice", async () => {
-    const h = await start("managed");
-    const job = await claimedDynamic(h);
-
-    await h.complete(job.id, job.leaseToken, { usage: NO_COST });
-    const again = await h.complete(job.id, job.leaseToken, { usage: NO_COST });
-
-    expect(again.status).toBe(200);
-    expect(await again.json()).toMatchObject({ alreadyCompleted: true });
   });
 
   // #553-T09

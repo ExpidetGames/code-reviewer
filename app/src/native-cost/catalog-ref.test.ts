@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   catalogProviderIdOf,
   catalogRefOf,
+  nativeProviderIdOf,
   providerSlugOf,
 } from "./catalog-ref.ts";
 
@@ -63,9 +64,26 @@ describe("the catalog model a selection names", () => {
     ).toBeNull();
   });
 
+  // #577-L6
+  it("tells a native provider from a legacy one by the slug alone", () => {
+    expect(nativeProviderIdOf("deepseek", LEGACY)).toBe("deepseek");
+    expect(nativeProviderIdOf("fireworks_ai", LEGACY)).toBe("fireworks-ai");
+    expect(nativeProviderIdOf("openrouter", LEGACY)).toBeNull();
+    expect(nativeProviderIdOf("nosuchprovider", LEGACY)).toBeNull();
+  });
+
   // #553-R10
   it("is none for a model id the job entry would refuse", () => {
-    for (const model of ["", " ", "a b", "../x", "x".repeat(201)])
+    // `..` is no part of a model id (#577): it would walk out of a path the id is put into.
+    for (const model of [
+      "",
+      " ",
+      "a b",
+      "../x",
+      "a..b",
+      "x/../y",
+      "x".repeat(201),
+    ])
       expect(catalogRefOf({ provider: "openai", model }, LEGACY)).toBeNull();
   });
 });

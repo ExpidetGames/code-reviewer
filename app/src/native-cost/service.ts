@@ -7,7 +7,11 @@
 import "server-only";
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { ModelPriceService } from "../model-prices/service.ts";
-import { catalogRefOf, type CatalogRef } from "./catalog-ref.ts";
+import {
+  catalogRefOf,
+  nativeProviderIdOf,
+  type CatalogRef,
+} from "./catalog-ref.ts";
 import {
   managedPolicy,
   ownPolicy,
@@ -17,12 +21,19 @@ import {
 import { ownKeyTokenCapOf } from "./token-cap.ts";
 
 export type PolicyOutcome =
-  | { ok: true; policy: CostPolicyJson }
+  | {
+      ok: true;
+      policy: CostPolicyJson;
+      /** The confirmation that priced a managed run; null for an own key. */
+      confirmation: { id: number; hashVersion: number } | null;
+    }
   | Extract<ManagedPolicyOutcome, { ok: false }>;
 
 export type NativeCostService = {
   /** The catalog model a selection names, or null when the job does not take the native path (catalog-ref.ts). */
   refOf(selection: { provider: string; model: string }): CatalogRef | null;
+  /** Whether a provider slug (as a usage record remembers it) is a native one: the job it served was native. */
+  isNativeProvider(slug: string): boolean;
   /**
    * The cost policy of a job on this key. `managed`: only a model that is enabled and has a confirmed price passes; the
    * refusal carries a stable code (`catalog_price_unconfirmed`, `catalog_model_unavailable`) and an internal reason, both
@@ -43,6 +54,8 @@ export function createNativeCostService(deps: {
 }): NativeCostService {
   return {
     refOf: (selection) => catalogRefOf(selection, deps.legacyProviders),
+    isNativeProvider: (slug) =>
+      nativeProviderIdOf(slug, deps.legacyProviders) !== null,
 
     async policyFor(keyMode, ref) {
       if (keyMode === "managed")
@@ -53,7 +66,11 @@ export function createNativeCostService(deps: {
         deps.prices.catalogPrice(ref.providerId, ref.modelId),
         deps.settings.get("own_key_max_total_tokens"),
       ]);
-      return { ok: true, policy: ownPolicy(book, ownKeyTokenCapOf(stored)) };
+      return {
+        ok: true,
+        policy: ownPolicy(book, ownKeyTokenCapOf(stored)),
+        confirmation: null,
+      };
     },
   };
 }

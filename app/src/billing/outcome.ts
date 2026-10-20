@@ -40,6 +40,25 @@ export const AI_COST_FAILURE_CODES = [
   "llm_context_length_exceeded",
 ] as const;
 
+/** The codes a claim ends or hands back a job with (`CLAIM_FAILURE_CODES` and `CLAIM_RELEASE_REASONS`, #553); a test compares. */
+type ClaimCode =
+  | "managed_model_unavailable"
+  | "llm_not_configured"
+  | "llm_provider_unsupported"
+  | "job_llm_options_invalid"
+  | "job_args_invalid"
+  | "job_env_invalid"
+  | "git_connection_disabled"
+  | "git_connection_gone"
+  | "git_connection_suspended"
+  | "git_scope_refused"
+  | "git_app_auth_failed"
+  | "git_access_failed"
+  | "git_access_unavailable"
+  | "pull_request_unavailable"
+  | "claim_failed"
+  | "price_check_failed";
+
 /** The codes that arrive through the release call of a Dispatcher (`KnownReleaseReason` in the contract). */
 type ReleaseReason = "launch_failed" | "worker_exited";
 
@@ -111,6 +130,24 @@ export const ERROR_CODE_CLASSES = {
   llm_quota: "charged",
   model_unknown: "charged",
   llm_parameters_unsupported: "charged",
+  // Refused or handed back at claim (#553): nothing ran, the model was not asked and no VM was kept. The codes that name the
+  // customer's side of the line (a closed pull request, a missing one, the Dynamic settings) keep their class above.
+  managed_model_unavailable: "free",
+  llm_not_configured: "free",
+  llm_provider_unsupported: "free",
+  job_llm_options_invalid: "free",
+  job_args_invalid: "free",
+  job_env_invalid: "free",
+  git_connection_disabled: "free",
+  git_connection_gone: "free",
+  git_connection_suspended: "free",
+  git_scope_refused: "free",
+  git_app_auth_failed: "free",
+  git_access_failed: "free",
+  git_access_unavailable: "free",
+  pull_request_unavailable: "free",
+  claim_failed: "free",
+  price_check_failed: "free",
   // Dynamic Review.
   dynamic_engine_unavailable: "free",
   dynamic_isolation_self_check_failed: "free",
@@ -123,7 +160,7 @@ export const ERROR_CODE_CLASSES = {
   // Replaced by a newer push; it reported what it used. In full.
   superseded: "charged",
 } as const satisfies Record<
-  JobErrorCode | RunnerErrorCode | ReleaseReason,
+  JobErrorCode | RunnerErrorCode | ReleaseReason | ClaimCode,
   OutcomeClass
 >;
 export type ClassifiedCode = keyof typeof ERROR_CODE_CLASSES;

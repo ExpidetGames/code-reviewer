@@ -69,6 +69,7 @@ function sharedDeps(): WorkerApiDeps {
     logger: { info: (line) => console.info(line) },
   });
   const llm = getWorkspaceLlm();
+  const nativeCost = getNativeCost();
   return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
@@ -137,7 +138,17 @@ function sharedDeps(): WorkerApiDeps {
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
     // #553: the cost policy of a native job. No selection the registry allows names a catalog model yet, so no job is native.
-    nativeCost: getNativeCost(),
+    nativeCost,
+    isNative: async (job) => {
+      const record = await createUsageRecordsRepository(
+        db,
+        job.workspaceId,
+      ).get(job.id);
+      return (
+        record?.llmProvider != null &&
+        nativeCost.isNativeProvider(record.llmProvider)
+      );
+    },
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,

@@ -245,7 +245,99 @@ describe("managedAvailabilityToJson", () => {
       model_retired: "catalog_model_unavailable",
       model_not_enabled: "catalog_model_unavailable",
       price_unconfirmed: "catalog_price_unconfirmed",
+      cache_read_unpriced: "catalog_price_unconfirmed",
+      cache_write_unpriced: "catalog_price_unconfirmed",
       check_failed: "catalog_model_unavailable",
     });
+  });
+});
+
+// #577-L4: one definition of "selectable". A book whose cache price is incomplete is not priced: the runner would have to
+// guess the price of a cache read (or write) it meets, and the managed key never runs on a guess.
+describe("managedAvailability and the cache prices of the book", () => {
+  const NO_CACHE = { input: "0.6", output: "1.2" };
+  const anthropic = {
+    provider: {
+      ...provider,
+      id: "anthropic",
+      name: "Anthropic",
+      url: { ...provider.url, trustedUrl: "https://api.anthropic.com/v1" },
+    },
+    model: {
+      ...model,
+      providerId: "anthropic",
+      id: "claude-test-1",
+      cost: { input: "3", output: "15", cacheRead: "0.3" },
+    },
+  };
+
+  // #577-L4
+  it("does not select a model whose confirmed book states no cache read", () => {
+    const row = { ...model, cost: NO_CACHE };
+
+    expect(check({ model: row, confirmation: confirmed(NO_CACHE) })).toEqual({
+      selectable: false,
+      reason: "cache_read_unpriced",
+    });
+  });
+
+  // #577-L4
+  it("selects it once the admin states the cache read explicitly in a correction", () => {
+    const row = { ...model, cost: NO_CACHE };
+    const base = confirmed(NO_CACHE);
+    const corrected: PriceConfirmation = {
+      ...base,
+      source: "admin",
+      book: { ...base.book, cacheRead: BigInt(600_000) },
+    };
+
+    expect(check({ model: row, confirmation: corrected })).toMatchObject({
+      selectable: true,
+    });
+  });
+
+  // #577-L4
+  it("does not select a model whose tier drops the cache read the base level states", () => {
+    const cost = {
+      ...model.cost!,
+      tiers: [{ contextOver: 200_000, input: "1.2", output: "2.4" }],
+    };
+    const row = { ...model, cost };
+
+    expect(check({ model: row, confirmation: confirmed(cost) })).toEqual({
+      selectable: false,
+      reason: "cache_read_unpriced",
+    });
+  });
+
+  // #577-L4
+  it("does not select a model of the Messages family that states a cache read and no cache write", () => {
+    expect(
+      check({
+        ...anthropic,
+        confirmation: {
+          ...confirmed(anthropic.model.cost),
+          providerId: "anthropic",
+          modelId: "claude-test-1",
+        },
+      }),
+    ).toEqual({ selectable: false, reason: "cache_write_unpriced" });
+  });
+
+  // #577-L4
+  it("selects a model of the Messages family that states both", () => {
+    const cost = { ...anthropic.model.cost, cacheWrite: "3.75" };
+
+    expect(
+      check({
+        provider: anthropic.provider,
+        model: { ...anthropic.model, cost },
+        confirmation: {
+          ...confirmed(cost),
+          providerId: "anthropic",
+          modelId: "claude-test-1",
+        },
+      }),
+    ).toMatchObject({ selectable: true });
   });
 });

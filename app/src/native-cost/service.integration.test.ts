@@ -194,6 +194,52 @@ describe.each(MODELS_DEV_ENGINES)(
       );
     });
 
+    describe("the cache prices of the managed key", () => {
+      // #577-L4
+      it_(
+        "refuses a confirmed model that states no cache read, until the admin states it in a correction",
+        async () => {
+          const t = await setup();
+          const body = modelsDevFixture() as Record<
+            string,
+            { models: Record<string, { cost: Record<string, unknown> }> }
+          >;
+          delete body.deepseek!.models["deepseek-v4-pro"]!.cost.cache_read;
+          t.fake.respondWith(body);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          await t.confirm(DEEPSEEK);
+
+          expect(await t.native.policyFor("managed", DEEPSEEK)).toEqual({
+            ok: false,
+            code: "catalog_price_unconfirmed",
+            reason: "cache_read_unpriced",
+          });
+          const view = await t.prices.get(
+            DEEPSEEK.providerId,
+            DEEPSEEK.modelId,
+          );
+          if (!view.ok) throw new Error("no view");
+          // The input price is the upper bound the admin may state.
+          const price = {
+            ...view.model.price.reference.book!,
+            cacheRead: view.model.price.reference.book!.input,
+          };
+          const corrected = await t.prices.correctPrice(ADMIN, {
+            ...DEEPSEEK,
+            referenceHash: view.model.price.reference.hash,
+            price,
+            reason: "no cache price stated: the input price as the upper bound",
+          });
+          expect(corrected.ok).toBe(true);
+
+          expect(await t.native.policyFor("managed", DEEPSEEK)).toMatchObject({
+            ok: true,
+            policy: { priceBook: { cacheRead: "660000" } },
+          });
+        },
+      );
+    });
+
     describe("the own key", () => {
       // #553-T04
       it_(
@@ -234,6 +280,7 @@ describe.each(MODELS_DEV_ENGINES)(
               priceBook: null,
               maxTotalTokens: 4_000_000,
             },
+            confirmation: null,
           });
         },
       );

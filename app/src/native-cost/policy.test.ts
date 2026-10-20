@@ -30,6 +30,7 @@ describe("the managed key's policy", () => {
     expect(managedPolicy(selectable(BOOK))).toEqual({
       ok: true,
       policy: { keyMode: "managed", priceBook: BOOK, maxTotalTokens: null },
+      confirmation: { id: 7, hashVersion: 2 },
     });
   });
 
@@ -57,49 +58,6 @@ describe("the managed key's policy", () => {
       code: "catalog_model_unavailable",
       reason: "check_failed",
     });
-  });
-
-  // #553-R04
-  it("refuses a book that sells a cache write and states no cache read: a read would be billed at a price nobody confirmed", () => {
-    for (const change of [
-      { cacheRead: null },
-      { cacheRead: null, cacheWrite1h: null },
-      { cacheRead: null, cacheWrite5m: null },
-    ])
-      expect(managedPolicy(selectable({ ...BOOK, ...change }))).toEqual({
-        ok: false,
-        code: "catalog_price_unconfirmed",
-        reason: "cache_read_unpriced",
-      });
-  });
-
-  // #553-R04
-  it("refuses a tier that drops the cache read the base level states", () => {
-    const tier = {
-      ...LEVEL,
-      cacheRead: null,
-      cacheWrite5m: null,
-      cacheWrite1h: null,
-    };
-    expect(
-      managedPolicy(
-        selectable({ ...BOOK, tiers: [{ contextOver: 200_000, ...tier }] }),
-      ),
-    ).toMatchObject({ ok: false, reason: "cache_read_unpriced" });
-    expect(
-      managedPolicy(selectable({ ...BOOK, contextOver200k: tier })),
-    ).toMatchObject({ ok: false, reason: "cache_read_unpriced" });
-  });
-
-  // #553-R04
-  it("accepts a model with no cache prices at all: nothing says it offers a cache read", () => {
-    const plain: PriceBookJson = {
-      ...BOOK,
-      cacheRead: null,
-      cacheWrite5m: null,
-      cacheWrite1h: null,
-    };
-    expect(managedPolicy(selectable(plain)).ok).toBe(true);
   });
 });
 

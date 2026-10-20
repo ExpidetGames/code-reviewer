@@ -22,6 +22,7 @@ import type { ManagedAvailabilityJson } from "../../src/model-prices/availabilit
 import type { PriceBookJson } from "../../src/model-prices/price-book.ts";
 import { createNativeCostService } from "../../src/native-cost/service.ts";
 import {
+  goodResult,
   startRunnerApiHarness,
   type RunnerApiHarness,
 } from "../../src/test-support/runner-api-harness.ts";
@@ -144,6 +145,7 @@ async function start(options: {
         selection.provider === FAKE_PROVIDER_ID
           ? { providerId: "deepseek", modelId: selection.model }
           : null,
+      isNativeProvider: (slug) => slug === FAKE_PROVIDER_ID,
     },
     loadLlm: undefined,
   });
@@ -258,6 +260,7 @@ describe("the managed key (we pay)", () => {
 
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).not.toBeNull();
+    expect(h.logLines().join("\n")).toContain("given back: price_check_failed");
     expect(await h.queue.get(job!.id)).toMatchObject({ status: "queued" });
     // Nothing of the job left: no token, no remembered key.
     expect(h.issuedJobTokens()).toEqual([]);
@@ -305,9 +308,46 @@ describe("the managed key (we pay)", () => {
           cost: { keyMode: "managed", priceBook: BOOK, maxTotalTokens: null },
         },
       });
+    // Which confirmation priced the run is in the log, so a price in dispute can be traced (#577).
+    expect(claimed.logLines().join("\n")).toMatch(
+      /selection entry=\S+ .*confirmation=3 hash=2/,
+    );
     expect(await recordOf(claimed, job.id)).toMatchObject({
       keyMode: "managed",
     });
+  });
+
+  // #553-T09, #577-L6
+  it("settles a native success without a cost as dynamic_accounting_failed, and the same report twice to one result", async () => {
+    const h = await start({ keyMode: "managed" });
+    const { job } = await h.claimed(CLAIM);
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    const done = await h.complete(job.id, job.leaseToken, { usage: noCost });
+    const again = await h.complete(job.id, job.leaseToken, { usage: noCost });
+
+    expect(done.status).toBe(200);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_accounting_failed",
+    });
+    expect(await recordOf(h, job.id)).toMatchObject({
+      keyMode: "managed",
+      state: "settled",
+      costMicroUsd: null,
+    });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ alreadyCompleted: true });
+  });
+
+  // #577-L6
+  it("settles a native success with a known cost as before", async () => {
+    const h = await start({ keyMode: "managed" });
+    const { job } = await h.claimed(CLAIM);
+
+    await h.complete(job.id, job.leaseToken);
+
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "succeeded" });
   });
 
   // #553-R09

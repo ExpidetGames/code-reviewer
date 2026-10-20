@@ -29,7 +29,11 @@ function resultOf(overrides: Partial<RunnerResult> = {}): RunnerResult {
   };
 }
 
-const MANAGED_DYNAMIC = { managed: true, reviewKind: "dynamic" } as const;
+const MANAGED_DYNAMIC = {
+  managed: true,
+  native: true,
+  reviewKind: "dynamic",
+} as const;
 
 describe("a managed Dynamic result without a known cost", () => {
   // #553-T09
@@ -84,18 +88,32 @@ describe("a managed Dynamic result without a known cost", () => {
     }
   });
 
+  // #577-L6
+  it("leaves a job that is not native alone: its runner never promised a cost it could not read", () => {
+    const unknown = resultOf();
+    expect(
+      withoutUnaccountedManagedSuccess(unknown, {
+        managed: true,
+        native: false,
+        reviewKind: "dynamic",
+      }),
+    ).toBe(unknown);
+  });
+
   // #553-T12
   it("leaves every other job alone: an own key, a Diff review", () => {
     const unknown = resultOf();
     expect(
       withoutUnaccountedManagedSuccess(unknown, {
         managed: false,
+        native: true,
         reviewKind: "dynamic",
       }),
     ).toBe(unknown);
     expect(
       withoutUnaccountedManagedSuccess(unknown, {
         managed: true,
+        native: true,
         reviewKind: "diff",
       }),
     ).toBe(unknown);

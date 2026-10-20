@@ -525,14 +525,17 @@ without it is a job of today; a job with it that would reach the legacy wire is 
 | model | refused at claim (`managed_model_unavailable`) unless enabled with a **confirmed** price, before any key, token or VM | free choice |
 | price source | the confirmed book of the claim, nothing else: never the engine's `cost`, never models.dev | the confirmed book, else the catalog's price, else none |
 | an unknown cost (a call whose usage was not read, one the book cannot price, a field nobody can price) | worst case booked, the run ends `dynamic_accounting_failed` (free) | the run goes on; the call books its tokens (or its expected cost and tokens when its usage was not read) |
-| bound | the dollar limit of #540 | the dollar limit while every call is priced; once the price is not known or a call is unknown, `maxTotalTokens` (instance setting, default 4,000,000: prompt, cache and completion tokens in all) and the clock |
-| result | `costUsd` known; the app refuses a managed success with a null cost (stored as `dynamic_accounting_failed`) | `costUsd: null` when any call is unpriced; billing charges minutes only |
+| bound | the dollar limit of #540 | the dollar limit of #540 while every call is priced, with `maxTotalTokens` (instance setting, default 4,000,000: prompt, cache and completion tokens in all) as a ceiling over it; with no price or an unknown call, the cap and the clock |
+| result | `costUsd` known; the app refuses a native managed success with a null cost (stored as `dynamic_accounting_failed`) | `costUsd: null` when any call is unpriced; billing charges minutes only |
 | a call with no usage at all | fails the run | fails the run (the cap cannot count it) |
 
-`build_native_ledger(policy, limits, window_tokens, output_tokens, reasoning)` makes the ledger: no book means no dollar is counted
+`build_native_run(policy, limits, ..., target, upstream, ...)` (`native_run.py`) makes the ledger and the proxy of one policy, so the
+two cannot disagree about whose key it is; `build_native_ledger(policy, limits, window_tokens, output_tokens, reasoning)` makes the ledger: no book means no dollar is counted
 (`priced=False`), the output of a call is held to `min(limit.output, 32000)` (what the engine really sends, spike #546), and a model
-the catalog marks `reasoning` reserves that whole output cap for every call, since its thinking is output nobody can predict (#548:
-the flag changes the request, so it changes the reservation). The token cap binds like the cost limit: a normal call is admitted
+the catalog marks `reasoning` reserves at least `REASONING_OUTPUT_FLOOR_TOKENS` (8,192) of output for every call and the p95 of its
+own completions after that, since its thinking is output nobody can predict (#548: the flag changes the request, so it changes the
+reservation). The whole 32,000-token cap is not reserved: at 15 USD per million tokens that alone would make the first call of a
+1 USD run the final call. The token cap binds like the cost limit: a normal call is admitted
 only while the tokens used, the tokens held for calls in flight and this call's expected tokens fit; a call that settles over the cap
 is delivered and ends the agent phase; the run is wrapped up first when a further call and a final one would not fit, with the
 reason `token_limit` (`stoppedEarly`), which the summary and the check run say in words. The unit costs a reservation is made with
@@ -540,9 +543,10 @@ are the book's base level (an expectation: what a call costs is always the book 
 settle above its reservation, which the final-call exemption already bounds).
 
 The book of a claim is read with `strict_cache_read` (`price_book.py`): a cache read without a read price is **not** priced as input
-(N4 of the review of PR #569). The claim refuses a managed book that sells a cache write and states no read; if a read slips past
-(a provider that caches a model with no cache price at all) the call is unpriced, and the run ends `dynamic_accounting_failed`, which
-is free. `cache_control.ttl` stays out of the request schema: the pinned engine never sends one, and a 1-hour write is a price the
+(N4 of the review of PR #569). "Selectable" on the managed key includes complete cache prices (`availability()`: every level states a
+cache read; the Messages family also a 5-minute write); if a read slips past, the call is unpriced and the run ends
+`dynamic_accounting_failed`, which is free. The token cap books a call at the largest of its counts, its stated total and reasoning
+on top of the completion, and an unknown call at the estimate of its input plus the whole output allowance. `cache_control.ttl` stays out of the request schema: the pinned engine never sends one, and a 1-hour write is a price the
 book states but nothing asks for.
 
 ## The model

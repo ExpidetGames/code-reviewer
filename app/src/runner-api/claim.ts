@@ -120,6 +120,8 @@ export const CLAIM_RELEASE_REASONS = [
   "git_access_unavailable",
   "pull_request_unavailable",
   "claim_failed",
+  // #553: the price check of a managed native job failed itself (the database could not be read); not the model's fault.
+  "price_check_failed",
   // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
   "launch_failed",
   // #375: the Worker's container ended with an error before it reported a result (the Dispatcher's release call).
@@ -205,7 +207,10 @@ export type ClaimDeps = {
    * #553: the cost policy of a native job (a job whose selection names a catalog model, src/native-cost/). Left out, no job
    * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
    */
-  nativeCost?: Pick<NativeCostService, "refOf" | "policyFor">;
+  nativeCost?: Pick<
+    NativeCostService,
+    "refOf" | "policyFor" | "isNativeProvider"
+  >;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -447,7 +452,12 @@ export type CheckOptions = {
 };
 
 type CostDecision =
-  | { kind: "decided"; policy: CostPolicyJson | null }
+  | {
+      kind: "decided";
+      policy: CostPolicyJson | null;
+      /** Which confirmation priced a managed run, for the log. */
+      confirmation?: { id: number; hashVersion: number };
+    }
   | { kind: "refused"; errorCode: string; detail: string }
   /** The price check itself failed (the database could not be read): not the model's fault, so the job is given back. */
   | { kind: "retry" };
@@ -469,7 +479,14 @@ async function costOf(
   const ref = native.refOf(selection);
   if (ref === null) return { kind: "decided", policy: null };
   const outcome = await native.policyFor(selection.keyMode, ref);
-  if (outcome.ok) return { kind: "decided", policy: outcome.policy };
+  if (outcome.ok)
+    return {
+      kind: "decided",
+      policy: outcome.policy,
+      ...(outcome.confirmation === null
+        ? {}
+        : { confirmation: outcome.confirmation }),
+    };
   // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
   if (outcome.reason === "check_failed") return { kind: "retry" };
   return {
@@ -516,13 +533,6 @@ export async function checkJob(
   if (!selected.ok) return refuse(selected.errorCode, selected.detail);
   const { selection } = selected;
   await deps.recordSelection(job, selection);
-  // The log names the entry and the kind of a job on the operator's key, never a model or a provider; the log of
-  // a job on the workspace's own key names no model either.
-  deps.logger.info(
-    selection.keyMode === "managed"
-      ? `[runner-api] job=${job.id} selection entry=${selection.entry.id} kind=${selection.kind} origin=${selection.entry.origin}`
-      : `[runner-api] job=${job.id} selection kind=${selection.kind} key=own`,
-  );
 
   // #553: the cost of a native Dynamic job. On the operator's key, which we pay, a model whose price is not confirmed ends
   // the job here, before any key, token or VM exists; the own key is never refused for a price.
@@ -531,9 +541,21 @@ export async function checkJob(
   if (cost.kind === "retry")
     return {
       kind: "retry",
-      reason: "claim_failed",
+      reason: "price_check_failed",
       retryAfterSeconds: DEFAULT_RETRY_AFTER_SECONDS,
     };
+  // The log names the entry and the kind of a job on the operator's key, never a model or a provider; the log of
+  // a job on the workspace's own key names no model either. A managed native job also names the confirmation that priced it
+  // (its id and the version of its hash), so a price in dispute can be traced.
+  deps.logger.info(
+    selection.keyMode === "managed"
+      ? `[runner-api] job=${job.id} selection entry=${selection.entry.id} kind=${selection.kind} origin=${selection.entry.origin}${
+          cost.confirmation === undefined
+            ? ""
+            : ` confirmation=${String(cost.confirmation.id)} hash=${String(cost.confirmation.hashVersion)}`
+        }`
+      : `[runner-api] job=${job.id} selection kind=${selection.kind} key=own`,
+  );
 
   // Only now the key of the selected provider: the workspace's own, or the operator's, as the selection says.
   const llm = await deps.keyFor(job.workspaceId, selection);
