@@ -191,7 +191,8 @@ def test_the_retries_of_the_engine_are_calls_of_their_own(run: Any) -> None:
         )
     )
     assert front.ledger.failure is None
-    assert front.proxy.last_upstream_error is ErrorCode.LLM_RATE_LIMIT
+    # The engine retried the 429s and the loop went through: the code is the last call's (#552-N2).
+    assert front.proxy.last_upstream_error is None
 
 
 # #550-T10

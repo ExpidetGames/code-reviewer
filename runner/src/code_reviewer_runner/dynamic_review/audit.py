@@ -138,19 +138,22 @@ class ToolAudit:
         size = len(text.encode("utf-8", errors="replace"))
         self._ledger.add_result_bytes(size)
         self._ledger.trace.tool_resulted(identity, size)
-        for path in _result_files(name, arguments, text):
+        for path in result_files(name, arguments, text):
             self._ledger.count_file(self._normal(path))
         return neutral
 
     def _normal(self, path: str) -> str:
-        """One identity per file: relative to the export when it is inside, however it was named."""
-        root = self._root
-        if root is not None and not path.startswith("/"):
-            path = posixpath.join(root, path)
-        path = posixpath.normpath(path)
-        if root is not None and (path == root or path.startswith(f"{root}/")):
-            return path[len(root) :].lstrip("/") or "."
-        return path
+        return normal_path(self._root, path)
+
+
+def normal_path(root: str | None, path: str) -> str:
+    """One identity per file: relative to the export when it is inside, however it was named."""
+    if root is not None and not path.startswith("/"):
+        path = posixpath.join(root, path)
+    path = posixpath.normpath(path)
+    if root is not None and (path == root or path.startswith(f"{root}/")):
+        return path[len(root) :].lstrip("/") or "."
+    return path
 
 
 def _tool_calls(message: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -195,7 +198,7 @@ def _content_text(content: object) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _result_files(name: str, arguments: Mapping[str, Any], text: str) -> list[str]:
+def result_files(name: str, arguments: Mapping[str, Any], text: str) -> list[str]:
     """The distinct content-bearing files one result names. Only the pinned tool shapes count."""
     if name == "read":
         path: Any = arguments.get("filePath")
