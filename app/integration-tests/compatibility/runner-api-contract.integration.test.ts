@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { REVIEW_COMMANDS } from "../../src/integrations/types.ts";
+import type { JobModelEntry } from "../../src/models-dev/job-entry.ts";
 import { LLM_PROVIDERS } from "../../src/llm/config.ts";
 import {
   LLM_PROVIDER_ID_PATTERN,
@@ -32,6 +33,27 @@ import {
 } from "../../src/test-support/runner-api-harness.ts";
 
 const contract = createContractValidator();
+// The entry of a native job is the object of its own file (#578).
+const entryValidator = createContractValidator("job-model-entry.v1.json");
+const NATIVE_ENTRY: JobModelEntry = {
+  version: 1,
+  providerId: "deepseek",
+  npm: "@ai-sdk/openai-compatible",
+  family: "openai-chat",
+  authHeader: "Authorization",
+  upstreamBaseUrl: "https://api.deepseek.com",
+  modelId: "deepseek-v4-pro",
+  model: {
+    name: "DeepSeek V4 Pro",
+    status: "active",
+    tool_call: true,
+    reasoning: true,
+    temperature: true,
+    limit: { context: 1_000_000, output: 384_000 },
+    modalities: { input: ["text"], output: ["text"] },
+    interleaved: { field: "reasoning_content" },
+  },
+};
 
 function expectValid(definition: string, document: unknown) {
   const { valid, errors } = contract.check(definition, document);
@@ -852,7 +874,6 @@ describe("the cost policy of a native job", () => {
       projects: true,
       nativeCost: {
         refOf: () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro" }),
-        isNativeProvider: () => true,
         policyFor: async () => ({
           ok: true,
           policy: {
@@ -862,6 +883,7 @@ describe("the cost policy of a native job", () => {
           },
           confirmation: null,
         }),
+        entryFor: async () => ({ ok: true, entry: NATIVE_ENTRY }),
       },
     });
     await h.projectService.activateProject(h.repositoryId);
@@ -881,7 +903,67 @@ describe("the cost policy of a native job", () => {
       priceBook: null,
       maxTotalTokens: 4_000_000,
     });
+    expect(claim.job.input.dynamic?.modelEntry).toEqual(NATIVE_ENTRY);
     expectValid("ClaimResponse", claim);
+    // The entry is the object of its own file, which the file of the runner API does not repeat.
+    expect(
+      entryValidator.check(
+        "JobModelEntry",
+        claim.job.input.dynamic?.modelEntry,
+      ),
+    ).toEqual({ valid: true, errors: "" });
+  });
+});
+
+// #578-T07: the entry of a native job. The runner API says only that it is an object that goes with the cost policy; the
+// entry's own file says what it is, and every golden job is held against both.
+describe("the model entry of a native job", () => {
+  const FIXTURES = new URL("../../../fakes/fixtures/", import.meta.url);
+  const read = (name: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  const dynamicOf = (job: Record<string, unknown>) =>
+    job.dynamic as Record<string, unknown>;
+
+  it.each([
+    "dynamic-review-job-native-managed.json",
+    "dynamic-review-job-native-own.json",
+  ])("accepts the golden native job %s and its entry", (name) => {
+    const job = read(name);
+
+    expectValid("RunnerJobInput", job);
+    expect(
+      entryValidator.check("JobModelEntry", dynamicOf(job).modelEntry),
+    ).toEqual({ valid: true, errors: "" });
+  });
+
+  it.each([
+    "dynamic-review-job.json",
+    "dynamic-review-job-cost-managed.json",
+    "dynamic-review-job-cost-own.json",
+  ])("still accepts the job without an entry %s", (name) => {
+    expectValid("RunnerJobInput", read(name));
+  });
+
+  it("refuses an entry without the cost policy it goes with", () => {
+    const job = read("dynamic-review-job-native-own.json");
+    delete dynamicOf(job).cost;
+
+    expect(contract.check("RunnerJobInput", job).valid).toBe(false);
+  });
+
+  it("refuses an entry that is not an object, and the entry's file refuses one with a key", () => {
+    const job = read("dynamic-review-job-native-own.json");
+    dynamicOf(job).modelEntry = "anthropic";
+    expect(contract.check("RunnerJobInput", job).valid).toBe(false);
+
+    const entry = structuredClone(
+      dynamicOf(read("dynamic-review-job-native-own.json")).modelEntry,
+    ) as Record<string, unknown>;
+    entry.apiKey = "sk-live-1";
+    expect(entryValidator.check("JobModelEntry", entry).valid).toBe(false);
   });
 });
 

@@ -167,6 +167,14 @@ reason=<catalog_price_unconfirmed|catalog_model_unavailable>:<reason>`), with no
    that named `dynamic_cost_policy` (else the job ends `dynamic_engine_unavailable`). A job that is not native is unchanged and
    the price service is not asked.
 
+   **The model entry of a native job (#578).** After the policy, the same decision step asks `nativeCost.entryFor` for the entry of
+   the model (the last known catalog row, no key, no price) and sends it as `dynamic.modelEntry` with the policy. An entry that
+   cannot be built ends the job like an unavailable model (`managed_model_unavailable` on the operator's key, with
+   `reason=entry_<code>` in the log; `dynamic_model_features_unsupported` on an own key), before any key or token exists; a failed
+   read gives the job back. The two registry providers keep their API address whatever the catalog trusts: an entry whose address is not the
+   registry's is refused with `reason=entry_upstream_not_registry` (`src/native-cost/registry-addresses.ts`). A native job does not read the provider's model metadata. Whether a registry provider is native at all
+   is the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off; `src/native-cost/README.md`).
+
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
    `prUrl` in the response is the URL the provider reports.
