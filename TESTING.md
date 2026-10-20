@@ -298,6 +298,20 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, `make test-engi
   provider answers; what is only assumed about one is listed in `docs/spike/544-passthrough.md`, section 6.
   `test_native_support.py` pins that the support code stops the `opencode serve` it started when that process does
   not come up healthy.
+- The passthrough proxy (#550, `test_engine_opencode_passthrough.py`, support `opencode_passthrough.py`): the same
+  real pinned OpenCode, with the production `PassthroughProxy` in front of each strict fake in place of the relay of
+  the spike (only the last hop is a loopback double, `runner/tests/passthrough_loopback.py`). One engine holds six
+  providers: the four family loops side by side (the fake saw the real key and no other credential, the engine's own
+  cache marks arrived as written, the ledger counted seven calls at the price of the usage the tee read), a provider
+  whose first two calls are 429s (nine upstream calls, nine in the ledger; a 5xx is an unknown call and ends a managed
+  run, so it is proven below this level), one whose 401 quotes the key (the engine gets the proxy's sentence, not the
+  provider's words) and a turn for a model the engine does not offer (no call, `model_unknown`). The four loops are
+  also the proof that the closed request schema (`body_schema.py`) admits everything the real engine sends
+  (`fakes/wire/engine_requests.json` is one captured body per family, the base of the schema unit tests).
+  Keep it that way: a new claim goes into one of those providers. The policy itself is proven below this level:
+  admission, the closed body schema, tee, destination, the time limits, the hostile-engine cases (no redaction oracle, a hang-up
+  that does not hide a cost, worst-case booking, one call at a time) and the relay in `tests/unit/test_passthrough_*.py` (no socket: a scripted upstream and an
+  in-memory sink), the server on real loopback sockets in `tests/integration/test_passthrough_server.py`.
 - Upgrading PR-Agent: the suite must pass unchanged, together with the identity patch guard in
   `tests/unit/`. A change in wording that the runner matches (see `error_mapping.py`) shows up here.
 
