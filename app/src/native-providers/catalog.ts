@@ -7,7 +7,7 @@
 // pages refuse it before they get here).
 //
 // **Offered** to a choice: a provider of `contracts/opencode-providers.v1.json` (a static key and a bundled SDK) that is not one
-// of the registry's two, whose address is trusted (`url_changed` and refused addresses block it), that models.dev still lists
+// of the registry's two, whose address is trusted (`url_changed` and refused addresses block it) and a plain public https address (`native-cost/catalog-address.ts`), that models.dev still lists
 // and that has a model to choose. A model is offered while models.dev lists it. What a claim serves is not decided here: the
 // claim builds the entry from the stored row through `native-cost/service.ts` `entryFor` (the last known row, whether or not
 // models.dev lists the model now: decision of 2026-10-19 on #548), as long as the provider is supported and its address trusted.
@@ -16,6 +16,7 @@ import type { ModelsDevRepository } from "../db/repositories/models-dev-reposito
 import type { StoredModel, StoredProvider } from "../models-dev/catalog.ts";
 import { supportedProvider } from "../models-dev/opencode-providers.ts";
 import { isUsable } from "../models-dev/upstream-url.ts";
+import { isCanonicalCatalogAddress } from "../native-cost/catalog-address.ts";
 import {
   nativeProviderIdOf,
   providerSlugOf,
@@ -89,7 +90,10 @@ function offered(
     provider !== undefined &&
     provider.unlistedAt === null &&
     supportedProvider(provider.id) !== undefined &&
-    isUsable(provider.url)
+    isUsable(provider.url) &&
+    // What the claim (`entryFor`) would refuse is not offered: the picker, the key and the choice agree with it.
+    provider.url.trustedUrl !== null &&
+    isCanonicalCatalogAddress(provider.url.trustedUrl)
   );
 }
 

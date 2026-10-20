@@ -108,14 +108,15 @@ runner (before the key is used):
   model and nothing else. The claim carries the address in `dynamic.modelEntry.upstreamBaseUrl`. Two more checks, the same on both sides
   (`catalog-address.ts`, `runner/.../passthrough/destination.py`, held to the shared `contracts/key-destination-vectors.json`):
   the address is a plain public https address in **exactly one spelling** (lower-case name of at least two labels, no default port, no
-  trailing slash, a plain path of letters, digits and `. _ ~ -`; an address a row holds in any other spelling ends the job
+  trailing slash, a plain path of letters, digits and `. _ ~ -`, and **never an IP address of any kind**: IPv4 or IPv6, bracketed, with a zone id,
+  mapped or in a number spelling, so that neither side has to agree on which literals count as public; an address a row holds in any other spelling ends the job
   `upstream_invalid`, and the runner refuses it as `invalid_job`); and the entry is of the provider the key is for (the id of the entry
   is the slug with hyphens). The runner then connects to that exact string; the connection resolves the name, judges **every**
   address it resolves to, connects to the address it judged, speaks TLS to the name and follows no redirect
   (`passthrough/upstream.py`).
 - **What this does not do.** The runner has no address list of its own for such a provider, so it cannot tell a trusted public name
   from another public name; that is the catalog's trust record (the app never builds an entry from an address that is not trusted).
-  The residual risk is the one #548 accepted: the first safe address models.dev states for a provider is trusted. A committed
+  The residual risk is the one #548 accepted: the first safe address models.dev states for a provider is trusted (except for the providers whose SDK address `contracts/opencode-providers.v1.json` records: that address is the trusted one from the start, and a different address models.dev states waits for an admin, `models-dev/plan.ts`). The picker, the key and the choice offer a provider only if the claim would build its entry (`native-providers/catalog.ts`, the canonical address). A committed
   address per provider (a pin like the registry's) would remove it at the cost of a hand-kept list; it is a follow-up for the
   security review, not part of this rule.
 

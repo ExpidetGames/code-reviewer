@@ -182,6 +182,78 @@ describe.each(MODELS_DEV_ENGINES)(
       });
     });
 
+    describe("a provider whose trusted address the claim would refuse", () => {
+      // The claim (`entryFor`) refuses an address that is not a plain public https address in its canonical spelling; the
+      // picker, the key and the choice must not offer what the claim then cannot serve.
+      // #555-T16
+      it_.each([
+        "https://10.0.0.5/v1",
+        "https://93.184.216.34/v1",
+        "https://[2606:4700:4700::1111]/v1",
+        "https://API.deepseek.example",
+        "https://api.deepseek.example/",
+        "https://api.deepseek.example//v1",
+        "https://models.internal/v1",
+      ])(
+        "is not offered, takes no key and no choice when its stored address is %s",
+        async (address) => {
+          const { db } = await engine.create();
+          const repository = createModelsDevRepository(db);
+          await repository.apply({
+            providers: [
+              provider("deepseek", {
+                url: {
+                  state: "trusted",
+                  trustedUrl: address,
+                  pendingUrl: null,
+                  problem: null,
+                },
+              }),
+              provider("openai"),
+            ],
+            models: [
+              model("deepseek", "deepseek-v4-pro"),
+              model("openai", "gpt-5.5"),
+            ],
+          });
+          const reader = createNativeCatalogReader({
+            models: repository,
+            legacyProviders: ["openrouter", "anthropic"],
+          });
+
+          expect((await reader.providers()).map((entry) => entry.id)).toEqual([
+            "openai",
+          ]);
+          expect(await reader.providerAvailable("deepseek")).toBe(false);
+          expect(await reader.models("deepseek")).toBeUndefined();
+          expect(
+            await reader.checkSelection("deepseek", "deepseek-v4-pro"),
+          ).toEqual({ ok: false, code: "model_not_in_catalog" });
+          // The reader and the claim agree: the claim refuses the same provider.
+          const native = createNativeCostService({
+            prices: {
+              availability: () => Promise.reject(new Error("not asked")),
+              catalogPrice: () => Promise.reject(new Error("not asked")),
+            },
+            settings: { get: () => Promise.resolve(undefined) },
+            catalog: repository,
+            legacyProviders: ["openrouter", "anthropic"],
+            registryAddresses: {},
+          });
+          expect(
+            (
+              await native.entryFor({
+                providerId: "deepseek",
+                modelId: "deepseek-v4-pro",
+              })
+            ).ok,
+          ).toBe(false);
+          // A provider with a plain address is offered still (the positive control).
+          expect(await reader.providerAvailable("openai")).toBe(true);
+        },
+      );
+    });
+
     describe("the models of a provider", () => {
       // #555-T03
       it_(

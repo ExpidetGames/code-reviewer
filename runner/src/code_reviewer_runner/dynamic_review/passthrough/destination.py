@@ -46,8 +46,9 @@ def key_destination(provider: str, entry: JobModelEntry) -> str:
         # The connection (`HttpsUpstream`) judges the form of the registry's address as well.
         return address
     destination = check_base_url(address)
-    # A provider of the catalog has a name: an IP literal of any kind (IPv4, bracketed IPv6, mapped, with a zone id) is
-    # refused, as the app does, so neither side has to agree on which literals count as public.
+    # A provider of the catalog has a name: an IP literal of any kind (IPv4, bracketed IPv6, mapped,
+    # with a zone id) is refused, as the app does, so neither side has to agree on which literals
+    # count as public.
     host = urlsplit(destination).netloc
     if host.startswith("[") or re.fullmatch(r"[0-9.]+", host):
         raise UpstreamRefused("the entry names an IP address, not the name of the provider")
