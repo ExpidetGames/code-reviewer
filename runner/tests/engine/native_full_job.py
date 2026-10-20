@@ -72,8 +72,20 @@ ENTRIES: dict[Family, dict[str, Any]] = {
 }
 
 
-def job_for(family: Family, cost: Mapping[str, Any]) -> Job:
-    entry = ENTRIES[family]
+# A provider of the models.dev catalog outside the registry (#555): the own key of the workspace
+# goes to the address the catalog trusts for it. It speaks the chat family, like most of them.
+CATALOG_ENTRY: dict[str, Any] = {
+    "provider": "deepseek",
+    "npm": "@ai-sdk/openai-compatible",
+    "family": "openai-chat",
+    "authHeader": "Authorization",
+    "upstreamBaseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-pro",
+}
+
+
+def job_for(family: Family, cost: Mapping[str, Any], entry: dict[str, Any] | None = None) -> Job:
+    entry = ENTRIES[family] if entry is None else entry
     model = entry["model"]
     return parse_job(
         json.dumps(
@@ -184,10 +196,12 @@ def full_job(
     limit: str = "5.00",
     react: Reaction | None = None,
     usage_fault: UsageFault | None = None,
+    entry: dict[str, Any] | None = None,
 ) -> Generator[FullJob]:
-    """Run one whole native job to its result."""
+    """Run one whole native job to its result. `entry`: the provider and model of the claim when
+    they are not the registry's (the family names the wire the fake speaks)."""
     export = make_export(scratch)
-    entry = ENTRIES[family]
+    entry = ENTRIES[family] if entry is None else entry
     scene = Scene()
 
     def judge(headers: Mapping[str, str], body: Mapping[str, Any]) -> Refusal | None:
@@ -264,7 +278,7 @@ def full_job(
         root.setLevel(logging.DEBUG)
         try:
             result = runner.run_dynamic_job(
-                job_for(family, cost),
+                job_for(family, cost, entry),
                 None,
                 0.0,
                 environment,

@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 from fakes.wire.formats import Family, Turn
-from native_full_job import MANAGED, OWN, FullJob, full_job
+from native_full_job import CATALOG_ENTRY, MANAGED, OWN, FullJob, full_job
 from opencode_native import REAL_KEY
 from opencode_support import opencode_binary
 from plain_final_support import reads, review, user_texts
@@ -119,6 +119,38 @@ def test_a_whole_native_job_on_an_own_key_without_a_price_reports_no_cost(
 def test_a_whole_native_job_runs_on_another_family(tmp_path: Path, family: Family) -> None:
     with full_job(tmp_path, three_reads_then_the_review, family=family, cost=MANAGED) as job:
         assert_a_native_review(job)
+
+
+# #555-T12: the own key of a provider of the catalog that is not in the registry, whole job: the
+# entry's address is the destination (checked by `key_destination` before the key is used), the
+# engine's configuration holds that one provider and model and no key.
+def test_a_whole_native_job_of_a_catalog_provider_publishes_a_review(tmp_path: Path) -> None:
+    with full_job(
+        tmp_path, three_reads_then_the_review, family="chat", cost=OWN, entry=CATALOG_ENTRY
+    ) as job:
+        result = job.result
+        assert result.ok, result.log_tail
+        assert result.comment_url == job.publisher.URL
+        assert len(job.publisher.calls) == 1
+        assert job.requests
+        for request in job.requests:
+            assert tool_names(request) == TOOLS
+        ((config,),) = [job.configs]
+        assert list(config["provider"]) == ["deepseek"]
+        ((block,),) = [config["provider"].values()]
+        assert list(block["models"]) == ["deepseek-v4-pro"]
+        assert REAL_KEY not in json.dumps(config)
+        assert job.spawned
+        for spawned in job.spawned:
+            assert REAL_KEY not in spawned.config_text
+            assert REAL_KEY not in json.dumps(spawned.environment)
+            assert "api.deepseek.com" not in spawned.config_text
+        assert REAL_KEY not in result.log_tail
+        assert REAL_KEY not in job.log
+        usage = result.usage
+        assert usage is not None
+        assert usage.cost_usd is None
+        assert usage.ai_calls == len(job.records)
 
 
 def many_reads(export: Path) -> list[Turn]:

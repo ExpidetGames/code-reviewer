@@ -160,6 +160,7 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
     expect(await page.content()).not.toContain(KEY);
     for (const url of requestedUrls) expect(url).not.toContain(KEY);
   });
+
   // #555-T10
   test("a review of a pull request is handed out with the chosen model, the workspace's own key and the catalog's address, and succeeds", async ({
     page,
