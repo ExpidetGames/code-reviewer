@@ -47,6 +47,8 @@ async function snapshot(
       table.name === "models_dev_providers" ||
       table.name === "models_dev_models" ||
       table.name === "models_dev_fetch_state" ||
+      table.name === "model_enablements" ||
+      table.name === "model_price_confirmations" ||
       table.name === "billing_webhook_events"
     )
       continue;

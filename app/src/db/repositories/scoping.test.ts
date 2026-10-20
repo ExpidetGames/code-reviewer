@@ -121,6 +121,8 @@ const INSTANCE_LEVEL = [
   "job-dispatches-repository.ts",
   "jobs-claim.ts",
   "legacy-users-repository.ts",
+  "model-enablements-repository.ts",
+  "model-price-confirmations-repository.ts",
   "models-dev-repository.ts",
   "plan-handoff-redeem-repository.ts",
   "rate-limits-repository.ts",
@@ -259,6 +261,22 @@ describe("the repositories and workspace scoping", () => {
     expect(factories.map((fn) => fn.name)).toEqual([
       "createModelsDevRepository",
     ]);
+  });
+
+  // #549-T12
+  it("classifies the model enablement and price confirmation repositories as instance level, with an exported factory that takes no workspace", () => {
+    for (const [file, factory] of [
+      ["model-enablements-repository.ts", "createModelEnablementsRepository"],
+      [
+        "model-price-confirmations-repository.ts",
+        "createModelPriceConfirmationsRepository",
+      ],
+    ] as const) {
+      expect(INSTANCE_LEVEL).toContain(file);
+      expect(SCOPED).not.toContain(file);
+      const factories = exportedFunctions(file).filter(touchesTheDatabase);
+      expect(factories.map((fn) => fn.name)).toEqual([factory]);
+    }
   });
 
   it("keeps the instance level modules from taking a workspace, so the two groups stay apart", () => {

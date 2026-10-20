@@ -110,6 +110,27 @@ describe("the guards of the admin portal", () => {
     expect(source).toMatch(/<ModelCatalogSection\b/);
   });
 
+  // #549-T08
+  it("guard the catalog price routes like every other part of the portal, and keep them out of every other area", () => {
+    const prices = discoverRoutes().filter(({ route }) =>
+      concretePath(route).startsWith("/api/instance-portal/catalog-models"),
+    );
+
+    expect(prices.map(({ route }) => route).sort()).toEqual([
+      "/api/instance-portal/catalog-models",
+      "/api/instance-portal/catalog-models/enablement",
+      "/api/instance-portal/catalog-models/enablement/reset",
+      "/api/instance-portal/catalog-models/price/confirm",
+      "/api/instance-portal/catalog-models/price/correct",
+    ]);
+    for (const { route, file } of prices) {
+      expect(isInternalPortalPath(concretePath(route))).toBe(true);
+      const source = readFileSync(file, "utf8");
+      expect(source, route).toMatch(/\bcreateModelPriceRouteHandlers\(/);
+      expect(source, route).toMatch(/\baccess:\s*lookupAdmin\b/);
+    }
+  });
+
   it("are handed to the handlers by every data route", () => {
     const handlers = routes.filter(({ file }) => /route\.tsx?$/.test(file));
     expect(handlers.length).toBeGreaterThan(0);
@@ -118,7 +139,7 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval|Catalog)RouteHandlers\(/.test(
+          /\bcreate(Admin|Github|Approval|Catalog|ModelPrice)RouteHandlers\(/.test(
             source,
           ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );

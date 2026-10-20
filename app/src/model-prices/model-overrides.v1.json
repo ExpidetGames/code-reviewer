@@ -1,0 +1,62 @@
+{
+  "$comment": "Fields models.dev lacks or gets wrong in a way that is a code matter (#549, app/src/model-prices/README.md): the 1-hour cache write price, a date after which a model is never offered (retiresNotBefore), a block (blocked: true). Per provider id, then model id; every entry states a one-line reason. The app (app/src/model-prices/overrides.ts) reads its identical copy, model-overrides.v1.json next to it, and a test compares the two. Prices are USD per million tokens as decimal strings. Nothing else belongs here without a test case that shows models.dev cannot hold it. Editing it is a normal pull request.",
+  "version": 1,
+  "providers": {
+    "anthropic": {
+      "models": {
+        "claude-fable-5-1": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "20"
+        },
+        "claude-opus-5-5": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "8"
+        },
+        "claude-sonnet-5-5": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "4"
+        },
+        "claude-haiku-5-5": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "0.20"
+        },
+        "claude-fable-5": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "20"
+        },
+        "claude-opus-5": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "10"
+        },
+        "claude-opus-4-8": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "10"
+        },
+        "claude-opus-4-7": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "10"
+        },
+        "claude-opus-4-6": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "10"
+        },
+        "claude-opus-4-5-20251101": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "10"
+        },
+        "claude-sonnet-5": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "4"
+        },
+        "claude-sonnet-4-6": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "6"
+        },
+        "claude-haiku-4-5-20251001": {
+          "reason": "models.dev states no 1-hour cache write price; Anthropic's price list of 2026-10-19 does.",
+          "cacheWrite1hPerMTok": "2"
+        }
+      }
+    }
+  }
+}

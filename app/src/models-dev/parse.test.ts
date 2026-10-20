@@ -200,6 +200,137 @@ describe("reading a models.dev body", () => {
     });
   });
 
+  // #549-T05
+  it("stores every price models.dev states: reasoning, audio and the older 200k tier", () => {
+    const [model] = parse(
+      bodyWith({
+        m: goodModel({
+          cost: {
+            input: 1,
+            output: 2,
+            reasoning: 3,
+            input_audio: 4,
+            output_audio: 5,
+            context_over_200k: { input: 6, output: 7, cache_read: 0.5 },
+          },
+        }),
+      }),
+    ).models;
+
+    expect(model?.cost).toEqual({
+      input: "1",
+      output: "2",
+      reasoning: "3",
+      inputAudio: "4",
+      outputAudio: "5",
+      contextOver200k: { input: "6", output: "7", cacheRead: "0.5" },
+    });
+  });
+
+  // #549-T05
+  it("stores every tier, however many there are, in the order they come", () => {
+    const tiers = Array.from({ length: 12 }, (_, index) => ({
+      input: index + 1,
+      output: index + 2,
+      tier: { type: "context", size: (12 - index) * 1000 },
+    }));
+
+    const [model] = parse(
+      bodyWith({ m: goodModel({ cost: { input: 1, output: 2, tiers } }) }),
+    ).models;
+
+    expect(model?.cost?.tiers).toHaveLength(12);
+    expect(model?.cost?.tiers?.[0]).toEqual({
+      contextOver: 12000,
+      input: "1",
+      output: "2",
+    });
+    expect(model?.cost?.unknown).toBeUndefined();
+  });
+
+  // #549-T05
+  it.each([
+    [
+      "a price field it does not know",
+      { input: 1, output: 2, input_video: 3 },
+      ["cost.input_video"],
+    ],
+    [
+      "a tier of a kind it does not know",
+      {
+        input: 1,
+        output: 2,
+        tiers: [
+          { input: 3, output: 4, tier: { type: "time_of_day", size: 12 } },
+        ],
+      },
+      ["tier_type.time_of_day"],
+    ],
+    [
+      "a tier with a price field it does not know",
+      {
+        input: 1,
+        output: 2,
+        tiers: [
+          {
+            input: 3,
+            output: 4,
+            cache_write_1h: 5,
+            tier: { type: "context", size: 1000 },
+          },
+        ],
+      },
+      ["tier.cache_write_1h"],
+    ],
+    [
+      "a tier that is not a tier",
+      { input: 1, output: 2, tiers: ["cheap", { input: 1 }] },
+      ["tier"],
+    ],
+    [
+      "a price field that is not a price",
+      { input: 1, output: 2, reasoning: "a lot" },
+      ["cost.reasoning"],
+    ],
+  ])(
+    "flags %s as a price it cannot read, instead of dropping it",
+    (_name, cost, unknown) => {
+      const [model] = parse(bodyWith({ m: goodModel({ cost }) })).models;
+
+      expect(model?.cost?.unknown).toEqual(unknown);
+      expect(model?.cost?.input).toBe("1");
+    },
+  );
+
+  // #549-T05
+  it("flags a model with more tiers than any real model has, and stores no more than the bound", () => {
+    const tiers = Array.from({ length: 70 }, (_, index) => ({
+      input: 1,
+      output: 2,
+      tier: { type: "context", size: index + 1 },
+    }));
+
+    const [model] = parse(
+      bodyWith({ m: goodModel({ cost: { input: 1, output: 2, tiers } }) }),
+    ).models;
+
+    expect(model?.cost?.tiers).toHaveLength(64);
+    expect(model?.cost?.unknown).toEqual(["tiers_over_limit"]);
+  });
+
+  // #549-T05
+  it("names an unknown field only by a short plain name, because the body is untrusted", () => {
+    const [model] = parse(
+      bodyWith({
+        m: goodModel({
+          cost: { input: 1, output: 2, "<script>alert(1)</script>": 3 },
+        }),
+      }),
+    ).models;
+
+    expect(model?.cost?.unknown).toEqual(["cost.invalid_name"]);
+  });
+
   // #548-T01
   it("stores the status of a deprecated model as a warning, and keeps the model", () => {
     const model = parse(FIXTURE).models.find(
