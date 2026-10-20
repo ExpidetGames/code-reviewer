@@ -457,27 +457,41 @@ change the rule: it is code, and the schema decides.
 
 **One repair.** An answer that is not the review gets exactly one more user message in the same session
 (`final_messages.repair_message`): the `<runner-wrap-up>` tag, the class of the problem, field names of the validator, never
-what the model or the pull request wrote. A second failure ends the run with the codes of today (`dynamic_policy_violation`
-for an invalid envelope, `llm_output_invalid` otherwise). The engine's own error (`info.error`) is not an answer and is not
-repaired. The run never shows the engine's error text: only its name as a plain identifier, and the stable code the ledger
-recorded (`ledger.failure`), or the proxy's `last_upstream_error` for a provider that failed (`provider_error=`).
+what the model or the pull request wrote. That includes a field name the model chose: an unknown field is named "an unknown
+field". Findings that are all invalid are an answer that is not the review, repaired like an invalid envelope. A second
+failure ends the run with the codes of today (`dynamic_policy_violation` for an invalid envelope, `llm_output_invalid`
+otherwise). The engine's own error (`info.error`) is not an answer and is not repaired. The run never shows the engine's error
+text: only its name as a plain identifier, and the stable code the ledger recorded (`ledger.failure`), or the proxy's
+`last_upstream_error` for a provider that failed (`provider_error=`). That code is the last call's: a call that went through
+clears it.
 
 **Wrap-up by message, not by rewrite.** While a turn runs, the adapter's watch asks the ledger whether the answer is due
 (`wrap_up_due`, read only: the cost arithmetic of the wrap-up, and for the clock 1.4 times the reserve) and, once, adds a
 user message to the running turn (`POST /session/{id}/prompt_async`, the "finish now, answer as JSON" text). The tools, the
 tool choice and the system prompt are untouched, so the provider's cache prefix and the binding of thinking blocks stay valid.
-The reason is kept as `stoppedEarly` (`cost_limit` / `time_limit`) as before.
+The announcement is best effort: an engine that cannot take it, or does not answer within its timeout (10 s), leaves the model
+unasked, which is not a failure of the run (the guard's refusal follows if the model keeps calling tools), and the reason is
+kept as `stoppedEarly` (`cost_limit` / `time_limit`) only for an announcement that was made. The end of a turn waits for a
+running announcement, so none can reach the engine after the abort and the mark.
 
 **A run never ends without a review because of the cost guard** (#540, #542). A model that ignores the message meets the
 ledger's refusal of its next call. With `enable_final_above_wire()` (called by the engine) that refusal is a
-`RefusedForFinal`, which is **not** the run's failure but a pending signal (`take_refusal`): the turn ends, the adapter
-aborts the session, **marks the next call as final** (`arm_final`) and sends one "answer now" message. The ledger admits that
-call under the final-call exemption of #542 although the limit is passed, and the passthrough proxy relays it as it relays
-any call (one call in flight, the closed schema, nothing rewritten). The mark is one call, it needs nothing in flight and no
-failure, nothing in a request can create it, and a second mark exists only for the one repair (no third). A tool call in the
-final turn is refused by the ledger and followed by the one repair (class `tool_call`), not by a silent failure. The clock
-works the same way: once less than the wrap-up reserve is left (150 s of 600 s) a normal call is refused for the answer, and
-the final call is admitted inside it.
+`RefusedForFinal`, which is **not** the run's failure but a counted signal (`refusals`; the adapter takes the count when a
+turn starts and reacts only to an increase, so a refusal between two turns is nobody's): the turn ends, the adapter aborts
+the session, waits (bounded by the deadline) until the proxy and the ledger have nothing in flight, **marks the next call as
+final** (`arm_final`) and sends one "answer now" message. The ledger admits that call under the final-call exemption of #542
+although the limit is passed, and the passthrough proxy relays it as it relays any call (one call in flight, the closed
+schema, nothing rewritten, the body byte for byte). The mark belongs to the request that holds that exact text and is no larger
+than the history the run had plus the message (see the ledger's "The mark"); any other request is a normal call that must fit,
+and the mark stays. A marked call that the provider turns away unbilled (429, 5xx) gives its mark back, at most twice per
+mark. If the turn ends with the mark unused (the engine made no call: the session was still winding down), the message goes
+out once more, and only once. A second mark exists only for the one repair (no third). A refusal after the final call is a
+tool call when the audit saw the model ask for a tool in that turn (class `tool_call`), and otherwise its own class
+(`final_call_refused`: the engine asked the model again, e.g. a retry, and the guard refused); either is followed by the one
+repair, not by a silent failure. A valid review in the last message wins over a refusal of the same turn. The clock works the
+same way: once less than the wrap-up reserve is left (150 s of 600 s, one provider call) a normal call is refused for the
+answer, and the final call is admitted inside it. The reserve is measured when a call is admitted, not when it ends: a normal
+call admitted just before it can still run into it, and only the deadline itself is never passed.
 
 **The bound** is #542's: the cost limit, plus the excess of the last normal call, plus the final call, plus the one repair.
 The ledger also admits no call at all after a recorded failure on this path.
@@ -485,12 +499,18 @@ The ledger also admits no call at all after a recorded failure on this path.
 **The tool-result audit** moved to the adapter for this path (the passthrough proxy counts none of it). The adapter reads
 the engine's own event stream (`GET /event`, `engine_events.py`) and `tool_part_audit.py` counts every tool call at first
 sight, and every result once per call id when its part is complete: 64 KiB per result and 4 MiB cumulative (`add_result_bytes`),
-the files read, and the call trace. A stream that does not connect, ends while the run goes on, or holds a line it cannot
-read or hold is the run's failure (`dynamic_engine_unavailable` / `dynamic_accounting_failed`); a bound is
-`dynamic_budget_exceeded`. This audit is **detective**: an event arrives when a tool has finished and the next request may
-already be on its way; the proxy's request byte bound (4 MiB per request, so no history can carry more) and the ledger's
+the files read, and the call trace. The reader is bounded and fails closed: opening the stream has a 10 s timeout of its own;
+one event (the sum of its `data:` lines) is at most 8 MiB; the audit holds at most 10,000 tool parts (call ids of at most 256
+characters) and the ledger at most 100,000 distinct files (paths of at most 4,096 characters); a stream that stays open and
+says nothing for 35 s is dead (the pinned engine beats every 10 s with `server.heartbeat`; a version bump must keep that
+beat); stopping the reader shuts the socket down, so a reader waiting on a quiet stream is released at once; and what the reader
+records while it is being stopped is still the run's result. A stream that does not connect, ends while the run goes on, or
+holds an event it cannot read or hold is the run's failure (`dynamic_engine_unavailable` / `dynamic_accounting_failed`); a
+bound is `dynamic_budget_exceeded`. This audit is **detective**: an event arrives when a tool has finished and the next request
+may already be on its way; the proxy's request byte bound (4 MiB per request, so no history can carry more) and the ledger's
 refusal of every call after a recorded failure are what bound a hostile or mistaken engine regardless. An engine that
-reports nothing is bounded by the request byte bound alone.
+reports nothing is bounded by the request byte bound alone. (A count the proxy makes itself from the history the engine
+resends, which an engine cannot forge, is the follow-up that replaces the detective audit for these bounds.)
 
 *Not changed:* the legacy path (`ModelProxy`, `StructuredOutput`, `required`, the steering, `wrap_up.py`, `recovery`) is
 untouched and still runs the providers of today; #556 deletes it. The prompt core is unchanged (it already says "one JSON

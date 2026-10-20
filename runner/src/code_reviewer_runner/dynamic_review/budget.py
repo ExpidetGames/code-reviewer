@@ -95,17 +95,37 @@ and never rewrites a request, so it cannot make the final call. The adapter asks
 instead, and the ledger gives it the same guarantee, with the same bound: a run never ends without
 a review because of the cost guard. The adapter declares this (`enable_final_above_wire`); from then
 on a call the guard refuses for the cost or the clock is a `RefusedForFinal`, which is **not** the
-run's failure (`record_failure` counts it, `refusals`) but the signal to
-abort the turn and send one "answer now" message. That message's call is admitted past the limit
-when the adapter marked it (`arm_final`): the mark is one call, it needs nothing in flight, it is
-consumed by the next reservation, and nothing in a request can make a call final by itself. A second
-mark exists for the one repair of an answer that is not the review; there is no third. Before
-refusing, the adapter can ask whether the answer is due (`wrap_up_due`, read only: the arithmetic of
-the wrap-up above and, for the clock, a lead of `WRAP_UP_ANNOUNCE_LEAD` of the reserve) and announce
-it to the model by an ordinary message; a model that complies is wrapped up without any refusal.
-The bound is the one above: the limit, plus the excess of the last normal call, plus the final
-call, plus the one repair. A failure that is recorded (a limit, a policy violation) admits no later
-call at all.
+run's failure (`record_failure` counts it, `refusals`) but the signal to abort the turn and send
+one "answer now" message. The adapter takes the count when a turn starts and reacts only to an
+increase: a refusal that landed between two turns belongs to neither. Before refusing, the adapter
+can ask whether the answer is due (`wrap_up_due`, read only: the arithmetic of the wrap-up above
+and, for the clock, a lead of `WRAP_UP_ANNOUNCE_LEAD` of the reserve) and announce it to the model
+by an ordinary message, best effort; a model that complies is wrapped up without any refusal.
+
+*The clock reserve.* The reserve is one provider call (`WRAP_UP_RESERVE_SECONDS`, 150 s, or a
+quarter of a shorter deadline). Once less than that is left, a normal call is refused
+(`RefusedForFinal`) and only the marked call is admitted, so the final call always has a call's
+time to run in. A normal call that was admitted just before the reserve began can still run into
+it (a call may take up to the proxy's call timeout, bounded by the deadline): the reserve is
+measured when a call is admitted, not when it ends, as in the legacy wrap-up. The deadline itself
+is never passed.
+
+*The mark.* The final call is admitted past the limit when the adapter marked it (`arm_final`,
+with the exact runner text it is about to send). The mark is one call and needs nothing in flight;
+a second mark exists for the one repair of an answer that is not the review, there is no third.
+It belongs to the request that **holds that text as a JSON body holds it** (quotes and line breaks
+escaped, with or without non-ASCII escapes) **and is no larger than the history the run had**: the
+last settled request, plus one output allowance (the model's last answer), plus the tool results
+the audit saw since that call, plus the message, plus `RECOVERY_REQUEST_SLACK_BYTES` for the
+engine's framing. Any other request is a normal call: it must fit the limit or it is refused, and
+the mark stays armed. So an engine cannot spend the mark on a request of its own choosing, and a
+request cannot make itself final; a result the engine does not report widens nothing (the final
+call is then refused and the run ends without a review, which a hostile engine does to itself). A
+marked call the provider turns away before it generated anything (a 429 or 5xx, settled as
+unbilled) gives its mark back, at most `MAX_MARK_RETURNS` times per mark: the engine retries such a
+call itself. A call that may have been billed keeps the mark spent. The bound is the one above:
+the limit, plus the excess of the last normal call, plus the final call, plus the one repair. A
+failure that is recorded (a limit, a policy violation) admits no later call at all.
 
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was

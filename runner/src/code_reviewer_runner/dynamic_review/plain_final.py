@@ -20,14 +20,18 @@ turn, and everything the wire used to decide is decided here, above it:
    ledger whether the answer is due (`wrap_up_due`: the cost arithmetic of the wrap-up, and the
    clock a little before its reserve) and adds one user message to the running turn
    (`prompt_async`), once. The tools, the tool choice and the system prompt are untouched, so the
-   cache prefix and the binding of thinking blocks stay valid.
+   cache prefix and the binding of thinking blocks stay valid. The announcement is best effort: one
+   the engine cannot take is "not announced" and not a failure, and the end of a turn waits for a
+   running one, so none reaches the engine after the abort and the mark.
 4. **A run never ends without a review because of the cost guard** (#540). A model that ignores the
    message meets the ledger's refusal of its next call (`RefusedForFinal`, which is not the run's
-   failure). The turn ends; the adapter aborts the session, marks the next call as final
-   (`arm_final`) and sends one "answer now" message, which the ledger admits past the limit. A tool
-   call in that turn is refused again and followed by the one repair (class `tool_call`), not by a
-   silent failure. The overshoot is the bound of #542: the limit, the excess of the last normal
-   call, the final call and the repair.
+   failure; the watch and the reading of a turn react only to a refusal *counted during that
+   turn*). The turn ends; the adapter aborts the session, waits until the proxy and the ledger have
+   nothing in flight, marks the next call as final (`arm_final`, with the exact text) and sends one
+   "answer now" message, which the ledger admits past the limit. A mark the turn did not use gets
+   the message once more, once. A refusal in that turn is a tool call when the audit saw one, and
+   otherwise a class of its own, and is followed by the one repair. The overshoot is the bound of
+   #542: the limit, the excess of the last normal call, the final call and the repair.
 
 A failure the ledger recorded (a limit, a policy violation, a provider refusal, the tool-result
 audit) always wins over whatever message the turn left. The engine's own error is not an answer and
