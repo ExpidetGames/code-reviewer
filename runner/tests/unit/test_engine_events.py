@@ -72,7 +72,7 @@ def tool_done(call: str, output: str) -> dict[str, Any]:
     }
 
 
-CONNECTED = {"type": "server.connected", "properties": {}}
+CONNECTED: dict[str, Any] = {"type": "server.connected", "properties": {}}
 
 
 def reader(stream: ScriptedStream) -> tuple[EventReader, BudgetLedger]:
