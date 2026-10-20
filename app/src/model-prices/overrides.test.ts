@@ -7,8 +7,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { usdPerMTokToMicroUsd } from "./money.ts";
 import {
+  ModelOverridesError,
   MODEL_OVERRIDES,
+  createOverrideLookup,
   modelOverride,
+  overrideProviderDrift,
   parseModelOverrides,
 } from "./overrides.ts";
 
@@ -127,30 +130,33 @@ describe("parseModelOverrides", () => {
   });
 
   // #549-T01
-  it("refuses a provider that is not supported, a wrong version and unknown top level fields", () => {
-    expect(
-      parseModelOverrides({
-        version: 1,
-        providers: {
-          "amazon-bedrock": { models: { m: { reason: "x", blocked: true } } },
-        },
-      }),
-    ).toEqual({ ok: false });
-    expect(
-      parseModelOverrides({
-        version: 1,
-        providers: {
-          "a-provider-from-next-week": {
-            models: { m: { reason: "x", blocked: true } },
-          },
-        },
-      }),
-    ).toEqual({ ok: false });
+  it("refuses a wrong version and unknown top level fields", () => {
     expect(parseModelOverrides({ ...valid, version: 2 })).toEqual({
       ok: false,
     });
     expect(parseModelOverrides({ ...valid, extra: 1 })).toEqual({ ok: false });
     expect(parseModelOverrides(null)).toEqual({ ok: false });
+  });
+
+  // #549-T01
+  it("names the providers of a file that the supported list lacks, as drift, instead of refusing the file", () => {
+    const parsed = parseModelOverrides({
+      version: 1,
+      providers: {
+        "amazon-bedrock": { models: { m: { reason: "x", blocked: true } } },
+        "a-provider-from-next-week": {
+          models: { m: { reason: "x", blocked: true } },
+        },
+        anthropic: valid.providers.anthropic,
+      },
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(overrideProviderDrift(parsed.overrides)).toEqual([
+      "a-provider-from-next-week",
+      "amazon-bedrock",
+    ]);
   });
 
   // #549-T01
@@ -199,6 +205,47 @@ describe("the committed override file", () => {
         usdPerMTokToMicroUsd(model.pricesUsdPerMTok.cacheWrite1h),
       );
     }
+  });
+});
+
+describe("a provider that is no longer supported", () => {
+  // #549-T01
+  it("does not stop the app from loading, and fails at use with a stable code", () => {
+    const parsed = parseModelOverrides(valid);
+    if (!parsed.ok) throw new Error("the fixture is valid");
+
+    const lookup = createOverrideLookup(parsed.overrides, () => false);
+
+    expect(() => lookup("anthropic", "claude-sonnet-5-5")).toThrow(
+      ModelOverridesError,
+    );
+    try {
+      lookup("openai", "gpt-5.5");
+      expect.unreachable("the lookup must throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "override_file_provider_unsupported",
+        providers: ["anthropic"],
+      });
+    }
+  });
+
+  // #549-T01
+  it("is a plain lookup while every provider of the file is supported", () => {
+    const parsed = parseModelOverrides(valid);
+    if (!parsed.ok) throw new Error("the fixture is valid");
+
+    const lookup = createOverrideLookup(parsed.overrides, () => true);
+
+    expect(lookup("anthropic", "claude-sonnet-5-5")?.cacheWrite1h).toBe(
+      BigInt(4_000_000),
+    );
+    expect(lookup("anthropic", "nobody")).toBeUndefined();
+  });
+
+  // #549-T01
+  it("is caught by the committed file's own test: it names no provider the supported list lacks", () => {
+    expect(overrideProviderDrift(MODEL_OVERRIDES)).toEqual([]);
   });
 });
 

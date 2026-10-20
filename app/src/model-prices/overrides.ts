@@ -4,9 +4,13 @@
 // lacks or gets wrong in a way that is a code matter. Per provider and model: the price of a 1-hour cache write
 // (models.dev has none), a date after which the model is never offered, a block (never offered), each with a one-line
 // reason. Nothing else belongs in it. It is validated when the app starts to read it (an unknown field, a negative or
-// inexact price, a missing reason or a provider that is not supported fails), and edited by a normal pull request. The
-// app image holds `app/` only, so it reads its identical copy, `./model-overrides.v1.json`; a test compares the two.
-// Data only; no server code.
+// inexact price or a missing reason fails the start), and edited by a normal pull request. The app image holds `app/` only,
+// so it reads its identical copy, `./model-overrides.v1.json`; a test compares the two.
+//
+// A provider the file names and the supported-provider file (`opencode-providers`) no longer lists is *drift*, not a broken
+// file: it must not take the whole app down at import. The module loads, a test fails on the drift in CI
+// (`overrideProviderDrift`), and until it is fixed every lookup throws a `ModelOverridesError` with a stable code, which the
+// price routes answer as unavailable and `service.availability` as a refusal. Data only; no server code.
 import { z } from "zod";
 import { supportedProvider } from "../models-dev/opencode-providers.ts";
 import raw from "./model-overrides.v1.json" with { type: "json" };
@@ -56,15 +60,15 @@ const providerSchema = z.strictObject({
   models: z.record(z.string().min(1).max(200), entrySchema),
 });
 
-const fileSchema = z.strictObject({
+const fileShape = {
   $comment: z.string().optional(),
   version: z.literal(1),
-  providers: z
-    .record(z.string(), providerSchema)
-    .refine((providers) =>
-      Object.keys(providers).every((id) => supportedProvider(id) !== undefined),
-    ),
-});
+  providers: z.record(z.string(), providerSchema),
+};
+const fileSchema = z.strictObject(fileShape);
+
+/** Whether the provider is one the job may carry a key to (`opencode-providers.ts`). */
+const providerIsSupported = (id: string) => supportedProvider(id) !== undefined;
 
 /** What the file says about one model. Prices are micro-USD per million tokens. */
 export type ModelOverride = {
@@ -83,11 +87,56 @@ export type ModelOverrides = {
 export type OverridesParse =
   { ok: true; overrides: ModelOverrides } | { ok: false };
 
+/** Reads the file's shape; the providers are checked by `overrideProviderDrift`, not here. */
 export function parseModelOverrides(input: unknown): OverridesParse {
   const parsed = fileSchema.safeParse(input);
   if (!parsed.success) return { ok: false };
   const { version, providers } = parsed.data;
   return { ok: true, overrides: { version, providers } as ModelOverrides };
+}
+
+/** The providers the file names that are not supported (any more), sorted; empty when the file is in step with the list. */
+export function overrideProviderDrift(
+  overrides: ModelOverrides,
+  isSupported: (providerId: string) => boolean = providerIsSupported,
+): string[] {
+  return Object.keys(overrides.providers)
+    .filter((id) => !isSupported(id))
+    .sort();
+}
+
+export const OVERRIDE_ERROR_CODES = [
+  /** The file names a provider that the supported-provider file does not list (any more). */
+  "override_file_provider_unsupported",
+] as const;
+export type OverrideErrorCode = (typeof OVERRIDE_ERROR_CODES)[number];
+
+/** Thrown by a lookup while the file is out of step with the supported providers. The message names no model or price. */
+export class ModelOverridesError extends Error {
+  readonly code: OverrideErrorCode = "override_file_provider_unsupported";
+  /** The provider ids that are no longer supported. */
+  readonly providers: string[];
+  constructor(providers: string[]) {
+    super("The override file names a provider that is no longer supported.");
+    this.name = "ModelOverridesError";
+    this.providers = providers;
+  }
+}
+
+/** The lookup of an override over a parsed file; it throws `ModelOverridesError` for as long as the file has drift. */
+export function createOverrideLookup(
+  overrides: ModelOverrides,
+  isSupported: (providerId: string) => boolean = providerIsSupported,
+): (providerId: string, modelId: string) => ModelOverride | undefined {
+  const drift = overrideProviderDrift(overrides, isSupported);
+  return (providerId, modelId) => {
+    if (drift.length > 0) throw new ModelOverridesError(drift);
+    if (!Object.hasOwn(overrides.providers, providerId)) return undefined;
+    const models = overrides.providers[providerId]?.models;
+    if (models === undefined || !Object.hasOwn(models, modelId))
+      return undefined;
+    return models[modelId];
+  };
 }
 
 const loaded = parseModelOverrides(raw);
@@ -97,13 +146,5 @@ if (!loaded.ok)
   );
 export const MODEL_OVERRIDES: ModelOverrides = loaded.overrides;
 
-/** The override of a model, or undefined when the file does not name it. */
-export function modelOverride(
-  providerId: string,
-  modelId: string,
-): ModelOverride | undefined {
-  if (!Object.hasOwn(MODEL_OVERRIDES.providers, providerId)) return undefined;
-  const models = MODEL_OVERRIDES.providers[providerId]?.models;
-  if (models === undefined || !Object.hasOwn(models, modelId)) return undefined;
-  return models[modelId];
-}
+/** The override of a model, or undefined when the file does not name it. Throws while the file has provider drift. */
+export const modelOverride = createOverrideLookup(MODEL_OVERRIDES);

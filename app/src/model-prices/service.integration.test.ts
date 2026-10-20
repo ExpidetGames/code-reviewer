@@ -14,7 +14,7 @@ import { createModelsDevRepository } from "../db/repositories/models-dev-reposit
 import { createModelPriceConfirmationsRepository } from "../db/repositories/model-price-confirmations-repository.ts";
 import { createModelsDevService } from "../models-dev/service.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
-import type { ModelOverride } from "./overrides.ts";
+import { ModelOverridesError, type ModelOverride } from "./overrides.ts";
 import {
   parsePriceBookJson,
   type PriceBook,
@@ -54,6 +54,8 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
   async function setup(
     options: {
       overrides?: Record<string, ModelOverride>;
+      /** Replaces the override lookup, for a test that makes it fail. */
+      overrideOf?: (providerId: string, modelId: string) => never;
       lockTimeoutMs?: number;
     } = {},
   ) {
@@ -82,8 +84,9 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         info: (line) => lines.push(line),
         error: (line) => errors.push(line),
       },
-      overrideOf: (providerId, modelId) =>
-        overrides[`${providerId}/${modelId}`],
+      overrideOf:
+        options.overrideOf ??
+        ((providerId, modelId) => overrides[`${providerId}/${modelId}`]),
     });
     return {
       db,
@@ -1245,6 +1248,26 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         expect(t.errors).toEqual([
           "model prices: AVAILABILITY_CHECK_FAILED: the managed key is refused for this model.",
         ]);
+      },
+    );
+
+    // #549-T01
+    it_(
+      "refuses the managed key, with a stable code, when the override file names a provider that is no longer supported",
+      async () => {
+        const t = await setup({
+          overrideOf: () => {
+            throw new ModelOverridesError(["anthropic"]);
+          },
+        });
+
+        expect(
+          await t.service.availability("anthropic", "claude-sonnet-5-5"),
+        ).toEqual({
+          selectable: false,
+          reason: "check_failed",
+          code: "catalog_model_unavailable",
+        });
       },
     );
 
