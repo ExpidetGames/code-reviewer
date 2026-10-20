@@ -34,6 +34,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
 | Recovery when a run wrote the summary and then ended failed | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
 | A short failure note in the summary comment when a run fails (not `lease_lost`, not a refused token) | Shipped (#299) |
+| Finalization above the wire for native providers: the review as plain JSON text, one repair, wrap-up by message, the final call after a refusal, the tool-result audit on the adapter side (`DynamicEngine(plain_final=True)`; not wired to the claim yet) | Shipped (#552), see "Finalization above the wire" |
 | Hosted activation | Needs the hosted egress gate (#82) |
 
 ## How a Dynamic job reaches an engine
@@ -509,9 +510,9 @@ engine gives up. Everything else ends the run with its code, the text of the pro
 **Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
 config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
 `target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step; its ledger and proxy come
-from `cost_policy.py`, see the next section), the audit of tool results in a request (it is chat-shaped; the adapter still counts
-the tool calls the engine reports), how a final call is told to answer without rewriting the request (#552; the token cap uses the
-same refusal as the cost limit once it lands) and the live capture that replaces the assumed usage shapes (L14).
+from `native_run.py`, see the next section), the audit of tool results in a request (it is chat-shaped; since #552 the adapter counts
+them from the engine's own event stream), how a final call is told to answer without rewriting the request (done in #552, see
+"Finalization above the wire") and the live capture that replaces the assumed usage shapes (L14).
 
 ### The cost policy of a native job (#553)
 
@@ -535,10 +536,14 @@ two cannot disagree about whose key it is; `build_native_ledger(policy, limits, 
 the catalog marks `reasoning` reserves at least `REASONING_OUTPUT_FLOOR_TOKENS` (8,192) of output for every call and the p95 of its
 own completions after that, since its thinking is output nobody can predict (#548: the flag changes the request, so it changes the
 reservation). The whole 32,000-token cap is not reserved: at 15 USD per million tokens that alone would make the first call of a
-1 USD run the final call. The token cap binds like the cost limit: a normal call is admitted
+1 USD run the final call. The token cap binds like the cost limit, and above the wire it is answered the same way: a normal call is
+admitted
 only while the tokens used, the tokens held for calls in flight and this call's expected tokens fit; a call that settles over the cap
 is delivered and ends the agent phase; the run is wrapped up first when a further call and a final one would not fit, with the
-reason `token_limit` (`stoppedEarly`), which the summary and the check run say in words. The unit costs a reservation is made with
+reason `token_limit` (`stoppedEarly`), which the summary and the check run say in words. Above the wire (#552) the cap's refusal is a
+`RefusedForFinal` with `refusal_reason` `token_limit`, `wrap_up_due` announces the answer before it, `arm_final` and `begin_recovery`
+consult the cap, a marked call skips it, and an unknown call that takes the tokens over the cap (or its worst case over the cost limit)
+ends the agent phase without ending the review. The unit costs a reservation is made with
 are the book's base level (an expectation: what a call costs is always the book applied to its usage, so a model with tiers can
 settle above its reservation, which the final-call exemption already bounds).
 
@@ -548,6 +553,97 @@ cache read; the Messages family also a 5-minute write); if a read slips past, th
 `dynamic_accounting_failed`, which is free. The token cap books a call at the largest of its counts, its stated total and reasoning
 on top of the completion, and an unknown call at the estimate of its input plus the whole output allowance. `cache_control.ttl` stays out of the request schema: the pinned engine never sends one, and a 1-hour write is a price the
 book states but nothing asks for.
+
+## Finalization above the wire (native providers, #552)
+
+The legacy path finishes a review through the engine's `StructuredOutput` tool with a forced `tool_choice` and lets
+the proxy rewrite the last request (`wrap_up.py`). A passthrough proxy cannot do that, and many models reject a forced
+choice. On the native path the finish is decided **in the adapter**, the same for every model, and the engine runs with
+`read` / `grep` / `glob`, tool choice `auto`, no `format`, no `StructuredOutput` and no `response_format`. Switch:
+`DynamicEngine(plain_final=True, engine_config=<build_native_engine_config>, provider_id=...)`; the default is the legacy
+path, unchanged until #556 deletes it. (Reading a job's entry from the claim and building those arguments is the wiring step.)
+
+**The answer** is the visible text of the *last* assistant message and nothing else: not reasoning, not a tool result, not
+`info.structured`, not an earlier message (`final_json.extract_final_json`). It is accepted when the whole text is one JSON
+object, or one Markdown fence (` ```json `, any case, `\n` or `\r\n`) around the whole text. Text around the object, two
+objects, trailing commas, single quotes, comments, a cut-off tail and `NaN` are **not guessed into an answer**: each is a
+named `Problem` class. A nesting that exhausts the parser (`RecursionError`) is `invalid_json` with a fixed text. The object
+then goes through the existing envelope check (`parse_dynamic_findings`; the runner sets `schemaVersion` and `reviewedSha`
+itself, #530) and the job's finding bound (more findings than the job allows is repairable). Hostile pull request text cannot
+change the rule: it is code, and the schema decides.
+
+**One repair.** An answer that is not the review gets exactly one more user message in the same session
+(`final_messages.repair_message`): the `<runner-wrap-up>` tag, the class of the problem, field names of the validator, never
+what the model or the pull request wrote. That includes a field name the model chose: an unknown field is named "an unknown
+field". Findings that are all invalid are an answer that is not the review, repaired like an invalid envelope. A second
+failure ends the run with the codes of today (`dynamic_policy_violation` for an invalid envelope, `llm_output_invalid`
+otherwise). The engine's own error (`info.error`) is not an answer and is not repaired. The run never shows the engine's error
+text: only its name, when it is one of the names the pinned engine has (otherwise `other`), and the stable code the ledger recorded (`ledger.failure`), or the proxy's
+`last_upstream_error` for a provider that failed (`provider_error=`). That code is the last call's: a call that went through
+clears it.
+
+**Wrap-up by message, not by rewrite.** While a turn runs, the adapter's watch asks the ledger whether the answer is due
+(`wrap_up_due`, read only: the cost arithmetic of the wrap-up, and for the clock 1.4 times the reserve) and, once, adds a
+user message to the running turn (`POST /session/{id}/prompt_async`, the "finish now, answer as JSON" text). The tools, the
+tool choice and the system prompt are untouched, so the provider's cache prefix and the binding of thinking blocks stay valid.
+The announcement is best effort: an engine that cannot take it, or does not answer within its timeout (10 s), leaves the model
+unasked, which is not a failure of the run (the guard's refusal follows if the model keeps calling tools). The reason is kept
+as `stoppedEarly` (`cost_limit` / `time_limit`) only where the adapter acts: for an announcement the engine took while the turn
+ran, and for a refusal it answers with the final call; not for a refusal nobody acts on (a stray retry after a review) and not
+for an announcement the engine took only after the turn had ended. The end of a turn waits for a running announcement, so none
+can reach the engine after the abort and the mark, and when one was taken and no refusal followed, the adapter aborts the
+session and waits for the proxy to be idle before it reads the review, so nothing of that turn is left running (an
+announcement the engine takes while the model call that writes the review is in flight can still make it take one more step
+inside the same turn; that call is accounted like any other). If the final call cannot be marked the run ends with the cause
+in the ledger's words: a failure it recorded, a model call of the aborted turn still running after 30 s
+(`dynamic_engine_unavailable`), the deadline, or both marks used (`dynamic_budget_exceeded`).
+
+**A run never ends without a review because of the cost guard** (#540, #542). A model that ignores the message meets the
+ledger's refusal of its next call. With `enable_final_above_wire()` (called by the engine) that refusal is a
+`RefusedForFinal`, which is **not** the run's failure but a counted signal (`refusals`; the adapter takes the count when a
+turn starts and reacts only to an increase, so a refusal between two turns is nobody's): the turn ends, the adapter aborts
+the session, waits (bounded by the deadline) until the proxy and the ledger have nothing in flight, **marks the next call as
+final** (`arm_final`) and sends one "answer now" message. The ledger admits that call under the final-call exemption of #542
+although the limit is passed, and the passthrough proxy relays it as it relays any call (one call in flight, the closed
+schema, nothing rewritten, the body byte for byte). The message of the final call and of the repair carries a random token of its own
+(`<runner-wrap-up id="…">`; the announcement carries none). The mark belongs to the request that holds that exact text, holds
+the token once in the whole body **and in its last user message** (the proxy reads the parsed body, `passthrough/last_user.py`;
+the system prompt, a tool result, assistant text or an earlier message holding it does not count), and is no larger than the
+history the run had plus the message, where the tool results the audit saw since the last call are frozen when the mark is
+armed (see the ledger's "The mark"); any other request is a normal call that must fit, and the mark stays. A marked call that the provider turns away unbilled (429, 5xx) gives its mark back, at most twice per
+mark. A call booked at its worst case because its usage was never seen (an own key goes on after one) that passes the limit
+ends the agent phase like a call that settled over it, and the final call is still admitted. If the turn ends with the mark unused (the engine made no call: the session was still winding down), the message goes
+out once more, and only once. A second mark exists only for the one repair (no third). A refusal after the final call is a
+tool call when the audit saw the model ask for a tool in that turn (class `tool_call`), and otherwise its own class
+(`final_call_refused`: the engine asked the model again, e.g. a retry, and the guard refused); either is followed by the one
+repair, not by a silent failure. A valid review in the last message wins over a refusal of the same turn. The clock works the
+same way: once less than the wrap-up reserve is left (150 s of 600 s, one provider call) a normal call is refused for the
+answer, and the final call is admitted inside it. The reserve is measured when a call is admitted, not when it ends: a normal
+call admitted just before it can still run into it, and only the deadline itself is never passed.
+
+**The bound** is #542's: the cost limit, plus the excess of the last normal call, plus the final call, plus the one repair.
+The ledger also admits no call at all after a recorded failure on this path.
+
+**The tool-result audit** moved to the adapter for this path (the passthrough proxy counts none of it). The adapter reads
+the engine's own event stream (`GET /event`, `engine_events.py`) and `tool_part_audit.py` counts every tool call at first
+sight, and every result once per call id when its part is complete: 64 KiB per result and 4 MiB cumulative (`add_result_bytes`),
+the files read, and the call trace. The reader is bounded and fails closed: opening the stream has a 10 s timeout of its own;
+one event (the sum of its `data:` lines) is at most 8 MiB; the audit holds at most 10,000 tool parts (call ids of at most 256
+characters) and the ledger at most 100,000 distinct files (paths of at most 4,096 characters); a stream that stays open and
+says nothing for 35 s is dead (the pinned engine beats every 10 s with `server.heartbeat`; a version bump must keep that
+beat); stopping the reader shuts the socket down, so a reader waiting on a quiet stream is released at once; and what the reader
+records while it is being stopped is still the run's result. A stream that does not connect, ends while the run goes on, or
+holds an event it cannot read or hold is the run's failure (`dynamic_engine_unavailable` / `dynamic_accounting_failed`); a
+bound is `dynamic_budget_exceeded`. This audit is **detective**: an event arrives when a tool has finished and the next request
+may already be on its way; the proxy's request byte bound (4 MiB per request, so no history can carry more) and the ledger's
+refusal of every call after a recorded failure are what bound a hostile or mistaken engine regardless. An engine that
+reports nothing is bounded by the request byte bound alone. (A count the proxy makes itself from the history the engine
+resends, which an engine cannot forge, is the follow-up that replaces the detective audit for these bounds.)
+
+*Not changed:* the legacy path (`ModelProxy`, `StructuredOutput`, `required`, the steering, `wrap_up.py`, `recovery`) is
+untouched and still runs the providers of today; #556 deletes it. The prompt core is unchanged (it already says "one JSON
+object and nothing else"); the adapter adds one fixed runner line at the end of the first user message, outside every
+untrusted block, that carries the job's finding bound (`final_messages.final_answer_line`).
 
 ## The model
 

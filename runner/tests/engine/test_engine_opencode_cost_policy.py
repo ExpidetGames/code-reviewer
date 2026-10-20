@@ -4,9 +4,11 @@
 
 An own key is free to choose any model, so a price may be missing. Through the production proxy and
 the ledger a native job builds, the engine runs a tool loop on a model with no price: the loop
-completes under the token cap, the cost of the run is unknown (`costUsd` null, never zero) and
-billing charges minutes only; the same loop under a small cap is braked by the cap before the
-provider is asked again. Kept lean: one engine, two providers of one family.
+completes under the token cap and the cost of the run is unknown (`costUsd` null, never zero), and
+the production adapter on the native path (#552) finishes a run that reaches its cap the way it
+finishes one that reaches its cost limit: the model is asked to answer, a model that ignores the
+message is refused and asked once more, and the review is delivered with `stoppedEarly:
+token_limit`. Kept lean.
 """
 
 import sys
@@ -17,31 +19,27 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from fakes.wire.formats import Turn
 from opencode_native import Outcome, Provider, Step, run_plan
 from opencode_passthrough import PassthroughEngine, passthrough_engine
+from plain_final_support import native_run, reads, review
+from test_engine_plain_final import answer_when_asked, many_reads
 
 from code_reviewer_runner.dynamic_review.passthrough.cost_policy import (
     CostPolicy,
     KeyMode,
 )
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
-from code_reviewer_runner.result import ErrorCode
 from passthrough_expect import usage_expected
 
 pytestmark = pytest.mark.engine
 
 TOOL_ORDER = ["glob", "read", "grep", "read", "glob", "grep"]
 ROOMY = "acme-unpriced"
-TIGHT = "acme-capped"
 
 
 def policies() -> dict[str, CostPolicy]:
-    unpriced = {"book": None, "key_mode": KeyMode.OWN}
-    return {
-        ROOMY: CostPolicy(max_total_tokens=1_000_000, **unpriced),  # type: ignore[arg-type]
-        # Three calls' worth: the cap stops the loop where it would otherwise go on for seven.
-        TIGHT: CostPolicy(max_total_tokens=4_500, **unpriced),  # type: ignore[arg-type]
-    }
+    return {ROOMY: unpriced(1_000_000)}
 
 
 @pytest.fixture(scope="module")
@@ -49,14 +47,12 @@ def run(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-de
     scratch = tmp_path_factory.mktemp("cost-policy")
     providers = [
         Provider("chat", id=ROOMY, model="acme-unpriced-9"),
-        Provider("chat", id=TIGHT, model="acme-capped-9"),
     ]
     with passthrough_engine(scratch, providers, policies=policies()) as engine:
         outcomes = run_plan(
             engine,
             [
                 Step("roomy", ROOMY, "acme-unpriced-9"),
-                Step("tight", TIGHT, "acme-capped-9"),
             ],
         )
         yield engine, outcomes
@@ -85,20 +81,52 @@ def test_an_unpriced_model_completes_its_loop_under_the_token_cap_and_its_cost_i
     assert usage.limit_exceeded_by is None
 
 
-# #553-T05
-def test_a_run_that_reaches_its_token_cap_is_braked_before_the_provider_is_asked_again(
-    run: Any,
+def unpriced(cap: int) -> CostPolicy:
+    return CostPolicy(key_mode=KeyMode.OWN, book=None, max_total_tokens=cap)
+
+
+# #553-T05, #552: the sister of the cost-limit cases of `test_engine_plain_final.py` for an own key
+# with no price. The cap is reached long before the script is out of tool calls; the model that is
+# asked to answer does, and the review is delivered with the reason it stopped
+def test_an_own_key_run_at_its_token_cap_is_asked_to_answer_and_delivers_its_review(
+    tmp_path: Path,
 ) -> None:
-    engine: PassthroughEngine
-    outcomes: dict[str, Outcome]
-    engine, outcomes = run
-    outcome = outcomes["tight"]
-    front = engine.front(TIGHT)
-    # The cap is reached long before the loop's seventh call, and the provider is not asked again.
-    assert 1 <= len(outcome.records) < 7
-    assert front.ledger.failure is not None
-    assert front.ledger.failure.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert "token" in front.ledger.failure.detail
-    usage = front.ledger.usage("acme-capped-9")
-    assert usage.cost_usd is None
-    assert usage.prompt_tokens + usage.completion_tokens <= 4_500 + 2_000
+    with native_run(
+        tmp_path, many_reads, policy=unpriced(6_000), react=answer_when_asked(times=1)
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        usage = run.ledger.usage(None)
+        assert usage.stopped_early == "token_limit"
+        assert usage.cost_usd is None
+        assert run.ledger.failure is None
+        assert len(run.requests) < 36  # the script had far more calls than the cap admits
+
+
+# #553-T05, #552: the model ignores the message; the ledger refuses its next call for the tokens,
+# the adapter aborts the turn and asks once more, the answer is admitted past the cap, and the
+# review is delivered
+def test_an_own_key_model_that_ignores_the_message_still_delivers_a_review_past_the_cap(
+    tmp_path: Path,
+) -> None:
+    with native_run(
+        tmp_path, many_reads, policy=unpriced(6_000), react=answer_when_asked(times=2)
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        usage = run.ledger.usage(None)
+        assert usage.stopped_early == "token_limit"
+        assert usage.cost_usd is None
+        assert run.ledger.failure is None
+        assert run.ledger.refusals >= 1
+        assert run.ledger.refusal_reason == "token_limit"
+
+
+# #553-T05: a run that stays within its cap is a complete run with an unknown cost
+def test_an_own_key_run_within_its_cap_is_complete_and_its_cost_is_unknown(
+    tmp_path: Path,
+) -> None:
+    with native_run(
+        tmp_path, lambda export: [*reads(export, 3), Turn(text=review())], policy=unpriced(500_000)
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        usage = run.ledger.usage(None)
+        assert usage.stopped_early is None and usage.cost_usd is None

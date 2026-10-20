@@ -319,3 +319,68 @@ def failing(family: WireFamily, status: int, detail: str = "", **headers: str) -
 
 def real_key_header(family: WireFamily) -> str:
     return auth_value(FAKE[family], REAL_KEY)
+
+
+def conversation(family: WireFamily, *turns: tuple[str, str], pad: int = 0) -> bytes:
+    """A body of the family's closed schema from `(kind, text)` turns, kind one of `system`,
+    `user`, `assistant` and `tool` (a tool result). The order is kept as given, so a test can put
+    the same text in the system prompt, in a result or in what the assistant said. `pad` puts that
+    many bytes of text in a user message first, so the body weighs what the fake provider's usage
+    says it did."""
+    if pad:
+        turns = (("user", "x" * pad), *turns)
+    system: list[str] = [text for kind, text in turns if kind == "system"]
+    rest = [(kind, text) for kind, text in turns if kind != "system"]
+    document: dict[str, Any]
+    if family is WireFamily.GOOGLE:
+        contents: list[dict[str, Any]] = []
+        for kind, text in rest:
+            if kind == "tool":
+                part: dict[str, Any] = {
+                    "functionResponse": {"name": "read", "response": {"output": text}}
+                }
+            else:
+                part = {"text": text}
+            contents.append({"role": "model" if kind == "assistant" else "user", "parts": [part]})
+        document = {"contents": contents, "generationConfig": {"maxOutputTokens": 1000}}
+        if system:
+            document["systemInstruction"] = {"parts": [{"text": text} for text in system]}
+    elif family is WireFamily.OPENAI_RESPONSES:
+        items: list[dict[str, Any]] = []
+        for kind, text in turns:
+            if kind == "tool":
+                items.append({"type": "function_call_output", "call_id": "c1", "output": text})
+            elif kind == "assistant":
+                items.append(
+                    {"role": "assistant", "content": [{"type": "output_text", "text": text}]}
+                )
+            else:
+                part_type = "input_text"
+                items.append({"role": kind, "content": [{"type": part_type, "text": text}]})
+        document = {"model": MODEL, "stream": True, "max_output_tokens": 1000, "input": items}
+    elif family is WireFamily.ANTHROPIC_MESSAGES:
+        messages: list[dict[str, Any]] = []
+        for kind, text in rest:
+            if kind == "tool":
+                block: dict[str, Any] = {
+                    "type": "tool_result",
+                    "tool_use_id": "c1",
+                    "content": text,
+                }
+                messages.append({"role": "user", "content": [block]})
+            elif kind == "assistant":
+                messages.append({"role": "assistant", "content": [{"type": "text", "text": text}]})
+            else:
+                messages.append({"role": "user", "content": text})
+        document = {"model": MODEL, "stream": True, "max_tokens": 1000, "messages": messages}
+        if system:
+            document["system"] = "\n".join(system)
+    else:
+        chat: list[dict[str, Any]] = []
+        for kind, text in turns:
+            if kind == "tool":
+                chat.append({"role": "tool", "tool_call_id": "c1", "content": text})
+            else:
+                chat.append({"role": kind, "content": text})
+        document = {"model": MODEL, "stream": True, "max_tokens": 1000, "messages": chat}
+    return json.dumps(document).encode()
