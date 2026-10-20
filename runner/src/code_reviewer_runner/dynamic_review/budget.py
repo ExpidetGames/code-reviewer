@@ -517,6 +517,7 @@ class BudgetLedger:
         self._above_wire = False
         self._final_armed = False
         self._final_needles: tuple[bytes, ...] = ()
+        self._final_token = ""
         self._final_message_bytes = 0
         self._final_results = 0
         self._mark_returns = 0
@@ -629,7 +630,7 @@ class BudgetLedger:
                 held, self._expected_cost(priced, allowance), priced, allowance
             )
 
-    def arm_final(self, message: str) -> bool:
+    def arm_final(self, message: str, token: str) -> bool:
         """Mark the next call as the run's final call, or say that it cannot be (#552).
 
         The final call is admitted past the cost limit (see "The bound"), once. The adapter marks
@@ -653,6 +654,7 @@ class BudgetLedger:
                 return False
             self._final_armed = True
             self._final_needles = _json_forms(message)
+            self._final_token = token
             self._final_message_bytes = len(message.encode("utf-8", errors="replace"))
             # What the tools returned since the last call, frozen now: reports that come after the
             # mark cannot widen what the final request may be (the audit is the engine's report).
@@ -775,6 +777,7 @@ class BudgetLedger:
         can_wrap_up: bool = False,
         wrap_up_text: str = "",
         recovery_text: str = "",
+        last_user_text: str | None = None,
     ) -> Reservation:
         """Reserve one model call before its request is sent. Raises when it cannot fit.
 
@@ -783,6 +786,10 @@ class BudgetLedger:
         the window at a lenient density (a backstop in front of the provider's own limit, which
         refuses only what cannot fit at all), and the cost spent, the cost reserved for calls in
         flight and the cost this call could have must stay within the limit.
+
+        `last_user_text` is the text of the last message of the request when that is a user message
+        (the proxy parsed it); an armed mark applies only to a request whose last user text holds
+        its token (#552).
         """
         self.check_deadline()
         size = _byte_size(request_text)

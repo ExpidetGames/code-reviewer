@@ -346,7 +346,11 @@ class PassthroughProxy:
             if self._superseded():
                 raise LimitError(ErrorCode.SUPERSEDED, "the run was superseded by a newer push")
             admitted = self._admission.body(head, read_body(head.content_length))
-            reservation = self.ledger.reserve_call(admitted.body, output_tokens=admitted.output_cap)
+            reservation = self.ledger.reserve_call(
+                admitted.body,
+                output_tokens=admitted.output_cap,
+                last_user_text=admitted.last_user_text,
+            )
         except Refused as refused:
             self._refuse(sink, refused)
             return

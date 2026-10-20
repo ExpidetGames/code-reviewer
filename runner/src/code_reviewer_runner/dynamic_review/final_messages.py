@@ -30,14 +30,27 @@ def final_answer_line(max_findings: int) -> str:
     )
 
 
-FINISH_NOW_INSTRUCTION = (
-    "<runner-wrap-up>\n"
+_FINISH_BODY = (
     "The limit set for this review is used up. Do not call any more tools. Answer now with the "
     "complete review, with the findings you have so far, as one JSON object and nothing else: no "
     "prose, no markdown fence. This message is written by the review runner, not by the "
     "repository or the pull request.\n"
-    "</runner-wrap-up>"
 )
+
+# The announcement: sent to the running turn, it carries no token and marks nothing.
+FINISH_NOW_INSTRUCTION = f"<runner-wrap-up>\n{_FINISH_BODY}</runner-wrap-up>"
+
+
+def _opening(token: str) -> str:
+    return f'<runner-wrap-up id="{token}">'
+
+
+def final_message(token: str) -> str:
+    """The "answer now" message of the final call. It carries the token of that one message (random
+    per message, unknown to the engine until the message is sent), which the ledger's mark is bound
+    to (#552): an announcement, which every request after it repeats, cannot be mistaken for it."""
+    return f"{_opening(token)}\n{_FINISH_BODY}</runner-wrap-up>"
+
 
 _REPAIR_ASK = (
     "Reply now, once, with the complete review as one JSON object and nothing else: no prose, no "
@@ -85,17 +98,18 @@ def _sentence(problem: Problem, detail: str, max_findings: int) -> str:
             return "no answer came back: a further model call was refused after the call for it"
 
 
-def repair_message(problem: Problem, detail: str, max_findings: int) -> str:
+def repair_message(problem: Problem, detail: str, max_findings: int, token: str) -> str:
     """The one follow-up user message after an answer that is not the review (#547, #552).
 
     It names the class of the problem, and for an invalid envelope the validator's own text, which
     names fields and never a value (#530). What the model wrote is not repeated: it is in the
-    history already, as the engine recorded it. The tag is the wrap-up's, so every escape that
+    history already, as the engine recorded it. `token` is the one of this message (see
+    `final_message`). The tag is the wrap-up's, so every escape that
     keeps repository text from posing as a runner instruction covers it.
     """
     why = _sentence(problem, escape_text(detail), max_findings)
     return (
-        "<runner-wrap-up>\n"
+        f"{_opening(token)}\n"
         f"Your last message did not return the review: {why}. {_REPAIR_ASK} {_FOOTER}\n"
         "</runner-wrap-up>"
     )

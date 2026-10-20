@@ -40,6 +40,7 @@ proxy kept for a provider that failed.
 """
 
 import json
+import secrets
 import threading
 import time
 from collections.abc import Callable
@@ -55,6 +56,7 @@ from code_reviewer_runner.dynamic_review.final_json import (
 )
 from code_reviewer_runner.dynamic_review.final_messages import (
     FINISH_NOW_INSTRUCTION,
+    final_message,
     repair_message,
     validator_detail,
 )
@@ -114,6 +116,7 @@ class PlainFinalization:
         parse: Callable[[dict[str, Any]], DynamicFindings],
         provider_error: Callable[[], ErrorCode | None] = lambda: None,
         wait_idle: Callable[[float], bool] = lambda _timeout: True,
+        new_token: Callable[[], str] = lambda: secrets.token_hex(16),
     ) -> None:
         self._client = client
         self._session = session_id
@@ -126,6 +129,8 @@ class PlainFinalization:
         # Whether the proxy has answered every request it took (the ledger's own view of its open
         # calls is waited for as well, `BudgetLedger.wait_idle`).
         self._wait_idle = wait_idle
+        # A fresh random token for each message that asks for the answer (the mark is bound to it).
+        self._new_token = new_token
         self._announced = False
         self._watch_error: Exception | None = None
         # What the ledger counted when the running turn started: only an increase is this turn's.
@@ -138,7 +143,7 @@ class PlainFinalization:
         outcome = self._read()
         if outcome is None:
             # The guard refused a call: the agent phase is over, the answer is still owed.
-            self._ask(FINISH_NOW_INSTRUCTION, abort=True)
+            self._ask(final_message, abort=True)
             outcome = self._read() or self._after_the_final_call()
         if isinstance(outcome, DynamicFindings):
             return outcome
@@ -146,7 +151,10 @@ class PlainFinalization:
 
     def _repair(self, first: _Verdict) -> DynamicFindings:
         """The one repair. A second failure ends the run; there is no third message."""
-        self._ask(repair_message(first.problem, first.detail, self._max_findings), abort=False)
+        self._ask(
+            lambda token: repair_message(first.problem, first.detail, self._max_findings, token),
+            abort=False,
+        )
         second = self._read() or self._after_the_final_call()
         if isinstance(second, DynamicFindings):
             return second
@@ -163,7 +171,7 @@ class PlainFinalization:
             return _Verdict(Problem.TOOL_CALL)
         return _Verdict(Problem.FINAL_CALL_REFUSED)
 
-    def _ask(self, text: str, *, abort: bool = True) -> None:
+    def _ask(self, build: Callable[[str], str], *, abort: bool = True) -> None:
         """Send one runner message as a call the ledger admits past the limit. Aborting first
         makes sure no step of the earlier turn is still running when the mark is set, and the
         proxy is given the time to answer the call the abort cut short: the mark needs nothing in
@@ -171,7 +179,9 @@ class PlainFinalization:
         if abort:
             self._client.abort(self._session)
         self._settle()
-        if not self._ledger.arm_final(text):
+        token = self._new_token()
+        text = build(token)
+        if not self._ledger.arm_final(text, token):
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "no call was left for the answer to the run"
             )

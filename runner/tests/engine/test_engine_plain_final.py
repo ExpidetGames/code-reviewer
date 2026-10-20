@@ -96,6 +96,11 @@ def many_reads(export: Path) -> list[Turn]:
     return [*reads(export, 6) * 6, Turn(text=review())]
 
 
+def is_final_message(text: str) -> bool:
+    """The runner's message that asks for the answer: the wrap-up tag with a token of its own."""
+    return text.startswith('<runner-wrap-up id="') and "Do not call any more tools" in text
+
+
 def announced(request: dict[str, Any]) -> int:
     """How often the request holds the runner's finish-now message."""
     return sum(1 for text in user_texts(request) if text == FINISH_NOW_INSTRUCTION)
@@ -105,7 +110,12 @@ def answer_when_asked(*, times: int) -> Reaction:
     """The model answers with the review once the finish-now message was seen `times` times."""
 
     def react(scene: Scene, request: dict[str, Any]) -> None:
-        if announced(request) >= times:
+        asked = [
+            text
+            for text in user_texts(request)
+            if text == FINISH_NOW_INSTRUCTION or is_final_message(text)
+        ]
+        if len(asked) >= times:
             scene.answer_next_with(Turn(text=review()))
 
     return react
@@ -149,8 +159,9 @@ def test_a_model_that_ignores_the_message_still_ends_with_a_delivered_review(
         final = run.requests[-1]
         # The announcement and then the message of the final call, which only the refusal of the
         # ledger makes the adapter send: both are last, and nothing else follows them.
-        assert user_texts(final)[-2:] == [FINISH_NOW_INSTRUCTION] * 2
-        assert announced(final) == 2
+        asked = user_texts(final)[-2:]
+        assert asked[0] == FINISH_NOW_INSTRUCTION and is_final_message(asked[1])
+        assert announced(final) == 1
         assert tool_names(final) == TOOLS  # the tool set is unchanged: the cache prefix stays
         assert final.get("tool_choice") in (None, {"type": "auto"})
         assert_same_prefix(run.requests)
@@ -182,7 +193,7 @@ def test_a_tool_call_in_the_final_turn_is_refused_and_followed_by_one_repair(
         assert run.answer.ok, run.answer.error
         texts = user_texts(run.requests[-1])
         # The announcement, the final message that got the tool call, and then the one repair.
-        assert texts[-3:-1] == [FINISH_NOW_INSTRUCTION] * 2
+        assert texts[-3] == FINISH_NOW_INSTRUCTION and is_final_message(texts[-2])
         assert "called a tool, and no tool may be called now" in texts[-1]
         # The final call and the repair are the two calls the exemption admitted.
         assert final_calls(run)[-2:] == [True, True]
@@ -204,7 +215,7 @@ def test_a_failed_answer_gets_one_repair_message_and_the_repair_succeeds(tmp_pat
         before, repair = run.requests[2]["messages"], run.requests[3]["messages"]
         assert [message["role"] for message in repair[len(before) :]] == ["assistant", "user"]
         text = user_texts(run.requests[3])[-1]
-        assert text.startswith("<runner-wrap-up>\n")
+        assert text.startswith('<runner-wrap-up id="')
         assert "text next to the JSON object" in text
         assert MODEL_TEXT_MARKER not in text
         assert not run.ledger.usage(None).stopped_early

@@ -333,11 +333,11 @@ def test_a_provider_error_gets_a_stable_code_and_keeps_its_status_for_the_engine
 def test_the_marked_call_is_the_request_that_holds_the_adapters_text_and_is_relayed_unchanged(
     family: WireFamily,
 ) -> None:
-    message = '<runner-wrap-up>\nAnswer "now".\n</runner-wrap-up>'
+    message = '<runner-wrap-up id="tok-123">\nAnswer "now".\n</runner-wrap-up>'
     r = rig(family, streamed(family, call=1), streamed(family, call=2), streamed(family, call=3))
     r.ledger.enable_final_above_wire()
     r.post()  # a normal call settles
-    assert r.ledger.arm_final(message)
+    assert r.ledger.arm_final(message, "tok-123")
 
     ordinary = r.body()
     carrying = r.body().replace(b"x" * 10, json.dumps(message)[1:-1].encode(), 1)
