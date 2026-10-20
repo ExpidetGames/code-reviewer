@@ -495,7 +495,7 @@ describe("a job that is not native", () => {
     },
   );
 
-  // #553-T12
+  // #553-T12, #578-T06
   it("is unchanged for a Diff job, whatever it selects", async () => {
     const h = await start({ keyMode: "own", dynamic: false });
 
