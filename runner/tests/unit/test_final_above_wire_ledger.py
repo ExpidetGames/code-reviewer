@@ -261,7 +261,7 @@ def test_the_announcement_is_the_reason_the_run_stopped_early() -> None:
 
 
 # #552-L15: the overshoot is the bound of #542 and not a call more
-def test_the_overshoot_is_the_excess_of_the_last_normal_call_plus_the_final_call_plus_the_repair() -> (
+def test_the_overshoot_stays_within_the_excess_of_the_last_call_the_final_call_and_the_repair() -> (
     None
 ):
     budget = ledger()
