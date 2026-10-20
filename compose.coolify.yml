@@ -84,6 +84,10 @@ services:
       DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
       # When the app backs up the database every day (HH:MM, UTC), or "off". Empty: the default.
       BACKUP_TIME: ${BACKUP_TIME:-}
+      # Optional. The daily read of the public model catalog (src/models-dev/README.md): where it is read from (empty:
+      # https://models.dev/api.json, or a mirror) and whether it is read at all (`off`, for an air-gapped instance).
+      MODELS_DEV_URL: ${MODELS_DEV_URL:-}
+      MODELS_DEV_FETCH: ${MODELS_DEV_FETCH:-}
     healthcheck:
       # Node is in the image, curl is not. /api/health is public and reads the database. A Compose
       # health check is the only kind Coolify uses for a Compose application.

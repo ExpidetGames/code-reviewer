@@ -65,6 +65,11 @@ vi.mock("./maintenance/startup.ts", () => ({
   startCleanupOnStart: () => void calls.push("cleanup"),
 }));
 
+// The daily models.dev fetch: the real one is tested in src/models-dev/.
+vi.mock("./models-dev/startup.ts", () => ({
+  startModelsDevRefreshOnStart: () => void calls.push("models-dev"),
+}));
+
 import { register } from "./instrumentation.ts";
 
 beforeEach(() => {
@@ -102,6 +107,7 @@ describe("starting the server", () => {
       "setup",
       "sync",
       "cleanup",
+      "models-dev",
       "backup",
     ]);
   });
@@ -136,6 +142,7 @@ describe("starting the server", () => {
       "setup",
       "sync",
       "cleanup",
+      "models-dev",
       "backup",
     ]);
   });
