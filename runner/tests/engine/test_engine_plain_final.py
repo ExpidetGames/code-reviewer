@@ -10,6 +10,7 @@ seconds, so the cases are few and each is a whole run.
 """
 
 import itertools
+import json
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +28,16 @@ from plain_final_support import (
     user_texts,
 )
 
-from code_reviewer_runner.dynamic_review.final_messages import FINISH_NOW_INSTRUCTION
+from code_reviewer_runner.dynamic_review.final_messages import (
+    FINISH_NOW_INSTRUCTION,
+    final_answer_line,
+)
 from code_reviewer_runner.result import ErrorCode
 
 pytestmark = pytest.mark.engine
 
 TOOLS = {"read", "grep", "glob"}
+MAX_FINDINGS = 5  # `dynamic_job` in `opencode_support.py`
 
 
 @pytest.fixture(autouse=True)
@@ -223,3 +228,152 @@ def test_a_failed_repair_ends_the_run_with_the_stable_code_and_no_model_text(
         assert MODEL_TEXT_MARKER not in run.answer.error.detail
         assert "no_json_object" in run.answer.error.detail
         assert len(run.requests) == 3  # the read, the prose, the repair: no second repair
+
+
+# -- the cases of the spike (#547) that production keeps -----------------------------------------
+# One engine start costs about five seconds, so each case is one whole run with several assertions.
+# The chat-compatible family (`@ai-sdk/openai-compatible`) is where `info.finish`, the reasoning
+# replay and the engine's own error names are read from the real engine.
+
+
+def request_history(request: dict[str, Any]) -> list[dict[str, Any]]:
+    """The messages of a chat request."""
+    return request["messages"]
+
+
+def chat_user_texts(request: dict[str, Any]) -> list[str]:
+    return [m["content"] for m in request_history(request) if m["role"] == "user"]
+
+
+def review_with(count: int, **change: Any) -> str:
+    document = json.loads(review(count))
+    document.update(change)
+    return json.dumps(document)
+
+
+# #552-T03, #552-T04 (messages): an envelope the validator rejects is repaired once, with the
+# validator's field names and never a field the model chose
+def test_an_invalid_envelope_is_repaired_once_without_repeating_the_models_field_name(
+    tmp_path: Path,
+) -> None:
+    bad = review_with(1, **{MODEL_TEXT_MARKER: 1})
+    with native_run(
+        tmp_path, lambda export: [*reads(export, 1), Turn(text=bad), Turn(text=review())]
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        assert len(run.requests) == 3
+        assert_same_prefix(run.requests)
+        text = user_texts(run.requests[2])[-1]
+        assert "the review is not valid: an unknown field" in text
+        assert MODEL_TEXT_MARKER not in text
+        assert not run.ledger.usage(None).stopped_early
+
+
+# #552-T03 (chat): more findings than the job allows is repaired with the bound of the job
+def test_too_many_findings_are_repaired_with_the_bound_of_the_job_on_the_chat_family(
+    tmp_path: Path,
+) -> None:
+    too_many = review(MAX_FINDINGS + 1)
+    with native_run(
+        tmp_path,
+        lambda export: [*reads(export, 1), Turn(text=too_many), Turn(text=review(MAX_FINDINGS))],
+        family="chat",
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        assert run.answer.findings is not None
+        assert len(run.answer.findings.findings) == MAX_FINDINGS
+        requests = run.requests
+        assert f"at most {MAX_FINDINGS} findings" in chat_user_texts(requests[-1])[-1]
+        assert chat_user_texts(requests[0])[0].rstrip().endswith(final_answer_line(MAX_FINDINGS))
+
+
+# #552-T04 (chat): the engine reports the output limit as `info.finish == "length"`; the answer
+# that was cut at it is repaired once with a shorter ask
+def test_an_answer_cut_at_the_output_limit_is_named_and_repaired_on_the_chat_family(
+    tmp_path: Path,
+) -> None:
+    cut = Turn(text='{"resolvedIds": [], "findings": [{"id": "f', finish="length")
+    with native_run(
+        tmp_path, lambda export: [*reads(export, 1), cut, Turn(text=review())], family="chat"
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        requests = run.requests
+        assert len(requests) == 3
+        text = chat_user_texts(requests[2])[-1]
+        assert "cut off at the output limit" in text and "short" in text
+        assert not run.ledger.usage(None).stopped_early
+
+
+# #552-T04 (chat): the thinking ate the answer; the reasoning of that message is replayed in the
+# history of the repair (`reasoning_content`) and the repair names what was missing
+def test_an_answer_with_reasoning_and_no_text_is_repaired_and_its_reasoning_replayed(
+    tmp_path: Path,
+) -> None:
+    thought = Turn(thinking="THINKING_REPLAYED")
+    with native_run(
+        tmp_path, lambda export: [*reads(export, 1), thought, Turn(text=review())], family="chat"
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        requests = run.requests
+        assert len(requests) == 3
+        assert "reasoning but no text" in chat_user_texts(requests[2])[-1]
+        replayed = [
+            m
+            for m in request_history(requests[2])
+            if m.get("reasoning_content") == "THINKING_REPLAYED"
+        ]
+        assert len(replayed) == 1 and replayed[0]["role"] == "assistant"
+
+
+# #552-T04 (messages): an envelope that is invalid twice is the policy violation of #530, with
+# the validator's text and nothing the model wrote, after exactly one repair
+def test_an_envelope_that_is_invalid_twice_ends_the_run_with_the_policy_violation(
+    tmp_path: Path,
+) -> None:
+    bad = review_with(1, **{MODEL_TEXT_MARKER: 1})
+    with native_run(
+        tmp_path,
+        lambda export: [*reads(export, 1), Turn(text=bad), Turn(text=bad), Turn(text=review())],
+    ) as run:
+        assert run.answer.error is not None
+        assert run.answer.error.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+        assert MODEL_TEXT_MARKER not in str(run.answer.error)
+        assert len(run.requests) == 3  # the read, the answer, the repair: nothing after it
+
+
+# #552-T09 (chat): the engine's own error is read from the real engine as a name and nothing else;
+# it is not repaired and its text never reaches the result
+def test_the_engines_own_error_is_not_repaired_and_only_its_name_is_shown(tmp_path: Path) -> None:
+    blocked = Turn(finish="content_filter")
+    with native_run(
+        tmp_path, lambda export: [*reads(export, 1), blocked, Turn(text=review())], family="chat"
+    ) as run:
+        assert run.answer.error is not None
+        assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
+        assert "ContentFilterError" in run.answer.error.detail
+        assert len(run.requests) == 2  # the read and the blocked answer: no repair
+
+
+# #552-T06 (messages): the clock of the job is announced like the cost: one message, no refusal,
+# no final-call exemption, and the run says why it stopped early
+def test_a_run_near_its_deadline_is_asked_to_answer_by_a_message_too(tmp_path: Path) -> None:
+    def react(scene: Scene, request: dict[str, Any]) -> None:
+        if scene.calls == 2:
+            assert scene.ledger is not None
+            # 180 s are left of the 600: the reserve (150 s) has not started, the announcement
+            # (a lead of 40% on it) is due. Hold this call until the adapter has made it.
+            scene.clock_offset = scene.ledger.limits.deadline_seconds - 180.0
+            scene.wait_until(lambda: scene.ledger is not None and bool(scene.ledger.stopped_early))
+        if announced(request) >= 1:
+            scene.answer_next_with(Turn(text=review()))
+
+    with native_run(tmp_path, many_reads, react=react) as run:
+        assert run.answer.ok, run.answer.error
+        assert [announced(request) for request in run.requests].count(1) >= 1
+        assert max(announced(request) for request in run.requests) == 1
+        assert user_texts(run.requests[-1])[-1] == FINISH_NOW_INSTRUCTION
+        assert_same_prefix(run.requests)
+        usage = run.ledger.usage(None)
+        assert usage.stopped_early == "time_limit"
+        assert run.ledger.failure is None and run.ledger.refusals == 0
+        assert final_calls(run) == [False] * len(run.requests)

@@ -63,6 +63,9 @@ class Turn:
     args: Mapping[str, Any] = field(default_factory=lambda: {})
     text: str = ""
     thinking: str = ""
+    # Why the answer ended, in the family's own word (chat: `length`, `content_filter`; messages:
+    # `max_tokens`): the default is the end of a tool call or of a text.
+    finish: str | None = None
 
 
 @dataclass(frozen=True)
@@ -208,6 +211,8 @@ def _chat_usage(call: int) -> dict[str, Any]:
 
 def _chat_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
     message: dict[str, Any] = {"role": "assistant", "content": turn.text or None}
+    if turn.thinking:
+        message["reasoning_content"] = turn.thinking
     if turn.tool:
         message["tool_calls"] = [
             {
@@ -225,7 +230,7 @@ def _chat_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
             {
                 "index": 0,
                 "message": message,
-                "finish_reason": "tool_calls" if turn.tool else "stop",
+                "finish_reason": turn.finish or ("tool_calls" if turn.tool else "stop"),
             }
         ],
         "usage": _chat_usage(call),
@@ -243,6 +248,8 @@ def _chat_stream(turn: Turn, call: int, model: str, include_usage: bool) -> list
         }
 
     events: list[tuple[str | None, Any]] = [(None, chunk({"role": "assistant"}))]
+    if turn.thinking:
+        events.append((None, chunk({"reasoning_content": turn.thinking})))
     if turn.tool:
         arguments = json.dumps(dict(turn.args))
         half = len(arguments) // 2
@@ -255,12 +262,13 @@ def _chat_stream(turn: Turn, call: int, model: str, include_usage: bool) -> list
         events.append((None, chunk({"tool_calls": [opening]})))
         rest = {"index": 0, "function": {"arguments": arguments[half:]}}
         events.append((None, chunk({"tool_calls": [rest]})))
-        events.append((None, chunk({}, "tool_calls")))
+        events.append((None, chunk({}, turn.finish or "tool_calls")))
     else:
-        middle = max(1, len(turn.text) // 2)
-        events.append((None, chunk({"content": turn.text[:middle]})))
-        events.append((None, chunk({"content": turn.text[middle:]})))
-        events.append((None, chunk({}, "stop")))
+        if turn.text:
+            middle = max(1, len(turn.text) // 2)
+            events.append((None, chunk({"content": turn.text[:middle]})))
+            events.append((None, chunk({"content": turn.text[middle:]})))
+        events.append((None, chunk({}, turn.finish or "stop")))
     if include_usage:
         # Only a request with `stream_options.include_usage` gets this chunk; without it a Chat
         # provider states no usage in the stream at all.
@@ -431,7 +439,7 @@ def _messages_answer(turn: Turn, call: int, model: str) -> dict[str, Any]:
         "role": "assistant",
         "model": model,
         "content": _messages_content(turn, call),
-        "stop_reason": "tool_use" if turn.tool else "end_turn",
+        "stop_reason": turn.finish or ("tool_use" if turn.tool else "end_turn"),
         "stop_sequence": None,
         "usage": _messages_usage(call),
     }
@@ -489,7 +497,7 @@ def _messages_stream(turn: Turn, call: int, model: str) -> list[bytes]:
             {
                 "type": "message_delta",
                 "delta": {
-                    "stop_reason": "tool_use" if turn.tool else "end_turn",
+                    "stop_reason": turn.finish or ("tool_use" if turn.tool else "end_turn"),
                     "stop_sequence": None,
                 },
                 "usage": {"output_tokens": usage["output_tokens"]},
