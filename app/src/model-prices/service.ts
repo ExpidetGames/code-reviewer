@@ -15,13 +15,14 @@
 // correction's reason (as a JSON string, so a line break cannot split the line). Never a key. Nothing here is reachable by a
 // member of a workspace; the routes are the admin portal's (admin-http.ts).
 import "server-only";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import {
   createModelEnablementsRepository,
   type ModelEnablement,
 } from "../db/repositories/model-enablements-repository.ts";
 import { createModelPriceConfirmationsRepository } from "../db/repositories/model-price-confirmations-repository.ts";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
+import { databaseDriver } from "../db/driver.ts";
 import type { Database } from "../db/schema.ts";
 import type { FetchState } from "../models-dev/catalog.ts";
 import {
@@ -72,6 +73,10 @@ export type ModelList = {
 export const DEFAULT_PAGE_SIZE = 100;
 export const MAX_PAGE_SIZE = 500;
 export const MAX_REASON_LENGTH = 500;
+/** How long a confirmation waits for the daily fetch's lock on Postgres before it gives up with `fetch_in_progress`. */
+export const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+/** Postgres' error code for a lock that could not be taken within `lock_timeout`. */
+const LOCK_NOT_AVAILABLE = "55P03";
 
 export type ModelPriceService = {
   list(query: ListQuery): Promise<ModelList>;
@@ -108,6 +113,8 @@ export type ModelPriceService = {
 export type ModelPriceServiceDependencies = {
   db: Kysely<Database>;
   now?: () => Date;
+  /** How long a confirmation waits for the fetch's lock on Postgres; tests shorten it. */
+  lockTimeoutMs?: number;
   /** Where the audit line goes (the server's log in production, a list in tests). */
   log?: { info(line: string): void; error?(line: string): void };
   /** The override file; tests bring their own. */
@@ -152,6 +159,21 @@ function checkReason(value: unknown): string | undefined {
   return /^[^\p{Cc}\p{Zl}\p{Zp}]+$/u.test(reason) ? reason : undefined;
 }
 
+type WrittenPrice = {
+  ok: true;
+  written: PriceConfirmation | null;
+  before: PriceConfirmation | undefined;
+};
+
+function isLockTimeout(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === LOCK_NOT_AVAILABLE
+  );
+}
+
 const priceText = (book: PriceBook | null) =>
   book === null ? "none" : JSON.stringify(priceBookToJson(book));
 
@@ -169,6 +191,10 @@ export function createModelPriceService(
   const models = createModelsDevRepository(db);
   const enablements = createModelEnablementsRepository(db);
   const confirmations = createModelPriceConfirmationsRepository(db);
+  const lockTimeoutMs = Math.max(
+    1,
+    Math.floor(deps.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS),
+  );
 
   async function viewOf(
     executor: Kysely<Database>,
@@ -216,59 +242,64 @@ export function createModelPriceService(
     ids: { providerId: string; modelId: string },
     referenceHash: string,
     statement: { price: PriceBook; reason: string } | undefined,
-  ): Promise<
-    | {
-        ok: true;
-        written: PriceConfirmation | null;
-        before: PriceConfirmation | undefined;
-      }
-    | ModelPriceRefusal
-  > {
-    return db.transaction().execute(async (trx) => {
-      const catalog = createModelsDevRepository(trx);
-      // The lock the fetch holds while it writes: wait for a fetch, then read what it wrote.
-      const provider = await catalog.getProvider(ids.providerId, {
-        forUpdate: true,
+  ): Promise<WrittenPrice | ModelPriceRefusal> {
+    return db
+      .transaction()
+      .execute(async (trx): Promise<WrittenPrice | ModelPriceRefusal> => {
+        const catalog = createModelsDevRepository(trx);
+        // On Postgres the wait for the fetch's lock is bounded; the number is an integer made here, never text of a request.
+        if (databaseDriver(trx) === "postgres")
+          await sql
+            .raw(`set local lock_timeout = ${String(lockTimeoutMs)}`)
+            .execute(trx);
+        // The lock the fetch holds while it writes: wait for a fetch, then read what it wrote.
+        const provider = await catalog.getProvider(ids.providerId, {
+          forUpdate: true,
+        });
+        const model = await catalog.getModel(ids.providerId, ids.modelId);
+        if (provider === undefined || model === undefined)
+          return refuse("model_unknown");
+        const history = createModelPriceConfirmationsRepository(trx);
+        const latest = await history.latest(ids.providerId, ids.modelId);
+        // A row that cannot be read is replaced by the new confirmation, never compared with it.
+        const before = isUnreadable(latest) ? undefined : latest;
+        const today = effectivePrice({
+          cost: model.cost,
+          reasoning: model.reasoning,
+          override: overrideOf(ids.providerId, ids.modelId),
+          confirmation: null,
+        }).reference;
+        if (statement === undefined && today.book === null)
+          return refuse("price_missing");
+        if (today.hash !== referenceHash) return refuse("price_changed");
+        const book = statement?.price ?? (today.book as PriceBook);
+        // Confirming again what is confirmed already changes nothing, so the history holds decisions only.
+        if (
+          statement === undefined &&
+          before?.referenceHash === today.hash &&
+          priceText(before.book) === priceText(book)
+        )
+          return { ok: true, written: null, before };
+        const written = await history.append(
+          {
+            providerId: ids.providerId,
+            modelId: ids.modelId,
+            source: statement === undefined ? "catalog" : "admin",
+            book,
+            reference: today.book,
+            referenceHash: today.hash,
+            reason: statement?.reason ?? null,
+            confirmedBy: actorId,
+          },
+          now(),
+        );
+        return { ok: true, written, before };
+      })
+      .catch((error: unknown): ModelPriceRefusal => {
+        // The fetch kept its lock for longer than we wait: nothing was written, and the admin tries again.
+        if (isLockTimeout(error)) return refuse("fetch_in_progress");
+        throw error;
       });
-      const model = await catalog.getModel(ids.providerId, ids.modelId);
-      if (provider === undefined || model === undefined)
-        return refuse("model_unknown");
-      const history = createModelPriceConfirmationsRepository(trx);
-      const latest = await history.latest(ids.providerId, ids.modelId);
-      // A row that cannot be read is replaced by the new confirmation, never compared with it.
-      const before = isUnreadable(latest) ? undefined : latest;
-      const today = effectivePrice({
-        cost: model.cost,
-        reasoning: model.reasoning,
-        override: overrideOf(ids.providerId, ids.modelId),
-        confirmation: null,
-      }).reference;
-      if (statement === undefined && today.book === null)
-        return refuse("price_missing");
-      if (today.hash !== referenceHash) return refuse("price_changed");
-      const book = statement?.price ?? (today.book as PriceBook);
-      // Confirming again what is confirmed already changes nothing, so the history holds decisions only.
-      if (
-        statement === undefined &&
-        before?.referenceHash === today.hash &&
-        priceText(before.book) === priceText(book)
-      )
-        return { ok: true, written: null, before };
-      const written = await history.append(
-        {
-          providerId: ids.providerId,
-          modelId: ids.modelId,
-          source: statement === undefined ? "catalog" : "admin",
-          book,
-          reference: today.book,
-          referenceHash: today.hash,
-          reason: statement?.reason ?? null,
-          confirmedBy: actorId,
-        },
-        now(),
-      );
-      return { ok: true, written, before };
-    });
   }
 
   return {

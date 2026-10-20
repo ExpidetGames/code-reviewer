@@ -52,7 +52,10 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
   const it_ = engine.skip ? it.skip : it;
 
   async function setup(
-    options: { overrides?: Record<string, ModelOverride> } = {},
+    options: {
+      overrides?: Record<string, ModelOverride>;
+      lockTimeoutMs?: number;
+    } = {},
   ) {
     const fake = await startModelsDevFake();
     fakes.push(fake);
@@ -72,6 +75,9 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     const service = createModelPriceService({
       db,
       now: () => now,
+      ...(options.lockTimeoutMs === undefined
+        ? {}
+        : { lockTimeoutMs: options.lockTimeoutMs }),
       log: {
         info: (line) => lines.push(line),
         error: (line) => errors.push(line),
@@ -1441,6 +1447,43 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
         expect(result).toMatchObject({ ok: false, code: "price_changed" });
         expect((await view(t)).price.status).toBe("unconfirmed");
+      },
+    );
+
+    // #549-T05
+    it.skipIf(engine.name !== "postgres")(
+      "gives up with a stable code when the fetch holds its lock for longer than the timeout, and writes nothing",
+      async () => {
+        const t = await setup({ lockTimeoutMs: 300 });
+        const seen = (await view(t)).price.reference.hash;
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let locked!: () => void;
+        const hasLocked = new Promise<void>((resolve) => (locked = resolve));
+        const fetching = t.db.transaction().execute(async (trx) => {
+          await createModelsDevRepository(trx).listProviders({
+            forUpdate: true,
+          });
+          locked();
+          await gate;
+        });
+        await hasLocked;
+
+        const refused = await t.service.confirmPrice(ADMIN, {
+          ...SONNET,
+          referenceHash: seen,
+        });
+        release();
+        await fetching;
+
+        expect(refused).toEqual({ ok: false, code: "fetch_in_progress" });
+        expect((await view(t)).price.status).toBe("unconfirmed");
+        expect(
+          await t.service.confirmPrice(ADMIN, {
+            ...SONNET,
+            referenceHash: seen,
+          }),
+        ).toMatchObject({ ok: true });
       },
     );
 

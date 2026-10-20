@@ -18,6 +18,8 @@ export const MODEL_PRICE_ERROR_CODES = [
   "price_changed",
   /** A correction needs a reason of one to 500 printable characters on one line. */
   "reason_invalid",
+  /** The daily fetch holds the provider's lock for longer than the confirmation waits (5 seconds); nothing was written, try again. */
+  "fetch_in_progress",
 ] as const;
 export type ModelPriceErrorCode = (typeof MODEL_PRICE_ERROR_CODES)[number];
 
@@ -29,4 +31,5 @@ export const MODEL_PRICE_ERROR_STATUS: Record<ModelPriceErrorCode, number> = {
   price_missing: 409,
   price_changed: 409,
   reason_invalid: 422,
+  fetch_in_progress: 409,
 };
