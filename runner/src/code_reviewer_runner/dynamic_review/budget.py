@@ -518,6 +518,7 @@ class BudgetLedger:
         self._final_armed = False
         self._final_needles: tuple[bytes, ...] = ()
         self._final_message_bytes = 0
+        self._final_results = 0
         self._mark_returns = 0
         self._marks_used = 0
         self._refusals = 0
@@ -653,6 +654,11 @@ class BudgetLedger:
             self._final_armed = True
             self._final_needles = _json_forms(message)
             self._final_message_bytes = len(message.encode("utf-8", errors="replace"))
+            # What the tools returned since the last call, frozen now: reports that come after the
+            # mark cannot widen what the final request may be (the audit is the engine's report).
+            self._final_results = max(
+                self._counters.returned_bytes - self._counters.returned_at_settle, 0
+            )
             self._mark_returns = 0
             self._marks_used += 1
             return True
@@ -679,7 +685,7 @@ class BudgetLedger:
         allowed = (
             history
             + math.ceil(allowance * WINDOW_CHECK_DENSITY)
-            + max(counters.returned_bytes - counters.returned_at_settle, 0)
+            + self._final_results
             + self._final_message_bytes
             + RECOVERY_REQUEST_SLACK_BYTES
         )

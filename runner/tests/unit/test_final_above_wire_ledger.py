@@ -486,3 +486,16 @@ def test_the_answer_is_not_asked_for_while_a_mark_is_armed_or_after_the_final_ca
     final = budget.reserve_call(carrying(), output_tokens=1_024)
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.001"))
     assert budget.wrap_up_due() is None  # and nobody is asked after the final call
+
+
+# #552-F1: what the audit saw returned is frozen when the mark is armed; reports after it widen nothing
+def test_results_reported_after_the_mark_is_armed_do_not_widen_the_final_request() -> None:
+    budget = over_the_limit()
+    assert budget.arm_final(MESSAGE) is True
+
+    for _ in range(64):  # forged reports of the largest result each: the whole cumulative bound
+        budget.add_result_bytes(64 * 1024)
+
+    with pytest.raises(RefusedForFinal):
+        budget.reserve_call(carrying(more=1_000_000), output_tokens=1_024)
+    assert budget.reserve_call(carrying(), output_tokens=1_024).final is True
