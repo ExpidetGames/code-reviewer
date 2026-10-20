@@ -7,7 +7,10 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
-import { model } from "../../test-support/catalog-models-fixtures.ts";
+import {
+  model,
+  staleModel,
+} from "../../test-support/catalog-models-fixtures.ts";
 import type { CatalogModelsApi } from "./api.ts";
 import { ModelActions } from "./model-actions.tsx";
 
@@ -44,13 +47,43 @@ function names() {
     .map((b) => b.getAttribute("aria-label") ?? b.textContent);
 }
 
+describe("the names of the buttons", () => {
+  // #554-T01
+  it.each([
+    ["a new unconfirmed model", () => model({ isNew: true })],
+    ["an enabled model", () => model({ enabled: true })],
+    ["a disabled model", () => model({ enabled: false })],
+    ["a stale model", () => staleModel()],
+    [
+      "a model with a confirmed price",
+      () => model({ price: { ...model().price, status: "confirmed" } }),
+    ],
+  ])(
+    "contain the visible text of the button, for %s (WCAG 2.5.3 label in name)",
+    (_name, view) => {
+      render(<ModelActions model={view()} api={fakeApi()} />);
+
+      for (const button of screen.getAllByRole("button")) {
+        const visible = (button.textContent ?? "").trim().toLowerCase();
+        const accessible = (
+          button.getAttribute("aria-label") ?? button.textContent
+        )
+          ?.trim()
+          .toLowerCase();
+        expect(visible).not.toBe("");
+        expect(accessible, visible).toContain(visible);
+      }
+    },
+  );
+});
+
 describe("the actions of a model", () => {
   // #554-T01
   it("offers enable and disable for a model nobody has decided about, and no reset", () => {
     render(<ModelActions model={model({ isNew: true })} api={fakeApi()} />);
 
     expect(names()).toEqual([
-      "Review the price of DeepSeek V4 Pro",
+      "Review price of DeepSeek V4 Pro",
       "Enable DeepSeek V4 Pro",
       "Disable DeepSeek V4 Pro",
     ]);
@@ -61,7 +94,7 @@ describe("the actions of a model", () => {
     render(<ModelActions model={model({ enabled: true })} api={fakeApi()} />);
 
     expect(names()).toEqual([
-      "Review the price of DeepSeek V4 Pro",
+      "Review price of DeepSeek V4 Pro",
       "Disable DeepSeek V4 Pro",
       "Reset to new: DeepSeek V4 Pro",
     ]);
@@ -72,7 +105,7 @@ describe("the actions of a model", () => {
     render(<ModelActions model={model({ enabled: false })} api={fakeApi()} />);
 
     expect(names()).toEqual([
-      "Review the price of DeepSeek V4 Pro",
+      "Review price of DeepSeek V4 Pro",
       "Enable DeepSeek V4 Pro",
       "Reset to new: DeepSeek V4 Pro",
     ]);

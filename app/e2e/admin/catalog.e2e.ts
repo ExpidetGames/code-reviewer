@@ -160,7 +160,7 @@ test.describe("the models.dev catalog in the admin portal", () => {
     await test.step("the admin confirms the price exactly as shown", async () => {
       const row = rowOf(page, NEW_MODEL);
       await row
-        .getByRole("button", { name: "Review the price of Mistral New 1" })
+        .getByRole("button", { name: "Review price of Mistral New 1" })
         .click();
       const dialog = page.getByRole("dialog", {
         name: "Price of Mistral New 1",
@@ -198,7 +198,7 @@ test.describe("the models.dev catalog in the admin portal", () => {
     await test.step("the admin sees both prices and confirms the new one", async () => {
       const row = rowOf(page, NEW_MODEL);
       await row
-        .getByRole("button", { name: "Review the price of Mistral New 1" })
+        .getByRole("button", { name: "Review price of Mistral New 1" })
         .click();
       const dialog = page.getByRole("dialog", {
         name: "Price of Mistral New 1",
@@ -224,7 +224,7 @@ test.describe("the models.dev catalog in the admin portal", () => {
     await test.step("the admin corrects the price with a reason and the correction is the source", async () => {
       const row = rowOf(page, NEW_MODEL);
       await row
-        .getByRole("button", { name: "Review the price of Mistral New 1" })
+        .getByRole("button", { name: "Review price of Mistral New 1" })
         .click();
       const dialog = page.getByRole("dialog", {
         name: "Price of Mistral New 1",

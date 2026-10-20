@@ -66,7 +66,7 @@ async function openPrice(view: CatalogModelView, api = fakeApi()) {
   const user = userEvent.setup();
   render(<ModelActions model={view} api={api} />);
   await user.click(
-    screen.getByRole("button", { name: /Review the price of|Price/ }),
+    screen.getByRole("button", { name: /(Review price|Price) of/ }),
   );
   const dialog = await screen.findByRole("dialog");
   return { user, api, dialog: within(dialog) };
@@ -606,9 +606,7 @@ describe("correcting the price", () => {
     const view = model();
     const { rerender } = render(<ModelActions model={view} api={fakeApi()} />);
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole("button", { name: /Review the price of/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /Review price of/ }));
     await user.click(
       await screen.findByRole("button", { name: "Correct price" }),
     );

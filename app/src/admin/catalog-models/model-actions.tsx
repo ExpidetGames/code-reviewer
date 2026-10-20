@@ -49,16 +49,20 @@ export function ModelActions({
     router.refresh();
   }
 
+  // The accessible name of a button contains the words it shows (WCAG 2.5.3): "Price of X", "Review price of X".
+  const priceLabel =
+    model.price.status === "confirmed" ? "Price" : "Review price";
+
   return (
     <div className="flex flex-col items-start gap-2">
       <div className="flex flex-wrap gap-2">
         <Button
           variant="secondary"
           size="sm"
-          aria-label={`Review the price of ${name}`}
+          aria-label={`${priceLabel} of ${name}`}
           onClick={() => setPriceOpen(true)}
         >
-          {model.price.status === "confirmed" ? "Price" : "Review price"}
+          {priceLabel}
         </Button>
         {model.enabled === true ? null : (
           <Button
