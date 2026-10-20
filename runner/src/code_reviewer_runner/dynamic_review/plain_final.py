@@ -142,7 +142,7 @@ class PlainFinalization:
         makes sure no step of the earlier turn is still running when the mark is set."""
         if abort:
             self._client.abort(self._session)
-        if not self._ledger.arm_final():
+        if not self._ledger.arm_final(text):
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "no call was left for the answer to the run"
             )

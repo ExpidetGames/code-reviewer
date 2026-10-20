@@ -452,6 +452,7 @@ class BudgetLedger:
         # Finalization above the wire (#552): declared by the adapter, then marks and refusals.
         self._above_wire = False
         self._final_armed = False
+        self._final_message = ""
         self._marks_used = 0
         self._refusals = 0
         self._stopped_early: str | None = None
@@ -553,8 +554,10 @@ class BudgetLedger:
                 held, self._expected_cost(priced, allowance), priced, allowance
             )
 
-    def arm_final(self) -> bool:
+    def arm_final(self, message: str) -> bool:
         """Mark the next call as the run's final call, or say that it cannot be (#552).
+
+        `message` is the exact runner text the adapter is about to send (see "The mark").
 
         The final call is admitted past the cost limit (see "The bound"), once. The adapter marks
         it after it aborted the turn, so nothing is in flight; the call that follows is the
@@ -572,6 +575,7 @@ class BudgetLedger:
             if not (self._final_granted or self._final_admissible(held)):
                 return False
             self._final_armed = True
+            self._final_message = message
             self._marks_used += 1
             return True
 

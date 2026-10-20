@@ -27,6 +27,8 @@ from code_reviewer_runner.dynamic_review.budget import (
 from code_reviewer_runner.result import ErrorCode
 
 REQUEST = b"x" * 4000
+# The runner text the adapter marks a call with (a stand-in for the finish-now message).
+MESSAGE = "<runner-wrap-up>\nAnswer now.\n</runner-wrap-up>"
 LIMIT = Decimal("0.10")
 UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
@@ -109,7 +111,7 @@ def test_the_marked_call_is_admitted_past_the_limit_as_the_final_call_and_once()
     call(budget, "0.15")
     refused(budget)
 
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
     final = budget.reserve_call(REQUEST, output_tokens=1_024)
     assert final.final is True
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.20"))
@@ -140,7 +142,7 @@ def test_the_marked_call_is_admitted_when_only_its_expected_cost_does_not_fit() 
     error = refused(budget)
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
     final = budget.reserve_call(REQUEST, output_tokens=1_024)
     assert final.final is True
 
@@ -150,16 +152,16 @@ def test_the_repair_is_admitted_after_the_final_call_and_then_nothing() -> None:
     budget = ledger()
     call(budget, "0.15")
     refused(budget)
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
     final = budget.reserve_call(REQUEST, output_tokens=1_024)
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.20"))
 
-    assert budget.arm_final() is True  # the repair, although the spend is over the limit
+    assert budget.arm_final(MESSAGE) is True  # the repair, although the spend is over the limit
     repair = budget.reserve_call(REQUEST, output_tokens=1_024)
     assert repair.final is True
     budget.settle_call(repair, prompt_tokens=1000, completion_tokens=100, cost=Decimal("0.01"))
 
-    assert budget.arm_final() is False
+    assert budget.arm_final(MESSAGE) is False
 
 
 # #552-L08, #552-T05: a run within the limit that needs a repair is repaired without the
@@ -168,7 +170,7 @@ def test_a_repair_inside_the_limit_is_marked_like_the_final_call_and_does_not_st
     budget = ledger()
     call(budget, "0.01")
 
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
     repair = budget.reserve_call(REQUEST, output_tokens=1_024)
 
     assert repair.final is True
@@ -181,22 +183,22 @@ def test_the_mark_is_refused_while_a_call_is_in_flight_or_after_the_deadline() -
     budget = ledger(clock=clock)
     in_flight = budget.reserve_call(REQUEST, output_tokens=1_024)
 
-    assert budget.arm_final() is False
+    assert budget.arm_final(MESSAGE) is False
     budget.settle_unbilled(in_flight)
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
 
     late = Clock()
     other = ledger(clock=late)
     late.now = other.limits.deadline_seconds + 1
-    assert other.arm_final() is False
+    assert other.arm_final(MESSAGE) is False
 
 
 # #552-L10: the mark is one call; an unused mark is not a second one
 def test_an_armed_mark_is_consumed_by_exactly_one_call() -> None:
     budget = ledger()
     call(budget, "0.15")
-    assert budget.arm_final() is True
-    assert budget.arm_final() is False  # armed already
+    assert budget.arm_final(MESSAGE) is True
+    assert budget.arm_final(MESSAGE) is False  # armed already
 
     first = budget.reserve_call(REQUEST, output_tokens=1_024)
     assert first.final is True
@@ -236,7 +238,7 @@ def test_the_clock_asks_for_the_answer_before_the_reserve_and_refuses_inside_it(
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert budget.failure is None
     assert budget.stopped_early == "time_limit"
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
 
 
 # #552-L13: the mode is the adapter's declaration; the legacy ledger never refuses on the clock
@@ -275,10 +277,10 @@ def test_the_overshoot_stays_within_the_excess_of_the_last_call_the_final_call_a
     refused(budget)
 
     final_cost = Decimal("0.03")
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
     final = budget.reserve_call(REQUEST, output_tokens=1_024)
     budget.settle_call(final, prompt_tokens=1000, completion_tokens=100, cost=final_cost)
-    assert budget.arm_final() is True
+    assert budget.arm_final(MESSAGE) is True
     repair = budget.reserve_call(REQUEST, output_tokens=1_024)
     repair_cost = Decimal("0.02")
     budget.settle_call(repair, prompt_tokens=1000, completion_tokens=100, cost=repair_cost)
@@ -304,4 +306,4 @@ def test_no_call_is_reserved_once_the_run_has_failed() -> None:
 
     assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert "per-result byte bound" in raised.value.detail
-    assert budget.arm_final() is False
+    assert budget.arm_final(MESSAGE) is False
