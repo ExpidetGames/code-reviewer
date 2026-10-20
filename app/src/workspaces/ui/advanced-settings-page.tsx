@@ -31,7 +31,12 @@ export function AdvancedSettingsPageContent({
    * Every registered provider and whether a workspace key of it is saved (nothing to remove otherwise). All of
    * them are listed, so a component that removed its key stays mounted to confirm it.
    */
-  keys: ReadonlyArray<{ provider: string; configured: boolean }>;
+  keys: ReadonlyArray<{
+    provider: string;
+    configured: boolean;
+    /** The name of a catalog provider (#555) as the catalog spells it; the registry's providers are named by the registry. */
+    label?: string;
+  }>;
   /**
    * Set when this instance provides the access of the workspace (its key mode is managed, `instanceAccessOf`): the
    * provider behind that access is not for the workspace to read, so no card names one. A key the workspace stored
@@ -56,14 +61,14 @@ export function AdvancedSettingsPageContent({
         {canManageKey
           ? keys
               .filter(({ configured }) => instanceAccess === null || configured)
-              .map(({ provider, configured }) => (
+              .map(({ provider, configured, label }) => (
                 <RemoveWorkspaceKey
                   key={provider}
                   workspaceSlug={workspaceSlug}
                   provider={provider}
                   label={
                     instanceAccess === null
-                      ? llmProviderDescriptors.labelOf(provider)
+                      ? (label ?? llmProviderDescriptors.labelOf(provider))
                       : null
                   }
                   keyConfigured={configured}

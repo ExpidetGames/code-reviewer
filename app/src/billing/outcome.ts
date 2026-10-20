@@ -45,6 +45,7 @@ type ClaimCode =
   | "managed_model_unavailable"
   | "llm_not_configured"
   | "llm_provider_unsupported"
+  | "llm_model_unavailable"
   | "job_llm_options_invalid"
   | "job_args_invalid"
   | "job_env_invalid"
@@ -135,6 +136,7 @@ export const ERROR_CODE_CLASSES = {
   managed_model_unavailable: "free",
   llm_not_configured: "free",
   llm_provider_unsupported: "free",
+  llm_model_unavailable: "free",
   job_llm_options_invalid: "free",
   job_args_invalid: "free",
   job_env_invalid: "free",

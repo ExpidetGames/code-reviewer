@@ -15,6 +15,8 @@ import {
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import { instanceAccessOf } from "../access.ts";
 import type { WorkspaceLlmSummary } from "../assemble.ts";
+import { CatalogProvidersCard } from "../../native-providers/ui/catalog-providers-card.tsx";
+import type { NativeProviderView } from "../../native-providers/catalog.ts";
 import { llmProviderDescriptors } from "../providers/index.ts";
 import type {
   ProviderKeyStatus,
@@ -81,10 +83,17 @@ const stateOf = (status: WorkspaceLlmKeyStatus) =>
       ? "the saved key cannot be read"
       : "no key is saved";
 
+/** The catalog providers of a workspace on its own key (#555): what the catalog offers and which of them have a key. */
+export type CatalogProvidersData = {
+  providers: readonly NativeProviderView[];
+  keyStatuses: readonly ProviderKeyStatus[];
+};
+
 export function LlmAccessSection({
   workspaceSlug,
   canManage,
   keyStatuses,
+  catalog,
   summary,
   api,
 }: {
@@ -93,6 +102,11 @@ export function LlmAccessSection({
   canManage: boolean;
   /** The state of the key of every registered provider, in the order of the registry. */
   keyStatuses: ProviderKeyStatus[];
+  /**
+   * The providers of the models.dev catalog (#555). Left out, the page has the two providers of the registry only. Never given
+   * for a workspace on the instance's access: it has no provider to choose.
+   */
+  catalog?: CatalogProvidersData;
   summary: WorkspaceLlmSummary;
   /** Only tests pass this. */
   api?: LlmKeyApi;
@@ -101,42 +115,56 @@ export function LlmAccessSection({
   if (instanceAccess !== null)
     return <InstanceAccessCard access={instanceAccess} />;
 
+  const catalogCard =
+    catalog === undefined || catalog.providers.length === 0 ? null : (
+      <CatalogProvidersCard
+        workspaceSlug={workspaceSlug}
+        canManage={canManage}
+        providers={catalog.providers}
+        keyStatuses={catalog.keyStatuses}
+        {...(api === undefined ? {} : { api })}
+      />
+    );
+
   if (!canManage) {
     // The summary is the access of the default provider, the first card.
     const unreadable = keyStatuses[0]?.status.state === "unreadable";
     return (
-      <Card role="region" aria-labelledby="llm-key-heading">
-        <CardHeader>
-          <CardTitle>
-            <h2
-              id="llm-key-heading"
-              className="text-lg font-semibold tracking-tight"
-            >
-              Key
-            </h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <HelpDisclosure label="How the key is stored">
-            {HOW_STORED}
-          </HelpDisclosure>
-          <p>
-            {summary.configured
-              ? "Reviews of this workspace have an LLM key."
-              : unreadable
-                ? "The saved key cannot be read, so reviews cannot run."
-                : "No LLM key is set, so reviews cannot run."}{" "}
-            Only an Admin or an Owner of the workspace can change it.
-          </p>
-          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-            {keyStatuses.map(({ provider, status }) => (
-              <li key={provider}>
-                {llmProviderDescriptors.labelOf(provider)}: {stateOf(status)}.
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-6">
+        <Card role="region" aria-labelledby="llm-key-heading">
+          <CardHeader>
+            <CardTitle>
+              <h2
+                id="llm-key-heading"
+                className="text-lg font-semibold tracking-tight"
+              >
+                Key
+              </h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <HelpDisclosure label="How the key is stored">
+              {HOW_STORED}
+            </HelpDisclosure>
+            <p>
+              {summary.configured
+                ? "Reviews of this workspace have an LLM key."
+                : unreadable
+                  ? "The saved key cannot be read, so reviews cannot run."
+                  : "No LLM key is set, so reviews cannot run."}{" "}
+              Only an Admin or an Owner of the workspace can change it.
+            </p>
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {keyStatuses.map(({ provider, status }) => (
+                <li key={provider}>
+                  {llmProviderDescriptors.labelOf(provider)}: {stateOf(status)}.
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+        {catalogCard}
+      </div>
     );
   }
 
@@ -175,6 +203,7 @@ export function LlmAccessSection({
           </Card>
         );
       })}
+      {catalogCard}
     </div>
   );
 }
