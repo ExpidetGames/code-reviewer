@@ -1,0 +1,21 @@
+{
+  "id": "txi_FakeTemplate",
+  "object": "tax_id",
+  "country": null,
+  "created": 1700000000,
+  "customer": "cus_FakeTemplate",
+  "customer_account": null,
+  "livemode": false,
+  "owner": {
+    "customer": "cus_FakeTemplate",
+    "customer_account": null,
+    "type": "customer"
+  },
+  "type": "eu_vat",
+  "value": "DE000000000",
+  "verification": {
+    "status": "pending",
+    "verified_address": null,
+    "verified_name": null
+  }
+}

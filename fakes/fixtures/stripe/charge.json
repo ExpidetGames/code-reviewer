@@ -1,0 +1,38 @@
+{
+  "id": "ch_FakeTemplate",
+  "object": "charge",
+  "amount": 0,
+  "amount_captured": 0,
+  "amount_refunded": 0,
+  "application": null,
+  "application_fee": null,
+  "application_fee_amount": null,
+  "balance_transaction": null,
+  "billing_details": {
+    "address": null,
+    "email": null,
+    "name": null,
+    "phone": null
+  },
+  "captured": true,
+  "created": 1700000000,
+  "currency": "usd",
+  "customer": null,
+  "description": null,
+  "disputed": false,
+  "failure_code": null,
+  "failure_message": null,
+  "livemode": false,
+  "metadata": {},
+  "outcome": {
+    "network_status": "approved_by_network",
+    "risk_level": "normal",
+    "type": "authorized"
+  },
+  "paid": true,
+  "payment_intent": null,
+  "payment_method": null,
+  "receipt_email": null,
+  "refunded": false,
+  "status": "succeeded"
+}
