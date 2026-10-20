@@ -755,3 +755,542 @@ def test_a_chat_choice_that_finishes_with_an_error_is_an_error() -> None:
     chunk: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "error"}]}
     result = read_stream(CHAT, sse((None, chunk), (None, {"choices": [], "usage": CHAT_OK})))
     assert result.errored and not result.terminated
+
+
+# -- review of PR #569: a usage must not go backwards, and one that is stated twice is no usage --
+#
+# The reviewer's proofs of concept, one row each. A call gets one usage-carrying event (Chat, a
+# Responses terminal event); Messages has its fixed order; Google may state its cumulative usage
+# again, but never less. Anything else is unknown, whatever the figures say.
+
+
+def _m_start(inp: int = 1000, out: int = 1, **extra: Any) -> tuple[str, Any]:
+    usage = {"input_tokens": inp, "output_tokens": out, **extra}
+    return ("message_start", {"type": "message_start", "message": {"id": "m", "usage": usage}})
+
+
+def _m_delta(**usage: Any) -> tuple[str, Any]:
+    return (
+        "message_delta",
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": usage},
+    )
+
+
+M_STOP = ("message_stop", {"type": "message_stop"})
+M_PING = ("ping", {"type": "ping"})
+M_ERROR = ("error", {"type": "error", "error": {"type": "overloaded_error"}})
+
+MESSAGES_FINE: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    ("baseline", [_m_start(), _m_delta(output_tokens=500), M_STOP]),
+    ("a ping between", [_m_start(), M_PING, _m_delta(output_tokens=500), M_PING, M_STOP]),
+    (
+        "a delta that states the input again",
+        [_m_start(), _m_delta(input_tokens=1000, output_tokens=500), M_STOP],
+    ),
+    (
+        "a delta that states the cache again",
+        [
+            _m_start(cache_read_input_tokens=4000),
+            _m_delta(input_tokens=1000, cache_read_input_tokens=4000, output_tokens=500),
+            M_STOP,
+        ],
+    ),
+    (
+        "two deltas, the output grows",
+        [_m_start(), _m_delta(output_tokens=200), _m_delta(output_tokens=500), M_STOP],
+    ),
+    ("a ping after the stop", [_m_start(), _m_delta(output_tokens=500), M_STOP, M_PING]),
+]
+
+MESSAGES_BROKEN: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    ("a delta before the start", [_m_delta(output_tokens=500), _m_start(), M_STOP]),
+    ("no start at all", [_m_delta(input_tokens=1000, output_tokens=500), M_STOP]),
+    (
+        "a later delta states less output",
+        [_m_start(), _m_delta(output_tokens=500), _m_delta(output_tokens=5), M_STOP],
+    ),
+    (
+        "a delta states less input than the start",
+        [_m_start(), _m_delta(input_tokens=10, output_tokens=500), M_STOP],
+    ),
+    (
+        "a delta states less cache than the start",
+        [
+            _m_start(cache_read_input_tokens=4000),
+            _m_delta(cache_read_input_tokens=0, output_tokens=500),
+            M_STOP,
+        ],
+    ),
+    (
+        "a second start after the delta",
+        [_m_start(), _m_delta(output_tokens=500), _m_start(10), M_STOP],
+    ),
+    (
+        "a second start before the delta",
+        [_m_start(), _m_start(10), _m_delta(output_tokens=500), M_STOP],
+    ),
+    (
+        "two messages in one stream",
+        [_m_start(), _m_delta(output_tokens=500), _m_start(10), _m_delta(output_tokens=2), M_STOP],
+    ),
+    (
+        "a start after the stop",
+        [_m_start(), _m_delta(output_tokens=500), M_STOP, _m_start(5), _m_delta(output_tokens=1)],
+    ),
+    (
+        "a delta after the stop",
+        [_m_start(), _m_delta(output_tokens=500), M_STOP, _m_delta(output_tokens=900)],
+    ),
+    (
+        "a content block after the stop",
+        [
+            _m_start(),
+            _m_delta(output_tokens=500),
+            M_STOP,
+            ("content_block_start", {"type": "content_block_start"}),
+        ],
+    ),
+    ("an error after the delta", [_m_start(), _m_delta(output_tokens=500), M_ERROR]),
+    ("an error after the stop", [_m_start(), _m_delta(output_tokens=500), M_STOP, M_ERROR]),
+    (
+        "the tier priority in the start, standard in the delta",
+        [
+            _m_start(service_tier="priority"),
+            _m_delta(output_tokens=500, service_tier="standard"),
+            M_STOP,
+        ],
+    ),
+    (
+        "a server tool in the start, none in the delta",
+        [
+            _m_start(server_tool_use={"web_search_requests": 2}),
+            _m_delta(output_tokens=500, server_tool_use={"web_search_requests": 0}),
+            M_STOP,
+        ],
+    ),
+    (
+        "a cache write split in the start, flat zero in the delta",
+        [
+            _m_start(
+                cache_creation={"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 200},
+                cache_creation_input_tokens=300,
+            ),
+            _m_delta(output_tokens=500, cache_creation_input_tokens=0),
+            M_STOP,
+        ],
+    ),
+]
+
+
+# #551-R569-S1
+@pytest.mark.parametrize(("name", "events"), MESSAGES_FINE, ids=[c[0] for c in MESSAGES_FINE])
+@pytest.mark.parametrize("size", [0, 1])
+def test_messages_events_in_the_order_of_the_api_give_one_usage(
+    name: str, events: list[tuple[str | None, Any]], size: int
+) -> None:
+    got = assert_priceable(read_stream(MESSAGES, sse(*events), size=size))
+    assert got.completion_tokens == 500
+    assert got.prompt_tokens in (1000, 5000)
+
+
+# #551-R569-S1
+@pytest.mark.parametrize(("name", "events"), MESSAGES_BROKEN, ids=[c[0] for c in MESSAGES_BROKEN])
+@pytest.mark.parametrize("size", [0, 1])
+def test_messages_events_out_of_order_repeated_or_going_backwards_are_unknown(
+    name: str, events: list[tuple[str | None, Any]], size: int
+) -> None:
+    assert_unknown(read_stream(MESSAGES, sse(*events), size=size))
+
+
+CHAT_FINISH: dict[str, Any] = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+CHAT_CONTENT: dict[str, Any] = {"choices": [{"index": 0, "delta": {"content": "x"}}]}
+
+
+def _usage_chunk(prompt: int = 1000, completion: int = 500, **extra: Any) -> dict[str, Any]:
+    usage = {"prompt_tokens": prompt, "completion_tokens": completion, **extra}
+    return {"choices": [], "usage": usage}
+
+
+def _with_usage(chunk: dict[str, Any], **usage: Any) -> dict[str, Any]:
+    return {**chunk, "usage": {"prompt_tokens": 1000, "completion_tokens": 500, **usage}}
+
+
+DONE: tuple[str | None, Any] = (None, "[DONE]")
+
+CHAT_FINE: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    (
+        "the usage after the finish",
+        [(None, CHAT_CONTENT), (None, CHAT_FINISH), (None, _usage_chunk()), DONE],
+    ),
+    (
+        "the usage in the finish chunk",
+        [(None, CHAT_CONTENT), (None, _with_usage(CHAT_FINISH)), DONE],
+    ),
+    (
+        "usage null on every chunk before",
+        [
+            (None, {**CHAT_CONTENT, "usage": None}),
+            (None, {**CHAT_FINISH, "usage": None}),
+            (None, _usage_chunk()),
+            DONE,
+        ],
+    ),
+    (
+        "usage null after the real one",
+        [
+            (None, CHAT_CONTENT),
+            (None, CHAT_FINISH),
+            (None, _usage_chunk()),
+            (None, {"choices": [], "usage": None}),
+            DONE,
+        ],
+    ),
+    (
+        "no DONE, the usage ends it",
+        [(None, CHAT_CONTENT), (None, CHAT_FINISH), (None, _usage_chunk())],
+    ),
+]
+
+CHAT_BROKEN: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    (
+        "two usage chunks, the last states less",
+        [(None, CHAT_FINISH), (None, _usage_chunk()), (None, _usage_chunk(1000, 5)), DONE],
+    ),
+    (
+        "two usage chunks that are the same",
+        [(None, CHAT_FINISH), (None, _usage_chunk()), (None, _usage_chunk()), DONE],
+    ),
+    (
+        "two usage chunks, the last states more",
+        [(None, CHAT_FINISH), (None, _usage_chunk(1000, 5)), (None, _usage_chunk()), DONE],
+    ),
+    (
+        "an early usage and none after the finish",
+        [(None, _with_usage(CHAT_CONTENT, completion_tokens=1)), (None, CHAT_FINISH), DONE],
+    ),
+    (
+        "an early usage, no DONE",
+        [(None, _with_usage(CHAT_CONTENT, completion_tokens=1)), (None, CHAT_FINISH)],
+    ),
+    (
+        "an early usage and a usage after the finish",
+        [
+            (None, _with_usage(CHAT_CONTENT, completion_tokens=1)),
+            (None, CHAT_FINISH),
+            (None, _usage_chunk()),
+            DONE,
+        ],
+    ),
+    (
+        "an early usage and DONE only",
+        [(None, _with_usage(CHAT_CONTENT, completion_tokens=1)), DONE],
+    ),
+    (
+        "a usage in the finish chunk and another after it",
+        [(None, _with_usage(CHAT_FINISH)), (None, _usage_chunk()), DONE],
+    ),
+    (
+        "the usage, then an empty usage",
+        [(None, CHAT_FINISH), (None, _usage_chunk()), (None, {"choices": [], "usage": {}}), DONE],
+    ),
+    (
+        "the usage, then a usage that is text",
+        [
+            (None, CHAT_FINISH),
+            (None, _usage_chunk()),
+            (None, {"choices": [], "usage": "nope"}),
+            DONE,
+        ],
+    ),
+    (
+        "the usage, then a usage that is a list",
+        [
+            (None, CHAT_FINISH),
+            (None, _usage_chunk()),
+            (None, {"choices": [], "usage": [1, 2]}),
+            DONE,
+        ],
+    ),
+]
+
+
+# #551-R569-S1
+@pytest.mark.parametrize(("name", "events"), CHAT_FINE, ids=[c[0] for c in CHAT_FINE])
+@pytest.mark.parametrize("size", [0, 1])
+def test_a_chat_usage_in_or_after_the_finish_chunk_is_the_usage(
+    name: str, events: list[tuple[str | None, Any]], size: int
+) -> None:
+    got = assert_priceable(read_stream(CHAT, sse(*events), size=size))
+    assert (got.prompt_tokens, got.completion_tokens) == (1000, 500)
+
+
+# #551-R569-S1
+# #551-R569-S2
+@pytest.mark.parametrize(("name", "events"), CHAT_BROKEN, ids=[c[0] for c in CHAT_BROKEN])
+@pytest.mark.parametrize("size", [0, 1])
+def test_a_chat_usage_before_the_finish_or_stated_twice_is_unknown(
+    name: str, events: list[tuple[str | None, Any]], size: int
+) -> None:
+    assert_unknown(read_stream(CHAT, sse(*events), size=size))
+
+
+RESPONSES_USAGE: dict[str, Any] = {"input_tokens": 1000, "output_tokens": 500}
+
+
+def _terminal(
+    kind: str = "response.completed", usage: dict[str, Any] | None = None
+) -> tuple[str, Any]:
+    response = {"id": "r", "usage": RESPONSES_USAGE if usage is None else usage}
+    return (kind, {"type": kind, "response": response})
+
+
+RESPONSES_BROKEN: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    (
+        "two completed, the last states less",
+        [_terminal(), _terminal(usage={"input_tokens": 1000, "output_tokens": 5})],
+    ),
+    ("two completed that are the same", [_terminal(), _terminal()]),
+    ("completed, then incomplete", [_terminal(), _terminal("response.incomplete")]),
+    ("incomplete, then completed", [_terminal("response.incomplete"), _terminal()]),
+    ("completed, then failed", [_terminal(), _terminal("response.failed")]),
+]
+
+
+# #551-R569-S1
+@pytest.mark.parametrize("kind", ["response.completed", "response.incomplete"])
+def test_a_responses_stream_with_one_terminal_event_gives_its_usage(kind: str) -> None:
+    created = ("response.created", {"type": "response.created", "response": {"usage": None}})
+    got = assert_priceable(read_stream(RESPONSES, sse(created, _terminal(kind))))
+    assert (got.prompt_tokens, got.completion_tokens) == (1000, 500)
+
+
+# #551-R569-S1
+@pytest.mark.parametrize(("name", "events"), RESPONSES_BROKEN, ids=[c[0] for c in RESPONSES_BROKEN])
+def test_a_responses_stream_with_a_second_terminal_event_is_unknown(
+    name: str, events: list[tuple[str | None, Any]]
+) -> None:
+    assert_unknown(read_stream(RESPONSES, sse(*events)))
+
+
+def _g_chunk(
+    usage: dict[str, Any] | None = None, *, finish: bool = False
+) -> tuple[str | None, Any]:
+    candidate: dict[str, Any] = {"index": 0, "content": {"parts": [{"text": "x"}]}}
+    if finish:
+        candidate["finishReason"] = "STOP"
+    chunk: dict[str, Any] = {"candidates": [candidate]}
+    if usage is not None:
+        chunk["usageMetadata"] = usage
+    return (None, chunk)
+
+
+def _gu(candidates: int = 500, **extra: int) -> dict[str, int]:
+    return {"promptTokenCount": 1000, "candidatesTokenCount": candidates, **extra}
+
+
+GOOGLE_FINE: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    (
+        "cumulative and growing",
+        [_g_chunk(_gu(10)), _g_chunk(_gu(300)), _g_chunk(_gu(500), finish=True)],
+    ),
+    ("only the last chunk", [_g_chunk(), _g_chunk(_gu(), finish=True)]),
+    (
+        "a usage chunk after the finish, the same",
+        [_g_chunk(_gu()), _g_chunk(finish=True), _g_chunk(_gu())],
+    ),
+    (
+        "thoughts that appear late",
+        [_g_chunk(_gu(10)), _g_chunk(_gu(500, thoughtsTokenCount=40), finish=True)],
+    ),
+]
+
+GOOGLE_BROKEN: list[tuple[str, list[tuple[str | None, Any]]]] = [
+    ("the last chunk states less", [_g_chunk(_gu(500)), _g_chunk(_gu(5), finish=True)]),
+    (
+        "the finish states more, a chunk after it less",
+        [_g_chunk(_gu(500), finish=True), _g_chunk(_gu(2))],
+    ),
+    (
+        "two finishes, the second states less",
+        [_g_chunk(_gu(500), finish=True), _g_chunk(_gu(2), finish=True)],
+    ),
+    (
+        "the thoughts shrink",
+        [_g_chunk(_gu(500, thoughtsTokenCount=30)), _g_chunk(_gu(500), finish=True)],
+    ),
+    (
+        "the prompt shrinks",
+        [
+            _g_chunk(_gu(10)),
+            _g_chunk({"promptTokenCount": 900, "candidatesTokenCount": 500}, finish=True),
+        ],
+    ),
+    (
+        "a field that could carry a price in an earlier chunk only",
+        [_g_chunk(_gu(10, toolUsePromptTokenCount=40)), _g_chunk(_gu(500), finish=True)],
+    ),
+    (
+        "a traffic type in an earlier chunk only",
+        [
+            _g_chunk({**_gu(10), "trafficType": "PROVISIONED_THROUGHPUT"}),
+            _g_chunk(_gu(500), finish=True),
+        ],
+    ),
+    ("the finish chunk has no usage", [_g_chunk(_gu(500)), _g_chunk(finish=True)]),
+]
+
+
+# #551-R569-S1
+@pytest.mark.parametrize(("name", "events"), GOOGLE_FINE, ids=[c[0] for c in GOOGLE_FINE])
+@pytest.mark.parametrize("size", [0, 1])
+def test_google_usage_that_stays_or_grows_is_the_last_statement(
+    name: str, events: list[tuple[str | None, Any]], size: int
+) -> None:
+    got = assert_priceable(read_stream(GOOGLE, sse(*events), size=size))
+    assert got.prompt_tokens == 1000
+    assert got.completion_tokens in (500, 540)
+
+
+# #551-R569-S1
+# #551-R569-N3
+@pytest.mark.parametrize(("name", "events"), GOOGLE_BROKEN, ids=[c[0] for c in GOOGLE_BROKEN])
+@pytest.mark.parametrize("size", [0, 1])
+def test_google_usage_that_goes_backwards_or_hides_a_field_is_unknown(
+    name: str, events: list[tuple[str | None, Any]], size: int
+) -> None:
+    assert_unknown(read_stream(GOOGLE, sse(*events), size=size))
+
+
+# #551-R569-S1
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.parametrize("size", [0, 1])
+def test_the_fakes_duplicate_usage_is_unknown(family: WireFamily, size: int) -> None:
+    result = read_stream(family, fake_stream(family, 3, usage_fault="duplicate"), size=size)
+    assert_unknown(result)
+    # The same call without the fault is whole: only the repeated statement made it unknown.
+    assert_priceable(read_stream(family, fake_stream(family, 3), size=size))
+
+
+# #551-R569-S1
+@pytest.mark.parametrize("family", [CHAT, MESSAGES, GOOGLE])
+@pytest.mark.parametrize("size", [0, 1])
+def test_the_fakes_usage_out_of_order_is_unknown(family: WireFamily, size: int) -> None:
+    options: dict[str, Any] = {"cumulative_usage": True} if family is GOOGLE else {}
+    data = fake_stream(family, 3, usage_fault="out_of_order", **options)
+    assert_unknown(read_stream(family, data, size=size))
+
+
+# -- review of PR #569: the total the provider states must agree with the counts (S5) -----------
+
+TOTALS_FINE: list[tuple[WireFamily, dict[str, Any]]] = [
+    (CHAT, {**CHAT_OK, "total_tokens": 120}),
+    (CHAT, {**CHAT_OK}),
+    (CHAT, {**CHAT_OK, "total_tokens": 120, "completion_tokens_details": {"reasoning_tokens": 5}}),
+    (RESPONSES, {**RESPONSES_OK, "total_tokens": 120}),
+    (GOOGLE, {**GOOGLE_OK, "totalTokenCount": 120}),
+    (GOOGLE, {**GOOGLE_OK, "thoughtsTokenCount": 7, "totalTokenCount": 127}),
+]
+TOTALS_BROKEN: list[tuple[str, WireFamily, dict[str, Any]]] = [
+    ("chat, the total is more", CHAT, {**CHAT_OK, "total_tokens": 121}),
+    ("chat, the total is less", CHAT, {**CHAT_OK, "total_tokens": 119}),
+    (
+        "chat, reasoning on top of the completion, as xAI states it",
+        CHAT,
+        {
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "total_tokens": 1500,
+            "completion_tokens_details": {"reasoning_tokens": 300},
+        },
+    ),
+    ("chat, the total is not a count", CHAT, {**CHAT_OK, "total_tokens": "120"}),
+    ("chat, the total is negative", CHAT, {**CHAT_OK, "total_tokens": -120}),
+    ("responses, the total is more", RESPONSES, {**RESPONSES_OK, "total_tokens": 500}),
+    ("responses, the total is less", RESPONSES, {**RESPONSES_OK, "total_tokens": 20}),
+    (
+        "google, the total leaves out the thoughts",
+        GOOGLE,
+        {**GOOGLE_OK, "thoughtsTokenCount": 7, "totalTokenCount": 120},
+    ),
+    ("google, the total is more", GOOGLE, {**GOOGLE_OK, "totalTokenCount": 9999}),
+    ("google, the total is less", GOOGLE, {**GOOGLE_OK, "totalTokenCount": 100}),
+]
+
+
+# #551-R569-S5
+@pytest.mark.parametrize(("family", "usage"), TOTALS_FINE)
+def test_a_total_that_agrees_with_the_counts_or_is_not_stated_is_no_unknown_field(
+    family: WireFamily, usage: dict[str, Any]
+) -> None:
+    assert_priceable(read_document(family, _wrap(family, usage)))
+
+
+# #551-R569-S5
+@pytest.mark.parametrize(
+    ("name", "family", "usage"), TOTALS_BROKEN, ids=[c[0] for c in TOTALS_BROKEN]
+)
+def test_a_total_that_disagrees_with_the_counts_is_unknown(
+    name: str, family: WireFamily, usage: dict[str, Any]
+) -> None:
+    result = read_document(family, _wrap(family, usage))
+    assert result.usage is not None
+    assert result.usage.unknown_fields, "a total that disagrees must not be priced"
+    # The same in a stream.
+    if family is CHAT:
+        data = sse((None, CHAT_FINISH), (None, {"choices": [], "usage": usage}), DONE)
+        assert_unknown(read_stream(CHAT, data))
+
+
+# -- review of PR #569: the tap never fails the relay (N1) ---------------------------------------
+
+
+def _deep(depth: int) -> str:
+    return "[" * depth + "1" + "]" * depth
+
+
+# #551-R569-N1
+@pytest.mark.parametrize("depth", [100, 300, 480, 600, 900, 5000])
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_usage_field_nested_deeper_than_the_parser_goes_is_unknown_and_never_raises(
+    family: WireFamily, depth: int
+) -> None:
+    usage = json.dumps(OK_OF[family])[:-1] + f', "x": {_deep(depth)}}}'
+    if family is GOOGLE:
+        document = f'{{"candidates": [{{"finishReason": "STOP"}}], "usageMetadata": {usage}}}'
+        events = f"data: {document}\n\n"
+    elif family is RESPONSES:
+        document = f'{{"type": "response.completed", "response": {{"usage": {usage}}}}}'
+        events = f"event: response.completed\ndata: {document}\n\n"
+    elif family is MESSAGES:
+        document = f'{{"usage": {usage}}}'
+        events = (
+            f'event: message_start\ndata: {{"type": "message_start", "message": {document}}}\n\n'
+            "event: message_delta\n"
+            'data: {"type": "message_delta", "usage": {"output_tokens": 20}}\n\n'
+            'event: message_stop\ndata: {"type": "message_stop"}\n\n'
+        )
+    else:
+        document = f'{{"choices": [], "usage": {usage}}}'
+        events = (
+            'data: {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}\n\n'
+            f"data: {document}\n\ndata: [DONE]\n\n"
+        )
+    # Whether the parser reads it or gives up on it, the tap does not raise and the call is unknown.
+    assert_unknown(read_stream(family, events.encode()))
+    tap = tap_for(family, sse=False)
+    tap.feed(document.encode())
+    assert_unknown(tap.finish())
+
+
+# #551-R569-N1
+def test_what_a_field_holds_is_decided_without_recursing() -> None:
+    from code_reviewer_runner.dynamic_review.passthrough.usage_normalize import holds_something
+
+    nested: Any = 1
+    for _ in range(2_000):
+        nested = [nested]
+    assert holds_something(nested)
+    empty: Any = 0
+    for _ in range(2_000):
+        empty = {"a": empty}
+    assert not holds_something(empty)

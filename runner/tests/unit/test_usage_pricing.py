@@ -341,30 +341,56 @@ def test_a_charge_the_provider_states_is_the_cost_and_is_never_recomputed() -> N
 
 
 # #551-T09
-@pytest.mark.parametrize("figure", ["0.0012", "0.0001", "0.002"])
-def test_a_stated_charge_beyond_the_tolerance_of_the_book_is_kept_and_counted_as_drift(
-    figure: str,
-) -> None:
+# #551-R569-S4
+@pytest.mark.parametrize("figure", ["0.0012", "0.002", "0.46"])
+def test_a_stated_charge_above_the_book_is_the_cost_and_is_counted_as_drift(figure: str) -> None:
     priced = price_call(stated(figure), PLAIN)
     assert priced.cost == Decimal(figure)
     assert priced.drift
 
 
-# #551-T09
-def test_a_stated_zero_for_a_call_that_used_tokens_is_not_sane_and_the_book_prices_it() -> None:
-    priced = price_call(stated("0"), PLAIN)
+# #551-R569-S4
+@pytest.mark.parametrize("figure", ["0.0003", "0.0001", "0.000045"])
+def test_a_stated_charge_below_the_book_by_at_most_ten_times_books_what_the_book_says(
+    figure: str,
+) -> None:
+    # The book says 0.00045: the dearer of the two is booked, never less than the book expects.
+    priced = price_call(stated(figure), PLAIN)
     assert priced.cost == Decimal("0.00045")
     assert priced.drift
-    # A model the book prices at zero is free: a stated zero agrees with it.
+
+
+# #551-R569-S4
+def test_a_stated_charge_a_little_below_the_book_is_no_drift_and_books_the_book() -> None:
+    priced = price_call(stated("0.000448"), PLAIN)
+    assert priced.cost == Decimal("0.00045") and not priced.drift
+
+
+# #551-R569-S4
+@pytest.mark.parametrize(
+    "figure",
+    ["0", "0.000044999", "0.00001", "0.000000000001", "1e-300", "1E-1000", "0.0000000000000001"],
+)
+def test_a_stated_charge_more_than_ten_times_below_the_book_is_unknown(figure: str) -> None:
+    # Tiny but not zero is as little to believe as zero: the call has no cost, the run books its
+    # worst case.
+    assert price_call(stated(figure), PLAIN).cost is None
+
+
+# #551-R569-S4
+def test_a_model_the_book_prices_at_zero_may_state_zero_and_must_not_state_more_for_free() -> None:
     free = price_call(stated("0"), parsed(FREE))
     assert free.cost == Decimal(0) and not free.drift
+    dear = price_call(stated("0.5"), parsed(FREE))
+    assert dear.cost == Decimal("0.5") and dear.drift
 
 
-# #551-T09
-def test_a_stated_charge_is_the_cost_even_when_the_book_cannot_price_the_call() -> None:
+# #551-R569-S3
+# #551-R569-S4
+def test_a_stated_charge_does_not_make_a_call_the_book_cannot_price_known() -> None:
+    # Nothing to hold it against (no ten-times check is possible): the call is unknown.
     priced = price_call(stated("0.0003", cache_write_5m=5), parsed(NO_WRITE))
-    assert priced.cost == Decimal("0.0003")
-    assert not priced.drift  # nothing to compare it with
+    assert priced.cost is None
 
 
 # #551-T09

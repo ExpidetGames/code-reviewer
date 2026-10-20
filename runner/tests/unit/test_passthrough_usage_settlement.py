@@ -32,10 +32,12 @@ from passthrough_support import (
     failing,
     rig,
     streamed,
+    worst_case,
 )
 
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, UnitCosts
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
+from code_reviewer_runner.dynamic_review.passthrough.price_book import PriceBook, PriceLevel
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 from code_reviewer_runner.dynamic_review.passthrough.upstream import UpstreamError, UpstreamFailure
 from code_reviewer_runner.result import ErrorCode
@@ -43,10 +45,6 @@ from passthrough_expect import usage_expected
 
 FAMILIES = list(WireFamily)
 LOGGER = "code_reviewer_runner.dynamic_review.passthrough.usage_report"
-
-
-def worst_case(body_bytes: int, output_cap: int = 1000) -> Decimal:
-    return PRICES.of_call(body_bytes, output_cap, cache_in_use=True)
 
 
 def spent(ledger: BudgetLedger) -> Decimal:
@@ -230,3 +228,128 @@ def test_a_retry_after_a_429_is_two_upstream_calls_with_one_settled_at_the_usage
     # The refused call was never billed and the answered one is priced at its usage.
     assert usage.cost_usd == pytest.approx(float(call_cost(usage_expected(1, family), PRICES) or 0))
     assert r.ledger.unknown_calls == 0 and r.ledger.failure is None
+
+
+# -- review of PR #569: a call the book cannot price, a charge that cannot be believed -----------
+
+
+# #551-R569-S3
+def test_a_call_with_a_one_hour_write_and_no_one_hour_price_is_booked_at_the_worst_case() -> None:
+    # The generic fake's first call writes to the cache for 5 minutes and for an hour.
+    no_one_hour = UnitCosts(
+        input_usd_per_mtok=Decimal(3),
+        output_usd_per_mtok=Decimal(15),
+        cache_read_usd_per_mtok=Decimal("0.3"),
+        cache_write_usd_per_mtok=Decimal("3.75"),
+    )
+    family = WireFamily.ANTHROPIC_MESSAGES
+    r = rig(family, streamed(family, 1), prices=no_one_hour)
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #551-R569-S3
+@pytest.mark.parametrize("which", ["5m", "1h"])
+def test_a_price_book_without_the_price_of_a_write_the_call_made_is_an_unknown_call(
+    which: str,
+) -> None:
+    level = PriceLevel(
+        input=3_000_000,
+        output=15_000_000,
+        cache_read=300_000,
+        cache_write_5m=None if which == "5m" else 3_750_000,
+        cache_write_1h=None if which == "1h" else 6_000_000,
+    )
+    family = WireFamily.ANTHROPIC_MESSAGES
+    r = rig(family, streamed(family, 1), prices=PriceBook(base=level))
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #551-R569-S3
+def test_for_an_own_key_a_call_the_book_cannot_price_is_booked_and_the_run_goes_on() -> None:
+    family = WireFamily.ANTHROPIC_MESSAGES
+    level = PriceLevel(input=3_000_000, output=15_000_000, cache_read=300_000)
+    r = rig(family, streamed(family, 1), prices=PriceBook(base=level), unknown_cost_ends_run=False)
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))
+    assert r.ledger.failure is None
+
+
+# #551-R569-S4
+@pytest.mark.parametrize("cost", [0, 1e-300, 5e-324, 0.00000001, 0.000009])
+def test_a_charge_far_below_what_the_book_expects_is_an_unknown_call_at_the_worst_case(
+    cost: float,
+) -> None:
+    # The book expects 0.000105 for the call (10 in, 5 out): one hundredth of it is no price.
+    r = rig(WireFamily.OPENAI_CHAT, _openrouter(cost))
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #551-R569-S4
+def test_a_charge_below_the_book_by_less_than_ten_times_books_the_book_and_counts_the_drift() -> (
+    None
+):
+    r = rig(WireFamily.OPENAI_CHAT, _openrouter(0.00005))
+    r.post()
+    assert r.ledger.usage(MODEL).cost_usd == pytest.approx(0.000105)
+    assert r.proxy.price_drift_calls == 1
+    assert r.ledger.unknown_calls == 0 and r.ledger.failure is None
+
+
+# -- review of PR #569: usage that is stated twice or in the wrong order -------------------------
+
+
+# #551-R569-S1
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_usage_that_is_stated_twice_is_an_unknown_call_at_the_worst_case(
+    family: WireFamily,
+) -> None:
+    r = rig(family, streamed(family, 1, usage_fault="duplicate"))
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))
+    assert r.ledger.failure is not None
+    assert r.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+
+
+# #551-R569-S1
+@pytest.mark.parametrize(
+    "family", [WireFamily.OPENAI_CHAT, WireFamily.ANTHROPIC_MESSAGES, WireFamily.GOOGLE]
+)
+def test_a_usage_in_the_wrong_order_is_an_unknown_call_at_the_worst_case(
+    family: WireFamily,
+) -> None:
+    r = rig(family, streamed(family, 1, usage_fault="out_of_order"))
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))
+
+
+# #551-R569-S2
+def test_the_two_usage_chunks_of_the_reviewers_chat_stream_cannot_book_the_smaller_one() -> None:
+    # Before: the last chunk (5 tokens out) replaced the first (500) and the call cost a hundredth.
+    finish = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+    def usage(completion: int) -> dict[str, Any]:
+        counts = {"prompt_tokens": 1000, "completion_tokens": completion}
+        return {"choices": [], "usage": {**counts, "total_tokens": 1000 + completion}}
+
+    chunks = [
+        f"data: {json.dumps(item)}\n\n".encode() for item in (finish, usage(500), usage(5))
+    ] + [b"data: [DONE]\n\n"]
+    r = rig(WireFamily.OPENAI_CHAT, Scripted(chunks=chunks))
+    body = r.body()
+    r.post(body)
+    assert_unknown_call(r, len(body))

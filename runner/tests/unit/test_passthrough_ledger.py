@@ -18,6 +18,11 @@ from code_reviewer_runner.dynamic_review.budget import (
     LimitError,
     UnitCosts,
 )
+from code_reviewer_runner.dynamic_review.passthrough.price_book import (
+    PriceBook,
+    PriceLevel,
+    PriceTier,
+)
 from code_reviewer_runner.result import ErrorCode
 
 UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(3), output_usd_per_mtok=Decimal(15))
@@ -102,16 +107,20 @@ def test_a_call_that_reports_more_prompt_than_the_bytes_allow_is_booked_too() ->
 
 
 # #550-B1-L04
-def test_an_over_report_without_a_cost_is_booked_at_what_was_reserved() -> None:
+# #551-R569-S3
+def test_an_over_report_without_a_cost_is_booked_at_the_worst_case() -> None:
     budget = ledger()
     reservation = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
     with pytest.raises(LimitError):
         budget.settle_call(reservation, prompt_tokens=100, completion_tokens=2_000, cost=None)
-    # No cost was reported, so none is known: the run's cost is unknown, and the guard keeps
-    # counting the reservation as spent.
+    # No cost was reported, so none is known: the run's cost is unknown. What is booked is what the
+    # call could have cost at most (every byte a token of the dearest kind, the whole cap), not what
+    # it was expected to cost: a hostile answer must never make a call cheaper than it may be.
     assert budget.usage("m").cost_usd is None
-    held_after = budget.reserve_call(b"x" * 3000, output_tokens=1_000)
-    assert held_after.cost >= reservation.cost
+    worst = Decimal(3000) * 3 / 1_000_000 + Decimal(1000) * 15 / 1_000_000
+    assert budget.worst_case_cost(reservation) == worst
+    assert budget._counters.cost == worst  # pyright: ignore[reportPrivateUsage]
+    assert worst > reservation.cost
 
 
 # #550-B3-L05
@@ -136,3 +145,91 @@ def test_a_call_without_usage_is_booked_at_its_worst_case_not_its_expected_cost(
     assert worst > reservation.cost
     assert budget.unknown_calls == 1
     assert budget._counters.reserved_cost == 0  # pyright: ignore[reportPrivateUsage]
+
+
+# -- the worst case of a call (N8 of the review of PR #569) --------------------------------------
+
+
+def book_ledger(book: PriceBook) -> BudgetLedger:
+    return BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal("100.00")),
+        window_tokens=200_000,
+        output_tokens=8_192,
+        unit_costs=UNIT_COSTS,
+        price_book=book,
+    )
+
+
+def worst_of(budget: BudgetLedger, size: int = 3000, cap: int = 1000) -> Decimal:
+    return budget.worst_case_cost(budget.reserve_call(b"x" * size, output_tokens=cap))
+
+
+# #551-R569-N8
+def test_the_worst_case_takes_the_one_hour_write_price_when_it_is_the_dearest_input() -> None:
+    book = PriceBook(
+        base=PriceLevel(
+            input=3_000_000,
+            output=15_000_000,
+            cache_read=300_000,
+            cache_write_5m=3_750_000,
+            cache_write_1h=6_000_000,
+        )
+    )
+    assert worst_of(book_ledger(book)) == Decimal(3000 * 6 + 1000 * 15) / 1_000_000
+
+
+# #551-R569-N8
+def test_the_worst_case_takes_the_reasoning_price_when_it_is_dearer_than_the_output_price() -> None:
+    book = PriceBook(base=PriceLevel(input=3_000_000, output=15_000_000, reasoning=20_000_000))
+    assert worst_of(book_ledger(book)) == Decimal(3000 * 3 + 1000 * 20) / 1_000_000
+
+
+# #551-R569-N8
+def test_the_worst_case_prices_a_prompt_above_a_tier_at_the_tier() -> None:
+    dearer = PriceLevel(input=6_000_000, output=22_500_000, cache_write_5m=7_500_000)
+    book = PriceBook(
+        base=PriceLevel(input=3_000_000, output=15_000_000),
+        tiers=(PriceTier(context_over=1000, level=dearer),),
+    )
+    # 3000 bytes may be 3000 tokens, above the 1000 of the tier.
+    assert worst_of(book_ledger(book)) == Decimal(3000 * 7.5 + 1000 * 22.5) / 1_000_000
+
+
+# #551-R569-N8
+def test_the_worst_case_ignores_a_tier_the_request_cannot_reach() -> None:
+    dearer = PriceLevel(input=60_000_000, output=225_000_000)
+    book = PriceBook(
+        base=PriceLevel(input=3_000_000, output=15_000_000),
+        tiers=(PriceTier(context_over=10_000, level=dearer),),
+    )
+    assert worst_of(book_ledger(book)) == Decimal(3000 * 3 + 1000 * 15) / 1_000_000
+
+
+# #551-R569-N8
+def test_the_worst_case_takes_the_base_when_it_is_dearer_than_a_tier_the_prompt_may_not_reach() -> (
+    None
+):
+    # A tier may be cheaper than the level below it: a prompt below its size still pays the base.
+    cheaper = PriceLevel(input=1_000_000, output=5_000_000)
+    book = PriceBook(
+        base=PriceLevel(input=3_000_000, output=15_000_000),
+        tiers=(PriceTier(context_over=1000, level=cheaper),),
+    )
+    assert worst_of(book_ledger(book)) == Decimal(3000 * 3 + 1000 * 15) / 1_000_000
+
+
+# #551-R569-N8
+def test_the_worst_case_of_a_job_without_a_book_counts_its_one_hour_write_too() -> None:
+    costs = UnitCosts(
+        input_usd_per_mtok=Decimal(3),
+        output_usd_per_mtok=Decimal(15),
+        cache_write_usd_per_mtok=Decimal("3.75"),
+        cache_write_1h_usd_per_mtok=Decimal(6),
+    )
+    budget = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal("100.00")),
+        window_tokens=200_000,
+        output_tokens=8_192,
+        unit_costs=costs,
+    )
+    assert worst_of(budget) == Decimal(3000 * 6 + 1000 * 15) / 1_000_000
