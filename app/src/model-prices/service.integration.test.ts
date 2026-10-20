@@ -1475,7 +1475,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     );
 
     // #549-T05
-    it.skipIf(engine.name !== "postgres")(
+    it.skipIf(engine.name !== "postgres" || engine.skip)(
       "gives up with a stable code when the fetch holds its lock for longer than the timeout, and writes nothing",
       async () => {
         const t = await setup({ lockTimeoutMs: 300 });
