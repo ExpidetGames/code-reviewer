@@ -51,6 +51,43 @@ describe("priceBookFromCatalog", () => {
     });
   });
 
+  // #549-T04
+  it("sorts the tiers by context size, however the catalog lists them", () => {
+    const book = priceBookFromCatalog(
+      {
+        input: "1",
+        output: "2",
+        tiers: [
+          { contextOver: 400000, input: "3", output: "6" },
+          { contextOver: 200000, input: "2", output: "4" },
+        ],
+      },
+      undefined,
+    ) as PriceBook;
+
+    expect(book.tiers.map((tier) => tier.contextOver)).toEqual([
+      200000, 400000,
+    ]);
+    expect(parsePriceBookJson(priceBookToJson(book)).ok).toBe(true);
+  });
+
+  // #549-T04
+  it("treats two tiers of the same context size as no price, because it is not one price", () => {
+    const book = priceBookFromCatalog(
+      {
+        input: "1",
+        output: "2",
+        tiers: [
+          { contextOver: 200000, input: "2", output: "4" },
+          { contextOver: 200000, input: "3", output: "6" },
+        ],
+      },
+      undefined,
+    );
+
+    expect(book).toBeNull();
+  });
+
   // #549-T03
   it("takes the 1-hour cache write from the override when the catalog has none", () => {
     const book = priceBookFromCatalog(COST, BigInt(200_000)) as PriceBook;

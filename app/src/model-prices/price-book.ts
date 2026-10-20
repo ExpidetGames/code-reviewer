@@ -78,6 +78,15 @@ export function priceBookFromCatalog(
       cacheWrite1h: null,
     });
   }
+  // models.dev does not promise an order, a book states tiers from the smallest context up, and two tiers of one size are
+  // not one price: that catalog row is unpriced until an admin states the price.
+  tiers.sort((a, b) => a.contextOver - b.contextOver);
+  if (
+    tiers.some(
+      (tier, i) => i > 0 && tier.contextOver === tiers[i - 1]?.contextOver,
+    )
+  )
+    return null;
   return {
     input,
     output,

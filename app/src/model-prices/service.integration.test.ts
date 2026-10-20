@@ -423,6 +423,46 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
     // #549-T04
     it_(
+      "confirms as shown a model whose catalog lists its tiers from the largest context down",
+      async () => {
+        const t = await setup();
+        await t.fetchChanged((body) => {
+          body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+            input: 2,
+            output: 10,
+            tiers: [
+              {
+                input: 6,
+                output: 30,
+                tier: { type: "context", size: 400000 },
+              },
+              {
+                input: 4,
+                output: 20,
+                tier: { type: "context", size: 200000 },
+              },
+            ],
+          };
+        });
+        const shown = await view(t);
+
+        const result = await confirm(t);
+
+        expect(result).toMatchObject({
+          ok: true,
+          model: { price: { status: "confirmed" } },
+        });
+        expect(
+          shown.price.reference.book?.tiers.map((t) => t.contextOver),
+        ).toEqual([200000, 400000]);
+        expect(
+          (await view(t)).price.confirmation?.book.tiers.map((t) => t.input),
+        ).toEqual(["4000000", "6000000"]);
+      },
+    );
+
+    // #549-T04
+    it_(
       "keeps both rows when the price is corrected afterwards, and the latest counts",
       async () => {
         const t = await setup();
