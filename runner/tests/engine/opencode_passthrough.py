@@ -50,7 +50,16 @@ PRICES = UnitCosts(
     output_usd_per_mtok=Decimal(15),
     cache_read_usd_per_mtok=Decimal("0.3"),
     cache_write_usd_per_mtok=Decimal("3.75"),
+    cache_write_1h_usd_per_mtok=Decimal(6),
 )
+# The same prices as a price book (#549), for the independent calculator of `usage_calc.py`.
+PRICE_BOOK_JSON: dict[str, object] = {
+    "input": "3000000",
+    "output": "15000000",
+    "cacheRead": "300000",
+    "cacheWrite5m": "3750000",
+    "cacheWrite1h": "6000000",
+}
 WIRE: dict[str, WireFamily] = {
     "chat": WireFamily.OPENAI_CHAT,
     "responses": WireFamily.OPENAI_RESPONSES,

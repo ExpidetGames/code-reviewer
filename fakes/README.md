@@ -30,7 +30,8 @@ for a request that asked for it; Google's `usageMetadata` can be cumulative on e
 an error event for a stream that fails after HTTP 200); `upstream.py` is a provider that accepts only the
 real key in the real header on the real path and model (faults of a test's choice: a status with a chosen
 `retry-after`, a stream cut midway, an error event inside a stream, gzip, error messages that quote the key,
-an answer without `Content-Length`; framing: a stream re-chunked at arbitrary byte boundaries); `relay.py` is
+an answer without `Content-Length`, a fault in the usage of every answer: left out, a field nobody can price, a
+count that is no count, one that is stated twice with less, one in an order the family never uses (`usage_fault`, #551); framing: a stream re-chunked at arbitrary byte boundaries); `relay.py` is
 the smallest key swapping passthrough, which can also pin the model of the job, a reference for the proxy of
 #550. The shapes follow the providers' documentation, they are not captured from real providers yet, and the
 assumptions are listed in `docs/spike/544-passthrough.md`, section 6. There is no live relay here: the relay

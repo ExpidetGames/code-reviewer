@@ -13,6 +13,7 @@ engine does not know) are further providers of the same engine.
 import json
 import sys
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +24,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fakes.wire.formats import AUTH_HEADER, FAMILIES, Family, auth_value, request_path
 from fakes.wire.upstream import ScriptedUpstream
 from opencode_native import DEFAULT_IDS, REAL_KEY, Outcome, Provider, Step, run_plan
-from opencode_passthrough import PRICES, WIRE, PassthroughEngine, passthrough_engine
+from opencode_passthrough import (
+    PRICE_BOOK_JSON,
+    PRICES,
+    WIRE,
+    PassthroughEngine,
+    passthrough_engine,
+)
 
 from code_reviewer_runner.dynamic_review.passthrough.engine_errors import model_not_found_for_turn
 from code_reviewer_runner.dynamic_review.passthrough.pricing import call_cost
 from code_reviewer_runner.result import ErrorCode
 from passthrough_expect import usage_expected
+from usage_calc import expected_cost
 
 pytestmark = pytest.mark.engine
 
@@ -104,8 +112,19 @@ def run(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-de
 def _prices_of(outcome: Outcome, family: Family) -> Decimal:
     total = Decimal(0)
     for call in range(1, len(outcome.records) + 1):
-        cost = call_cost(usage_expected(call, WIRE[family]), PRICES)
+        usage = usage_expected(call, WIRE[family])
+        cost = call_cost(usage, PRICES)
         assert cost is not None
+        # An independent calculator prices the same usage the same way (#551-T08).
+        assert Fraction(cost) == expected_cost(
+            PRICE_BOOK_JSON,
+            prompt=usage.prompt_tokens,
+            completion=usage.completion_tokens,
+            read=usage.cache_read,
+            write_5m=usage.cache_write_5m,
+            write_1h=usage.cache_write_1h,
+            reasoning=usage.reasoning_tokens,
+        )
         total += cost
     return total
 

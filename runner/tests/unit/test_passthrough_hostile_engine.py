@@ -36,6 +36,7 @@ from passthrough_support import (
     failing,
     rig,
     streamed,
+    worst_case,
 )
 
 from code_reviewer_runner.dynamic_review.budget import DynamicLimits, LimitError
@@ -52,12 +53,6 @@ from passthrough_expect import usage_expected
 
 FAMILIES = list(WireFamily)
 GUESSES = [REAL_KEY, REAL_KEY[:14], REAL_KEY[-9:], REAL_KEY[3:20], REAL_KEY[:8]]
-
-
-def worst_case(body_bytes: int, output_cap: int = 1000) -> Decimal:
-    """The most a call can cost: the bytes of the request as tokens at the dearest input price, and
-    the whole output cap."""
-    return PRICES.of_call(body_bytes, output_cap, cache_in_use=True)
 
 
 def spent(r_ledger: object) -> Decimal:

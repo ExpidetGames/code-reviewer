@@ -29,6 +29,7 @@ from passthrough_support import (
     failing,
     rig,
     streamed,
+    worst_case,
 )
 
 from code_reviewer_runner.dynamic_review.budget import DynamicLimits
@@ -41,10 +42,6 @@ from passthrough_expect import usage_expected
 
 FAMILIES = list(WireFamily)
 DEEP = 30_000
-
-
-def worst_case(body_bytes: int, output_cap: int = 1000) -> Decimal:
-    return PRICES.of_call(body_bytes, output_cap, cache_in_use=True)
 
 
 def spent(ledger: object) -> Decimal:

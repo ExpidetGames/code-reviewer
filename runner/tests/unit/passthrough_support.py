@@ -32,6 +32,7 @@ from fakes.wire.formats import (
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.passthrough.admission import PassthroughTarget
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
+from code_reviewer_runner.dynamic_review.passthrough.price_book import PriceBook
 from code_reviewer_runner.dynamic_review.passthrough.proxy import PassthroughProxy
 from code_reviewer_runner.dynamic_review.passthrough.sink import ClientGone
 from code_reviewer_runner.dynamic_review.passthrough.upstream import (
@@ -47,7 +48,26 @@ PRICES = UnitCosts(
     output_usd_per_mtok=Decimal(15),
     cache_read_usd_per_mtok=Decimal("0.3"),
     cache_write_usd_per_mtok=Decimal("3.75"),
+    cache_write_1h_usd_per_mtok=Decimal(6),
 )
+
+
+def worst_case(body_bytes: int, output_cap: int = 1000, prices: UnitCosts = PRICES) -> Decimal:
+    """The most a call can cost (N8 of the review of PR #569): the bytes of the request as tokens
+    at the dearest input price there is (plain input or either cache write), and the whole output
+    cap at the dearest output price."""
+    dearest = max(
+        price
+        for price in (
+            prices.input_usd_per_mtok,
+            prices.cache_write_usd_per_mtok,
+            prices.cache_write_1h_usd_per_mtok,
+        )
+        if price is not None
+    )
+    return (dearest * body_bytes + prices.output_usd_per_mtok * output_cap) / 1_000_000
+
+
 FAKE: dict[WireFamily, Family] = {
     WireFamily.OPENAI_CHAT: "chat",
     WireFamily.OPENAI_RESPONSES: "responses",
@@ -247,7 +267,7 @@ def rig(
     limit: str = "5.00",
     deadline: float = 600.0,
     limits: DynamicLimits | None = None,
-    prices: UnitCosts = PRICES,
+    prices: UnitCosts | PriceBook = PRICES,
     superseded: Callable[[], bool] = lambda: False,
     on_send: Callable[[], None] | None = None,
     unknown_cost_ends_run: bool = True,
