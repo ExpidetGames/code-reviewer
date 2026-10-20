@@ -91,15 +91,16 @@ A fetch that fails (no answer, a status other than 200, a redirect, too large, n
 is **not applied**. The old rows stay, `models_dev_fetch_state` records `last_status = failed` and `last_error` (one of
 `MODELS_DEV_FETCH_ERROR_CODES`) and a line with the code and the reasons is logged. Implausible (`plan.ts`) means:
 
-| Reason (`GuardReason`) | Code                                 | Trips when                                                                                                                                                                                    |
-| ---------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unlisted_share`       | `models_dev_guard_unlisted_share`    | more than **10 %** of the listed models (or of the listed providers) would be unlisted (`UNLISTED_SHARE_LIMIT`)                                                                               |
-| `growth`               | `models_dev_guard_growth`            | the listed models would grow by more than **50 %** in one fetch (`GROWTH_LIMIT`); the first fetch into an empty database is exempt                                                            |
-| `url_changed_share`    | `models_dev_guard_url_changed_share` | the address of more than **10 %** of the providers, and at least 3, would be newly blocked (`URL_CHANGED_SHARE_LIMIT`, `URL_CHANGED_MIN_COUNT`: one or two moving house must reach the admin) |
-| `provider_size`        | `models_dev_guard_provider_size`     | a provider states more than **2,000** models (`MAX_MODELS_PER_PROVIDER` in `parse.ts`; the largest has 621 today): that provider is not read at all, and the fetch is refused                 |
+| Reason (`GuardReason`)   | Code                                 | Trips when                                                                                                                                                                                                              |
+| ------------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unlisted_share`         | `models_dev_guard_unlisted_share`    | more than **10 %** of the listed models (or of the listed providers) would be unlisted (`UNLISTED_SHARE_LIMIT`)                                                                                                         |
+| `enabled_unlisted_share` | `models_dev_guard_enabled_unlisted`  | at least **3**, and more than **10 %**, of the models an admin **enabled** would be unlisted (`ENABLED_UNLISTED_MIN_COUNT`, #549); they are the ones in use and paid for, so they count even when they are a few of all |
+| `growth`                 | `models_dev_guard_growth`            | the listed models would grow by more than **50 %** in one fetch (`GROWTH_LIMIT`); the first fetch into an empty database is exempt                                                                                      |
+| `url_changed_share`      | `models_dev_guard_url_changed_share` | the address of more than **10 %** of the providers, and at least 3, would be newly blocked (`URL_CHANGED_SHARE_LIMIT`, `URL_CHANGED_MIN_COUNT`: one or two moving house must reach the admin)                           |
+| `provider_size`          | `models_dev_guard_provider_size`     | a provider states more than **2,000** models (`MAX_MODELS_PER_PROVIDER` in `parse.ts`; the largest has 621 today): that provider is not read at all, and the fetch is refused                                           |
 
-There is no "enabled" or "selected" model yet (#549, #554), so the guard looks at everything listed; when those exist the
-guard should count them first. `refresh({ acceptLargeChange: true })` applies a fetch the guard refused (a large removal,
+The guard counts the models an admin enabled for the managed key first (#549, `model_enablements`): the catalog-wide
+share can stay small while the models in use vanish, so `planCatalog` also looks at the enabled ones alone. `refresh({ acceptLargeChange: true })` applies a fetch the guard refused (a large removal,
 growth, a mass change of addresses; a provider that was too large is still left out): for an admin who has looked at it
 (#554). A small catalog is guarded as strictly: the loss of one provider out of six is more than a tenth.
 
