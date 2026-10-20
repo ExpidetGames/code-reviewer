@@ -54,11 +54,12 @@ export type ClaimedKeys = {
   /** The entry models handed out for the job, oldest first (empty if none, unknown or unreadable). */
   modelsOf(jobId: string): Promise<string[]>;
   /**
-   * Remembers that the claim handed the job a native model entry (#578). What the report applies to a native run (a managed
-   * success with no cost is not a success) is decided by this, not by the switch of the moment the report arrives: the
-   * switch may have been turned off while the run was going.
+   * Remembers whether the claim handed the job a native model entry (#578). What the report applies to a native run (a
+   * managed success with no cost is not a success) is decided by this, not by the switch of the moment the report arrives:
+   * the switch may have been turned off while the run was going. Every claim and every Worker fetch writes it, `false`
+   * included: a job claimed again after the switch was turned off is no longer native.
    */
-  rememberNative(jobId: string): Promise<void>;
+  rememberNative(jobId: string, native: boolean): Promise<void>;
   /** Whether the claim handed the job a native model entry (false if unknown or unreadable). */
   wasNative(jobId: string): Promise<boolean>;
 };
@@ -158,8 +159,8 @@ export function createClaimedKeys({
       (await read(createJobClaimedKeysRepository(db, now), jobId)).keys,
     modelsOf: async (jobId) =>
       (await read(createJobClaimedKeysRepository(db, now), jobId)).models,
-    rememberNative: (jobId) =>
-      update(jobId, (known) => ({ ...known, native: true })),
+    rememberNative: (jobId, native) =>
+      update(jobId, (known) => ({ ...known, native })),
     wasNative: async (jobId) =>
       (await read(createJobClaimedKeysRepository(db, now), jobId)).native,
   };

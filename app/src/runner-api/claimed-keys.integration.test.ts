@@ -185,15 +185,29 @@ describe("the native marker remembered for a job (#578)", () => {
     await keys.remember(job.id, "plain-key-one-0001");
     expect(await keys.wasNative(job.id)).toBe(false);
 
-    await keys.rememberNative(job.id);
+    await keys.rememberNative(job.id, true);
     expect(await keys.wasNative(job.id)).toBe(true);
+  });
+
+  // #578-T34
+  it("is cleared when a later claim says the job is not native", async () => {
+    const { job, keys } = await start();
+    await keys.remember(job.id, "plain-key-one-0001");
+    await keys.rememberNative(job.id, true);
+    expect(await keys.wasNative(job.id)).toBe(true);
+
+    await keys.remember(job.id, "plain-key-one-0001");
+    await keys.rememberNative(job.id, false);
+
+    expect(await keys.wasNative(job.id)).toBe(false);
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-one-0001"]);
   });
 
   // #578-T29
   it("keeps the keys and the models apart from it, in whatever order they are noted, and stores it encrypted", async () => {
     const { db, job, keys } = await start();
 
-    await keys.rememberNative(job.id);
+    await keys.rememberNative(job.id, true);
     await keys.remember(job.id, "plain-key-one-0001");
     await keys.rememberModel(job.id, "tier/the-model");
     await keys.remember(job.id, "plain-key-two-0002");
@@ -215,7 +229,7 @@ describe("the native marker remembered for a job (#578)", () => {
   it("is not set for a job of another claim, or a row of the earlier format", async () => {
     const { db, job, keys, clock, enqueueNew } = await start();
     const other = await enqueueNew({ headSha: "b".repeat(40) });
-    await keys.rememberNative(job.id);
+    await keys.rememberNative(job.id, true);
     const sealed = encryptSecret(
       APP_SECRET,
       { table: "job_claimed_keys", rowId: other.id, field: "api_key" },

@@ -1113,8 +1113,7 @@ export async function handleClaim(
           claimed.job.id,
           prepared.entryModel,
         );
-      if (prepared.native)
-        await deps.claimedKeys.rememberNative(claimed.job.id);
+      await deps.claimedKeys.rememberNative(claimed.job.id, prepared.native);
       deps.logger.info(
         `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );

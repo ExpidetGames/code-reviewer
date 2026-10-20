@@ -424,6 +424,51 @@ describe("the managed key (we pay)", () => {
     });
   });
 
+  // #578-T34
+  it("does not read a legacy re-claim as native when the switch was turned off after the first, native claim", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const first = await h.claimed(CLAIM);
+    expect(first.job.input).toMatchObject({ dynamic: { modelEntry: ENTRY } });
+    live.native = false;
+    h.clock.advance(3 * 60 * 1000);
+
+    const again = await h.claimed({ ...CLAIM, runnerId: "runner-b" });
+    expect(again.job.id).toBe(first.job.id);
+    expect(again.job.input).not.toHaveProperty("dynamic.modelEntry");
+    const noCost = { ...goodResult().usage!, costUsd: null };
+    await h.complete(again.job.id, again.job.leaseToken, { usage: noCost });
+
+    expect(await h.queue.get(again.job.id)).toMatchObject({
+      status: "succeeded",
+    });
+  });
+
+  // #578-T34
+  it("does not read a second Worker fetch as native when the switch was turned off after the first, native fetch", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const { jobId, credential } = await h.startedWorker(
+      WORKER_FEATURES,
+      BOTH.join(","),
+      DISPATCHER,
+    );
+    live.native = false;
+    const again = await h.worker.details(
+      jobId,
+      credential,
+      WORKER_FEATURES,
+      undefined,
+      BOTH.join(","),
+    );
+    expect(again.status).toBe(200);
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    await h.worker.result(jobId, credential, { usage: noCost });
+
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "succeeded" });
+  });
+
   // #577-L6
   it("settles a native success with a known cost as before", async () => {
     const h = await start({ keyMode: "managed" });
