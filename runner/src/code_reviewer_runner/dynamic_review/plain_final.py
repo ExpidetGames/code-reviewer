@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from code_reviewer_runner.dynamic_findings import DynamicFindings, EnvelopeError, FindingsError
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.budget import STOPPED_EARLY_COST, BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.final_json import (
     Problem,
     engine_error_name,
@@ -132,6 +132,10 @@ class PlainFinalization:
         # A fresh random token for each message that asks for the answer (the mark is bound to it).
         self._new_token = new_token
         self._announced = False
+        # The announcement of the running turn: its reason once the engine accepted it, and whether
+        # that was after the turn had ended.
+        self._accepted: str | None = None
+        self._turn_over = threading.Event()
         self._watch_error: Exception | None = None
         # What the ledger counted when the running turn started: only an increase is this turn's.
         self._refusals_before = 0
@@ -142,7 +146,9 @@ class PlainFinalization:
         self._turn(None)
         outcome = self._read()
         if outcome is None:
-            # The guard refused a call: the agent phase is over, the answer is still owed.
+            # The guard refused a call: the agent phase is over, the answer is still owed. The run
+            # stopped early now: the adapter acts on the refusal (and on no other).
+            self._ledger.note_wrap_up(self._ledger.refusal_reason or STOPPED_EARLY_COST)
             self._ask(final_message, abort=True)
             outcome = self._read() or self._after_the_final_call()
         if isinstance(outcome, DynamicFindings):
@@ -204,12 +210,15 @@ class PlainFinalization:
     def _turn(self, prompt: str | None) -> None:
         self._refusals_before = self._ledger.refusals
         self._tool_calls_before = self._ledger.tool_calls
+        self._accepted = None
+        self._turn_over.clear()
         stop = threading.Event()
         watch = threading.Thread(target=self._watch, args=(stop,), daemon=True)
         watch.start()
         try:
             self._send(prompt)
         finally:
+            self._turn_over.set()
             stop.set()
             watch.join(timeout=_JOIN_SECONDS)
         if watch.is_alive():
@@ -220,6 +229,12 @@ class PlainFinalization:
             )
         if self._watch_error is not None:
             raise self._watch_error
+        if self._accepted is not None and self._ledger.refusals == self._refusals_before:
+            # The engine took an announcement and nothing followed that the adapter acts on: an
+            # announcement it took after the turn ended would start a turn of its own, with a model
+            # call nobody asked for, after the review is read. Nothing of this turn may be left.
+            self._client.abort(self._session)
+            self._settle()
 
     # -- the answer -----------------------------------------------------------
 
@@ -297,7 +312,12 @@ class PlainFinalization:
             )
         except Exception:  # whatever the transport made of it: not announced
             return
-        if accepted:
+        if not accepted:
+            return
+        self._accepted = reason
+        if not self._turn_over.is_set():
+            # The model could see it: that is why the run stopped early. One the engine took only
+            # after the turn had ended asked nobody (and is aborted at the end of the turn).
             self._ledger.note_wrap_up(reason)
 
 

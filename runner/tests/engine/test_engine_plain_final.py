@@ -11,6 +11,7 @@ seconds, so the cases are few and each is a whole run.
 
 import itertools
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from plain_final_support import (
     user_texts,
 )
 
+from code_reviewer_runner.dynamic_review.adapter import EngineClient
 from code_reviewer_runner.dynamic_review.final_messages import (
     FINISH_NOW_INSTRUCTION,
     final_answer_line,
@@ -388,3 +390,38 @@ def test_a_run_near_its_deadline_is_asked_to_answer_by_a_message_too(tmp_path: P
         assert usage.stopped_early == "time_limit"
         assert run.ledger.failure is None and run.ledger.refusals == 0
         assert final_calls(run) == [False] * len(run.requests)
+
+
+# #552-F3: the engine takes the announcement only after it has ended the turn. On an idle session it
+# would start a turn of its own and make a model call after the review is read. The adapter aborts
+# it, waits for the proxy and does not claim the reason: the run ends with the review it has, and
+# nothing happens after it.
+def test_an_announcement_taken_after_the_turn_ended_starts_no_model_call_after_the_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent = EngineClient.queue_message
+
+    def late(self: EngineClient, session_id: str, *, model: str, text: str, **options: Any) -> bool:
+        time.sleep(1.5)  # the review is read long before the engine hears of the announcement
+        return sent(self, session_id, model=model, text=text, **options)
+
+    monkeypatch.setattr(EngineClient, "queue_message", late)
+
+    def react(scene: Scene, request: dict[str, Any]) -> None:
+        if scene.calls == 3:  # the call that writes the review: from here the clock asks for it
+            assert scene.ledger is not None
+            scene.clock_offset = scene.ledger.limits.deadline_seconds - 180.0
+
+    with native_run(
+        tmp_path,
+        lambda export: [*reads(export, 2), Turn(text=review()), Turn(text=review())],
+        react=react,
+    ) as run:
+        assert run.answer.ok, run.answer.error
+        at_return = (len(run.records), run.ledger.model_calls, run.ledger.unknown_calls)
+        assert at_return[0] == 3 and at_return[1] == 3  # the two reads and the review
+        assert run.proxy.wait_idle(0.0)  # no call of the aborted turn is still being answered
+        time.sleep(2.0)
+        assert (len(run.records), run.ledger.model_calls, run.ledger.unknown_calls) == at_return
+        assert run.ledger.failure is None
+        assert not run.ledger.usage(None).stopped_early  # nobody saw that announcement

@@ -395,11 +395,12 @@ def test_a_call_that_never_ends_after_the_abort_is_an_engine_that_is_not_availab
 def test_a_run_near_its_limit_is_asked_to_answer_by_one_message_and_keeps_the_reason() -> None:
     final, engine = make()
     engine.call("0.01")
-    engine.call("0.0895")  # a further call and a final one would not fit any more
+    engine.call("0.07")  # a further call and a final one would not fit any more
 
     def waits_for_the_message(engine: Engine) -> None:
         assert engine.client.queued_event.wait(5.0)
-        engine.client.last_message = message(review())
+        time.sleep(0.1)  # the engine has it
+        engine.answer(review())  # the next step of the model carries it, and answers
 
     engine.turns = [waits_for_the_message]
 
@@ -408,7 +409,37 @@ def test_a_run_near_its_limit_is_asked_to_answer_by_one_message_and_keeps_the_re
     assert len(findings.findings) == 1
     assert engine.client.queued == [FINISH_NOW_INSTRUCTION]
     assert engine.ledger.usage(None).stopped_early == "cost_limit"
-    assert engine.client.aborted == 0
+    # Nothing is left of the turn when the review is read: aborted and the proxy idle (#552-F3)
+    assert engine.client.aborted == 1
+
+
+# #552-F3: an announcement the engine takes only after the turn has ended would start a turn of its
+# own, with a model call nobody asked for; the adapter aborts it and does not claim the reason
+def test_an_announcement_accepted_after_the_turn_ended_is_aborted_and_is_no_reason() -> None:
+    final, engine = make()
+    log: list[str] = []
+
+    def accepted_late() -> bool:
+        time.sleep(0.3)
+        log.append("accepted")
+        return True
+
+    engine.client.queue_result = accepted_late
+    engine.client.on_abort = lambda: log.append("abort")
+
+    def ends_before_the_engine_took_it(engine: Engine) -> None:
+        engine.call("0.01")
+        engine.call("0.0895")
+        assert engine.client.queued_event.wait(5.0)  # the announcement is on its way ...
+        engine.client.last_message = message(review())  # ... and the turn is over
+
+    engine.turns = [ends_before_the_engine_took_it]
+
+    findings = final.run()
+
+    assert len(findings.findings) == 1
+    assert log == ["accepted", "abort"]  # the late one is cancelled, after it was accepted
+    assert engine.ledger.usage(None).stopped_early is None
 
 
 # #552-T06 and the lead case of #552: the model ignores the message, the ledger refuses the next
@@ -697,6 +728,7 @@ def test_a_valid_review_in_the_last_message_wins_over_a_refusal_of_the_same_turn
 
     assert len(findings.findings) == 1
     assert engine.prompts == [None]
+    assert engine.ledger.usage(None).stopped_early is None  # nobody acted on that refusal (#552-F7)
 
 
 # #552-S5 (PoC 6): an announcement that fails is "not announced", not a failed run

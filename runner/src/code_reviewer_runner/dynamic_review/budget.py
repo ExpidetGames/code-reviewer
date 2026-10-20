@@ -534,6 +534,7 @@ class BudgetLedger:
         self._mark_returns = 0
         self._marks_used = 0
         self._refusals = 0
+        self._refusal_reason: str | None = None
         self._stopped_early: str | None = None
         self._clock = clock
         self._started = clock()
@@ -597,6 +598,15 @@ class BudgetLedger:
         landed between two turns belongs to neither."""
         with self._lock:
             return self._refusals
+
+    @property
+    def refusal_reason(self) -> str | None:
+        """Why the guard last refused a call for the adapter to finalize (`cost_limit` or
+        `time_limit`). The run stopped early only when the adapter acts on a refusal
+        (`note_wrap_up`): a refusal nobody acts on, a stray retry that came after a review, says
+        nothing about how the run ended."""
+        with self._lock:
+            return self._refusal_reason
 
     def wait_idle(self, timeout: float) -> bool:
         """Wait until no reserved call is open; False when `timeout` ran out first (#552). A call
@@ -863,7 +873,7 @@ class BudgetLedger:
                     "the run asked for a call after its final call",
                 )
             if self._above_wire and not marked and self._wrap_up_started():
-                self._stop_early(STOPPED_EARLY_TIME)
+                self._refusal_reason = STOPPED_EARLY_TIME
                 raise RefusedForFinal(
                     ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
                     "the clock reserve for the answer has started",
@@ -916,7 +926,7 @@ class BudgetLedger:
             if final:
                 self._final_granted = True
                 if marked:
-                    # Why the run stopped early, if it did, was recorded when the model was asked.
+                    # Why the run stopped early, if it did, is noted by the adapter when it acts.
                     self._final_armed = False
                 elif recovery:
                     self._recovery_armed = False
@@ -942,15 +952,10 @@ class BudgetLedger:
         """The clock reserve for the answer has started. Call with the lock held."""
         return self.remaining_seconds() <= self._wrap_up_seconds
 
-    def _stop_early(self, reason: str) -> None:
-        """Remember why the run is wrapped up; the first reason wins. Call with the lock held."""
-        if self._stopped_early is None:
-            self._stopped_early = reason
-
     def _cost_refusal(self) -> RefusedForFinal:
         """The error of a call the cost limit cannot hold. Call with the lock held."""
         if self._above_wire:
-            self._stop_early(STOPPED_EARLY_COST)
+            self._refusal_reason = STOPPED_EARLY_COST
         return RefusedForFinal(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
 
     def try_reserve_final_retry(

@@ -98,7 +98,10 @@ def test_a_call_the_cost_limit_cannot_hold_is_a_refusal_to_finalize_not_the_runs
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert budget.failure is None
     assert budget.refusals == 1
-    assert budget.stopped_early == "cost_limit"
+    # The refusal is counted and its reason kept; the run stopped early only when the adapter acts
+    # on it (#552-F7)
+    assert budget.refusal_reason == "cost_limit"
+    assert budget.stopped_early is None
 
 
 # #552-L02, #552-T11: without the mode the refusal ends the run, as it always did
@@ -257,7 +260,8 @@ def test_the_clock_asks_for_the_answer_before_the_reserve_and_refuses_inside_it(
     error = refused(budget)
     assert error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert budget.failure is None
-    assert budget.stopped_early == "time_limit"
+    assert budget.refusal_reason == "time_limit"
+    assert budget.stopped_early is None
     assert budget.arm_final(MESSAGE, TOKEN) is True
 
 
