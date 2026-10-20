@@ -27,6 +27,11 @@ const operatorAppPort = Number(process.env.E2E_OPERATOR_PORT) || appPort + 6;
 // so the catalog starts empty and the admin builds it in the portal. The port after the operator app unless
 // E2E_CATALOG_PORT says otherwise.
 const catalogAppPort = Number(process.env.E2E_CATALOG_PORT) || appPort + 7;
+// The app of the catalog admin journey (e2e/admin/catalog.e2e.ts, #554): a single-tenant instance that fetches the
+// models.dev catalog from the fake (`MODELS_DEV_URL`), so the journey can move a price and fetch again. The port after
+// the catalog app unless E2E_CATALOG_ADMIN_PORT says otherwise.
+const catalogAdminAppPort =
+  Number(process.env.E2E_CATALOG_ADMIN_PORT) || appPort + 8;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -63,6 +68,12 @@ process.env.E2E_CATALOG_LLM_PORT ||= String(
   40000 + Math.floor(Math.random() * 500),
 );
 const catalogLlmFakePort = Number(process.env.E2E_CATALOG_LLM_PORT);
+// The fake models.dev of the catalog admin journey (#554): the app fetches the catalog from it, so the port has to be
+// known when the app starts. A range of its own, between the others: 60600-60999.
+process.env.E2E_MODELS_DEV_PORT ||= String(
+  60600 + Math.floor(Math.random() * 400),
+);
+const modelsDevFakePort = Number(process.env.E2E_MODELS_DEV_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -96,6 +107,13 @@ export const e2eEnv = {
   /** The SQLite file of the catalog app (#435), fresh for every run. */
   catalogDatabasePath: "test-results/e2e-catalog-data/app.db",
   catalogAppUrl: `http://127.0.0.1:${catalogAppPort}`,
+  catalogAdminAppPort,
+  /** The SQLite file of the catalog admin app (#554), fresh for every run. */
+  catalogAdminDatabasePath: "test-results/e2e-catalog-admin-data/app.db",
+  catalogAdminAppUrl: `http://127.0.0.1:${catalogAdminAppPort}`,
+  modelsDevFakePort,
+  /** The fake models.dev of the catalog admin app (`MODELS_DEV_URL`). */
+  modelsDevFakeUrl: `http://127.0.0.1:${modelsDevFakePort}/api.json`,
   catalogLlmFakePort,
   /** The fake LLM of the catalog app: reviews and model metadata (`LLM_API_BASE_URL`). */
   catalogLlmFakeApiUrl: `http://127.0.0.1:${catalogLlmFakePort}/api/v1`,
@@ -129,6 +147,7 @@ export const e2eEnv = {
     multi: "test-results/e2e-multi.log",
     operator: "test-results/e2e-operator.log",
     catalog: "test-results/e2e-catalog.log",
+    catalogAdmin: "test-results/e2e-catalog-admin.log",
   },
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",

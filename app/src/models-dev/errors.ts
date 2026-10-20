@@ -49,6 +49,38 @@ export const GUARD_ERROR_CODES = {
   provider_size: "models_dev_guard_provider_size",
 } as const satisfies Record<string, ModelsDevFetchErrorCode>;
 export type GuardReason = keyof typeof GUARD_ERROR_CODES;
+export type GuardCode = (typeof GUARD_ERROR_CODES)[GuardReason];
+
+/** Every reason, in the fixed order the guard reports them. */
+export const GUARD_REASONS = Object.keys(GUARD_ERROR_CODES) as GuardReason[];
+
+/** The reason a stable guard code stands for; `undefined` for anything else. */
+export function guardReasonOfCode(code: unknown): GuardReason | undefined {
+  return GUARD_REASONS.find((reason) => GUARD_ERROR_CODES[reason] === code);
+}
+
+/**
+ * What the guard measured, for the admin to judge a refused fetch: numbers only, never a name or an address. Models are
+ * the catalog's models, providers the providers of the catalog.
+ */
+export type GuardFigures = {
+  /** Models this fetch would unlist, and the models that were listed before it. */
+  unlisted: number;
+  listed: number;
+  /** Models that would be listed after it (growth is measured against `listed`). */
+  listedAfter: number;
+  /** Providers this fetch would unlist, and the providers that were listed before it. */
+  providersUnlisted: number;
+  providersListed: number;
+  /** Models an admin enabled that it would unlist, and the enabled models that were listed before it. */
+  enabledUnlisted: number;
+  enabledListed: number;
+  /** Providers whose address it would newly block, of the providers it states. */
+  newlyBlocked: number;
+  providers: number;
+  /** Providers it holds with more models than any provider has (left out). */
+  oversizedProviders: number;
+};
 
 /** Thrown by the write when the caller's time is up between two batches; the transaction is rolled back. */
 export class ModelsDevDeadlineError extends Error {

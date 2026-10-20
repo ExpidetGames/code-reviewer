@@ -63,6 +63,18 @@ test.describe("the apps under test", () => {
     expect(page.status()).toBe(307);
   });
 
+  // #554-T10
+  test("the app of the catalog admin journey is set up before it runs", async ({
+    request,
+  }) => {
+    await setUpApp(e2eEnv.catalogAdminAppUrl, e2eEnv.logFiles.catalogAdmin);
+
+    const page = await request.get(e2eEnv.catalogAdminAppUrl, {
+      maxRedirects: 0,
+    });
+    expect(page.status()).toBe(307);
+  });
+
   test("the app of the real review journey is set up before it runs", async ({
     request,
   }) => {
