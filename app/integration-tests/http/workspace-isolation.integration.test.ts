@@ -306,6 +306,17 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    // #555-T08: the models of a catalog provider for the picker of a project; a workspace on the operator's key gets a 404.
+    name: "GET llm-catalog/[provider]/models",
+    route: "/api/w/[workspace]/llm-catalog/[provider]/models",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/llm-catalog/deepseek/models",
+    params: () => ({ provider: "deepseek" }),
+    file: "llm-catalog/[provider]/models/route.ts",
+    takesNoIds: true,
+  },
+  {
     name: "POST plan-handoff",
     route: "/api/w/[workspace]/plan-handoff",
     method: "POST",
