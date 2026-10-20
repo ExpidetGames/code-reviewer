@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import type { StoredModel, StoredProvider } from "../models-dev/catalog.ts";
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
+import { createNativeCostService } from "../native-cost/service.ts";
 import { createNativeCatalogReader } from "./catalog.ts";
 
 const T1 = "2026-10-19T03:00:00.000Z";
@@ -268,21 +269,39 @@ describe.each(MODELS_DEV_ENGINES)(
     });
 
     describe("a model a claim has to serve", () => {
+      function entries(db: Awaited<ReturnType<typeof setup>>["db"]) {
+        return createNativeCostService({
+          prices: {
+            availability: () => Promise.reject(new Error("not asked")),
+            catalogPrice: () => Promise.reject(new Error("not asked")),
+          },
+          settings: { get: () => Promise.resolve(undefined) },
+          catalog: createModelsDevRepository(db),
+          legacyProviders: ["openrouter", "anthropic"],
+          registryAddresses: {},
+        });
+      }
+
       // #555-T09
       it_(
         "is served from the stored row even when models.dev no longer lists it, with a note for the settings",
         async () => {
-          const { reader } = await setup();
+          const { db } = await setup();
+          const native = entries(db);
 
-          expect(await reader.resolve("deepseek", "gone")).toMatchObject({
+          expect(
+            await native.entryFor({ providerId: "deepseek", modelId: "gone" }),
+          ).toMatchObject({
             ok: true,
             unlisted: true,
             entry: { providerId: "deepseek", modelId: "gone" },
           });
-          expect(await reader.resolve("deepseek", "free-model")).toMatchObject({
-            ok: true,
-            unlisted: false,
-          });
+          expect(
+            await native.entryFor({
+              providerId: "deepseek",
+              modelId: "free-model",
+            }),
+          ).toMatchObject({ ok: true, unlisted: false });
         },
       );
 
@@ -290,21 +309,30 @@ describe.each(MODELS_DEV_ENGINES)(
       it_(
         "is refused when the row is missing or the provider is blocked, excluded or unknown: no entry is built",
         async () => {
-          const { reader } = await setup();
+          const { db } = await setup();
+          const native = entries(db);
 
-          expect(await reader.resolve("deepseek", "retired")).toEqual({
-            ok: false,
-            code: "model_unavailable",
-          });
-          for (const [slug, id] of [
-            ["google", "gemini-3.5-flash"],
-            ["amazon_bedrock", "m"],
-            ["nope", "m"],
-          ] as const)
-            expect(await reader.resolve(slug, id)).toEqual({
-              ok: false,
-              code: "provider_unavailable",
-            });
+          expect(
+            await native.entryFor({
+              providerId: "deepseek",
+              modelId: "retired",
+            }),
+          ).toEqual({ ok: false, code: "model_not_in_catalog" });
+          expect(
+            await native.entryFor({
+              providerId: "google",
+              modelId: "gemini-3.5-flash",
+            }),
+          ).toEqual({ ok: false, code: "provider_url_blocked" });
+          expect(
+            await native.entryFor({
+              providerId: "amazon-bedrock",
+              modelId: "m",
+            }),
+          ).toEqual({ ok: false, code: "provider_unsupported" });
+          expect(
+            await native.entryFor({ providerId: "nope", modelId: "m" }),
+          ).toEqual({ ok: false, code: "model_not_in_catalog" });
         },
       );
     });

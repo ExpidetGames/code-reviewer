@@ -8,16 +8,12 @@
 //
 // **Offered** to a choice: a provider of `contracts/opencode-providers.v1.json` (a static key and a bundled SDK) that is not one
 // of the registry's two, whose address is trusted (`url_changed` and refused addresses block it), that models.dev still lists
-// and that has a model to choose. A model is offered while models.dev lists it. **Served** to a claim: the stored row, whether
-// or not models.dev lists it now (decision of 2026-10-19 on #548: a model that disappears keeps working until the provider
-// retires it), as long as the provider is supported and its address trusted.
+// and that has a model to choose. A model is offered while models.dev lists it. What a claim serves is not decided here: the
+// claim builds the entry from the stored row through `native-cost/service.ts` `entryFor` (the last known row, whether or not
+// models.dev lists the model now: decision of 2026-10-19 on #548), as long as the provider is supported and its address trusted.
 import "server-only";
 import type { ModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import type { StoredModel, StoredProvider } from "../models-dev/catalog.ts";
-import {
-  buildJobModelEntry,
-  type JobModelEntry,
-} from "../models-dev/job-entry.ts";
 import { supportedProvider } from "../models-dev/opencode-providers.ts";
 import { isUsable } from "../models-dev/upstream-url.ts";
 import {
@@ -28,15 +24,6 @@ import {
 export const NATIVE_CHOICE_REFUSAL_CODES = ["model_not_in_catalog"] as const;
 export type NativeChoiceRefusalCode =
   (typeof NATIVE_CHOICE_REFUSAL_CODES)[number];
-
-export const NATIVE_SERVE_REFUSAL_CODES = [
-  /** The provider is not supported, its address is not trusted, or the catalog has no such provider. */
-  "provider_unavailable",
-  /** The catalog holds no row for the model (or the row makes no entry the contract allows). */
-  "model_unavailable",
-] as const;
-export type NativeServeRefusalCode =
-  (typeof NATIVE_SERVE_REFUSAL_CODES)[number];
 
 /** A provider of the picker: the slug the key and the selection are stored under, the name people read. */
 export type NativeProviderView = {
@@ -71,16 +58,6 @@ export type NativeChoice =
   | { ok: true; model: NativeModelView }
   | { ok: false; code: NativeChoiceRefusalCode };
 
-export type NativeServed =
-  | {
-      ok: true;
-      /** The per-job entry of #548: what the runner is told about the model. */
-      entry: JobModelEntry;
-      /** models.dev no longer lists the model: the last known row serves, and the settings say so. */
-      unlisted: boolean;
-    }
-  | { ok: false; code: NativeServeRefusalCode };
-
 export type NativeCatalogReader = {
   /** The providers to offer, sorted by name. */
   providers(): Promise<NativeProviderView[]>;
@@ -90,8 +67,6 @@ export type NativeCatalogReader = {
   models(slug: string): Promise<NativeModelView[] | undefined>;
   /** Whether a project may save this provider and model: only a listed model of an offered provider. */
   checkSelection(slug: string, modelId: string): Promise<NativeChoice>;
-  /** The entry of the model a claim serves, or why it cannot be served (the job then fails closed). */
-  resolve(slug: string, modelId: string): Promise<NativeServed>;
 };
 
 export type NativeCatalogDependencies = {
@@ -196,35 +171,6 @@ export function createNativeCatalogReader({
       if (model === undefined || model.unlistedAt !== null)
         return { ok: false, code: "model_not_in_catalog" };
       return { ok: true, model: viewOf(model) };
-    },
-
-    async resolve(slug, modelId) {
-      const providerId = providerIdOf(slug);
-      const provider =
-        providerId === null ? undefined : await models.getProvider(providerId);
-      if (
-        provider === undefined ||
-        supportedProvider(provider.id) === undefined ||
-        !isUsable(provider.url)
-      )
-        return { ok: false, code: "provider_unavailable" };
-      const model = await models.getModel(provider.id, modelId);
-      if (model === undefined) return { ok: false, code: "model_unavailable" };
-      const built = buildJobModelEntry(provider, model);
-      if (!built.ok)
-        return {
-          ok: false,
-          code:
-            built.code === "provider_unsupported" ||
-            built.code === "provider_url_blocked"
-              ? "provider_unavailable"
-              : "model_unavailable",
-        };
-      return {
-        ok: true,
-        entry: built.entry,
-        unlisted: model.unlistedAt !== null,
-      };
     },
   };
 }

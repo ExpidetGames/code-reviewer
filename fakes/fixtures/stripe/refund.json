@@ -1,0 +1,15 @@
+{
+  "id": "re_FakeTemplate",
+  "object": "refund",
+  "amount": 0,
+  "balance_transaction": null,
+  "charge": null,
+  "created": 1700000000,
+  "currency": "usd",
+  "destination_details": null,
+  "metadata": {},
+  "payment_intent": null,
+  "reason": null,
+  "receipt_number": null,
+  "status": "succeeded"
+}

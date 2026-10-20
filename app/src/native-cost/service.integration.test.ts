@@ -11,6 +11,7 @@ import {
   type ModelsDevFake,
 } from "../../../fakes/models-dev/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { GUARD_REASONS } from "../models-dev/errors.ts";
 import { createModelsDevService } from "../models-dev/service.ts";
 import { createModelPriceService } from "../model-prices/service.ts";
@@ -20,9 +21,18 @@ import { createNativeCostService } from "./service.ts";
 const T1 = new Date("2026-10-19T03:00:00.000Z");
 const ADMIN = "admin-1";
 const SONNET = { providerId: "anthropic", modelId: "claude-sonnet-5-5" };
+const OPENROUTER = {
+  providerId: "openrouter",
+  modelId: "mistralai/mistral-saba",
+};
 const DEEPSEEK = { providerId: "deepseek", modelId: "deepseek-v4-pro" };
 // The model-prices tests keep the price rules; here the legacy registry is the only thing the service needs to be told.
 const LEGACY = ["openrouter", "anthropic"] as const;
+// The registry's addresses (#578): the key of these two providers goes nowhere else.
+const REGISTRY_ADDRESSES = {
+  openrouter: "https://openrouter.ai/api/v1",
+  anthropic: "https://api.anthropic.com/v1",
+} as const;
 
 const fakes: ModelsDevFake[] = [];
 afterEach(async () => {
@@ -34,9 +44,10 @@ describe.each(MODELS_DEV_ENGINES)(
   (engine) => {
     const it_ = engine.skip ? it.skip : it;
 
-    async function setup() {
+    async function setup(catalog?: unknown) {
       const fake = await startModelsDevFake();
       fakes.push(fake);
+      if (catalog !== undefined) fake.respondWith(catalog);
       const { db } = await engine.create();
       const modelsDev = createModelsDevService({
         db,
@@ -56,7 +67,9 @@ describe.each(MODELS_DEV_ENGINES)(
       const native = createNativeCostService({
         prices,
         settings,
+        catalog: createModelsDevRepository(db),
         legacyProviders: LEGACY,
+        registryAddresses: REGISTRY_ADDRESSES,
       });
       const confirm = async (ids: typeof SONNET) => {
         await prices.setEnabled(ADMIN, { ...ids, enabled: true });
@@ -304,6 +317,269 @@ describe.each(MODELS_DEV_ENGINES)(
           expect(await t.native.policyFor("own", DEEPSEEK)).toMatchObject({
             policy: { maxTotalTokens: 4_000_000 },
           });
+        },
+      );
+    });
+
+    describe("the model entry", () => {
+      // #578-T03
+      it_(
+        "is the entry of the chosen model, with the address of its provider and no key and no price",
+        async () => {
+          const t = await setup();
+
+          const outcome = await t.native.entryFor(DEEPSEEK);
+
+          expect(outcome).toMatchObject({
+            ok: true,
+            entry: {
+              version: 1,
+              providerId: "deepseek",
+              npm: "@ai-sdk/openai-compatible",
+              family: "openai-chat",
+              authHeader: "Authorization",
+              upstreamBaseUrl: "https://api.deepseek.com",
+              modelId: "deepseek-v4-pro",
+            },
+          });
+          const text = JSON.stringify(outcome);
+          expect(text).not.toContain("cost");
+          expect(text).not.toContain("apiKey");
+        },
+      );
+
+      // #578-T03
+      it_("is the entry of an Anthropic model too", async () => {
+        const t = await setup();
+
+        expect(await t.native.entryFor(SONNET)).toMatchObject({
+          ok: true,
+          entry: {
+            providerId: "anthropic",
+            npm: "@ai-sdk/anthropic",
+            family: "anthropic-messages",
+            authHeader: "x-api-key",
+            modelId: "claude-sonnet-5-5",
+          },
+        });
+      });
+
+      // #578-T28
+      it_(
+        "is refused for a registry provider whose address, trusted on first sight, is not the registry's, before any key",
+        async () => {
+          const first = modelsDevFixture() as Record<string, { api?: string }>;
+          first.openrouter!.api =
+            "https://openrouter-proxy.evilcorp.net/api/v1";
+          const t = await setup(first);
+
+          const outcome = await t.native.entryFor(OPENROUTER);
+
+          expect(outcome).toEqual({ ok: false, code: "upstream_not_registry" });
+          expect(JSON.stringify(outcome)).not.toContain("evilcorp");
+        },
+      );
+
+      // #578-T28
+      it_(
+        "is refused for a registry provider whose changed address an admin confirmed, and the catalog alone would serve it",
+        async () => {
+          const t = await setup();
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.anthropic!.api = "https://anthropic-proxy.evilcorp.net/v1";
+          t.fake.respondWith(moved);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          expect(await t.native.entryFor(SONNET)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+
+          const catalog = createModelsDevRepository(t.db);
+          await catalog.confirmPendingUrl(
+            "anthropic",
+            "https://anthropic-proxy.evilcorp.net/v1",
+          );
+
+          expect(await t.native.entryFor(SONNET)).toEqual({
+            ok: false,
+            code: "upstream_not_registry",
+          });
+        },
+      );
+
+      // #578-T28
+      it_(
+        "is the entry of the registry's address for both registry providers",
+        async () => {
+          const t = await setup();
+
+          expect(await t.native.entryFor(SONNET)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.anthropic.com/v1" },
+          });
+          expect(await t.native.entryFor(OPENROUTER)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://openrouter.ai/api/v1" },
+          });
+        },
+      );
+
+      // #578-T28
+      it_(
+        "keeps the rules of the catalog for a provider the registry has no address for",
+        async () => {
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.deepseek!.api = "https://api.deepseek-other.example/v1";
+          const t = await setup(moved);
+
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.deepseek-other.example/v1" },
+          });
+        },
+      );
+
+      // #555-T13
+      it_(
+        "is refused for a provider whose address the catalog never trusted: nothing the workspace could make the key go to",
+        async () => {
+          const first = modelsDevFixture() as Record<string, { api?: string }>;
+          first.deepseek!.api = "https://10.0.0.5/v1";
+          const t = await setup(first);
+
+          const outcome = await t.native.entryFor(DEEPSEEK);
+
+          expect(outcome).toEqual({ ok: false, code: "provider_url_blocked" });
+          expect(JSON.stringify(outcome)).not.toContain("10.0.0.5");
+        },
+      );
+
+      // #555-T13
+      it_(
+        "is refused for a provider whose address changed to another one and waits for an admin, and served once an admin confirmed it",
+        async () => {
+          const t = await setup();
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.deepseek!.api = "https://api.attacker.example/v1";
+          t.fake.respondWith(moved);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+          expect(await t.native.entryFor(DEEPSEEK)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+
+          await createModelsDevRepository(t.db).confirmPendingUrl(
+            "deepseek",
+            "https://api.attacker.example/v1",
+          );
+
+          // The admin's decision is the catalog's trust: the entry names exactly that address.
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.attacker.example/v1" },
+          });
+        },
+      );
+
+      // #555-T13
+      it_.each([
+        "https://API.deepseek.com",
+        "https://api.deepseek.com/",
+        "https://api.deepseek.com:443",
+        "https://api.deepseek.com//v1",
+        "https://api.deepseek.com/v1/../v2",
+        "https://10.0.0.5/v1",
+        "https://localhost/v1",
+        "https://models.internal/v1",
+      ])(
+        "is refused for a provider whose stored trusted address %s is not a plain public https address in its canonical spelling",
+        async (address) => {
+          const t = await setup();
+          const catalog = createModelsDevRepository(t.db);
+          const [stored] = (await catalog.listProviders()).filter(
+            (provider) => provider.id === "deepseek",
+          );
+          await catalog.apply({
+            providers: [
+              { ...stored!, url: { ...stored!.url, trustedUrl: address } },
+            ],
+            models: [],
+          });
+
+          const outcome = await t.native.entryFor(DEEPSEEK);
+
+          expect(outcome).toEqual({ ok: false, code: "upstream_invalid" });
+          expect(JSON.stringify(outcome)).not.toContain("10.0.0.5");
+        },
+      );
+
+      // #555-T09
+      it_("says whether the model is still listed by the catalog", async () => {
+        const t = await setup();
+        expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+          ok: true,
+          unlisted: false,
+        });
+        const body = modelsDevFixture() as Record<
+          string,
+          { models: Record<string, unknown> }
+        >;
+        delete body.deepseek!.models["deepseek-v4-pro"];
+        t.fake.respondWith(body);
+        await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+        expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+          ok: true,
+          unlisted: true,
+        });
+      });
+
+      // #578-T04
+      it_("is refused for a model the catalog does not have", async () => {
+        const t = await setup();
+
+        expect(
+          await t.native.entryFor({
+            providerId: "deepseek",
+            modelId: "deepseek-v9",
+          }),
+        ).toEqual({ ok: false, code: "model_not_in_catalog" });
+        expect(
+          await t.native.entryFor({ providerId: "nobody", modelId: "x" }),
+        ).toEqual({ ok: false, code: "model_not_in_catalog" });
+      });
+
+      // #578-T05
+      it_(
+        "is refused while the provider's address changed and waits for an admin",
+        async () => {
+          const t = await setup();
+          const moved = modelsDevFixture() as Record<string, { api?: string }>;
+          moved.deepseek!.api = "https://api.deepseek-proxy.example/v1";
+          t.fake.respondWith(moved);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+          expect(await t.native.entryFor(DEEPSEEK)).toEqual({
+            ok: false,
+            code: "provider_url_blocked",
+          });
+        },
+      );
+
+      // #578-T03
+      it_(
+        "is still served for a model models.dev no longer lists: the last known entry is the entry",
+        async () => {
+          const t = await setup();
+          const body = modelsDevFixture() as Record<
+            string,
+            { models: Record<string, unknown> }
+          >;
+          delete body.deepseek!.models["deepseek-v4-pro"];
+          t.fake.respondWith(body);
+          await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({ ok: true });
         },
       );
     });

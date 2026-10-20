@@ -6,18 +6,22 @@
 // models and prices, none of which reaches a member.
 import "server-only";
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
-import type { ModelPriceService } from "../model-prices/service.ts";
+import type { ModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import {
-  catalogRefOf,
-  nativeProviderIdOf,
-  type CatalogRef,
-} from "./catalog-ref.ts";
+  buildJobModelEntry,
+  type JobEntryRefusalCode,
+  type JobModelEntry,
+} from "../models-dev/job-entry.ts";
+import type { ModelPriceService } from "../model-prices/service.ts";
+import { isCanonicalCatalogAddress } from "./catalog-address.ts";
+import { catalogRefOf, type CatalogRef } from "./catalog-ref.ts";
 import {
   managedPolicy,
   ownPolicy,
   type CostPolicyJson,
   type ManagedPolicyOutcome,
 } from "./policy.ts";
+import { sameAddress, UPSTREAM_NOT_REGISTRY } from "./registry-addresses.ts";
 import { ownKeyTokenCapOf } from "./token-cap.ts";
 
 export type PolicyOutcome =
@@ -29,11 +33,32 @@ export type PolicyOutcome =
     }
   | Extract<ManagedPolicyOutcome, { ok: false }>;
 
+/** The refusal of an entry for a provider outside the registry whose trusted address is not a plain public https address in its canonical spelling. */
+export const UPSTREAM_INVALID = "upstream_invalid";
+
+/**
+ * The entry of the chosen model for the claim (#578), or why there is none. `model_not_in_catalog`: the catalog has no such
+ * provider or model; `upstream_not_registry`: the provider is one of the app's registry and the catalog's trusted address is not
+ * the registry's (the key goes only to the registry's address); `upstream_invalid` (#555): any other provider, whose stored trusted
+ * address is not a plain public https address in the one spelling the runner accepts (`catalog-address.ts`); `check_failed`: the
+ * database could not be read (the job is given back, as for a failed price check). `unlisted`: models.dev no longer lists the
+ * model and the last known row serves (#548).
+ */
+export type EntryOutcome =
+  | { ok: true; entry: JobModelEntry; unlisted?: boolean }
+  | {
+      ok: false;
+      code:
+        | JobEntryRefusalCode
+        | "model_not_in_catalog"
+        | typeof UPSTREAM_NOT_REGISTRY
+        | typeof UPSTREAM_INVALID
+        | "check_failed";
+    };
+
 export type NativeCostService = {
   /** The catalog model a selection names, or null when the job does not take the native path (catalog-ref.ts). */
   refOf(selection: { provider: string; model: string }): CatalogRef | null;
-  /** Whether a provider slug (as a usage record remembers it) is a native one: the job it served was native. */
-  isNativeProvider(slug: string): boolean;
   /**
    * The cost policy of a job on this key. `managed`: only a model that is enabled and has a confirmed price passes; the
    * refusal carries a stable code (`catalog_price_unconfirmed`, `catalog_model_unavailable`) and an internal reason, both
@@ -44,18 +69,25 @@ export type NativeCostService = {
     keyMode: "managed" | "own",
     ref: CatalogRef,
   ): Promise<PolicyOutcome>;
+  /**
+   * The entry the claim tells the runner about the model (`dynamic.modelEntry`, #578): the last known row of the catalog, so a
+   * model models.dev no longer lists is still served. No key, no price. Never throws.
+   */
+  entryFor(ref: CatalogRef): Promise<EntryOutcome>;
 };
 
 export function createNativeCostService(deps: {
   prices: Pick<ModelPriceService, "availability" | "catalogPrice">;
   settings: Pick<InstanceSettingsRepository, "get">;
+  /** The stored providers and models the entry is made from. */
+  catalog: Pick<ModelsDevRepository, "getProvider" | "getModel">;
   /** The providers of the app's registry, which keep the legacy path until #556. */
   legacyProviders: readonly string[];
+  /** The API addresses of those providers by catalog provider id; the entry of such a provider names no other (#578). */
+  registryAddresses: Readonly<Record<string, string>>;
 }): NativeCostService {
   return {
     refOf: (selection) => catalogRefOf(selection, deps.legacyProviders),
-    isNativeProvider: (slug) =>
-      nativeProviderIdOf(slug, deps.legacyProviders) !== null,
 
     async policyFor(keyMode, ref) {
       if (keyMode === "managed")
@@ -71,6 +103,35 @@ export function createNativeCostService(deps: {
         policy: ownPolicy(book, ownKeyTokenCapOf(stored)),
         confirmation: null,
       };
+    },
+
+    async entryFor(ref) {
+      try {
+        const [provider, model] = await Promise.all([
+          deps.catalog.getProvider(ref.providerId),
+          deps.catalog.getModel(ref.providerId, ref.modelId),
+        ]);
+        if (provider === undefined || model === undefined)
+          return { ok: false, code: "model_not_in_catalog" };
+        const built = buildJobModelEntry(provider, model);
+        if (!built.ok) return built;
+        const pinned = deps.registryAddresses[ref.providerId];
+        // The key of a registry provider goes to the registry's address; the key of any other provider to the address the catalog
+        // trusts for it, in the one spelling the runner accepts (#555). Nothing a workspace typed is ever an address.
+        if (pinned !== undefined) {
+          if (!sameAddress(built.entry.upstreamBaseUrl, pinned))
+            return { ok: false, code: UPSTREAM_NOT_REGISTRY };
+        } else if (!isCanonicalCatalogAddress(built.entry.upstreamBaseUrl))
+          return { ok: false, code: UPSTREAM_INVALID };
+        return {
+          ok: true,
+          entry: built.entry,
+          unlisted: model.unlistedAt !== null,
+        };
+      } catch {
+        // No error text: it could carry whatever the failing layer held.
+        return { ok: false, code: "check_failed" };
+      }
     },
   };
 }

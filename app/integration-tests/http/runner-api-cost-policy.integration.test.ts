@@ -20,7 +20,12 @@ import { createUsageRecordsRepository } from "../../src/db/repositories/usage-re
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import type { ManagedAvailabilityJson } from "../../src/model-prices/availability.ts";
 import type { PriceBookJson } from "../../src/model-prices/price-book.ts";
-import { createNativeCostService } from "../../src/native-cost/service.ts";
+import type { ModelCapabilityChecker } from "../../src/llm/model-capabilities.ts";
+import type { JobModelEntry } from "../../src/models-dev/job-entry.ts";
+import {
+  createNativeCostService,
+  type EntryOutcome,
+} from "../../src/native-cost/service.ts";
 import {
   goodResult,
   startRunnerApiHarness,
@@ -49,6 +54,26 @@ const BOOK: PriceBookJson = {
   outputAudio: null,
   contextOver200k: null,
   tiers: [],
+};
+// What the catalog tells a job about its model (#578); the harness's native provider is not a provider of the catalog, so
+// the service that would read the entry is replaced by this one.
+const ENTRY: JobModelEntry = {
+  version: 1,
+  providerId: "deepseek",
+  npm: "@ai-sdk/openai-compatible",
+  family: "openai-chat",
+  authHeader: "Authorization",
+  upstreamBaseUrl: "https://api.deepseek.com",
+  modelId: NATIVE_MODEL,
+  model: {
+    name: "Thorough",
+    status: "active",
+    tool_call: true,
+    reasoning: false,
+    temperature: true,
+    limit: { context: 128000, output: 8192 },
+    modalities: { input: ["text"], output: ["text"] },
+  },
 };
 const CLAIM = {
   engines: ["opencode"],
@@ -105,6 +130,8 @@ const CONFIRMED: ManagedAvailabilityJson = {
 
 type Started = RunnerApiHarness & {
   asked: { availability: number; catalogPrice: number };
+  /** How often the entry of the model was asked for. */
+  entries: { count: number };
   keyLoads: { count: number };
 };
 
@@ -115,18 +142,29 @@ async function start(options: {
   catalogPrice?: PriceBookJson | null;
   /** The provider the project selects; the fake one is the native one. */
   provider?: string;
+  /** What the catalog says about the entry of the model (#578). Default: the entry of `ENTRY`. */
+  entry?: EntryOutcome;
+  /** A reader of the provider's model metadata, to see whether a claim asks it (#578). */
+  capabilities?: ModelCapabilityChecker;
+  /** The switch of the native path as the server reads it, now: a test turns it off after the claim (#578). */
+  live?: { native: boolean };
 }): Promise<Started> {
+  const live = options.live ?? { native: true };
   const script = scriptedPrices(
     options.availability ?? CONFIRMED,
     options.catalogPrice === undefined ? BOOK : options.catalogPrice,
   );
   const keyLoads = { count: 0 };
+  const entries = { count: 0 };
   let settingsDb: ReturnType<typeof createInstanceSettingsRepository> | null =
     null;
   const h = await startRunnerApiHarness({
     llmKey: WORKSPACE_KEY,
     projects: true,
     providers: PROVIDERS,
+    ...(options.capabilities === undefined
+      ? {}
+      : { modelCapabilities: options.capabilities }),
     env: { LLM_MODEL: "vendor/instance-model", LLM_MAX_TOKENS: "64000" },
     nativeCost: {
       ...createNativeCostService({
@@ -138,14 +176,23 @@ async function start(options: {
               ? Promise.resolve(undefined)
               : settingsDb.get(key),
         },
+        // The entry is replaced below: the harness's provider is not one of the catalog.
+        catalog: {
+          getProvider: async () => undefined,
+          getModel: async () => undefined,
+        },
         legacyProviders: [openrouterDescriptor.id],
+        registryAddresses: {},
       }),
+      entryFor: async () => {
+        entries.count += 1;
+        return options.entry ?? { ok: true, entry: ENTRY };
+      },
       // The harness's second provider is the native one: the real map names no provider outside the legacy registry.
       refOf: (selection) =>
-        selection.provider === FAKE_PROVIDER_ID
+        live.native && selection.provider === FAKE_PROVIDER_ID
           ? { providerId: "deepseek", modelId: selection.model }
           : null,
-      isNativeProvider: (slug) => slug === FAKE_PROVIDER_ID,
     },
     loadLlm: undefined,
   });
@@ -181,7 +228,7 @@ async function start(options: {
     ...(options.dynamic === false ? {} : { reviewKind: "dynamic" as const }),
   });
   await h.enqueueNew();
-  return Object.assign(h, { asked: script.asked, keyLoads });
+  return Object.assign(h, { asked: script.asked, entries, keyLoads });
 }
 
 async function recordOf(h: RunnerApiHarness, jobId: string) {
@@ -340,6 +387,88 @@ describe("the managed key (we pay)", () => {
     expect(await again.json()).toMatchObject({ alreadyCompleted: true });
   });
 
+  // #578-T30
+  it("still holds a native run to its cost when the switch is turned off between the claim and the report", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const { job } = await h.claimed(CLAIM);
+    live.native = false;
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    await h.complete(job.id, job.leaseToken, { usage: noCost });
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_accounting_failed",
+    });
+  });
+
+  // #578-T33
+  it("still holds a native run to its cost when the switch is turned off between the Worker's fetch and its report", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const { jobId, credential, details } = await h.startedWorker(
+      WORKER_FEATURES,
+      BOTH.join(","),
+      DISPATCHER,
+    );
+    expect(details.job.input).toMatchObject({ dynamic: { modelEntry: ENTRY } });
+    live.native = false;
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    await h.worker.result(jobId, credential, { usage: noCost });
+
+    expect(await h.queue.get(jobId)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_accounting_failed",
+    });
+  });
+
+  // #578-T34
+  it("does not read a legacy re-claim as native when the switch was turned off after the first, native claim", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const first = await h.claimed(CLAIM);
+    expect(first.job.input).toMatchObject({ dynamic: { modelEntry: ENTRY } });
+    live.native = false;
+    h.clock.advance(3 * 60 * 1000);
+
+    const again = await h.claimed({ ...CLAIM, runnerId: "runner-b" });
+    expect(again.job.id).toBe(first.job.id);
+    expect(again.job.input).not.toHaveProperty("dynamic.modelEntry");
+    const noCost = { ...goodResult().usage!, costUsd: null };
+    await h.complete(again.job.id, again.job.leaseToken, { usage: noCost });
+
+    expect(await h.queue.get(again.job.id)).toMatchObject({
+      status: "succeeded",
+    });
+  });
+
+  // #578-T34
+  it("does not read a second Worker fetch as native when the switch was turned off after the first, native fetch", async () => {
+    const live = { native: true };
+    const h = await start({ keyMode: "managed", live });
+    const { jobId, credential } = await h.startedWorker(
+      WORKER_FEATURES,
+      BOTH.join(","),
+      DISPATCHER,
+    );
+    live.native = false;
+    const again = await h.worker.details(
+      jobId,
+      credential,
+      WORKER_FEATURES,
+      undefined,
+      BOTH.join(","),
+    );
+    expect(again.status).toBe(200);
+    const noCost = { ...goodResult().usage!, costUsd: null };
+
+    await h.worker.result(jobId, credential, { usage: noCost });
+
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "succeeded" });
+  });
+
   // #577-L6
   it("settles a native success with a known cost as before", async () => {
     const h = await start({ keyMode: "managed" });
@@ -445,18 +574,22 @@ describe("a job that is not native", () => {
       const { job } = await h.claimed(CLAIM);
 
       expect(JSON.stringify(job.input)).not.toContain('"cost"');
+      expect(JSON.stringify(job.input)).not.toContain('"modelEntry"');
       expect(h.asked).toEqual({ availability: 0, catalogPrice: 0 });
+      expect(h.entries.count).toBe(0);
     },
   );
 
-  // #553-T12
+  // #553-T12, #578-T06
   it("is unchanged for a Diff job, whatever it selects", async () => {
     const h = await start({ keyMode: "own", dynamic: false });
 
     const { job } = await h.claimed({ llmProviders: BOTH });
 
     expect(JSON.stringify(job.input)).not.toContain('"cost"');
+    expect(JSON.stringify(job.input)).not.toContain('"modelEntry"');
     expect(h.asked).toEqual({ availability: 0, catalogPrice: 0 });
+    expect(h.entries.count).toBe(0);
   });
 
   // #553-T12
@@ -473,5 +606,226 @@ describe("a job that is not native", () => {
     });
 
     expect(JSON.stringify(job.input)).not.toContain('"cost"');
+  });
+});
+
+describe("the model entry of a native job (#578)", () => {
+  const counted = () => {
+    const reads = { count: 0 };
+    const checker: ModelCapabilityChecker = {
+      check: async () => {
+        reads.count += 1;
+        return { outcome: "unverifiable" };
+      },
+    };
+    return { reads, checker };
+  };
+
+  // #578-T03
+  it("travels with the confirmed book of the managed key, on the claim and on the Worker's fetch", async () => {
+    const claimed = await start({ keyMode: "managed" });
+    const { job } = await claimed.claimed(CLAIM);
+    const fetched = await start({ keyMode: "managed" });
+
+    const { details } = await fetched.startedWorker(
+      WORKER_FEATURES,
+      BOTH.join(","),
+      DISPATCHER,
+    );
+
+    for (const input of [job.input, details.job.input])
+      expect(input).toMatchObject({
+        dynamic: {
+          cost: { keyMode: "managed", priceBook: BOOK },
+          modelEntry: ENTRY,
+        },
+      });
+  });
+
+  // #578-T04
+  it("travels with the policy of the own key too", async () => {
+    const h = await start({ keyMode: "own" });
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({
+      dynamic: { cost: { keyMode: "own" }, modelEntry: ENTRY },
+    });
+  });
+
+  // #578-T03
+  it("holds no key, no price and no other model", async () => {
+    const h = await start({ keyMode: "managed" });
+
+    const { job } = await h.claimed(CLAIM);
+
+    const dynamic = (job.input as { dynamic: { modelEntry: object } }).dynamic;
+    const text = JSON.stringify(dynamic.modelEntry);
+    for (const hidden of [
+      FAKE_OPERATOR_KEY,
+      WORKSPACE_KEY,
+      FAKE_WORKSPACE_KEY,
+      "660000",
+    ])
+      expect(text).not.toContain(hidden);
+    expect(Object.keys(dynamic.modelEntry).sort()).toEqual(
+      [
+        "authHeader",
+        "family",
+        "model",
+        "modelId",
+        "npm",
+        "providerId",
+        "upstreamBaseUrl",
+        "version",
+      ].sort(),
+    );
+  });
+
+  // #578-T05
+  it("ends a managed job before any key or token exists when the catalog cannot describe the model", async () => {
+    const h = await start({
+      keyMode: "managed",
+      entry: { ok: false, code: "provider_url_blocked" },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "managed_model_unavailable",
+    });
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(
+      await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+    ).toEqual([]);
+    expect(await recordOf(h, job!.id)).toMatchObject({ state: "void" });
+    const written = h.logLines().join("\n");
+    expect(written).toContain("reason=entry_provider_url_blocked");
+    for (const hidden of [NATIVE_MODEL, FAKE_PROVIDER_ID, "deepseek", "660000"])
+      expect(written).not.toContain(hidden);
+  });
+
+  // #578-T28
+  it("ends a job, before any key or token exists, when the address of a registry provider is not the registry's", async () => {
+    for (const keyMode of ["managed", "own"] as const) {
+      const h = await start({
+        keyMode,
+        entry: { ok: false, code: "upstream_not_registry" },
+      });
+      const [job] = await h.snapshotJobs();
+
+      const response = await h.claim(CLAIM);
+
+      expect(response.status).toBe(204);
+      expect(await h.queue.get(job!.id)).toMatchObject({
+        status: "failed",
+        errorCode:
+          keyMode === "managed"
+            ? "managed_model_unavailable"
+            : "dynamic_model_features_unsupported",
+      });
+      expect(h.issuedJobTokens()).toEqual([]);
+      expect(h.keyLoads.count).toBe(0);
+      expect(h.logLines().join("\n")).toContain(
+        "reason=entry_upstream_not_registry",
+      );
+    }
+  });
+
+  // #578-T04
+  it("ends an own-key job as a model Dynamic Review cannot use when the catalog does not have it", async () => {
+    const h = await start({
+      keyMode: "own",
+      entry: { ok: false, code: "model_not_in_catalog" },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_model_features_unsupported",
+    });
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(h.keyLoads.count).toBe(0);
+  });
+
+  // #578-T05
+  it("gives the job back, and does not end it, when the catalog could not be read", async () => {
+    const h = await start({
+      keyMode: "managed",
+      entry: { ok: false, code: "check_failed" },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(503);
+    expect(await h.queue.get(job!.id)).toMatchObject({ status: "queued" });
+    expect(h.issuedJobTokens()).toEqual([]);
+  });
+
+  // #578-T05
+  it("is not asked for when the price already refused the managed model", async () => {
+    const h = await start({
+      keyMode: "managed",
+      availability: {
+        selectable: false,
+        reason: "price_unconfirmed",
+        code: "catalog_price_unconfirmed",
+      },
+    });
+
+    await h.claim(CLAIM);
+
+    expect(h.entries.count).toBe(0);
+  });
+
+  // #578-T08
+  it("never goes to a runner that did not say it enforces a cost policy, so the entry does not either", async () => {
+    const h = await start({ keyMode: "own" });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim({
+      engines: ["opencode"],
+      features: ["dynamic_capabilities"],
+      llmProviders: BOTH,
+    });
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_engine_unavailable",
+    });
+    expect(h.issuedJobTokens()).toEqual([]);
+  });
+
+  // #578-T03
+  it("does not read the legacy capability metadata of the provider: the entry states the window and the flags", async () => {
+    const native = counted();
+    const h = await start({ keyMode: "own", capabilities: native.checker });
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(native.reads.count).toBe(0);
+    expect(JSON.stringify(job.input)).not.toContain('"capabilities"');
+  });
+
+  // #578-T01
+  it("leaves the legacy read of the metadata alone for a job of today", async () => {
+    const legacy = counted();
+    const h = await start({
+      keyMode: "own",
+      provider: openrouterDescriptor.id,
+      capabilities: legacy.checker,
+    });
+
+    await h.claimed(CLAIM);
+
+    expect(legacy.reads.count).toBeGreaterThan(0);
   });
 });

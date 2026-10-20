@@ -15,6 +15,7 @@ import type {
   StoredProvider,
 } from "../../src/models-dev/catalog.ts";
 import type { PriceBookJson } from "../../src/model-prices/price-book.ts";
+import { registryAddressesOf } from "../../src/native-cost/registry-addresses.ts";
 import { createNativeCostService } from "../../src/native-cost/service.ts";
 import { createNativeCatalogReader } from "../../src/native-providers/catalog.ts";
 import {
@@ -140,7 +141,12 @@ async function start(
             ? Promise.resolve(undefined)
             : createInstanceSettingsRepository(dbRef).get(key),
       },
+      catalog: {
+        getProvider: (id, o) => lazyRepository().getProvider(id, o),
+        getModel: (p, m) => lazyRepository().getModel(p, m),
+      },
       legacyProviders: LEGACY,
+      registryAddresses: registryAddressesOf(llmProviderDescriptors.providers),
     }),
     nativeCatalog: reader,
   });
@@ -187,6 +193,12 @@ describe("the claim of a catalog model on the workspace's own key", () => {
       },
       dynamic: {
         cost: { keyMode: "own", priceBook: BOOK, maxTotalTokens: 4_000_000 },
+        // The destination of the key is the address the catalog trusts for the provider, in the claim's entry (#555-T13).
+        modelEntry: {
+          providerId: "deepseek",
+          modelId: "deepseek-v4-pro",
+          upstreamBaseUrl: "https://api.deepseek.example",
+        },
       },
     });
     const sent = JSON.stringify(job.input);
@@ -290,6 +302,124 @@ describe("the claim of a catalog model on the workspace's own key", () => {
       errorCode: "llm_provider_unsupported",
     });
   });
+
+  // #555-T13
+  it("fails closed with llm_provider_unsupported for a provider whose address changed to an attacker's and was not confirmed: no key is loaded", async () => {
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: async (repository) => {
+        const [stored] = (await repository.listProviders()).filter(
+          (p) => p.id === "deepseek",
+        );
+        await repository.apply({
+          providers: [
+            {
+              ...stored!,
+              url: {
+                ...stored!.url,
+                state: "url_changed",
+                pendingUrl: "https://attacker.example/v1",
+              },
+            },
+          ],
+          models: [],
+        });
+      },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "llm_provider_unsupported",
+    });
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(
+      await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+    ).toEqual([]);
+    const written = h.logLines().join("\n");
+    expect(written).toContain("entry_provider_url_blocked");
+    expect(written).not.toContain("attacker");
+    expect(written).not.toContain(DEEPSEEK_KEY);
+  });
+
+  // #555-T13
+  it("fails closed with llm_provider_unsupported for a provider whose first address was refused, and never reveals the key", async () => {
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: async (repository) => {
+        const [stored] = (await repository.listProviders()).filter(
+          (p) => p.id === "deepseek",
+        );
+        await repository.apply({
+          providers: [
+            {
+              ...stored!,
+              url: {
+                state: "rejected",
+                trustedUrl: null,
+                pendingUrl: "https://10.0.0.5/v1",
+                problem: "private_address",
+              },
+            },
+          ],
+          models: [],
+        });
+      },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "llm_provider_unsupported",
+    });
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(h.logLines().join("\n")).not.toContain("10.0.0.5");
+  });
+
+  // #555-T13
+  it.each([
+    "https://API.deepseek.example",
+    "https://api.deepseek.example/",
+    "https://10.0.0.5/v1",
+    "https://api.deepseek.example:8443",
+  ])(
+    "fails closed with llm_provider_unsupported when the stored trusted address %s is not a plain public https address in its canonical spelling",
+    async (address) => {
+      const h = await start({
+        keyOf: "deepseek",
+        afterSave: async (repository) => {
+          const [stored] = (await repository.listProviders()).filter(
+            (p) => p.id === "deepseek",
+          );
+          await repository.apply({
+            providers: [
+              { ...stored!, url: { ...stored!.url, trustedUrl: address } },
+            ],
+            models: [],
+          });
+        },
+      });
+      const [job] = await h.snapshotJobs();
+
+      const response = await h.claim(CLAIM);
+
+      expect(response.status).toBe(204);
+      expect(await h.queue.get(job!.id)).toMatchObject({
+        status: "failed",
+        errorCode: "llm_provider_unsupported",
+      });
+      expect(h.issuedJobTokens()).toEqual([]);
+      expect(
+        await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+      ).toEqual([]);
+    },
+  );
 
   // #555-T09
   it("serves a model models.dev no longer lists, from the last known row: the settings warn, the run goes on", async () => {

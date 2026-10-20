@@ -169,25 +169,34 @@ reason=<catalog_price_unconfirmed|catalog_model_unavailable>:<reason>`), with no
    that named `dynamic_cost_policy` (else the job ends `dynamic_engine_unavailable`). A job that is not native is unchanged and
    the price service is not asked.
 
+   **The model entry of a native job (#578).** After the policy, the same decision step asks `nativeCost.entryFor` for the entry of
+   the model (the last known catalog row, no key, no price) and sends it as `dynamic.modelEntry` with the policy. An entry that
+   cannot be built ends the job like an unavailable model (`managed_model_unavailable` on the operator's key, with
+   `reason=entry_<code>` in the log; `dynamic_model_features_unsupported` on an own key of a registry provider), before any key or
+   token exists; a failed read gives the job back. The two registry providers keep their API address whatever the catalog trusts: an
+   entry whose address is not the registry's is refused with `reason=entry_upstream_not_registry`
+   (`src/native-cost/registry-addresses.ts`). A native job does not read the provider's model metadata. Whether a registry provider
+   is native at all is the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off; `src/native-cost/README.md`).
+
    **A catalog model on the workspace's own key (#555).** A Dynamic job on the workspace's own key may name a provider of the
    models.dev catalog and one of its models (`contracts/opencode-providers.v1.json`; the project settings save only a pair the
    catalog lists, `MODEL_NOT_IN_CATALOG` otherwise). The sequence, all before any key, token or VM exists:
-   1. `resolveModelSelection` accepts the provider only when `ClaimDeps.nativeCatalog` **and** `ClaimDeps.nativeCost` are both
-      wired (`SelectionDeps.nativeModels`) and marks the selection as a catalog model. Left out, a project that names a catalog
-      provider ends `llm_provider_unsupported` (log reason `native_catalog_missing`): the running server leaves
-      `nativeCatalog` out until the wiring of the passthrough proxy switches it on (#578).
-   2. `nativeEntryOf` resolves the stored provider/model row from the catalog (`NativeCatalogReader.resolve`) into the per-job
-      entry of #548 (`Checked.modelEntry`; the job input does not carry it yet, the wiring reads it). **A model that models.dev
-      stopped listing keeps being served** from its last known row (decision of 2026-10-19 on #548; the claim logs it and the
-      settings page warns), because a provider's retirement is not the catalog's housekeeping. **A row that is gone** ends the job
-      `llm_model_unavailable`, and a provider that cannot carry a key any more (blocked by `url_changed`, no longer supported)
-      ends it `llm_provider_unsupported`. The log names the kind and the stable reason (`model_unavailable`, `provider_unavailable`,
-      ...), never a provider or a model. There is no move to another model, provider or key.
-   3. The cost policy of #553 follows (an own key is never refused for a price; an unknown price gets the token cap).
+   1. `resolveModelSelection` accepts the provider only when `ClaimDeps.nativeCost` is wired (`SelectionDeps.nativeModels`) and
+      marks the selection as a catalog model (`catalog: true`).
+   2. `costOf` builds the per-job entry of #548 with `nativeCost.entryFor` (`Checked.modelEntry`, sent as `dynamic.modelEntry`). **A
+      model that models.dev stopped listing keeps being served** from its last known row (decision of 2026-10-19 on #548; the claim
+      logs it and the settings page warns), because a provider's retirement is not the catalog's housekeeping. For a catalog
+      selection the refusals have their own codes: **a row that is gone** ends the job `llm_model_unavailable`, and **a provider that
+      cannot carry a key** (blocked by `url_changed` or `rejected`, no longer supported, an address that is not the trusted one in its
+      canonical form) ends it `llm_provider_unsupported`. The log names the kind and the stable reason (`entry_model_not_in_catalog`,
+      `entry_provider_url_blocked`, ...), never a provider or a model. There is no move to another model, provider or key.
+   3. The cost policy of #553 is judged first (an own key is never refused for a price; an unknown price gets the token cap).
    4. `keyFor` reveals **only the chosen provider's key** (`llm_api_key.<slug>`). A workspace that has a key for another provider but
       not for this one ends `llm_not_configured`; the key of provider B is never used for provider A.
       The Runs copy for `llm_model_unavailable` says the model is no longer offered and asks the workspace to pick another one
       (`runs/error-copy.ts`).
+   5. **Where the key goes.** For a provider outside the registry the destination is exactly the catalog's trusted address
+      (`src/native-cost/README.md`, "Where the key goes"); the workspace types none.
 
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;

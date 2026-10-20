@@ -128,11 +128,10 @@ export async function startRunnerApiHarness(
     /** #553: the cost policy of a native job (`ClaimDeps.nativeCost`). Left out, no job is native, as on the running server today. */
     nativeCost?: ClaimDeps["nativeCost"];
     /**
-     * #555: the catalog of providers and models a project may pick for Dynamic Review and a claim serves (`ClaimDeps.nativeCatalog`).
-     * Left out, no job is a catalog job, as on the running server until the switch of the wiring.
+     * #555: the catalog of providers and models a project may pick for Dynamic Review (the save of the settings). The claim
+     * serves the model from `nativeCost.entryFor`, never from this reader.
      */
-    nativeCatalog?: ClaimDeps["nativeCatalog"] &
-      Pick<NativeCatalogReader, "checkSelection">;
+    nativeCatalog?: Pick<NativeCatalogReader, "checkSelection">;
     /**
      * #432: the providers of the app, for a test that brings a second one (`createFakeAdapter`). The key services, the
      * claim and the selection all use it. Default: the registry of the app.
@@ -419,17 +418,6 @@ export async function startRunnerApiHarness(
           ).get(job.id),
         catalog,
       }),
-      isNative: async (job) => {
-        const record = await createUsageRecordsRepository(
-          fixture.db,
-          job.workspaceId,
-          fixture.clock.now,
-        ).get(job.id);
-        return (
-          record?.llmProvider != null &&
-          options.nativeCost?.isNativeProvider(record.llmProvider) === true
-        );
-      },
       entitlementsFor: (workspaceId) =>
         readEffectiveEntitlements(fixture.db, workspaceId, fixture.clock.now),
       recordKeyMode: (job, keyMode) =>
@@ -444,9 +432,6 @@ export async function startRunnerApiHarness(
       ...(options.nativeCost === undefined
         ? {}
         : { nativeCost: options.nativeCost }),
-      ...(options.nativeCatalog === undefined
-        ? {}
-        : { nativeCatalog: options.nativeCatalog }),
       claimedKeys,
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
