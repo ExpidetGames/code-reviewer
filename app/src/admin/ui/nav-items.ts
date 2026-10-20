@@ -50,6 +50,8 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/mail", label: "Mail", exact: false },
       // The operator's own LLM key (#276).
       { href: "/admin/llm", label: "LLM keys", exact: false },
+      // The models.dev catalog: what is new, what is enabled, what each costs us (#554).
+      { href: "/admin/catalog", label: "Catalog", exact: false },
     ],
   },
 ];

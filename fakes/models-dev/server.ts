@@ -4,9 +4,17 @@
 // fixture of `fakes/fixtures/models-dev/` (a real copy, see its README) or whatever a test scripts instead: another body,
 // a status, text that is no JSON, an oversized body, a slow answer, a connection that never answers. It counts the
 // requests, so a test can prove that a switched-off fetch makes none. The app finds it through `MODELS_DEV_URL`.
+// A journey that runs the fake as a process of its own (`main.ts`, #554) scripts it over HTTP: `GET /__fake/health`,
+// `GET /__fake/fixture` (the trimmed fixture, to change and send back) and `POST /__fake/respond` (a JSON body: what
+// `/api.json` answers from now on).
 // Dummy values only; state is in memory.
 import { readFileSync } from "node:fs";
-import { createServer, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
@@ -53,6 +61,14 @@ export type ModelsDevFake = {
   stop(): Promise<void>;
 };
 
+function readBody(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
+}
+
 function send(response: ServerResponse, script: Script): void {
   switch (script.kind) {
     case "json":
@@ -92,7 +108,10 @@ function send(response: ServerResponse, script: Script): void {
   }
 }
 
-export async function startModelsDevFake(): Promise<ModelsDevFake> {
+/** The address of the fake: a port of the OS's choosing, or `port` when the app under test has to know it when it starts. */
+export async function startModelsDevFake(
+  options: { port?: number } = {},
+): Promise<ModelsDevFake> {
   let script: Script = { kind: "json", body: modelsDevFixture() };
   let requests = 0;
   const open = new Set<ServerResponse>();
@@ -100,14 +119,39 @@ export async function startModelsDevFake(): Promise<ModelsDevFake> {
     requests += 1;
     open.add(response);
     response.on("close", () => open.delete(response));
-    if (request.url?.split("?")[0] !== "/api.json") {
+    const path = request.url?.split("?")[0];
+    if (path === "/__fake/health" && request.method === "GET") {
+      response.writeHead(200);
+      response.end("ok");
+      return;
+    }
+    if (path === "/__fake/fixture" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(modelsDevFixture()));
+      return;
+    }
+    if (path === "/__fake/respond" && request.method === "POST") {
+      void readBody(request).then((text) => {
+        try {
+          script = { kind: "json", body: JSON.parse(text) as unknown };
+          response.writeHead(204);
+        } catch {
+          response.writeHead(400);
+        }
+        response.end();
+      });
+      return;
+    }
+    if (path !== "/api.json") {
       response.writeHead(404);
       response.end();
       return;
     }
     send(response, script);
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) =>
+    server.listen(options.port ?? 0, "127.0.0.1", resolve),
+  );
   const { port } = server.address() as AddressInfo;
 
   return {

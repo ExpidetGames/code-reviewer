@@ -13,6 +13,8 @@ const ALLOWED = [
   "model-prices/",
   "app/api/instance-portal/catalog-models/",
   "app/(app)/instance-portal/",
+  // The screens of the admin portal that show the catalog (#554).
+  "admin/catalog-models/",
   "db/",
   "models-dev/",
   "test-support/",

@@ -4,6 +4,7 @@
 // return, the trust on first use of each provider's address, and the guard against a fetch that would unlist too much.
 import { describe, expect, it } from "vitest";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
+import type { GuardFigures } from "./errors.ts";
 import type {
   ParsedModelsDev,
   ReducedModel,
@@ -85,6 +86,20 @@ function applied(
   return { providers: [...providers.values()], models: [...models.values()] };
 }
 const EMPTY: Stored = { providers: [], models: [] };
+/** The figures of a guard for one provider that is listed and not blocked, with what a test changes. */
+const figures = (changes: Partial<GuardFigures> = {}): GuardFigures => ({
+  unlisted: 0,
+  listed: 0,
+  listedAfter: 0,
+  providersUnlisted: 0,
+  providersListed: 1,
+  enabledUnlisted: 0,
+  enabledListed: 0,
+  newlyBlocked: 0,
+  providers: 1,
+  oversizedProviders: 0,
+  ...changes,
+});
 const ids = (models: StoredModel[]) => models.map((m) => m.id).sort();
 
 describe("planning what a fetch writes", () => {
@@ -314,8 +329,7 @@ describe("the fetch guard", () => {
     expect(plan.guard).toEqual({
       tripped: false,
       reasons: [],
-      unlisted: 2,
-      listed: 20,
+      ...figures({ unlisted: 2, listed: 20, listedAfter: 18 }),
     });
   });
 
@@ -331,8 +345,7 @@ describe("the fetch guard", () => {
     expect(plan.guard).toEqual({
       tripped: true,
       reasons: ["unlisted_share"],
-      unlisted: 3,
-      listed: 20,
+      ...figures({ unlisted: 3, listed: 20, listedAfter: 17 }),
     });
   });
 
@@ -377,8 +390,7 @@ describe("the fetch guard", () => {
     expect(first.guard).toEqual({
       tripped: false,
       reasons: [],
-      unlisted: 0,
-      listed: 0,
+      ...figures({ listedAfter: 20, providersListed: 0 }),
     });
 
     const gone = applied(
@@ -399,8 +411,86 @@ describe("the fetch guard", () => {
     expect(again.guard).toEqual({
       tripped: false,
       reasons: [],
-      unlisted: 0,
-      listed: 18,
+      ...figures({ listed: 18, listedAfter: 18 }),
+    });
+  });
+});
+
+describe("the figures of the guard", () => {
+  const twenty = Array.from({ length: 20 }, (_unused, i) =>
+    reducedModel(`m${String(i)}`),
+  );
+  const stored = applied(
+    EMPTY,
+    planCatalog({
+      parsed: parsed(twenty),
+      stored: EMPTY,
+      urlChecks: okUrl(),
+      now: T1,
+    }).write,
+  );
+
+  // #554-T08
+  it("names every reason that trips, in a fixed order, with the figures the admin needs to judge them", () => {
+    const filler = Array.from({ length: 20 }, (_unused, i) =>
+      reducedModel(`new${String(i)}`),
+    );
+    const plan = planCatalog({
+      parsed: parsed([...twenty.slice(3), ...filler]),
+      stored,
+      urlChecks: okUrl(),
+      now: T2,
+    });
+
+    expect(plan.guard).toEqual({
+      tripped: true,
+      reasons: ["unlisted_share", "growth"],
+      ...figures({ unlisted: 3, listed: 20, listedAfter: 37 }),
+    });
+  });
+
+  // #554-T08
+  it("counts the blocked addresses and the providers left out for their size", () => {
+    const providers = Array.from({ length: 10 }, (_unused, i) =>
+      reducedProvider(`p${String(i)}`),
+    );
+    const checks = new Map(
+      providers.map((p): [string, UrlCheck] => [
+        p.id,
+        { ok: true, url: URL_A },
+      ]),
+    );
+    const first = applied(
+      EMPTY,
+      planCatalog({
+        parsed: parsed([], providers),
+        stored: EMPTY,
+        urlChecks: checks,
+        now: T1,
+      }).write,
+    );
+    const moved = new Map(checks);
+    for (const id of ["p0", "p1", "p2", "p3"])
+      moved.set(id, { ok: true, url: "https://api.moved.example/v1" });
+    const base = parsed([], providers);
+
+    const plan = planCatalog({
+      parsed: {
+        ...base,
+        skipped: { ...base.skipped, oversizedProviders: 1 },
+      },
+      stored: first,
+      urlChecks: moved,
+      now: T2,
+    });
+
+    expect(plan.guard.reasons).toEqual(["url_changed_share", "provider_size"]);
+    expect(plan.guard).toMatchObject({
+      newlyBlocked: 4,
+      providers: 10,
+      oversizedProviders: 1,
+      providersListed: 10,
+      providersUnlisted: 0,
     });
   });
 });
@@ -443,8 +533,13 @@ describe("the fetch guard and the models an admin enabled", () => {
     expect(result.guard).toEqual({
       tripped: true,
       reasons: ["enabled_unlisted_share"],
-      unlisted: 3,
-      listed: 100,
+      ...figures({
+        unlisted: 3,
+        listed: 100,
+        listedAfter: 97,
+        enabledUnlisted: 3,
+        enabledListed: 10,
+      }),
     });
   });
 
