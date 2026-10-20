@@ -79,7 +79,6 @@ describe("the routes of the portal", () => {
       "/api/admin/catalog-models/enablement/reset",
       "/api/admin/catalog-models/price/confirm",
       "/api/admin/catalog-models/price/correct",
-      "/api/admin/catalog-providers",
       "/api/admin/catalog-providers/url/confirm",
       "/api/admin/github",
       "/api/admin/github/check",

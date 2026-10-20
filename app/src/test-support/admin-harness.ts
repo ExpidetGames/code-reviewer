@@ -543,11 +543,6 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           return await modelPriceRoutes.correctPrice(request);
       }
       if (
-        pathname === "/api/instance-portal/catalog-providers" &&
-        request.method === "GET"
-      )
-        return await modelsDevRoutes.providers(request);
-      if (
         pathname === "/api/instance-portal/catalog-providers/url/confirm" &&
         request.method === "POST"
       )

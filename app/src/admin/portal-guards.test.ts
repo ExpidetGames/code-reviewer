@@ -141,7 +141,6 @@ describe("the guards of the admin portal", () => {
 
     expect(catalog.map(({ route }) => route).sort()).toEqual([
       "/api/instance-portal/catalog-fetch",
-      "/api/instance-portal/catalog-providers",
       "/api/instance-portal/catalog-providers/url/confirm",
     ]);
     for (const { route, file } of catalog) {

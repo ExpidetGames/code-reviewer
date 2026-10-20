@@ -43,7 +43,7 @@ import type { UrlProblem, UrlState } from "./upstream-url.ts";
 export const FETCH_NOW_DEADLINE_MS = 45_000;
 export const FETCH_NOW_MAX = 6;
 export const FETCH_NOW_WINDOW_MS = 10 * 60 * 1000;
-const FETCH_NOW_KEY = "models-dev-fetch-now";
+export const FETCH_NOW_KEY = "models-dev-fetch-now";
 /** The guard has five reasons; a longer list cannot be a valid one. */
 const MAX_ACCEPTED_REASONS = 5;
 /** How long a confirmation waits for the fetch's lock on Postgres before it gives up with `fetch_in_progress`. */
@@ -192,27 +192,21 @@ export function createModelsDevAdminService(
     id: string,
     repository = catalog,
   ): Promise<ProviderView | undefined> {
-    const [provider, models] = await Promise.all([
+    const [provider, counts] = await Promise.all([
       repository.getProvider(id),
-      repository.listModels(),
+      repository.listedModelCounts(id),
     ]);
     if (provider === undefined) return undefined;
-    return viewOf(
-      provider,
-      models.filter((m) => m.providerId === id && m.unlistedAt === null).length,
-    );
+    return viewOf(provider, counts.get(id) ?? 0);
   }
 
   return {
     async providers() {
-      const [providers, models] = await Promise.all([
+      // The numbers are counted by the database: the catalog has thousands of models and this screen needs none of them.
+      const [providers, count] = await Promise.all([
         catalog.listProviders(),
-        catalog.listModels(),
+        catalog.listedModelCounts(),
       ]);
-      const count = new Map<string, number>();
-      for (const model of models)
-        if (model.unlistedAt === null)
-          count.set(model.providerId, (count.get(model.providerId) ?? 0) + 1);
       return {
         providers: providers.map((p) => viewOf(p, count.get(p.id) ?? 0)),
         fetchEnabled: settings().enabled,
@@ -241,7 +235,10 @@ export function createModelsDevAdminService(
           > => {
             await setLockTimeout(trx, lockTimeoutMs);
             const repository = createModelsDevRepository(trx);
-            // The lock the fetch holds while it writes: wait for a fetch, then judge what it wrote.
+            // Belt and braces: the guarded update below (`confirmPendingUrl`) is atomic on its own and cannot write over what
+            // the fetch wrote. This read `FOR UPDATE` only makes the confirmation wait for a fetch that is writing (at most
+            // `lockTimeoutMs`, then `fetch_in_progress` with nothing written) and judge the row after it, instead of
+            // judging a row that is being rewritten.
             const provider = await repository.getProvider(providerId, {
               forUpdate: true,
             });
@@ -296,6 +293,9 @@ export function createModelsDevAdminService(
         deadlineMs: FETCH_NOW_DEADLINE_MS,
         ...(accepted.length > 0 ? { acceptReasons: accepted } : {}),
       });
+      // Nothing was fetched: another run holds the lock, so this try did not use up one of the few a window allows.
+      if (outcome.status === "skipped" && outcome.reason === "already_running")
+        await deps.rateLimits.refund(FETCH_NOW_KEY);
       const result: FetchNowResult =
         outcome.status === "applied"
           ? { ok: true, outcome: "applied", summary: outcome.summary }

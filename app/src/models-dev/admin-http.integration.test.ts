@@ -59,7 +59,6 @@ async function start() {
 }
 
 const ROUTES = [
-  { method: "GET", path: "/catalog-providers", body: undefined },
   {
     method: "POST",
     path: "/catalog-providers/url/confirm",
@@ -163,43 +162,6 @@ describe("who may use the catalog routes", () => {
       expect(portal.modelsDevLog).toEqual([]);
     },
   );
-});
-
-describe("the providers", () => {
-  // #554-T06
-  it("lists every provider with the old and the new address and the problem of a refused one, and is never cached", async () => {
-    const portal = await start();
-
-    const response = await call(portal, "GET", "/catalog-providers");
-    const body = (await response.json()) as {
-      providers: Array<{ id: string; url: Record<string, unknown> }>;
-      fetchEnabled: boolean;
-    };
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(body.fetchEnabled).toBe(true);
-    expect(body.providers.map((p) => [p.id, p.url])).toEqual([
-      [
-        "deepseek",
-        {
-          state: "url_changed",
-          trustedUrl: "https://api.deepseek.com",
-          pendingUrl: MOVED,
-          problem: null,
-        },
-      ],
-      [
-        "xai",
-        {
-          state: "url_changed",
-          trustedUrl: "https://api.x.ai/v1",
-          pendingUrl: "http://169.254.169.254/latest",
-          problem: "not_https",
-        },
-      ],
-    ]);
-  });
 });
 
 describe("confirming a changed address through the route", () => {

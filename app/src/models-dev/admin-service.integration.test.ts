@@ -15,7 +15,9 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { MODELS_DEV_ENGINES } from "../test-support/models-dev-engines.ts";
 import {
   FETCH_NOW_DEADLINE_MS,
+  FETCH_NOW_KEY,
   FETCH_NOW_MAX,
+  FETCH_NOW_WINDOW_MS,
   createModelsDevAdminService,
 } from "./admin-service.ts";
 import type { StoredModel, StoredProvider } from "./catalog.ts";
@@ -443,6 +445,33 @@ describe.each(MODELS_DEV_ENGINES)(
       await t.fake.stop();
       await first;
     });
+
+    // #554-T08
+    it_(
+      "gives the rate-limit token back for a fetch that was refused because another one is running",
+      async () => {
+        const t = await setup();
+        t.fake.hang();
+        const first = t.models.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        // More tries than the limit allows, all while the daily fetch runs: none of them is a fetch.
+        for (let i = 0; i < FETCH_NOW_MAX + 2; i += 1)
+          expect(await t.admin.fetchNow(ACTOR, {})).toEqual({
+            ok: false,
+            code: "fetch_in_progress",
+          });
+        await t.fake.stop();
+        await first;
+
+        // Every token is back: the next try is the first of the window.
+        const next = await createRateLimitsRepository(t.db).hit(
+          FETCH_NOW_KEY,
+          FETCH_NOW_WINDOW_MS,
+        );
+        expect(next.count).toBe(1);
+      },
+    );
 
     // #554-T08
     it_("limits how often an admin can fetch now", async () => {

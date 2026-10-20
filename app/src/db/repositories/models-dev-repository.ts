@@ -63,6 +63,11 @@ export type ModelsDevRepository = {
   /** Every model, listed or not. */
   listModels(): Promise<StoredModel[]>;
   /**
+   * How many listed models each provider has, counted by the database (`group by`) and not by loading the catalog: for a
+   * screen that needs the numbers only. A provider with none is not in the map. `providerId` limits it to that provider.
+   */
+  listedModelCounts(providerId?: string): Promise<Map<string, number>>;
+  /**
    * One provider. `forUpdate` locks the row until the transaction ends on Postgres, as for `listProviders`: a write to a
    * model of the provider that must not run beside a fetch (an admin's price confirmation, #549) takes this lock first, so
    * that it waits for a fetch that is writing and then reads what the fetch wrote. On SQLite every transaction begins
@@ -284,6 +289,19 @@ export function createModelsDevRepository(
         .orderBy("model_id")
         .execute();
       return rows.map(modelOf);
+    },
+
+    async listedModelCounts(providerId) {
+      let query = db
+        .selectFrom("models_dev_models")
+        .select(["provider_id", (builder) => builder.fn.countAll().as("n")])
+        .where("unlisted_at", "is", null)
+        .groupBy("provider_id")
+        .orderBy("provider_id");
+      if (providerId !== undefined)
+        query = query.where("provider_id", "=", providerId);
+      const rows = await query.execute();
+      return new Map(rows.map((row) => [row.provider_id, Number(row.n)]));
     },
 
     async getProvider(id, options) {

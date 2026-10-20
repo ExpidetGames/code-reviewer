@@ -4,7 +4,6 @@
 // passed in so the route files only wire the real ones and tests wire fakes. Paths as the admin sees them (the proxy
 // rewrites `/api/admin/...` to the files below `/api/instance-portal/...`):
 //
-//   GET  /api/admin/catalog-providers              every provider of the catalog with the state of its address
 //   POST /api/admin/catalog-providers/url/confirm  { providerId, pendingUrl }: trust the address the admin saw
 //   POST /api/admin/catalog-fetch                  {} or { acceptReasons: [guard code, ...] }: fetch the catalog now
 //
@@ -36,7 +35,6 @@ export type ModelsDevRouteDependencies = {
 };
 
 export type ModelsDevRouteHandlers = {
-  providers(request: Request): Promise<Response>;
   confirmUrl(request: Request): Promise<Response>;
   fetchNow(request: Request): Promise<Response>;
 };
@@ -96,14 +94,6 @@ export function createModelsDevRouteHandlers({
   }
 
   return {
-    async providers() {
-      const who = await admin();
-      if (who instanceof Response) return who;
-      const list = await guarded(() => service.providers());
-      if (list instanceof Response) return list;
-      return Response.json(list, { headers: NO_STORE });
-    },
-
     confirmUrl: (request) =>
       change(request, async (who, body) => {
         const result = await service.confirmUrl(who.id, body);

@@ -137,7 +137,6 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/catalog-models/enablement/reset",
   "/api/instance-portal/catalog-models/price/confirm",
   "/api/instance-portal/catalog-models/price/correct",
-  "/api/instance-portal/catalog-providers",
   "/api/instance-portal/catalog-providers/url/confirm",
   "/api/instance-portal/model-catalog",
   "/api/instance-portal/model-catalog/[id]",

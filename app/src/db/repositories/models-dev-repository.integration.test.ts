@@ -240,6 +240,37 @@ describe.each(MODELS_DEV_ENGINES)(
 
       expect(await repository.listModels()).toHaveLength(450);
     });
+    // #554-T01
+    it_(
+      "counts the listed models of each provider in the database, without loading the catalog, and of one provider on request",
+      async () => {
+        const { repository } = await setup();
+        await repository.apply({
+          providers: [
+            provider(),
+            provider({ id: "openai", name: "OpenAI" }),
+            provider({ id: "empty", name: "Empty" }),
+          ],
+          models: [
+            model({ id: "a" }),
+            model({ id: "b" }),
+            model({ id: "gone", unlistedAt: T2.toISOString() }),
+            model({ providerId: "openai", id: "c" }),
+          ],
+        });
+
+        const all = await repository.listedModelCounts();
+        const one = await repository.listedModelCounts("openai");
+
+        expect([...all]).toEqual([
+          ["deepseek", 2],
+          ["openai", 1],
+        ]);
+        expect([...one]).toEqual([["openai", 1]]);
+        expect([...(await repository.listedModelCounts("empty"))]).toEqual([]);
+      },
+    );
+
     // #548-T04
     it_(
       "records the start of an attempt first: a new row is a failure that was interrupted, an old one keeps how it ended",
