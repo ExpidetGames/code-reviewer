@@ -27,6 +27,15 @@ The order is deliberate and mirrors the epic's:
    stopped and its private scratch directory removed. No fallback, no partial success.
 
 `steps`, SSE events and the engine's own counters are observation only; nothing here trusts them.
+
+**The native path (#552).** With `plain_final` the engine runs without a `format`: no
+`StructuredOutput` tool, no forced tool choice, and nothing rewritten on the wire. The review is the
+text of the message that ends the turn, read, repaired once and wrapped up above the wire
+(`plain_final.py`), and the tool, file and result-byte bounds are audited here from the engine's own
+event stream (`tool_part_audit.py`, `engine_events.py`) because the passthrough proxy counts none of
+them. `engine_config` is the trusted configuration of such a job
+(`config.build_native_engine_config`); the legacy path, the default, is unchanged until #556
+removes it.
 """
 
 import contextlib
@@ -64,11 +73,15 @@ from code_reviewer_runner.dynamic_review.config import (
     build_engine_config,
     engine_environment,
 )
+from code_reviewer_runner.dynamic_review.engine_events import EventReader, EventStream
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
+from code_reviewer_runner.dynamic_review.final_messages import final_answer_line
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.plain_final import NoFinalAnswer, PlainFinalization
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.dynamic_review.schema import engine_schema
+from code_reviewer_runner.dynamic_review.tool_part_audit import ToolPartAudit
 from code_reviewer_runner.dynamic_review.wrap_up import recovery_prompt
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -97,6 +110,9 @@ SESSION_TIMEOUT_SECONDS = 30.0
 WATCH_INTERVAL_SECONDS = 0.05
 # A failed message call this close before the whole-job deadline is counted as the deadline.
 DEADLINE_TOLERANCE_SECONDS = 0.25
+# How long the engine's event stream may take to say it is connected (the audit of the native path
+# runs on it, so no turn starts before it does).
+EVENTS_CONNECT_SECONDS = 10.0
 # The agent the runner defines and selects; the request may never name another.
 REVIEW_AGENT = "review"
 # The largest startup/answer body the adapter will read before the ledger refuses it.
@@ -304,20 +320,22 @@ class EngineClient:
         *,
         model: str,
         parts: list[dict[str, str]],
-        schema: Any,
+        schema: Any | None,
         timeout: float = MAX_TURN_TIMEOUT_SECONDS,
     ) -> None:
-        """Send one structured turn to the runner-defined review agent.
+        """Send one turn to the runner-defined review agent: structured when there is a `schema`,
+        a plain one (the native path, #552) when there is none.
 
         The call returns when the turn is done, so `timeout` is the time the turn may take (the run
         gives it what is left of the whole job, plus a margin).
         """
-        body = {
+        body: dict[str, Any] = {
             "agent": REVIEW_AGENT,
             "model": {"providerID": PROXY_PROVIDER_ID, "modelID": model},
-            "format": {"type": "json_schema", "schema": schema},
             "parts": parts,
         }
+        if schema is not None:
+            body["format"] = {"type": "json_schema", "schema": schema}
         try:
             status, answer = self._call(
                 "POST", f"/session/{session_id}/message", body, timeout=timeout
@@ -336,6 +354,40 @@ class EngineClient:
             self._call("POST", f"/session/{session_id}/abort", timeout=SHORT_TIMEOUT_SECONDS)
         except EngineError:
             return  # the process group is ended anyway
+
+    def queue_message(self, session_id: str, *, model: str, text: str) -> bool:
+        """Add a user message to the turn that is running (`prompt_async`, 204): the engine reads
+        it before its next step. Nothing else about the turn changes (#552, spike #547). True when
+        the engine accepted it."""
+        body = {
+            "agent": REVIEW_AGENT,
+            "model": {"providerID": PROXY_PROVIDER_ID, "modelID": model},
+            "parts": [{"type": "text", "text": text}],
+        }
+        status, _ = self._call(
+            "POST", f"/session/{session_id}/prompt_async", body, timeout=SESSION_TIMEOUT_SECONDS
+        )
+        return status == 204
+
+    def open_events(self) -> EventStream:
+        """The engine's event stream (`GET /event`), scoped to the export like every request. The
+        socket timeout is the longest a turn can take: the stream is quiet while a model thinks."""
+        request = Request(
+            f"{self.base_url}/event",
+            headers={"x-opencode-directory": self.directory, "accept": "text/event-stream"},
+        )
+        try:
+            response = no_redirect_opener(direct=True).open(
+                request, timeout=MAX_TURN_TIMEOUT_SECONDS
+            )
+        except (HTTPError, URLError, OSError):
+            raise _unreachable() from None
+        if response.status != 200:
+            response.close()
+            raise EngineError(
+                ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine refused its event stream"
+            )
+        return response
 
 
 # What a finish reason or an error name of the engine's answer may look like to be named in a log:
@@ -536,6 +588,9 @@ class DynamicEngine:
         port_source: Callable[[], int] = lambda: _free_port(),
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         superseded: Callable[[], bool] = lambda: False,
+        plain_final: bool = False,
+        engine_config: Mapping[str, Any] | None = None,
+        provider_error: Callable[[], ErrorCode | None] = lambda: None,
     ) -> None:
         if job.dynamic is None or job.base is None:
             raise EngineError(
@@ -563,6 +618,18 @@ class DynamicEngine:
         # True once the host told the process that a newer push replaced this run: the watch ends
         # the turn at once instead of waiting for the proxy to see the next request.
         self._superseded = superseded
+        # The native path (#552): the review is the text of the last message, read and wrapped up
+        # above the wire. The ledger is told so from the start: from then on a call it refuses for
+        # the cost or the clock is the signal to ask for the answer, and not the run's failure.
+        self._plain_final = plain_final
+        if plain_final:
+            ledger.enable_final_above_wire()
+        # The trusted configuration of a native job; None: the legacy proxy provider (`start`).
+        self._engine_config = engine_config
+        # The stable code the proxy kept for a provider that failed (`PassthroughProxy`), named
+        # when the engine gives up; the engine's own error text is never shown.
+        self._provider_error = provider_error
+        self._events_connect_seconds = EVENTS_CONNECT_SECONDS
         # Set by the supervisor: the engine then runs as the dedicated user with its own network
         # rules, and its home, temporary files and config live where `export_isolation` prepared
         # them (removed with the job's lifetime). Without it (the unprivileged engine suite and
@@ -591,11 +658,15 @@ class DynamicEngine:
         """Write the trusted config, start the engine and wait for it to become healthy."""
         dynamic = self.job.dynamic
         assert dynamic is not None  # narrowed in __init__
-        config = build_engine_config(
-            proxy_url=self.proxy_url,
-            model=dynamic.model,
-            system_prompt=self.agent_prompt,
-            proxy_capability=self._proxy_capability,
+        config = (
+            dict(self._engine_config)
+            if self._engine_config is not None
+            else build_engine_config(
+                proxy_url=self.proxy_url,
+                model=dynamic.model,
+                system_prompt=self.agent_prompt,
+                proxy_capability=self._proxy_capability,
+            )
         )
         if self.launch is not None:
             # The dedicated user's own directories exist and are its own; the config is its file.
@@ -789,9 +860,55 @@ class DynamicEngine:
         fails with how the last model calls ended, like a missing answer does.
         """
         try:
+            if self._plain_final:
+                return self._plain_turns(client, session_id)
             return self._turns(client, session_id)
         except FindingsError as error:
             raise self._with_call_outcomes(error) from None
+
+    def _plain_turns(self, client: EngineClient, session_id: str) -> EngineAnswer:
+        """The native path (#552): the audit of the engine's tool parts runs on its event stream
+        beside the turns, and the turns are `PlainFinalization`'s."""
+        dynamic = self.job.dynamic
+        assert dynamic is not None  # narrowed in __init__
+        audit = ToolPartAudit(self.ledger, session_id, export_root=self.directory)
+        events = EventReader(client.open_events, audit, self.ledger)
+        events.start(self._events_connect_seconds)
+        try:
+            final = PlainFinalization(
+                client=client,
+                session_id=session_id,
+                ledger=self.ledger,
+                send=lambda prompt: self._send(client, session_id, prompt=prompt),
+                model=dynamic.model,
+                max_findings=dynamic.limits.max_findings,
+                parse=self._parse_plain,
+                provider_error=self._provider_error,
+            )
+            try:
+                return EngineAnswer(findings=final.run(), error=None)
+            except NoFinalAnswer as error:
+                return self._no_answer(error.note)
+        finally:
+            events.stop()
+
+    def _parse_plain(self, document: dict[str, Any]) -> DynamicFindings:
+        """The envelope check of the model's JSON; the runner sets the constants itself (#530)."""
+        base = self.job.base
+        assert base is not None  # narrowed in __init__
+        findings = parse_dynamic_findings(
+            document, exported_paths=self.exported_paths, reviewed_sha=base.head_sha
+        )
+        self._note_overrides(findings)
+        return findings
+
+    @staticmethod
+    def _note_overrides(findings: DynamicFindings) -> None:
+        if findings.envelope_overrides:
+            _log.warning(
+                "the answer did not carry the envelope constants the runner owns: %s",
+                ", ".join(findings.envelope_overrides),
+            )
 
     def _turns(self, client: EngineClient, session_id: str) -> EngineAnswer:
         self._send(client, session_id)
@@ -876,10 +993,11 @@ class DynamicEngine:
         calls = self.ledger.recent_call_outcomes
         if calls:
             note += "; last model calls: " + "; ".join(calls)
+        answer = "valid review" if self._plain_final else "structured answer"
         return EngineAnswer(
             findings=None,
             error=EngineError(
-                ErrorCode.LLM_OUTPUT_INVALID, f"the engine returned no structured answer ({note})"
+                ErrorCode.LLM_OUTPUT_INVALID, f"the engine returned no {answer} ({note})"
             ),
         )
 
@@ -897,8 +1015,16 @@ class DynamicEngine:
         # (#309) sends the runner's own short prompt instead and no input at all.
         if prompt is None:
             prompt = compose_user_prompt(self.inputs)
+            if self._plain_final:
+                # The schema that carried the job's finding bound is gone with the format: one
+                # fixed runner line, outside every untrusted block, states it (#552).
+                prompt += "\n" + final_answer_line(dynamic.limits.max_findings) + "\n"
             self.ledger.check_input_bytes(len(prompt.encode("utf-8")))
-        schema = engine_schema(self.model_schema, dynamic.limits.max_findings)
+        schema = (
+            None
+            if self._plain_final
+            else engine_schema(self.model_schema, dynamic.limits.max_findings)
+        )
         outcome: list[Exception] = []
         finished = threading.Event()
 
@@ -971,11 +1097,7 @@ class DynamicEngine:
         findings = parse_dynamic_findings(
             raw, exported_paths=self.exported_paths, reviewed_sha=base.head_sha
         )
-        if findings.envelope_overrides:
-            _log.warning(
-                "the answer did not carry the envelope constants the runner owns: %s",
-                ", ".join(findings.envelope_overrides),
-            )
+        self._note_overrides(findings)
         if len(findings.findings) > dynamic.limits.max_findings:
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
