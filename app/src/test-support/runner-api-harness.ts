@@ -409,17 +409,6 @@ export async function startRunnerApiHarness(
           ).get(job.id),
         catalog,
       }),
-      isNative: async (job) => {
-        const record = await createUsageRecordsRepository(
-          fixture.db,
-          job.workspaceId,
-          fixture.clock.now,
-        ).get(job.id);
-        return (
-          record?.llmProvider != null &&
-          options.nativeCost?.isNativeProvider(record.llmProvider) === true
-        );
-      },
       entitlementsFor: (workspaceId) =>
         readEffectiveEntitlements(fixture.db, workspaceId, fixture.clock.now),
       recordKeyMode: (job, keyMode) =>
