@@ -15,6 +15,9 @@ const ALLOWED = [
   "app/(app)/instance-portal/",
   // The screens of the admin portal that show the catalog (#554).
   "admin/catalog-models/",
+  // The cost policy of a claim (#553): server side, hands the runner the confirmed book and a refusal code, and never
+  // anything to a member. The claim itself imports this module, not the prices.
+  "native-cost/",
   "db/",
   "models-dev/",
   "test-support/",

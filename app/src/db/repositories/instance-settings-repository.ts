@@ -61,6 +61,12 @@ export type InstanceSettingValues = {
   /** The most workspaces one user may own (the limits page). No row: the default (10). */
   max_workspaces_per_user: number;
   /**
+   * #553: the most tokens (prompt, cache and completion in all) a Dynamic run on the workspace's own key may use when its
+   * price is not known (src/native-cost/token-cap.ts). No row: the default (4,000,000). The admin sets it within bounds;
+   * a stored value outside them reads as the default.
+   */
+  own_key_max_total_tokens: number;
+  /**
    * The mail server (src/mail/smtp-config.ts). No row: the instance has no mail server. The password is
    * not here but in the secret store (`smtp_password`).
    */

@@ -34,6 +34,7 @@ export type CheckText = Pick<
 const STOPPED_EARLY_TEXT: Readonly<Record<string, string>> = {
   cost_limit: "The review stopped at its cost limit and may be incomplete.",
   time_limit: "The review stopped at its time limit and may be incomplete.",
+  token_limit: "The review stopped at its token limit and may be incomplete.",
 };
 
 function plural(count: number, noun: string): string {

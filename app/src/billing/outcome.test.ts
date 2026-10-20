@@ -3,6 +3,10 @@
 import { describe, expect, it } from "vitest";
 import { JOB_ERROR_CODES } from "../jobs/job-types.ts";
 import {
+  CLAIM_FAILURE_CODES,
+  CLAIM_RELEASE_REASONS,
+} from "../runner-api/claim.ts";
+import {
   RUNNER_CHECKOUT_REASONS,
   RUNNER_ERROR_CODES,
 } from "../runner-api/contract.ts";
@@ -97,6 +101,8 @@ describe("every terminal code has an outcome class", () => {
     const known = new Set<string>([
       ...JOB_ERROR_CODES,
       ...RUNNER_ERROR_CODES,
+      ...CLAIM_FAILURE_CODES,
+      ...CLAIM_RELEASE_REASONS,
       LAUNCH_FAILED_CODE,
       WORKER_EXITED_CODE,
     ]);
@@ -361,6 +367,68 @@ describe("the class of a run's end", () => {
     expect(
       classifyOutcome(failed("command_failed", { errorReason: "transport" })),
     ).toBe("charged");
+  });
+});
+
+describe("a job refused or handed back at claim (#553)", () => {
+  // #577-L5
+  it("has a class for every code of the claim, and a claim that refused a job bills nothing", () => {
+    for (const code of [...CLAIM_FAILURE_CODES, ...CLAIM_RELEASE_REASONS])
+      expect(Object.keys(ERROR_CODE_CLASSES), code).toContain(code);
+    // Nothing ran: the model was not asked and no VM was kept. The codes that name the customer's side of the line
+    // (a closed pull request, a missing one, the Dynamic settings) keep the class they were given in #523.
+    for (const code of [
+      "managed_model_unavailable",
+      "llm_not_configured",
+      "llm_provider_unsupported",
+      "job_llm_options_invalid",
+      "job_args_invalid",
+      "job_env_invalid",
+      "git_connection_disabled",
+      "git_connection_gone",
+      "git_connection_suspended",
+      "git_scope_refused",
+      "git_app_auth_failed",
+      "git_access_failed",
+      "git_access_unavailable",
+      "pull_request_unavailable",
+      "claim_failed",
+      "price_check_failed",
+    ])
+      expect(classifyOutcome(failed(code)), code).toBe("free");
+  });
+
+  // #577-L5
+  it("is free on the own key too: it is the claim's refusal, not the model's", () => {
+    expect(
+      classifyOutcome(failed("managed_model_unavailable", { keyMode: "own" })),
+    ).toBe("free");
+  });
+});
+
+describe("the cost policy of a native job (#553)", () => {
+  // #553-T08
+  it("charges the minutes only for an own-key Dynamic run that delivered a review at its token cap or without a price", () => {
+    for (const end of [
+      { status: "succeeded", errorCode: null },
+      failed("dynamic_budget_exceeded"),
+    ] satisfies Array<Pick<RunEnd, "status" | "errorCode">>)
+      expect(
+        classifyOutcome({ ...end, keyMode: "own", aiCostKnown: false }),
+      ).toBe("minutes_only");
+  });
+
+  // #553-T03
+  it("treats a managed run that could not account for its cost as our fault, whatever else is known", () => {
+    for (const aiCostKnown of [true, false, undefined])
+      expect(
+        classifyOutcome(
+          failed("dynamic_accounting_failed", {
+            keyMode: "managed",
+            ...(aiCostKnown === undefined ? {} : { aiCostKnown }),
+          }),
+        ),
+      ).toBe("free");
   });
 });
 

@@ -44,6 +44,14 @@ connection, project, review settings) is looked up in the workspace of the job (
 credentials are those of the job's own connection. Nothing of this shows in the contract: the answers
 are the same as for a single workspace.
 
+## A managed Dynamic result without a cost (#553)
+
+`finishJob` (`report.ts`, shared by the runner API's `complete` and the Worker API's `result`) stores a Dynamic result of a job on
+the operator's key that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
+(`managed-cost-guard.ts`): a managed run never settles with an unknown cost, and the code is free for the customer. A failure keeps
+the runner's code. On the workspace's own key a null cost is a success whose usage record settles with an unknown cost (minutes
+only in billing).
+
 ## Authentication
 
 `Authorization: Bearer <RUNNER_TOKEN>` on every call. One shared token in the MVP, read from the
@@ -150,6 +158,14 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    URL, and the MVP has no fallback chain); the runner adds OpenRouter's `provider.require_parameters` to every
    request for OpenRouter by itself (#270). The usage record itself was reserved by `claimNext`, in the transaction of
    the claim (`src/usage/README.md`); a failure of these calls gives the job back.
+
+   **The cost of a native job (#553).** Right after the selection and before the key is loaded, a Dynamic job whose selection
+   names a catalog model (`ClaimDeps.nativeCost`, `src/native-cost/README.md`) gets its cost policy. On the operator's key a model
+   that is not enabled with a confirmed price ends the job `managed_model_unavailable` (the log: `entry=<id> kind=<kind>
+reason=<catalog_price_unconfirmed|catalog_model_unavailable>:<reason>`), with no key, token or VM and a `void` usage record; a
+   price check that itself fails gives the job back instead. The policy goes into the job as `dynamic.cost`, only to a caller
+   that named `dynamic_cost_policy` (else the job ends `dynamic_engine_unavailable`). A job that is not native is unchanged and
+   the price service is not asked.
 
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;

@@ -634,6 +634,16 @@ def _run_dynamic_job(
             started,
             capture,
         )
+    if dynamic.cost is not None:
+        # #553: the cost policy is enforced by the passthrough path alone (`build_native_ledger`).
+        # Until a claim's native job runs through it, a job that carries one and would reach the
+        # legacy wire is refused: it must not run with a bound it never read.
+        return _failure(
+            ErrorCode.DYNAMIC_CONFIG_INVALID,
+            "a cost policy needs the native provider path, which this job does not take",
+            started,
+            capture,
+        )
     # The `rg` the startup self-check verified, named by the loop and not looked up along the PATH.
     # Without one the adapter refuses to start the engine.
     ripgrep = (

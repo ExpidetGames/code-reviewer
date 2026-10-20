@@ -29,6 +29,8 @@ export const STOPPED_EARLY_TEXT: Record<StoppedEarly, string> = {
     "The review reached the cost limit and was wrapped up; it may be incomplete.",
   time_limit:
     "The review reached its time limit and was wrapped up; it may be incomplete.",
+  token_limit:
+    "The review reached the token limit and was wrapped up; it may be incomplete.",
 };
 
 /** The model, tokens, calls and cost the runner reported; a text from outside is rendered as text. */

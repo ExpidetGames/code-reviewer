@@ -274,7 +274,12 @@ describe("the complete body", () => {
 
   // #293-T08
   it("keeps the reason a Dynamic Review stopped early, and null when it did not", () => {
-    for (const stoppedEarly of ["cost_limit", "time_limit"] as const) {
+    for (const stoppedEarly of [
+      "cost_limit",
+      "time_limit",
+      // #553-R07
+      "token_limit",
+    ] as const) {
       const parsed = parseCompleteRequest({
         leaseToken: TOKEN,
         result: {

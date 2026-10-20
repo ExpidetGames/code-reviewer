@@ -50,7 +50,7 @@ import {
   type LlmProvider,
 } from "../llm/config.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
-import type { Selection } from "../llm/selection.ts";
+import { MANAGED_MODEL_UNAVAILABLE, type Selection } from "../llm/selection.ts";
 import type { UsageKeyMode } from "../usage/usage-records.ts";
 import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
 import type {
@@ -61,6 +61,8 @@ import {
   clampMaxTokens,
   UNKNOWN_WINDOW_MAX_TOKENS,
 } from "../model-catalog/token-budget.ts";
+import type { NativeCostService } from "../native-cost/service.ts";
+import type { CostPolicyJson } from "../native-cost/policy.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
@@ -118,6 +120,8 @@ export const CLAIM_RELEASE_REASONS = [
   "git_access_unavailable",
   "pull_request_unavailable",
   "claim_failed",
+  // #553: the price check of a managed native job failed itself (the database could not be read); not the model's fault.
+  "price_check_failed",
   // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
   "launch_failed",
   // #375: the Worker's container ended with an error before it reported a result (the Dispatcher's release call).
@@ -199,6 +203,14 @@ export type ClaimDeps = {
    * carries no capabilities, as before.
    */
   modelCapabilities?: ModelCapabilityChecker;
+  /**
+   * #553: the cost policy of a native job (a job whose selection names a catalog model, src/native-cost/). Left out, no job
+   * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
+   */
+  nativeCost?: Pick<
+    NativeCostService,
+    "refOf" | "policyFor" | "isNativeProvider"
+  >;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -228,6 +240,8 @@ export type Checked = {
   llmOptions: { maxTokens?: number };
   /** The Dynamic options of a Dynamic job; null for a Diff job. */
   dynamic: DynamicReviewOptions | null;
+  /** #553: the cost policy of a native Dynamic job (`dynamic.cost`); null for every other job. */
+  cost: CostPolicyJson | null;
   integration: Integration;
   repo: RepoRef;
   prUrl: string;
@@ -437,6 +451,51 @@ export type CheckOptions = {
   runnerProviders: readonly string[] | null;
 };
 
+type CostDecision =
+  | {
+      kind: "decided";
+      policy: CostPolicyJson | null;
+      /** Which confirmation priced a managed run, for the log. */
+      confirmation?: { id: number; hashVersion: number };
+    }
+  | { kind: "refused"; errorCode: string; detail: string }
+  /** The price check itself failed (the database could not be read): not the model's fault, so the job is given back. */
+  | { kind: "retry" };
+
+/**
+ * #553: the cost policy of a native Dynamic job, or none. A job is native when its selection names a catalog model
+ * (`nativeCost.refOf`); a Diff job and a job without `nativeCost` are not, and nothing is asked for them. The managed key is
+ * refused with `managed_model_unavailable` (the log carries the opaque entry id, the kind and the stable code, never a
+ * provider, a model or a price); the own key always gets a policy.
+ */
+async function costOf(
+  deps: ClaimDeps,
+  job: Job,
+  selection: Selection,
+): Promise<CostDecision> {
+  const native = deps.nativeCost;
+  if (native === undefined || job.reviewKind !== "dynamic")
+    return { kind: "decided", policy: null };
+  const ref = native.refOf(selection);
+  if (ref === null) return { kind: "decided", policy: null };
+  const outcome = await native.policyFor(selection.keyMode, ref);
+  if (outcome.ok)
+    return {
+      kind: "decided",
+      policy: outcome.policy,
+      ...(outcome.confirmation === null
+        ? {}
+        : { confirmation: outcome.confirmation }),
+    };
+  // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
+  if (outcome.reason === "check_failed") return { kind: "retry" };
+  return {
+    kind: "refused",
+    errorCode: MANAGED_MODEL_UNAVAILABLE,
+    detail: `${selection.keyMode === "managed" ? `entry=${selection.entry.id} ` : ""}kind=${selection.kind} reason=${outcome.code}:${outcome.reason}`,
+  };
+}
+
 /**
  * Steps 1 to 3 of the module comment: the guard, the selection and the key it names, the options of the job and the
  * pull request. Nothing here creates or reveals a credential of the job.
@@ -474,11 +533,27 @@ export async function checkJob(
   if (!selected.ok) return refuse(selected.errorCode, selected.detail);
   const { selection } = selected;
   await deps.recordSelection(job, selection);
+
+  // #553: the cost of a native Dynamic job. On the operator's key, which we pay, a model whose price is not confirmed ends
+  // the job here, before any key, token or VM exists; the own key is never refused for a price.
+  const cost = await costOf(deps, job, selection);
+  if (cost.kind === "refused") return refuse(cost.errorCode, cost.detail);
+  if (cost.kind === "retry")
+    return {
+      kind: "retry",
+      reason: "price_check_failed",
+      retryAfterSeconds: DEFAULT_RETRY_AFTER_SECONDS,
+    };
   // The log names the entry and the kind of a job on the operator's key, never a model or a provider; the log of
-  // a job on the workspace's own key names no model either.
+  // a job on the workspace's own key names no model either. A managed native job also names the confirmation that priced it
+  // (its id and the version of its hash), so a price in dispute can be traced.
   deps.logger.info(
     selection.keyMode === "managed"
-      ? `[runner-api] job=${job.id} selection entry=${selection.entry.id} kind=${selection.kind} origin=${selection.entry.origin}`
+      ? `[runner-api] job=${job.id} selection entry=${selection.entry.id} kind=${selection.kind} origin=${selection.entry.origin}${
+          cost.confirmation === undefined
+            ? ""
+            : ` confirmation=${String(cost.confirmation.id)} hash=${String(cost.confirmation.hashVersion)}`
+        }`
       : `[runner-api] job=${job.id} selection kind=${selection.kind} key=own`,
   );
 
@@ -583,6 +658,7 @@ export async function checkJob(
     options,
     llmOptions,
     dynamic,
+    cost: cost.policy,
     integration,
     repo,
     prUrl,
@@ -609,9 +685,14 @@ export async function buildJobInput(
     options,
     llmOptions,
     dynamic,
+    cost,
     integration,
     repo,
   } = checked;
+  // #553: a cost policy goes only to a caller that enforces one. A runner that did not read it would run without the bound
+  // (the price book of the managed key, the token cap of an own key), so the job ends here, before any credential exists.
+  if (cost !== null && !features.includes("dynamic_cost_policy"))
+    return refuse("dynamic_engine_unavailable");
   const managed = selection.keyMode === "managed";
   const provider = deps.registry.resolve(integration.type);
 
@@ -713,8 +794,11 @@ export async function buildJobInput(
           prUrl: checked.prUrl,
           command,
           reviewKind: "dynamic",
-          dynamic:
-            capabilities === undefined ? dynamic : { ...dynamic, capabilities },
+          dynamic: {
+            ...dynamic,
+            ...(capabilities === undefined ? {} : { capabilities }),
+            ...(cost === null ? {} : { cost }),
+          },
           base: claimBaseOf(
             repo.fullName,
             checked.baseRef,

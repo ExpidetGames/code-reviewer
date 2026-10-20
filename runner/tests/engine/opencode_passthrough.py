@@ -12,7 +12,7 @@ of the pinned https connection). Nothing here talks beyond loopback.
 
 import shutil
 import sys
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -40,7 +40,9 @@ from code_reviewer_runner.dynamic_review.passthrough.admission import (
     PassthroughTarget,
     output_allowance,
 )
+from code_reviewer_runner.dynamic_review.passthrough.cost_policy import CostPolicy
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
+from code_reviewer_runner.dynamic_review.passthrough.native_run import build_native_run
 from code_reviewer_runner.dynamic_review.passthrough.proxy import PassthroughProxy
 from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughServer
 from passthrough_loopback import LoopbackUpstream
@@ -95,9 +97,17 @@ class PassthroughEngine(NativeEngine):
 
 @contextmanager
 def passthrough_engine(
-    scratch: Path, providers: Sequence[Provider], *, limit: str = "5.00"
+    scratch: Path,
+    providers: Sequence[Provider],
+    *,
+    limit: str = "5.00",
+    policies: Mapping[str, CostPolicy] | None = None,
 ) -> Generator[PassthroughEngine]:
-    """The fakes, a passthrough proxy in front of each, and one engine that knows all of them."""
+    """The fakes, a passthrough proxy in front of each, and one engine that knows all of them.
+
+    A provider named in `policies` (#553) is run under its cost policy: its ledger is the one
+    `build_native_ledger` makes and its proxy prices from the policy's book, as a native job does.
+    Any other provider keeps the legacy per-job prices."""
     export = make_export(scratch)
     with ExitStack() as stack:
         running: dict[str, Running] = {}
@@ -118,25 +128,42 @@ def passthrough_engine(
                 provider.tune(upstream)
             limits = DynamicLimits(max_cost_usd=Decimal(limit))
             output = (provider.entry or {}).get("limit", {}).get("output", 8192)
-            ledger = BudgetLedger(
-                limits,
-                window_tokens=1_000_000,
-                output_tokens=output_allowance(int(output)),
-                unit_costs=PRICES,
-            )
+            policy = (policies or {}).get(provider.provider_id)
             capability = new_proxy_capability()
-            proxy = PassthroughProxy(
-                ledger=ledger,
-                target=PassthroughTarget(
-                    family=WIRE[provider.family],
-                    model=provider.model_id,
-                    output_allowance=output_allowance(int(output)),
-                ),
-                upstream=LoopbackUpstream(upstream.url + BASE_PATH[provider.family]),
-                upstream_api_key=REAL_KEY,
-                capability=capability,
-                prices=PRICES,
+            target = PassthroughTarget(
+                family=WIRE[provider.family],
+                model=provider.model_id,
+                output_allowance=output_allowance(int(output)),
             )
+            hop = LoopbackUpstream(upstream.url + BASE_PATH[provider.family])
+            if policy is None:
+                ledger = BudgetLedger(
+                    limits,
+                    window_tokens=1_000_000,
+                    output_tokens=output_allowance(int(output)),
+                    unit_costs=PRICES,
+                )
+                proxy = PassthroughProxy(
+                    ledger=ledger,
+                    target=target,
+                    upstream=hop,
+                    upstream_api_key=REAL_KEY,
+                    capability=capability,
+                    prices=PRICES,
+                )
+            else:
+                # A native job: the ledger and the proxy of one policy, from the one factory.
+                run = build_native_run(
+                    policy,
+                    limits,
+                    window_tokens=1_000_000,
+                    output_tokens=output_allowance(int(output)),
+                    target=target,
+                    upstream=hop,
+                    upstream_api_key=REAL_KEY,
+                    capability=capability,
+                )
+                ledger, proxy = run.ledger, run.proxy
             server = PassthroughServer(proxy, "127.0.0.1", 0).start()
             stack.callback(server.stop)
             front = PassthroughFront(proxy, server, ledger, capability)

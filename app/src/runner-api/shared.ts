@@ -22,6 +22,7 @@ import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
+import { getNativeCost } from "../native-cost/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
@@ -68,6 +69,7 @@ function sharedDeps(): WorkerApiDeps {
     logger: { info: (line) => console.info(line) },
   });
   const llm = getWorkspaceLlm();
+  const nativeCost = getNativeCost();
   return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
@@ -135,6 +137,18 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
+    // #553: the cost policy of a native job. No selection the registry allows names a catalog model yet, so no job is native.
+    nativeCost,
+    isNative: async (job) => {
+      const record = await createUsageRecordsRepository(
+        db,
+        job.workspaceId,
+      ).get(job.id);
+      return (
+        record?.llmProvider != null &&
+        nativeCost.isNativeProvider(record.llmProvider)
+      );
+    },
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,

@@ -66,7 +66,7 @@ __all__ = [
 
 # What this runner understands beyond its engines (ClaimRequest.features in the contract).
 # `supersede` (#396): it stops gracefully when a heartbeat answers `job.superseded`.
-CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede")
+CLAIM_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede", "dynamic_cost_policy")
 
 
 @dataclass(frozen=True)

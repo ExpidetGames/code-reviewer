@@ -257,6 +257,16 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
   does not know), unlike unknown engines. `golden` fixtures: `fakes/fixtures/dynamic-review-job.json`
   (without) and `dynamic-review-job-capabilities.json` (with the field), validated by both suites.
 
+- #553 adds the optional `DynamicReview.cost` (`DynamicCostPolicy`: the key mode, the price book the ledger prices from and the
+  token cap of an own key), the claim feature `dynamic_cost_policy` and the `stoppedEarly` value `token_limit`. `RunnerJobInput`
+  is closed, so the rule is the one of `capabilities`: the **app** never sends `dynamic.cost` unless the caller named
+  `dynamic_cost_policy`, and a job that carries a policy and meets a caller without the feature ends `dynamic_engine_unavailable`
+  (a runner that did not read the policy would run without its bound). A new runner always names the feature; an old runner
+  gets exactly the previous payload. A job gets the policy only when it is native (a selection that names a catalog model,
+  `app/src/native-cost/README.md`), so no job of today carries one. `token_limit` is only reported by a run that had a token
+  cap, which only a new app sends. `fakes/fixtures/dynamic-review-job-cost-managed.json` and `-cost-own.json` are validated by
+  both suites; the price book is the form of `fakes/fixtures/price-books.json`.
+
 - #424 grows v1 without breaking a reader: `RunnerJobInput.llm.provider` changes from the enum
   `["openrouter"]` to a slug (`LlmProviderId`, `^[a-z][a-z0-9_]{1,31}$`), and `ClaimRequest` and the
   Worker API's details request (`WorkerJobDetailsRequest`, the query `?llmProviders=a,b`) get an
