@@ -14,6 +14,7 @@ import { createAdminHarness } from "../test-support/admin-harness.ts";
 import { describeQuery } from "../test-support/query-hook.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { isBillingOn } from "./enabled.ts";
+import { STRIPE_MANAGED_PAYMENTS_API_VERSION } from "./stripe-client.ts";
 import { STRIPE_WEBHOOK_EVENTS } from "./stripe-webhook-events.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
@@ -723,6 +724,23 @@ describe("the webhook endpoint at Stripe", () => {
     expect(key.ok && key.value.reveal()).toBe(
       stored.ok && stored.value.reveal(),
     );
+  });
+
+  // #501-X01: the follow-up of #500 (pull request 587): the events are rendered in the version the API calls use, whatever the
+  // account's default becomes, so the event shape #502 reads is pinned.
+  it("pins the API version the events are rendered in to the version of the client", async () => {
+    const s = await start();
+    await s.saveStripe({ apiKey: s.stripe.apiKey });
+
+    await s.post("/webhook-endpoint");
+
+    const created = s.stripe.requests().find((r) => r.method === "POST");
+    expect(created?.form).toMatchObject({
+      api_version: STRIPE_MANAGED_PAYMENTS_API_VERSION,
+    });
+    expect(s.stripe.webhookEndpoints()[0]).toMatchObject({
+      api_version: STRIPE_MANAGED_PAYMENTS_API_VERSION,
+    });
   });
 
   // #504-T06
