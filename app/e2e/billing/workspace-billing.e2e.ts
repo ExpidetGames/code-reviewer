@@ -147,7 +147,8 @@ test.describe("the billing page of a workspace", () => {
     await page.goto("/w/default/settings/billing");
     const before = await balanceCents(page);
     const journal = page.getByRole("region", { name: "Journal" });
-    const credited = await journal.getByText("+$10.00").count();
+    await expect(journal.getByRole("row").nth(1)).toBeVisible();
+    const rowsBefore = await journal.getByRole("row").count();
 
     await page.getByRole("radio", { name: "$10", exact: true }).click();
     const session = await payAt(page);
@@ -171,7 +172,9 @@ test.describe("the billing page of a workspace", () => {
     expect(delivered.length).toBeGreaterThan(0);
     await page.reload();
     expect(await balanceCents(page)).toBe(before + 1_000);
-    await expect(journal.getByText("+$10.00")).toHaveCount(credited + 1);
+    // One row more than before the payment: the late webhook did not credit it a second time.
+    await expect(journal.getByRole("row")).toHaveCount(rowsBefore + 1);
+    await expect(journal.getByRole("row").nth(1)).toContainText("+$10.00");
   });
 
   // #505-T09
