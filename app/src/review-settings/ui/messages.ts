@@ -197,6 +197,9 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository was not found. Reload the Projects page and try again.",
+  // #588: the address of a catalog provider is confirmed, moved or dropped by an Owner or Admin only.
+  PROVIDER_ADDRESS_CONFIRM_FORBIDDEN:
+    "The address of this provider changed. Only an Owner or Admin of the workspace can confirm it or change the provider of this project.",
 };
 
 /** The sentence for a save (or reset) that failed as a whole. */

@@ -18,17 +18,22 @@ export const ADDRESS_UNPINNED_TEXT =
   "Your key address is fixed at the next review to the address the catalog lists now:";
 export const ADDRESS_PINNED_TEXT =
   "Your key is sent only to the address fixed when this provider was selected:";
+export const ADDRESS_CONFIRM_BY_ADMIN_TEXT =
+  "An Owner or Admin must confirm the new address; ask one of them to open these settings.";
 export const CONFIRM_ADDRESS_LABEL =
   "Confirm the new address and send my key there";
 
 export function ProviderAddressNote({
   address,
   confirm,
+  canConfirm,
   disabled,
   onConfirmChange,
 }: {
   address: ProviderAddressView;
   confirm: boolean;
+  /** The person may manage the workspace's LLM key (`manage_llm_key`): only they confirm a new address (#588). */
+  canConfirm: boolean;
   disabled: boolean;
   onConfirmChange: (confirm: boolean) => void;
 }) {
@@ -67,17 +72,21 @@ export function ProviderAddressNote({
       <p className="text-xs">
         Listed now: <code className="break-all">{address.current}</code>
       </p>
-      <span className="mt-2 flex items-start gap-2">
-        <Checkbox
-          id={`${id}-confirm`}
-          checked={confirm}
-          disabled={disabled}
-          onCheckedChange={(checked) => onConfirmChange(checked === true)}
-        />
-        <Label htmlFor={`${id}-confirm`} className="font-normal">
-          {CONFIRM_ADDRESS_LABEL}
-        </Label>
-      </span>
+      {canConfirm ? (
+        <span className="mt-2 flex items-start gap-2">
+          <Checkbox
+            id={`${id}-confirm`}
+            checked={confirm}
+            disabled={disabled}
+            onCheckedChange={(checked) => onConfirmChange(checked === true)}
+          />
+          <Label htmlFor={`${id}-confirm`} className="font-normal">
+            {CONFIRM_ADDRESS_LABEL}
+          </Label>
+        </span>
+      ) : (
+        <p className="mt-2 text-xs">{ADDRESS_CONFIRM_BY_ADMIN_TEXT}</p>
+      )}
     </Alert>
   );
 }

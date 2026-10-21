@@ -129,6 +129,7 @@ function renderForm(
   initial: SettingsFormModel,
   api: SettingsApi,
   nativeCatalog: NativeFormData | undefined = CATALOG,
+  canConfirmProviderAddress = false,
 ) {
   return render(
     <SettingsForm
@@ -136,6 +137,7 @@ function renderForm(
       initial={initial}
       api={api}
       dynamicReviewEnabled
+      canConfirmProviderAddress={canConfirmProviderAddress}
       {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
     />,
   );
@@ -299,6 +301,8 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
     renderForm(
       model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
       api,
+      CATALOG,
+      true,
     );
 
     expect(await screen.findByRole("alert")).toBeTruthy();
@@ -319,6 +323,8 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
     renderForm(
       model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
       fakeApi().api,
+      CATALOG,
+      true,
     );
     expect(await screen.findByRole("alert")).toBeTruthy();
 
@@ -327,6 +333,24 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
     expect(
       screen.queryByRole("checkbox", { name: /confirm the new address/i }),
     ).toBeNull();
+  });
+
+  // #588-T45
+  it("offers a person who may not manage the LLM key no confirmation, and says an Owner or Admin must confirm", async () => {
+    const { api, save } = fakeApi();
+    renderForm(
+      model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
+      api,
+    );
+
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toContain(OLD);
+    expect(warning.textContent).toContain(NEW);
+    expect(warning.textContent).toMatch(/an owner or admin must confirm/i);
+    expect(
+      screen.queryByRole("checkbox", { name: /confirm the new address/i }),
+    ).toBeNull();
+    expect(save).not.toHaveBeenCalled();
   });
 
   // #588-T30

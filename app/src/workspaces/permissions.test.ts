@@ -21,6 +21,8 @@ import { WORKSPACE_ROLES, type WorkspaceRole } from "./roles.ts";
 const MATRIX: Record<WorkspaceAction, [boolean, boolean, boolean]> = {
   view: [true, true, true],
   start_review: [true, true, true],
+  // #588-T42: a Member saves the settings of a project, but confirming or moving the pinned address of its catalog provider is
+  // `manage_llm_key` (below).
   change_project_settings: [true, true, true],
   manage_projects: [false, true, true],
   manage_review_defaults: [false, true, true],
@@ -38,6 +40,18 @@ const MATRIX: Record<WorkspaceAction, [boolean, boolean, boolean]> = {
 };
 
 const ORDER: WorkspaceRole[] = ["member", "admin", "owner"];
+
+describe("who confirms the address of a catalog provider (#588)", () => {
+  // #588-T42
+  it("is decided by the LLM key right: the roles that hold the key confirm the address a key is sent to, a Member does not", () => {
+    expect(can("member", "change_project_settings")).toBe(true);
+    expect(ORDER.map((role) => can(role, "manage_llm_key"))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+  });
+});
 
 describe("the permission matrix", () => {
   // #101-WM-08

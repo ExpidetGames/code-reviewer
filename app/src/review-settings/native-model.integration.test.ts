@@ -299,9 +299,11 @@ describe("the address a selection pins (#588)", () => {
     await select(app);
     ADDRESSES.set("deepseek", "https://api.deepseek-new.example");
 
-    const view = await app.service.updateProjectSettings(app.first.id, {
-      confirmProviderAddress: true,
-    });
+    const view = await app.service.updateProjectSettings(
+      app.first.id,
+      { confirmProviderAddress: true },
+      { canManageLlmKey: true },
+    );
 
     expect(await pinned(app)).toBe("https://api.deepseek-new.example");
     expect(view.dynamic.providerAddress).toMatchObject({ state: "pinned" });
@@ -424,5 +426,223 @@ describe("the address a selection pins (#588)", () => {
     app.setOperatorsModels(false);
     await app.service.resetProjectSettings(app.first.id);
     expect(await pinned(app)).toBeUndefined();
+  });
+});
+
+// Who may write or move the pin (#588, security review): the roles that may manage the workspace's LLM key (`manage_llm_key`).
+// A Member saves the settings of a project; if that save would write a pin that is not the one in force, or drop one the catalog
+// no longer trusts, it is refused (`PROVIDER_ADDRESS_CONFIRM_FORBIDDEN`) and the stored pin stays.
+describe("who may move the pin (#588)", () => {
+  const DEEPSEEK = "https://api.deepseek.example";
+  const MOVED = "https://api.deepseek-new.example";
+  const MEMBER = { canManageLlmKey: false };
+  const ADMIN = { canManageLlmKey: true };
+
+  type App = Awaited<ReturnType<typeof setup>>;
+
+  async function pinOf(app: App, repositoryId: string) {
+    const rows = await app.projectRows();
+    const row = rows.find((r) => r.repository_id === repositoryId);
+    return row === undefined
+      ? undefined
+      : (JSON.parse(row.settings) as { dynamicProviderAddress?: string })
+          .dynamicProviderAddress;
+  }
+
+  const SELECT = {
+    reviewKind: "dynamic",
+    dynamicProvider: "deepseek",
+    dynamicModel: "deepseek-v4-pro",
+  } as const;
+
+  async function pinnedThenMoved(app: App) {
+    await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
+    ADDRESSES.set("deepseek", MOVED);
+  }
+
+  async function forbidden(promise: Promise<unknown>) {
+    const error = await refusal(promise);
+    expect(error.code).toBe("PROVIDER_ADDRESS_CONFIRM_FORBIDDEN");
+  }
+
+  // #588-T33
+  it("refuses a Member who confirms a moved address, keeps the pin, and lets an Admin do it (P1)", async () => {
+    const app = await setup();
+    await pinnedThenMoved(app);
+
+    await forbidden(
+      app.service.updateProjectSettings(
+        app.first.id,
+        { confirmProviderAddress: true },
+        MEMBER,
+      ),
+    );
+    await forbidden(
+      app.service.updateProjectSettings(app.first.id, {
+        confirmProviderAddress: true,
+      }),
+    );
+    expect(await pinOf(app, app.first.id)).toBe(DEEPSEEK);
+
+    await app.service.updateProjectSettings(
+      app.first.id,
+      { confirmProviderAddress: true },
+      ADMIN,
+    );
+    expect(await pinOf(app, app.first.id)).toBe(MOVED);
+  });
+
+  // #588-T34
+  it("refuses a Member who drops the provider while the pin differs from what the catalog trusts, and lets an Admin (P2)", async () => {
+    const app = await setup();
+    await pinnedThenMoved(app);
+
+    await forbidden(
+      app.service.updateProjectSettings(
+        app.first.id,
+        { dynamicProvider: null, dynamicModel: null },
+        MEMBER,
+      ),
+    );
+    await forbidden(
+      app.service.updateProjectSettings(
+        app.first.id,
+        { dynamicProvider: "openai", dynamicModel: "gpt-5.5" },
+        MEMBER,
+      ),
+    );
+    expect(await pinOf(app, app.first.id)).toBe(DEEPSEEK);
+
+    await app.service.updateProjectSettings(
+      app.first.id,
+      { dynamicProvider: null, dynamicModel: null },
+      ADMIN,
+    );
+    expect(await pinOf(app, app.first.id)).toBeUndefined();
+  });
+
+  // #588-T35
+  it("refuses a Member who resets the project while the pin differs from what the catalog trusts, and lets an Admin (P3)", async () => {
+    const app = await setup();
+    await pinnedThenMoved(app);
+
+    await forbidden(app.service.resetProjectSettings(app.first.id, MEMBER));
+    await forbidden(app.service.resetProjectSettings(app.first.id));
+    expect(await pinOf(app, app.first.id)).toBe(DEEPSEEK);
+
+    await app.service.resetProjectSettings(app.first.id, ADMIN);
+    expect(await pinOf(app, app.first.id)).toBeUndefined();
+  });
+
+  // #588-T36
+  it("lets a Member change provider, reset or drop the provider while the pin is the address the catalog trusts", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
+
+    await app.service.updateProjectSettings(
+      app.first.id,
+      { dynamicProvider: "openai", dynamicModel: "gpt-5.5" },
+      MEMBER,
+    );
+    expect(await pinOf(app, app.first.id)).toBe("https://api.openai.example");
+    await app.service.resetProjectSettings(app.first.id, MEMBER);
+    expect(await pinOf(app, app.first.id)).toBeUndefined();
+  });
+
+  // #588-T37
+  it("refuses a Member who selects the provider in a second project at an address other projects of the workspace did not pin, and lets an Admin (P4)", async () => {
+    const app = await setup();
+    await pinnedThenMoved(app);
+
+    await forbidden(
+      app.service.updateProjectSettings(app.second.id, SELECT, MEMBER),
+    );
+    expect(await pinOf(app, app.second.id)).toBeUndefined();
+
+    await app.service.updateProjectSettings(app.second.id, SELECT, ADMIN);
+    expect(await pinOf(app, app.second.id)).toBe(MOVED);
+    // The first project still holds to its own pin.
+    expect(await pinOf(app, app.first.id)).toBe(DEEPSEEK);
+  });
+
+  // #588-T38
+  it("lets a Member select the provider in a second project at the address the other projects pinned", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
+
+    await app.service.updateProjectSettings(app.second.id, SELECT, MEMBER);
+
+    expect(await pinOf(app, app.second.id)).toBe(DEEPSEEK);
+  });
+
+  // #588-T39
+  it("refuses a model-only save of a selection made before pins existed when it would pin an address another project does not hold (P5)", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
+    await app.projects.updateSettingsWith(app.second.id, () => ({
+      reviewKind: "dynamic",
+      dynamicProvider: "deepseek",
+      dynamicModel: "deepseek-v4-pro",
+    }));
+    ADDRESSES.set("deepseek", MOVED);
+
+    await forbidden(
+      app.service.updateProjectSettings(
+        app.second.id,
+        { dynamicModel: "deepseek-v4-pro" },
+        MEMBER,
+      ),
+    );
+    expect(await pinOf(app, app.second.id)).toBeUndefined();
+
+    await app.service.updateProjectSettings(
+      app.second.id,
+      { dynamicModel: "deepseek-v4-pro" },
+      ADMIN,
+    );
+    expect(await pinOf(app, app.second.id)).toBe(MOVED);
+  });
+
+  // #588-T40
+  it("leaves a model-only save of a selection made before pins existed to a Member when no other project holds another address", async () => {
+    const app = await setup();
+    await app.projects.updateSettingsWith(app.first.id, () => ({
+      reviewKind: "dynamic",
+      dynamicProvider: "deepseek",
+      dynamicModel: "deepseek-v4-pro",
+    }));
+
+    await app.service.updateProjectSettings(
+      app.first.id,
+      { dynamicModel: "deepseek-v4-pro" },
+      MEMBER,
+    );
+
+    expect(await pinOf(app, app.first.id)).toBe(DEEPSEEK);
+  });
+
+  // #588-T41
+  it("adopts the address of a claim only when no other project of the workspace pinned another one, else answers that pin", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
+    await app.projects.updateSettingsWith(app.second.id, () => ({
+      reviewKind: "dynamic",
+      dynamicProvider: "deepseek",
+      dynamicModel: "deepseek-v4-pro",
+    }));
+
+    expect(
+      await app.service.adoptProviderAddress(app.second.id, "deepseek", MOVED),
+    ).toBe(DEEPSEEK);
+    expect(await pinOf(app, app.second.id)).toBeUndefined();
+
+    expect(
+      await app.service.adoptProviderAddress(
+        app.second.id,
+        "deepseek",
+        DEEPSEEK,
+      ),
+    ).toBe(DEEPSEEK);
+    expect(await pinOf(app, app.second.id)).toBe(DEEPSEEK);
   });
 });

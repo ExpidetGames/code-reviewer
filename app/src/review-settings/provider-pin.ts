@@ -10,6 +10,8 @@
 //   - nothing else moves the pin: a save that does not select a provider keeps it, whatever the catalog trusts now;
 //   - the person confirming the address (`confirmProviderAddress`) pins what the catalog trusts now;
 //   - a selection made before pins existed has none; the first claim adopts the address it is about to send the key to.
+// Who may move it: writing a pin that another project of the workspace does not hold, and dropping or replacing a pin the catalog
+// no longer trusts, are reserved to the roles that manage the workspace's LLM key (`pinMoveNeedsRight`); anyone else is refused.
 // A claim refuses a job whose catalog trusts another address than the pin (`provider_address_changed`) before it loads a key.
 
 /** What the service knows when a project save decides the pin. */
@@ -34,6 +36,34 @@ export function pinAfterSave(input: PinInput): string | undefined {
   if (input.confirm) return input.trusted;
   if (input.nextProvider !== input.storedProvider) return input.trusted;
   return input.storedPin ?? input.trusted;
+}
+
+/** What decides whether a save moves the pin in a way only an Owner or Admin may. */
+export type PinMove = {
+  /** The pin the project had before the save. */
+  storedPin: string | undefined;
+  /** The pin the project has after the save. */
+  newPin: string | undefined;
+  /** The address the catalog trusts now for the provider the project had before the save; undefined when it trusts none. */
+  trustedForStored: string | undefined;
+  /** The pins the other projects of the workspace hold for the provider the project has after the save. */
+  otherPins: readonly string[];
+};
+
+/**
+ * Whether a save needs the right to manage the workspace's LLM key (#588): it drops or replaces a pin that is not the address the
+ * catalog trusts now (a Member could otherwise walk the pin to a moved address by confirming, by choosing another provider and
+ * back, or by a reset), or it writes a pin that differs from one another project of the workspace holds for the provider (the
+ * first pin of a provider, with no other, is the first sight and needs no right). A save that leaves the pin as it is needs none.
+ */
+export function pinMoveNeedsRight(move: PinMove): boolean {
+  if (move.newPin === move.storedPin) return false;
+  if (move.storedPin !== undefined && move.storedPin !== move.trustedForStored)
+    return true;
+  return (
+    move.newPin !== undefined &&
+    move.otherPins.some((pin) => pin !== move.newPin)
+  );
 }
 
 /** How the pinned address compares with what the catalog trusts now, for the settings page. */

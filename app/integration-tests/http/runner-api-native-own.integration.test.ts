@@ -535,9 +535,11 @@ describe("the address a selection is pinned to, at the claim (#588)", () => {
       errorCode: "provider_address_changed",
     });
 
-    await h.reviewSettings.updateProjectSettings(h.repositoryId, {
-      confirmProviderAddress: true,
-    });
+    await h.reviewSettings.updateProjectSettings(
+      h.repositoryId,
+      { confirmProviderAddress: true },
+      { canManageLlmKey: true },
+    );
     await h.enqueueNew({ headSha: sha("b") });
     const { job } = await h.claimed(CLAIM);
 

@@ -41,6 +41,7 @@ import { createRepositoriesRepository } from "../../db/repositories/repositories
 import { createReviewSettingsService } from "../../review-settings/service.ts";
 import { createAppSettingsRepository } from "../../db/repositories/app-settings-repository.ts";
 import { builtInReviewSettings } from "../../review-settings/settings.ts";
+import type { NativeFormData } from "../../native-providers/form-data.ts";
 
 afterEach(cleanup);
 
@@ -90,7 +91,11 @@ async function openProject(
 function renderReady(
   app: Awaited<ReturnType<typeof openProject>>,
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>,
-  options: { audience?: "member" | "operator" } = {},
+  options: {
+    audience?: "member" | "operator";
+    nativeCatalog?: NativeFormData;
+    canConfirmProviderAddress?: boolean;
+  } = {},
 ) {
   return render(
     <ProjectSettingsPageContent
@@ -98,6 +103,12 @@ function renderReady(
       audience={options.audience ?? "member"}
       data={data}
       api={app.api}
+      {...(options.nativeCatalog === undefined
+        ? {}
+        : { nativeCatalog: options.nativeCatalog })}
+      {...(options.canConfirmProviderAddress === undefined
+        ? {}
+        : { canConfirmProviderAddress: options.canConfirmProviderAddress })}
     />,
   );
 }
@@ -683,5 +694,64 @@ describe("the Review kind card of the settings page of a project", () => {
         settings: expect.stringContaining('"reviewKind":"dynamic"'),
       },
     ]);
+  });
+});
+
+describe("the pinned address on the settings page of a project (#588)", () => {
+  const CATALOG: NativeFormData = {
+    providers: [{ id: "deepseek", label: "DeepSeek", hasKey: true }],
+    tokenCap: 4_000_000,
+    billingOn: false,
+  };
+
+  async function changedAddress() {
+    const app = await openProject({ dynamicReviewEnabled: true });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    const dynamic = data.model.dynamic;
+    if (dynamic === undefined) throw new Error("expected a project form");
+    const changed = {
+      ...data,
+      model: {
+        ...data.model,
+        dynamic: {
+          ...dynamic,
+          effective: {
+            ...dynamic.effective,
+            reviewKind: "dynamic" as const,
+            dynamicProvider: "deepseek",
+            dynamicModel: "deepseek-v4-pro",
+          },
+          providerAddress: {
+            pinned: "https://api.deepseek.example",
+            current: "https://api.deepseek-new.example",
+            state: "changed" as const,
+          },
+        },
+      },
+    };
+    return { app, data: changed };
+  }
+
+  // #588-T45
+  it("carries the right to confirm from the page to the form: the checkbox for an Owner or Admin, the hint for a Member", async () => {
+    const { app, data } = await changedAddress();
+
+    renderReady(app, data, {
+      nativeCatalog: CATALOG,
+      canConfirmProviderAddress: true,
+    });
+    expect(
+      screen.getByRole("checkbox", { name: /confirm the new address/i }),
+    ).toBeTruthy();
+    cleanup();
+
+    renderReady(app, data, { nativeCatalog: CATALOG });
+    expect(
+      screen.queryByRole("checkbox", { name: /confirm the new address/i }),
+    ).toBeNull();
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /an owner or admin must confirm/i,
+    );
   });
 });

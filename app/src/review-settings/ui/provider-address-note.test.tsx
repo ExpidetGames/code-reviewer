@@ -14,12 +14,17 @@ afterEach(cleanup);
 const OLD = "https://api.deepseek.example";
 const NEW = "https://api.deepseek-new.example";
 
-function show(address: ProviderAddressView, confirm = false) {
+function show(
+  address: ProviderAddressView,
+  confirm = false,
+  canConfirm = true,
+) {
   const onConfirmChange = vi.fn();
   render(
     <ProviderAddressNote
       address={address}
       confirm={confirm}
+      canConfirm={canConfirm}
       disabled={false}
       onConfirmChange={onConfirmChange}
     />,
@@ -72,6 +77,17 @@ describe("the pinned address of a catalog provider on the settings page", () => 
     );
 
     expect(onConfirmChange).toHaveBeenCalledWith(true);
+  });
+
+  // #588-T45
+  it("shows a person who may not confirm both addresses and who confirms, without the checkbox", () => {
+    show({ pinned: OLD, current: NEW, state: "changed" }, false, false);
+
+    const warning = screen.getByRole("alert");
+    expect(warning.textContent).toContain(OLD);
+    expect(warning.textContent).toContain(NEW);
+    expect(warning.textContent).toMatch(/an owner or admin must confirm/i);
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   // #588-T29

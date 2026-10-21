@@ -30,6 +30,11 @@ export type ReviewSettingsRouteDependencies = {
    */
   requireUser: () => Promise<SessionUser>;
   service: ReviewSettingsService;
+  /**
+   * Whether the person may manage the workspace's LLM key (`manage_llm_key`): only then may a project save write or move the
+   * address pinned for a catalog provider (#588). Left out, they may not.
+   */
+  canManageLlmKey?: boolean;
 };
 
 export type ReviewSettingsRouteHandlers = {
@@ -108,6 +113,7 @@ async function readSettings(request: Request): Promise<unknown> {
 export function createReviewSettingsRouteHandlers({
   requireUser,
   service,
+  canManageLlmKey = false,
 }: ReviewSettingsRouteDependencies): ReviewSettingsRouteHandlers {
   // Runs a handler body after the user is known; a ReviewSettingsError becomes its answer.
   async function guarded(
@@ -141,13 +147,19 @@ export function createReviewSettingsRouteHandlers({
       guarded(async () => {
         checkSite(request);
         const settings = await readSettings(request);
-        return ok(await service.updateProjectSettings(repositoryId, settings));
+        return ok(
+          await service.updateProjectSettings(repositoryId, settings, {
+            canManageLlmKey,
+          }),
+        );
       }),
 
     deleteProject: (request, repositoryId) =>
       guarded(async () => {
         checkSite(request);
-        return ok(await service.resetProjectSettings(repositoryId));
+        return ok(
+          await service.resetProjectSettings(repositoryId, { canManageLlmKey }),
+        );
       }),
   };
 }

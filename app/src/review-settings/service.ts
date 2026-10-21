@@ -46,9 +46,11 @@ import { isNativeProvider, nativeDynamicChoice } from "./native-choice.ts";
 import type { NativeSelectionSource } from "../native-providers/catalog.ts";
 import {
   pinAfterSave,
+  pinMoveNeedsRight,
   providerAddressView,
   type ProviderAddressView,
 } from "./provider-pin.ts";
+import { createPinnedAddressReader } from "./pinned-addresses.ts";
 import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
@@ -211,6 +213,13 @@ export type ProjectSettingsSaved = ProjectSettingsView & {
   warnings: ReviewSettingWarning[];
 };
 
+/**
+ * Who saves, as far as the pinned address of a catalog provider is concerned (#588): writing a pin another project of the workspace
+ * does not hold, and dropping or replacing a pin the catalog no longer trusts, are for the roles that manage the workspace's LLM
+ * key. Left out, the actor may not (fails closed).
+ */
+export type ProjectSaveActor = { canManageLlmKey: boolean };
+
 export type ReviewSettingsService = {
   getGlobalSettings(): Promise<GlobalSettingsView>;
   /**
@@ -237,16 +246,21 @@ export type ReviewSettingsService = {
   updateProjectSettings(
     repositoryId: string,
     input: unknown,
+    actor?: ProjectSaveActor,
   ): Promise<ProjectSettingsSaved>;
   /**
    * Removes every override of a project, so it follows the global defaults again. A repository
    * without a project has none to remove: nothing is written.
    */
-  resetProjectSettings(repositoryId: string): Promise<ProjectSettingsView>;
+  resetProjectSettings(
+    repositoryId: string,
+    actor?: ProjectSaveActor,
+  ): Promise<ProjectSettingsView>;
   /**
    * The claim of a job on a selection made before pins existed (#588): pins `address`, the one the claim is about to send the key
-   * to, unless the project has a pin already. Answers the pin in force, so a claim that lost a race to another pin holds to that
-   * one; null when the project no longer selects `provider` (a raced settings change).
+   * to, unless the project has a pin already or another project of the workspace pinned another address for the provider. Answers
+   * the pin in force (that other pin when it is the reason nothing was written), so a claim that lost a race to another pin holds
+   * to that one; null when the project no longer selects `provider` (a raced settings change).
    */
   adoptProviderAddress(
     repositoryId: string,
@@ -875,6 +889,61 @@ export function createReviewSettingsService(deps: {
     return undefined;
   }
 
+  const pinnedAddresses = createPinnedAddressReader(projects);
+
+  /** The address the catalog trusts now for a provider, when it is a catalog provider it offers. */
+  async function trustedNow(
+    provider: string | undefined,
+  ): Promise<string | undefined> {
+    if (
+      provider === undefined ||
+      !isNativeProvider(provider) ||
+      deps.nativeCatalog === undefined
+    )
+      return undefined;
+    return deps.nativeCatalog.addressOf(provider);
+  }
+
+  /**
+   * #588: refuses a save that moves the pin of the project (writes one, drops one, replaces one) when it is not the pin's
+   * business of an Owner or Admin (`pinMoveNeedsRight`). `before` is the settings the save found, `after` what it would store;
+   * `read` is what was looked up before the transaction for the providers they name, and a provider that changed meanwhile has
+   * nothing looked up, which the rule reads as "not trusted": refused.
+   */
+  function refuseUnauthorizedPinMove(
+    before: ProjectSettings,
+    after: ProjectSettings,
+    read: {
+      storedProvider: string | undefined;
+      trustedForStored: string | undefined;
+      nextProvider: string | undefined;
+      otherPins: readonly string[];
+    },
+    actor: ProjectSaveActor | undefined,
+  ): void {
+    if (actor?.canManageLlmKey === true) return;
+    const stored = parseDynamic(before);
+    const next = parseDynamic(after);
+    const sameStored = stored.dynamicProvider === read.storedProvider;
+    const sameNext = next.dynamicProvider === read.nextProvider;
+    if (
+      pinMoveNeedsRight({
+        storedPin: stored.dynamicProviderAddress,
+        newPin: next.dynamicProviderAddress,
+        trustedForStored: sameStored ? read.trustedForStored : undefined,
+        otherPins: sameNext
+          ? read.otherPins
+          : next.dynamicProviderAddress === undefined
+            ? []
+            : [""],
+      })
+    )
+      throw new ReviewSettingsError(
+        "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
+        "Only an Owner or Admin may confirm the address of a provider.",
+      );
+  }
+
   /** What the settings page shows of the pinned address; null when the project selects no catalog provider or the workspace is managed. */
   async function providerAddressOf(
     project: StoredProject | undefined,
@@ -973,7 +1042,7 @@ export function createReviewSettingsService(deps: {
       return viewOfRepository(repositoryId);
     },
 
-    async updateProjectSettings(repositoryId, input) {
+    async updateProjectSettings(repositoryId, input, actor) {
       const managed = await operatorsModels();
       if (managed)
         refuseModelFields(input, [
@@ -988,10 +1057,25 @@ export function createReviewSettingsService(deps: {
         (await projects.get(repositoryId))?.settings,
       );
       if (!managed) await refuseUnfitNativeChoice(patch.dynamic, storedDynamic);
+      const choice = managed
+        ? null
+        : nativeDynamicChoice(patch.dynamic, storedDynamic);
       const trusted = await trustedAddressFor(
-        managed ? null : nativeDynamicChoice(patch.dynamic, storedDynamic),
+        choice,
         patch.confirmProviderAddress === true,
       );
+      // #588: what the rule of who may move the pin needs, looked up before the write.
+      const pinRead = {
+        storedProvider: storedDynamic.dynamicProvider,
+        trustedForStored: await trustedNow(storedDynamic.dynamicProvider),
+        nextProvider: choice?.provider,
+        otherPins:
+          choice === null
+            ? []
+            : await pinnedAddresses(choice.provider, {
+                exceptRepositoryId: repositoryId,
+              }),
+      };
       const toCheck = dynamicModelToCheck(
         patch.dynamic,
         storedDynamic,
@@ -1042,6 +1126,7 @@ export function createReviewSettingsService(deps: {
           const next = managed
             ? { ...merged, ...modelFieldsOf(parseReview(current)) }
             : merged;
+          refuseUnauthorizedPinMove(current, next, pinRead, actor);
           previousKind = kindOf(current);
           kindChanged = previousKind !== kindOf(next);
           return next;
@@ -1065,6 +1150,11 @@ export function createReviewSettingsService(deps: {
 
     async adoptProviderAddress(repositoryId, provider, address) {
       let inForce: string | null = null;
+      // #588: an address that another project of the workspace did not pin for the provider is not adopted; the claim then holds
+      // to that pin and is refused, and an Owner or Admin confirms the address.
+      const others = isNativeProvider(provider)
+        ? await pinnedAddresses(provider, { exceptRepositoryId: repositoryId })
+        : [];
       const project = await projects.updateSettingsWith(
         repositoryId,
         (current) => {
@@ -1080,6 +1170,11 @@ export function createReviewSettingsService(deps: {
             inForce = stored.dynamicProviderAddress;
             return current;
           }
+          const other = others.find((pin) => pin !== address);
+          if (other !== undefined) {
+            inForce = other;
+            return current;
+          }
           inForce = address;
           return { ...current, dynamicProviderAddress: address };
         },
@@ -1087,10 +1182,17 @@ export function createReviewSettingsService(deps: {
       return project === undefined ? null : inForce;
     },
 
-    async resetProjectSettings(repositoryId) {
+    async resetProjectSettings(repositoryId, actor) {
       // Nothing to remove, so no row is created just for this.
-      if ((await projects.get(repositoryId)) === undefined)
-        return viewOfRepository(repositoryId);
+      const existing = await projects.get(repositoryId);
+      if (existing === undefined) return viewOfRepository(repositoryId);
+      const storedProvider = parseDynamic(existing.settings).dynamicProvider;
+      const pinRead = {
+        storedProvider,
+        trustedForStored: await trustedNow(storedProvider),
+        nextProvider: undefined,
+        otherPins: [],
+      };
       // A full reset clears every override (Diff and project-only) and notifies the same hook as a
       // save, so a kind change back to Diff cancels waiting reviews and a rejecting hook rolls the
       // reset back.
@@ -1103,11 +1205,14 @@ export function createReviewSettingsService(deps: {
           // What the other key mode stored stays stored, as it does through a save (#283, #430): the models and
           // providers of the workspace's own key while it is on the operator's key, and the other way round the
           // catalog entries it chose then.
-          if (!managed) return catalogFieldsOf(parseDynamic(current));
-          return {
-            ...modelFieldsOf(parseReview(current)),
-            ...dynamicModelFieldsOf(parseDynamic(current)),
-          };
+          const next = !managed
+            ? catalogFieldsOf(parseDynamic(current))
+            : {
+                ...modelFieldsOf(parseReview(current)),
+                ...dynamicModelFieldsOf(parseDynamic(current)),
+              };
+          refuseUnauthorizedPinMove(current, next, pinRead, actor);
+          return next;
         },
         async (updated, executor) => {
           const nextKind = kindOf(updated.settings);
