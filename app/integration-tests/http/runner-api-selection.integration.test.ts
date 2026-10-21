@@ -940,7 +940,8 @@ describe("the legacy claim and the Worker's fetch cannot disagree", () => {
   });
 
   // #432-T12
-  it("selects again at the fetch: a workspace that moved from the own key to the operator's key is served the entry", async () => {
+  // #496-T11
+  it("selects at the fetch with the key mode of the claim: a workspace whose entitlements moved to the operator's key meanwhile keeps its own key", async () => {
     const h = await start({
       keyMode: "own",
       project: { provider: FAKE_PROVIDER_ID, model: "fake-large" },
@@ -958,9 +959,10 @@ describe("the legacy claim and the Worker's fetch cannot disagree", () => {
     const details = await response.json();
 
     expect(details.job.input.llm).toMatchObject({
-      model: "entry/default-model",
-      apiKey: OPERATOR_KEY,
+      provider: FAKE_PROVIDER_ID,
+      model: "fake-large",
     });
+    expect(details.job.input.llm.apiKey).not.toBe(OPERATOR_KEY);
   });
 
   // #432-T25

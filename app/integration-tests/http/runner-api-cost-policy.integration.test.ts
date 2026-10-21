@@ -13,6 +13,7 @@ import {
   createFakeAdapter,
   FAKE_PROVIDER_ID,
 } from "../../src/llm/providers/fake-adapter.ts";
+import type { WorkerJobDetailsResponse } from "../../src/runner-api/contract.ts";
 import { openrouterDescriptor } from "../../src/llm/providers/openrouter/descriptor.ts";
 import { createProviderRegistry } from "../../src/llm/providers/registry.ts";
 import { createLlmKeyModeStore } from "../../src/llm/key-mode-store.ts";
@@ -634,6 +635,60 @@ describe("the workspace's choice while billing is on (#496)", () => {
       dynamic: { cost: { keyMode: "managed", priceBook: BOOK } },
       llm: { provider: FAKE_PROVIDER_ID, apiKey: FAKE_OPERATOR_KEY },
     });
+  });
+});
+
+describe("the key mode of a Dynamic claim is decided at the claim, not at the Worker's fetch (#496)", () => {
+  // #496-T11
+  it("gives the Worker the operator's key and the cost policy of the claim after the workspace switched to its own key", async () => {
+    const h = await start({ keyMode: "own", billingChoice: "managed" });
+    const claim = await h.claimedSplit(DISPATCHER);
+    await createLlmKeyModeStore(h.db, h.workspaceId, h.clock.now).set(
+      "own",
+      null,
+    );
+
+    const response = await h.worker.details(
+      claim.job.id,
+      claim.job.credential,
+      WORKER_FEATURES,
+      undefined,
+      BOTH.join(","),
+    );
+
+    expect(response.status).toBe(200);
+    const { job } = (await response.json()) as WorkerJobDetailsResponse;
+    expect(job.input).toMatchObject({
+      dynamic: { cost: { keyMode: "managed", priceBook: BOOK } },
+      llm: { apiKey: FAKE_OPERATOR_KEY },
+    });
+    expect((await recordOf(h, claim.job.id))?.keyMode).toBe("managed");
+  });
+
+  // #496-T11
+  it("gives the Worker the workspace's own key and the token cap of the claim after the workspace switched to our models", async () => {
+    const h = await start({ keyMode: "own", billingChoice: "own" });
+    const claim = await h.claimedSplit(DISPATCHER);
+    await createLlmKeyModeStore(h.db, h.workspaceId, h.clock.now).set(
+      "managed",
+      null,
+    );
+
+    const response = await h.worker.details(
+      claim.job.id,
+      claim.job.credential,
+      WORKER_FEATURES,
+      undefined,
+      BOTH.join(","),
+    );
+
+    expect(response.status).toBe(200);
+    const { job } = (await response.json()) as WorkerJobDetailsResponse;
+    expect(job.input).toMatchObject({
+      dynamic: { cost: { keyMode: "own", maxTotalTokens: 4_000_000 } },
+      llm: { apiKey: FAKE_WORKSPACE_KEY },
+    });
+    expect((await recordOf(h, claim.job.id))?.keyMode).toBe("own");
   });
 });
 

@@ -7,8 +7,12 @@
 import { describe, expect, it } from "vitest";
 import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createUsageSeeder } from "../test-support/usage-seed.ts";
-import { setBillingSwitch } from "../test-support/billing-switch.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../test-support/billing-switch.ts";
 import {
   createJobQueueFixture,
   type JobQueueFixture,
@@ -198,5 +202,77 @@ describe("the claim, billing on", () => {
 
     // The managed limit watches the runs on our key; the workspace is on its own key now, which has no limit.
     expect(claimed?.job.id).toBe(next.id);
+  });
+});
+
+describe("the key mode of a claim is decided once, in the claim", () => {
+  const MINUTE = 60_000;
+  const recordOf = (fixture: JobQueueFixture, jobId: string) =>
+    createUsageRecordsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ).get(jobId);
+
+  // #496-T11
+  it("reserves the usage record on the key mode the claim decided, for a Diff and a Dynamic job", async () => {
+    for (const reviewKind of ["diff", "dynamic"] as const) {
+      for (const mode of ["managed", "own"] as const) {
+        const fixture = await start("on");
+        await fundWorkspace(
+          fixture.db,
+          fixture.workspaceId,
+          5_000_000,
+          fixture.clock.now,
+        );
+        await choose(fixture, mode);
+        pr += 1;
+        fixture.clock.advance(1);
+        const job = await fixture.enqueueNew({ prNumber: pr, reviewKind });
+
+        const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+        expect(claimed?.job.id).toBe(job.id);
+        expect((await recordOf(fixture, job.id))?.keyMode).toBe(mode);
+      }
+    }
+  });
+
+  // #496-T11
+  it("reserves the record on the entitlement's key mode while billing is off", async () => {
+    const fixture = await start("off");
+    await entitle(fixture, entitlements("managed"));
+    await choose(fixture, "own");
+    const job = await enqueue(fixture);
+
+    await fixture.queue.claimNext("runner-a", ENGINES);
+
+    expect((await recordOf(fixture, job.id))?.keyMode).toBe("managed");
+  });
+
+  // #496-T11
+  it("decides again when the job is claimed afresh after a lost lease, and only then", async () => {
+    const fixture = await start("on");
+    await fundWorkspace(
+      fixture.db,
+      fixture.workspaceId,
+      5_000_000,
+      fixture.clock.now,
+    );
+    await choose(fixture, "own");
+    const job = await enqueue(fixture);
+    await fixture.queue.claimNext("runner-a", ENGINES);
+    expect((await recordOf(fixture, job.id))?.keyMode).toBe("own");
+
+    // A switch while the claim lives changes nothing...
+    await choose(fixture, "managed");
+    expect((await recordOf(fixture, job.id))?.keyMode).toBe("own");
+
+    // ...a new claim (the lease ran out) takes the choice of that moment, and keeps the one record.
+    fixture.clock.advance(3 * MINUTE);
+    const again = await fixture.queue.claimNext("runner-b", ENGINES);
+
+    expect(again?.job).toMatchObject({ id: job.id, attempts: 1 });
+    expect((await recordOf(fixture, job.id))?.keyMode).toBe("managed");
   });
 });

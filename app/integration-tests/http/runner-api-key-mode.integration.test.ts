@@ -186,3 +186,86 @@ describe("the claim with billing on", () => {
     expect(stored).not.toContain(WORKSPACE_KEY);
   });
 });
+
+describe("the key mode of a claim in the split path (Dispatcher claims, Worker fetches)", () => {
+  // #496-T11
+  it("serves the Worker the key of the mode at the claim and keeps the record, when the workspace switches from own to our models in between", async () => {
+    const h = await start({ billing: "on", choice: "own" });
+    const job = await h.enqueueNew();
+    const claim = await h.claimedSplit();
+    expect((await recordOf(h, job.id))?.keyMode).toBe("own");
+
+    await choose(h, "managed");
+    const response = await h.worker.details(claim.job.id, claim.job.credential);
+
+    expect(response.status).toBe(200);
+    const body = JSON.stringify(await response.json());
+    expect(body).toContain(WORKSPACE_KEY);
+    expect(body).not.toContain(OPERATOR_KEY);
+    expect((await recordOf(h, job.id))?.keyMode).toBe("own");
+  });
+
+  // #496-T11
+  it("serves the Worker the key of the mode at the claim and keeps the record, when the workspace switches from our models to its own key in between", async () => {
+    const h = await start({ billing: "on", choice: "managed" });
+    const job = await h.enqueueNew();
+    const claim = await h.claimedSplit();
+    expect((await recordOf(h, job.id))?.keyMode).toBe("managed");
+
+    await choose(h, "own");
+    const response = await h.worker.details(claim.job.id, claim.job.credential);
+
+    expect(response.status).toBe(200);
+    const body = JSON.stringify(await response.json());
+    expect(body).toContain(OPERATOR_KEY);
+    expect(body).not.toContain(WORKSPACE_KEY);
+    expect((await recordOf(h, job.id))?.keyMode).toBe("managed");
+  });
+
+  // #496-T11
+  it("serves every re-fetch of the same claim the key of the claim, whatever the workspace chose meanwhile", async () => {
+    const h = await start({ billing: "on", choice: "managed" });
+    const job = await h.enqueueNew();
+    const claim = await h.claimedSplit();
+
+    for (const choice of ["own", "managed", "own"] as const) {
+      await choose(h, choice);
+      const response = await h.worker.details(
+        claim.job.id,
+        claim.job.credential,
+      );
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain(OPERATOR_KEY);
+      expect((await recordOf(h, job.id))?.keyMode).toBe("managed");
+    }
+  });
+
+  // #496-T11
+  it("masks the key of the claim in the result the Worker sends after a switch", async () => {
+    const h = await start({ billing: "on", choice: "managed" });
+    const job = await h.enqueueNew();
+    const claim = await h.claimedSplit();
+    await choose(h, "own");
+    await h.worker.details(claim.job.id, claim.job.credential);
+
+    const completed = await h.worker.result(job.id, claim.job.credential, {
+      logTail: `with ${OPERATOR_KEY}`,
+    });
+
+    expect(completed.status).toBe(200);
+    expect(
+      JSON.stringify((await h.queue.get(job.id))?.result ?? null),
+    ).not.toContain(OPERATOR_KEY);
+  });
+
+  // #496-T11
+  it("keeps the record of the inline claim on the mode of the claim, and a choice after it does not reach the job", async () => {
+    const h = await start({ billing: "on", choice: "own" });
+    const job = await h.enqueueNew();
+    const claimed = await h.claimed();
+    await choose(h, "managed");
+
+    expect(claimed.job.input.llm.apiKey).toBe(WORKSPACE_KEY);
+    expect((await recordOf(h, job.id))?.keyMode).toBe("own");
+  });
+});

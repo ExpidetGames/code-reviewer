@@ -41,6 +41,7 @@ import type {
 } from "../integrations/types.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
+import { withClaimedKeyMode } from "../workspaces/effective-key-mode.ts";
 import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import { llmProviderDescriptors as DEFAULT_PROVIDERS } from "../llm/providers/index.ts";
@@ -49,7 +50,6 @@ import {
   MIN_LLM_CONTEXT_TOKENS,
   type LlmProvider,
 } from "../llm/config.ts";
-import { keyModeForJob } from "../llm/resolve.ts";
 import { MANAGED_MODEL_UNAVAILABLE, type Selection } from "../llm/selection.ts";
 import type { UsageKeyMode } from "../usage/usage-records.ts";
 import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
@@ -174,16 +174,17 @@ export type ClaimDeps = {
     selection: Selection,
   ) => Promise<LlmAccessResult>;
   /**
-   * The effective entitlements of ONE workspace right now (`readEffectiveEntitlements`). The Worker's fetch asks
-   * for the standing of the workspace (suspended, unreadable) before it hands out a key, because the claim that
-   * admitted the job is behind it (#276).
+   * The entitlements of ONE workspace as they are stored right now (`readEntitlements`), without a key mode: the standing
+   * (suspended, unreadable) and the model access. The Worker's fetch asks for the standing before it hands out a key, because
+   * the claim that admitted the job is behind it (#276).
    */
   entitlementsFor: (workspaceId: string) => Promise<ResolvedEntitlements>;
   /**
-   * Notes whose key the claimed job runs on in its usage record (src/usage/README.md). The claim reserved the
-   * record already, as `own`; this corrects it once the key mode is known. A failure gives the job back.
+   * Whose key the claimed job runs on, as its claim decided and recorded it in the usage record (src/usage/README.md, #496).
+   * Read by the checks of the claim and of the Worker's fetch, which never decide it again: a choice of the workspace after
+   * the claim does not reach the job. `undefined` when the job has no record.
    */
-  recordKeyMode: (job: Job, keyMode: UsageKeyMode) => Promise<void>;
+  claimedKeyMode: (job: Job) => Promise<UsageKeyMode | undefined>;
   /**
    * Notes the provider and, for a job on the operator's key, the catalog entry (id and name as they are now) the job was
    * given in its usage record (#432): never the model. The claim reserved the record already; a failure gives the job back.
@@ -573,11 +574,15 @@ export async function checkJob(
       ? { kind: "cancelled", errorCode: decision.errorCode }
       : refuse(decision.errorCode);
 
-  // Whose key the job runs on, from the effective entitlements of its own workspace. Entitlements that cannot be read
-  // fail the selection closed (it is not known whose key applies); nothing of another workspace is looked at.
-  const entitlements = await deps.entitlementsFor(job.workspaceId);
-  const keyMode = keyModeForJob(entitlements);
-  if (keyMode !== "unreadable") await deps.recordKeyMode(job, keyMode);
+  // Whose key the job runs on is what its claim decided (#496), read from the usage record: the claim of the runner, the
+  // Worker's fetch and any fetch again of the same claim cannot differ. Entitlements that cannot be read fail the selection
+  // closed (it is not known whose key applies); nothing of another workspace is looked at.
+  const stored = await deps.entitlementsFor(job.workspaceId);
+  const claimedKeyMode = await deps.claimedKeyMode(job);
+  // A claimed job always has its record; without one nobody decided, and the job is given back rather than decided here.
+  if (claimedKeyMode === undefined)
+    throw new Error(`Claimed job ${job.id} has no usage record.`);
+  const entitlements = withClaimedKeyMode(stored, claimedKeyMode);
 
   const command = commandOf(job);
   if (command === null) return refuse("job_args_invalid");

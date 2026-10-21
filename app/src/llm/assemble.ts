@@ -213,12 +213,17 @@ export function createWorkspaceLlm({
         const own = await service.keyFor(provider);
         if (own.state === "key") keys.push(own.apiKey);
       }
-      const mode = keyModeForJob(
-        await readEffectiveEntitlements(db, workspaceId, now),
-      );
       // While billing is on the workspace can change its key mode at any moment, and a review that started on our key is not
-      // stopped by it (#496): its result must still be masked with the operator's key.
-      if (mode !== "managed" && !(await isBillingOn(db))) return keys;
+      // stopped by it (#496): its result must still be masked with the operator's key. The switch is read once; the key mode of
+      // the entitlements only matters while it is off.
+      const billing = { on: await isBillingOn(db) };
+      if (
+        !billing.on &&
+        keyModeForJob(
+          await readEffectiveEntitlements(db, workspaceId, now, billing),
+        ) !== "managed"
+      )
+        return keys;
       const operators = operatorKey();
       for (const id of providers.ids) {
         const operator = await operators.forJob(id);

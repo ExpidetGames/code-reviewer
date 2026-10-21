@@ -121,7 +121,7 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
     });
   }
 
-  /** Claims, notes the key and completes a run with a cost, as a runner would. */
+  /** Claims, notes the key it ran on and completes a run with a cost, as a runner would. */
   async function runToCompletion(
     fixture: JobQueueFixture,
     options: { costUsd: number | null; managed: boolean },
@@ -129,7 +129,12 @@ describe.each(databases)("the limits at claim on %s", (name, open) => {
     const job = await enqueue(fixture);
     const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
     expect(claimed?.job.id).toBe(job.id);
-    if (options.managed) await recordsOf(fixture).setKeyMode(job.id, "managed");
+    // The claim reserved the record on the key mode it decided (the entitlements', billing being off); a run on the other key is
+    // noted the way a test of the usage record has to say it.
+    await recordsOf(fixture).setKeyMode(
+      job.id,
+      options.managed ? "managed" : "own",
+    );
     await fixture.queue.complete(job.id, claimed?.leaseToken ?? "", {
       ok: true,
       result: {

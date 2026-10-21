@@ -965,15 +965,16 @@ export function createRunnerJobsRepository(
               });
               continue;
             }
-            // The record is reserved in the transaction of the claim, so a job handed out always counts. The
-            // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
-            // job claimed again keeps the record it has.
+            // The record is reserved in the transaction of the claim, so a job handed out always counts. It carries the key
+            // mode this claim decided (#496): the Worker's fetch, a retry and the settlement read it from here and never
+            // decide again. A job claimed again after a lost lease keeps its one record, and takes the mode of the new claim.
             const records = createUsageRecordsRepository(
               trx,
               row.workspace_id,
               () => current,
             );
-            await records.reserve(row.id, "own");
+            await records.reserve(row.id, keyMode);
+            if (hadRecord) await records.setKeyMode(row.id, keyMode);
             // #605: the money of this job is settled when it ends, and only a job claimed with billing on is.
             if (billing.state === "on") await records.openBilling(row.id);
             return {

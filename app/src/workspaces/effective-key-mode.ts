@@ -46,3 +46,17 @@ export function applyWorkspaceKeyMode(
     ? { kind: "unlimited", keyMode }
     : { ...entitlements, keyMode };
 }
+
+/**
+ * The entitlements with the key mode the claim of the job decided and recorded (#496): after the claim the job runs on that mode,
+ * whatever the workspace chooses meanwhile. Unreadable entitlements stay unreadable.
+ */
+export function withClaimedKeyMode(
+  entitlements: ResolvedEntitlements,
+  keyMode: KeyMode,
+): ResolvedEntitlements {
+  if (entitlements.kind === "invalid") return entitlements;
+  return entitlements.kind === "unlimited"
+    ? { kind: "unlimited", keyMode }
+    : { ...entitlements, keyMode };
+}

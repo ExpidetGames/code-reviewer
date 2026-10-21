@@ -19,15 +19,15 @@ import {
   type ResolvedEntitlements,
 } from "./entitlements.ts";
 
-export async function readEffectiveEntitlements(
+/**
+ * The entitlements of one workspace as they are stored, with no key mode applied: its row, else the default, else none. What
+ * the standing (suspended, unreadable) and the model access of a job are read from after the claim, which decided the key mode
+ * and recorded it (#496); no switch and no choice of the workspace is read.
+ */
+export async function readEntitlements(
   db: Kysely<Database>,
   workspaceId: string,
   now: () => Date = () => new Date(),
-  /**
-   * Whether billing is on, for a caller that has read the switch already (the claim reads it once for the whole claim); left out,
-   * it is read here.
-   */
-  billing: { on: boolean } | undefined = undefined,
 ): Promise<ResolvedEntitlements> {
   const row = await createWorkspaceEntitlementsRepository(
     db,
@@ -38,7 +38,20 @@ export async function readEffectiveEntitlements(
     row === undefined
       ? await createInstanceSettingsRepository(db, now).getDefaultEntitlements()
       : undefined;
-  const entitlements = resolveEntitlements(row, defaults);
+  return resolveEntitlements(row, defaults);
+}
+
+export async function readEffectiveEntitlements(
+  db: Kysely<Database>,
+  workspaceId: string,
+  now: () => Date = () => new Date(),
+  /**
+   * Whether billing is on, for a caller that has read the switch already (the claim reads it once for the whole claim); left out,
+   * it is read here.
+   */
+  billing: { on: boolean } | undefined = undefined,
+): Promise<ResolvedEntitlements> {
+  const entitlements = await readEntitlements(db, workspaceId, now);
   const billingOn = billing?.on ?? (await isBillingOn(db));
   if (!billingOn) return entitlements;
   return applyWorkspaceKeyMode(entitlements, {

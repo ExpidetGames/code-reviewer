@@ -16,6 +16,7 @@ import { createJobDispatchesRepository } from "../db/repositories/job-dispatches
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { decideOutcome } from "../dispatch/outcome.ts";
 import { settleEndedJobs } from "./settle-jobs.ts";
+import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -107,12 +108,19 @@ describe.each(databases)("the settlement of a job on %s", (name, open) => {
         : { limits: { maxAttempts: options.maxAttempts } }),
     });
     await setBillingSwitch(fixture.db, true);
-    if (options.keyMode !== undefined)
+    if (options.keyMode !== undefined) {
       await createWorkspaceEntitlementsRepository(
         fixture.db,
         fixture.workspaceId,
         fixture.clock.now,
       ).put(entitlements(options.keyMode), null);
+      // While billing is on the workspace's own choice decides the key mode of a claim (#496), not the entitlement's.
+      await createLlmKeyModeStore(
+        fixture.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      ).set(options.keyMode, null);
+    }
     await fundWorkspace(
       fixture.db,
       fixture.workspaceId,
