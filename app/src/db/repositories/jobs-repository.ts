@@ -296,7 +296,7 @@ export function createJobsRepository(
         trx,
         workspaceId,
         now,
-      ).voidEndedJobs();
+      ).voidEndedJobsWithIds();
       // #498: a job that took a hold before it waited again gives it back.
       await settleEndedJobs(trx, voided, now);
       return Number(result.numUpdatedRows);
@@ -561,7 +561,11 @@ export function createJobsRepository(
           supersededJobIds = [...droppedIds, ...drainingIds];
           // Only when jobs were replaced: the reserved records of the waiting ones no longer count.
           if (droppedIds.length > 0)
-            await settleEndedJobs(trx, await records.voidEndedJobs(), now);
+            await settleEndedJobs(
+              trx,
+              await records.voidEndedJobsWithIds(),
+              now,
+            );
         }
 
         return { status: "created", job: toJob(inserted), supersededJobIds };
