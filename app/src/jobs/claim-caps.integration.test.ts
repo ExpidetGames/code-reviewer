@@ -5,12 +5,13 @@
 // entitlements and before the balance; a refusal is free (no usage record, no journal entry). Made-up rates
 // (test-support/billing-switch.ts): a Diff hold on the workspace's own key is 25 minutes x 13,000 = 325,000 micro-USD, a Dynamic
 // hold on the operator's key 5,400,000.
-import type { Kysely } from "kysely";
+import type { Kysely, KyselyPlugin } from "kysely";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { describeCheck } from "../check-runs/check-text.ts";
 import { noticeBody } from "../refusal-notices/notice-text.ts";
 import { toRunDetailView, toRunRowView } from "../runs/run-view.ts";
+import { CLAIM_CAPS_RETRY_MS } from "../billing/claim-caps.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
@@ -28,6 +29,7 @@ import {
   type JobQueueFixture,
 } from "../test-support/jobs.ts";
 import { enqueueInWorkspace } from "../test-support/other-workspace-jobs.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 import {
   createPostgresTestDatabase,
   hasPostgres,
@@ -52,6 +54,21 @@ const databases: Array<
       : undefined,
   ],
 ];
+
+/** Makes every read of the workspace limits fail with the given database error code, while `code` is set. */
+function limitsReadFault(state: { code: string | null }): KyselyPlugin {
+  return {
+    transformQuery: ({ node }) => {
+      if (
+        state.code !== null &&
+        JSON.stringify(node).includes("billing_workspace_settings")
+      )
+        throw Object.assign(new Error("injected"), { code: state.code });
+      return node;
+    },
+    transformResult: async ({ result }) => result,
+  };
+}
 
 function entitlements(
   keyMode: "own" | "managed",
@@ -85,9 +102,18 @@ describe.each(databases)(
         monthlyLimitMicroUsd?: number;
         /** The balance every case starts with: large, so the balance is never what refuses. 0: none at all. */
         funding?: number;
+        /** Wraps the database so that the read of the workspace limits fails while the fault has a code. */
+        fault?: { code: string | null };
       } = {},
     ) {
-      const database = await open?.();
+      const opened =
+        options.fault === undefined || open !== undefined
+          ? await open?.()
+          : (await createTestDatabase()).db;
+      const database =
+        opened === undefined || options.fault === undefined
+          ? opened
+          : opened.withPlugin(limitsReadFault(options.fault));
       const fixture = await createJobQueueFixture({
         ...(database === undefined ? {} : { database }),
         dynamicReview: true,
@@ -478,16 +504,20 @@ describe.each(databases)(
           });
           const detail = toRunDetailView(stored, "p", fixture.clock.now());
           const row = toRunRowView(stored, "p", fixture.clock.now());
-          const customerSees = JSON.stringify([
-            check,
-            detail,
-            row,
+          const customerSees = [
+            check.title,
+            check.summary,
+            detail.problem,
+            row.problem,
             noticeBody("reviews_paused", `head:${stored.headSha}`, null),
-          ]);
+          ].join("\n");
 
           expect(detail.errorCode).toBeNull();
-          expect(customerSees).not.toMatch(/hour|brake|window|37|60|minute/i);
+          expect(customerSees).not.toMatch(/hour|brake|window|minute|\d/i);
           expect(customerSees).not.toContain("reviews_paused");
+          expect(JSON.stringify([check, detail, row])).not.toContain(
+            "reviews_paused",
+          );
           expect(customerSees).toContain("Reviews are paused");
         },
       );
@@ -768,6 +798,120 @@ describe.each(databases)(
           expect(
             (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
           ).toBe(job.id);
+        },
+      );
+    });
+
+    describe("a limit that cannot be evaluated for now", () => {
+      for (const code of ["40P01", "SQLITE_BUSY"])
+        // #499-T15
+        run(
+          `leaves the job queued for a later claim, counts an attempt and goes on, when the read fails with ${code}`,
+          async () => {
+            const refusals: ClaimRefusal[] = [];
+            const fault = { code: code as string | null };
+            const fixture = await start({
+              fault,
+              onRefused: (refusal) => refusals.push(refusal),
+            });
+            const first = await enqueue(fixture);
+            const second = await enqueue(fixture);
+            const entriesBefore = (
+              await journalOf(fixture).entries({ limit: 50 })
+            ).entries.length;
+            const failedAt = fixture.clock.now().getTime();
+
+            // The pass ends: a struggling database is not asked again in the same transaction.
+            expect(
+              await fixture.queue.claimNext("runner-a", ENGINES),
+            ).toBeNull();
+
+            expect(await fixture.queue.get(first.id)).toMatchObject({
+              status: "queued",
+              errorCode: null,
+              attempts: 1,
+              runnerId: null,
+              runAfter: new Date(failedAt + CLAIM_CAPS_RETRY_MS).toISOString(),
+            });
+            expect(await fixture.queue.get(second.id)).toMatchObject({
+              status: "queued",
+              attempts: 0,
+            });
+            expect(await usageRecords(fixture)).toEqual([]);
+            expect(
+              (await journalOf(fixture).entries({ limit: 50 })).entries,
+            ).toHaveLength(entriesBefore);
+            expect(refusals).toEqual([]);
+
+            // The database is well again: the next job goes first, the deferred one is not at the head until it is due ...
+            fault.code = null;
+            expect(
+              (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+            ).toBe(second.id);
+            // ... and then it is claimed like any other.
+            fixture.clock.advance(CLAIM_CAPS_RETRY_MS);
+            expect(
+              (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+            ).toBe(first.id);
+          },
+        );
+
+      // #499-T16
+      run(
+        "fails the job closed once its attempts are used up, like a lost lease, and reports the refusal once",
+        async () => {
+          const refusals: ClaimRefusal[] = [];
+          const fault = { code: "57014" as string | null };
+          const fixture = await start({
+            fault,
+            onRefused: (refusal) => refusals.push(refusal),
+          });
+          const job = await enqueue(fixture);
+
+          for (let attempt = 1; attempt <= 2; attempt += 1) {
+            expect(
+              await fixture.queue.claimNext("runner-a", ENGINES),
+            ).toBeNull();
+            expect(await fixture.queue.get(job.id)).toMatchObject({
+              status: "queued",
+              attempts: attempt,
+            });
+            fixture.clock.advance(CLAIM_CAPS_RETRY_MS);
+          }
+          expect(refusals).toEqual([]);
+
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+          expect(await fixture.queue.get(job.id)).toMatchObject({
+            status: "failed",
+            errorCode: "billing_limits_unreadable",
+          });
+          expect(refusals).toEqual([
+            expect.objectContaining({
+              jobId: job.id,
+              errorCode: "billing_limits_unreadable",
+            }),
+          ]);
+          expect(await usageRecords(fixture)).toEqual([]);
+        },
+      );
+
+      // #499-T16
+      run(
+        "does not touch the attempts of a job whose limits can be read again before it is due",
+        async () => {
+          const fault = { code: "40001" as string | null };
+          const fixture = await start({ fault });
+          const job = await enqueue(fixture);
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+          fault.code = null;
+
+          // Not due yet: nothing is claimed and nothing changes.
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+          expect(await fixture.queue.get(job.id)).toMatchObject({
+            status: "queued",
+            attempts: 1,
+          });
         },
       );
     });

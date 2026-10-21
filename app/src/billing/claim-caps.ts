@@ -20,10 +20,13 @@
 // Robust: the evaluation runs in a savepoint. Anything that goes wrong in it (a table that cannot be read, a stored value that
 // is no number) is undone, logged with the workspace id and the kind of error only, and answered as the stable refusal
 // `billing_limits_unreadable`: closed for that job, never open, and never thrown out of the claim, so the queue goes on with the
-// next job. A refusal is free, like every refusal at the claim.
+// next job. A refusal is free, like every refusal at the claim. A failure that may pass (a deadlock, a statement timeout, a busy
+// database: `isTransientDatabaseError`) is not a verdict on the job: it is marked `transient` and the claim gives the job back to
+// the queue instead (`CLAIM_CAPS_RETRY_MS`, one attempt counted, so it still ends after the attempts of a lost lease).
 import "server-only";
 import { sql, type Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
+import { isTransientDatabaseError } from "../db/errors.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
@@ -44,7 +47,15 @@ export const CLAIM_CAP_REFUSALS = [
 ] as const;
 export type ClaimCapRefusal = (typeof CLAIM_CAP_REFUSALS)[number];
 
-export type CapOutcome = { ok: true } | { ok: false; code: ClaimCapRefusal };
+/**
+ * `transient` (only with `billing_limits_unreadable`): the evaluation failed in a way that may pass (a deadlock, a timeout, a busy
+ * database; `isTransientDatabaseError`), so the claim gives the job back to the queue for a later try instead of refusing it.
+ */
+export type CapOutcome =
+  { ok: true } | { ok: false; code: ClaimCapRefusal; transient?: true };
+
+/** How long a job whose limits could not be read for now waits before it is due again: no hot loop, and the queue goes on past it. */
+export const CLAIM_CAPS_RETRY_MS = 15_000;
 
 /** The first moment of the UTC calendar month `now` is in, as the timestamps of the database are written. */
 export function utcMonthStart(now: Date): string {
@@ -130,9 +141,12 @@ export async function checkClaimCaps(
   } catch (error) {
     await sql.raw(`rollback to savepoint ${SAVEPOINT}`).execute(trx);
     // The workspace and the kind of error only: no number, no amount, no message of the database.
+    const transient = isTransientDatabaseError(error);
     console.warn(
-      `[billing] ${CLAIM_CAPS_FAILED_LOG_CODE} workspace=${input.job.workspaceId} error=${error instanceof Error ? error.name : "unknown"}`,
+      `[billing] ${CLAIM_CAPS_FAILED_LOG_CODE} workspace=${input.job.workspaceId} error=${error instanceof Error ? error.name : "unknown"} retry=${transient ? "yes" : "no"}`,
     );
-    return { ok: false, code: "billing_limits_unreadable" };
+    return transient
+      ? { ok: false, code: "billing_limits_unreadable", transient: true }
+      : { ok: false, code: "billing_limits_unreadable" };
   }
 }

@@ -59,7 +59,11 @@ import {
   type ClaimBilling,
   type ReserveOutcome,
 } from "../../billing/claim-billing.ts";
-import { checkClaimCaps, type CapOutcome } from "../../billing/claim-caps.ts";
+import {
+  CLAIM_CAPS_RETRY_MS,
+  checkClaimCaps,
+  type CapOutcome,
+} from "../../billing/claim-caps.ts";
 import { headNoticeKey } from "../../refusal-notices/notice-key.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
@@ -862,6 +866,48 @@ export function createRunnerJobsRepository(
                     now: () => current,
                   })
                 : { ok: true };
+            // #499: a limit that could not be read for now (a deadlock, a timeout, a busy database) is no verdict on the job: it goes
+            // back to the queue like a lost attempt, due again after CLAIM_CAPS_RETRY_MS, and fails (closed) only when its attempts
+            // are used up. The pass ends here, so a database in trouble is not asked again while this transaction holds the gate lock;
+            // the job is not due for the next pass, so it does not block the queue head.
+            if (!capped.ok && capped.transient === true) {
+              const lost = await loseAttempt(
+                trx,
+                { claim: { jobId: row.id, leaseToken } },
+                capped.code,
+                formatTimestamp(current),
+                formatTimestamp(
+                  new Date(current.getTime() + CLAIM_CAPS_RETRY_MS),
+                ),
+              );
+              if (lost.failed > 0) {
+                if (hadRecord)
+                  unknownCost.push(
+                    ...(await closeRecordsOfEndedJobs(
+                      trx,
+                      formatTimestamp(current),
+                    )),
+                  );
+                const ended = await trx
+                  .selectFrom("jobs")
+                  .select("error_code")
+                  .where("id", "=", row.id)
+                  .executeTakeFirstOrThrow();
+                const noticeKey = headNoticeKey(row.head_sha);
+                refusals.push({
+                  jobId: row.id,
+                  workspaceId: row.workspace_id,
+                  repositoryId: row.repository_id,
+                  prNumber: row.pr_number,
+                  triggerKind: row.trigger_kind,
+                  errorCode: ended.error_code ?? capped.code,
+                  ...(noticeKey === undefined
+                    ? {}
+                    : { periodStart: noticeKey }),
+                });
+              }
+              return null;
+            }
             // #498: while billing is on, the hold comes after the admission and before the record, in the same transaction:
             // a refused job leaves neither a record nor an entry, and a job handed out has both. Billing off reads no
             // billing table.
