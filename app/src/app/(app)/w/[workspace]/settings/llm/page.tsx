@@ -5,6 +5,7 @@ import { instanceAccessOf } from "@/llm/access";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { getNativeCatalog } from "@/native-providers/shared";
 import { LlmSettingsPageContent } from "@/llm/ui/llm-settings-page";
+import { billingPageLinkedFor } from "@/billing/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
@@ -38,10 +39,11 @@ async function LlmSettingsContent({
   canManage: boolean;
 }) {
   const llm = getWorkspaceLlm();
-  const [keyStatuses, summary, showPlan] = await Promise.all([
+  const [keyStatuses, summary, showPlan, showBilling] = await Promise.all([
     llm.keyServiceFor(workspaceId).statusAll(),
     llm.summaryFor(workspaceId),
     planPageLinkedFor(workspaceId),
+    billingPageLinkedFor(),
   ]);
   // A workspace on the instance's access has no provider to choose: the catalog is not read for it (#555).
   const catalog =
@@ -59,6 +61,7 @@ async function LlmSettingsContent({
       {...(catalog === undefined ? {} : { catalog })}
       summary={summary}
       showPlan={showPlan}
+      showBilling={showBilling}
     />
   );
 }

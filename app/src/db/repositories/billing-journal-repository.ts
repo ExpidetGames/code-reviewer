@@ -191,10 +191,15 @@ export type BillingJournalRepository = {
    * charges. Reads the journal and takes no lock: the claim that asks holds the gate lock of the queue.
    */
   chargedSince(since: string): Promise<number>;
-  /** The entries, newest first, `limit` at a time, after the cursor of the previous page. */
+  /**
+   * The entries, newest first, `limit` at a time, after the cursor of the previous page. `excludeTypes` leaves entries of those
+   * types out of the pages (the customer's journal does not list a hold or its release, #505); the cursor still walks the whole
+   * journal, so a page is full whenever more entries follow.
+   */
   entries(options: {
     cursor?: JournalCursor | undefined;
     limit: number;
+    excludeTypes?: readonly BillingEntryType[] | undefined;
   }): Promise<JournalPage>;
   /**
    * Compares the cache with the sum of the journal and with its open reservations, and counts the holds of jobs that ended
@@ -710,12 +715,14 @@ export function createBillingJournalRepository(
       return -Number(row?.total ?? 0) || 0;
     },
 
-    async entries({ cursor, limit }) {
+    async entries({ cursor, limit, excludeTypes }) {
       let query = db
         .selectFrom("billing_journal_entries")
         .selectAll()
         .where("workspace_id", "=", workspaceId);
       if (cursor !== undefined) query = query.where("seq", "<", cursor.seq);
+      if (excludeTypes !== undefined && excludeTypes.length > 0)
+        query = query.where("type", "not in", [...excludeTypes]);
       // One more than the page, to know whether another page follows.
       const rows = await query
         .orderBy("seq", "desc")

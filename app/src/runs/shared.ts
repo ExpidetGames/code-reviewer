@@ -4,6 +4,8 @@
 // (to take them out of a log should one slip through). Pages and routes ask for the service here;
 // tests build their own with `createRunsService`.
 import "server-only";
+import { isBillingOn } from "../billing/enabled.ts";
+import { createRunPriceSource } from "../billing/run-prices.ts";
 import { createRunsRepository } from "../db/repositories/runs-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { knownSecretsFromEnv, redactText } from "../runner-api/redact.ts";
@@ -16,8 +18,15 @@ import {
 
 /** The runs service of one workspace. */
 export function runsServiceFor(workspaceId: string): RunsService {
+  const db = getDatabase();
   return createRunsService({
-    runs: createRunsRepository(getDatabase(), workspaceId),
+    runs: createRunsRepository(db, workspaceId),
+    // The price of a review (#505): read only while billing is on, so a self-hoster who never switches it on sees no change. The
+    // switch is the one instance setting; no billing table is read while it is off.
+    prices: async (jobIds) =>
+      (await isBillingOn(db))
+        ? createRunPriceSource(db, workspaceId).pricesOf(jobIds)
+        : new Map(),
     // Read on every call: the keys can change while the server runs.
     redact: (text) => redactText(text, knownSecretsFromEnv(process.env)),
   });

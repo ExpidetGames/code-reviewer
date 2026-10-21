@@ -94,4 +94,4 @@ no webhooks, so it does not replace it. The app's client (`app/src/billing/strip
   out again in `webhooks.ts` and does not import the app's verifier, so a delivery that verifies proves that both follow the
   documented scheme. The real API wants a public https address for an endpoint; the fake takes any http(s) one at create, but delivers to the loopback only.
 - **As a process.** `main.ts` (`STRIPE_FAKE_PORT`, `STRIPE_FAKE_API_KEY`) is controlled over HTTP under `/__fake/`: `GET health`,
-  `GET events`, `POST pay`, `refund`, `dispute`, `dispute/close`, `flush`, `reset`.
+  `GET events`, `POST pay`, `refund`, `dispute`, `dispute/close`, `flush`, `reset`. The e2e stack runs it for the billing page of a workspace (#505, `app/e2e/billing/`): the app under test is pointed at it with `STRIPE_API_BASE_URL` and `ALLOW_TEST_STRIPE_ENDPOINTS=true` (`app/src/stripe-endpoints.ts`: loopback http only).

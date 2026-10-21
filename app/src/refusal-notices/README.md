@@ -96,7 +96,7 @@ there (`src/plan-handoff/README.md`). A setting that cannot be read costs the no
 
 A job the claim refuses because the balance is zero or below zero (`insufficient_balance`, `balance_negative`; no amount is held since #605) gets a notice too. The text is "No review
 ran for this change." and "This workspace has no credit left for reviews." (or "The balance of this workspace is below zero."), then "Add credit to
-continue": with a link to the workspace settings (`/w/<slug>/settings`, `settingsUrl`; the balance page of #505 will take it over) it says an Owner or
+continue": with a link to the billing page of the workspace (`/w/<slug>/settings/billing`, `settingsUrl`, #505; the workspace settings while billing is off, `billing-link.ts`) it says an Owner or
 Admin can do so there, without one it says to contact an Owner or Admin. It names no amount, rate, formula or model. It is **one per pull request head**,
 not per period: the row is recorded under `head:<commit id>` in the `period_start` column (`notice-key.ts`; a value that is no commit id gets no notice),
 so a new push after a top-up that was not enough is told again and the same head is told once. `billing_rates_incomplete` and `billing_hold_released`

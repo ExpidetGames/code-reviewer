@@ -27,3 +27,11 @@ export function workspaceSettingsUrl(
     baseUrl,
   ).toString();
 }
+
+/** The address of the billing page of a workspace (`/w/<slug>/settings/billing`, #505); the configured address of the app, never a request. */
+export function billingPageUrl(baseUrl: string, workspaceSlug: string): string {
+  return new URL(
+    `/w/${encodeURIComponent(workspaceSlug)}/settings/billing`,
+    baseUrl,
+  ).toString();
+}

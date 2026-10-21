@@ -116,6 +116,7 @@ and usage page shows no "Reviews in this period" rows: `PlanView.runs` is `null`
 of the period, the paused notice and the cost-limit bar (the own-key limit of #361 and the managed one) stay. The monthly total limit and the hourly brake
 that replace the quotas are in `src/billing/README.md`, "Limits at claim". The operator API's limits are not touched (ADR 0006, section 6, no. 3 is still
 open).
+Since #505 the page itself is not shown while billing is on: `/w/<slug>/settings/plan` leads on to the billing page (`/w/<slug>/settings/billing`, `src/billing/README.md`, "The workspace page"), which takes its place in the settings navigation. The data route `GET /api/w/<slug>/plan` is unchanged.
 
 ## Limits and suspension at claim (#277)
 
