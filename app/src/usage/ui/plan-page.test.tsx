@@ -67,6 +67,26 @@ describe("the plan page of an unlimited workspace", () => {
   });
 });
 
+describe("the plan page while billing is on (#499)", () => {
+  // #499-T10
+  it("shows no quota rows when the view has no run counts, and still shows the plan and the usage limit", () => {
+    page(
+      limited({
+        runs: null,
+        managed: true,
+        cost: { percentUsed: 62, unknownCostCount: 0 },
+      }),
+    );
+
+    expect(
+      screen.getAllByRole("heading").map((heading) => heading.textContent),
+    ).toEqual(["Plan and usage", "Current plan", "Usage limit"]);
+    expect(screen.queryByText("Diff Review")).toBeNull();
+    expect(screen.queryByText("Dynamic Review")).toBeNull();
+    expect(screen.queryByText(/\bof\b \d/)).toBeNull();
+  });
+});
+
 describe("the plan page of a workspace with limits", () => {
   // #282-T02
   it("shows how many runs of each kind are used of the limit", () => {

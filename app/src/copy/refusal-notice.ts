@@ -50,3 +50,27 @@ export function noticeAddCreditAt(linkText: string, url: string): string {
 
 /** The name of the workspace settings in the link of a refusal for the balance. */
 export const NOTICE_SETTINGS_LINK_TEXT = "the workspace settings";
+
+/**
+ * Why, for a workspace whose own monthly spending limit was reached (#499). It names no amount of ours and not the limit the
+ * customer set: the Owner or Admin who set it finds it in the settings.
+ */
+export const NOTICE_MONTHLY_LIMIT_REACHED =
+  "The monthly spending limit of this workspace was reached.";
+
+/** Who to turn to for the monthly limit, when there is no page to point to. */
+export const NOTICE_MONTHLY_LIMIT_WHO =
+  "An Owner or Admin of this workspace can change it.";
+
+/** The same, with the page where an Owner or Admin changes it (the link text is the page's name). */
+export function noticeMonthlyLimitAt(linkText: string, url: string): string {
+  return `An Owner or Admin of this workspace can change it on [${linkText}](${url}).`;
+}
+
+/**
+ * Why, for a workspace the hidden abuse brake paused (#499). It says reviews are paused for a while and nothing else: not the
+ * number of reviews, not the period it counts, not that it is a limit. Nobody in the workspace can lift it, so it points to no page.
+ */
+export const NOTICE_REVIEWS_PAUSED_FOR_A_WHILE =
+  "Reviews are paused for this workspace for a while.";
+export const NOTICE_TRY_AGAIN_LATER = "Please try again later.";

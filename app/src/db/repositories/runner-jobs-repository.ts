@@ -59,6 +59,11 @@ import {
   type ClaimBilling,
   type ReserveOutcome,
 } from "../../billing/claim-billing.ts";
+import {
+  CLAIM_CAPS_RETRY_MS,
+  checkClaimCaps,
+  type CapOutcome,
+} from "../../billing/claim-caps.ts";
 import { headNoticeKey } from "../../refusal-notices/notice-key.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
@@ -778,11 +783,16 @@ export function createRunnerJobsRepository(
                 : claimOldestDueJob
             )(trx, claim, reviewKinds, claimOptions.jobId);
             if (row === undefined) return null;
+            // #498: read once per claim, for the first job that is taken (a claim that finds no job reads nothing). #499
+            // needs it before the admission: while billing is on, the run quotas of the plan are not enforced.
+            billing ??= await readClaimBilling(trx);
             // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
             // the record is reserved: a refused job leaves no record, and two claims cannot both take the
             // last unit of a limit.
             const { admission, hadRecord, ignoredCostLimit, keyMode } =
-              await admitClaimedJob(trx, row, () => current);
+              await admitClaimedJob(trx, row, () => current, {
+                runQuotas: billing.state !== "on",
+              });
             if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
             if (!admission.allow) {
               const detail = {
@@ -840,16 +850,68 @@ export function createRunnerJobsRepository(
               });
               continue;
             }
+            // #499: while billing is on, the hidden hourly brake and the workspace's monthly limit come after the admission and
+            // before the balance. They never fail the claim (their savepoint turns a failure into a refusal of this job).
+            const capped: CapOutcome =
+              billing.state === "on"
+                ? await checkClaimCaps(trx, {
+                    hourlyReviewLimit: billing.hourlyReviewLimit,
+                    job: { id: row.id, workspaceId: row.workspace_id },
+                    now: () => current,
+                  })
+                : { ok: true };
+            // #499: a limit that could not be read for now (a deadlock, a timeout, a busy database) is no verdict on the job: it goes
+            // back to the queue like a lost attempt, due again after CLAIM_CAPS_RETRY_MS, and fails (closed) only when its attempts
+            // are used up. The pass ends here, so a database in trouble is not asked again while this transaction holds the gate lock;
+            // the job is not due for the next pass, so it does not block the queue head.
+            if (!capped.ok && capped.transient === true) {
+              const lost = await loseAttempt(
+                trx,
+                { claim: { jobId: row.id, leaseToken } },
+                capped.code,
+                formatTimestamp(current),
+                formatTimestamp(
+                  new Date(current.getTime() + CLAIM_CAPS_RETRY_MS),
+                ),
+              );
+              if (lost.failed > 0) {
+                if (hadRecord)
+                  unknownCost.push(
+                    ...(await closeRecordsOfEndedJobs(
+                      trx,
+                      formatTimestamp(current),
+                    )),
+                  );
+                const ended = await trx
+                  .selectFrom("jobs")
+                  .select("error_code")
+                  .where("id", "=", row.id)
+                  .executeTakeFirstOrThrow();
+                const noticeKey = headNoticeKey(row.head_sha);
+                refusals.push({
+                  jobId: row.id,
+                  workspaceId: row.workspace_id,
+                  repositoryId: row.repository_id,
+                  prNumber: row.pr_number,
+                  triggerKind: row.trigger_kind,
+                  errorCode: ended.error_code ?? capped.code,
+                  ...(noticeKey === undefined
+                    ? {}
+                    : { periodStart: noticeKey }),
+                });
+              }
+              return null;
+            }
             // #498: while billing is on, the hold comes after the admission and before the record, in the same transaction:
             // a refused job leaves neither a record nor an entry, and a job handed out has both. Billing off reads no
             // billing table.
-            billing ??= await readClaimBilling(trx);
             // #507: the start credit comes first, in this transaction, so the first job of a new workspace can use it. It is
-            // granted once per GitHub account and only while billing is on and ready (a state that is not "on" reads nothing).
-            // It never fails the claim (a failed grant is skipped and logged), and a workspace is tried once per claim:
-            // a refused job's workspace meets its next candidate job with the same answer.
+            // granted once per GitHub account and only while billing is on and ready (a state that is not "on" reads nothing),
+            // and not for a job a limit refused. It never fails the claim (a failed grant is skipped and logged), and a
+            // workspace is tried once per claim: a refused job's workspace meets its next candidate job with the same answer.
             if (
               billing.state === "on" &&
+              capped.ok &&
               !startCreditTried.has(row.workspace_id)
             ) {
               startCreditTried.add(row.workspace_id);
@@ -864,8 +926,9 @@ export function createRunnerJobsRepository(
                   amountMicroUsd: credit.entry.amountMicroUsd,
                 });
             }
-            const held: ReserveOutcome =
-              billing.state === "off"
+            const held: ReserveOutcome | CapOutcome = !capped.ok
+              ? capped
+              : billing.state === "off"
                 ? { ok: true }
                 : billing.state === "rates_incomplete"
                   ? RATES_INCOMPLETE_REFUSAL

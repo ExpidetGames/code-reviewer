@@ -338,6 +338,30 @@ describe("merging the instance admin with an imported operator", () => {
     ]);
   });
 
+  // #499-T04
+  it("keeps who set the monthly limit: the author moves to the admin when the operator is retired", async () => {
+    const ctx = await setup();
+    await adminAndImportedOperator(ctx);
+    await ctx.db
+      .insertInto("billing_workspace_settings")
+      .values({
+        workspace_id: ctx.workspace.id,
+        monthly_limit_micro_usd: 50_000_000,
+        updated_by: "operator",
+        updated_at: "2026-10-11T08:30:00.000Z",
+      })
+      .execute();
+
+    expect(await ctx.link(ADMIN)).toEqual({ ok: true, outcome: "merged" });
+
+    expect(
+      await ctx.db
+        .selectFrom("billing_workspace_settings")
+        .select(["updated_by", "monthly_limit_micro_usd"])
+        .execute(),
+    ).toEqual([{ updated_by: "admin", monthly_limit_micro_usd: 50_000_000 }]);
+  });
+
   // #102-GH-25
   it("keeps the higher role where both are members, in either direction, without a duplicate membership", async () => {
     const ctx = await setup();

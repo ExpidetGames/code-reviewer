@@ -51,6 +51,18 @@ describe("the sentences for error codes", () => {
     }
   });
 
+  // #499-T13
+  it("gives the code of the hidden brake a sentence and shows no code, no number and no window", () => {
+    const described = describeErrorCode("reviews_paused");
+
+    expect(described.known).toBe(true);
+    expect(described.code).toBeNull();
+    expect(described.text).toMatch(/^Reviews are paused for this workspace/);
+    expect(described.text).not.toMatch(
+      /\d|hour|brake|limit|window|reviews_paused/i,
+    );
+  });
+
   // #434-X1: the code no part of the system produces any more, kept for the runs that ended with it.
   it("keeps the sentence of the removed tier code for old runs, points at the review options that replaced the levels, and the claim cannot end a job with it", () => {
     const code = "managed_tier_unavailable";

@@ -32,6 +32,7 @@ import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
 import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
 import { createBillingProfilesRepository } from "./billing-profiles-repository.ts";
+import { createBillingWorkspaceSettingsRepository } from "./billing-workspace-settings-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -57,6 +58,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     billing: createBillingJournalRepository(db, workspaceId),
     topUpIntents: createBillingTopUpIntentsRepository(db, workspaceId),
     profiles: createBillingProfilesRepository(db, workspaceId),
+    limits: createBillingWorkspaceSettingsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -320,6 +322,11 @@ async function seed(
     vatId: null,
   });
   await repos.profiles.setCustomer("fake", `cus_${tag}`);
+  // The monthly limit (#499): each workspace has its own, so the other's is there to be reached for.
+  await repos.limits.setMonthlyLimit(
+    tag === "a" ? 10_000_000 : 20_000_000,
+    null,
+  );
   return {
     topUpIntentId: topUpIntent.id,
     unpagedIntentId: unpagedIntent.id,
@@ -437,6 +444,11 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .execute(),
     billingProfiles: await db
       .selectFrom("billing_profiles")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .execute(),
+    billingWorkspaceSettings: await db
+      .selectFrom("billing_workspace_settings")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .execute(),
@@ -1007,6 +1019,12 @@ const CASES: Case[] = [
     run: (a) => a.usage.countByKind("2000-01-01T00:00:00.000Z"),
     expectAnswer: (answer) => expect(answer).toEqual({ diff: 1, dynamic: 0 }),
   },
+  // the started reviews (#499): A counts its own record, never B's
+  {
+    name: "usage.startedSince",
+    run: (a) => a.usage.startedSince("2000-01-01T00:00:00.000Z"),
+    expectAnswer: (answer) => expect(answer).toBe(1),
+  },
   {
     name: "usage.sumSettledCostMicroUsd",
     run: (a) =>
@@ -1271,6 +1289,12 @@ const CASES: Case[] = [
       ]);
     },
   },
+  // the charged total (#499): A was charged nothing, whatever B was
+  {
+    name: "billing.chargedSince",
+    run: (a) => a.billing.chargedSince("2000-01-01T00:00:00.000Z"),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
   // the balance lock (#507) writes nothing, and it locks the row of A's own workspace only
   {
     name: "billing.lockBalance",
@@ -1404,6 +1428,24 @@ const CASES: Case[] = [
         customerRef: "cus_new",
         legalName: "Legal a GmbH",
       }),
+  },
+  // the workspace billing settings (#499): A reads and sets its own limit; B's stays as it is
+  {
+    name: "limits.get",
+    run: (a) => a.limits.get(),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ monthlyLimitMicroUsd: 10_000_000 }),
+  },
+  {
+    name: "limits.monthlyLimitMicroUsd",
+    run: (a) => a.limits.monthlyLimitMicroUsd(),
+    expectAnswer: (answer) => expect(answer).toBe(10_000_000),
+  },
+  {
+    name: "limits.setMonthlyLimit",
+    run: (a) => a.limits.setMonthlyLimit(null, null),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ monthlyLimitMicroUsd: null }),
   },
   // runs
   {

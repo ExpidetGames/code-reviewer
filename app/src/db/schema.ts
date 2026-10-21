@@ -880,6 +880,20 @@ export interface BillingProfilesTable {
 }
 
 /**
+ * What a workspace sets for its own billing (src/billing/README.md, ADR 0006, 2.9; #499): the optional monthly total limit.
+ * One row per workspace, made by the first change; no row means no limit.
+ */
+export interface BillingWorkspaceSettingsTable {
+  workspace_id: string;
+  /** Micro-USD, positive; null is no limit. `bigint` on Postgres, which reads it back as text (the repository converts). */
+  monthly_limit_micro_usd: number | null;
+  /** The user who last changed it; null once that user is gone. */
+  updated_by: string | null;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+}
+
+/**
  * The memory of the start credit (src/billing/README.md, ADR 0006, 2.16; #507): one row for each GitHub account that was
  * granted it. Instance level, a numeric id and a workspace id only, and no foreign key: it outlives the workspace.
  */
@@ -990,6 +1004,7 @@ export interface Database {
   billing_balances: BillingBalancesTable;
   billing_profiles: BillingProfilesTable;
   billing_start_credit_grants: BillingStartCreditGrantsTable;
+  billing_workspace_settings: BillingWorkspaceSettingsTable;
   billing_topup_intents: BillingTopupIntentsTable;
   billing_webhook_events: BillingWebhookEventsTable;
   password_reset_tokens: PasswordResetTokensTable;

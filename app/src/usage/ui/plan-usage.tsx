@@ -117,6 +117,19 @@ function CostUsage({ cost }: { cost: CostUsageView }) {
   );
 }
 
+function RunUsage({ runs }: { runs: NonNullable<Limited["runs"]> }) {
+  return (
+    <Section title={PLAN_RUNS_HEADING}>
+      <DescriptionList
+        items={(["diff", "dynamic"] as const).map((kind) => ({
+          term: KIND_NAMES[kind],
+          description: planRunsText(runs[kind].used, runs[kind].limit),
+        }))}
+      />
+    </Section>
+  );
+}
+
 function LimitedPlan({ plan }: { plan: Limited }) {
   return (
     <>
@@ -140,17 +153,7 @@ function LimitedPlan({ plan }: { plan: Limited }) {
           <p className="text-sm text-muted-foreground">{PLAN_MANAGED}</p>
         ) : null}
       </Section>
-      <Section title={PLAN_RUNS_HEADING}>
-        <DescriptionList
-          items={(["diff", "dynamic"] as const).map((kind) => ({
-            term: KIND_NAMES[kind],
-            description: planRunsText(
-              plan.runs[kind].used,
-              plan.runs[kind].limit,
-            ),
-          }))}
-        />
-      </Section>
+      {plan.runs === null ? null : <RunUsage runs={plan.runs} />}
       {plan.cost === null ? null : <CostUsage cost={plan.cost} />}
     </>
   );

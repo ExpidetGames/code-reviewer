@@ -347,6 +347,30 @@ const ENTRIES: Entry[] = [
     billing: true,
   },
   {
+    // #499-T04: the monthly total limit is read and set by an Admin and an Owner, and by nobody of another workspace.
+    name: "GET billing/monthly-limit",
+    route: "/api/w/[workspace]/billing/monthly-limit",
+    method: "GET",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/monthly-limit",
+    params: () => ({}),
+    file: "billing/monthly-limit/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
+    name: "PUT billing/monthly-limit",
+    route: "/api/w/[workspace]/billing/monthly-limit",
+    method: "PUT",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/monthly-limit",
+    body: () => ({ monthlyLimitCents: 5_000 }),
+    params: () => ({}),
+    file: "billing/monthly-limit/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
     // #502-T15: "Check payment" is for an Admin and an Owner. The intent of the address is looked up in the workspace of the
     // address only (a foreign intent is `intent_not_found`, proven in src/billing/topup-check-http.integration.test.ts); here the
     // intent does not exist, so the answer at the right role is 404 `intent_not_found` and Stripe is never called.
@@ -677,7 +701,8 @@ async function start() {
         | "jobs"
         | "invitations"
         | "workspace_members"
-        | "plan_handoff_tokens",
+        | "plan_handoff_tokens"
+        | "billing_workspace_settings",
     ) =>
       db
         .selectFrom(table)
@@ -696,6 +721,7 @@ async function start() {
       invitations: await select("invitations"),
       members: await select("workspace_members"),
       planHandoffTokens: await select("plan_handoff_tokens"),
+      billingWorkspaceSettings: await select("billing_workspace_settings"),
       projects: await db
         .selectFrom("projects")
         .innerJoin("repositories", "repositories.id", "projects.repository_id")

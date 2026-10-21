@@ -21,6 +21,8 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `wall-clock.ts`                                                                                                                   | `createWallClockRecorder`: the measure of a job without a VM, where billing is on (#493). `shared.ts` hands it to the platform after the response.                                                                                                                                                                                                                                                                                             |
 | `hold.ts`                                                                                                                         | What a hold is made for (#498): the longest a VM lives (the Dispatcher's job timeout plus VM margin, pinned to it by a test in both places) and the Dynamic cost limit (the runner's default).                                                                                                                                                                                                                                                 |
 | `claim-billing.ts`                                                                                                                | Billing at the claim (#498): `readClaimBilling` (off, rates incomplete, or on with the rates), `holdOf`, `reserveAtClaim`.                                                                                                                                                                                                                                                                                                                     |
+| `claim-caps.ts`                                                                                                                   | The monthly total limit and the hidden hourly brake at the claim (#499): `checkClaimCaps` (in a savepoint; `reviews_paused`, `monthly_limit_reached`, `billing_limits_unreadable`), `utcMonthStart`, `brakeWindowStart`. See "Limits at claim (#499)".                                                                                                                                                                                         |
+| `monthly-limit-service.ts`, `monthly-limit-http.ts`                                                                               | Reading and setting the monthly limit (#499): an Owner and an Admin (`manage_billing`), whole US cents, `null` for none, an audit line for every change; the handlers behind `GET` and `PUT /api/w/:workspace/billing/monthly-limit`.                                                                                                                                                                                                          |
 | `claim-key-mode.ts`                                                                                                               | `keyModeAtClaim`: whose key a job runs on, as far as the claim knows. The seam of #496.                                                                                                                                                                                                                                                                                                                                                        |
 | `settle-jobs.ts`                                                                                                                  | `settleEndedJobs`: prices the jobs a transaction ended and writes a `release` and, unless free, a `usage` entry (#498).                                                                                                                                                                                                                                                                                                                        |
 | `stranded-holds.ts`                                                                                                               | `releaseStrandedHolds` (#591): releases the holds of ended jobs that have none released (a job that ended while billing was off), never charging; run by the switch-on and the sweep.                                                                                                                                                                                                                                                          |
@@ -254,12 +256,15 @@ of the entitlements the claim has read, as the LLM access resolves it; the seam 
 (decision 5 of #489, "option b" of the maintainer on #489): any positive balance holds `min(hold, balance)` and the job runs, only a balance of exactly zero is refused (`insufficient_balance`), and the final charge may take the balance below zero. ADR 0006 (D8, 2.8) and the case #498-T03 still say "refuse below the hold"; they are updated on #490. Refusals fail the job with
 the stable codes below, count no attempt, leave **no usage record and no entry**, and are reported to `onRefused` like the refusals of the entitlements:
 
-| Code                       | When                                                                                                                       | Notice |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `insufficient_balance`     | the balance is zero: nothing can be held                                                                                   | yes    |
-| `balance_negative`         | the balance is below zero (a refund, a chargeback or a final charge above the hold took it there), also for a hold of zero | yes    |
-| `billing_rates_incomplete` | billing is on and a rate is missing, or the switch is set and the adapter is not ready (`isBillingOn` is false)            | no     |
-| `billing_hold_released`    | a job claimed again whose hold was released already: it must not run as if it were paid                                    | no     |
+| Code                        | When                                                                                                                       | Notice |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `insufficient_balance`      | the balance is zero: nothing can be held                                                                                   | yes    |
+| `balance_negative`          | the balance is below zero (a refund, a chargeback or a final charge above the hold took it there), also for a hold of zero | yes    |
+| `billing_rates_incomplete`  | billing is on and a rate is missing, or the switch is set and the adapter is not ready (`isBillingOn` is false)            | no     |
+| `billing_hold_released`     | a job claimed again whose hold was released already: it must not run as if it were paid                                    | no     |
+| `reviews_paused`            | the hidden brake: the workspace started too many reviews in the last hour (#499, below)                                    | yes    |
+| `monthly_limit_reached`     | the workspace's own monthly total limit would be passed (#499, below)                                                      | yes    |
+| `billing_limits_unreadable` | the brake or the monthly limit could not be evaluated (#499): closed for this job                                          | no     |
 
 A hold of zero (the workspace's own key and B = 0) writes no reservation, but a balance below zero still refuses. A job that is claimed again after
 a lost attempt keeps its one hold and its one usage record (`reservation` is keyed by the job).
@@ -345,6 +350,64 @@ it last saw a Dispatcher with and without it (`dispatcher-features.ts`, the inst
 `canSwitchBillingOnWithDispatcher` refuses with `dispatcher_lacks_vm_lifecycle` while one without it has claimed within a day; the switch-on of the
 admin page asks it inside the same `lockBillingSettings` transaction that writes `enabled`, next to the readiness of the adapter, and names the item in
 `missing` (#498-T19).
+
+## Limits at claim (#499)
+
+Three things in ADR 0006, 2.9 are decided where a job is claimed and nowhere else: the customer's optional **monthly total limit**, the operator's hidden
+**hourly abuse brake**, and the **absence of the per-period run quotas** while billing is on. The own-key cost limit (`ownKeyCostLimitMicroUsd`, #361) is untouched.
+All of it acts **at the claim only**: a run that started is never stopped by a limit, so no review is ever cut short for money, and the cost guard of Dynamic
+Review with its final-call exemption is not involved. With billing off none of it runs (`checkClaimCaps` is not even called; `decideAdmission` keeps the
+quotas), and nothing about a self-hoster changes.
+
+**Order of the checks at the claim**, inside the claim transaction, the first refusal wins: the entitlements (unreadable, suspended, the own-key and managed
+cost limits as today; the run quotas only while billing is off), then **the brake**, then **the monthly limit**, then the start credit and the balance (#498, #507).
+A refusal is free like every refusal at the claim: the job fails with a stable code, no attempt is counted, no usage record and no journal entry exists,
+and `onRefused` hears of it for the pull request notice.
+
+| Check               | Set by                                                                                          | Default                   | Counts                                                                                                                                                                                                                                                     | Code                    | Notice                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------- |
+| Hourly brake        | the instance admin (`billing_settings.hourlyReviewLimit`, #504; 1 to 100,000, 0 is not allowed) | 60                        | the usage records the workspace started after "now minus 60 minutes" (`reserved_at`, every state: a review that was cancelled or replaced did start; the job that asks is left out, so one claimed again after a lost lease is not counted against itself) | `reviews_paused`        | yes: "Reviews are paused for this workspace for a while." |
+| Monthly total limit | the customer (Owner, Admin; `billing_workspace_settings.monthly_limit_micro_usd`)               | none (`null`)             | the `usage` entries of the journal (AI plus infrastructure) since the first moment of the **UTC calendar month**, once they have reached the limit (no hold counts)                                                                                        | `monthly_limit_reached` | yes                                                       |
+| Plan run quotas     | the operator, in entitlements                                                                   | enforced with billing off | not enforced while billing is on                                                                                                                                                                                                                           | -                       | -                                                         |
+
+- **The brake is hidden.** Nothing a customer can read names its number, its window or that anything is counted. The refused job is stored with the neutral code
+  `reviews_paused` (not a name that carries the window) and `describeErrorCode` (`UNSHOWN_ERROR_CODES`) never hands that code out, so the check run says only
+  "Reviews are paused for this workspace for a while, so this run did not start ..." with no "(`code`)", and the Runs page shows the sentence with no "Error code" line (also in
+  every answer built on the run view). The notice ("Reviews are paused for this workspace for a while. Please try again later.") points to no page, because nobody in
+  the workspace can lift it. What the **operator** can see: the server log line every refusal at the claim writes, `[queue] job=<id> workspace=<id> refused at claim: reviews_paused`
+  (ids and the neutral code; no number, no window), and the admin runs list, which shows the stored code. The only other line the evaluation writes, `CLAIM_CAPS_FAILED`, holds the workspace
+  id and the kind of error. The admin sets the number on the billing page of the admin portal (#504). Two claims of one workspace never both take the last start: the claim runs
+  under the gate lock of the queue (Postgres) or the write lock of the connection (SQLite), and the record of a started review is written in the same transaction.
+- **The monthly limit.** `charged >= limit` refuses (maintainer decision on #499, which replaced the first rule `charged + hold > limit` and a later hard cap): the claim
+  is refused `monthly_limit_reached` only when this UTC month's **actual charges** have already reached the limit; below it the job starts. `charged` is the sum of `usage`
+  entries by the time the run **settled** (`created_at`), from the start of the UTC month (`utcMonthStart`); the sum starts again at 00:00:00.000 UTC of the first day. No hold counts:
+  neither the holds of the runs in flight (`billing_balances.reserved_micro_usd`) nor the hold of the job that asks, so a job whose own cost would take the month above the limit
+  still starts when the charges are below it, and the month can pass the limit by what the reviews in flight and that job end up costing. It acts at the claim only: a review that runs
+  is never cut short. The balance check of #498 is a separate matter and unchanged here. A limit of one workspace never counts another's charges. The notice says that the monthly
+  spending limit of the workspace was reached and that an Owner or Admin can change it (with a link to the workspace settings when the instance has one); it names no amount.
+- **Setting it.** `GET` and `PUT /api/w/:workspace/billing/monthly-limit` (`monthly-limit-http.ts`): billing off is the 404 of a path that does not exist; then the
+  same-site check, the session and the role (`manage_billing`: an Owner or an Admin; a Member gets 403 and nothing is stored or logged), a JSON body of at most 1 KiB
+  `{ "monthlyLimitCents": 12345 }` (whole US cents between 100 and 100,000,000; `null` clears the limit). Codes: `limit_invalid` (not a whole number or missing),
+  `limit_out_of_range`, plus the usual `cross_site_request`, `unsupported_content_type`, `body_too_large`, `invalid_input` and `forbidden`. The workspace is the one of the address. Every change
+  leaves an audit line `[billing] MONTHLY_LIMIT_CHANGED workspace=<id> user=<id> action=set limit_cents=<n>` (or `action=cleared`), and the row keeps who and when (`updated_by`,
+  `updated_at`). The settings form is #505.
+- **Robustness.** `checkClaimCaps` runs in a savepoint (the pattern of the start credit). Anything that goes wrong in it is rolled back to the savepoint, logged as
+  `CLAIM_CAPS_FAILED workspace=<id> error=<kind> retry=<yes|no>`, and never thrown out of the claim. On Postgres the savepoint is what keeps a failed statement from poisoning the claim
+  transaction. What happens to the job depends on the kind of error (`isTransientDatabaseError`, `db/errors.ts`, by the SQLSTATE or SQLite code, never by the message):
+  - **Deterministic** (a table or column that cannot be read, a stored value that is no positive whole number: asking again gives the same answer): the stable refusal
+    `billing_limits_unreadable` for that job: closed, never open, so the queue goes on with the next job.
+  - **Transient** (a serialization failure or deadlock, a lock that could not be taken, a statement timeout, too many connections, a failed connection, `SQLITE_BUSY`/`SQLITE_LOCKED`):
+    no verdict on the job. The claim gives it back with the queue's own rule for a lost attempt (`loseAttempt`): it is `queued` again with `run_after` at now plus
+    `CLAIM_CAPS_RETRY_MS` (15 seconds) and one attempt counted, so it is not due in the next pass (no hot loop; the queue head is not blocked, the next runner poll takes the
+    next job) and, after `maxAttempts` (3) such tries, it ends `billing_limits_unreadable` like any lost lease. Until then no refusal, no notice, no usage record and no entry
+    exist. The pass ends at once (the claim answers "nothing", the runner asks again): a database in trouble is not asked again inside the transaction that holds the gate lock.
+    Trade-off: while the database fails for a workspace, its jobs are tried one per pass and each uses one of its three attempts.
+- **Run quotas.** `decideAdmission` takes `{ runQuotas: false }` while billing is on (`billing.state === "on"`; a switch that is set but whose adapter is not ready is not on, and
+  keeps the quotas as the claim refuses everything then anyway). The suspension, unreadable entitlements and the cost limits are unchanged. The plan and usage page shows no run rows then
+  (`PlanView.runs` is `null`, `src/usage/README.md`). The operator API's limits are not touched (ADR 0006, section 6, no. 3 is open).
+- **Indexes.** `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the brake (the earlier `(workspace_id, review_kind, reserved_at)` cannot serve a range on `reserved_at`
+  without the kind) and `billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum (migration `20261021210200_add_limit_query_indexes`; the second one also carries `amount_micro_usd` (`INCLUDE (amount_micro_usd)` on Postgres, a last key column on SQLite, which has no INCLUDE), so the month sum is read from the index alone). The settings table
+  is `billing_workspace_settings` (`20261021210100_create_billing_workspace_settings`); the widened check of the notice codes is `20261021210000_widen_refusal_notice_codes_for_limits`.
 
 ## The switch
 
@@ -940,7 +1003,7 @@ It is the easiest thing to farm, so it is tied to the **GitHub account**, not to
 
 ### Abuse protection of version 1, and the surface that is left
 
-What protects the credit: the memory above (one grant per GitHub account, kept past the workspace), the hourly brake (#499; its setting exists, the brake itself is not built yet), the holds
+What protects the credit: the memory above (one grant per GitHub account, kept past the workspace), the hidden hourly brake (#499, "Limits at claim (#499)"), the holds
 that bound what a run can cost (a hold is at most the balance, a balance of zero is refused), and the sign-up rules of the instance
 (allowed organizations, invitation only, verified email as the operator configured them). Not in version 1, by ADR 0006 2.16:
 disposable-email lists, a first-top-up cap, a verified email as a condition.

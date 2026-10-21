@@ -588,6 +588,18 @@ describe("the detail of a run", () => {
     expect(view.problem).toBe(UNKNOWN_ERROR_COPY);
   });
 
+  // #499-T13
+  it("carries no error code and no window for a run the hidden brake refused", () => {
+    const refused = job({ status: "failed", errorCode: "reviews_paused" });
+    const detail = toRunDetailView(refused, "p", NOW);
+    const row = toRunRowView(refused, "p", NOW);
+
+    expect(detail.errorCode).toBeNull();
+    expect(detail.errorCodeKnown).toBe(true);
+    expect(detail.problem).toMatch(/^Reviews are paused for this workspace/);
+    expect(JSON.stringify([detail, row])).not.toMatch(/hourly|reviews_paused/i);
+  });
+
   // CR-53-T01
   it.each([
     [
