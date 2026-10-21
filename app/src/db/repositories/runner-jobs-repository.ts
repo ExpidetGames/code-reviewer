@@ -64,6 +64,7 @@ import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import {
   settlementOfOutcome,
   settlementOfSupersededOutcome,
@@ -1018,6 +1019,8 @@ export function createRunnerJobsRepository(
               finished.workspace_id,
               now,
             ).settle(finished.id, settlement);
+            // #498: the hold of the job is released and its price charged, in the transaction that ended it.
+            await settleEndedJobs(trx, [finished.id], now);
             // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
             // call settled the record, not when it was settled already).
             if (
@@ -1081,6 +1084,7 @@ export function createRunnerJobsRepository(
               stored.workspace_id,
               now,
             ).settle(stored.id, settlement);
+            await settleEndedJobs(trx, [stored.id], now);
             if (
               settled &&
               settlement.state === "settled" &&

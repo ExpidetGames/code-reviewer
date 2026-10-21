@@ -51,6 +51,7 @@ import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
+import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 
 export type JobListFilter = {
@@ -291,7 +292,13 @@ export function createJobsRepository(
       );
       const result = await query.executeTakeFirst();
       // A job that waited again after a lost lease keeps a reserved usage record; it no longer counts.
-      await createUsageRecordsRepository(trx, workspaceId, now).voidEndedJobs();
+      const voided = await createUsageRecordsRepository(
+        trx,
+        workspaceId,
+        now,
+      ).voidEndedJobs();
+      // #498: a job that took a hold before it waited again gives it back.
+      await settleEndedJobs(trx, voided, now);
       return Number(result.numUpdatedRows);
     });
   }
@@ -553,7 +560,8 @@ export function createJobsRepository(
           }
           supersededJobIds = [...droppedIds, ...drainingIds];
           // Only when jobs were replaced: the reserved records of the waiting ones no longer count.
-          if (droppedIds.length > 0) await records.voidEndedJobs();
+          if (droppedIds.length > 0)
+            await settleEndedJobs(trx, await records.voidEndedJobs(), now);
         }
 
         return { status: "created", job: toJob(inserted), supersededJobIds };

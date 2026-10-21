@@ -114,9 +114,10 @@ export type UsageRecordsRepository = {
   /**
    * Voids the `reserved` records of this workspace whose job has ended without reporting (cancelled, replaced,
    * or otherwise final), so a run that was dropped while it waited again no longer counts. Called in the
-   * transaction of every transition that ends a waiting job.
+   * transaction of every transition that ends a waiting job. Returns the ids of the jobs whose record it voided (#498: the
+   * caller settles their holds in the same transaction).
    */
-  voidEndedJobs(): Promise<void>;
+  voidEndedJobs(): Promise<string[]>;
   /**
    * #397: marks the `reserved` records of these jobs of this workspace as superseded runs (reason `superseded`): the
    * run was replaced by a newer push and is draining. It stays `reserved` until its Worker reports or the drain ends,
@@ -289,7 +290,7 @@ export function createUsageRecordsRepository(
     },
 
     async voidEndedJobs() {
-      await db
+      const voided = await db
         .updateTable("usage_records")
         .set({ state: "void" })
         .where("workspace_id", "=", workspaceId)
@@ -308,7 +309,9 @@ export function createUsageRecordsRepository(
               .where("jobs.status", "in", ENDED_JOB_STATUSES),
           ),
         )
+        .returning("job_id")
         .execute();
+      return voided.map((row) => row.job_id);
     },
 
     async get(jobId) {
