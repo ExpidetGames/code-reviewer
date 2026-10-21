@@ -2,6 +2,7 @@
 
 import type { Metadata } from "next";
 import { instanceAccessOf } from "@/llm/access";
+import { getLlmKeyModeService } from "@/llm/key-mode-shared";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { getNativeCatalog } from "@/native-providers/shared";
 import { LlmSettingsPageContent } from "@/llm/ui/llm-settings-page";
@@ -45,9 +46,14 @@ async function LlmSettingsContent({
     planPageLinkedFor(workspaceId),
     billingPageLinkedFor(),
   ]);
-  // A workspace on the instance's access has no provider to choose: the catalog is not read for it (#555).
+  // While billing is on the workspace chooses whose key its reviews use (#496); the key forms stay on the page whichever it chose.
+  // `showBilling` is the switch: with billing off there is no choice and the page is what it was.
+  const keyChoice = showBilling
+    ? await getLlmKeyModeService().choiceOf(workspaceId)
+    : undefined;
+  // A workspace on the instance's access has no provider to choose: the catalog is not read for it (#555), unless it can choose.
   const catalog =
-    instanceAccessOf(summary) === null
+    instanceAccessOf(summary) === null || keyChoice !== undefined
       ? {
           providers: await getNativeCatalog().providers(),
           keyStatuses: await llm.keyServiceFor(workspaceId).nativeStatuses(),
@@ -60,6 +66,7 @@ async function LlmSettingsContent({
       keyStatuses={keyStatuses}
       {...(catalog === undefined ? {} : { catalog })}
       summary={summary}
+      {...(keyChoice === undefined ? {} : { keyChoice })}
       showPlan={showPlan}
       showBilling={showBilling}
     />

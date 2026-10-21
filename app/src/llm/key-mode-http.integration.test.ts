@@ -356,3 +356,41 @@ describe("GET /api/w/:workspace/llm-key-mode", () => {
     expect(await read("admin")).toEqual([200, { keyMode: "own" }]);
   });
 });
+
+describe("what the LLM access page reads", () => {
+  const serviceOf = (t: Awaited<ReturnType<typeof start>>) => {
+    const llm = createWorkspaceLlm({
+      db: t.db,
+      appSecret: () => APP_SECRET,
+      env: () => ({ LLM_MODEL: "vendor/model" }),
+    });
+    return createLlmKeyModeService({
+      db: t.db,
+      keysOf: (id) => llm.keyServiceFor(id),
+    });
+  };
+
+  // #496-T09
+  it("is our models and whether a key of the workspace's own is stored", async () => {
+    const withKey = await start();
+    const withoutKey = await start({ ownKey: false });
+
+    expect(await serviceOf(withKey).choiceOf(withKey.workspaceId)).toEqual({
+      keyMode: "managed",
+      hasOwnKey: true,
+    });
+    expect(
+      await serviceOf(withoutKey).choiceOf(withoutKey.workspaceId),
+    ).toEqual({ keyMode: "managed", hasOwnKey: false });
+  });
+
+  // #496-T09
+  it("is what the workspace chose", async () => {
+    const t = await start();
+    await createLlmKeyModeStore(t.db, t.workspaceId).set("own", null);
+
+    expect(await serviceOf(t).choiceOf(t.workspaceId)).toMatchObject({
+      keyMode: "own",
+    });
+  });
+});

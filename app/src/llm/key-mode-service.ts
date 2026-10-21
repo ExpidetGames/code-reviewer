@@ -35,7 +35,11 @@ export type KeyModeActor = {
 export type KeyModeResult =
   { ok: true; keyMode: KeyMode } | { ok: false; error: KeyModeErrorCode };
 
+/** What the LLM access page shows: the choice that applies, and whether a key of the workspace's own is stored. */
+export type KeyChoiceView = { keyMode: KeyMode; hasOwnKey: boolean };
+
 export type LlmKeyModeService = {
+  choiceOf(workspaceId: string): Promise<KeyChoiceView>;
   /** What the workspace chose; our models until it did. Every member may ask. */
   get(workspaceId: string): Promise<KeyModeResult>;
   /** The body is what the person sent: `{ keyMode: "managed" | "own" }`. */
@@ -70,6 +74,13 @@ export function createLlmKeyModeService({
   }
 
   return {
+    async choiceOf(workspaceId) {
+      return {
+        keyMode: (await storeOf(workspaceId).get()) ?? DEFAULT_LLM_KEY_MODE,
+        hasOwnKey: await hasOwnKey(workspaceId),
+      };
+    },
+
     async get(workspaceId) {
       return {
         ok: true,
