@@ -21,6 +21,7 @@ const LATER_TABLES = [
   "model_enablements",
   "model_price_confirmations",
   "billing_profiles",
+  "billing_start_credit_grants",
 ];
 
 const beforeThisMigration: MigrationProvider = {
