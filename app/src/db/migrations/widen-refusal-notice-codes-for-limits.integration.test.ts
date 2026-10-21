@@ -135,11 +135,7 @@ describe("the refusal notice codes migration for the limits", () => {
         "monthly_limit_reached",
         "head:abc1234",
       );
-      await seedNotice(
-        db as unknown as Db,
-        "reviews_paused",
-        "head:def5678",
-      );
+      await seedNotice(db as unknown as Db, "reviews_paused", "head:def5678");
       await expect(
         seedNotice(db as unknown as Db, "not_a_notice", "head:0000000"),
       ).rejects.toThrow();

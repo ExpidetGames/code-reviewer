@@ -224,11 +224,7 @@ describe("the notice of the hidden hourly brake (#499)", () => {
   // #499-T06
   it("points to no page, because nobody in the workspace can lift it, even when it is given a link", () => {
     const text = visible(
-      noticeBody(
-        "reviews_paused",
-        HEAD,
-        "https://app.example/w/acme/settings",
-      ),
+      noticeBody("reviews_paused", HEAD, "https://app.example/w/acme/settings"),
     );
 
     expect(text).not.toMatch(/https?:\/\//);

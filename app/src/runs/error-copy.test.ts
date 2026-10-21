@@ -58,7 +58,9 @@ describe("the sentences for error codes", () => {
     expect(described.known).toBe(true);
     expect(described.code).toBeNull();
     expect(described.text).toMatch(/^Reviews are paused for this workspace/);
-    expect(described.text).not.toMatch(/\d|hour|brake|limit|window|reviews_paused/i);
+    expect(described.text).not.toMatch(
+      /\d|hour|brake|limit|window|reviews_paused/i,
+    );
   });
 
   // #434-X1: the code no part of the system produces any more, kept for the runs that ended with it.
