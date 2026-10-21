@@ -30,7 +30,8 @@ import {
   stripeEnvironmentFromSecrets,
   stripeWebhookSecretFromSecrets,
 } from "./stripe-credentials.ts";
-import { createStripeClient, STRIPE_API_BASE_URL } from "./stripe-client.ts";
+import { createStripeClient } from "./stripe-client.ts";
+import { stripeApiBaseUrl } from "../stripe-endpoints.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { isBillingOn } from "./enabled.ts";
 import { manualAdapter } from "./manual-adapter.ts";
@@ -74,7 +75,7 @@ export function getBillingAdapterRegistry() {
     createStripeAdapter({
       client: stripeClientFromSecrets({
         secrets: getSecretStore,
-        baseUrl: STRIPE_API_BASE_URL,
+        baseUrl: stripeApiBaseUrl(),
       }),
       webhookSecret: stripeWebhookSecretFromSecrets({
         secrets: getSecretStore,
@@ -187,7 +188,7 @@ export function getBillingAdminService(): BillingAdminService {
     clientFor: (apiKey, environment) =>
       createStripeClient({
         apiKey,
-        baseUrl: STRIPE_API_BASE_URL,
+        baseUrl: stripeApiBaseUrl(),
         environment,
       }),
   });
