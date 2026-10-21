@@ -6,7 +6,7 @@ epic #489): prepaid pay-as-you-go through Stripe Managed Payments, a provider-ne
 earlier subscription design (plans, plan versions, prices with a payment provider, an admin page for them) was deleted
 before it reached a release (#491); the model catalog, the providers and `modelAccess` of epic #420 are unaffected.
 
-What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: a hold at claim, the settlement when the job ends and the refusal when the balance cannot hold it (#498, "Reserve, settle, release" below), and the Stripe adapter with the billing profile and the top-up route (#501, below). Server-only: every
+What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: a hold at claim, the settlement when the job ends and the refusal when the balance cannot hold it (#498, "Reserve, settle, release" below), the Stripe adapter with the billing profile and the top-up route (#501, below), and the Stripe webhooks that credit, refund and charge back (#502, "Stripe webhooks" below). Server-only: every
 source file imports `"server-only"` (`server-only.test.ts`).
 
 | File                                                                                                                              | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -35,6 +35,7 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `public-url.ts`                                                                                                                   | Whether an address can be reached from the internet (https, no credentials, no loopback, private, link-local or local name; pure), and the one spelling addresses are compared in. A Stripe webhook endpoint needs it.                                                                                                                                                                                                                         |
 | `stripe-client.ts`, `stripe-schemas.ts`                                                                                           | A thin typed `fetch` client of the Stripe API and our own schemas of the fields we read (#500); no SDK. Used by the Stripe adapter (#501) and the webhook route (#502).                                                                                                                                                                                                                                                                        |
 | `stripe-webhook-verify.ts`                                                                                                        | `verifyStripeSignature` (pure): the `Stripe-Signature` header over the raw body bytes (#500).                                                                                                                                                                                                                                                                                                                                                  |
+| `stripe-webhook-parse.ts`, `topup-check.ts`, `topup-check-http.ts`                                                                | What a verified Stripe event becomes (#502, pure: `parseStripeWebhookEvent`, `paymentEventOfSession`), and "Check payment": the service and the handler behind `POST /api/w/:workspace/billing/top-ups/:id/check`.                                                                                                                                                                                                                             |
 | `stripe-adapter.ts`, `stripe-credentials.ts`                                                                                      | The Stripe adapter (#501): `ensureCustomer` and `createTopUpCheckout` over the client, and the client made from the stored key when a top-up needs it.                                                                                                                                                                                                                                                                                         |
 | `profile.ts`, `profile-service.ts`                                                                                                | The billing profile (#501): validation of what a person typed (pure, stable field codes) and the service that lets an Owner and an Admin read and write it.                                                                                                                                                                                                                                                                                    |
 | `topup-service.ts`, `topup-http.ts`, `topup-limits.ts`                                                                            | Starting a top-up (#501): the checks in order, the handler behind `POST /api/w/:workspace/billing/top-ups` and its limit.                                                                                                                                                                                                                                                                                                                      |
@@ -540,8 +541,10 @@ interface BillingAdapter {
   below. `ProviderRef` is an opaque id (`isProviderRef`: letters, digits and
   `_ . : -`, at most 255): no card, address, tax id or email is ever stored or carried.
 - **The events.** `payment.succeeded` (`creditable` is the net amount that becomes credit; `gross`; `tax`, where `0` is a
-  real tax and `null` is "not said"), `payment.failed`, `payment.expired` (the checkout ended unpaid: the only way an
-  intent becomes `expired`), `refund.updated` (`status` `pending`/`approved`/`rejected`/`reversed`, `initiatedBy`),
+  real tax and `null` is "not said"; `providerAmount`, what the buyer was charged in the provider's unit, which the application
+  pins on the intent), `payment.failed`, `payment.expired` (the checkout ended unpaid: the only way an
+  intent becomes `expired`), `payment.refused` (#502: the adapter read a paid payment that contradicts what we asked for, such as
+  another currency or the other environment; nothing is credited, it is recorded `amount_rejected` for review), `refund.updated` (`status` `pending`/`approved`/`rejected`/`reversed`, `initiatedBy`),
   `dispute.updated` (`opened`/`lost`/`won`, with the dispute id) and `ignored` (a verified event of a type the adapter
   does not use). `validateBillingEvent` refuses an event with a non-integer amount, an id that is not an opaque id, a
   time that is not ISO 8601 or an unknown status, so nothing past it trusts a provider's number.
@@ -578,8 +581,7 @@ engine; the same event twice, the same payment under another event id and the wr
 delivery). Both live in `src/test-support/billing-adapter-kit.ts`; the fake adapter in `fake-billing-adapter.ts` is the
 model, and `adapter-kit.test.ts` / `adapter-kit.integration.test.ts` show the call. The active adapter is the `adapter`
 field of the instance setting `billing_settings` (`manual` when it is not set or not an adapter id); the admin page sets it
-(#504). The Stripe adapter is in the registry (#501); its webhook joins with #502, until then the webhook route answers the
-missing path for it. Errors of an adapter are `BillingAdapterError`s with a stable code (`provider_unavailable` for a timeout,
+(#504). The Stripe adapter is in the registry (#501) and has its webhook and its lookup since #502 ("Stripe webhooks", below). Errors of an adapter are `BillingAdapterError`s with a stable code (`provider_unavailable` for a timeout,
 a 5xx or a rate limit, `provider_rejected`, `provider_not_configured` for a key Stripe does not accept, `vat_id_rejected`,
 `customer_missing`) and never carry a word of what the provider said.
 
@@ -643,8 +645,8 @@ its own (#502 turns `checkout.session.expired` into `payment.expired`). The log 
 crediting). Once a profile can be saved, the top-up route becomes usable (`profile_required` is the only thing keeping a
 buyer out today), and a payment made before #502 is taken by Stripe and credited to nobody. The rule is also on #510 (go-live).
 
-**What is not here.** The pages (#505, which also needs a route for the profile form: `profile-service.ts` is ready for it),
-the webhook, refunds and chargebacks (#502), the sandbox plan for invoices and VAT (#503), auto-recharge.
+**What is not here.** The pages (#505, which also needs a route for the profile form: `profile-service.ts` is ready for it;
+the webhook, refunds and chargebacks are #502, above), the sandbox plan for invoices and VAT (#503), auto-recharge.
 
 **Checked against the Stripe sandbox (test mode, 2026-10-21).** A Customer takes `business_name` at API version
 `2025-03-31.basil`; `eu_vat`, `gb_vat`, `ch_vat` (the compact form is stored as `CHE-123.456.789 MWST`) and `no_vat` (without
@@ -727,6 +729,82 @@ answered 200 and recorded for review (see above). The log names a code only
 (`billing_webhook_rejected code=signature_invalid`): never a body, header, signature, id, amount or error message.
 **There is no outbound call in the handler** (`webhook-handler.test.ts` pins it), so the route answers within a few
 seconds whatever the provider does.
+
+## Stripe webhooks (#502)
+
+This is the money trust root: **crediting happens only here** (and in "Check payment", which applies the same events). The Stripe
+adapter verifies the webhook, reads it into a normalized event (`stripe-webhook-parse.ts`, pure) and `applyBillingEvent` does the
+rest; the handler in front of it is the generic one (above).
+
+**Verification.** `Stripe-Signature` over the exact bytes of the body (`Uint8Array`, never decoded text: the generic handler passes the
+bytes it read, Next.js's `Request` is not re-encoded), with the secret the admin stored (`stripe_webhook_secret`, read per request),
+five minutes of tolerance, constant-time compare, the signature before the age. No stored secret, or no environment that can be told
+from the stored API key, refuses every webhook (`signature_invalid`). Only then is the body decoded (strict UTF-8) and read; an event
+whose `livemode` is not the environment of the stored API key (a test event at a live instance, or the reverse) is `body_invalid`
+(400) and nothing of it is used. The answer for a refusal is a status and an empty body.
+
+**What each event does** (the events the admin page subscribes the endpoint to, `stripe-webhook-events.ts`):
+
+| Stripe event                                                                                                                                                                                            | Normalized event           | Effect                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checkout.session.completed` (paid), `checkout.session.async_payment_succeeded`                                                                                                                         | `payment.succeeded`        | A `top_up` of the **net** amount (`amount_subtotal`; VAT is on top and never credited), keyed by the payment intent id (D14), on the intent of **our** row. The intent becomes `paid` and pins what the buyer was charged. |
+| `checkout.session.completed` (unpaid, a delayed method)                                                                                                                                                 | `ignored`                  | Nothing; the success or failure follows.                                                                                                                                                                                   |
+| a paid session in another currency than USD, of the other environment, with no payment intent, with a net amount that is no positive whole number of cents, or whose reference contradicts its metadata | `payment.refused`          | Nothing is credited; recorded `amount_rejected`, open for review, logged at error level, answered 200.                                                                                                                     |
+| `checkout.session.async_payment_failed`                                                                                                                                                                 | `payment.failed`           | A pending intent becomes `failed` (a payment that still arrives pays it, once).                                                                                                                                            |
+| `checkout.session.expired`                                                                                                                                                                              | `payment.expired`          | A pending intent becomes `expired` (a late payment still pays it).                                                                                                                                                         |
+| `refund.created`, `refund.updated`, `refund.failed`                                                                                                                                                     | `refund.updated`           | One event per refund with the amount of THAT refund: `pending`/`requires_action`/no status and `succeeded` debit (`refund` entry, the share of the credit), `failed` and `canceled` reverse the debit once (`correction`). |
+| `charge.dispute.created`, `charge.dispute.funds_withdrawn`                                                                                                                                              | `dispute.updated` `opened` | A `chargeback` entry (Stripe takes the money when a dispute opens). A `warning_*` status moves no money and is `ignored`.                                                                                                  |
+| `charge.dispute.closed` (`lost`)                                                                                                                                                                        | `dispute.updated` `lost`   | The debit stays (written once, whichever event was seen first).                                                                                                                                                            |
+| `charge.dispute.closed` (`won`, `charge_refunded`), `charge.dispute.funds_reinstated`                                                                                                                   | `dispute.updated` `won`    | A `correction` reverses the chargeback once.                                                                                                                                                                               |
+| anything else, including `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`                                                                                                 | `ignored`                  | `ignored_type`, 200, no change.                                                                                                                                                                                            |
+
+`payment_intent.succeeded` is not read because a payment intent has no net amount and the session event describes the same payment
+under the same journal key (the second is a repeat either way). `payment_intent.payment_failed` is not read because a declined card
+can be retried on the same page: it is not the end of the intent. `charge.refunded` is cumulative (`amount_refunded` of the whole
+charge); reading it as one refund is the mistake the caps exist for, so the per-refund events are mapped instead. A refund or
+dispute event with no payment intent, or an amount that is no positive whole number, is `body_invalid` (400).
+
+**The workspace comes from our intent row**, found by the payment, the checkout session or our intent id (`client_reference_id`, with
+`metadata[intent]` as a cross-check: when both are there and differ the payment is refused). Metadata alone never maps a payment to a
+workspace (ADR 2.13). An event with no intent of ours is `intent_unresolved`, 200, no change, flagged for review.
+
+**The total of a payment is pinned.** A Stripe refund or dispute names only its own amount. When the application credits a payment it
+pins on the intent what the buyer was charged, gross, in Stripe's unit (`provider_amount`: `presentment_details.presentment_amount`
+when Adaptive Pricing localized the price, else `amount_total`, in cents), and the share of the credit that a refund takes back is
+`floor(credited x refund / pinned)` (`net-share.ts`), with no call to Stripe. The first amount told is the one kept. An event that
+carries a total which differs from the pin is `amount_conflict`; a refund of a payment that pinned none (paid before the column existed
+or by a provider that does not say) is `amount_rejected`: both are open for review, nothing is debited.
+
+**Ordering.** Refund and dispute states are ordered by the event's `created` (seconds): a state older than the last applied one for that
+refund or dispute is `stale_ignored`. Two states in the same second follow the order they arrive in; Stripe's refund and dispute
+events are seconds to days apart in practice, and a debit is always reversible by the later event.
+
+**Block on a negative balance.** A refund or chargeback beyond the unspent balance is written anyway; the balance goes negative, the
+claim of the workspace refuses `balance_negative` (#498) until a top-up lifts it above zero, and the operator sees the entries in the
+journal. The workspace billing page (#505) states why.
+
+**Three things an operator should know** (notes N3, N4, N6 and N7 of the review of #497):
+
+- A refund or dispute that exceeds the caps of its payment is `amount_rejected` and **final**: its event id is not applied again.
+  If the earlier debits are reversed later (a refund fails, a dispute is won) the rejected one may have become valid at Stripe; the
+  repair is a `manual` correction (#504), not a redelivery.
+- An `event_invalid` row is final as well (a redelivery is `duplicate_ignored`), so after an adapter fix "Check payment" or a manual
+  grant is the repair. A signed event whose id is not even an id is answered 200 and cannot be recorded: the log line
+  `billing_webhook_event_invalid` is the whole record.
+- A review row is closed with `resolveReview(provider, eventId)` of the events repository (N7); the screen for it is a follow-up of #504.
+
+**Check payment.** `POST /api/w/:workspace/billing/top-ups/:id/check` (an Owner or an Admin; same site; 20 per person and workspace
+and 300 for the instance in 10 minutes; the 404 of a missing path while billing is off or for an adapter with no lookup). It finds
+the intent in the workspace of the address (any other id, also one of another workspace, is `intent_not_found`), and unless the
+intent is paid already or has no page it asks the adapter (`lookupTopUp`: the Checkout Session by the id recorded on the intent;
+a delayed payment that Stripe gave up on is read from its payment intent) and applies the resulting event through
+`applyBillingEvent` with an event id of its own (`check-<session>-<paid|failed|expired>`). So a lost webhook, a late one and a second
+click are one credit. A session or payment intent that is gone at Stripe (`404 resource_missing`) is nothing to report, never an
+error; a Stripe that is down is `provider_unavailable` (502) and changes nothing. The answer is `{ intentId, state }`.
+
+**What is not done.** The exact split of a payment refunded in several parts (the last refund taking the remainder, note N1: today
+each share is rounded down, so the residue is under one micro-USD per refund) and a reconcile sweep over Stripe's Events API are
+follow-ups.
 
 ## The manual adapter
 

@@ -119,8 +119,10 @@ describe("the guards of the admin portal", () => {
         concretePath(route).startsWith("/api/w/"),
     );
 
-    expect(routes.map(({ route }) => concretePath(route))).toEqual([
+    // Changed with #502: "Check payment" is the second billing route of a workspace, and it passes the same guard.
+    expect(routes.map(({ route }) => concretePath(route)).sort()).toEqual([
       "/api/w/x/billing/top-ups",
+      "/api/w/x/billing/top-ups/x/check",
     ]);
     for (const { route, file } of routes)
       expect(readFileSync(file, "utf8"), route).toMatch(

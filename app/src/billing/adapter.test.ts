@@ -329,8 +329,9 @@ describe("validating a normalized event", () => {
     expect(() => validateBillingEvent(refund)).not.toThrow();
     // Changed with #502: the payment amount is optional now (Stripe's refund carries none; the application takes the amount
     // it pinned from the payment), so its absence is no longer an invalid event. A wrong one still is.
-    const { paymentAmount: _omitted, ...withoutTotal } = refund;
-    expect(() => validateBillingEvent(withoutTotal)).not.toThrow();
+    expect(() =>
+      validateBillingEvent({ ...refund, paymentAmount: undefined }),
+    ).not.toThrow();
     for (const paymentAmount of [0, -1, 1.5, Number.NaN])
       expect(
         codeOf(() =>

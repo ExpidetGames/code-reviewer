@@ -61,6 +61,12 @@ export type BillingWebhookEventsRepository = {
   ): Promise<void>;
   /** The events waiting for an operator, oldest first. */
   listOpenReviews(options: { limit: number }): Promise<EventReview[]>;
+  /**
+   * Closes the review of an event an operator has dealt with (a manual credit or correction, "Check payment"). True when an open
+   * review was closed, false when there was none (unknown event, not under review, already closed). The outcome and the id
+   * stay as they were: the event is final, only the flag changes.
+   */
+  resolveReview(provider: string, eventId: string): Promise<boolean>;
   /** True when a state of the same refund or dispute that happened AFTER `occurredAt` was applied before. */
   hasNewerState(
     provider: string,
@@ -148,6 +154,18 @@ export function createBillingWebhookEventsRepository(
         subject: row.subject,
         receivedAt: row.received_at,
       }));
+    },
+
+    async resolveReview(provider, eventId) {
+      const closed = await db
+        .updateTable("billing_webhook_events")
+        .set({ review_state: "resolved" })
+        .where("provider", "=", provider)
+        .where("event_id", "=", eventId)
+        .where("review_state", "=", "open")
+        .returning("event_id")
+        .executeTakeFirst();
+      return closed !== undefined;
     },
 
     async hasNewerState(provider, subject, occurredAt) {
