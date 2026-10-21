@@ -22,6 +22,30 @@ export async function adminClient(baseURL: string): Promise<APIRequestContext> {
 async function createWebhookEndpoint(appUrl: string): Promise<string> {
   const stripe = await request.newContext({ baseURL: e2eEnv.stripeFakeUrl });
   try {
+    // One endpoint for the app: the fake delivers every event to every endpoint, and the app holds the secret of the last one only,
+    // so an endpoint an earlier journey made would be delivered to with a secret the app no longer has (and answer 400).
+    const headers = {
+      authorization: `Bearer ${e2eEnv.stripeFakeApiKey}`,
+      "stripe-version": STRIPE_VERSION,
+    };
+    const listed = await stripe.get("/v1/webhook_endpoints?limit=100", {
+      headers,
+    });
+    expect(listed.status(), await listed.text()).toBe(200);
+    const { data } = (await listed.json()) as {
+      data: Array<{ id: string; url: string }>;
+    };
+    for (const endpoint of data.filter(
+      (one) => one.url === `${appUrl}/api/billing/webhook`,
+    )) {
+      const removed = await stripe.delete(
+        `/v1/webhook_endpoints/${endpoint.id}`,
+        {
+          headers,
+        },
+      );
+      expect(removed.status(), await removed.text()).toBe(200);
+    }
     const created = await stripe.post("/v1/webhook_endpoints", {
       headers: {
         authorization: `Bearer ${e2eEnv.stripeFakeApiKey}`,

@@ -24,7 +24,7 @@ import type {
 } from "../workspace-key.ts";
 import type { KeyMode } from "../../workspaces/entitlements.ts";
 import type { LlmKeyApi } from "./api.ts";
-import { browserLlmKeyModeApi, type LlmKeyModeApi } from "./key-mode-api.ts";
+import type { LlmKeyModeApi } from "./key-mode-api.ts";
 import { KeyModeCard } from "./key-mode-card.tsx";
 import { LlmAccessForm } from "./llm-access-form.tsx";
 
@@ -132,10 +132,11 @@ export function LlmAccessSection({
   const choiceCard =
     keyChoice === undefined ? null : (
       <KeyModeCard
+        workspaceSlug={workspaceSlug}
         canManage={canManage}
         keyMode={keyChoice.keyMode}
         hasOwnKey={keyChoice.hasOwnKey}
-        api={keyModeApi ?? browserLlmKeyModeApi(workspaceSlug)}
+        {...(keyModeApi === undefined ? {} : { api: keyModeApi })}
       />
     );
 

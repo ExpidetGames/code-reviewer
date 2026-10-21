@@ -98,6 +98,60 @@ function money(micro: number): string {
   return `${sign}$${whole.toLocaleString("en-US")}.${fraction}`;
 }
 
+/** A notice names no amount and no number: what is read is its words (the link's address and the hidden marker are not words). */
+function expectNoNumber(notice: string): void {
+  const words = notice
+    .replace(/\(https?:\/\/[^)]*\)/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+  expect(words).not.toMatch(/\d/);
+  expect(words).not.toContain("$");
+}
+
+/** A top-up through the fake checkout: details and the business confirmation if the page asks, the buyer pays, the webhook credits. */
+async function topUp(page: Page, dollars: 10 | 25): Promise<FakePayment> {
+  await page.goto(BILLING_PAGE);
+  const before = await balanceMicro(page);
+  const pay = page.getByRole("button", { name: "Continue to payment" });
+  if (await pay.isDisabled()) {
+    await page.getByLabel("Legal name").fill("Acme Reviews GmbH");
+    await page.getByLabel("Address", { exact: true }).fill("Hauptstrasse 1");
+    await page.getByLabel("Postal code").fill("10115");
+    await page.getByLabel("City").fill("Berlin");
+    await page.getByLabel(/^Country/).fill("DE");
+    await page.getByRole("button", { name: "Save billing details" }).click();
+    await expect(page.getByText("Billing details saved.")).toBeVisible();
+  }
+  await page
+    .getByRole("radio", { name: `$${String(dollars)}`, exact: true })
+    .click();
+  const confirmation = page.getByRole("checkbox", {
+    name: /buying for a business/,
+  });
+  if ((await confirmation.count()) > 0) await confirmation.click();
+  // The person never leaves the app's pages: the payment page is a stub, the buyer "pays" over the control API of the fake.
+  await page.route(`${e2eEnv.stripeFakeUrl}/c/pay/**`, (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><title>Fake checkout</title><h1>Fake checkout</h1>",
+    }),
+  );
+  await pay.click();
+  await page.waitForURL(/\/c\/pay\/cs_/);
+  const session = /\/c\/pay\/(cs_[A-Za-z0-9_]+)/.exec(page.url())?.[1];
+  if (session === undefined) throw new Error(`No session in ${page.url()}.`);
+  const payment = await payFakeSession(session);
+  await page.goto(`${BILLING_PAGE}?topup=success`);
+  expect(await balanceMicro(page)).toBe(before);
+  const delivered = await deliverEvents();
+  expect(delivered.length).toBeGreaterThan(0);
+  expect(delivered.every((status) => status === 200)).toBe(true);
+  await expect(page.locator("[data-slot=balance-amount]")).toHaveText(
+    money(before + dollars * MICRO),
+    { timeout: 30_000 },
+  );
+  return payment;
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("the billing journeys of a review", () => {
@@ -227,54 +281,6 @@ test.describe("the billing journeys of a review", () => {
     return row;
   }
 
-  /** A top-up through the fake checkout: details and the business confirmation if the page asks, the buyer pays, the webhook credits. */
-  async function topUp(
-    page: Page,
-    dollars: 10 | 25,
-    label: string,
-  ): Promise<void> {
-    await page.goto(BILLING_PAGE);
-    const before = await balanceMicro(page);
-    const pay = page.getByRole("button", { name: "Continue to payment" });
-    if (await pay.isDisabled()) {
-      await page.getByLabel("Legal name").fill("Acme Reviews GmbH");
-      await page.getByLabel("Address", { exact: true }).fill("Hauptstrasse 1");
-      await page.getByLabel("Postal code").fill("10115");
-      await page.getByLabel("City").fill("Berlin");
-      await page.getByLabel(/^Country/).fill("DE");
-      await page.getByRole("button", { name: "Save billing details" }).click();
-      await expect(page.getByText("Billing details saved.")).toBeVisible();
-    }
-    await page
-      .getByRole("radio", { name: `$${String(dollars)}`, exact: true })
-      .click();
-    const confirmation = page.getByRole("checkbox", {
-      name: /buying for a business/,
-    });
-    if ((await confirmation.count()) > 0) await confirmation.click();
-    // The person never leaves the app's pages: the payment page is a stub, the buyer "pays" over the control API of the fake.
-    await page.route(`${e2eEnv.stripeFakeUrl}/c/pay/**`, (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: "<!doctype html><title>Fake checkout</title><h1>Fake checkout</h1>",
-      }),
-    );
-    await pay.click();
-    await page.waitForURL(/\/c\/pay\/cs_/);
-    const session = /\/c\/pay\/(cs_[A-Za-z0-9_]+)/.exec(page.url())?.[1];
-    if (session === undefined) throw new Error(`No session in ${page.url()}.`);
-    payments[label] = await payFakeSession(session);
-    await page.goto(`${BILLING_PAGE}?topup=success`);
-    expect(await balanceMicro(page)).toBe(before);
-    const delivered = await deliverEvents();
-    expect(delivered.length).toBeGreaterThan(0);
-    expect(delivered.every((status) => status === 200)).toBe(true);
-    await expect(page.locator("[data-slot=balance-amount]")).toHaveText(
-      money(before + dollars * MICRO),
-      { timeout: 30_000 },
-    );
-  }
-
   /** The journal invariant (#508-T10): after a journey the journal's own check finds no difference and no stranded hold. */
   async function expectJournalConsistent(): Promise<JournalVerdict> {
     const verdict = await verifyJournal(e2eEnv.catalogAdminDatabasePath);
@@ -304,13 +310,13 @@ test.describe("the billing journeys of a review", () => {
     );
   });
 
-  test.afterAll(async () => {
-    await runner?.dispose();
-  });
-
   test.afterEach(async () => {
     // #508-T10
     await expectJournalConsistent();
+  });
+
+  test.afterAll(async () => {
+    await runner?.dispose();
   });
 
   // #508-T01
@@ -335,8 +341,8 @@ test.describe("the billing journeys of a review", () => {
         kinds: ["diff", "dynamic"],
       },
     ]);
-    const entryId = entries["Journey model"];
-    if (entryId === undefined) throw new Error("The entry was not made.");
+    const entryId = entries["Journey model"] ?? "";
+    expect(entryId).not.toBe("");
     await setCatalogDefaults(e2eEnv.catalogAdminDatabasePath, {
       diff: entryId,
       dynamic: entryId,
@@ -450,13 +456,12 @@ test.describe("the billing journeys of a review", () => {
     expect(notice).toContain("no credit left");
     expect(notice).toContain("Add credit to continue");
     expect(notice).toContain(`${BILLING_PAGE}`);
-    expect(notice).not.toMatch(/\$\s?\d/);
-    expect(notice).not.toMatch(/\d\.\d/);
+    expectNoNumber(notice);
 
     // The Owner pays at the (fake) checkout and Stripe's signed event credits the workspace.
     await page.goto(BILLING_PAGE);
     await expect(page.getByText("No credit left")).toBeVisible();
-    await topUp(page, 10, "first");
+    payments["first"] = await topUp(page, 10);
     expect(await balanceMicro(page)).toBe(10 * MICRO);
     await expect(page.getByText("No credit left")).toHaveCount(0);
 
@@ -476,8 +481,8 @@ test.describe("the billing journeys of a review", () => {
     test.setTimeout(240_000);
     await signInAsAdmin(page);
     const before = 10 * MICRO - DIFF_PRICE;
-    const firstPayment = payments["first"];
-    if (firstPayment === undefined) throw new Error("No payment to refund.");
+    const firstPayment = payments["first"] as FakePayment;
+    expect(firstPayment).toBeDefined();
 
     // The whole payment is refunded although a review of it was used: the balance is below zero.
     await refundFakePayment(firstPayment);
@@ -495,10 +500,10 @@ test.describe("the billing journeys of a review", () => {
     const notice = await refusedReview(request, "diff");
     expect(notice).toContain("below zero");
     expect(notice).toContain("Add credit to continue");
-    expect(notice).not.toMatch(/\$\s?\d/);
+    expectNoNumber(notice);
 
     // A top-up unblocks: the balance is positive again and the next push is reviewed.
-    await topUp(page, 10, "second");
+    payments["second"] = await topUp(page, 10);
     expect(await balanceMicro(page)).toBe(before);
     const job = await review(request, "diff", DIFF_COST_USD);
     await page.goto(BILLING_PAGE);
@@ -529,8 +534,7 @@ test.describe("the billing journeys of a review", () => {
     // The next push is refused for the limit; the notice names neither the limit nor the amounts.
     const notice = await refusedReview(request, "diff");
     expect(notice).toContain("monthly spending limit");
-    expect(notice).not.toMatch(/\$\s?\d/);
-    expect(notice).not.toMatch(/\d\.\d/);
+    expectNoNumber(notice);
 
     // The limit is removed and the next push is reviewed.
     await page.goto(BILLING_PAGE);

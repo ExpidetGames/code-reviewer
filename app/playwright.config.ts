@@ -234,10 +234,21 @@ export default defineConfig({
       // No retry: a second attempt would find the payments made and the profile saved.
       retries: 0,
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
-      testMatch: /e2e\/billing\/.*\.e2e\.ts$/,
+      testMatch: /e2e\/billing\/workspace-billing\.e2e\.ts$/,
       dependencies: ["billing-reviews-admin"],
     },
-    // The billing journeys that need a review to run (#508): the same app, after the billing page of a workspace. A runner script
+    // The journey of the key mode (#496): the same app, after the billing page of a workspace and not next to it. Both put billing on
+    // against the fake Stripe (the app keeps the signing secret of the last webhook endpoint made) and the key mode journey ends with
+    // billing off, so run side by side on two workers they broke each other (the payment's webhook was answered 400).
+    {
+      name: "billing-key-mode",
+      // No retry: a second attempt would find the key saved and the choice made.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing\/key-mode\.e2e\.ts$/,
+      dependencies: ["billing-workspace"],
+    },
+    // The billing journeys that need a review to run (#508): the same app, after the billing page of a workspace and the key mode. A runner script
     // hands out the jobs the pushes make and reports them, so the journeys count the balance, the prices and the notices; they leave
     // the workspace with a bound installation, a project that is active and a journal of its own, so nothing comes after them.
     {
@@ -246,7 +257,7 @@ export default defineConfig({
       retries: 0,
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
       testMatch: /e2e\/billing-journeys\/.*\.e2e\.ts$/,
-      dependencies: ["billing-workspace"],
+      dependencies: ["billing-key-mode"],
     },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and
