@@ -124,14 +124,20 @@ describe("the guards of the admin portal", () => {
     );
 
     // Changed with #502 and #499: "Check payment" and the monthly limit are billing routes of a workspace, and they pass the same guard.
+    // Changed with #505: the profile is another one, and the journal is read by every member (`view`): it is the one route here
+    // that does not need the billing action, because a Member reads the balance and the journal of their workspace.
     expect(routes.map(({ route }) => concretePath(route)).sort()).toEqual([
+      "/api/w/x/billing/journal",
       "/api/w/x/billing/monthly-limit",
+      "/api/w/x/billing/profile",
       "/api/w/x/billing/top-ups",
       "/api/w/x/billing/top-ups/x/check",
     ]);
     for (const { route, file } of routes)
       expect(readFileSync(file, "utf8"), route).toMatch(
-        /\bwithWorkspace\(\s*workspace,\s*"manage_billing"/,
+        concretePath(route) === "/api/w/x/billing/journal"
+          ? /\bwithWorkspace\(\s*workspace,\s*"view"/
+          : /\bwithWorkspace\(\s*workspace,\s*"manage_billing"/,
       );
   });
 

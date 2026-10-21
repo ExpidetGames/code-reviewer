@@ -164,7 +164,7 @@ export function createTopUpRoute({
               amountCents: body.value.amountCents,
               confirmBusiness: body.value.confirmBusiness,
               intentId: body.value.intentId,
-              returnUrl: `${origin}${workspacePath(access.workspace.slug, "/billing")}`,
+              returnUrl: `${origin}${workspacePath(access.workspace.slug, "/settings/billing")}`,
             },
           );
           if (!result.ok) return refusal(result.error);
