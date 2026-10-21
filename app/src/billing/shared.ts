@@ -57,6 +57,8 @@ import {
 } from "./topup-check-http.ts";
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
+import { getMailSender } from "../mail/shared.ts";
+import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
@@ -172,6 +174,7 @@ export function getBillingWebhookHandler(): (
     db,
     guard: { isOn: () => isBillingOn(db), notFound },
     activeAdapter: createActiveAdapterResolver(db, getBillingAdapterRegistry()),
+    afterApplied: deliverBalanceMails,
   });
 }
 
@@ -241,4 +244,24 @@ export function recordWallClocks(jobIds: readonly string[]): void {
   } catch {
     console.error("[billing] WALL_CLOCK_NOT_RECORDED");
   }
+}
+
+/**
+ * Mails the balance crossings that are due (#506), after the response and best effort: the decision was made in the transaction
+ * that moved the balance, so this only sends. Called when claims ended, when a claim was refused for the balance and when a
+ * billing webhook was applied; a call that finds nothing due does one small read. Never throws, never delays the call, and
+ * logs only a stable code.
+ */
+export function deliverBalanceMails(): void {
+  runAfterResponse(async () => {
+    try {
+      await deliverDueBalanceMails({
+        db: getDatabase(),
+        mail: getMailSender(),
+        baseUrl: publicAddress(),
+      });
+    } catch {
+      console.error("[billing] BALANCE_MAIL_FAILED code=unavailable");
+    }
+  });
 }

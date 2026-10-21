@@ -63,7 +63,11 @@ function tablesTouchedBy(db: Kysely<Database>, tables: string[]): KyselyPlugin {
 function suite(engine: BillingEngine) {
   describe.skipIf(engine.skip)(`the billing webhook on ${engine.name}`, () => {
     async function setup(
-      options: { adapter?: BillingAdapter | undefined; on?: boolean } = {},
+      options: {
+        adapter?: BillingAdapter | undefined;
+        on?: boolean;
+        afterApplied?: () => void;
+      } = {},
     ) {
       const { db, workspaceId, otherWorkspaceId } = await engine.create();
       if (options.on !== false) await setBillingSwitch(db, true);
@@ -82,6 +86,9 @@ function suite(engine: BillingEngine) {
           activeAdapter: () => Promise.resolve(adapter),
           logger,
           now: () => NOW,
+          ...(options.afterApplied === undefined
+            ? {}
+            : { afterApplied: options.afterApplied }),
         });
       const intent = await createBillingTopUpIntentsRepository(
         db,
@@ -172,6 +179,60 @@ function suite(engine: BillingEngine) {
       await expect(
         none.post(none.handler, fakeWebhookRequest(none.payment)),
       ).rejects.toBeInstanceOf(NotFound);
+    });
+
+    // #506-T05
+    it("tells the workspace once that a refund took its balance below zero, and calls the delivery of mails after the commit", async () => {
+      const afterApplied = vi.fn();
+      const s = await setup({ afterApplied });
+      await s.post(s.handler, fakeWebhookRequest(s.payment));
+      await s.journal.charge("job-1", {
+        aiMicroUsd: 20 * USD,
+        infraMicroUsd: 0,
+        minutes: 1,
+        reviewKind: "diff",
+      });
+      afterApplied.mockClear();
+      const refund: FakeWireEvent = {
+        id: "evt_refund",
+        kind: "refund",
+        created: T,
+        payment: "pi_1",
+        refund: "re_1",
+        amount: 25 * USD,
+        payment_amount: 25 * USD,
+        status: "approved",
+      };
+
+      const response = await s.post(s.handler, fakeWebhookRequest(refund));
+      await s.post(s.handler, fakeWebhookRequest(refund));
+
+      expect(await response.json()).toEqual({ outcome: "applied" });
+      expect((await s.journal.balance()).balanceMicroUsd).toBeLessThan(0);
+      const rows = await s.db
+        .selectFrom("billing_notifications")
+        .select(["kind", "state", "delivery"])
+        .orderBy("kind")
+        .execute();
+      expect(rows).toEqual([
+        { kind: "empty", state: "sent", delivery: "due" },
+        { kind: "low", state: "sent", delivery: "none" },
+      ]);
+      expect(afterApplied).toHaveBeenCalled();
+    });
+
+    // #506-T08
+    it("does not call the delivery of mails for a request that was refused", async () => {
+      const afterApplied = vi.fn();
+      const s = await setup({ afterApplied });
+
+      const response = await s.post(s.handler, {
+        headers: new Headers(),
+        rawBody: fakeWebhookRequest(s.payment).rawBody,
+      });
+
+      expect(response.status).toBe(401);
+      expect(afterApplied).not.toHaveBeenCalled();
     });
 
     // #497-T02
