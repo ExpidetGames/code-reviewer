@@ -63,6 +63,9 @@ import { migration as addBillingBalancesReservedIndex } from "./20261021120000_a
 import { migration as createBillingStartCreditGrants } from "./20261021150000_create_billing_start_credit_grants.ts";
 import { migration as widenJobVmRunsEndSource } from "./20261021090100_widen_job_vm_runs_end_source.ts";
 import { migration as createBillingProfiles } from "./20261021130000_create_billing_profiles.ts";
+import { migration as widenRefusalNoticeCodesForLimits } from "./20261021190000_widen_refusal_notice_codes_for_limits.ts";
+import { migration as createBillingWorkspaceSettings } from "./20261021190100_create_billing_workspace_settings.ts";
+import { migration as addLimitQueryIndexes } from "./20261021190200_add_limit_query_indexes.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -130,6 +133,11 @@ const migrations: Record<string, Migration> = {
   "20261021130000_create_billing_profiles": createBillingProfiles,
   "20261021150000_create_billing_start_credit_grants":
     createBillingStartCreditGrants,
+  "20261021190000_widen_refusal_notice_codes_for_limits":
+    widenRefusalNoticeCodesForLimits,
+  "20261021190100_create_billing_workspace_settings":
+    createBillingWorkspaceSettings,
+  "20261021190200_add_limit_query_indexes": addLimitQueryIndexes,
 };
 
 export const migrationProvider: MigrationProvider = {
