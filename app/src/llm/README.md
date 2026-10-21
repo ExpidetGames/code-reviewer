@@ -79,7 +79,7 @@ provider** since #426 (below, "The keys of a workspace").
   carry, in the runner too; nothing is guessed from a name.
 - **Cost.** Anthropic returns token counts and no charge. The runner computes the cost of every call from the counts and
   the list prices, exactly (`runner/README.md`, "Anthropic"); a model that is not listed, or an answer that cannot be
-  priced, is an unknown cost, which billing charges nothing for.
+  priced, is an unknown cost: billing charges the minutes of that run and no AI price.
 - **Egress.** The app asks `api.anthropic.com` (HTTPS 443) for the key test only; the runner sends the model calls.
 - **Retirement.** `retiresNotBefore` records Anthropic's commitment. `claude-opus-4-5-20251101` (not before 2026-11-24)
   and `claude-haiku-4-5-20251001` (not before 2026-10-15, the day has passed and the model is still listed as active)
@@ -153,7 +153,7 @@ described above, and a workspace without any is on its own key. With billing on:
   mode is now.
 - **Own without a key.** `own` with no stored key for the selected provider still ends `llm_not_configured`, reason `no_key`, and never
   falls back to our key. The choice route does not let a workspace pick `own` while it has no key for any provider
-  (`own_key_missing`). There is no `own_key_requires_plan`.
+  (`own_key_missing`). No plan gates the own key.
 - **Who.** Everybody in the workspace reads the choice; an Owner and an Admin (`manage_llm_key`, the action of the LLM access
   page) set it, with the audit line `[llm] KEY_MODE_CHANGED workspace=<id> user=<id> key_mode=<mode>`. The route is `GET` and `PUT
 /api/w/:workspace/llm-key-mode` (`key-mode-http.ts`, `key-mode-service.ts`; same site, `no-store`); billing off is the 404 of a
