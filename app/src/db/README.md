@@ -522,6 +522,16 @@ of stranded holds asks which workspaces have money reserved in every run; the in
 not with the number of workspaces (`billing-holds-sweep.ts`; `stranded-holds.integration.test.ts` checks on Postgres that the read
 needs no sequential scan, `add-billing-balances-reserved-index.integration.test.ts` that the migration adds the index and keeps the rows).
 
+### The memory of the start credit
+
+Migration `20261021150000_create_billing_start_credit_grants` (#507; ADR 0006, 2.16). It adds one empty table and touches no row, so the
+release that is still running is not affected while it runs. `billing_start_credit_grants`: `github_account_id` (`text`, the primary
+key: the numeric id of the GitHub account of an installation, checked to be a plain positive number on both engines), `workspace_id`
+(`text`, the workspace that got the credit) and `granted_at` (ISO 8601 text in UTC). **`workspace_id` has no foreign key on purpose**:
+the memory has to outlive the workspace, or deleting a workspace and creating it again would grant the account twice. The primary
+key is what makes the grant race safe (`insert ... on conflict do nothing`). Instance level (`billing-start-credit-grants-repository.ts`),
+ids and a time only: no login, no name, no address. See `src/billing/README.md`, "The start credit".
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
