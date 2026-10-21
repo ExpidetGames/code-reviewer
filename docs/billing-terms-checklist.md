@@ -102,8 +102,9 @@ Payments go through Stripe Managed Payments. Only businesses can buy. Credit nev
 
 - Say what happens to unused credit if the operator ends the service or switches billing off. Switching off keeps balances;
   the product has no refund path.
-- The terms link: the business confirmation needs a link to the terms. **The app has no terms page and no setting for the
-  link yet** (the page file passes `null`). Add one before go-live. This is a go-live item.
+- The terms link: the business confirmation needs a link to the terms. Enter it (and, optionally, the link to the privacy
+  statement) on the billing page of the admin portal (card **Terms and privacy**): an `https` address of a public website. With
+  Stripe, billing cannot be switched on without it (`terms_url_missing`).
 
 ## 2. The open points of ADR 0006, section 6
 

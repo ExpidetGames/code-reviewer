@@ -30,6 +30,8 @@ export type BillingChange =
   | { stripe: { apiKey?: string; webhookSecret?: string } }
   | { removeSecret: "apiKey" | "webhookSecret" }
   | { rates: BillingRatesChange }
+  /** A link that is left out stays; an empty text removes it (#626). */
+  | { legal: { termsUrl?: string; privacyUrl?: string } }
   | { enabled: boolean };
 
 /** The result of the connection check: it worked (and for which environment), or a stable code. */

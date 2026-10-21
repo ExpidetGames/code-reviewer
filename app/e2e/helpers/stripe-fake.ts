@@ -66,7 +66,7 @@ async function createWebhookEndpoint(appUrl: string): Promise<string> {
 }
 
 /**
- * Puts billing of the app at `appUrl` on the Stripe adapter against the fake: made-up rates, the fake's API key, a webhook endpoint at
+ * Puts billing of the app at `appUrl` on the Stripe adapter against the fake: made-up rates, the terms link, the fake's API key, a webhook endpoint at
  * the app, a passing connection check, and the switch on. Every step is idempotent, so a journey may call it at its start.
  */
 export async function switchBillingOnWithFakeStripe(
@@ -89,6 +89,13 @@ export async function switchBillingOnWithFakeStripe(
         factorA: 50_000,
         minuteRateMicroUsd: { diff: 13_000, dynamic: 16_000 },
         diffAiReserveMicroUsd: 150_000,
+      },
+    });
+    // The Stripe adapter is not ready without the link to the terms (#626).
+    await change({
+      legal: {
+        termsUrl: "https://example.com/terms",
+        privacyUrl: "https://example.com/privacy",
       },
     });
     const checked = await admin.post("/api/admin/billing/check", { data: {} });

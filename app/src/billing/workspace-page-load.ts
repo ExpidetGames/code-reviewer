@@ -5,6 +5,7 @@
 // payment page said on the way back (`?topup=success` or `?topup=cancelled`). The page file only wires the real collaborators in.
 import "server-only";
 import type { WorkspaceBillingView } from "../workspace-billing/view.ts";
+import type { LegalUrls } from "./legal-urls.ts";
 import type { BillingActor } from "./profile-service.ts";
 import type { WorkspaceBillingService } from "./workspace-page.ts";
 
@@ -17,23 +18,43 @@ export function returnedOf(
   return value === "success" || value === "cancelled" ? value : null;
 }
 
+/** The links the business confirmation shows (#626); null for one the instance has not set. */
+export type LegalLinks = { termsUrl: string | null; privacyUrl: string | null };
+
 export type BillingPageLoad =
   | { kind: "not_found" }
-  | { kind: "ok"; view: WorkspaceBillingView; returned: TopUpReturn | null };
+  | {
+      kind: "ok";
+      view: WorkspaceBillingView;
+      returned: TopUpReturn | null;
+      legal: LegalLinks;
+    };
 
 export async function loadWorkspaceBillingPage({
   isOn,
   service,
+  legal,
   actor,
   topup,
 }: {
   isOn: () => Promise<boolean>;
   service: Pick<WorkspaceBillingService, "overview">;
+  /** The links of the operator's terms and privacy statement; read only while billing is on. */
+  legal: () => Promise<LegalUrls | undefined>;
   actor: BillingActor;
   topup: string | string[] | undefined;
 }): Promise<BillingPageLoad> {
   if (!(await isOn())) return { kind: "not_found" };
   const result = await service.overview(actor);
   if (!result.ok) return { kind: "not_found" };
-  return { kind: "ok", view: result.view, returned: returnedOf(topup) };
+  const links = await legal();
+  return {
+    kind: "ok",
+    view: result.view,
+    returned: returnedOf(topup),
+    legal: {
+      termsUrl: links?.termsUrl ?? null,
+      privacyUrl: links?.privacyUrl ?? null,
+    },
+  };
 }

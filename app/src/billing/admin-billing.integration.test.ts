@@ -4,7 +4,7 @@
 // fake Stripe as the payment provider (#504): what an admin can save and read back, how the switch is judged, the connection
 // check and the webhook endpoint, the rates, the manual credit, that a person who is not an admin reaches nothing, and that no
 // credential is in an answer, a page or a log line.
-import type { Kysely, KyselyPlugin } from "kysely";
+import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startStripeFake } from "../../../fakes/stripe/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -14,6 +14,7 @@ import { createAdminHarness } from "../test-support/admin-harness.ts";
 import { describeQuery } from "../test-support/query-hook.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { isBillingOn } from "./enabled.ts";
+import { runJournalCheckWhileBillingOn } from "./journal-check.ts";
 import { STRIPE_MANAGED_PAYMENTS_API_VERSION } from "./stripe-client.ts";
 import { STRIPE_WEBHOOK_EVENTS } from "./stripe-webhook-events.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
@@ -30,6 +31,8 @@ const RATES = {
 // Built from parts: a live-looking key in the source would be refused by the secret scan of the push.
 const LIVE_PREFIX = ["sk", "live", ""].join("_");
 const MANUAL_SECRET = "whsec_ManualSecret0123456789abcdef";
+const TERMS_URL = "https://example.com/terms";
+const PRIVACY_URL = "https://example.com/privacy";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- the shape is asserted field by field
 
@@ -132,6 +135,8 @@ async function start(
     call(`/api/admin/billing${path}`, { method: "POST", body });
   const saveStripe = (body: Record<string, unknown>) => put({ stripe: body });
   const saveRates = (rates: unknown = RATES) => put({ rates });
+  const saveLegal = (legal: unknown = { termsUrl: TERMS_URL }) =>
+    put({ legal });
   const workspace = async (name = "Acme") => {
     const found = await portal.db
       .insertInto("workspaces")
@@ -156,6 +161,7 @@ async function start(
     post,
     saveStripe,
     saveRates,
+    saveLegal,
     workspace,
   };
 }
@@ -223,7 +229,60 @@ describe("billing that was never configured", () => {
       "minute_rate_dynamic_missing",
       "diff_ai_reserve_missing",
     ]);
+    // #626-T17
+    expect(v.journalCheck).toEqual({
+      state: "never",
+      checkedAt: null,
+      workspaces: 0,
+      inconsistentWorkspaces: 0,
+    });
     expect(s.stripe.requests()).toEqual([]);
+  });
+});
+
+describe("the check of the journal on the page's data", () => {
+  // #626-T17
+  it("shows the result of the scheduled check: ok, then inconsistent when the cache and the journal are apart", async () => {
+    const s = await start();
+    await s.saveRates();
+    await s.put({ enabled: true });
+    const id = await s.workspace("Acme");
+    await createBillingJournalRepository(s.portal.db, id).append({
+      type: "top_up",
+      amountMicroUsd: 5_000_000,
+      provider: "manual",
+      providerRef: "ref-626",
+      refKey: "ref-626",
+    });
+    const time = new Date("2026-10-21T03:00:00.000Z");
+
+    await runJournalCheckWhileBillingOn(s.portal.db, {
+      now: () => time,
+      log: { info: () => undefined, error: () => undefined },
+    });
+    const ok = (await s.view()).journalCheck;
+    await sql`update billing_balances set balance_micro_usd = 1 where workspace_id = ${id}`.execute(
+      s.portal.db,
+    );
+    const later = new Date(time.getTime() + 25 * 60 * 60 * 1000);
+    await runJournalCheckWhileBillingOn(s.portal.db, {
+      now: () => later,
+      log: { info: () => undefined, error: () => undefined },
+    });
+    const broken = (await s.view()).journalCheck;
+
+    expect(ok).toEqual({
+      state: "ok",
+      checkedAt: "2026-10-21T03:00:00.000Z",
+      workspaces: 1,
+      inconsistentWorkspaces: 0,
+    });
+    expect(broken).toEqual({
+      state: "inconsistent",
+      checkedAt: "2026-10-22T04:00:00.000Z",
+      workspaces: 1,
+      inconsistentWorkspaces: 1,
+    });
   });
 });
 
@@ -429,6 +488,7 @@ describe("switching billing on", () => {
         "stripe_api_key_missing",
         "stripe_webhook_secret_missing",
         "connection_check_missing",
+        "terms_url_missing",
       ],
     });
     expect((await s.view()).enabled).toBe(false);
@@ -439,6 +499,7 @@ describe("switching billing on", () => {
   it("refuses without a passing connection check even when the credentials and rates are set", async () => {
     const s = await start();
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({
       apiKey: s.stripe.apiKey,
@@ -543,6 +604,7 @@ describe("switching billing on", () => {
   it("switches on with Stripe once the key was checked and the rates and the webhook secret are set", async () => {
     const s = await start();
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({
       apiKey: s.stripe.apiKey,
@@ -563,6 +625,7 @@ describe("switching billing on", () => {
   it("refuses with the failed check named when the key stopped working since the last check", async () => {
     const s = await start();
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({
       apiKey: s.stripe.apiKey,
@@ -587,6 +650,7 @@ describe("switching billing on", () => {
   it("keeps the credentials and the adapter in place while billing is on, and a new key must work first", async () => {
     const s = await start();
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({
       apiKey: s.stripe.apiKey,
@@ -629,6 +693,7 @@ describe("switching billing on", () => {
     const s = await start({ stripeFetch: asFakeKey });
     fakeKey = s.stripe.apiKey;
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({
       apiKey: s.stripe.apiKey,
@@ -668,6 +733,7 @@ describe("switching billing on", () => {
     const s = await start({ stripeFetch: asFakeKey });
     fakeKey = s.stripe.apiKey;
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({
       apiKey: s.stripe.apiKey,
@@ -857,6 +923,7 @@ describe("the webhook endpoint at Stripe", () => {
   it("does not replace the endpoint while billing is on", async () => {
     const s = await start();
     await s.put({ adapter: "stripe" });
+    await s.saveLegal();
     await s.saveRates();
     await s.saveStripe({ apiKey: s.stripe.apiKey });
     await s.post("/webhook-endpoint");
@@ -1087,6 +1154,237 @@ describe("the webhook endpoint at Stripe", () => {
     expect(v.stripe.environment).toBe("live");
     expect(v.stripe.webhookSecret.state).toBe("not_configured");
     expect(v.stripe.webhookEndpointId).toBeNull();
+  });
+});
+
+describe("the links to the terms and the privacy statement", () => {
+  const settingsOf = (db: Kysely<Database>) =>
+    createInstanceSettingsRepository(db).get("billing_settings");
+
+  // #626-T04
+  it("stores both links, shows them in the page's data, and keeps the rest of the setting", async () => {
+    const s = await start();
+    await s.saveRates();
+
+    const response = await s.saveLegal({
+      termsUrl: TERMS_URL,
+      privacyUrl: PRIVACY_URL,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      billing: { legal: { termsUrl: TERMS_URL, privacyUrl: PRIVACY_URL } },
+    });
+    expect(await settingsOf(s.portal.db)).toMatchObject({
+      enabled: false,
+      ...RATES,
+      legal: { termsUrl: TERMS_URL, privacyUrl: PRIVACY_URL },
+    });
+    expect((await s.view()).legal).toEqual({
+      termsUrl: TERMS_URL,
+      privacyUrl: PRIVACY_URL,
+    });
+    expect(s.stripe.requests()).toEqual([]);
+  });
+
+  // #626-T04
+  it("shows no link before one is saved", async () => {
+    const s = await start();
+
+    expect((await s.view()).legal).toEqual({
+      termsUrl: null,
+      privacyUrl: null,
+    });
+  });
+
+  // #626-T04
+  it("trims the text, changes one link and leaves the other, and removes a link with an empty text or null", async () => {
+    const s = await start();
+    await s.saveLegal({ termsUrl: ` ${TERMS_URL} `, privacyUrl: PRIVACY_URL });
+
+    await s.saveLegal({ privacyUrl: "https://example.com/privacy-2" });
+    expect((await s.view()).legal).toEqual({
+      termsUrl: TERMS_URL,
+      privacyUrl: "https://example.com/privacy-2",
+    });
+
+    await s.saveLegal({ privacyUrl: "" });
+    expect((await s.view()).legal).toEqual({
+      termsUrl: TERMS_URL,
+      privacyUrl: null,
+    });
+
+    await s.saveLegal({ termsUrl: null });
+    expect((await s.view()).legal).toEqual({
+      termsUrl: null,
+      privacyUrl: null,
+    });
+    expect(await settingsOf(s.portal.db)).not.toHaveProperty("legal");
+  });
+
+  // #626-T04
+  it.each([
+    ["http", "http://example.com/terms"],
+    ["a script", "javascript:alert(1)"],
+    ["credentials", "https://user:secret@example.com/terms"],
+    ["a private host", "https://10.0.0.5/terms"],
+    ["a loopback name", "https://localhost/terms"],
+    ["text that is no address", "terms"],
+    ["a space inside", "https://example.com/my terms"],
+    ["more than 2048 characters", `https://example.com/${"a".repeat(2048)}`],
+    ["a number", 5],
+  ])(
+    "refuses %s as the terms link with the field named, and writes nothing",
+    async (_name, value) => {
+      const s = await start();
+      await s.saveLegal({ termsUrl: TERMS_URL });
+      const before = await settingsOf(s.portal.db);
+
+      const response = await s.saveLegal({ termsUrl: value });
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: "invalid_input",
+        issues: [{ field: "legal.termsUrl", code: "url_invalid" }],
+      });
+      expect(await settingsOf(s.portal.db)).toEqual(before);
+    },
+  );
+
+  // #626-T04
+  it("names both fields when both links are refused, and stores neither when only one is", async () => {
+    const s = await start();
+
+    const both = await s.saveLegal({
+      termsUrl: "http://example.com/terms",
+      privacyUrl: "https://localhost/privacy",
+    });
+    const one = await s.saveLegal({
+      termsUrl: TERMS_URL,
+      privacyUrl: "ftp://example.com/privacy",
+    });
+
+    expect(await both.json()).toEqual({
+      error: "invalid_input",
+      issues: [
+        { field: "legal.termsUrl", code: "url_invalid" },
+        { field: "legal.privacyUrl", code: "url_invalid" },
+      ],
+    });
+    expect(one.status).toBe(422);
+    expect(await settingsOf(s.portal.db)).toBeUndefined();
+  });
+
+  // #626-T04
+  it.each([
+    ["a text", "https://example.com/terms"],
+    ["a list", []],
+    ["null", null],
+    [
+      "a field it does not know",
+      { termsUrl: TERMS_URL, imprintUrl: TERMS_URL },
+    ],
+  ])("refuses %s in place of the links", async (_name, legal) => {
+    const s = await start();
+
+    const response = await s.saveLegal(legal);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "legal", code: "body_invalid" }],
+    });
+    expect(await settingsOf(s.portal.db)).toBeUndefined();
+  });
+
+  // #626-T05
+  it("refuses switching billing on with the Stripe adapter without the terms link, naming it alone", async () => {
+    const s = await start();
+    await s.put({ adapter: "stripe" });
+    await s.saveRates();
+    await s.saveStripe({
+      apiKey: s.stripe.apiKey,
+      webhookSecret: MANUAL_SECRET,
+    });
+    await s.post("/check");
+    // The privacy link alone does not make it ready.
+    await s.saveLegal({ privacyUrl: PRIVACY_URL });
+
+    const refused = await s.put({ enabled: true });
+
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: "billing_not_ready",
+      missing: ["terms_url_missing"],
+    });
+    expect(await isBillingOn(s.portal.db)).toBe(false);
+    expect((await s.view()).missing).toEqual(["terms_url_missing"]);
+
+    await s.saveLegal({ termsUrl: TERMS_URL });
+    const switched = await s.put({ enabled: true });
+
+    expect(switched.status).toBe(200);
+    expect(await isBillingOn(s.portal.db)).toBe(true);
+  });
+
+  // #626-T05
+  it("switches on with the manual adapter without any link", async () => {
+    const s = await start();
+    await s.saveRates();
+
+    const response = await s.put({ enabled: true });
+
+    expect(response.status).toBe(200);
+    expect((await s.view()).legal).toEqual({
+      termsUrl: null,
+      privacyUrl: null,
+    });
+    expect(await isBillingOn(s.portal.db)).toBe(true);
+  });
+
+  // #626-T06
+  it("keeps the terms link while billing is on with Stripe, and still lets it be changed and the privacy link be removed", async () => {
+    const s = await start();
+    await s.put({ adapter: "stripe" });
+    await s.saveRates();
+    await s.saveStripe({
+      apiKey: s.stripe.apiKey,
+      webhookSecret: MANUAL_SECRET,
+    });
+    await s.post("/check");
+    await s.saveLegal({ termsUrl: TERMS_URL, privacyUrl: PRIVACY_URL });
+    await s.put({ enabled: true });
+
+    const removal = await s.saveLegal({ termsUrl: "" });
+    const change = await s.saveLegal({
+      termsUrl: "https://example.com/terms-2",
+      privacyUrl: null,
+    });
+
+    expect(removal.status).toBe(409);
+    expect(await removal.json()).toMatchObject({
+      error: "billing_disable_first",
+    });
+    expect(change.status).toBe(200);
+    expect((await s.view()).legal).toEqual({
+      termsUrl: "https://example.com/terms-2",
+      privacyUrl: null,
+    });
+    expect(await isBillingOn(s.portal.db)).toBe(true);
+  });
+
+  // #626-T06
+  it("lets the terms link be removed while billing is on with the manual adapter", async () => {
+    const s = await start();
+    await s.saveRates();
+    await s.saveLegal();
+    await s.put({ enabled: true });
+
+    const response = await s.saveLegal({ termsUrl: null });
+
+    expect(response.status).toBe(200);
+    expect(await isBillingOn(s.portal.db)).toBe(true);
   });
 });
 
@@ -1487,6 +1785,12 @@ describe("who may use the billing routes", () => {
   const ROUTES: Array<[string, string, unknown?]> = [
     ["GET", "/api/admin/billing"],
     ["PUT", "/api/admin/billing", { enabled: false }],
+    // #626-T09
+    [
+      "PUT",
+      "/api/admin/billing",
+      { legal: { termsUrl: "https://example.com/terms" } },
+    ],
     ["POST", "/api/admin/billing/check", {}],
     ["POST", "/api/admin/billing/webhook-endpoint", {}],
     ["GET", "/api/admin/billing/workspaces?q=a"],

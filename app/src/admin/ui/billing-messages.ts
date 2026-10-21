@@ -25,7 +25,7 @@ const FAILURE_COPY: Record<string, string> = {
   billing_not_ready:
     "Billing cannot be switched on yet. The list shows what is missing; fix it and try again.",
   billing_disable_first:
-    "Switch billing off first. The payment adapter and the credentials do not change while billing is on.",
+    "Switch billing off first. The payment adapter, the credentials and the link to the terms (with Stripe) are not removed while billing is on.",
   webhook_environment_mismatch:
     "The webhook endpoint at Stripe belongs to the other environment than the API key. A test key goes with test mode, a live key with live mode.",
   webhook_url_not_public:
@@ -92,6 +92,8 @@ const ISSUE_COPY: Record<string, string> = {
     "Enter the low-balance threshold in US dollars, from 0 to 500.",
   hourly_limit_invalid:
     "Enter a whole number of started reviews per hour, from 1 to 100,000.",
+  url_invalid:
+    "The link must be an https address of a public website, written out in full (https://example.com/terms), with no user name or password and at most 2,048 characters.",
   adapter_invalid: "Choose the manual adapter or Stripe.",
   api_key_invalid:
     "This is not a Stripe API key. It starts with sk_test_ or rk_test_ (test mode) or sk_live_ or rk_live_ (live mode).",
@@ -130,6 +132,7 @@ const MISSING_COPY: Record<string, string> = {
   stripe_webhook_secret_missing:
     "The webhook secret (create the webhook endpoint, or enter the secret)",
   connection_check_missing: "A passing connection check",
+  terms_url_missing: "The link to your terms",
   connection_check_failed:
     "The connection check failed just now: check the API key",
   dispatcher_lacks_vm_lifecycle:

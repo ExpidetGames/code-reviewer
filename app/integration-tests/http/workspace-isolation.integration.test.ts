@@ -659,6 +659,7 @@ async function switchBillingOnWithStripe() {
         checkedAt: "2026-10-21T10:00:00.000Z",
         checkedEnvironment: "test",
       },
+      legal: { termsUrl: "https://example.com/terms" },
     },
     null,
   );

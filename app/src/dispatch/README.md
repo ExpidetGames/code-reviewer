@@ -190,14 +190,19 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
 8. **`balance_mails`** (#506): mails the balance crossings that are due (`src/billing/README.md`, "Balance notifications (#506)"): a settlement
    of this sweep or of a superseded job has no response to send after. It reads only the billing switch while billing is off and
    never throws; a failure is a failed step (`balance_mails`). The answer of the route counts the mails sent (`balanceMailsSent`).
-9. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
-   than 23 hours old and the last failure more than an hour old; it is last so that a slow answer from the internet never
-   delays the steps above. A fetch that fails records its own failure (`models_dev_fetch_state`) and keeps the rows it has;
-   that is not a failed step. The whole step (fetch, lookups and write) has one deadline of `MODELS_DEV_BUDGET_MS` (90 s;
-   the route runs 300 s, the check runs take 40 s of it); a step that cannot finish writes nothing and fails with
-   `models_dev_timeout`. The attempt is recorded before it starts. Nothing happens with `MODELS_DEV_FETCH=off`.
+9. **`journal_check`** (#626): while billing is on, a bounded step of the daily check of the billing journal (`verify()` of every workspace;
+   `src/billing/README.md`, "The scheduled journal check (#626)"). It reads one instance setting when no pass is due and only the
+   billing switch while billing is off. An inconsistency is logged by the code `BILLING_JOURNAL_INCONSISTENT` and its result is shown on
+   the admin billing page; the answer of the route counts the workspaces checked in this run (`journalChecked`). A failure is a failed
+   step (`journal_check`).
+10. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
+    than 23 hours old and the last failure more than an hour old; it is last so that a slow answer from the internet never
+    delays the steps above. A fetch that fails records its own failure (`models_dev_fetch_state`) and keeps the rows it has;
+    that is not a failed step. The whole step (fetch, lookups and write) has one deadline of `MODELS_DEV_BUDGET_MS` (90 s;
+    the route runs 300 s, the check runs take 40 s of it); a step that cannot finish writes nothing and fails with
+    `models_dev_timeout`. The attempt is recorded before it starts. Nothing happens with `MODELS_DEV_FETCH=off`.
 
-The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool,"holdsReleased":n,"modelsDev":"applied"|"skipped"|"failed"|null}`; a line
+The answer is `{"status":"ok","expired":{...},"givenUp":n,"revived":n,"sent":n,"noticesTried":n,"cleanedUp":bool,"holdsReleased":n,"journalChecked":n,"modelsDev":"applied"|"skipped"|"failed"|null}`; a line
 `[sweep] requeued=.. lease_expired=.. timed_out=.. given_up=.. revived=.. sent=..` is logged for a run that did
 something. Nothing a database or a Dispatcher said reaches a log or an answer.
 

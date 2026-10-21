@@ -109,6 +109,9 @@ const SCOPED = [
  * - billing-holds-sweep: the reservations of ended jobs that nobody released (#591), for the sweep and the switch-on that
  *   serve the whole instance; it only reads, driven by the workspaces that have something reserved, and every answer names
  *   its workspace, which is where the release goes (the journal repository of that workspace);
+ * - billing-journal-directory: the ids of the workspaces that have a billing journal, page by page (#626), for the scheduled check
+ *   of the journal that serves the whole instance; it only reads and returns workspace ids and nothing else, and the check of
+ *   each one goes through the journal repository of that workspace;
  * - billing-start-credit-grants: which GitHub accounts were granted the start credit (#507). The credit is tied to the
  *   account of an installation, which no workspace owns, so it is asked across workspaces and the row outlives the
  *   workspace. A numeric account id, a workspace id and a time; no name, login or address, so it is not customer data;
@@ -126,6 +129,7 @@ const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
   "billing-holds-sweep.ts",
+  "billing-journal-directory-repository.ts",
   "billing-notification-directory-repository.ts",
   "billing-start-credit-grants-repository.ts",
   "billing-topup-intent-directory-repository.ts",

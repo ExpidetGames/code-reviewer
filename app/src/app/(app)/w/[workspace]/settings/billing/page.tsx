@@ -3,6 +3,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isBillingOn } from "@/billing/enabled";
+import { readStoredSettings } from "@/billing/settings-store";
 import { getWorkspaceBillingService } from "@/billing/shared";
 import { loadWorkspaceBillingPage } from "@/billing/workspace-page-load";
 import { getDatabase } from "@/db/startup";
@@ -26,6 +27,7 @@ export default async function BillingSettingsPage({
   const page = await loadWorkspaceBillingPage({
     isOn: () => isBillingOn(db),
     service: getWorkspaceBillingService(),
+    legal: async () => (await readStoredSettings(db)).settings.legal,
     actor: { workspaceId: workspace.id, userId: user.id, role },
     topup,
   });
@@ -35,8 +37,9 @@ export default async function BillingSettingsPage({
       workspaceSlug={workspace.slug}
       view={page.view}
       returned={page.returned}
-      // The operator's terms have no page of their own in the app yet: the confirmation states them in words (follow-up).
-      termsHref={null}
+      // The operator's own pages (the admin sets them on the billing page, #626); the confirmation shows what is set.
+      termsHref={page.legal.termsUrl}
+      privacyHref={page.legal.privacyUrl}
     />
   );
 }

@@ -27,16 +27,19 @@ describe("loading the billing page", () => {
   // #505-T11
   it("is not found while billing is off, and reads nothing of the workspace", async () => {
     const overview = vi.fn();
+    const legal = vi.fn();
 
     const result = await loadWorkspaceBillingPage({
       isOn: () => Promise.resolve(false),
       service: { overview },
+      legal,
       actor: ACTOR,
       topup: undefined,
     });
 
     expect(result).toEqual({ kind: "not_found" });
     expect(overview).not.toHaveBeenCalled();
+    expect(legal).not.toHaveBeenCalled();
   });
 
   // #505-T01
@@ -48,12 +51,46 @@ describe("loading the billing page", () => {
     const result = await loadWorkspaceBillingPage({
       isOn: () => Promise.resolve(true),
       service: { overview },
+      legal: () => Promise.resolve(undefined),
       actor: ACTOR,
       topup: "success",
     });
 
-    expect(result).toEqual({ kind: "ok", view: VIEW, returned: "success" });
+    expect(result).toEqual({
+      kind: "ok",
+      view: VIEW,
+      returned: "success",
+      legal: { termsUrl: null, privacyUrl: null },
+    });
     expect(overview).toHaveBeenCalledWith(ACTOR);
+  });
+
+  // #626-T08
+  it("gives the links to the terms and the privacy statement the instance has set, and null for one it has not", async () => {
+    const overview = () => Promise.resolve({ ok: true as const, view: VIEW });
+    const load = (legal: { termsUrl?: string; privacyUrl?: string }) =>
+      loadWorkspaceBillingPage({
+        isOn: () => Promise.resolve(true),
+        service: { overview },
+        legal: () => Promise.resolve(legal),
+        actor: ACTOR,
+        topup: undefined,
+      });
+
+    expect(
+      await load({
+        termsUrl: "https://example.com/terms",
+        privacyUrl: "https://example.com/privacy",
+      }),
+    ).toMatchObject({
+      legal: {
+        termsUrl: "https://example.com/terms",
+        privacyUrl: "https://example.com/privacy",
+      },
+    });
+    expect(await load({ termsUrl: "https://example.com/terms" })).toMatchObject(
+      { legal: { termsUrl: "https://example.com/terms", privacyUrl: null } },
+    );
   });
 
   // #505-T02
@@ -64,6 +101,7 @@ describe("loading the billing page", () => {
         overview: () =>
           Promise.resolve({ ok: false as const, error: "forbidden" as const }),
       },
+      legal: () => Promise.resolve(undefined),
       actor: ACTOR,
       topup: undefined,
     });
