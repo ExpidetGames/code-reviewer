@@ -115,6 +115,7 @@ describe("the migrations of both epics", () => {
       "20261021170000_add_billing_topup_intents_provider_amount",
       "20261021190000_add_billing_topup_intents_provider_currency",
       "20261021190100_add_billing_webhook_events_review_context",
+      "20261021230000_add_billing_webhook_events_resolution",
     ]);
   });
 

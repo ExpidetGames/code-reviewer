@@ -73,6 +73,197 @@ function suite(engine: BillingEngine) {
         expect(await events.resolveReview("stripe", "evt_nothing")).toBe(false);
         expect(await events.listOpenReviews({ limit: 10 })).toHaveLength(1);
       });
+
+      async function withReviews() {
+        const { db } = await engine.create();
+        const events = createBillingWebhookEventsRepository(db);
+        const record = async (
+          id: string,
+          at: string,
+          outcome: "amount_rejected" | "intent_unresolved",
+          subject: string,
+          attribution?: { workspaceId: string; intentId: string },
+        ) => {
+          await events.claim("stripe", id, at);
+          await events.finish(
+            "stripe",
+            id,
+            outcome,
+            { subject, occurredAt: null },
+            true,
+            attribution,
+          );
+        };
+        await record(
+          "evt_a",
+          "2026-10-21T08:00:00.000Z",
+          "amount_rejected",
+          "payment:pi_a",
+          {
+            workspaceId: "ws-1",
+            intentId: "intent-1",
+          },
+        );
+        await record(
+          "evt_b",
+          "2026-10-21T09:00:00.000Z",
+          "intent_unresolved",
+          "refund:re_b",
+        );
+        await record(
+          "evt_c",
+          "2026-10-21T10:00:00.000Z",
+          "amount_rejected",
+          "payment:pi_c",
+          {
+            workspaceId: "ws-2",
+            intentId: "intent-2",
+          },
+        );
+        await events.claim("stripe", "evt_ok", "2026-10-21T11:00:00.000Z");
+        await events.finish("stripe", "evt_ok", "applied", {
+          subject: null,
+          occurredAt: null,
+        });
+        return { db, events };
+      }
+
+      // #603-T01
+      it("lists the open reviews newest first with the outcome, the subject and, where known, the workspace and the intent", async () => {
+        const { events } = await withReviews();
+
+        const page = await events.listReviews({
+          state: "open",
+          limit: 10,
+          offset: 0,
+        });
+
+        expect(page.map((row) => row.eventId)).toEqual([
+          "evt_c",
+          "evt_b",
+          "evt_a",
+        ]);
+        expect(page[0]).toEqual({
+          provider: "stripe",
+          eventId: "evt_c",
+          outcome: "amount_rejected",
+          subject: "payment:pi_c",
+          workspaceId: "ws-2",
+          intentId: "intent-2",
+          receivedAt: "2026-10-21T10:00:00.000Z",
+          reviewState: "open",
+          resolution: null,
+        });
+      });
+
+      // #603-T04
+      it("lists a review of a payment that is none of ours without a workspace and an intent", async () => {
+        const { events } = await withReviews();
+
+        const page = await events.listReviews({
+          state: "open",
+          limit: 10,
+          offset: 0,
+        });
+
+        expect(page.find((row) => row.eventId === "evt_b")).toMatchObject({
+          subject: "refund:re_b",
+          workspaceId: null,
+          intentId: null,
+        });
+      });
+
+      // #603-T07
+      it("pages the list and counts the reviews of each state", async () => {
+        const { events } = await withReviews();
+
+        const first = await events.listReviews({
+          state: "open",
+          limit: 2,
+          offset: 0,
+        });
+        const second = await events.listReviews({
+          state: "open",
+          limit: 2,
+          offset: 2,
+        });
+
+        expect(first.map((row) => row.eventId)).toEqual(["evt_c", "evt_b"]);
+        expect(second.map((row) => row.eventId)).toEqual(["evt_a"]);
+        expect(await events.countReviews("open")).toBe(3);
+        expect(await events.countReviews("resolved")).toBe(0);
+      });
+
+      // #603-T02
+      it("keeps who closed a review, when, why and with which entry, and a second close changes nothing", async () => {
+        const { events } = await withReviews();
+        const resolution = {
+          resolvedBy: "user-1",
+          note: "credited by hand",
+          entryId: "entry-1",
+          at: "2026-10-21T12:00:00.000Z",
+        };
+
+        const first = await events.resolveReview("stripe", "evt_a", resolution);
+        const second = await events.resolveReview("stripe", "evt_a", {
+          ...resolution,
+          resolvedBy: "user-2",
+          note: "again",
+          entryId: null,
+        });
+
+        expect(first).toBe(true);
+        expect(second).toBe(false);
+        const closed = await events.listReviews({
+          state: "resolved",
+          limit: 10,
+          offset: 0,
+        });
+        expect(closed).toEqual([
+          expect.objectContaining({
+            eventId: "evt_a",
+            outcome: "amount_rejected",
+            reviewState: "resolved",
+            resolution,
+          }),
+        ]);
+        expect(await events.countReviews("open")).toBe(2);
+        expect(await events.getReview("stripe", "evt_a")).toMatchObject({
+          resolution,
+        });
+      });
+
+      // #603-T02
+      it("reads one review by its provider and event id, open or resolved, and nothing for an event that was not under review", async () => {
+        const { events } = await withReviews();
+
+        expect(await events.getReview("stripe", "evt_b")).toMatchObject({
+          eventId: "evt_b",
+          reviewState: "open",
+        });
+        expect(await events.getReview("stripe", "evt_ok")).toBeUndefined();
+        expect(await events.getReview("other", "evt_b")).toBeUndefined();
+      });
+
+      // #603-T02
+      it("starts a redelivered event over without the resolution of the earlier review", async () => {
+        const { events } = await withReviews();
+        await events.resolveReview("stripe", "evt_b", {
+          resolvedBy: "user-1",
+          note: "nothing to do",
+          entryId: null,
+          at: "2026-10-21T12:00:00.000Z",
+        });
+
+        const again = await events.claim(
+          "stripe",
+          "evt_b",
+          "2026-10-21T13:00:00.000Z",
+        );
+
+        expect(again).toEqual({ claimed: true });
+        expect(await events.getReview("stripe", "evt_b")).toBeUndefined();
+      });
     },
   );
 }

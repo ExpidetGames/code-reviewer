@@ -66,6 +66,7 @@ import { migration as createBillingProfiles } from "./20261021130000_create_bill
 import { migration as addBillingTopupIntentsProviderAmount } from "./20261021170000_add_billing_topup_intents_provider_amount.ts";
 import { migration as addBillingTopupIntentsProviderCurrency } from "./20261021190000_add_billing_topup_intents_provider_currency.ts";
 import { migration as addBillingWebhookEventsReviewContext } from "./20261021190100_add_billing_webhook_events_review_context.ts";
+import { migration as addBillingWebhookEventsResolution } from "./20261021230000_add_billing_webhook_events_resolution.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -139,6 +140,8 @@ const migrations: Record<string, Migration> = {
     addBillingTopupIntentsProviderCurrency,
   "20261021190100_add_billing_webhook_events_review_context":
     addBillingWebhookEventsReviewContext,
+  "20261021230000_add_billing_webhook_events_resolution":
+    addBillingWebhookEventsResolution,
 };
 
 export const migrationProvider: MigrationProvider = {

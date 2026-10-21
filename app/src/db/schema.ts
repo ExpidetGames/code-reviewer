@@ -944,6 +944,11 @@ export interface BillingWebhookEventsTable {
   /** Whose payment the event is, when the application could attribute it to one of its intents (#502); else null. */
   workspace_id: string | null;
   intent_id: string | null;
+  /** The resolution of a review (#603), null while open and for a review closed before it existed: when (ISO 8601, UTC), who (a user id), why, and the journal entry of a manual credit or correction. */
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  resolution_entry_id: string | null;
 }
 
 export interface Database {
