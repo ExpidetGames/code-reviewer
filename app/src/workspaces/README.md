@@ -184,7 +184,7 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   whether the entry is released and serves the kind, and whether the workspace reads the catalog at all, is the caller's.
   **It means something for the key mode `managed` only**: next to `own` it is accepted and kept (so a switch back finds
   it) but the claim and the picker never read it, because a workspace on its own key chooses provider and model freely;
-  a later billing design may refuse it for an `own` key mode. **Off by default**: a row or default without the
+  billing does not refuse it for an `own` key mode. **Off by default**: a row or default without the
   field, and an instance that never sets it, behave as before. Reading is lenient like `LIMITS_ADDED_LATER`: a missing
   field reads as `{ catalogEntries: null }` and never makes the entry `entitlements_invalid`, a key of a newer version
   inside the field is ignored; a field that is there and damaged makes the entry unreadable, so damaged data grants no
@@ -245,8 +245,7 @@ sets the workspace's key mode while billing is on, our models or its own key (`G
 #496, `src/llm/README.md`), and every member sees the choice. "Manage plan"
 (`manage_plan`, an Admin or an Owner) hands the person over to the operator-configured plan page (`src/plan-handoff/`). The billing profile and the top-up of
 the prepaid balance (`manage_billing`, an Admin or an Owner) are in `src/billing/`; so is the optional monthly total limit of the workspace
-(`GET` and `PUT /api/w/:workspace/billing/monthly-limit`, the same role, #499), which refuses a review at the claim when the month's charges plus its hold
-would pass it. While billing is on the per-period run quotas of the entitlements (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`) are not enforced and the plan
+(`GET` and `PUT /api/w/:workspace/billing/monthly-limit`, the same role, #499), which refuses a review at the claim once this UTC month's charges have reached it (a review that runs is never cut short; nothing is held). While billing is on the per-period run quotas of the entitlements (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`) are not enforced and the plan
 page shows none (`src/usage/README.md`); with billing off they apply as before. The workspace
 pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the variables are the
 instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
