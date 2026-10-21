@@ -462,6 +462,37 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
     },
   );
 
+  // #498-T24
+  run(
+    "claims as with billing off when the stored billing setting is text that is no JSON, and settles nothing",
+    async () => {
+      const fixture = await start();
+      await fixture.db
+        .updateTable("instance_settings")
+        .set({ value: "not json {" })
+        .where("key", "=", "billing_settings")
+        .execute();
+      const job = await enqueue(fixture);
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+      await fixture.queue.complete(job.id, claimed?.leaseToken ?? "", {
+        ok: true,
+        result: { ok: true },
+      });
+
+      expect(claimed?.job.id).toBe(job.id);
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        status: "succeeded",
+      });
+      expect(
+        await fixture.db
+          .selectFrom("billing_journal_entries")
+          .selectAll()
+          .execute(),
+      ).toEqual([]);
+    },
+  );
+
   // #498-T15
   run(
     "reads no billing table and writes no entry while billing is off, and the claim is as before",

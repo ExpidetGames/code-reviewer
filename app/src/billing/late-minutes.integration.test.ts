@@ -94,10 +94,11 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
       fixture.clock.now,
     );
     /**
-     * A job a Dispatcher acknowledged, claimed on the workspace's own key, with a VM reported two seconds later that ran for a
-     * minute and was completed: it settles with the backstop (the job's end plus 60 s), which is 2 started minutes.
+     * A job a Dispatcher acknowledged, claimed on the workspace's own key, with a VM reported two seconds later that ran for
+     * `runMinutes` and was completed: it settles with the backstop (the job's end plus 60 s), which is 2 started minutes for a
+     * minute and 6 for five.
      */
-    async function settledJob() {
+    async function settledJob(runMinutes = 1) {
       const job = await fixture.enqueueNew({ prNumber: 7 });
       const dispatches = createJobDispatchesRepository(
         fixture.db,
@@ -122,7 +123,7 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
         startedAt: fixture.clock.now(),
         vmTimeoutSeconds: 2100,
       });
-      fixture.clock.advance(MINUTE);
+      fixture.clock.advance(runMinutes * MINUTE);
       await fixture.queue.complete(job.id, claimed?.leaseToken as string, {
         ok: true,
         result: {},
@@ -139,16 +140,52 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
     return { fixture, receiver, service, journal, runs, settledJob, entries };
   }
 
+  /** The VM of a settled job is learned to have ended `minutes` minutes before the job did (a clock that ran ahead). */
+  async function learnEndBefore(
+    t: Awaited<ReturnType<typeof setup>>,
+    id: string,
+    minutes: number,
+  ) {
+    await t.runs.confirmStopped(
+      id,
+      [VM],
+      new Date(t.fixture.clock.now().getTime() - minutes * MINUTE),
+    );
+    return correctLateMinutes(
+      t.fixture.db,
+      t.fixture.workspaceId,
+      id,
+      t.fixture.clock.now,
+    );
+  }
+
   // #498-T14
-  it("writes one correction when the real end arrives within a day and is more than a minute away", async () => {
+  it("credits one correction when the real end arrives within a day and is more than a minute before the backstop", async () => {
     const t = await setup();
-    const id = await t.settledJob();
+    const id = await t.settledJob(5);
     expect(await t.entries(id)).toEqual([
       ["reservation", -325_000, null],
       ["release", 325_000, null],
-      ["usage", -26_000, 2],
+      ["usage", -78_000, 6],
     ]);
-    // The answer to the stop call comes ten minutes after the job ended: the VM was up for 11 minutes.
+
+    expect(await learnEndBefore(t, id, 2)).toBe("corrected");
+
+    expect(await t.entries(id)).toEqual([
+      ["reservation", -325_000, null],
+      ["release", 325_000, null],
+      ["usage", -78_000, 6],
+      // The VM ended 3 started minutes in, not 6: 3 minutes x 13,000 back.
+      ["correction", 39_000, 3],
+    ]);
+    expect(await t.journal.verify()).toMatchObject({ consistent: true });
+  });
+
+  // #498-T25
+  it("adds no charge when the answer to the stop call arrives late: a late stop is our error", async () => {
+    const t = await setup();
+    const id = await t.settledJob();
+    // The answer comes ten minutes after the job ended: the VM was up for 11 minutes, the settlement charged the backstop (2).
     t.fixture.clock.advance(10 * MINUTE);
     t.receiver.reply(stoppingVms(VM));
 
@@ -158,10 +195,11 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
       ["reservation", -325_000, null],
       ["release", 325_000, null],
       ["usage", -26_000, 2],
-      // 9 more started minutes x 13,000.
-      ["correction", -117_000, 11],
     ]);
-    expect(await t.journal.verify()).toMatchObject({ consistent: true });
+    expect(await t.journal.balance()).toEqual({
+      balanceMicroUsd: 10_000_000 - 26_000,
+      reservedMicroUsd: 0,
+    });
   });
 
   // #498-T14
@@ -183,11 +221,10 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
   // #498-T14
   it("writes no correction when the real end arrives more than a day after the settlement", async () => {
     const t = await setup();
-    const id = await t.settledJob();
+    const id = await t.settledJob(5);
     t.fixture.clock.advance(25 * HOUR);
-    t.receiver.reply(stoppingVms(VM));
 
-    await t.service.stopJobs([id]);
+    expect(await learnEndBefore(t, id, 25 * 60 + 2)).toBe("too_late");
 
     expect((await t.entries(id)).map(([type]) => type)).toEqual([
       "reservation",
@@ -199,18 +236,10 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
   // #498-T14
   it("writes the correction once, however often the end is learned", async () => {
     const t = await setup();
-    const id = await t.settledJob();
-    t.fixture.clock.advance(10 * MINUTE);
-    t.receiver.reply(stoppingVms(VM));
-    await t.service.stopJobs([id]);
+    const id = await t.settledJob(5);
+    await learnEndBefore(t, id, 2);
 
-    await t.service.stopJobs([id]);
-    await correctLateMinutes(
-      t.fixture.db,
-      t.fixture.workspaceId,
-      id,
-      t.fixture.clock.now,
-    );
+    await learnEndBefore(t, id, 2);
     await correctLateMinutes(
       t.fixture.db,
       t.fixture.workspaceId,

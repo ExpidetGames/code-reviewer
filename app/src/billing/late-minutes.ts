@@ -4,13 +4,16 @@
 // (the confirmed stop, else the bounded backstop of #493). The answer to the App's stop call can arrive afterwards and
 // replace the backstop with the real end. If that happens within a day of the settlement and moves the started minutes by more
 // than one (the ends differ by more than a minute), the journal gets ONE `correction` for the difference at the rate the run
-// was charged at; otherwise the settlement stands. A job that was not billed, and billing off, change nothing.
+// was charged at; otherwise the settlement stands. A stop that answers late is our error (#493), so a correction never
+// charges beyond the backstop (the job's end plus the stop-retry window, bounded by the VM's timeout): it can only credit.
+// A job that was not billed, and billing off, change nothing.
 import "server-only";
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { readClaimBilling } from "./claim-billing.ts";
+import { backstopEnd, billableMinutes } from "./minutes.ts";
 
 /** How long after the settlement the real end of a VM may still correct it. */
 export const LATE_MINUTES_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -29,6 +32,46 @@ export type LateMinutesResult = (typeof LATE_MINUTES_RESULTS)[number];
 
 export function lateMinutesKey(jobId: string): string {
   return `late-minutes:${jobId}`;
+}
+
+/**
+ * The minutes a late end settles at: the measure, but never more than the backstop (nor than what was settled, when that is
+ * already above it). A measure below the settlement is taken as it is. An unknown backstop allows no increase.
+ */
+export function lateMinutesTarget(input: {
+  settled: number;
+  measured: number;
+  backstop: number | null;
+}): number {
+  if (input.measured <= input.settled) return input.measured;
+  if (input.backstop === null) return input.settled;
+  return Math.max(input.settled, Math.min(input.measured, input.backstop));
+}
+
+/** The started minutes of the run if its VM had ended at the backstop, or null when the run or the job does not say. */
+async function backstopMinutesOf(
+  db: Kysely<Database>,
+  workspaceId: string,
+  jobId: string,
+  run: { startedAt: string; vmTimeoutSeconds: number | null } | null,
+): Promise<number | null> {
+  if (run === null || run.vmTimeoutSeconds === null) return null;
+  const job = await db
+    .selectFrom("jobs")
+    .select("finished_at")
+    .where("id", "=", jobId)
+    .where("workspace_id", "=", workspaceId)
+    .executeTakeFirst();
+  if (job?.finished_at == null) return null;
+  const startedAt = new Date(run.startedAt);
+  return billableMinutes({
+    startedAt,
+    endedAt: backstopEnd({
+      startedAt,
+      timeoutSeconds: run.vmTimeoutSeconds,
+      jobEndedAt: new Date(job.finished_at),
+    }),
+  });
 }
 
 export async function correctLateMinutes(
@@ -58,19 +101,24 @@ export async function correctLateMinutes(
   const infra = usage.infraMicroUsd ?? 0;
   if (measured.state !== "measured" || settledMinutes === 0 || infra === 0)
     return "within_tolerance";
-  if (Math.abs(measured.minutes - settledMinutes) <= LATE_MINUTES_TOLERANCE)
+  const target = lateMinutesTarget({
+    settled: settledMinutes,
+    measured: measured.minutes,
+    backstop: await backstopMinutesOf(db, workspaceId, jobId, measured.run),
+  });
+  if (Math.abs(target - settledMinutes) <= LATE_MINUTES_TOLERANCE)
     return "within_tolerance";
   // The infrastructure part is whole started minutes times a whole rate: the rate it was charged at is exact.
   const rate = infra / settledMinutes;
   if (!Number.isSafeInteger(rate)) return "within_tolerance";
-  const amount = -(measured.minutes - settledMinutes) * rate;
+  const amount = -(target - settledMinutes) * rate;
   await journal.append({
     type: "correction",
     amountMicroUsd: amount,
     jobId,
     refKey: lateMinutesKey(jobId),
     ...(usage.reviewKind === null ? {} : { reviewKind: usage.reviewKind }),
-    minutes: measured.minutes,
+    minutes: target,
     note: "late end of the VM",
   });
   return "corrected";
