@@ -28,6 +28,7 @@ export const stripeCustomerSchema = z.object({
   id: text,
   object: z.literal("customer"),
   name: text.nullish(),
+  business_name: text.nullish(),
   metadata,
   livemode: z.boolean().optional(),
   /** Only when the customer was asked for with `expand[]=tax_ids`. */

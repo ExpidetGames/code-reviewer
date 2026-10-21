@@ -576,6 +576,61 @@ describe("what Managed Payments does not support", () => {
     expect(fake.checkoutSessions()).toHaveLength(0);
   });
 
+  // #501-X02: probed against the sandbox on 2026-10-21: the digital-goods family (`txcd_10...`) is eligible; `txcd_99999999`
+  // (tangible goods), `txcd_00000000`, `txcd_20030000` and a text that is no code are refused with this message.
+  it("refuses a tax code outside the family Managed Payments takes, with the message of the sandbox", async () => {
+    const fake = await startTestStripe();
+    const withCode = (code: string) => [
+      ...MANAGED_SESSION_ENTRIES.filter(
+        ([name]) => !name.endsWith("[tax_code]"),
+      ),
+      ["line_items[0][price_data][product_data][tax_code]", code] as [
+        string,
+        string,
+      ],
+    ];
+    for (const code of ["txcd_99999999", "txcd_00000000", "txcd_20030000"]) {
+      const refused = await rawPost(
+        fake.baseUrl,
+        fake.apiKey,
+        "/v1/checkout/sessions",
+        withCode(code),
+      );
+      expect(refused.status, code).toBe(400);
+      expect(refused.json.error.message, code).toContain(
+        "this product tax code is ineligible for Managed Payments",
+      );
+    }
+    for (const code of ["txcd_10103001", "txcd_10105002"]) {
+      const accepted = await rawPost(
+        fake.baseUrl,
+        fake.apiKey,
+        "/v1/checkout/sessions",
+        withCode(code),
+      );
+      expect(accepted.status, code).toBe(200);
+    }
+  });
+
+  // #501-X03: probed against the sandbox on 2026-10-21 (API version 2025-03-31.basil): a customer takes `business_name`.
+  it("takes business_name on a customer, when it is made and when it is changed", async () => {
+    const fake = await startTestStripe();
+    const created = await rawPost(fake.baseUrl, fake.apiKey, "/v1/customers", [
+      ["name", "Example GmbH"],
+      ["business_name", "Example GmbH"],
+    ]);
+    expect(created.status).toBe(200);
+    expect(created.json.business_name).toBe("Example GmbH");
+    const changed = await rawPost(
+      fake.baseUrl,
+      fake.apiKey,
+      `/v1/customers/${created.json.id}`,
+      [["business_name", "Renamed GmbH"]],
+    );
+    expect(changed.status).toBe(200);
+    expect(changed.json.business_name).toBe("Renamed GmbH");
+  });
+
   // #500-T09
   it("refuses a parameter it does not know, a missing required one and a customer that does not exist, as Stripe does", async () => {
     const fake = await startTestStripe();
