@@ -104,7 +104,8 @@ workspace, a used up run or cost limit, or entitlements that cannot be read): th
 below runs for it, no credential exists and no record is written (`src/usage/README.md`, "Limits and suspension at
 claim"). **#498: while billing is on, the hold comes next, in the same transaction:** a workspace whose balance is empty or below
 zero has the job end `failed` with `insufficient_balance` or `balance_negative` (and `billing_rates_incomplete` when a rate is missing), with no
-record and no entry; otherwise the record and the hold are written together (`src/billing/README.md`, "Reserve, settle, release"). Every claim
+record and no entry. **#499:** before the balance it checks the hidden hourly brake and the workspace's monthly limit and ends the job `failed` with
+`reviews_paused`, `monthly_limit_reached` or, when it cannot evaluate them for good, `billing_limits_unreadable` (a failure that may pass puts the job back in the queue for a later claim instead, `src/billing/README.md`, "Limits at claim"), with no record and no entry either; otherwise the record and the hold are written together (`src/billing/README.md`, "Reserve, settle, release"). Every claim
 path passes through it: the legacy claim, the split claim of a Dispatcher and the claim by job
 id (for which a refused job answers `204`, like any job that cannot be claimed). Then, for that job, in this order:
 

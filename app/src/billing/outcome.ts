@@ -94,6 +94,10 @@ export const ERROR_CODE_CLASSES = {
   insufficient_balance: "free",
   billing_rates_incomplete: "free",
   billing_hold_released: "free",
+  // Refused at claim by the customer's monthly limit or the hidden brake (#499): free, and no hold was taken.
+  monthly_limit_reached: "free",
+  reviews_paused: "free",
+  billing_limits_unreadable: "free",
   // The Dispatcher gave the job back.
   launch_failed: "free",
   worker_exited: "free",

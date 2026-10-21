@@ -66,6 +66,9 @@ import { migration as createBillingProfiles } from "./20261021130000_create_bill
 import { migration as addBillingTopupIntentsProviderAmount } from "./20261021170000_add_billing_topup_intents_provider_amount.ts";
 import { migration as addBillingTopupIntentsProviderCurrency } from "./20261021190000_add_billing_topup_intents_provider_currency.ts";
 import { migration as addBillingWebhookEventsReviewContext } from "./20261021190100_add_billing_webhook_events_review_context.ts";
+import { migration as widenRefusalNoticeCodesForLimits } from "./20261021210000_widen_refusal_notice_codes_for_limits.ts";
+import { migration as createBillingWorkspaceSettings } from "./20261021210100_create_billing_workspace_settings.ts";
+import { migration as addLimitQueryIndexes } from "./20261021210200_add_limit_query_indexes.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -139,6 +142,11 @@ const migrations: Record<string, Migration> = {
     addBillingTopupIntentsProviderCurrency,
   "20261021190100_add_billing_webhook_events_review_context":
     addBillingWebhookEventsReviewContext,
+  "20261021210000_widen_refusal_notice_codes_for_limits":
+    widenRefusalNoticeCodesForLimits,
+  "20261021210100_create_billing_workspace_settings":
+    createBillingWorkspaceSettings,
+  "20261021210200_add_limit_query_indexes": addLimitQueryIndexes,
 };
 
 export const migrationProvider: MigrationProvider = {

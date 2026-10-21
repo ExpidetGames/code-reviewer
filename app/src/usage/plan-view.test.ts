@@ -259,3 +259,53 @@ describe("the plan view", () => {
     expect(JSON.stringify(view)).not.toContain("source");
   });
 });
+
+describe("the plan view while billing is on (#499)", () => {
+  // #499-T10
+  it("has no run counts, whatever the plan says, but keeps the cost limit and the rest", () => {
+    const view = buildPlanView(
+      limited({
+        keyMode: "managed",
+        limits: {
+          diffRunsPerPeriod: 5,
+          dynamicRunsPerPeriod: 2,
+          managedCostLimitMicroUsd: 1_000_000,
+          ownKeyCostLimitMicroUsd: null,
+        },
+      }),
+      {
+        runs: { diff: 5, dynamic: 2 },
+        costMicroUsd: 250_000,
+        unknownCostCount: 0,
+      },
+      { runQuotas: false },
+    );
+
+    expect(view).toEqual({
+      kind: "limited",
+      planLabel: "Team",
+      managed: true,
+      suspended: false,
+      periodStart: "2026-10-01T00:00:00.000Z",
+      runs: null,
+      cost: { percentUsed: 25, unknownCostCount: 0 },
+    });
+  });
+
+  // #499-T10
+  it("keeps the run counts when nothing is said about billing", () => {
+    const view = buildPlanView(
+      limited({
+        limits: {
+          diffRunsPerPeriod: 5,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
+        },
+      }),
+      { ...NO_USAGE, runs: { diff: 3, dynamic: 0 } },
+    );
+
+    expect(view).toMatchObject({ runs: { diff: { used: 3, limit: 5 } } });
+  });
+});

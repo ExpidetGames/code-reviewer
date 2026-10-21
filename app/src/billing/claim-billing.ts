@@ -25,7 +25,12 @@ export type ClaimBilling =
   | { state: "off" }
   /** Billing is on and a rate is missing: no job is handed out, none can be priced. */
   | { state: "rates_incomplete" }
-  | { state: "on"; rates: BillingRates };
+  | {
+      state: "on";
+      rates: BillingRates;
+      /** The hidden brake's number (#499): started reviews of a workspace in a rolling hour. Never shown to a customer. */
+      hourlyReviewLimit: number;
+    };
 
 /**
  * Whether billing is on for the claims of this moment, and with which rates. A switch that is set but whose adapter is not
@@ -37,11 +42,12 @@ export type ClaimBilling =
 export async function readClaimBilling(
   db: Kysely<Database>,
 ): Promise<ClaimBilling> {
-  const { enabled, missing, rates } = await readBillingSwitch(db);
+  const { enabled, missing, rates, hourlyReviewLimit } =
+    await readBillingSwitch(db);
   if (!enabled) return { state: "off" };
   if (missing.length > 0 || rates === null)
     return { state: "rates_incomplete" };
-  return { state: "on", rates };
+  return { state: "on", rates, hourlyReviewLimit };
 }
 
 /** The codes a claim is refused with because of billing; each is a `JobErrorCode`. */
