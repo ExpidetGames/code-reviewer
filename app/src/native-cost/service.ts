@@ -37,15 +37,24 @@ export type PolicyOutcome =
 export const UPSTREAM_INVALID = "upstream_invalid";
 
 /**
+ * The refusal of an entry for a catalog provider whose trusted address is not the one the workspace's selection pinned (#588): the
+ * catalog's address moved since the workspace selected the provider. The key is not sent anywhere until an Owner or Admin
+ * confirms the new address in the settings of the project.
+ */
+export const PROVIDER_ADDRESS_CHANGED = "provider_address_changed";
+
+/**
  * The entry of the chosen model for the claim (#578), or why there is none. `model_not_in_catalog`: the catalog has no such
  * provider or model; `upstream_not_registry`: the provider is one of the app's registry and the catalog's trusted address is not
  * the registry's (the key goes only to the registry's address); `upstream_invalid` (#555): any other provider, whose stored trusted
  * address is not a plain public https address in the one spelling the runner accepts (`catalog-address.ts`); `check_failed`: the
  * database could not be read (the job is given back, as for a failed price check). `unlisted`: models.dev no longer lists the
- * model and the last known row serves (#548).
+ * model and the last known row serves (#548). `provider_address_changed` (#588): the selection pinned another address than the
+ * catalog trusts now. `unpinned`: the selection has no pin (made before pins existed) and the entry names the trusted address;
+ * the claim adopts it as the pin before it goes on.
  */
 export type EntryOutcome =
-  | { ok: true; entry: JobModelEntry; unlisted?: boolean }
+  | { ok: true; entry: JobModelEntry; unlisted?: boolean; unpinned?: true }
   | {
       ok: false;
       code:
@@ -53,6 +62,7 @@ export type EntryOutcome =
         | "model_not_in_catalog"
         | typeof UPSTREAM_NOT_REGISTRY
         | typeof UPSTREAM_INVALID
+        | typeof PROVIDER_ADDRESS_CHANGED
         | "check_failed";
     };
 
@@ -71,9 +81,11 @@ export type NativeCostService = {
   ): Promise<PolicyOutcome>;
   /**
    * The entry the claim tells the runner about the model (`dynamic.modelEntry`, #578): the last known row of the catalog, so a
-   * model models.dev no longer lists is still served. No key, no price. Never throws.
+   * model models.dev no longer lists is still served. No key, no price. Never throws. `pinned` (#588) is the address the
+   * workspace's selection of a catalog provider pinned: the entry names exactly that address or there is none
+   * (`provider_address_changed`); a registry provider has the registry's address and ignores it.
    */
-  entryFor(ref: CatalogRef): Promise<EntryOutcome>;
+  entryFor(ref: CatalogRef, pinned?: string): Promise<EntryOutcome>;
 };
 
 export function createNativeCostService(deps: {
@@ -105,7 +117,7 @@ export function createNativeCostService(deps: {
       };
     },
 
-    async entryFor(ref) {
+    async entryFor(ref, pinned) {
       try {
         const [provider, model] = await Promise.all([
           deps.catalog.getProvider(ref.providerId),
@@ -115,18 +127,28 @@ export function createNativeCostService(deps: {
           return { ok: false, code: "model_not_in_catalog" };
         const built = buildJobModelEntry(provider, model);
         if (!built.ok) return built;
-        const pinned = deps.registryAddresses[ref.providerId];
+        const registryAddress = deps.registryAddresses[ref.providerId];
         // The key of a registry provider goes to the registry's address; the key of any other provider to the address the catalog
         // trusts for it, in the one spelling the runner accepts (#555). Nothing a workspace typed is ever an address.
-        if (pinned !== undefined) {
-          if (!sameAddress(built.entry.upstreamBaseUrl, pinned))
+        if (registryAddress !== undefined) {
+          if (!sameAddress(built.entry.upstreamBaseUrl, registryAddress))
             return { ok: false, code: UPSTREAM_NOT_REGISTRY };
-        } else if (!isCanonicalCatalogAddress(built.entry.upstreamBaseUrl))
+          return {
+            ok: true,
+            entry: built.entry,
+            unlisted: model.unlistedAt !== null,
+          };
+        }
+        if (!isCanonicalCatalogAddress(built.entry.upstreamBaseUrl))
           return { ok: false, code: UPSTREAM_INVALID };
+        // #588: the address the catalog trusts is the one the workspace saw when it selected the provider, or the key does not go.
+        if (pinned !== undefined && pinned !== built.entry.upstreamBaseUrl)
+          return { ok: false, code: PROVIDER_ADDRESS_CHANGED };
         return {
           ok: true,
           entry: built.entry,
           unlisted: model.unlistedAt !== null,
+          ...(pinned === undefined ? { unpinned: true as const } : {}),
         };
       } catch {
         // No error text: it could carry whatever the failing layer held.

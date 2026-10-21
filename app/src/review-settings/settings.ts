@@ -140,8 +140,17 @@ export type ProjectDynamicSettings = {
   reviewVerdict: ReviewVerdictMode;
 };
 
-/** A project layer: only the fields somebody set. */
-export type ProjectDynamicOverrides = Partial<ProjectDynamicSettings>;
+/** The longest address a project may hold as its pin (#588); the address of a catalog provider is far shorter. */
+export const PROVIDER_ADDRESS_MAX_LENGTH = 2048;
+
+/**
+ * A project layer: only the fields somebody set. `dynamicProviderAddress` (#588) is the address of the catalog provider of
+ * `dynamicProvider` at the moment the project selected it, written by the server and never by a request: the claim sends the
+ * own key of the provider to exactly this address, or to none (`native-cost/README.md`, "Where the key goes").
+ */
+export type ProjectDynamicOverrides = Partial<ProjectDynamicSettings> & {
+  dynamicProviderAddress?: string;
+};
 
 /**
  * A project-only patch (#194, #200): a field that is left out is kept, and `null` on the Dynamic

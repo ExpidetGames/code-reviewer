@@ -55,6 +55,8 @@ export const LLM_KEY_TEST_FAILURE_CODES = [
   "llm_unreachable",
   /** Any other answer than success: a rate limit or an error of the provider's, a redirect. */
   "llm_provider_error",
+  /** A project pinned another address for this catalog provider than the catalog trusts now; the key was not sent (#588). */
+  "llm_provider_address_changed",
 ] as const;
 export type LlmKeyTestFailureCode = (typeof LLM_KEY_TEST_FAILURE_CODES)[number];
 

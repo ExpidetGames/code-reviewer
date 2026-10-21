@@ -106,6 +106,7 @@ async function ProjectSettingsContent({
       llmNotice={llmNotice}
       {...(keyedProviders === undefined ? {} : { keyedProviders })}
       {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
+      canConfirmProviderAddress={canManageLlmKey}
       data={data}
     />
   );

@@ -93,6 +93,7 @@ export function ProjectSettingsPageContent({
   llmNotice = null,
   keyedProviders,
   nativeCatalog,
+  canConfirmProviderAddress = false,
   data,
   api,
 }: {
@@ -106,6 +107,8 @@ export function ProjectSettingsPageContent({
   keyedProviders?: readonly string[];
   /** The models.dev catalog for the Dynamic provider and model of a workspace on its own key (#555); absent otherwise. */
   nativeCatalog?: NativeFormData;
+  /** The person may manage the workspace's LLM key, so they may confirm a new address of the project's catalog provider (#588). */
+  canConfirmProviderAddress?: boolean;
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
@@ -136,6 +139,7 @@ export function ProjectSettingsPageContent({
           repositoryId={data.row.repositoryId}
           {...(keyedProviders === undefined ? {} : { keyedProviders })}
           {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
+          canConfirmProviderAddress={canConfirmProviderAddress}
           {...(api === undefined ? {} : { api })}
         />
       </div>

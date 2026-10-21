@@ -57,6 +57,7 @@ import {
   resetSkill,
   setCatalogEntry,
   setDynamicModel,
+  setConfirmProviderAddress,
   setDynamicProvider,
   setReviewKind,
   setReviewVerdict,
@@ -83,6 +84,7 @@ import {
 } from "./form-state.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ModelFieldset } from "./model-fieldset.tsx";
+import { ProviderAddressNote } from "./provider-address-note.tsx";
 import { ModelChoice, ModelChoiceNote } from "./model-choice.tsx";
 import { CatalogModelPicker } from "../../native-providers/ui/catalog-model-picker.tsx";
 import type { NativeFormData } from "../../native-providers/form-data.ts";
@@ -185,6 +187,7 @@ export function SettingsForm({
   dynamicReviewEnabled = false,
   keyedProviders,
   nativeCatalog,
+  canConfirmProviderAddress = false,
   providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
 }: {
@@ -214,6 +217,11 @@ export function SettingsForm({
    * then offers those providers next to the registry's and the model is picked from a list. The Diff provider is not affected.
    */
   nativeCatalog?: NativeFormData;
+  /**
+   * The person may manage the workspace's LLM key (`manage_llm_key`, Owner and Admin): only they confirm a new address of the
+   * project's catalog provider (#588); the route refuses anyone else. Unknown counts as no.
+   */
+  canConfirmProviderAddress?: boolean;
   /** Only tests pass this: the providers the selects offer, the registry's by default. */
   providers?: ReadonlyArray<
     Pick<LlmProviderDescriptor, "id" | "label" | "defaultModels"> &
@@ -608,6 +616,26 @@ export function SettingsForm({
             workspaceSlug={workspaceSlug}
             providers={dynamicProviderChoices}
             nativeProvidersHint={nativeCatalog !== undefined}
+            {...(projectView.providerAddress == null ||
+            chosenDynamicProvider !== projectView.effective.dynamicProvider
+              ? {}
+              : {
+                  // #588: only for the provider the project has pinned; one chosen instead is pinned by its own selection.
+                  addressNote: (
+                    <ProviderAddressNote
+                      address={projectView.providerAddress}
+                      confirm={state.dynamic.confirmProviderAddress}
+                      canConfirm={canConfirmProviderAddress}
+                      disabled={disabled}
+                      onConfirmChange={(confirm) =>
+                        edit(
+                          setConfirmProviderAddress(state, confirm),
+                          "dynamicProvider",
+                        )
+                      }
+                    />
+                  ),
+                })}
             {...(nativeCatalog === undefined || chosenNative === undefined
               ? {}
               : {

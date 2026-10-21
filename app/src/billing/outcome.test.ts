@@ -392,6 +392,8 @@ describe("a job refused or handed back at claim (#553)", () => {
       "managed_model_unavailable",
       "llm_not_configured",
       "llm_provider_unsupported",
+      // #588-T32
+      "provider_address_changed",
       "job_llm_options_invalid",
       "job_args_invalid",
       "job_env_invalid",
@@ -405,6 +407,8 @@ describe("a job refused or handed back at claim (#553)", () => {
       "pull_request_unavailable",
       "claim_failed",
       "price_check_failed",
+      // #588-T32
+      "provider_pin_check_failed",
     ])
       expect(classifyOutcome(failed(code)), code).toBe("free");
   });

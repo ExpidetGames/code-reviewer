@@ -223,6 +223,14 @@ export function createLlmKeyRouteHandlers({
       if (bodyNamesAnotherProvider(body.value, provider, providers))
         return invalid([{ field: "provider", code: "provider_invalid" }]);
 
+      // #588: a provider whose address moved after a project selected it is refused before any key is read, the stored one
+      // included: the key is decrypted only for a test that can be made.
+      const moved = await tester.preflight({
+        workspaceId: access.workspace.id,
+        provider,
+      });
+      if (moved !== null) return done(moved);
+
       // A key typed into the field is checked as it is (and forgotten); with an empty field the stored key of
       // this provider is.
       let apiKey: string;

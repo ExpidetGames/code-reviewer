@@ -15,6 +15,7 @@ import {
   getDatabase,
   initializeDatabaseOnStart,
 } from "../../src/db/startup.ts";
+import { createModelsDevRepository } from "../../src/db/repositories/models-dev-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { seedRepositories } from "../../src/test-support/review-settings-harness.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
@@ -45,7 +46,7 @@ async function startRoutes() {
     env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
   });
   const db = getDatabase();
-  const { first } = await seedRepositories(db);
+  const { first, second } = await seedRepositories(db);
   const workspaceId = await defaultWorkspaceId(db);
   await createProjectsRepository(db, workspaceId).activate(first.id);
   const signIn = async (role: "owner" | "admin" | "member", id = `${role}-1`) =>
@@ -72,7 +73,7 @@ async function startRoutes() {
       headers: { "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  return { db, first, context, globalContext, request, signIn };
+  return { db, first, second, context, globalContext, request, signIn };
 }
 
 afterEach(async () => {
@@ -254,4 +255,143 @@ describe("the project review settings route", () => {
       error: "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
     });
   });
+});
+
+// Who may confirm or move the address pinned for a catalog provider (#588), through the real route files: the role of the person
+// reaches the service as `manage_llm_key`, so a Member who tries any of the ways around the confirmation is refused with a 403 and
+// the stored pin stays, while an Admin and an Owner may.
+describe("the pinned address of a catalog provider on the project route (#588)", () => {
+  const T1 = "2026-10-19T03:00:00.000Z";
+  const DEEPSEEK = "https://api.deepseek.example";
+  const MOVED = "https://api.deepseek-moved.example";
+  const SELECT = {
+    reviewKind: "dynamic",
+    dynamicProvider: "deepseek",
+    dynamicModel: "deepseek-v4-pro",
+  };
+
+  async function start() {
+    const routes = await startRoutes();
+    await createProjectsRepository(
+      routes.db,
+      await defaultWorkspaceId(routes.db),
+    ).activate(routes.second.id);
+    const repository = createModelsDevRepository(routes.db);
+    const provider = {
+      id: "deepseek",
+      name: "deepseek",
+      url: {
+        state: "trusted" as const,
+        trustedUrl: DEEPSEEK,
+        pendingUrl: null,
+        problem: null,
+      },
+      urlChangedAt: null,
+      firstSeenAt: T1,
+      unlistedAt: null,
+      updatedAt: T1,
+    };
+    await repository.apply({
+      providers: [provider],
+      models: [
+        {
+          providerId: "deepseek",
+          id: "deepseek-v4-pro",
+          name: "deepseek-v4-pro",
+          family: null,
+          limit: { context: 128_000, output: 8_000 },
+          reasoning: false,
+          temperature: true,
+          attachment: false,
+          modalities: { input: ["text"], output: ["text"] },
+          status: null,
+          cost: { input: "0.66", output: "1.98" },
+          lastUpdated: null,
+          interleaved: null,
+          firstSeenAt: T1,
+          unlistedAt: null,
+          updatedAt: T1,
+        },
+      ],
+    });
+    const path = (repositoryId: string) =>
+      `/api/w/default/repositories/${repositoryId}/project/settings`;
+    const put = (repositoryId: string, settings: unknown) =>
+      PUT_PROJECT(
+        routes.request("PUT", path(repositoryId), { settings }),
+        routes.context(repositoryId),
+      );
+    const reset = (repositoryId: string) =>
+      DELETE(
+        routes.request("DELETE", path(repositoryId)),
+        routes.context(repositoryId),
+      );
+    const pinOf = async (repositoryId: string) => {
+      const rows = await routes.db.selectFrom("projects").selectAll().execute();
+      const row = rows.find((r) => r.repository_id === repositoryId);
+      return (
+        JSON.parse(row?.settings ?? "{}") as {
+          dynamicProviderAddress?: string;
+        }
+      ).dynamicProviderAddress;
+    };
+    const moveAddress = () =>
+      repository.apply({
+        providers: [
+          { ...provider, url: { ...provider.url, trustedUrl: MOVED } },
+        ],
+        models: [],
+      });
+    return { ...routes, put, reset, pinOf, moveAddress };
+  }
+
+  // #588-T43
+  it("refuses a Member every way to move a pin that differs from what the catalog trusts, and keeps the pin", async () => {
+    const app = await start();
+    await app.signIn("member");
+    expect((await app.put(app.first.id, SELECT)).status).toBe(200);
+    expect(await app.pinOf(app.first.id)).toBe(DEEPSEEK);
+    await app.moveAddress();
+
+    const refused = [
+      await app.put(app.first.id, { confirmProviderAddress: true }),
+      await app.put(app.first.id, {
+        dynamicProvider: null,
+        dynamicModel: null,
+      }),
+      await app.reset(app.first.id),
+      await app.put(app.second.id, SELECT),
+    ];
+
+    for (const response of refused) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
+      });
+    }
+    expect(await app.pinOf(app.first.id)).toBe(DEEPSEEK);
+    expect(await app.pinOf(app.second.id)).toBeUndefined();
+  });
+
+  // #588-T44
+  it.each(["admin", "owner"] as const)(
+    "lets an %s confirm the moved address, and select the provider in another project at it",
+    async (role) => {
+      const app = await start();
+      await app.signIn("member");
+      expect((await app.put(app.first.id, SELECT)).status).toBe(200);
+      await app.moveAddress();
+      await app.signIn(role);
+
+      const confirmed = await app.put(app.first.id, {
+        confirmProviderAddress: true,
+      });
+      const other = await app.put(app.second.id, SELECT);
+
+      expect(confirmed.status).toBe(200);
+      expect(other.status).toBe(200);
+      expect(await app.pinOf(app.first.id)).toBe(MOVED);
+      expect(await app.pinOf(app.second.id)).toBe(MOVED);
+    },
+  );
 });

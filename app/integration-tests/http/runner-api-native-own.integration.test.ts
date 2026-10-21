@@ -15,9 +15,11 @@ import type {
   StoredProvider,
 } from "../../src/models-dev/catalog.ts";
 import type { PriceBookJson } from "../../src/model-prices/price-book.ts";
+import { sha } from "../../src/test-support/jobs.ts";
 import { registryAddressesOf } from "../../src/native-cost/registry-addresses.ts";
 import { createNativeCostService } from "../../src/native-cost/service.ts";
 import { createNativeCatalogReader } from "../../src/native-providers/catalog.ts";
+import type { ProviderPins } from "../../src/runner-api/provider-pins.ts";
 import {
   startRunnerApiHarness,
   type RunnerApiHarness,
@@ -99,6 +101,8 @@ async function start(
     keyOf?: "deepseek" | "openai" | "none";
     catalogPrice?: PriceBookJson | null;
     selectModel?: string;
+    /** #588: where the claim adopts the address of a selection made before pins existed; default the real one. */
+    providerPins?: ProviderPins;
     /** Rows of the catalog written after the project saved its selection (the model leaves, the address changes). */
     afterSave?: (
       repository: ReturnType<typeof createModelsDevRepository>,
@@ -149,6 +153,12 @@ async function start(
       registryAddresses: registryAddressesOf(llmProviderDescriptors.providers),
     }),
     nativeCatalog: reader,
+    onKeyLoad: () => {
+      keyLoads.count += 1;
+    },
+    ...(options.providerPins === undefined
+      ? {}
+      : { providerPins: options.providerPins }),
   });
   dbRef = h.db;
   const repository = createModelsDevRepository(h.db);
@@ -453,5 +463,244 @@ describe("the claim of a catalog model on the workspace's own key", () => {
       errorCode: "dynamic_engine_unavailable",
     });
     expect(h.issuedJobTokens()).toEqual([]);
+  });
+});
+
+describe("the address a selection is pinned to, at the claim (#588)", () => {
+  const MOVED = "https://api.deepseek-moved.example";
+  const ATTACKER = "https://api.attacker.example";
+
+  /** The catalog trusts another address for deepseek: an admin confirmed a change (#548), or the catalog moved it. */
+  async function trustAddress(
+    repository: ReturnType<typeof createModelsDevRepository>,
+    address: string,
+  ) {
+    const [stored] = (await repository.listProviders()).filter(
+      (p) => p.id === "deepseek",
+    );
+    await repository.apply({
+      providers: [{ ...stored!, url: { ...stored!.url, trustedUrl: address } }],
+      models: [],
+    });
+  }
+
+  async function pinOf(h: RunnerApiHarness): Promise<string | undefined> {
+    const [row] = await h.db.selectFrom("projects").selectAll().execute();
+    return (JSON.parse(row!.settings) as { dynamicProviderAddress?: string })
+      .dynamicProviderAddress;
+  }
+
+  // #588-T19
+  it("serves the claim at the address the project pinned when it selected the provider", async () => {
+    const h = await start({ keyOf: "deepseek" });
+    expect(await pinOf(h)).toBe("https://api.deepseek.example");
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({
+      dynamic: {
+        modelEntry: { upstreamBaseUrl: "https://api.deepseek.example" },
+      },
+    });
+    // The spy on the key load is wired: a served claim loads the key once.
+    expect(h.keyLoads.count).toBe(1);
+  });
+
+  // #588-T20
+  it("refuses a job whose catalog address moved after the selection with provider_address_changed: no key is loaded and the new address gets nothing", async () => {
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: (repository) => trustAddress(repository, ATTACKER),
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "provider_address_changed",
+    });
+    // Nothing was issued or stored for the job: no token, no key, and the key was never asked for.
+    expect(h.keyLoads.count).toBe(0);
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(
+      await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+    ).toEqual([]);
+    const written = h.logLines().join("\n");
+    expect(written).toContain("entry_provider_address_changed");
+    expect(written).not.toContain("attacker");
+    expect(written).not.toContain(DEEPSEEK_KEY);
+    // The pin is untouched by the refusal.
+    expect(await pinOf(h)).toBe("https://api.deepseek.example");
+  });
+
+  // #588-T21
+  it("serves the job at the new address once the person confirms it in the settings of the project", async () => {
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: (repository) => trustAddress(repository, MOVED),
+    });
+    const [first] = await h.snapshotJobs();
+    expect((await h.claim(CLAIM)).status).toBe(204);
+    expect(await h.queue.get(first!.id)).toMatchObject({
+      errorCode: "provider_address_changed",
+    });
+
+    await h.reviewSettings.updateProjectSettings(
+      h.repositoryId,
+      { confirmProviderAddress: true },
+      { canManageLlmKey: true },
+    );
+    await h.enqueueNew({ headSha: sha("b") });
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({
+      llm: { apiKey: DEEPSEEK_KEY },
+      dynamic: { modelEntry: { upstreamBaseUrl: MOVED } },
+    });
+  });
+
+  // #588-T22
+  it("pins a selection made before pins existed at its first claim, and holds the next claim to that address", async () => {
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: async (_repository, db) => {
+        const [row] = await db.selectFrom("projects").selectAll().execute();
+        const stored = JSON.parse(row!.settings) as Record<string, unknown>;
+        delete stored.dynamicProviderAddress;
+        await db
+          .updateTable("projects")
+          .set({ settings: JSON.stringify(stored) })
+          .where("id", "=", row!.id)
+          .execute();
+      },
+    });
+    expect(await pinOf(h)).toBeUndefined();
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({
+      dynamic: {
+        modelEntry: { upstreamBaseUrl: "https://api.deepseek.example" },
+      },
+    });
+    expect(await pinOf(h)).toBe("https://api.deepseek.example");
+
+    // The catalog moves; the next job is refused at the address the first claim pinned.
+    await trustAddress(createModelsDevRepository(h.db), ATTACKER);
+    await h.enqueueNew({ headSha: sha("b"), prNumber: 8 });
+    expect((await h.claim(CLAIM)).status).toBe(204);
+    const second = (await h.snapshotJobs()).find(
+      (candidate) => candidate.id !== job.id,
+    );
+    expect(await h.queue.get(second!.id)).toMatchObject({
+      errorCode: "provider_address_changed",
+    });
+  });
+
+  /** A selection made before pins existed: the pin is taken out of the stored settings. */
+  async function unpin(_repository: unknown, db: RunnerApiHarness["db"]) {
+    const [row] = await db.selectFrom("projects").selectAll().execute();
+    const stored = JSON.parse(row!.settings) as Record<string, unknown>;
+    delete stored.dynamicProviderAddress;
+    await db
+      .updateTable("projects")
+      .set({ settings: JSON.stringify(stored) })
+      .where("id", "=", row!.id)
+      .execute();
+  }
+
+  // #588-T51
+  it("holds a claim that lost the race for the adoption to the pin in force: refused, with no key loaded and no token", async () => {
+    const adopted: Array<{ provider: string; address: string }> = [];
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: unpin,
+      // Another claim pinned another address first: the answer is that pin.
+      providerPins: {
+        adopt: (_job, provider, address) => {
+          adopted.push({ provider, address });
+          return Promise.resolve(ATTACKER);
+        },
+      },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(adopted).toEqual([
+      { provider: "deepseek", address: "https://api.deepseek.example" },
+    ]);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "provider_address_changed",
+    });
+    expect(h.keyLoads.count).toBe(0);
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(
+      await h.db.selectFrom("job_claimed_keys").selectAll().execute(),
+    ).toEqual([]);
+    const written = h.logLines().join("\n");
+    expect(written).toContain("entry_provider_address_changed");
+    expect(written).not.toContain("attacker");
+  });
+
+  // #588-T52
+  it("serves a claim whose adoption answers the very address it sends the key to", async () => {
+    const h = await start({
+      keyOf: "deepseek",
+      afterSave: unpin,
+      providerPins: {
+        adopt: (_job, _provider, address) => Promise.resolve(address),
+      },
+    });
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({ llm: { apiKey: DEEPSEEK_KEY } });
+    expect(h.keyLoads.count).toBe(1);
+  });
+
+  // #588-T53
+  it.each([
+    ["fails", () => Promise.reject(new Error("pin store down"))],
+    [
+      "answers that the project no longer selects the provider",
+      () => Promise.resolve(null),
+    ],
+  ])(
+    "gives the job back with its own reason, not the price check's, when the adoption %s: no key, no token",
+    async (_name, answer) => {
+      const h = await start({
+        keyOf: "deepseek",
+        afterSave: unpin,
+        providerPins: { adopt: answer },
+      });
+      const [job] = await h.snapshotJobs();
+
+      const response = await h.claim(CLAIM);
+
+      expect(response.status).toBe(503);
+      const written = h.logLines().join("\n");
+      expect(written).toContain("given back: provider_pin_check_failed");
+      expect(written).not.toContain("price_check_failed");
+      expect(written).not.toContain("pin store down");
+      expect(await h.queue.get(job!.id)).toMatchObject({ status: "queued" });
+      expect(h.keyLoads.count).toBe(0);
+      expect(h.issuedJobTokens()).toEqual([]);
+    },
+  );
+
+  // #588-T23
+  it("does not pin a registry provider: the registry's address is in the code", async () => {
+    const h = await start({ keyOf: "deepseek" });
+    await h.reviewSettings.updateProjectSettings(h.repositoryId, {
+      dynamicProvider: "openrouter",
+      dynamicModel: "vendor/model",
+    });
+
+    expect(await pinOf(h)).toBeUndefined();
   });
 });

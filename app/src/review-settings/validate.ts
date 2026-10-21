@@ -13,6 +13,7 @@ import {
 import {
   PROJECT_CATALOG_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
+  PROVIDER_ADDRESS_MAX_LENGTH,
   PROJECT_DYNAMIC_SETTING_FIELDS,
   REVIEW_VERDICT_MODES,
   type ReviewVerdictMode,
@@ -62,6 +63,11 @@ export const REVIEW_SETTING_ISSUE_CODES = [
   "MODEL_MANAGED_BY_INSTANCE",
   /** The provider is not one of the registry (#430). */
   "PROVIDER_UNKNOWN",
+  /**
+   * The person confirms the address of the project's catalog provider (#588) and there is none to confirm: the project selects
+   * no catalog provider, or the catalog trusts no address for it now. Never reported by the validation itself.
+   */
+  "PROVIDER_ADDRESS_NOT_PINNABLE",
   /**
    * The catalog entry checks of a project save in a workspace on the operator's key (#430). Never reported by the
    * validation itself: they need the catalog. There is no such entry.
@@ -366,6 +372,9 @@ function dynamicProviderValue(
   return native === undefined ? registered : ok(native);
 }
 
+/** The action of a project save that pins the address the catalog trusts now (#588); not a stored field. */
+export const CONFIRM_PROVIDER_ADDRESS = "confirmProviderAddress";
+
 const DYNAMIC_FIELD_CHECKS: {
   [K in ProjectDynamicSettingField]: (
     value: unknown,
@@ -385,6 +394,11 @@ const DYNAMIC_FIELD_CHECKS: {
 export type ProjectSettingsPatch = {
   review: ReviewSettingsOverrides;
   dynamic: ProjectDynamicPatch;
+  /**
+   * The person confirms the address the catalog trusts for the project's catalog provider now (#588): the pinned address is
+   * written anew. Not a setting, an action; present only when the request said `true`.
+   */
+  confirmProviderAddress?: true;
 };
 
 export type ProjectValidationResult =
@@ -424,7 +438,14 @@ export function validateProjectSettingsPatch(
   const review: ReviewSettingsOverrides = {};
   const dynamic: ProjectDynamicPatch = {};
   const issues: ReviewSettingIssue[] = [];
+  let confirmProviderAddress = false;
   for (const [name, raw] of Object.entries(input)) {
+    if (name === CONFIRM_PROVIDER_ADDRESS) {
+      if (raw === true) confirmProviderAddress = true;
+      else if (raw !== false)
+        issues.push({ field: name, code: "INVALID_TYPE" });
+      continue;
+    }
     if (isProjectDynamicField(name)) {
       const issue = checkDynamicField(dynamic, name, raw, context);
       if (issue !== undefined) issues.push(issue);
@@ -442,7 +463,14 @@ export function validateProjectSettingsPatch(
   }
   return issues.length > 0
     ? { ok: false, issues }
-    : { ok: true, value: { review, dynamic } };
+    : {
+        ok: true,
+        value: {
+          review,
+          dynamic,
+          ...(confirmProviderAddress ? { confirmProviderAddress: true } : {}),
+        },
+      };
 }
 
 /**
@@ -476,6 +504,15 @@ export function parseStoredProjectDynamicOverrides(
     const entry = value[field];
     if (typeof entry === "string") overrides[field] = entry;
   }
+  // The pin (#588) is the server's: it is read from storage only. Whether it is the one canonical spelling is the claim's
+  // judgement (it compares it with the address the catalog trusts); here a shape that no address of a catalog provider has is dropped.
+  const pinned = stored.dynamicProviderAddress;
+  if (
+    typeof pinned === "string" &&
+    pinned.startsWith("https://") &&
+    pinned.length <= PROVIDER_ADDRESS_MAX_LENGTH
+  )
+    overrides.dynamicProviderAddress = pinned;
   return overrides;
 }
 

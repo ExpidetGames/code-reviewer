@@ -102,6 +102,20 @@ describe("the sentences for error codes", () => {
     expect(text).not.toMatch(/openrouter/i);
   });
 
+  // #588-T31
+  it("tells a person that the address of the provider changed, that the key was not sent and who can confirm it", () => {
+    expect(CLAIM_FAILURE_CODES).toContain("provider_address_changed");
+    const { text, known } = describeErrorCode("provider_address_changed");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/Owner or Admin/);
+    expect(text).toMatch(/confirm/);
+    expect(text).toMatch(/review settings of the project/);
+    expect(text).toMatch(/key was not sent/);
+    expect(text).toMatch(/no AI model was used/);
+    expect(text).not.toMatch(/https?:/);
+  });
+
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
   it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
     expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
