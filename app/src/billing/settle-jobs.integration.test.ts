@@ -368,18 +368,21 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
   );
 
   // #498-T08
-  run("charges the minutes only when the provider cost is missing", async () => {
-    const fixture = await start({ keyMode: "managed" });
-    const { job, leaseToken } = await claim(fixture, { managed: true });
+  run(
+    "charges the minutes only when the provider cost is missing",
+    async () => {
+      const fixture = await start({ keyMode: "managed" });
+      const { job, leaseToken } = await claim(fixture, { managed: true });
 
-    await fixture.queue.complete(job.id, leaseToken, delivered(null));
+      await fixture.queue.complete(job.id, leaseToken, delivered(null));
 
-    expect(shape(await entriesOf(fixture, job.id))).toEqual([
-      ["reservation", -1_075_000],
-      ["release", 1_075_000],
-      ["usage", -26_000],
-    ]);
-  });
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -1_075_000],
+        ["release", 1_075_000],
+        ["usage", -26_000],
+      ]);
+    },
+  );
 
   // #498-T08b
   run(
@@ -411,7 +414,9 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, {
         ok: false,
         errorCode: "dynamic_accounting_failed",
-        result: { usage: { promptTokens: 5, completionTokens: 1, costUsd: null } },
+        result: {
+          usage: { promptTokens: 5, completionTokens: 1, costUsd: null },
+        },
       });
 
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
@@ -547,23 +552,26 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
   );
 
   // #498-T11
-  run("takes no hold from a workspace whose claim the entitlements refuse", async () => {
-    const fixture = await start();
-    await createWorkspaceEntitlementsRepository(
-      fixture.db,
-      fixture.workspaceId,
-      fixture.clock.now,
-    ).put(entitlements("own", true), null);
-    const job = await fixture.enqueueNew({ prNumber: 5 });
+  run(
+    "takes no hold from a workspace whose claim the entitlements refuse",
+    async () => {
+      const fixture = await start();
+      await createWorkspaceEntitlementsRepository(
+        fixture.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      ).put(entitlements("own", true), null);
+      const job = await fixture.enqueueNew({ prNumber: 5 });
 
-    expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+      expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
 
-    expect(await fixture.queue.get(job.id)).toMatchObject({
-      errorCode: "workspace_suspended",
-    });
-    expect(await entriesOf(fixture, job.id)).toEqual([]);
-    expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
-  });
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        errorCode: "workspace_suspended",
+      });
+      expect(await entriesOf(fixture, job.id)).toEqual([]);
+      expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
+    },
+  );
 
   // #498-T11
   run("writes no entry for a job cancelled while it waited", async () => {
@@ -706,7 +714,11 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
     await dispatches.create(jobId, at);
     const row = await dispatches.get(jobId);
     await dispatches.claimSend(jobId, row?.nextDispatchAt ?? "", at);
-    await dispatches.record(jobId, decideOutcome({ kind: "accepted" }, 0, at), at);
+    await dispatches.record(
+      jobId,
+      decideOutcome({ kind: "accepted" }, 0, at),
+      at,
+    );
   }
 
   // #498-B1 (the gate of the review of #524)
@@ -767,7 +779,11 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await acknowledge(fixture, job.id);
       fixture.clock.advance(10 * SECOND);
 
-      await fixture.queue.cancelClaimed(job.id, leaseToken, "project_deactivated");
+      await fixture.queue.cancelClaimed(
+        job.id,
+        leaseToken,
+        "project_deactivated",
+      );
 
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
         ["reservation", -325_000],

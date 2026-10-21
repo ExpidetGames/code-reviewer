@@ -346,7 +346,10 @@ export function createJobVmRunsRepository(
             if (known.has(name) || !isVmOfJob(name, jobId)) continue;
             known.add(name);
             const end = new Date(
-              Math.min(latest.getTime(), Math.max(start.getTime(), at.getTime())),
+              Math.min(
+                latest.getTime(),
+                Math.max(start.getTime(), at.getTime()),
+              ),
             );
             const made = await insertRun(executor, {
               jobId,

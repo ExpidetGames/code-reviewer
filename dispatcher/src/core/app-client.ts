@@ -5,7 +5,10 @@
 // Every answer is read against the shapes of contracts/runner-api.v1.json; an answer of another shape,
 // such as a previous release's legacy claim with a job input and a git token, is refused unread.
 import { z } from "zod";
-import type { KnownReleaseReason } from "../contracts/runner-api.ts";
+import type {
+  KnownClaimFeature,
+  KnownReleaseReason,
+} from "../contracts/runner-api.ts";
 import type { ReviewKind } from "./types.ts";
 
 /** The features of the App the split needs (`VersionResponse.features`). */
@@ -18,6 +21,15 @@ export const REQUIRED_APP_FEATURES = [
 
 /** #493: the feature of the App that has the call by which the Dispatcher reports the VM it created. */
 export const VM_LIFECYCLE_FEATURE = "vm_lifecycle";
+
+/**
+ * What a claim of the Dispatcher names (`KnownClaimFeature`): the split answer, and (#498) that it reports the VM it creates,
+ * so the App can tell a Dispatcher that measures billable minutes from one that does not before billing is switched on.
+ */
+const CLAIM_FEATURES: KnownClaimFeature[] = [
+  "worker_credential",
+  VM_LIFECYCLE_FEATURE,
+];
 
 export type ClaimedJob = {
   id: string;
@@ -244,7 +256,7 @@ export function createAppClient(options: AppClientOptions) {
         method: "POST",
         bearer: options.token,
         runnerId: true,
-        body: { ...body, features: ["worker_credential"] },
+        body: { ...body, features: CLAIM_FEATURES },
       });
       if (
         response === null ||

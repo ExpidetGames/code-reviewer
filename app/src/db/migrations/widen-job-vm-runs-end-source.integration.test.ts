@@ -88,7 +88,9 @@ describe("the job VM end source migration", () => {
         db,
       ),
     ).rejects.toThrow();
-    const indexes = await sql<{ name: string }>`select name from sqlite_master where type = 'index' and tbl_name = 'job_vm_runs'`.execute(
+    const indexes = await sql<{
+      name: string;
+    }>`select name from sqlite_master where type = 'index' and tbl_name = 'job_vm_runs'`.execute(
       db,
     );
     expect(indexes.rows.map((row) => row.name)).toContain(

@@ -60,9 +60,7 @@ describe("the longest a VM lives, which a hold is made for", () => {
       Math.ceil((JOB_TIMEOUT_SECONDS.diff + VM_TIMEOUT_MARGIN_SECONDS) / 60),
     );
     expect(maxVmMinutes("dynamic")).toBe(
-      Math.ceil(
-        (JOB_TIMEOUT_SECONDS.dynamic + VM_TIMEOUT_MARGIN_SECONDS) / 60,
-      ),
+      Math.ceil((JOB_TIMEOUT_SECONDS.dynamic + VM_TIMEOUT_MARGIN_SECONDS) / 60),
     );
     expect(maxVmMinutes("diff")).toBe(25);
   });

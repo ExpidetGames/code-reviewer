@@ -528,9 +528,14 @@ describe.each(databases)("the VM runs of a job on %s", (name, open) => {
           t.clock.now(),
         ),
       ).toBe(0);
-      await t.queue.release(job.id, claimed?.leaseToken as string, "worker_exited", {
-        retryAt: t.clock.now(),
-      });
+      await t.queue.release(
+        job.id,
+        claimed?.leaseToken as string,
+        "worker_exited",
+        {
+          retryAt: t.clock.now(),
+        },
+      );
       expect(
         await t.runs.confirmStopped(
           job.id,

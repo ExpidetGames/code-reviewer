@@ -22,6 +22,7 @@ import { createCatalogFixture } from "./review-settings-harness.ts";
 import type { CatalogEntry } from "../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import type { ClaimDeps } from "../runner-api/claim.ts";
 import {
@@ -457,6 +458,8 @@ export async function startRunnerApiHarness(
         createJobVmRunsRepository(fixture.db, workspaceId, fixture.clock.now),
       runnerToken: () => configuredRunnerToken(env),
       appVersion: TEST_APP_VERSION,
+      noteClaimFeatures: (features) =>
+        noteDispatcherClaim(fixture.db, features, fixture.clock.now()),
     });
     // #320: the Worker API over the same collaborators (it has no dispatcher credential).
     const workerApi = createWorkerApi(apiDeps);

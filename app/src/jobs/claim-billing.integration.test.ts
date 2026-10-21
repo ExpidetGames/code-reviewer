@@ -122,12 +122,12 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
         expect.objectContaining({ job_id: job.id, state: "reserved" }),
       ]);
       const { entries } = await journalOf(fixture).entries({ limit: 10 });
-      expect(entries.map((entry) => [entry.type, entry.amountMicroUsd])).toEqual(
-        [
-          ["reservation", -DYNAMIC_MANAGED_HOLD],
-          ["top_up", 10_000_000],
-        ],
-      );
+      expect(
+        entries.map((entry) => [entry.type, entry.amountMicroUsd]),
+      ).toEqual([
+        ["reservation", -DYNAMIC_MANAGED_HOLD],
+        ["top_up", 10_000_000],
+      ]);
       expect(entries[0]).toMatchObject({ jobId: job.id, refKey: job.id });
       expect(await journalOf(fixture).balance()).toEqual({
         balanceMicroUsd: 10_000_000 - DYNAMIC_MANAGED_HOLD,
@@ -137,19 +137,22 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
   );
 
   // #498-T02
-  run("holds the minutes only for a job on the workspace's own key", async () => {
-    const fixture = await start();
-    await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
-    const job = await enqueue(fixture);
+  run(
+    "holds the minutes only for a job on the workspace's own key",
+    async () => {
+      const fixture = await start();
+      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
+      const job = await enqueue(fixture);
 
-    await fixture.queue.claimNext("runner-a", ENGINES);
+      await fixture.queue.claimNext("runner-a", ENGINES);
 
-    const reservation = await journalOf(fixture).findByKey(
-      "reservation",
-      job.id,
-    );
-    expect(reservation?.amountMicroUsd).toBe(-DIFF_OWN_HOLD);
-  });
+      const reservation = await journalOf(fixture).findByKey(
+        "reservation",
+        job.id,
+      );
+      expect(reservation?.amountMicroUsd).toBe(-DIFF_OWN_HOLD);
+    },
+  );
 
   // #498-T02
   run(
@@ -354,7 +357,11 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
       const job = await enqueue(fixture);
       const first = await fixture.queue.claimNext("runner-a", ENGINES);
       expect(first?.job.id).toBe(job.id);
-      await fixture.queue.release(job.id, first?.leaseToken ?? "", "worker_exited");
+      await fixture.queue.release(
+        job.id,
+        first?.leaseToken ?? "",
+        "worker_exited",
+      );
 
       const second = await fixture.queue.claimNext("runner-b", ENGINES);
 
@@ -429,7 +436,10 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
         }),
       ]);
       expect(
-        await fixture.db.selectFrom("billing_journal_entries").selectAll().execute(),
+        await fixture.db
+          .selectFrom("billing_journal_entries")
+          .selectAll()
+          .execute(),
       ).toEqual([]);
       expect(
         await fixture.db.selectFrom("billing_balances").selectAll().execute(),

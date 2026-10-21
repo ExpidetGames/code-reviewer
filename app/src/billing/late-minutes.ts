@@ -44,12 +44,16 @@ export async function correctLateMinutes(
   if (usage === undefined) return "not_billed";
   if (now().getTime() - Date.parse(usage.createdAt) > LATE_MINUTES_WINDOW_MS)
     return "too_late";
-  if ((await journal.findByKey("correction", lateMinutesKey(jobId))) !== undefined)
+  if (
+    (await journal.findByKey("correction", lateMinutesKey(jobId))) !== undefined
+  )
     return "already_corrected";
 
-  const measured = await createJobVmRunsRepository(db, workspaceId, now).measure(
-    jobId,
-  );
+  const measured = await createJobVmRunsRepository(
+    db,
+    workspaceId,
+    now,
+  ).measure(jobId);
   const settledMinutes = usage.minutes ?? 0;
   const infra = usage.infraMicroUsd ?? 0;
   if (measured.state !== "measured" || settledMinutes === 0 || infra === 0)

@@ -49,9 +49,7 @@ async function rebuild(db: Parameters<Migration["up"]>[0], codes: string) {
     .addColumn("state", "text", (column) =>
       column.notNull().defaultTo("pending"),
     )
-    .addColumn("attempts", "integer", (column) =>
-      column.notNull().defaultTo(0),
-    )
+    .addColumn("attempts", "integer", (column) => column.notNull().defaultTo(0))
     .addColumn("next_attempt_at", "text", (column) => column.notNull())
     .addColumn("posted_at", "text")
     .addColumn("created_at", "text", (column) => column.notNull())
@@ -60,7 +58,10 @@ async function rebuild(db: Parameters<Migration["up"]>[0], codes: string) {
       "refusal_notices_state_check",
       sql`state in ('pending', 'posted', 'dropped')`,
     )
-    .addCheckConstraint("refusal_notices_code_check", sql.raw(`code in (${codes})`))
+    .addCheckConstraint(
+      "refusal_notices_code_check",
+      sql.raw(`code in (${codes})`),
+    )
     .addCheckConstraint(
       "refusal_notices_attempts_check",
       sql`attempts >= 0 and pr_number >= 1`,

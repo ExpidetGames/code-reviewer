@@ -29,6 +29,7 @@ import {
   readEntitlements,
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
+import type { DispatcherSightings } from "../../billing/dispatcher-features.ts";
 import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
@@ -114,6 +115,12 @@ export type InstanceSettingValues = {
    * and inert (`isBillingOn`).
    */
   billing_settings: BillingSettings;
+  /**
+   * #498: when the app last saw a Dispatcher that reports its VMs (`vm_lifecycle`) and one that does not, so billing is not
+   * switched on over the second (src/billing/dispatcher-features.ts). Written by `noteDispatcherClaim` only; a value that is not the
+   * shape reads as no sighting. No row: no Dispatcher has claimed.
+   */
+  dispatcher_sightings: DispatcherSightings;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 /**

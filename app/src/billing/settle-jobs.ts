@@ -110,7 +110,9 @@ export async function settleEndedJobs(
 
     if (billing.state === "rates_incomplete") {
       // The rates were removed after the claim: the run cannot be priced, and the hold must not stay.
-      console.error(`[billing] BILLING_RATES_INCOMPLETE_AT_SETTLEMENT job=${job.id}`);
+      console.error(
+        `[billing] BILLING_RATES_INCOMPLETE_AT_SETTLEMENT job=${job.id}`,
+      );
       await journal.release(job.id);
       continue;
     }
@@ -156,7 +158,9 @@ export async function settleEndedJobs(
         });
     } catch (error) {
       if (!(error instanceof PricingError)) throw error;
-      console.error(`[billing] BILLING_PRICING_FAILED job=${job.id} code=${error.code}`);
+      console.error(
+        `[billing] BILLING_PRICING_FAILED job=${job.id} code=${error.code}`,
+      );
       await journal.release(job.id);
     }
   }

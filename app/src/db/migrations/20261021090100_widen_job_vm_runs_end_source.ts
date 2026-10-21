@@ -14,7 +14,8 @@ import { sql } from "kysely";
 import type { Migration } from "kysely/migration";
 import { databaseDriver } from "../driver.ts";
 
-const OLD_SOURCES = "'app_stop_confirmed', 'timeout_backstop', 'job_wall_clock'";
+const OLD_SOURCES =
+  "'app_stop_confirmed', 'timeout_backstop', 'job_wall_clock'";
 const NEW_SOURCES = `${OLD_SOURCES}, 'app_stop_unreported', 'claim_wall_clock'`;
 
 type Db = Parameters<Migration["up"]>[0];
@@ -36,9 +37,7 @@ async function rebuild(db: Db, sources: string) {
     .addColumn("vm_timeout_seconds", "integer")
     .addColumn("ended_at", "text")
     .addColumn("end_source", "text")
-    .addColumn("billable", "integer", (column) =>
-      column.notNull().defaultTo(0),
-    )
+    .addColumn("billable", "integer", (column) => column.notNull().defaultTo(0))
     .addColumn("billable_minutes", "integer")
     .addColumn("created_at", "text", (column) => column.notNull())
     .addColumn("updated_at", "text", (column) => column.notNull())

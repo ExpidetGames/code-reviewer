@@ -5,7 +5,11 @@ import {
   PLAN_RETURN_PATH_SECTION,
   planReturnPath,
 } from "../plan-handoff/return-path.ts";
-import { planPagePath, planPageUrl, workspaceSettingsUrl } from "./plan-page.ts";
+import {
+  planPagePath,
+  planPageUrl,
+  workspaceSettingsUrl,
+} from "./plan-page.ts";
 
 describe("the address of the plan page of a workspace", () => {
   // #281-T09

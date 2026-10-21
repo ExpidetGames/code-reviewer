@@ -63,16 +63,25 @@ describe("the refusal notice codes migration", () => {
 
     await migrateToLatest(db, migrationProvider);
 
-    const { rows } = await sql<{ id: string; code: string }>`select id, code from refusal_notices`.execute(
-      db,
-    );
-    expect(rows).toEqual([{ id: "n-quota_exhausted-2026-10-01", code: "quota_exhausted" }]);
+    const { rows } = await sql<{
+      id: string;
+      code: string;
+    }>`select id, code from refusal_notices`.execute(db);
+    expect(rows).toEqual([
+      { id: "n-quota_exhausted-2026-10-01", code: "quota_exhausted" },
+    ]);
     await seedNotice(db, "insufficient_balance", "head:abc1234");
     await seedNotice(db, "balance_negative", "head:def5678");
-    await expect(seedNotice(db, "not_a_notice", "head:0000000")).rejects.toThrow();
+    await expect(
+      seedNotice(db, "not_a_notice", "head:0000000"),
+    ).rejects.toThrow();
     // The dedupe survives: the same pull request and period cannot hold two notices.
-    await expect(seedNotice(db, "workspace_suspended", "head:abc1234")).rejects.toThrow();
-    const indexes = await sql<{ name: string }>`select name from sqlite_master where type = 'index' and tbl_name = 'refusal_notices'`.execute(
+    await expect(
+      seedNotice(db, "workspace_suspended", "head:abc1234"),
+    ).rejects.toThrow();
+    const indexes = await sql<{
+      name: string;
+    }>`select name from sqlite_master where type = 'index' and tbl_name = 'refusal_notices'`.execute(
       db,
     );
     expect(indexes.rows.map((row) => row.name)).toEqual(
@@ -90,7 +99,11 @@ describe("the refusal notice codes migration", () => {
     async () => {
       const { db } = await createPostgresTestDatabase();
 
-      await seedNotice(db as unknown as Db, "insufficient_balance", "head:abc1234");
+      await seedNotice(
+        db as unknown as Db,
+        "insufficient_balance",
+        "head:abc1234",
+      );
       await seedNotice(db as unknown as Db, "balance_negative", "head:def5678");
       await expect(
         seedNotice(db as unknown as Db, "not_a_notice", "head:0000000"),

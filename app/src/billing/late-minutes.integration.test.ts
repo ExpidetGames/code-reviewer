@@ -36,7 +36,10 @@ const webhookConfig: WebhookDispatchConfig = {
   mode: "webhook",
   url: "https://dispatcher.example.test/dispatch",
   currentKey: CURRENT,
-  previousKey: { kid: "k1", secret: "example-dispatch-secret-previous-0000000" },
+  previousKey: {
+    kid: "k1",
+    secret: "example-dispatch-secret-previous-0000000",
+  },
 };
 const VM = "cr-diff-job-ab12cd34";
 const stoppingVms = (...vms: unknown[]) => ({
@@ -202,8 +205,18 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
     await t.service.stopJobs([id]);
 
     await t.service.stopJobs([id]);
-    await correctLateMinutes(t.fixture.db, t.fixture.workspaceId, id, t.fixture.clock.now);
-    await correctLateMinutes(t.fixture.db, t.fixture.workspaceId, id, t.fixture.clock.now);
+    await correctLateMinutes(
+      t.fixture.db,
+      t.fixture.workspaceId,
+      id,
+      t.fixture.clock.now,
+    );
+    await correctLateMinutes(
+      t.fixture.db,
+      t.fixture.workspaceId,
+      id,
+      t.fixture.clock.now,
+    );
 
     expect(
       (await t.entries(id)).filter(([type]) => type === "correction"),
@@ -219,14 +232,24 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
     await setBillingSwitch(t.fixture.db, false);
 
     expect(
-      await correctLateMinutes(t.fixture.db, t.fixture.workspaceId, id, t.fixture.clock.now),
+      await correctLateMinutes(
+        t.fixture.db,
+        t.fixture.workspaceId,
+        id,
+        t.fixture.clock.now,
+      ),
     ).toBe("billing_off");
     expect(
       (await t.entries(id)).filter(([type]) => type === "correction"),
     ).toEqual([]);
     await setBillingSwitch(t.fixture.db, true);
     expect(
-      await correctLateMinutes(t.fixture.db, t.fixture.workspaceId, "no-such-job", t.fixture.clock.now),
+      await correctLateMinutes(
+        t.fixture.db,
+        t.fixture.workspaceId,
+        "no-such-job",
+        t.fixture.clock.now,
+      ),
     ).toBe("not_billed");
   });
 });
