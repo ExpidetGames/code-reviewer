@@ -249,6 +249,33 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
     },
   );
 
+  // #498-T20
+  run(
+    "charges only the infrastructure part of a delivered result with a known cost on the workspace's own key",
+    async () => {
+      const fixture = await start({ keyMode: "own" });
+      const { job, leaseToken } = await claim(fixture);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+
+      const entries = await entriesOf(fixture, job.id);
+      // The hold was 25 x 13,000 for the minutes alone; the AI cost is the customer's own and costs them nothing here.
+      expect(shape(entries)).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+        ["usage", -26_000],
+      ]);
+      expect(entries[2]).toMatchObject({
+        aiMicroUsd: 0,
+        infraMicroUsd: 26_000,
+        minutes: 2,
+      });
+      expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
+        100_000_000 - 26_000,
+      );
+    },
+  );
+
   // #498-T17
   run(
     "keeps the real cost in the usage record and the operator feed, not the price",
@@ -617,6 +644,35 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         ["reservation", -325_000],
         ["release", 325_000],
       ]);
+    },
+  );
+
+  // #498-T21
+  run(
+    "releases the hold of a job that waited again after a lost attempt and was cancelled, and restores the balance",
+    async () => {
+      const fixture = await start();
+      const { job, leaseToken } = await claim(fixture);
+      await fixture.queue.release(job.id, leaseToken, "worker_exited");
+      expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
+        325_000,
+      );
+
+      expect(
+        await fixture.queue.cancelWaitingForRepository(fixture.repositoryId),
+      ).toBe(1);
+
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        status: "cancelled",
+      });
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+      ]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: 100_000_000,
+        reservedMicroUsd: 0,
+      });
     },
   );
 

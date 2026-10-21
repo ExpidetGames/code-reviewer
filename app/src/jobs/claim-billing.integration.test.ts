@@ -396,6 +396,43 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
     },
   );
 
+  // #498-T22
+  run(
+    "refuses a job claimed again after its hold was released with billing_hold_released, and holds nothing more",
+    async () => {
+      const fixture = await start();
+      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
+      const job = await enqueue(fixture);
+      const first = await fixture.queue.claimNext("runner-a", ENGINES);
+      await fixture.queue.release(
+        job.id,
+        first?.leaseToken ?? "",
+        "worker_exited",
+      );
+      // The hold is given back while the job waits again (a settlement that ran for it).
+      expect(await journalOf(fixture).release(job.id)).toMatchObject({
+        ok: true,
+      });
+
+      const second = await fixture.queue.claimNext("runner-b", ENGINES);
+
+      expect(second).toBeNull();
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "billing_hold_released",
+      });
+      expect(
+        (await journalOf(fixture).entries({ limit: 10 })).entries.map(
+          (entry) => entry.type,
+        ),
+      ).toEqual(["release", "reservation", "top_up"]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: 1_000_000,
+        reservedMicroUsd: 0,
+      });
+    },
+  );
+
   // #498-T18
   run(
     "refuses the job with billing_rates_incomplete and holds nothing while the switch is set and the Stripe adapter is not ready",
