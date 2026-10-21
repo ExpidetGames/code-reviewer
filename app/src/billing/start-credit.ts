@@ -31,9 +31,7 @@ import {
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { Integration } from "../integrations/types.ts";
-import { isBillingOn, readStoredBillingSettings } from "./enabled.ts";
-import { billingNumbersOf } from "./rates.ts";
-import { readBillingSettings } from "./settings.ts";
+import { isBillingOn, readStartCreditMicroUsd } from "./enabled.ts";
 
 /** The key of the one `start_credit` entry of a workspace (with its type and workspace it is the journal's idempotency key). */
 export const START_CREDIT_REF_KEY = "start-credit";
@@ -99,10 +97,7 @@ export async function ensureStartCreditWhileOn(
     if (existing !== undefined)
       return { status: "already_granted", entry: existing } as const;
 
-    const stored = await readStoredBillingSettings(trx);
-    const { startCreditMicroUsd } = billingNumbersOf(
-      stored === undefined ? {} : readBillingSettings(stored),
-    );
+    const startCreditMicroUsd = await readStartCreditMicroUsd(trx);
     if (startCreditMicroUsd === 0) return { status: "disabled" } as const;
 
     const accounts = githubAccountsOf(

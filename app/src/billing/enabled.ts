@@ -17,7 +17,11 @@ import {
   STRIPE_ADAPTER_ID,
   type BillingMissingItem,
 } from "./readiness.ts";
-import { billingRatesOf, type BillingRates } from "./rates.ts";
+import {
+  billingNumbersOf,
+  billingRatesOf,
+  type BillingRates,
+} from "./rates.ts";
 import { DEFAULT_ADAPTER_ID, readBillingSettings } from "./settings.ts";
 import { isUndecodableText } from "./settings-store.ts";
 
@@ -35,6 +39,19 @@ export async function readStoredBillingSettings(
     if (!isUndecodableText(error)) throw error;
     return undefined;
   }
+}
+
+/**
+ * The start credit the admin set, in micro-USD (the default where none was set; 0 switches it off). Read here, next to the switch,
+ * because this module is the one reader of the stored setting; it says nothing about whether billing is on (#507).
+ */
+export async function readStartCreditMicroUsd(
+  db: Kysely<Database>,
+): Promise<number> {
+  const stored = await readStoredBillingSettings(db);
+  return billingNumbersOf(
+    stored === undefined ? {} : readBillingSettings(stored),
+  ).startCreditMicroUsd;
 }
 
 export type BillingSwitch = {

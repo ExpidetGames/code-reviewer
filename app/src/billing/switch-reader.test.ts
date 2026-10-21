@@ -23,12 +23,13 @@ describe("the reader of the billing switch", () => {
     );
 
     // The module itself, the wiring that hands it to the routes, the sweep step that asks it, the page's view that shows its
-    // answer, the first line of every billing route, and the claim, which tells "off" from "set, but not ready" (#498), and the release of stranded holds, whose sweep entry point does nothing while billing is off (#591).
+    // answer, the first line of every billing route, and the claim, which tells "off" from "set, but not ready" (#498), and the release of stranded holds, whose sweep entry point does nothing while billing is off (#591), and the start credit, whose one function does nothing while billing is off (#507).
     expect(deciders.sort()).toEqual([
       "admin-service.ts",
       "claim-billing.ts",
       "enabled.ts",
       "shared.ts",
+      "start-credit.ts",
       "stranded-holds.ts",
       "wall-clock.ts",
     ]);

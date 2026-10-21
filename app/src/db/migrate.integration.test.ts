@@ -110,6 +110,7 @@ describe("the migrations of both epics", () => {
       "20261021090000_widen_refusal_notice_codes",
       "20261021090100_widen_job_vm_runs_end_source",
       "20261021120000_add_billing_balances_reserved_index",
+      "20261021150000_create_billing_start_credit_grants",
     ]);
   });
 
@@ -154,6 +155,7 @@ describe("starting the database", () => {
       "app_settings",
       "billing_balances",
       "billing_journal_entries",
+      "billing_start_credit_grants",
       "billing_topup_intents",
       "billing_webhook_events",
       "email_verification_tokens",
