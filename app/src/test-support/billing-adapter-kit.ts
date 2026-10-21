@@ -91,6 +91,10 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
       expect(["redirect", "none"]).toContain(started.checkout.kind);
       if (started.checkout.kind === "redirect")
         expect(started.checkout.url).toMatch(/^https:\/\//);
+      // #501-T10: the capability is what the route reads to answer the missing path for an adapter with no checkout.
+      expect(started.checkout.kind === "redirect").toBe(
+        adapter.capabilities.checkout,
+      );
     });
 
     // #497-T14
