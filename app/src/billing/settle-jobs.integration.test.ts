@@ -266,6 +266,53 @@ describe.each(databases)("the settlement of a job on %s", (name, open) => {
     },
   );
 
+  // #496-T12
+  run(
+    "charges a run claimed on our models at the managed price, AI x A plus the minutes, though the workspace switched to its own key meanwhile",
+    async () => {
+      const fixture = await start({ keyMode: "managed" });
+      const { job, leaseToken } = await claim(fixture);
+      await createLlmKeyModeStore(
+        fixture.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      ).set("own", null);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+
+      expect(await recordsOf(fixture).get(job.id)).toMatchObject({
+        keyMode: "managed",
+      });
+      const entries = await entriesOf(fixture, job.id);
+      // 500,000 x 5.0 for the AI and 2 x 13,000 for the minutes: the choice at the claim, not the one at the settlement.
+      expect(shape(entries)).toEqual([["usage", -2_526_000]]);
+      expect(entries[0]).toMatchObject({
+        aiMicroUsd: 2_500_000,
+        infraMicroUsd: 26_000,
+      });
+    },
+  );
+
+  // #496-T12
+  run(
+    "charges a run claimed on the workspace's own key the minutes only, though the workspace switched to our models meanwhile",
+    async () => {
+      const fixture = await start({ keyMode: "own" });
+      const { job, leaseToken } = await claim(fixture);
+      await createLlmKeyModeStore(
+        fixture.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      ).set("managed", null);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["usage", -26_000],
+      ]);
+    },
+  );
+
   // #498-T20
   run(
     "charges only the infrastructure part of a delivered result with a known cost on the workspace's own key",
