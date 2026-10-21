@@ -82,7 +82,8 @@ export type JournalBalance = {
 
 /**
  * The cache against the journal. Differences are cache minus sum. A stranded hold (#591) is a `reservation` of a job that
- * has ended and has no `release`: money held for a run that is over. The cache and the journal agree about it, so only the
+ * has ended, whose usage record is no longer `reserved` (so nothing is left to settle it), and that has no `release`: money
+ * held for a run that is over. A superseded run whose Worker still drains is not one. The cache and the journal agree about it, so only the
  * jobs show it; `consistent` is true when both differences are zero and no hold is stranded.
  */
 export type JournalVerification = {
@@ -726,6 +727,10 @@ export function createBillingJournalRepository(
           where r.workspace_id = ${workspaceId}
             and r.type = 'reservation'
             and j.status in (${sql.join([...ENDED_JOB_STATUSES])})
+            and not exists (
+              select 1 from usage_records as u
+              where u.job_id = j.id and u.state = 'reserved'
+            )
             and not exists (
               select 1 from billing_journal_entries as l
               where l.workspace_id = r.workspace_id
