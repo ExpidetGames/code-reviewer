@@ -8,6 +8,8 @@ import { createJobDispatchesRepository } from "../db/repositories/job-dispatches
 import { getDatabase } from "../db/startup.ts";
 import { getCheckRunService } from "../check-runs/shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
+import { deliverDueBalanceMailsNow } from "../billing/shared.ts";
+import { runJournalCheckWhileBillingOn } from "../billing/journal-check.ts";
 import { releaseStrandedHoldsWhileBillingOn } from "../billing/stranded-holds.ts";
 import { cleanUpExpiredRows } from "../maintenance/cleanup.ts";
 import { getMailSender } from "../mail/shared.ts";
@@ -47,6 +49,10 @@ export function getDispatchSweep(
       releaseStranded: () =>
         releaseStrandedHoldsWhileBillingOn(db, () => new Date()),
     },
+    // #506: the balance mails that a settlement of this sweep left due.
+    balanceMails: { deliverDue: deliverDueBalanceMailsNow },
+    // #626: the daily check of the billing journal, while billing is on.
+    journalCheck: { run: () => runJournalCheckWhileBillingOn(db) },
     cleanup: () =>
       cleanUpExpiredRows(db, undefined, {
         // Read when it matters, never remembered: the admin can add or remove the mail server at any time.

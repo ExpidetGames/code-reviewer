@@ -32,6 +32,7 @@ import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
 import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
 import { createBillingProfilesRepository } from "./billing-profiles-repository.ts";
+import { createBillingNotificationsRepository } from "./billing-notifications-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "./billing-workspace-settings-repository.ts";
 
 const SHA = "b".repeat(40);
@@ -59,6 +60,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     topUpIntents: createBillingTopUpIntentsRepository(db, workspaceId),
     profiles: createBillingProfilesRepository(db, workspaceId),
     limits: createBillingWorkspaceSettingsRepository(db, workspaceId),
+    notifications: createBillingNotificationsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -327,6 +329,10 @@ async function seed(
     tag === "a" ? 10_000_000 : 20_000_000,
     null,
   );
+  // #506-T09: the balance notifications. Each workspace was told "empty", and B was also told "low" without a mail, so the other
+  // workspace's rows are there to be read, re-armed and marked.
+  await repos.notifications.markSent("empty", "due");
+  if (tag === "b") await repos.notifications.markSent("low", "none");
   return {
     topUpIntentId: topUpIntent.id,
     unpagedIntentId: unpagedIntent.id,
@@ -446,6 +452,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectFrom("billing_profiles")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
+      .execute(),
+    billingNotifications: await db
+      .selectFrom("billing_notifications")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("kind")
       .execute(),
     billingWorkspaceSettings: await db
       .selectFrom("billing_workspace_settings")
@@ -1462,6 +1474,31 @@ const CASES: Case[] = [
     run: (a) => a.limits.setMonthlyLimit(null, null),
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({ monthlyLimitMicroUsd: null }),
+  },
+  // #506-T09: the balance notifications: A reads, marks and re-arms its own rows; B's "low" and its mail stay as they are
+  {
+    name: "notifications.list",
+    run: (a) => a.notifications.list(),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual([
+        expect.objectContaining({ kind: "empty", state: "sent" }),
+      ]),
+  },
+  {
+    name: "notifications.get",
+    run: (a) => a.notifications.get("low"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ kind: "low", state: "armed" }),
+  },
+  {
+    name: "notifications.markSent",
+    run: (a) => a.notifications.markSent("low", "due"),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
+  {
+    name: "notifications.rearm",
+    run: (a) => a.notifications.rearm("low"),
+    expectAnswer: (answer) => expect(answer).toBe(false),
   },
   // runs
   {

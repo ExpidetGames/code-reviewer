@@ -41,6 +41,14 @@ describe("the copy for the billing codes", () => {
     },
   );
 
+  // #595
+  it("tells to switch billing off before the unusable webhook endpoint is replaced, as replacing is refused while billing is on", () => {
+    const sentence = describeBillingFailure("webhook_endpoint_unusable");
+
+    expect(sentence).toMatch(/Switch billing off, then replace it/);
+    expect(sentence).not.toMatch(/Replace the endpoint here/);
+  });
+
   // #504-T03
   it.each([...BILLING_MISSING_ITEMS, "connection_check_failed"])(
     "has a line for the missing item %s",

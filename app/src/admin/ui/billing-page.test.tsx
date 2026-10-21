@@ -50,6 +50,13 @@ const VIEW: BillingView = {
     webhookUrl: "https://reviews.example.test/api/billing/webhook",
     webhookUrlPublic: true,
   },
+  legal: { termsUrl: null, privacyUrl: null },
+  journalCheck: {
+    state: "never",
+    checkedAt: null,
+    workspaces: 0,
+    inconsistentWorkspaces: 0,
+  },
   rates: {
     factorA: null,
     diffMinuteRateMicroUsd: null,
@@ -87,6 +94,7 @@ const STRIPE_VIEW: BillingView = {
     "stripe_api_key_missing",
     "stripe_webhook_secret_missing",
     "connection_check_missing",
+    "terms_url_missing",
   ],
 };
 
@@ -663,6 +671,190 @@ describe("the rates and numbers", () => {
         .getByLabelText("Rate per started minute, Diff reviews (USD)")
         .getAttribute("aria-invalid"),
     ).not.toBe("true");
+  });
+});
+
+describe("the links to the terms and the privacy statement", () => {
+  const LEGAL_VIEW: BillingView = {
+    ...RATED,
+    legal: {
+      termsUrl: "https://example.com/terms",
+      privacyUrl: "https://example.com/privacy",
+    },
+  };
+
+  // #626-T07
+  it("shows both links as they are stored, and the terms link as needed for Stripe", () => {
+    render(<BillingPage billing={LEGAL_VIEW} notice={NOTICE} api={api()} />);
+
+    const card = screen.getByRole("region", { name: "Terms and privacy" });
+    expect(
+      (within(card).getByLabelText("Link to the terms") as HTMLInputElement)
+        .value,
+    ).toBe("https://example.com/terms");
+    expect(
+      (
+        within(card).getByLabelText(
+          "Link to the privacy statement (optional)",
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("https://example.com/privacy");
+    expect(within(card).getByText(/Needed to run Stripe/)).toBeTruthy();
+  });
+
+  // #626-T07
+  it("sends the typed links, and an emptied field as an empty text, which removes the link", async () => {
+    const mock = api({}, LEGAL_VIEW);
+    render(<BillingPage billing={LEGAL_VIEW} notice={NOTICE} api={mock} />);
+    const user = userEvent.setup();
+
+    await user.clear(screen.getByLabelText("Link to the terms"));
+    await user.type(
+      screen.getByLabelText("Link to the terms"),
+      "https://example.com/terms-2",
+    );
+    await user.clear(
+      screen.getByLabelText("Link to the privacy statement (optional)"),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save terms and privacy links" }),
+    );
+
+    await waitFor(() =>
+      expect(mock.change).toHaveBeenCalledWith({
+        legal: { termsUrl: "https://example.com/terms-2", privacyUrl: "" },
+      }),
+    );
+    expect(await screen.findByText("Saved.")).toBeTruthy();
+  });
+
+  // #626-T07
+  it("shows the server's refusal on the link it is about", async () => {
+    const mock = api({
+      change: () =>
+        failure("invalid_input", [
+          { field: "legal.termsUrl", code: "url_invalid" },
+        ]),
+    });
+    render(<BillingPage billing={LEGAL_VIEW} notice={NOTICE} api={mock} />);
+
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole("button", { name: "Save terms and privacy links" }),
+      );
+
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Link to the terms").getAttribute("aria-invalid"),
+      ).toBe("true"),
+    );
+    expect(screen.getByText(/must be an https address/)).toBeTruthy();
+    expect(
+      screen
+        .getByLabelText("Link to the privacy statement (optional)")
+        .getAttribute("aria-invalid"),
+    ).not.toBe("true");
+  });
+
+  // #626-T07
+  it("names the terms link among what is missing for Stripe, in words", () => {
+    render(<BillingPage billing={STRIPE_VIEW} notice={NOTICE} api={api()} />);
+
+    expect(screen.getByText("The link to your terms")).toBeTruthy();
+  });
+});
+
+describe("the check of the journal", () => {
+  const checked = (
+    journalCheck: BillingView["journalCheck"],
+    on = true,
+  ): BillingView => ({ ...RATED, enabled: on, on, journalCheck });
+
+  // #626-T17
+  it("says that no check has run yet, and that it runs daily while billing is on", () => {
+    render(<BillingPage billing={RATED} notice={NOTICE} api={api()} />);
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(within(status).getByText(/Journal check: not run yet/)).toBeTruthy();
+    expect(
+      within(status).getByText(/once a day while billing is on/),
+    ).toBeTruthy();
+  });
+
+  // #626-T17
+  it("shows an ok result with the date", () => {
+    render(
+      <BillingPage
+        billing={checked({
+          state: "ok",
+          checkedAt: "2026-10-21T03:00:12.000Z",
+          workspaces: 12,
+          inconsistentWorkspaces: 0,
+        })}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(
+      within(status).getByText("Journal check: ok (2026-10-21 03:00 UTC)"),
+    ).toBeTruthy();
+    expect(within(status).getByText(/12 workspaces/)).toBeTruthy();
+    expect(within(status).queryByRole("alert")).toBeNull();
+  });
+
+  // #626-T17
+  it("shows an inconsistent result with the date, how many workspaces and where to look", () => {
+    render(
+      <BillingPage
+        billing={checked({
+          state: "inconsistent",
+          checkedAt: "2026-10-21T03:00:12.000Z",
+          workspaces: 12,
+          inconsistentWorkspaces: 2,
+        })}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(
+      within(status).getByText(
+        "Journal check: inconsistent (2026-10-21 03:00 UTC)",
+      ),
+    ).toBeTruthy();
+    expect(within(status).getByText(/2 of 12 workspaces/)).toBeTruthy();
+    expect(
+      within(status).getByText(/BILLING_JOURNAL_INCONSISTENT/),
+    ).toBeTruthy();
+  });
+
+  // #626-T17
+  it("says the check is paused while billing is off, and still shows the last result", () => {
+    render(
+      <BillingPage
+        billing={checked(
+          {
+            state: "ok",
+            checkedAt: "2026-10-21T03:00:12.000Z",
+            workspaces: 12,
+            inconsistentWorkspaces: 0,
+          },
+          false,
+        )}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(within(status).getByText(/Journal check: ok/)).toBeTruthy();
+    expect(
+      within(status).getByText(/paused while billing is off/),
+    ).toBeTruthy();
   });
 });
 

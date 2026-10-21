@@ -2,7 +2,7 @@
 
 // The "test key" service as the running server wires it, over a database (src/llm/shared.ts passes the server's): counted in the
 // shared `rate_limits` table, connecting to the provider's own address only (src/llm/endpoint.ts), a catalog provider tested at the
-// trusted address of its row, through the connect guard, and held to the addresses the workspace's projects pinned (#588). Kept
+// trusted address of its row, through the connect guard, and held to the addresses the workspace's projects pinned (#588, all of them: #614). Kept
 // apart from the server-only module so a test can run exactly this wiring over its own database.
 import type { Kysely } from "kysely";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
@@ -40,11 +40,12 @@ export function createWiredLlmKeyTester({
       ...(fetchImpl === undefined ? {} : { fetchImpl }),
       ...(resolveAddresses === undefined ? {} : { resolveAddresses }),
     }),
-    // #588: the test is held to the address the projects of the workspace that use the provider pinned, as a claim is.
+    // #588: the test is held to the address the projects of the workspace pinned for the provider, as a claim is. Every project
+    // counts, also one on Diff Review or switched off (#614): a Member may switch a project over, and its pin must not leave the
+    // test with it.
     pinnedAddresses: (workspaceId, slug) =>
       createPinnedAddressReader(createProjectsRepository(db, workspaceId))(
         slug,
-        { inUseOnly: true },
       ),
   });
 }

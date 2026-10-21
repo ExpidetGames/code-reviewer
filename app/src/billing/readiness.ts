@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // What stands between an instance and a billing that can be on (ADR 0006, 2.14): the rates for every adapter (A, both B and
-// the Diff AI reserve), and for Stripe also the API key, the webhook secret and a passing connection check. The same list
+// the Diff AI reserve), and for Stripe also the API key, the webhook secret, a passing connection check and the link to the terms. The same list
 // answers two questions: the switch (`isBillingOn`: on only when nothing is missing) and the admin page (an attempt to switch
 // an incomplete setup on is refused with the items named). Pure: the caller says which credentials are stored.
 import "server-only";
@@ -17,6 +17,8 @@ export const BILLING_MISSING_ITEMS = [
   "stripe_api_key_missing",
   "stripe_webhook_secret_missing",
   "connection_check_missing",
+  /** The Stripe adapter shows the terms to the buyer at the first top-up (#626); the manual adapter does not need them. */
+  "terms_url_missing",
 ] as const;
 export type BillingMissingItem = (typeof BILLING_MISSING_ITEMS)[number];
 
@@ -47,5 +49,6 @@ export function missingItemsOf({
   if (!secrets.webhookSecret) missing.push("stripe_webhook_secret_missing");
   if (settings.stripe?.checkedAt === undefined)
     missing.push("connection_check_missing");
+  if (settings.legal?.termsUrl === undefined) missing.push("terms_url_missing");
   return missing;
 }

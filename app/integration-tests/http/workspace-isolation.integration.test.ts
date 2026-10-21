@@ -371,6 +371,31 @@ const ENTRIES: Entry[] = [
     billing: true,
   },
   {
+    // #496-T07: the key mode of the workspace is read by every member of the workspace in the address and set by an Admin and an
+    // Owner, and by nobody of another workspace.
+    name: "GET llm-key-mode",
+    route: "/api/w/[workspace]/llm-key-mode",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/llm-key-mode",
+    params: () => ({}),
+    file: "llm-key-mode/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
+    name: "PUT llm-key-mode",
+    route: "/api/w/[workspace]/llm-key-mode",
+    method: "PUT",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-key-mode",
+    body: () => ({ keyMode: "managed" }),
+    params: () => ({}),
+    file: "llm-key-mode/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
     // #505-T02: the journal is read by every member of the workspace in the address and by nobody of another one.
     name: "GET billing/journal",
     route: "/api/w/[workspace]/billing/journal",
@@ -634,6 +659,7 @@ async function switchBillingOnWithStripe() {
         checkedAt: "2026-10-21T10:00:00.000Z",
         checkedEnvironment: "test",
       },
+      legal: { termsUrl: "https://example.com/terms" },
     },
     null,
   );

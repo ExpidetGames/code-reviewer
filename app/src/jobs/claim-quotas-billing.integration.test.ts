@@ -6,6 +6,7 @@
 // the limits of epic #268 (src/usage/README.md).
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
+import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
@@ -231,6 +232,11 @@ describe.each(databases)(
         await entitle(fixture, {
           limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
         });
+        // While billing is on the cost limit of the key the workspace CHOSE applies (#496), not the entitlement's key mode.
+        await createLlmKeyModeStore(fixture.db, fixture.workspaceId).set(
+          "own",
+          null,
+        );
         const spent = await enqueue(fixture);
         const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
         expect(claimed?.job.id).toBe(spent.id);

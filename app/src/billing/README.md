@@ -2,12 +2,51 @@
 
 The place of billing in the app. **Billing is off unless an instance admin switches it on, and a self-hoster who never
 does sees no change.** The design is ADR 0006 (`docs/decisions/0006-prepaid-billing-via-stripe-managed-payments.md`,
-epic #489): prepaid pay-as-you-go through Stripe Managed Payments, a provider-neutral adapter in front of it. The
+epic #489): prepaid pay-as-you-go through Stripe Managed Payments, with a provider-neutral adapter in front of it. The
 earlier subscription design (plans, plan versions, prices with a payment provider, an admin page for them) was deleted
 before it reached a release (#491); the model catalog, the providers and `modelAccess` of epic #420 are unaffected.
 
-What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: the start of a review on a positive balance and the price charged when the job ends (#498, reworked by #605: no hold at claim; "Start, settle" below), the Stripe adapter with the billing profile and the top-up route (#501, below), the start credit with its abuse protection (#507, "The start credit" below), the Stripe webhooks that credit, refund and charge back (#502, "Stripe webhooks" below), and the billing page of a workspace with the price of each review (#505, "The workspace page" below). Server-only: every
-source file imports `"server-only"` (`server-only.test.ts`).
+This file is for developers. The people who run an instance have their own guides: `docs/billing.md` (the hosted
+operator), `docs/billing-self-hosting.md` (a self-hoster) and `docs/billing-terms-checklist.md` (the points for the terms).
+Every source file here imports `"server-only"` (`server-only.test.ts`).
+
+## Billing end to end
+
+One workspace has one USD balance, kept as the sum of an immutable journal in micro-USD. The sections below describe each
+step; this is the whole path in order.
+
+1. **The switch and readiness.** An instance admin sets the rates and the adapter on the billing page of the admin portal
+   (`/admin/billing`, #504) and then the switch. Billing is on only when the switch is set **and** the adapter is ready
+   (`isBillingOn`, "The switch"). Until then no billing route answers, no billing table is read and nobody is called.
+2. **Rates.** The factor **A** (AI cost multiplier, our key only) and one rate **B** per review kind (micro-USD per started
+   minute) are admin data with no default. The Diff AI reserve is still required to switch on but nothing reads it (#608).
+   The start credit (default 2 USD), the low-balance threshold (default 5 USD) and the hourly brake (default 60) have
+   defaults ("The price of a run", "The billing page").
+3. **Start credit.** The first time a workspace with a bound GitHub installation meets billing, it gets the start credit,
+   once per GitHub account ("The start credit").
+4. **Top-up.** An Owner or Admin saves the billing profile, confirms that they buy for a business and starts a top-up of 10
+   to 500 USD. The app writes an intent row, creates a Stripe Checkout session (Managed Payments) and sends the browser
+   there. The credit is written **only** by the webhook (or by "Check payment", which applies the same event): the net
+   amount, once per payment ("The billing profile, the Stripe adapter and the top-up", "Top-up intents", "Stripe webhooks").
+5. **Claim.** When a runner claims a job, the checks run in one transaction in this order: the entitlements, the hidden
+   hourly brake, the monthly limit, the start credit, and the balance. A review starts whenever the balance is above zero.
+   **Nothing is held** (#605). A refusal is free and leaves no usage record ("Start, settle", "Limits at claim").
+6. **Run.** Nothing is charged while it runs. The minutes come from the VM records ("Billable minutes").
+7. **Settle.** In the transaction that ends the job, `settleEndedJobs` classifies the end, prices it and writes one `usage`
+   entry. The balance may go below zero ("Start, settle", "The price of a run").
+8. **Negative or empty balance.** At zero or below, every claim is refused (`insufficient_balance`, `balance_negative`) with
+   a pull request notice until credit arrives. A refund or chargeback can also take the balance below zero.
+9. **Notifications.** Owners and Admins get one mail per crossing into low or empty, and a banner while it lasts ("Balance
+   notifications").
+10. **Key mode.** While billing is on, each workspace chooses our models (AI plus infrastructure) or its own key
+    (infrastructure only). The default is our models ("Key mode").
+11. **Payment reviews.** A payment that cannot be credited by itself (an unknown intent, a wrong amount) is recorded as a
+    review row that the admin resolves on `/admin/billing/reviews` ("Payment reviews").
+12. **Billing off.** Switching off keeps rates, credentials, journal and balances. Claims and usage records are as before
+    ("Start, settle" lists what billing off still reads).
+
+What stays true on every path: money is an integer, an entry is written once (idempotent keys), the balance row is locked
+before any write, the journal is never updated or deleted, and no secret, billing profile or amount of a payment is logged.
 
 | File                                                                                                                              | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -15,17 +54,17 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `rates.ts`                                                                                                                        | The rates and numbers (pure): the bounds, `validateRatesPatch` with the stable codes `factor_invalid`, `rate_invalid`, `reserve_invalid`, `start_credit_invalid`, `low_balance_invalid`, `hourly_limit_invalid`, `billingRatesOf` (the complete rates or null), `billingNumbersOf` (the numbers with their defaults) and `canSwitchBillingOn` (`billing_rates_incomplete`).                                                                    |
 | `rates-service.ts`, `settings-store.ts`                                                                                           | The one writer of the rates and numbers: validates, merges into the stored setting under an advisory lock (`db/billing-settings-lock.ts`), keeps the switch, the adapter and the Stripe record as they are. `settings-store.ts` is the read-modify-write both this service and the admin service (#504) go through.                                                                                                                            |
 | `outcome.ts`                                                                                                                      | `classifyOutcome`: the end state of a job and its stable codes to `charged`, `minutes_only` or `free`, from an exhaustive table (pure).                                                                                                                                                                                                                                                                                                        |
-| `pricing.ts`                                                                                                                      | `priceRun` (pure): the two prices of a run in whole micro-USD. `reserveFor` (the hold of ADR 0006, D6) is no longer called by the claim since #605.                                                                                                                                                                                                                                                                                            |
+| `pricing.ts`                                                                                                                      | `priceRun` (pure): the two prices of a run in whole micro-USD. `reserveFor` (the old hold) is read by nothing since #605.                                                                                                                                                                                                                                                                                                                      |
 | `journal.ts`                                                                                                                      | The vocabulary of the balance journal (#495): the entry types as an `as const` set, the sign of each, the stable error codes, `validateEntry`. The table checks restate the type and sign rules in SQL; `journal.test.ts` fails when they drift apart.                                                                                                                                                                                         |
 | `minutes.ts`                                                                                                                      | Billable minutes (pure, #493): `billableMinutes`, `backstopEnd`, `boundedEnd`, the end sources and `STOP_RETRY_WINDOW_SECONDS`.                                                                                                                                                                                                                                                                                                                |
 | `wall-clock.ts`                                                                                                                   | `createWallClockRecorder`: the measure of a job without a VM, where billing is on (#493). `shared.ts` hands it to the platform after the response.                                                                                                                                                                                                                                                                                             |
-| `hold.ts`                                                                                                                         | What a hold was made for (#498): the longest a VM lives and the Dynamic cost limit. Only `reserveFor` reads it, and no claim takes a hold since #605 (see "Follow-up" in "Start, settle").                                                                                                                                                                                                                                                     |
+| `hold.ts`                                                                                                                         | What an old hold was made for (#498): the longest a VM lives and the Dynamic cost limit. Only `reserveFor` reads it, and no claim takes a hold since #605 (dead code, #608).                                                                                                                                                                                                                                                                   |
 | `claim-billing.ts`                                                                                                                | Billing at the claim (#498, #605): `readClaimBilling` (off, rates incomplete, or on with the rates) and `admitAtClaim`: a balance above zero starts the job, nothing is held.                                                                                                                                                                                                                                                                  |
 | `claim-caps.ts`                                                                                                                   | The monthly total limit and the hidden hourly brake at the claim (#499): `checkClaimCaps` (in a savepoint; `reviews_paused`, `monthly_limit_reached`, `billing_limits_unreadable`), `utcMonthStart`, `brakeWindowStart`. See "Limits at claim (#499)".                                                                                                                                                                                         |
 | `monthly-limit-service.ts`, `monthly-limit-http.ts`                                                                               | Reading and setting the monthly limit (#499): an Owner and an Admin (`manage_billing`), whole US cents, `null` for none, an audit line for every change; the handlers behind `GET` and `PUT /api/w/:workspace/billing/monthly-limit`.                                                                                                                                                                                                          |
-| `claim-key-mode.ts`                                                                                                               | `keyModeAtClaim`: whose key a job runs on, as far as the claim knows. The seam of #496.                                                                                                                                                                                                                                                                                                                                                        |
-| `settle-jobs.ts`                                                                                                                  | `settleEndedJobs`: prices the jobs a transaction ended and writes one `usage` entry for each, unless free (#498, #605); a job that holds an old reservation also gets its `release`.                                                                                                                                                                                                                                                           |
-| `stranded-holds.ts`                                                                                                               | `releaseStrandedHolds` (#591), dormant since #605: releases the old holds of ended jobs that have none released, never charging; run by the switch-on and the sweep. It finds nothing on an instance that never took a hold.                                                                                                                                                                                                                   |
+| `claim-key-mode.ts`                                                                                                               | `keyModeAtClaim`: whose key a job runs on, as far as the claim knows (#496): the key mode of the effective entitlements, which is the workspace's own choice while billing is on.                                                                                                                                                                                                                                                              |
+| `settle-jobs.ts`                                                                                                                  | `settleEndedJobs`: prices the jobs a transaction ended and writes one `usage` entry for each, unless free (#498, #605); a job that holds an old reservation (legacy) also gets its `release`.                                                                                                                                                                                                                                                  |
+| `stranded-holds.ts`                                                                                                               | `releaseStrandedHolds` (#591), legacy since #605: releases the old holds of ended jobs that have none released, never charging; run by the switch-on and the sweep. It finds nothing on an instance that never took a hold.                                                                                                                                                                                                                    |
 | `start-credit.ts`                                                                                                                 | `ensureStartCredit` / `ensureStartCreditWhileOn` (#507): the one function that grants the start credit, once per GitHub account ("The start credit" below).                                                                                                                                                                                                                                                                                    |
 | `late-minutes.ts`                                                                                                                 | `correctLateMinutes`: one `correction` when the real end of a VM arrives within a day and moves the minutes by more than one (#498).                                                                                                                                                                                                                                                                                                           |
 | `dispatcher-features.ts`                                                                                                          | Which Dispatchers the app has seen (with and without `vm_lifecycle`) and `canSwitchBillingOnWithDispatcher` (#498).                                                                                                                                                                                                                                                                                                                            |
@@ -43,6 +82,7 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `profile.ts`, `profile-service.ts`                                                                                                | The billing profile (#501): validation of what a person typed (pure, stable field codes) and the service that lets an Owner and an Admin read and write it.                                                                                                                                                                                                                                                                                    |
 | `topup-service.ts`, `topup-http.ts`, `topup-limits.ts`                                                                            | Starting a top-up (#501): the checks in order, the handler behind `POST /api/w/:workspace/billing/top-ups` and its limit.                                                                                                                                                                                                                                                                                                                      |
 | `workspace-page.ts`, `workspace-page-load.ts`, `workspace-key-mode.ts`                                                            | The data of the billing page of a workspace (#505): the balance, the journal page by page, the pending payments and, for an Owner and an Admin, the billing details, the monthly limit and this month's charges; what the page file asks for; and the key mode it names. See "The workspace page".                                                                                                                                             |
+| `balance-state.ts`, `balance-notifications.ts`, `balance-mail.ts`, `balance-banner.ts`                                            | The notifications of #506: where a balance stands (`low`, `empty`, `negative`; pure), the decision made inside the transaction that moved the balance, the delivery of the mails after the commit, and the data of the banner. See "Balance notifications (#506)".                                                                                                                                                                             |
 | `journal-http.ts`, `profile-http.ts`, `run-prices.ts`                                                                             | The handlers behind `GET /api/w/:workspace/billing/journal` and `GET`/`PUT /api/w/:workspace/billing/profile` (#505), and the price of a review for the Runs pages.                                                                                                                                                                                                                                                                            |
 | `admin-service.ts`, `admin-credit-service.ts`, `admin-http.ts`, `admin-errors.ts`, `enabling-copy.ts`, `stripe-webhook-events.ts` | The billing page of the admin portal (#504): the settings service (adapter, credentials, rates, connection check, webhook endpoint, the switch), the manual credit, the handlers of the data routes with their stable codes, the wording of the enabling statement, and the events Stripe is told to send. The page itself is `src/admin/ui/billing-*` and `src/app/(app)/instance-portal/billing/`.                                           |
 
@@ -111,15 +151,15 @@ total      = aiPrice + infraPrice
 ```
 
 - **A** is stored in parts per 10,000 (1.2 is 12,000; at least 10,000, at most 1,000,000). **B** is micro-USD per started
-  minute, one per review kind (0 allowed, at most 10,000,000). The **AI reserve of a Diff review**
-  (`diffAiReserveMicroUsd`, 0 to 50,000,000) was the AI part of its hold; since #605 nothing reads it (follow-up: drop the field). A, both B and the reserve have **no default**
-  and are all required: billing cannot be switched on before they are set (`canSwitchBillingOn`,
-  `billing_rates_incomplete`).
-- **The reserve is real model cost.** It is in micro-USD of real model cost, before A, the unit of the Dynamic cost limit,
-  and the hold multiplies it by A. Changing A therefore never changes the real-cost margin of a hold. The admin form (#504)
-  labels it "real model cost, before the factor". _Guidance, not a default:_ the #492 estimate for a Diff review is
-  about 150,000 (0.15 USD of real cost, Sonnet-class: the largest run measured was 0.1004 times 1.5); about 370,000 if an
-  Opus-class model joins the catalog. At A = 5 the first is 0.75 USD of hold.
+  minute, one per review kind (0 allowed, at most 10,000,000). A and both B have **no default** and are all required:
+  billing cannot be switched on before they are set (`canSwitchBillingOn`, `billing_rates_incomplete`).
+- **The Diff AI reserve is dead.** `diffAiReserveMicroUsd` (0 to 50,000,000, real model cost before A) was the AI part of the
+  hold of a Diff review. Since #605 nothing reads it, but it is still required to switch billing on (`diff_ai_reserve_missing`),
+  so the admin form keeps the field and says that any value in range will do. Removing it (readiness, form, stored setting) is
+  the follow-up #608, item 2.
+- **Other numbers** (`billingNumbersOf`): the start credit (default 2 USD, 0 switches it off, at most 100 USD), the low-balance
+  threshold (default 5 USD, at most 500 USD) and the hourly brake (default 60, 1 to 100,000). They are stored only when the
+  admin sets them and can change at any time.
 - **Rounding.** The AI price is `cost x A / 10,000` rounded **half up** to a whole micro-USD, once per run, on the whole
   cost. The infrastructure price is whole started minutes times a whole rate, so it is exact and needs no rounding;
   minutes that are not whole are refused. The two are separate amounts, each computed alone, and the total is their sum.
@@ -128,9 +168,14 @@ total      = aiPrice + infraPrice
 - A run that cannot be priced (a fact that is no whole, non-negative number, rates that are not valid, an amount beyond
   the safe range) throws a `PricingError` with a stable code; the settlement of #498 charges such a run nothing and logs `BILLING_PRICING_FAILED` with the job id and the code (a customer is never charged a number nobody could compute).
 
-### The hold (no longer taken, #605)
+### The hold is gone (#605)
 
-`reserveFor` is the hold of ADR 0006, D6: the longest the VM lives (rounded up to a started minute) times `B[kind]`, plus, on the managed key, `round(AI budget x A / 10,000)`. **Since #605 no claim takes a hold**: holds blocked too much money (with 10 USD only about three Dynamic reviews could run at once), so a review starts whenever the balance is above zero and its real price is charged when it ends ("Start, settle" below). `reserveFor`, `hold.ts` and the Diff AI reserve rate stay in the code and are read by nothing at run time; removing them (with the field on the admin page and in the stored setting) is a follow-up, kept out of #605 on purpose. ADR 0006 D8 and 2.8 ("refuse below the hold") are superseded.
+Until #605 a claim held an amount for the run (`reserveFor`: the longest the VM lives times `B`, plus the AI budget times `A` on
+our key). Holds blocked too much money (with 10 USD only about three Dynamic reviews could run at once), so the maintainer
+removed them: a review starts whenever the balance is above zero and its real price is charged when it ends ("Start,
+settle"). `reserveFor`, `hold.ts` and the reserve rate stay in the code and are read by nothing at run time (#608). ADR 0006
+D6, D8 and 2.8 ("refuse below the hold") are superseded; "Old holds" in "Start, settle" says what still handles a hold that
+an earlier release wrote.
 
 ### The classes of an outcome
 
@@ -303,7 +348,7 @@ the journal holds the price.
   billing is switched **off before it ends** ends without a settlement (none runs while billing is off) and is **not charged**, also when billing is switched on again (#591,
   confirmed on #489: such a run is not charged; #605-T12). Its record stays `open` and nothing reads it again.
 
-**Old holds, and the machinery of #591 (`stranded-holds.ts`), dormant.** Billing was never enabled in production, so no `reservation` should exist; an instance that switched
+**Old holds (legacy), and the machinery of #591 (`stranded-holds.ts`).** Billing was never enabled in production, so no `reservation` should exist; an instance that switched
 billing on with an earlier release may have some, and nothing may break there. So the old code is **kept, not removed**: `settleEndedJobs` settles a job that holds a
 `reservation` through it exactly as before (a `release` of the hold, then the `usage`, or the `release` alone when the run is free; #605-T14), the journal keeps `reserve`,
 `settle` and `release`, and the entry types, `billing_balances.reserved_micro_usd` and `verify()` (which still flags a stranded hold) stay. Removing them would need a data
@@ -334,8 +379,10 @@ transaction ends, so the switch-on (up to 500 holds, in the order workspace, the
 lock the workspaces in one global order, and two such transactions cannot each wait for a row the other holds. The log line is `[billing] BILLING_HOLDS_RELEASED count=<n>`.
 **`verify()`** counts the stranded holds of the workspace (`strandedHoldCount`, `strandedHoldMicroUsd`) and is not `consistent` while there is one.
 
-**Follow-up (not in #605).** `reserveFor`, `hold.ts` (and `dispatcher/src/billing-hold-pin.test.ts` that pins it) and the Diff AI reserve rate (`diffAiReserveMicroUsd`, required to switch
-billing on) are dead at run time. Dropping them touches the admin form, the stored setting and the end to end test of the billing page, so it is a separate change.
+**Follow-up (#608).** `reserveFor`, `hold.ts` (and `dispatcher/src/billing-hold-pin.test.ts` that pins it) and the Diff AI reserve rate (`diffAiReserveMicroUsd`, required to switch
+billing on) are dead at run time. Dropping them touches the admin form, the stored setting and the end to end test of the billing page, so it is a separate change. Two more notes from
+that issue: a job claimed with billing on and ended while billing is off keeps `billing_state = 'open'` for good (it is never charged), and during a rolling deploy a job claimed by new code
+and ended by old code stays `open` and is never charged (this matters only if billing is on during the deploy).
 
 **Late minutes (`late-minutes.ts`).** A job settles with the best end of its VM known when it ends (the confirmed stop, else the bounded backstop).
 When the answer to the App's stop call arrives later (`dispatch/stop.ts`, after `confirmStopped`), within a day of the settlement, and the started
@@ -412,11 +459,31 @@ and `onRefused` hears of it for the pull request notice.
   without the kind) and `billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum (migration `20261021210200_add_limit_query_indexes`; the second one also carries `amount_micro_usd` (`INCLUDE (amount_micro_usd)` on Postgres, a last key column on SQLite, which has no INCLUDE), so the month sum is read from the index alone). The settings table
   is `billing_workspace_settings` (`20261021210100_create_billing_workspace_settings`); the widened check of the notice codes is `20261021210000_widen_refusal_notice_codes_for_limits`.
 
+## Key mode (#496)
+
+Two modes share one balance (ADR 0006, P3, D4). **Our models** (`managed`) use the operator's key and are charged AI plus infrastructure.
+**The workspace's own key** (`own`) is charged infrastructure only. The details are in `src/llm/README.md`, "The key mode a workspace chooses
+while billing is on"; this is what billing needs from it.
+
+- **While billing is on** the key mode is the workspace's own choice (`llm_key_mode` in its settings; `GET` and `PUT /api/w/:workspace/llm-key-mode`
+  for an Owner and an Admin, the page Settings, LLM access). A workspace that has not chosen is on `managed`. The `keyMode` of an entitlements row or of the
+  instance default is **not consulted** then; suspension, `modelAccess` and the cost limits still are. With billing off the entitlements decide as before.
+- **The claim and the price read the same answer.** `keyModeAtClaim` (`claim-key-mode.ts`) takes the key mode of the effective entitlements, so the claim's
+  balance check, the key the job is given and the key mode recorded in the usage record cannot differ. The mode is read at the claim and recorded in the
+  usage record; settlement reads the record, so a change never touches a review that runs.
+- **What it changes in the price.** `own` has no AI price whatever the cost (`priceRun`), and a job that cannot cost anything (own key and `B` of zero for its
+  kind) may start at a balance of exactly zero (`canCostAnything`).
+- **Own without a key** still ends `llm_not_configured` (reason `no_key`); it never falls back to our key. The route does not let a workspace choose `own`
+  before it has stored a key (`own_key_missing`). There is no plan that gates the own key.
+- **When billing is switched on** every existing workspace starts on `managed`, whatever its entitlements said. The enabling statement on the admin page says so and
+  counts the workspaces that hold a stored own key (`enabling-copy.ts`).
+
 ## The switch
 
 Billing is **on** when the instance setting `billing_settings.enabled` is exactly `true` **and the active adapter is ready**
 (`isBillingOn`, `readiness.ts`; #504). Ready means, for every adapter, that A, both B and the Diff AI reserve are set, and for
-`stripe` also that the API key and the webhook secret are stored and a connection check passed. The passing check is a record in
+`stripe` also that the API key and the webhook secret are stored, a connection check passed and the link to the operator's terms is set
+(`terms_url_missing`, #626). The passing check is a record in
 the setting (`stripe.checkedAt`, with the environment of the key): the switch reader may not call Stripe, so the admin page makes
 the check and the setting remembers it. A new API key clears the record; a check that fails never does, so a click during a
 Stripe outage cannot turn billing off. The switch reader looks for the two Stripe secrets by name in the secret table and does not
@@ -458,7 +525,7 @@ changes nothing and calls nobody; a self-hoster who never opens it sees no chang
   transaction of the settings, so a removal cannot slip in between the check and the write of the switch; otherwise it is refused with `billing_not_ready`
   and `missing`, every missing item by its code (`factor_a_missing`, `minute_rate_diff_missing`, `minute_rate_dynamic_missing`,
   `diff_ai_reserve_missing`, `stripe_api_key_missing`, `stripe_webhook_secret_missing`, `connection_check_missing`,
-  `connection_check_failed`). With Stripe the connection check is made once more just before, so a key that was revoked since the
+  `terms_url_missing`, `connection_check_failed`). With Stripe the connection check is made once more just before, so a key that was revoked since the
   last click is found now. Switching off is always allowed and writes nothing else: rates, credentials, journal and balances stay.
 - **The enabling statement** (`enabling-copy.ts`) says what switching on does: the reviews of every workspace are charged from a
   prepaid balance, workspaces choose their key mode (our models are the default), a workspace with no balance cannot start a
@@ -488,8 +555,22 @@ changes nothing and calls nobody; a self-hoster who never opens it sees no chang
   threshold and the hourly brake, with the codes of `rates.ts`. The API takes the stored whole numbers (A in parts per 10,000,
   money in micro-USD); the page shows and takes decimals (`src/admin/ui/billing-money.ts`: no float touches an amount). A, both B
   and the reserve have no default; the start credit is 2 USD, the threshold 5 USD and the brake 60 reviews per rolling hour until
-  they are set (ADR 0006 D3, D9, D10; `billingNumbersOf`). The numbers are stored here for the later issues that read them (the
-  start credit grant #507, the notifications #506, the brake #499). They can be changed at any time, also while billing is on.
+  they are set (ADR 0006 D3, D9, D10; `billingNumbersOf`). The numbers are read by the start credit grant (#507), the notifications (#506)
+  and the brake (#499). They can be changed at any time, also while billing is on.
+- **Terms and privacy links** (`PUT { "legal": { "termsUrl"?, "privacyUrl"? } }`, #626; `legal-urls.ts`). Stored as
+  `billing_settings.legal`. A link is an `https` address of a public host (`isPublicHttpsUrl`: no credentials, no loopback, private or
+  local name), at most 2,048 characters, with no space or control character inside (`validateLegalUrl`; the URL parser drops tabs
+  and line breaks silently, so the text that was checked would not be the text that is stored). A field that is left out stays, an
+  empty text or `null` removes the link, and one invalid link refuses the whole change and writes nothing
+  (`invalid_input` with `issues: [{ field: "legal.termsUrl", code: "url_invalid" }]`). The stored value is read again with the same
+  check (`readLegalUrls`), so a link written by another path reads as not set. The terms link is **required for Stripe**
+  (`terms_url_missing`, the switch-on and `isBillingOn`), optional for the manual adapter, and with Stripe on it cannot be removed
+  (`billing_disable_first`; it can be changed); the privacy link is always optional. Both can be changed while billing is on. The
+  workspace billing page reads them while billing is on (`loadWorkspaceBillingPage`, the page file passes them as `termsHref` and
+  `privacyHref`) and the business confirmation of the first top-up links to both, in a new tab (`rel="noopener noreferrer"`).
+  Billing off: nothing reads them.
+- **Journal check** (`journalCheck` of the answer, #626): the result of the last finished pass of the scheduled check (see "The
+  scheduled journal check"), shown as "Journal check: ok / inconsistent (date)". Reading it is one instance setting.
 - **Manual credit and correction** (`GET /workspaces?q=`, `GET /workspaces/<id>`, `POST /workspaces/<id>/credit`
   `{ type: "credit" | "correction", amountMicroUsd, note, requestId }`; the request id is required, `request_id_required`, so a retry is one entry): the admin searches a workspace by name, sees its balance
   and its ten newest entries, and writes a `top_up` (credit) or a signed `correction` through `createManualCreditService` with
@@ -547,8 +628,8 @@ through `applyBillingEvent` (below).
   `balance_negative`, `reservation_released`, `reservation_not_found`, `job_already_released`).
 - **`verify()`** returns the cache and the sum of the journal side by side with the difference of each (cache minus sum), the holds of
   jobs that ended with nothing left to settle them and without a release (`strandedHoldCount`, `strandedHoldMicroUsd`, #591; a superseded run
-  that still drains is not one) and `consistent` (both differences zero and no stranded hold), read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The nightly job
-  that runs it is #510's.
+  that still drains is not one) and `consistent` (both differences zero and no stranded hold), read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The scheduled
+  check that runs it for every workspace is described in "The scheduled journal check (#626)".
 - **Order.** Every entry has a `seq`, the order it was written in (a Postgres identity, the SQLite row id). `entries()`
   lists by it, so a `release` and its `usage`, written in one millisecond, keep their order. On Postgres a transaction
   that commits late can land below a `seq` a reader has passed; a cursor reader sees it on its next fresh read.
@@ -963,14 +1044,14 @@ caller is an instance admin first and work whether billing is on or off.
 
 ## The start credit
 
-The start credit (ADR 0006, 2.16, D11, P7; #507) replaces the Free plan: a new workspace can try our models before it pays. It is a
+The start credit (ADR 0006, 2.16, D11, P7; #507) is what a new workspace gets to try our models before it pays (there is no free tier next to the balance). It is a
 `start_credit` journal entry of the amount the admin set on the billing page (`startCreditMicroUsd`, default 2 USD, **0 disables it**).
 It is the easiest thing to farm, so it is tied to the **GitHub account**, not to the workspace.
 
 - **When.** Lazily, by one idempotent function, `ensureStartCredit(db, workspaceId)`, the first time a workspace with a bound
-  installation meets billing **while billing is on**: the first claim of a job (inside the claim transaction, before the hold, so the
+  installation meets billing **while billing is on**: the first claim of a job (inside the claim transaction, before the balance check, so the
   first job can use it; `runner-jobs-repository.ts` calls `ensureStartCreditWhileOn` once billing is `on`) and the first visit of the
-  workspace's billing page (that page does not exist yet: the issue that adds it, #501, calls `ensureStartCredit` before it reads the balance). There is no scheduler and no
+  workspace's billing page (`loadWorkspaceBillingPage` calls `ensureStartCredit` before it reads the balance, #505). There is no scheduler and no
   hook on binding. Existing workspaces when billing is switched on get theirs through the same path, on their first contact.
 - **Who.** The numeric account id of the installation (`config.accountId`, #103) of an integration that is not `disconnected`. A
   workspace without such an installation, or whose installation names no account id, gets nothing, and its claim is refused for
@@ -1002,8 +1083,8 @@ It is the easiest thing to farm, so it is tied to the **GitHub account**, not to
 
 ### Abuse protection of version 1, and the surface that is left
 
-What protects the credit: the memory above (one grant per GitHub account, kept past the workspace), the hidden hourly brake (#499, "Limits at claim (#499)"), the holds
-that bound what a run can cost (a hold is at most the balance, a balance of zero is refused), and the sign-up rules of the instance
+What protects the credit: the memory above (one grant per GitHub account, kept past the workspace), the hidden hourly brake (#499, "Limits at claim (#499)"), the refusal
+at a balance of zero (a workspace that has used its credit cannot start another review; a run that already started may take the balance below zero), and the sign-up rules of the instance
 (allowed organizations, invitation only, verified email as the operator configured them). Not in version 1, by ADR 0006 2.16:
 disposable-email lists, a first-top-up cap, a verified email as a condition.
 
@@ -1023,15 +1104,15 @@ What is observed, so a follow-up can be sized:
 
 `/w/:ws/settings/billing` shows a workspace its prepaid balance (ADR 0006, 2.5). **It exists only while billing is on**: with billing off the page, `GET /api/w/:ws/billing/journal`, `GET`/`PUT .../billing/profile` and the other billing routes of a workspace are the 404 of a path that does not exist (`loadWorkspaceBillingPage`, `guardBillingRoute`; no billing table is read). While billing is on the settings navigation lists **Billing instead of Plan** (`showBilling` of `SettingsNav`), and `/w/:ws/settings/plan` leads on to it (a redirect; the operator's "Manage plan" page is not part of a prepaid workspace). The page file only wires `workspace-page.ts` in; the UI is `src/workspace-billing/` (client-safe: the files here are server-only, `server-only.test.ts` keeps them out of the browser), so the view types, the money text and the copy are in `workspace-billing/view.ts`, `money.ts` and `messages.ts`.
 
-| Section                | Who          | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Balance                | everyone     | The balance in US dollars; what running reviews hold (a line only while something is held: no review holds anything since #605, an old hold may still); a warning when the balance is zero ("No credit left") or below zero ("The balance is below zero": a review that ended, or a refund, took it there), with the way out for an Owner/Admin and who to ask for a Member. A balance above zero starts reviews, even by one cent.                                                                                                      |
-| Add credit             | Owner, Admin | Presets 10, 25, 50, 100, 500 and another amount from 10 to 500 US dollars, typed in dollars and sent as whole cents (the server judges the range again); the **business confirmation** (checkbox) at the first top-up only; "Continue to payment" starts `POST .../billing/top-ups` and sends the browser to the page it answers. With the `manual` adapter (no checkout) there is no form for anybody: "Ask your operator to add credit".                                                                                               |
-| Billing details        | Owner, Admin | Legal name, address, an optional VAT ID, saved with `PUT .../billing/profile` (`profile-http.ts` over `profile-service.ts`: the fields are judged by `profile.ts`, a refusal names a field and a code and never echoes the value, nothing is logged). Shown for adapters that keep a profile (`requiresBillingProfile`). The terms link of the confirmation is shown when the page is given an address for the operator's terms; the app has no page or setting for them yet, so the confirmation states the terms in words (follow-up). |
-| Payments on their way  | Owner, Admin | Pending top-ups with "Check payment" (`POST .../top-ups/:id/check`, #502) where the adapter can look a payment up. After the buyer returns (`?topup=success`) the page says the payment is on its way and asks the server again every 4 seconds, for at most 150 seconds, while a payment is pending, so the credit appears without a reload.                                                                                                                                                                                            |
-| Journal                | everyone     | Credit added, start credit, **charges** (a review, with its AI price and its infrastructure price and a link to the Run), refunds, chargebacks and corrections, newest first, 25 rows a page with a cursor (`GET .../billing/journal?cursor=&limit=`, `entries({ excludeTypes })`). A hold and its release are not rows (they net to nothing; an open hold shows as "held"). The note of a correction, references and provider ids are never sent.                                                                                       |
-| Monthly spending limit | Owner, Admin | The optional limit of #499 (`GET`/`PUT .../billing/monthly-limit`): empty removes it; this UTC month's actual charges so far; "Reviews that are already running always finish".                                                                                                                                                                                                                                                                                                                                                          |
-| Key and invoices       | everyone     | Whose key reviews run on, with a link to the LLM access page where it is chosen (#496 makes it a choice), and "Invoices and receipts are issued and emailed by Link" with a link to link.com. **No promise of VAT-compliant invoices** until #503 passes.                                                                                                                                                                                                                                                                                |
+| Section                | Who          | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Balance                | everyone     | The balance in US dollars; what an old hold still holds (a line only while something is held: no review holds anything since #605); a warning when the balance is zero ("No credit left") or below zero ("The balance is below zero": a review that ended, or a refund, took it there), with the way out for an Owner/Admin and who to ask for a Member. A balance above zero starts reviews, even by one cent.                                                                                                                                    |
+| Add credit             | Owner, Admin | Presets 10, 25, 50, 100, 500 and another amount from 10 to 500 US dollars, typed in dollars and sent as whole cents (the server judges the range again); the **business confirmation** (checkbox) at the first top-up only; "Continue to payment" starts `POST .../billing/top-ups` and sends the browser to the page it answers. With the `manual` adapter (no checkout) there is no form for anybody: "Ask your operator to add credit".                                                                                                         |
+| Billing details        | Owner, Admin | Legal name, address, an optional VAT ID, saved with `PUT .../billing/profile` (`profile-http.ts` over `profile-service.ts`: the fields are judged by `profile.ts`, a refusal names a field and a code and never echoes the value, nothing is logged). Shown for adapters that keep a profile (`requiresBillingProfile`). The business confirmation links to the operator's terms and privacy statement when the admin has set them on the billing page (#626, "The billing page", "Terms and privacy links"); a link that is not set is not shown. |
+| Payments on their way  | Owner, Admin | Pending top-ups with "Check payment" (`POST .../top-ups/:id/check`, #502) where the adapter can look a payment up. After the buyer returns (`?topup=success`) the page says the payment is on its way and asks the server again every 4 seconds, for at most 150 seconds, while a payment is pending, so the credit appears without a reload.                                                                                                                                                                                                      |
+| Journal                | everyone     | Credit added, start credit, **charges** (a review, with its AI price and its infrastructure price and a link to the Run), refunds, chargebacks and corrections, newest first, 25 rows a page with a cursor (`GET .../billing/journal?cursor=&limit=`, `entries({ excludeTypes })`). A hold and its release are not rows (they net to nothing; an open hold shows as "held"). The note of a correction, references and provider ids are never sent.                                                                                                 |
+| Monthly spending limit | Owner, Admin | The optional limit of #499 (`GET`/`PUT .../billing/monthly-limit`): empty removes it; this UTC month's actual charges so far; "Reviews that are already running always finish".                                                                                                                                                                                                                                                                                                                                                                    |
+| Key and invoices       | everyone     | Whose key reviews run on, with a link to the LLM access page where the workspace chooses it (#496: our models by default, or its own provider key; the choice is `GET`/`PUT .../llm-key-mode`, `src/llm/README.md`), and "Invoices and receipts are issued and emailed by Link" with a link to link.com. **No promise of VAT-compliant invoices** until #503 passes.                                                                                                                                                                               |
 
 **Roles.** A Member reads the balance, the journal and the prices (`view`); an Owner and an Admin (`manage_billing`) also top up and change the billing details and the limit. A Member's data never carries the profile, the pending payments, the limit or the month's charges (`workspace-page.integration.test.ts`, #505-T02); another workspace's member gets the 404 of every workspace route.
 
@@ -1050,6 +1131,79 @@ What is observed, so a follow-up can be sized:
 **Tests.** `workspace-page.integration.test.ts` (the data), `journal-http.integration.test.ts`, `profile-http.integration.test.ts`, `run-prices.integration.test.ts`, `runs/runs-price.integration.test.ts`, `workspace-billing/ui/*.test.tsx` (the page), `refusal-notices/billing-link.integration.test.ts`, and the journey `e2e/billing/workspace-billing.e2e.ts` against the fake Stripe (top-up, the pending state, "Check payment" after a lost webhook, the limit, billing off).
 
 **The test stack's Stripe address.** The app sends its Stripe API key to Stripe's own address. The e2e stack points it at the fake Stripe with `STRIPE_API_BASE_URL` together with `ALLOW_TEST_STRIPE_ENDPOINTS=true` (`src/stripe-endpoints.ts`, read outside this module, so `no-environment-variable.test.ts` still holds): without the flag the variable is ignored, and even with it only plain `http:` on a loopback address is accepted. It is in no `.env.example` and no deployment file.
+
+## Balance notifications (#506)
+
+An Owner and an Admin hear about a low or empty balance before the pull requests start to carry refusal notices (ADR 0006, D9): **one mail per crossing** and **a banner** while the state lasts. Billing off: nothing is computed, written, sent or shown.
+
+**States.** A balance is `empty` at zero or below (a review starts with any balance above zero, #605, and is refused at exactly zero; below zero is also `empty` for the mail, and `negative` for the banner and the page), `low` below the threshold the admin set (#504, `lowBalanceMicroUsd`, default $5, `balance-state.ts`) and `ok` otherwise. `empty` is also `low`.
+
+**Where the decision is made.** The table `billing_notifications` (`20261022030000_create_billing_notifications`; one row per workspace and kind `low` or `empty`, written by the first crossing; `BillingNotificationsRepository`, workspace scoped) holds `state` (`armed`: the next drop into the state is told; `sent`: told since the balance was last out of it), `sent_at` and `delivery` (`none`, `due`, `sending`, `delivered`, `failed`). Every journal write, `applyToBalance` of the journal repository, calls `noteBalanceMoved` right after the balance row changed, so it runs **in the same transaction and under the balance row's lock**: the settlement of a job, a refund, a chargeback, a correction, a top-up, a start credit. A claim that is refused for the balance (`insufficient_balance`, `balance_negative`) calls `noteRefusalForBalance` (the lock first, then the same decision) inside the claim's transaction. Two writers of one workspace therefore decide one after the other, a transaction that rolls back takes its decision with it, and the table is never read without that lock. Billing off, or switched on but not ready: `noteBalanceMoved` reads the switch and returns.
+
+| What happens to the balance                                                                | Written                                                                                                                            |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Drops into a state that was `armed`                                                        | the kind is `sent` and its mail is `due` (when one drop is into both states, only `empty` is mailed, `low` is `sent` with no mail) |
+| Stays in a state that is `sent` (ten more settlements, a second refusal)                   | nothing                                                                                                                            |
+| Leaves a state (a top-up lifts it out)                                                     | the kind is `armed` again, and a mail that was `due` but not claimed is withdrawn                                                  |
+| A credit lands in a state (a start credit under the threshold, a top-up that is still low) | the kind is `sent` with **no** mail: the banner and the page already say it, and the first mail follows the next drop              |
+
+**The mail.** `deliverDueBalanceMails` (`balance-mail.ts`) runs **after the response** (`runAfterResponse`, wired in `shared.ts` as `deliverBalanceMails`): when claims of jobs ended (`onClaimsEnded`, which covers the settlements), when a claim was refused for the balance (`onRefused`) and when a billing webhook was applied (`afterApplied` of the webhook handler: a refund or a chargeback). A call that finds nothing due costs one small read. It claims each due crossing with one guarded statement (`due` to `sending`: of several senders one wins), checks that the balance is still in the state, and sends one message to **every Owner and Admin** (`manage_billing`, at most 20) through `getMailSender()`; a Member gets none. The message (`src/mail/balance-message.ts`) says what happened, the workspace's own balance and a link to its billing page built from the configured public address. No rate, factor, formula, minute count, model, provider or brake is in it (#506-T07 scans it). It is **best effort and cannot fail anything**: it runs after the commit of the claim or the settlement, never throws, tries each recipient once and never retries (a retry could repeat a mail the server did accept). A crossing that reached nobody is `failed` and logs one line `[billing] BALANCE_MAIL_FAILED workspace=<id> kind=<kind> code=<code> recipients=<n>` with the stable codes `mail_failed`, `not_configured` (the instance has no mail server), `no_recipients` and `stale` (the balance was lifted before the mail went out); no address, name or message is ever logged. A server that was down loses that mail but not the banner, which is computed from the balance, not from the table.
+
+**The decision never undoes a money write.** `noteBalanceMovedSafely` / `guardedBalanceNote` (`balance-notifications.ts`) run the decision in a savepoint of the transaction of the journal write, the job's settlement, the webhook and the claim refusal (`noteRefusalForBalance`, `claim-billing.ts`). A failure (a table that cannot be written, a damaged row) is rolled back to the savepoint, logged as `[billing] BALANCE_NOTE_FAILED workspace=<id> code=note_failed` (no address, no text of the database) and skipped: the charge, the credit or the refusal commits and the workspace is not told this time (#506-T11 to T14, a trigger that fails every write to `billing_notifications`). Mails due from a settlement that has no response to send after (a sweep, a superseded job) go out from the step `balance_mails` of the cron sweep and the hourly timer of a server (#506-T16, T17).
+
+**The banner.** `loadBalanceBanner` (`balance-banner.ts`): for an Owner and an Admin only (a Member gets `null` before anything is read), while billing is on and the balance of THEIR workspace is low, zero or below zero. The workspace layout (`src/app/(app)/w/[workspace]/layout.tsx`) shows `BalanceBanner` (`workspace-billing/ui/balance-banner.tsx`) above every page of the workspace: a warning while low, an alert at zero and below, with the balance and "Go to billing". A layout is not rendered again when the person moves between pages of the workspace, so the banner is as fresh as the last full load; the return from a payment loads it again. A database that cannot answer shows no banner and logs `BALANCE_BANNER_UNAVAILABLE`. The pull request notice of #498 stays the signal for members.
+
+**Not here.** Preferences, an opt-out, other channels, a usage forecast and auto-recharge are out of scope of #506. A holds-era reservation (`reserve`, dormant since #605) does not call the decision.
+
+**Tests.** `balance-state.test.ts`, `balance-notifications.integration.test.ts` (the state machine on both engines, including a burst of settlements that races), `balance-mail.integration.test.ts` (recipients, content, failures, no repeat), `jobs/claim-balance-notifications.integration.test.ts` (the refusal), `webhook-handler.integration.test.ts` (a refund), `balance-banner.integration.test.ts`, `workspace-billing/ui/balance-banner.test.tsx`, `mail/balance-message.test.ts`, the repository tests and the isolation rows, and the journey `e2e/billing/balance-banner.e2e.ts`.
+
+## The scheduled journal check (#626)
+
+`verify()` of the journal repository (above, "The balance journal") compares one workspace's cached balance and reserved money with
+what its journal adds up to and counts the holds of ended jobs nobody released. `journal-check.ts` runs it for every workspace that has
+a journal, once a day, while billing is on (#510 item 7).
+
+- **Where it runs.** The step `journal_check` of the cron sweep (after `balance_mails`, before `models_dev`; `src/dispatch/README.md`) and the
+  hourly timer of a server (`src/maintenance/startup.ts`, with the cleanup, the release of the holds and the balance mails). Both call
+  `runJournalCheckWhileBillingOn`; two runs at once are kept apart by a tried lock (`JOURNAL_CHECK_LOCK`, namespace 626).
+- **Bounded cost.** A run reads the workspace ids in order, 100 at a time (`JOURNAL_CHECK_BATCH`; the finder is
+  `billing-journal-directory-repository.ts`: the balances and the journal, a page of each at most, so a page never reads a whole
+  journal), and takes no further step when its budget is used (`JOURNAL_CHECK_BUDGET_MS`, 20 s). The position (`run.after`) is stored after every
+  step, so the next run continues where this one stopped; a pass over a large instance takes several runs and never one long
+  transaction.
+- **Daily.** A pass starts when the last one finished more than 24 hours ago (`JOURNAL_CHECK_INTERVAL_MS`); in between a run reads the
+  stored state and stops (`skipped: "not_due"`). A pass under way for more than three days (billing was off) starts again.
+- **The record.** The instance setting `billing_journal_check` holds `last` (when the pass finished, `ok` or `inconsistent`, how many
+  workspaces, how many inconsistent) and `run` (the pass under way). It is read leniently (a part of another shape reads as not
+  there) and written only by the check. The admin billing page shows `last` (`journalCheck` of `GET /api/admin/billing`); it stays while
+  the next pass is under way.
+- **The log.** One line per inconsistent workspace (at most 20 a step; the count of the pass has them all):
+  `[billing] BILLING_JOURNAL_INCONSISTENT workspace=<id> balance_drift=<0|1> reserved_drift=<0|1> stranded_holds=<count>`, and one line
+  per finished pass: `[billing] BILLING_JOURNAL_CHECK_DONE result=<ok|inconsistent> workspaces=<n> inconsistent=<n>`. No amount, no name,
+  no address. A workspace that shows a difference is verified a second time before it counts (a write between the two reads of a busy
+  workspace is not what the check is for).
+- **Billing off.** `runJournalCheckWhileBillingOn` reads the switch and nothing else: no billing table, no write, no log line. The
+  pass resumes when billing is on again.
+- **It repairs nothing.** A difference is a bug to look at; the stranded holds of ended jobs are released by their own step
+  (`billing_holds`), which runs before this one.
+
+Tests: `journal-check.integration.test.ts` (#626-T10 to T14, on SQLite and Postgres), the sweep (`dispatch/sweep.test.ts`,
+`dispatch/sweep.integration.test.ts`, #626-T15), the timer (`maintenance/startup.test.ts`, #626-T16) and the page's data (#626-T17).
+
+## Open points
+
+What is known to be unfinished, so nobody is surprised. Go-live blockers are in the checklist of #510.
+
+- **Refund and dispute currency under Adaptive Pricing (#604, N1).** The webhook pins the currency the buyer paid in and treats a refund or dispute in another
+  currency as `amount_rejected`. Whether Stripe reports refunds and disputes of a localized payment in the pinned currency or in USD is not verified in the
+  sandbox yet. Fail-closed: the credit stays and a review row opens. Verify before live money.
+- **Invoices and VAT ID on Managed Payments (#503).** Not verified. The product promises no VAT-compliant invoice.
+- **The Diff AI reserve and the hold code (#608).** Dead, still required to switch on.
+- **Journal check alert.** The scheduled check logs a stable code and shows its result on the admin billing page, but sends no mail or
+  message: the alert on `BILLING_JOURNAL_INCONSISTENT` is the operator's log tooling (#510, item 7). The admin overview does not show it.
+- **Price disclosure (#612).** The AI part and the infrastructure part of each review stay visible on purpose; the infrastructure part matters for future bigger
+  machines. Deriving A and B from them is accepted.
+- **Pruning.** Rows of `billing_webhook_events` are never pruned.
 
 ## Where billing is not allowed to reach
 

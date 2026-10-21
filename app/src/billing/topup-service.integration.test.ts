@@ -38,6 +38,8 @@ const PROFILE: BillingProfileInput = {
 };
 const PRIVATE_STRINGS = ["Example GmbH", "Teststrasse", "DE123456789", "10115"];
 
+const UUID_ENDING_IN_THE_AMOUNT = "e477439f-0c00-43c7-8429-459301854321";
+
 const RETURN_URL = "https://app.example.test/w/billing-a/billing";
 
 async function allRows(db: Kysely<Database>): Promise<Record<string, string>> {
@@ -579,11 +581,25 @@ function suite(engine: BillingEngine) {
         );
         await t.top({ amountCents: 4321 });
         await t.top({ amountCents: 9 });
+        // A workspace id is random and a log line may hold it, so one that ends in the digits of
+        // the amount must not make the test fail (#602). A member is refused before any write.
+        await t.service.start(
+          { ...t.actor("member"), workspaceId: UUID_ENDING_IN_THE_AMOUNT },
+          {
+            amountCents: 4321,
+            confirmBusiness: true,
+            intentId: undefined,
+            returnUrl: RETURN_URL,
+          },
+        );
       } finally {
         Object.assign(console, { log, info, warn, error });
       }
 
-      const lines = [...t.logs, ...output].join("\n");
+      // The workspace id is the one field of a line that is random; every other field is fixed text.
+      const lines = [...t.logs, ...output]
+        .map((line) => line.replace(/workspace=\S+/g, "workspace=<id>"))
+        .join("\n");
       expect(t.logs.length).toBeGreaterThan(0);
       for (const text of [
         ...PRIVATE_STRINGS,

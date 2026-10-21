@@ -132,6 +132,8 @@ function page(
     api?: WorkspaceBillingApi;
     navigate?: (url: string) => void;
     returned?: "success" | "cancelled" | null;
+    termsHref?: string | null;
+    privacyHref?: string | null;
   } = {},
 ) {
   const api = options.api ?? fakeApi();
@@ -141,7 +143,8 @@ function page(
       workspaceSlug="acme"
       view={view}
       returned={options.returned ?? null}
-      termsHref={null}
+      termsHref={options.termsHref ?? null}
+      privacyHref={options.privacyHref ?? null}
       api={api}
       navigate={navigate}
     />,
@@ -303,6 +306,50 @@ describe("the top-up", () => {
       confirmBusiness: true,
       intentId: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown as string,
     });
+  });
+
+  // #626-T08
+  it("links the terms and the privacy statement in the business confirmation, in a new tab", () => {
+    page(OWNER_VIEW, {
+      termsHref: "https://example.com/terms",
+      privacyHref: "https://example.com/privacy",
+    });
+
+    const terms = screen.getByRole("link", { name: "Terms" });
+    const privacy = screen.getByRole("link", { name: "Privacy" });
+    expect(terms.getAttribute("href")).toBe("https://example.com/terms");
+    expect(privacy.getAttribute("href")).toBe("https://example.com/privacy");
+    for (const link of [terms, privacy]) {
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+  });
+
+  // #626-T08
+  it("links only what the instance has set, and nothing when it has set nothing", () => {
+    const first = page(OWNER_VIEW, { termsHref: "https://example.com/terms" });
+
+    expect(screen.getByRole("link", { name: "Terms" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Privacy" })).toBeNull();
+
+    first.unmount();
+    page(OWNER_VIEW);
+
+    expect(screen.queryByRole("link", { name: "Terms" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Privacy" })).toBeNull();
+  });
+
+  // #626-T08
+  it("shows no link once the business confirmation was given, as it shows no box then", () => {
+    page(
+      { ...OWNER_VIEW, profile: { ...PROFILE, businessConfirmed: true } },
+      {
+        termsHref: "https://example.com/terms",
+        privacyHref: "https://example.com/privacy",
+      },
+    );
+
+    expect(screen.queryByRole("link", { name: "Terms" })).toBeNull();
   });
 
   // #505-T03

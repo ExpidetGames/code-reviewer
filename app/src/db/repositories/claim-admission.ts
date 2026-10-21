@@ -60,14 +60,24 @@ export async function admitClaimedJob(
   trx: Kysely<Database>,
   job: Pick<Selectable<JobsTable>, "id" | "workspace_id" | "review_kind">,
   now: () => Date,
-  options: AdmissionOptions = {},
+  options: AdmissionOptions & {
+    /** Whether billing is on, as the claim read it: the key mode of the workspace follows its choice then (#496). */
+    billingOn?: boolean;
+  } = {},
 ): Promise<ClaimAdmission> {
   const workspaceId = job.workspace_id;
   const records = createUsageRecordsRepository(trx, workspaceId, now);
   const own = await records.get(job.id);
   const hadRecord = own !== undefined;
 
-  const entitlements = await readEffectiveEntitlements(trx, workspaceId, now);
+  // The key mode is decided here, in the transaction of the claim, from the workspace's choice while billing is on (#496); the same
+  // function serves the claim route and the LLM access afterwards, so the admission and the key a job is given cannot differ.
+  const entitlements = await readEffectiveEntitlements(
+    trx,
+    workspaceId,
+    now,
+    options.billingOn === undefined ? undefined : { on: options.billingOn },
+  );
   const keyMode = keyModeAtClaim(entitlements);
   if (entitlements.kind === "unlimited")
     return {

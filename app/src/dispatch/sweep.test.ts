@@ -10,6 +10,7 @@ import type { RefreshOutcome } from "../models-dev/service.ts";
 import {
   CHECKS_BUDGET_MS,
   MODELS_DEV_BUDGET_MS,
+  SWEEP_STEPS,
   createDispatchSweep,
   type SweepSettings,
 } from "./sweep.ts";
@@ -67,6 +68,12 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     releaseStranded: vi.fn<() => Promise<{ released: number }>>(async () => ({
       released: 0,
     })),
+    deliverDue: vi.fn<() => Promise<{ delivered: number; failed: number }>>(
+      async () => ({ delivered: 0, failed: 0 }),
+    ),
+    checkJournal: vi.fn<() => Promise<{ checked: number }>>(async () => ({
+      checked: 0,
+    })),
     info: vi.fn<(line: string) => void>(),
     error: vi.fn<(line: string) => void>(),
   };
@@ -85,6 +92,8 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     checks: { reconcileDue: mocks.reconcileDue },
     modelsDev: { refreshIfDue: mocks.refreshIfDue },
     billingHolds: { releaseStranded: mocks.releaseStranded },
+    balanceMails: { deliverDue: mocks.deliverDue },
+    journalCheck: { run: mocks.checkJournal },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
     log: { info: mocks.info, error: mocks.error },
   });
@@ -240,6 +249,112 @@ describe("the holds of ended jobs in a run of the sweep (#591)", () => {
     expect(t.error).toHaveBeenCalledWith(
       "[sweep] SWEEP_STEP_FAILED step=billing_holds",
     );
+  });
+});
+
+describe("the balance mails in a run of the sweep (#506)", () => {
+  // #506-T16
+  it("delivers the due balance mails after the release of the holds and before the models.dev fetch, and reports how many were sent", async () => {
+    const t = setup();
+    const order: string[] = [];
+    t.releaseStranded.mockImplementationOnce(async () => {
+      order.push("billing_holds");
+      return { released: 1 };
+    });
+    t.deliverDue.mockImplementationOnce(async () => {
+      order.push("balance_mails");
+      return { delivered: 2, failed: 1 };
+    });
+    t.refreshIfDue.mockImplementationOnce(async () => {
+      order.push("models_dev");
+      return { status: "skipped", reason: "not_due" };
+    });
+
+    const report = await t.sweep.run();
+
+    expect(order).toEqual(["billing_holds", "balance_mails", "models_dev"]);
+    expect(report.balanceMailsSent).toBe(2);
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #506-T16
+  it("names a failed step without what it said, and still does the others", async () => {
+    const t = setup();
+    t.deliverDue.mockRejectedValueOnce(
+      new Error("postgres://u:hunter2@db/app"),
+    );
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["balance_mails"]);
+    expect(report.balanceMailsSent).toBe(0);
+    expect(t.refreshIfDue).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+    expect(t.error).toHaveBeenCalledWith(
+      "[sweep] SWEEP_STEP_FAILED step=balance_mails",
+    );
+  });
+});
+
+describe("the check of the journal in a run of the sweep (#626)", () => {
+  // #626-T15
+  it("checks the journal after the balance mails and before the models.dev fetch, and reports how many workspaces it checked", async () => {
+    const t = setup();
+    const order: string[] = [];
+    t.releaseStranded.mockImplementationOnce(async () => {
+      order.push("billing_holds");
+      return { released: 0 };
+    });
+    t.deliverDue.mockImplementationOnce(async () => {
+      order.push("balance_mails");
+      return { delivered: 0, failed: 0 };
+    });
+    t.checkJournal.mockImplementationOnce(async () => {
+      order.push("journal_check");
+      return { checked: 7 };
+    });
+    t.refreshIfDue.mockImplementationOnce(async () => {
+      order.push("models_dev");
+      return { status: "skipped", reason: "not_due" };
+    });
+
+    const report = await t.sweep.run();
+
+    expect(order).toEqual([
+      "billing_holds",
+      "balance_mails",
+      "journal_check",
+      "models_dev",
+    ]);
+    expect(report.journalChecked).toBe(7);
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #626-T15
+  it("names a failed step without what it said, and still does the others", async () => {
+    const t = setup();
+    t.checkJournal.mockRejectedValueOnce(
+      new Error("postgres://u:hunter2@db/app"),
+    );
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["journal_check"]);
+    expect(report.journalChecked).toBe(0);
+    expect(t.refreshIfDue).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+    expect(t.error).toHaveBeenCalledWith(
+      "[sweep] SWEEP_STEP_FAILED step=journal_check",
+    );
+  });
+
+  // #626-T15
+  it("is a step of the list, between the balance mails and the models.dev fetch", () => {
+    expect(SWEEP_STEPS.slice(-3)).toEqual([
+      "balance_mails",
+      "journal_check",
+      "models_dev",
+    ]);
   });
 });
 

@@ -116,7 +116,8 @@ migration: it is one more key of `projects.settings`.
   not. A save that would **drop or replace a pin that is not the address the catalog trusts now** (the confirmation, a reset, going back
   to the registry or to another provider) or **write a pin that differs from one another project of the workspace holds for the
   provider** (selecting it in a second project, or a model-only save of a selection from before pins) is refused for anyone else with
-  `PROVIDER_ADDRESS_CONFIRM_FORBIDDEN` (403) and stores nothing. The first pin of a provider in a workspace, and every save that
+  `PROVIDER_ADDRESS_CONFIRM_FORBIDDEN` (403; `PROVIDER_ADDRESS_OTHER_PROJECT_PIN`, also 403, for the second kind, whose message says
+  that another project holds a different address, #614) and stores nothing. The first pin of a provider in a workspace, and every save that
   leaves the pin as it is, need no right. The claim adopts a legacy selection's address only when no other project of the workspace
   pinned another one; else it holds to that pin and the job is refused (`provider_address_changed`). The form shows the confirmation
   checkbox only to those who may confirm, and tells everyone else that an Owner or Admin must. A confirmation on its own leaves the

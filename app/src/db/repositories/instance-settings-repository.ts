@@ -30,6 +30,7 @@ import {
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
 import type { DispatcherSightings } from "../../billing/dispatcher-features.ts";
+import type { StoredJournalCheck } from "../../billing/journal-check.ts";
 import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
@@ -121,6 +122,11 @@ export type InstanceSettingValues = {
    * shape reads as no sighting. No row: no Dispatcher has claimed.
    */
   dispatcher_sightings: DispatcherSightings;
+  /**
+   * #626: the state of the scheduled check of the journal (src/billing/journal-check.ts): the result of the last pass and the
+   * progress of the one under way. Written by the check only; a value that is not the shape reads as no check made. No row: none.
+   */
+  billing_journal_check: StoredJournalCheck;
   /**
    * #504: the lease that serializes the creation of the Stripe webhook endpoint (src/billing/): one admin action at a time
    * makes one. Taken with `claim`, released with `release`; a lease that ran out is taken over.

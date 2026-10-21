@@ -59,6 +59,8 @@ export const BILLING_WEBHOOK_LOG_CODES = [
   "billing_webhook_needs_review",
   /** A refund or dispute whose payment is not credited yet: answered 503 so the provider delivers it again (error). */
   "billing_webhook_credit_pending",
+  /** The reaction after an applied event (the balance mails of #506) threw; the event stays applied (error). */
+  "billing_webhook_after_applied_failed",
 ] as const;
 
 export type BillingWebhookLogger = {
@@ -79,6 +81,11 @@ export type BillingWebhookDeps = {
   logger?: BillingWebhookLogger;
   now?: () => Date;
   maxBodyBytes?: number;
+  /**
+   * Called after an event was applied and its transaction committed (a refund or a chargeback may have taken the balance below
+   * the threshold, #506): the running server mails what is due after the response. A callback that throws changes nothing.
+   */
+  afterApplied?: () => void;
 };
 
 const empty = (status: number) => new Response(null, { status });
@@ -125,6 +132,11 @@ export function createBillingWebhookHandler(
         event: parsed.event,
         now,
       });
+      try {
+        deps.afterApplied?.();
+      } catch {
+        logger.error("billing_webhook_after_applied_failed");
+      }
       // The answer is 200 in every case: a retry would not change what the provider sent. What the operator must see goes
       // to the error log with a code (and sits in the review list of the event table).
       if (result.outcome === "event_invalid")

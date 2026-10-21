@@ -78,10 +78,16 @@ export function createBillingCreditService({
   db,
   now,
   logger,
+  afterWritten,
 }: {
   db: Kysely<Database>;
   now?: () => Date;
   logger?: ManualCreditLogger;
+  /**
+   * Called after an entry was written and its transaction committed (a correction may have taken the balance below the threshold,
+   * #506): the running server mails what is due after the response. A callback that throws changes nothing.
+   */
+  afterWritten?: () => void;
 }): BillingCreditService {
   const workspaces = createWorkspacesRepository(db);
   const manual = createManualCreditService(db, {
@@ -147,6 +153,11 @@ export function createBillingCreditService({
           note,
           requestId,
         });
+        try {
+          afterWritten?.();
+        } catch {
+          // The entry is written; a failing reaction (the mail of a crossing) is not the operator's problem.
+        }
         const balance = await createBillingJournalRepository(
           db,
           workspaceId,

@@ -184,6 +184,7 @@ const PROTECTED_DATA_ROUTES = [
   // The models of one catalog provider for the picker of the project settings (#555).
   "/api/w/[workspace]/llm-catalog/[provider]/models",
   "/api/w/[workspace]/llm-key",
+  "/api/w/[workspace]/llm-key-mode",
   "/api/w/[workspace]/llm-key/test",
   "/api/w/[workspace]/llm-keys/[provider]",
   "/api/w/[workspace]/llm-keys/[provider]/test",

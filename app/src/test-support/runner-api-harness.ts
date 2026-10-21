@@ -66,7 +66,10 @@ import type { Selection } from "../llm/selection.ts";
 import { entryAllowed } from "../workspaces/entitlements.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
-import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
+import {
+  readEffectiveEntitlements,
+  readEntitlements,
+} from "../workspaces/effective-entitlements.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
 import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
 import type { NativeSelectionSource } from "../native-providers/catalog.ts";
@@ -439,13 +442,15 @@ export async function startRunnerApiHarness(
         catalog,
       }),
       entitlementsFor: (workspaceId) =>
-        readEffectiveEntitlements(fixture.db, workspaceId, fixture.clock.now),
-      recordKeyMode: (job, keyMode) =>
-        createUsageRecordsRepository(
-          fixture.db,
-          job.workspaceId,
-          fixture.clock.now,
-        ).setKeyMode(job.id, keyMode),
+        readEntitlements(fixture.db, workspaceId, fixture.clock.now),
+      claimedKeyMode: async (job) =>
+        (
+          await createUsageRecordsRepository(
+            fixture.db,
+            job.workspaceId,
+            fixture.clock.now,
+          ).get(job.id)
+        )?.keyMode,
       ...(options.modelCapabilities === undefined
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
