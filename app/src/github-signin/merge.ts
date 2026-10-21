@@ -217,6 +217,12 @@ export async function mergeImportedUser(
       .set({ updated_by: actingUserId })
       .where("updated_by", "=", source.id)
       .execute();
+    // Who confirmed that the billing profile is a business's: the time and the terms stay, the author must not become null.
+    await trx
+      .updateTable("billing_profiles")
+      .set({ confirmed_by: actingUserId })
+      .where("confirmed_by", "=", source.id)
+      .execute();
 
     await trx
       .updateTable("invitations")
