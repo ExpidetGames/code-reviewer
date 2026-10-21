@@ -107,6 +107,7 @@ describe("the migrations of both epics", () => {
       "20261019183000_add_jobs_created_at_index",
       "20261019200000_create_models_dev_catalog",
       "20261020090000_create_model_decisions",
+      "20261021090000_create_billing_profiles",
     ]);
   });
 
@@ -151,6 +152,7 @@ describe("starting the database", () => {
       "app_settings",
       "billing_balances",
       "billing_journal_entries",
+      "billing_profiles",
       "billing_topup_intents",
       "billing_webhook_events",
       "email_verification_tokens",
