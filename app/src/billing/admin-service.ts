@@ -28,6 +28,7 @@ import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { isBillingOn } from "./enabled.ts";
+import { releaseStrandedHolds } from "./stranded-holds.ts";
 import { createOwnKeyCountRepository } from "../db/repositories/own-key-count-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -575,6 +576,9 @@ export function createBillingAdminService({
             return {
               refuse: { ok: false, error: "billing_not_ready", missing },
             };
+          // The holds of jobs that ended while billing was off are released here, in the transaction that writes the switch (#591):
+          // billing is never on with the money of an ended run still held.
+          await releaseStrandedHolds(executor, now);
           return { write: { ...current, enabled: true }, result: { ok: true } };
         },
       );

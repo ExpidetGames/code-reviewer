@@ -40,6 +40,7 @@ import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
 import type { BillingJournalEntriesTable, Database } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
+import { ENDED_JOB_STATUSES } from "./billing-holds-sweep.ts";
 
 /** An entry as the rest of the app sees it. Amounts are micro-USD integers; timestamps are ISO 8601 text in UTC. */
 export type JournalEntry = {
@@ -79,7 +80,12 @@ export type JournalBalance = {
   reservedMicroUsd: number;
 };
 
-/** The cache against the journal. Differences are cache minus sum; `consistent` is true when both are zero. */
+/**
+ * The cache against the journal. Differences are cache minus sum. A stranded hold (#591) is a `reservation` of a job that
+ * has ended, whose usage record is no longer `reserved` (so nothing is left to settle it), and that has no `release`: money
+ * held for a run that is over. A superseded run whose Worker still drains is not one. The cache and the journal agree about it, so only the
+ * jobs show it; `consistent` is true when both differences are zero and no hold is stranded.
+ */
 export type JournalVerification = {
   balanceMicroUsd: number;
   expectedBalanceMicroUsd: number;
@@ -87,6 +93,8 @@ export type JournalVerification = {
   reservedMicroUsd: number;
   expectedReservedMicroUsd: number;
   reservedDifferenceMicroUsd: number;
+  strandedHoldCount: number;
+  strandedHoldMicroUsd: number;
   consistent: boolean;
 };
 
@@ -175,7 +183,10 @@ export type BillingJournalRepository = {
     cursor?: JournalCursor | undefined;
     limit: number;
   }): Promise<JournalPage>;
-  /** Compares the cache with the sum of the journal and with its open reservations. */
+  /**
+   * Compares the cache with the sum of the journal and with its open reservations, and counts the holds of jobs that ended
+   * without a release (#591).
+   */
   verify(): Promise<JournalVerification>;
 };
 
@@ -689,12 +700,16 @@ export function createBillingJournalRepository(
         reserved: string | number | null;
         cached_balance: string | number | null;
         cached_reserved: string | number | null;
+        stranded_count: string | number | null;
+        stranded_micro: string | number | null;
       }>`
         select
           sums.balance,
           sums.reserved,
           cache.balance_micro_usd as cached_balance,
-          cache.reserved_micro_usd as cached_reserved
+          cache.reserved_micro_usd as cached_reserved,
+          stranded.stranded_count,
+          stranded.stranded_micro
         from (
           select
             sum(amount_micro_usd) as balance,
@@ -702,9 +717,27 @@ export function createBillingJournalRepository(
           from billing_journal_entries
           where workspace_id = ${workspaceId}
         ) as sums
-        left join billing_balances as cache on cache.workspace_id = ${workspaceId}`.execute(
-        db,
-      );
+        left join billing_balances as cache on cache.workspace_id = ${workspaceId}
+        cross join (
+          select
+            count(*) as stranded_count,
+            coalesce(sum(-r.amount_micro_usd), 0) as stranded_micro
+          from billing_journal_entries as r
+          join jobs as j on j.id = r.ref_key and j.workspace_id = r.workspace_id
+          where r.workspace_id = ${workspaceId}
+            and r.type = 'reservation'
+            and j.status in (${sql.join([...ENDED_JOB_STATUSES])})
+            and not exists (
+              select 1 from usage_records as u
+              where u.job_id = j.id and u.state = 'reserved'
+            )
+            and not exists (
+              select 1 from billing_journal_entries as l
+              where l.workspace_id = r.workspace_id
+                and l.type = 'release'
+                and l.ref_key = r.ref_key
+            )
+        ) as stranded`.execute(db);
       const expectedBalanceMicroUsd = Number(rows[0]?.balance ?? 0);
       const expectedReservedMicroUsd = Number(rows[0]?.reserved ?? 0);
       const cached = {
@@ -715,6 +748,8 @@ export function createBillingJournalRepository(
         cached.balanceMicroUsd - expectedBalanceMicroUsd;
       const reservedDifferenceMicroUsd =
         cached.reservedMicroUsd - expectedReservedMicroUsd;
+      const strandedHoldCount = Number(rows[0]?.stranded_count ?? 0);
+      const strandedHoldMicroUsd = Number(rows[0]?.stranded_micro ?? 0);
       return {
         balanceMicroUsd: cached.balanceMicroUsd,
         expectedBalanceMicroUsd,
@@ -722,8 +757,12 @@ export function createBillingJournalRepository(
         reservedMicroUsd: cached.reservedMicroUsd,
         expectedReservedMicroUsd,
         reservedDifferenceMicroUsd,
+        strandedHoldCount,
+        strandedHoldMicroUsd,
         consistent:
-          differenceMicroUsd === 0 && reservedDifferenceMicroUsd === 0,
+          differenceMicroUsd === 0 &&
+          reservedDifferenceMicroUsd === 0 &&
+          strandedHoldCount === 0,
       };
     },
   };

@@ -806,6 +806,8 @@ for (const engine of ENGINES) {
         reservedMicroUsd: 2 * USD - 3,
         expectedReservedMicroUsd: 2 * USD,
         reservedDifferenceMicroUsd: -3,
+        strandedHoldCount: 0,
+        strandedHoldMicroUsd: 0,
         consistent: false,
       });
     });
