@@ -495,7 +495,8 @@ describe.each(databases)(
             status: "failed",
             errorCode: "reviews_paused",
           });
-          if (stored === undefined) throw new Error("the refused job is missing");
+          if (stored === undefined)
+            throw new Error("the refused job is missing");
           const check = describeCheck({
             status: "failed",
             errorCode: stored.errorCode,
