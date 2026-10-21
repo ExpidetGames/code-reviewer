@@ -656,6 +656,48 @@ describe("switching billing on", () => {
     expect(await isBillingOn(s.portal.db)).toBe(true);
   });
 
+  // #595
+  it("refuses a new key that passes the check while billing is on and the stored key cannot be read, and keeps everything", async () => {
+    // The fake accepts one key; the client is made to send it for whatever key the app holds, so the new key passes the check.
+    let fakeKey = "";
+    const asFakeKey: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("authorization", `Bearer ${fakeKey}`);
+      return fetch(input, { ...init, headers });
+    };
+    const s = await start({ stripeFetch: asFakeKey });
+    fakeKey = s.stripe.apiKey;
+    await s.put({ adapter: "stripe" });
+    await s.saveRates();
+    await s.saveStripe({
+      apiKey: s.stripe.apiKey,
+      webhookSecret: MANUAL_SECRET,
+    });
+    await s.post("/check");
+    await s.put({ enabled: true });
+    await s.portal.db
+      .updateTable("secrets")
+      .set({ ciphertext: "AAAA" })
+      .where("name", "=", "stripe_api_key")
+      .execute();
+
+    const response = await s.saveStripe({
+      apiKey: `${LIVE_PREFIX}ALiveKeyForTheTest0123456789`,
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "billing_disable_first" });
+    const stored = await s.portal.db
+      .selectFrom("secrets")
+      .select("ciphertext")
+      .where("name", "=", "stripe_api_key")
+      .executeTakeFirstOrThrow();
+    expect(stored.ciphertext).toBe("AAAA");
+    const secret = await s.portal.secrets.use("stripe_webhook_secret");
+    expect(secret.ok && secret.value.reveal()).toBe(MANUAL_SECRET);
+    expect(await isBillingOn(s.portal.db)).toBe(true);
+  });
+
   // #504-T04
   it("lets the rates be changed later while billing is on", async () => {
     const s = await start();

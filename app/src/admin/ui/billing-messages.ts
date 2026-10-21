@@ -33,7 +33,7 @@ const FAILURE_COPY: Record<string, string> = {
   webhook_endpoint_secret_unknown:
     "Stripe has a webhook endpoint for this app already, and Stripe shows its secret only when it is created. Enter the secret by hand, or replace the endpoint.",
   webhook_endpoint_unusable:
-    "Stripe has a webhook endpoint for this app, but it is switched off or not set to send every event billing needs, so it would not deliver a payment. Replace the endpoint here, or fix it in the Stripe dashboard.",
+    "Stripe has a webhook endpoint for this app, but it is switched off or not set to send every event billing needs, so it would not deliver a payment. Switch billing off, then replace it here, or fix it in the Stripe dashboard.",
   webhook_endpoint_in_progress:
     "A webhook endpoint is being created right now. Wait a moment and reload.",
   webhook_secret_not_stored:
