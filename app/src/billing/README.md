@@ -225,8 +225,19 @@ confirmation) counts from the job's `finished_at`.
 ## Reserve, settle, release (#498)
 
 While billing is on, the money of a job moves in three places, all inside a transaction the queue already runs. With billing off
-**none of it runs**: the only thing read is the switch (an instance setting, never a billing table), the claim, the usage records and
-the operator feed are exactly as before (`claim-billing.integration.test.ts`, which also checks that no statement names a billing table).
+**no money moves, and nothing reads or writes a billing table** (`claim-billing.integration.test.ts` checks that no statement of a claim and
+a completion names one). What billing off does add, exactly:
+
+- **one read of the instance setting `billing_settings`** per claim that reaches a candidate job (`readClaimBilling`, once per claim
+  transaction), per `settleEndedJobs` call that has job ids, and per answer to a stop call (`correctLateMinutes`); with a Stripe adapter
+  and the switch set it also looks for the two Stripe secrets by name, which is not the case while the switch is off;
+- **`RETURNING job_id`** on the statements that end a usage record (`voidEndedJobs`, the sweep and the closing of records), to know which
+  jobs ended;
+- for a claim that names `worker_credential` (a Dispatcher): **one read of `dispatcher_sightings`**, and a **write of it at most once an hour
+  per kind** of Dispatcher (`noteDispatcherClaim`, inside a `try`/`catch`: a failure logs `DISPATCHER_NOT_NOTED` and never delays or fails a
+  claim). This runs also while billing is off, because the sighting must exist before an admin switches billing on.
+
+The usage records, the claim and the operator feed are otherwise exactly as before.
 
 **Reserve (`claim-billing.ts`, called from `claimNext` after the admission of the entitlements and before the usage record).**
 The hold is `reserveFor`: the longest the VM lives (`hold.ts`: the Dispatcher's default job timeout plus its default VM margin, 25 minutes,
@@ -234,14 +245,14 @@ rounded up to a started minute) times B of the kind, plus, **on the operator's k
 job (`DYNAMIC_COST_LIMIT_MICRO_USD`, the runner's default of 1.00 USD; the app does not know an operator's own `RUNNER_DYNAMIC_MAX_COST_USD`, so
 a higher one only makes the hold smaller than its real maximum) or the admin's Diff AI reserve. The key mode is `keyModeAtClaim` (the key mode
 of the entitlements the claim has read, as the LLM access resolves it; the seam of #496). The journal's `reserveUpTo` takes `min(hold, balance)`
-(decision 5 of #489): a workspace with a little credit still runs, and the final charge may take the balance below zero. Refusals fail the job with
+(decision 5 of #489, "option b" of the maintainer on #489): any positive balance holds `min(hold, balance)` and the job runs, only a balance of exactly zero is refused (`insufficient_balance`), and the final charge may take the balance below zero. ADR 0006 (D8, 2.8) and the case #498-T03 still say "refuse below the hold"; they are updated on #490. Refusals fail the job with
 the stable codes below, count no attempt, leave **no usage record and no entry**, and are reported to `onRefused` like the refusals of the entitlements:
 
 | Code                       | When                                                                                                                       | Notice |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------ |
 | `insufficient_balance`     | the balance is zero: nothing can be held                                                                                   | yes    |
 | `balance_negative`         | the balance is below zero (a refund, a chargeback or a final charge above the hold took it there), also for a hold of zero | yes    |
-| `billing_rates_incomplete` | billing is on and a rate is missing                                                                                        | no     |
+| `billing_rates_incomplete` | billing is on and a rate is missing, or the switch is set and the adapter is not ready (`isBillingOn` is false)            | no     |
 | `billing_hold_released`    | a job claimed again whose hold was released already: it must not run as if it were paid                                    | no     |
 
 A hold of zero (the workspace's own key and B = 0) writes no reservation, but a balance below zero still refuses. A job that is claimed again after
@@ -269,16 +280,21 @@ journal holds the price.
   arrives. Settlement never takes `min(cost, hold)`. The final-call exemption of the cost guard (a run never ends without a review) is the
   runner's; billing only prices what the run reports.
 - A job that **never ran** has no minutes and no cost and prices to zero: only the `release` is written.
-- A superseded run whose Worker reported is charged its AI and its minutes; one that never reported within window and grace is charged its
-  minutes only, up to the push plus a minute (the end of the drain is not counted; accepted).
+- A superseded run with **no error code** (its Worker reported a result, or the run was drained) is charged in full, AI and minutes; one that never
+  reported within window and grace is charged its minutes only, up to the push plus a minute (the end of the drain is not counted; accepted). A
+  superseded run that **carries an error code** is classed by that code like any other end (`classOfEnd` in `outcome.ts`), so a code that is ours
+  (`runner_error`, `launch_failed`, ...) makes it free. That is the behaviour today; whether it should be charged in full instead awaits a
+  maintainer decision.
 - A job whose billing was **off at the claim** has no hold and is never settled, even if billing is switched on while it runs. A job whose
   billing is switched **off after** its claim ends without a settlement (none runs while billing is off): its hold stays in the journal. Releasing
   such holds when billing is switched back on (or off) is a follow-up of the admin page (#504).
 
 **Late minutes (`late-minutes.ts`).** A job settles with the best end of its VM known when it ends (the confirmed stop, else the bounded backstop).
 When the answer to the App's stop call arrives later (`dispatch/stop.ts`, after `confirmStopped`), within a day of the settlement, and the started
-minutes differ by more than one, **one** `correction` (key `late-minutes:<job id>`) moves the difference at the rate the run was charged at, either
-way; otherwise the settlement stands. A job that was never charged has nothing to correct.
+minutes differ by more than one, **one** `correction` (key `late-minutes:<job id>`) moves the difference at the rate the run was charged at;
+otherwise the settlement stands. A stop that answers late is our error (#493), so the correction **never charges beyond the backstop** (the job's
+end plus 60 seconds, bounded by the VM's timeout, `lateMinutesTarget`): a measure above it counts as the backstop, and a measure below the settlement
+credits the customer (#498-T14, T25). A job that was never charged has nothing to correct.
 
 **Hosted jobs never measure zero minutes silently** (the gate of the review of #524, B-1). `settleEndedJobs` asks `measure`; a charged run with
 a claim and no VM row of it falls back to its claim wall clock: `claim_wall_clock` when a Dispatcher acknowledged the job (a VM was started and its
@@ -287,8 +303,9 @@ answer that names a VM of our own naming for the job (`cr-<kind>-<job id>-...`) 
 the stop, at most the longest a VM lives); a better end (a VM's own) wins over a wall clock in `measure`. A claim keeps at most four VMs (N-1). A late
 `/vm` report for a claim that already ended stays refused (customer-friendly). The Dispatcher names `vm_lifecycle` in its claim and the app notes when
 it last saw a Dispatcher with and without it (`dispatcher-features.ts`, the instance setting `dispatcher_sightings`, at most once an hour per kind);
-`canSwitchBillingOnWithDispatcher` refuses with `dispatcher_lacks_vm_lifecycle` while one without it has claimed within a day. **#504 must ask it
-inside the same transaction that writes `enabled`**, next to `canSwitchBillingOn`.
+`canSwitchBillingOnWithDispatcher` refuses with `dispatcher_lacks_vm_lifecycle` while one without it has claimed within a day; the switch-on of the
+admin page asks it inside the same `lockBillingSettings` transaction that writes `enabled`, next to the readiness of the adapter, and names the item in
+`missing` (#498-T19).
 
 ## The switch
 
