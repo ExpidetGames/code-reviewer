@@ -256,6 +256,50 @@ function suite(engine: BillingEngine) {
       expect((await intents.get(intent.id))?.providerAmount).toBe(2975);
     });
 
+    // #502-T16
+    it("pins the currency of what the buyer was charged with it: once, never changed, and a bad code is refused", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      expect(intent.providerCurrency).toBeNull();
+
+      for (const providerCurrency of ["EUR", "eu", "euro", "", "e1r"])
+        expect(
+          await codeOf(
+            intents.markPaid(intent.id, {
+              paymentRef: "pi_1",
+              creditedMicroUsd: 25 * USD,
+              providerAmount: 2200,
+              providerCurrency,
+            }),
+          ),
+          providerCurrency,
+        ).toBe("amount_out_of_range");
+      expect((await intents.get(intent.id))?.state).toBe("pending");
+
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2200,
+        providerCurrency: "eur",
+      });
+      const again = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2200,
+        providerCurrency: "usd",
+      });
+
+      expect(again?.changed).toBe(false);
+      expect(await intents.get(intent.id)).toMatchObject({
+        providerAmount: 2200,
+        providerCurrency: "eur",
+      });
+    });
+
     // #502-T08
     it("pins the amount of a payment that was credited without one when it is told later, and leaves an unpinned intent unpinned otherwise", async () => {
       const { db, workspaceId } = await engine.create();
@@ -488,6 +532,54 @@ function suite(engine: BillingEngine) {
       expect(await directory.findById("fake", "missing")).toBeUndefined();
       expect((await directory.lockById(mine.id))?.id).toBe(mine.id);
       expect(await directory.lockById("missing")).toBeUndefined();
+    });
+
+    // #502-T18
+    it("says whether a top-up of an adapter is still waiting for its payment, and only a recent one without a payment", async () => {
+      const { db, workspaceId } = await engine.create();
+      const clock = { now: Date.parse("2026-10-21T10:00:00.000Z") };
+      const intents = createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        () => new Date(clock.now),
+      );
+      const directory = createBillingTopUpIntentDirectory(db);
+      const since = "2026-10-20T10:00:00.000Z";
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        false,
+      );
+
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        true,
+      );
+      // Another adapter's top-up is not it, and neither is one older than the window.
+      expect(await directory.hasPendingWithoutPayment("stripe", since)).toBe(
+        false,
+      );
+      expect(
+        await directory.hasPendingWithoutPayment(
+          "fake",
+          "2026-10-21T10:00:00.001Z",
+        ),
+      ).toBe(false);
+      // Not pending any more (paid, failed, expired) or with a payment recorded: not waiting.
+      await intents.attachRefs(intent.id, { paymentRef: "pi_1" });
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        false,
+      );
+      const second = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markFailed(second.id);
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        false,
+      );
     });
   });
 

@@ -314,6 +314,56 @@ describe("validating a normalized event", () => {
     ).toBe("event_invalid");
   });
 
+  // #502-T16
+  it("takes a currency as three lower case letters on a payment, a refund and a dispute, and refuses anything else", () => {
+    const payment = {
+      ...base,
+      type: "payment.succeeded",
+      intentId: "intent-1",
+      payment: "pi_1",
+      checkout: "cs_1",
+      creditable: toUsd(25 * USD),
+      gross: toUsd(30 * USD),
+      tax: toUsd(5 * USD),
+      providerAmount: toProviderAmount(2975),
+    } as const;
+    const refund = {
+      ...base,
+      type: "refund.updated",
+      payment: "pi_1",
+      refund: "re_1",
+      amount: toProviderAmount(1000),
+      initiatedBy: "provider",
+      status: "approved",
+    } as const;
+    const dispute = {
+      ...base,
+      type: "dispute.updated",
+      payment: "pi_1",
+      dispute: "dp_1",
+      amount: toProviderAmount(1000),
+      status: "lost",
+    } as const;
+
+    for (const [event, field] of [
+      [payment, "providerCurrency"],
+      [refund, "currency"],
+      [dispute, "currency"],
+    ] as const) {
+      expect(() =>
+        validateBillingEvent({ ...event, [field]: "eur" } as never),
+      ).not.toThrow();
+      expect(() => validateBillingEvent(event)).not.toThrow();
+      for (const bad of ["EUR", "eu", "euro", "", "e1r", 3, null])
+        expect(
+          codeOf(() =>
+            validateBillingEvent({ ...event, [field]: bad } as never),
+          ),
+          `${event.type} ${String(bad)}`,
+        ).toBe("event_invalid");
+    }
+  });
+
   // #497-T13
   it("refuses a refund or dispute whose payment amount is not a whole positive amount, and takes one without it", () => {
     const refund = {

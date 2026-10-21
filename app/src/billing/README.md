@@ -543,10 +543,10 @@ interface BillingAdapter {
   `_ . : -`, at most 255): no card, address, tax id or email is ever stored or carried.
 - **The events.** `payment.succeeded` (`creditable` is the net amount that becomes credit; `gross`; `tax`, where `0` is a
   real tax and `null` is "not said"; `providerAmount`, what the buyer was charged in the provider's unit, which the application
-  pins on the intent), `payment.failed`, `payment.expired` (the checkout ended unpaid: the only way an
+  pins on the intent, with `providerCurrency`, its lower case ISO 4217 code), `payment.failed`, `payment.expired` (the checkout ended unpaid: the only way an
   intent becomes `expired`), `payment.refused` (#502: the adapter read a paid payment that contradicts what we asked for, such as
-  another currency or the other environment; nothing is credited, it is recorded `amount_rejected` for review), `refund.updated` (`status` `pending`/`approved`/`rejected`/`reversed`, `initiatedBy`),
-  `dispute.updated` (`opened`/`lost`/`won`, with the dispute id) and `ignored` (a verified event of a type the adapter
+  another currency or the other environment; nothing is credited, it is recorded `amount_rejected` for review), `refund.updated` (`status` `pending`/`approved`/`rejected`/`reversed`, `initiatedBy`, and the `currency` of its amount),
+  `dispute.updated` (`opened`/`lost`/`won`, with the dispute id and the `currency` of its amount) and `ignored` (a verified event of a type the adapter
   does not use). `validateBillingEvent` refuses an event with a non-integer amount, an id that is not an opaque id, a
   time that is not ISO 8601 or an unknown status, so nothing past it trusts a provider's number.
 - **Payments are net, refunds and disputes are gross.** A payment carries OUR amounts (`creditable`, net of tax, in
@@ -676,15 +676,27 @@ payment, checkout or intent id, only for the adapter that made it.
 
 1. **Claim** the event id in `billing_webhook_events` (id, outcome, order; no payload). A repeat is `duplicate_ignored`.
    Only `intent_unresolved` lets the same event id be handled again, if it is delivered again. The route answers 200
-   for it, so a provider does NOT redeliver on its own: a refund that arrives before its payment is recorded for review
-   (below), and "Check payment" (#502) or the operator repairs it.
+   for it, so a provider does NOT redeliver on its own: an event about a payment that is none of ours is recorded for
+   review (below), and "Check payment" (#502) or the operator repairs it. A refund or dispute whose payment is NOT
+   CREDITED YET is different: see step 2.
 2. **Resolve** the intent: by the payment, then the checkout, then our own intent id recorded in the event, and every
    other field must agree. An event that names another intent than the payment belongs to, or another payment than the
    one recorded, resolves to nothing: `intent_unresolved`, no change, answered 200. The intent row is locked (Postgres
-   `FOR UPDATE`, SQLite one writer), so every event about one payment is applied one after the other.
+   `FOR UPDATE`, SQLite one writer), so every event about one payment is applied one after the other. **A refund or
+   dispute whose payment is not credited yet is not final** (#502): when the payment resolves to an intent that is not
+   `paid`, or resolves to none while a top-up of the adapter is still `pending` with no payment recorded and was written in
+   the last three days (it may be that one), `applyBillingEvent` throws `BillingEventRetryError("credit_pending")`, the
+   transaction rolls back (nothing is claimed) and the route answers **503** with an empty body, so the provider delivers the
+   event again after the credit. Without that, a refund that overtakes its `checkout.session.completed` would be answered
+   200 and never seen again, and the credit that arrives next would stand beside a payment that was taken back. A payment
+   that is none of ours (a foreign object on a shared Stripe account, no top-up waiting) stays `intent_unresolved`, 200 and
+   a review row, so a shared account is not retried for days.
 3. **Order**: a refund or dispute state older than the last one applied is `stale_ignored`.
-4. **Bound**: a credit is at least 10 USD and at most the amount of the intent. A refund or dispute is turned into its
-   net share (see above); it is `amount_rejected` when it is larger than its payment, and when it would take the
+4. **Bound**: a credit is **exactly the amount of the intent** (and at least 10 USD): the provider's net must equal what
+   we asked for, so a discount or a coupon (a smaller net) is `amount_rejected` and an operator decides, never a silently
+   smaller credit. A refund or dispute is turned into its net share (see above); it is `amount_rejected` when its
+   **currency is not the one the payment was pinned in** (an amount in another currency is no share of it), when it is
+   larger than its payment, and when it would take the
    refunds and disputes of that payment **together** above what the payment credited (two refunds of 20 on a 25 credit
    take 20, then the second is rejected; a refund of 25 and a dispute of 25 take 25). A debit adds to its total, a
    reversal (a rejected or reversed refund, a won dispute) subtracts what it gave back. Nothing is written for a
@@ -705,7 +717,9 @@ payment, checkout or intent id, only for the adapter that made it.
 `event_invalid`, mean a buyer may have paid and got nothing (an unknown intent, a second payment of an intent that is
 paid, an amount above what we asked, a payment that changes the amount of a credit) or been refunded and kept the credit
 (a refund before its payment, or beyond the caps). Each is recorded with `review_state = 'open'` and the subject it was
-about (`payment:<id>`, `refund:<id>`, `dispute:<id>`; `listOpenReviews` reads them; the admin view of them is a follow-up of #504), logged
+about (`payment:<id>`, `refund:<id>`, `dispute:<id>`) and, when the application could attribute the event to one of its intents, the
+**workspace id and the intent id** (`workspace_id`, `intent_id`; null for an event about a payment that is none of ours);
+`listOpenReviews` reads them; the admin view of them is a follow-up of #504 (a go-live blocker), logged
 at error level with its code (`billing_webhook_needs_review outcome=...`), and answered 200: the provider's retry would
 not change it. The repair is the operator's: a `manual` grant or correction, or "Check payment" (#502) when the provider's
 state is the doubt. A signed event that is not a normalized event (an adapter bug, a provider change) is recorded
@@ -725,7 +739,8 @@ that does not exist, before the body is read and before any billing table is tou
 `adapter.verifyAndParseWebhook` over the exact bytes (401 for a missing, wrong, altered or old signature and 400 for a signed
 body the adapter cannot read, both with an **empty body**), then `applyBillingEvent` (200 and `{ "outcome": "<code>" }`).
 The adapter gets the body as bytes (`body.bytes`). Anything that throws is 500 with an empty body and nothing applied; the
-provider redelivers. A signed event that is no event, and a paid-but-not-credited outcome, are not thrown: they are
+provider redelivers. A refund or dispute whose payment is not credited yet is answered **503** with an empty body (log
+`billing_webhook_credit_pending`) and nothing applied, so the provider delivers it again after the credit. A signed event that is no event, and a paid-but-not-credited outcome, are not thrown: they are
 answered 200 and recorded for review (see above). The log names a code only
 (`billing_webhook_rejected code=signature_invalid`): never a body, header, signature, id, amount or error message.
 **There is no outbound call in the handler** (`webhook-handler.test.ts` pins it), so the route answers within a few
@@ -746,18 +761,18 @@ whose `livemode` is not the environment of the stored API key (a test event at a
 
 **What each event does** (the events the admin page subscribes the endpoint to, `stripe-webhook-events.ts`):
 
-| Stripe event                                                                                                                                                                                            | Normalized event           | Effect                                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checkout.session.completed` (paid), `checkout.session.async_payment_succeeded`                                                                                                                         | `payment.succeeded`        | A `top_up` of the **net** amount (`amount_subtotal`; VAT is on top and never credited), keyed by the payment intent id (D14), on the intent of **our** row. The intent becomes `paid` and pins what the buyer was charged. |
-| `checkout.session.completed` (unpaid, a delayed method)                                                                                                                                                 | `ignored`                  | Nothing; the success or failure follows.                                                                                                                                                                                   |
-| a paid session in another currency than USD, of the other environment, with no payment intent, with a net amount that is no positive whole number of cents, or whose reference contradicts its metadata | `payment.refused`          | Nothing is credited; recorded `amount_rejected`, open for review, logged at error level, answered 200.                                                                                                                     |
-| `checkout.session.async_payment_failed`                                                                                                                                                                 | `payment.failed`           | A pending intent becomes `failed` (a payment that still arrives pays it, once).                                                                                                                                            |
-| `checkout.session.expired`                                                                                                                                                                              | `payment.expired`          | A pending intent becomes `expired` (a late payment still pays it).                                                                                                                                                         |
-| `refund.created`, `refund.updated`, `refund.failed`                                                                                                                                                     | `refund.updated`           | One event per refund with the amount of THAT refund: `pending`/`requires_action`/no status and `succeeded` debit (`refund` entry, the share of the credit), `failed` and `canceled` reverse the debit once (`correction`). |
-| `charge.dispute.created`, `charge.dispute.funds_withdrawn`                                                                                                                                              | `dispute.updated` `opened` | A `chargeback` entry (Stripe takes the money when a dispute opens). A `warning_*` status moves no money and is `ignored`.                                                                                                  |
-| `charge.dispute.closed` (`lost`)                                                                                                                                                                        | `dispute.updated` `lost`   | The debit stays (written once, whichever event was seen first).                                                                                                                                                            |
-| `charge.dispute.closed` (`won`, `charge_refunded`), `charge.dispute.funds_reinstated`                                                                                                                   | `dispute.updated` `won`    | A `correction` reverses the chargeback once.                                                                                                                                                                               |
-| anything else, including `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`                                                                                                 | `ignored`                  | `ignored_type`, 200, no change.                                                                                                                                                                                            |
+| Stripe event                                                                                                                                                                                                     | Normalized event           | Effect                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checkout.session.completed` (paid), `checkout.session.async_payment_succeeded`                                                                                                                                  | `payment.succeeded`        | A `top_up` of the **net** amount (`amount_total` less `amount_tax`: what the buyer paid after any discount, VAT being on top and never credited; it must equal the amount of the intent), keyed by the payment intent id (D14), on the intent of **our** row. The intent becomes `paid` and pins what the buyer was charged, and in which currency. |
+| `checkout.session.completed` (unpaid, a delayed method)                                                                                                                                                          | `ignored`                  | Nothing; the success or failure follows.                                                                                                                                                                                                                                                                                                            |
+| a paid session in another currency than USD, of the other environment, with no payment intent, with a total or tax that gives no positive whole net amount of cents, or whose reference contradicts its metadata | `payment.refused`          | Nothing is credited; recorded `amount_rejected`, open for review, logged at error level, answered 200.                                                                                                                                                                                                                                              |
+| `checkout.session.async_payment_failed`                                                                                                                                                                          | `payment.failed`           | A pending intent becomes `failed` (a payment that still arrives pays it, once).                                                                                                                                                                                                                                                                     |
+| `checkout.session.expired`                                                                                                                                                                                       | `payment.expired`          | A pending intent becomes `expired` (a late payment still pays it).                                                                                                                                                                                                                                                                                  |
+| `refund.created`, `refund.updated`, `refund.failed`                                                                                                                                                              | `refund.updated`           | One event per refund with the amount of THAT refund: `pending`/`requires_action`/no status and `succeeded` debit (`refund` entry, the share of the credit), `failed` and `canceled` reverse the debit once (`correction`).                                                                                                                          |
+| `charge.dispute.created`, `charge.dispute.funds_withdrawn`                                                                                                                                                       | `dispute.updated` `opened` | A `chargeback` entry (Stripe takes the money when a dispute opens). A `warning_*` status moves no money and is `ignored`.                                                                                                                                                                                                                           |
+| `charge.dispute.closed` (`lost`)                                                                                                                                                                                 | `dispute.updated` `lost`   | The debit stays (written once, whichever event was seen first).                                                                                                                                                                                                                                                                                     |
+| `charge.dispute.closed` (`won`, `charge_refunded`), `charge.dispute.funds_reinstated`                                                                                                                            | `dispute.updated` `won`    | A `correction` reverses the chargeback once.                                                                                                                                                                                                                                                                                                        |
+| anything else, including `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`                                                                                                          | `ignored`                  | `ignored_type`, 200, no change.                                                                                                                                                                                                                                                                                                                     |
 
 `payment_intent.succeeded` is not read because a payment intent has no net amount and the session event describes the same payment
 under the same journal key (the second is a repeat either way). `payment_intent.payment_failed` is not read because a declined card
@@ -775,6 +790,33 @@ when Adaptive Pricing localized the price, else `amount_total`, in cents), and t
 `floor(credited x refund / pinned)` (`net-share.ts`), with no call to Stripe. The first amount told is the one kept. An event that
 carries a total which differs from the pin is `amount_conflict`; a refund of a payment that pinned none (paid before the column existed
 or by a provider that does not say) is `amount_rejected`: both are open for review, nothing is debited.
+
+**The currency is pinned with it** (`provider_currency`: `presentment_details.presentment_currency` when Adaptive Pricing localized the
+price, else the session's own, `usd`). A Stripe refund and dispute name their own `currency`; one that is not the pinned currency (or
+that names one for a payment that pinned none) is `amount_rejected` and a review row, so a full refund in euros of a payment pinned in
+dollars is never read as "less than all of it" and the credit cannot survive a fully refunded payment.
+
+**A refund or dispute before the credit.** Stripe does not order its events. One whose payment is not credited yet is answered 503 (see
+"Applying an event", step 2) and delivered again; when the redelivery comes after the credit it is applied. The window for a payment
+we cannot place is the three days of Stripe's retries: a top-up that was started in that time and has no payment recorded could be
+the one, so the foreign object is retried only as long as such a top-up is waiting (a day for an abandoned checkout, until its
+`checkout.session.expired`). **A refund or dispute that arrives for a payment whose credit never comes** (the checkout event was lost)
+is repaired by "Check payment" and then by the redelivery Stripe still has queued.
+
+**On a shared Stripe account** (the account also serves another product) every Stripe event of the account reaches the endpoint:
+events of other products of the types the endpoint is subscribed to are verified (a signature check per delivery, before the body is trusted), parsed and, when they are
+refunds or disputes, looked up by their payment. Foreign `checkout.session.*` events and refunds are recorded `intent_unresolved`
+with a review row, so a busy shared account fills the review list and costs one signature check and a few reads per delivery.
+Give the endpoint its own Stripe account when that matters (the subscription is already limited to the types it reads,
+`stripe-webhook-events.ts`). **Before verification** a request costs the settings reads of the guard (the billing switch, the active adapter, the stored webhook secret), the read of its
+body (at most 256 KiB) and one HMAC over it, and nothing is written: an unsigned flood costs that per request, which the platform's rate limit (Vercel firewall or the proxy in front of a self-hosted instance) should bound: a
+rate limit on `POST /api/billing/webhook` of a few dozen requests per minute per IP is recommended (Stripe's own deliveries are
+few and come from a small set of addresses).
+
+**While billing is off.** The money events answer 404 while billing is off or the Stripe adapter is not ready (the route is not
+there), and Stripe retries a failed delivery for about three days. Do not switch billing off while top-ups are open: the credits
+arrive late (after "Check payment" or when the retry comes) and, if billing stays off past the retry window, only "Check payment"
+or a manual grant repairs them.
 
 **Ordering.** Refund and dispute states are ordered by the event's `created` (seconds): a state older than the last applied one for that
 refund or dispute is `stale_ignored`. Two states in the same second follow the order they arrive in; Stripe's refund and dispute

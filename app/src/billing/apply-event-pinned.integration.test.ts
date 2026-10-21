@@ -53,6 +53,7 @@ function paid(
     gross: toUsd(29_750_000),
     tax: toUsd(4_750_000),
     providerAmount: toProviderAmount(2975),
+    providerCurrency: "usd",
     ...overrides,
   };
 }
@@ -193,6 +194,149 @@ function suite(engine: BillingEngine) {
             subject: `payment:${s.payment}`,
           },
         ]);
+      });
+
+      // #502-T16
+      it("rejects a refund in another currency than the payment was pinned in, and flags it with whose payment it is", async () => {
+        const s = await seed(engine);
+        await apply(s, paid(s));
+
+        // The whole payment in euros: 2200 EUR cents is no share of 2975 USD cents.
+        const result = await apply(
+          s,
+          refundOf(s, { amount: toProviderAmount(2200), currency: "eur" }),
+        );
+
+        expect(result).toMatchObject({
+          outcome: "amount_rejected",
+          needsReview: true,
+          workspaceId: s.workspaceId,
+        });
+        expect((await journal(s).balance()).balanceMicroUsd).toBe(25 * USD);
+        expect(await intentOf(s)).toMatchObject({ refundedMicroUsd: 0 });
+        // #502-T19
+        expect(
+          await s.db
+            .selectFrom("billing_webhook_events")
+            .select(["outcome", "review_state", "workspace_id", "intent_id"])
+            .where("outcome", "=", "amount_rejected")
+            .execute(),
+        ).toEqual([
+          {
+            outcome: "amount_rejected",
+            review_state: "open",
+            workspace_id: s.workspaceId,
+            intent_id: s.intentId,
+          },
+        ]);
+      });
+
+      // #502-T16
+      it("rejects a dispute in another currency, and takes a refund in the pinned currency or one that names none", async () => {
+        const s = await seed(engine);
+        await apply(s, paid(s));
+
+        const euro = await apply(s, {
+          type: "dispute.updated",
+          eventId: nextId("evt"),
+          occurredAt: at(5),
+          payment: s.payment,
+          dispute: nextId("dp"),
+          amount: toProviderAmount(2975),
+          currency: "eur",
+          status: "opened",
+        });
+        const dollars = await apply(
+          s,
+          refundOf(s, { amount: toProviderAmount(1190), currency: "usd" }),
+        );
+        const silent = await apply(
+          s,
+          refundOf(s, { amount: toProviderAmount(1190) }),
+        );
+
+        expect(euro.outcome).toBe("amount_rejected");
+        expect(dollars.outcome).toBe("applied");
+        expect(silent.outcome).toBe("applied");
+        expect((await journal(s).balance()).balanceMicroUsd).toBe(5 * USD);
+      });
+
+      // #502-T16
+      it("rejects a refund that names a currency for a payment that pinned none", async () => {
+        const s = await seed(engine);
+        await apply(
+          s,
+          paid(s, {
+            providerCurrency: undefined as never,
+          }),
+        );
+        expect(await intentOf(s)).toMatchObject({
+          providerAmount: 2975,
+          providerCurrency: null,
+        });
+
+        const result = await apply(s, refundOf(s, { currency: "usd" }));
+
+        expect(result).toMatchObject({
+          outcome: "amount_rejected",
+          needsReview: true,
+        });
+        expect((await journal(s).balance()).balanceMicroUsd).toBe(25 * USD);
+      });
+
+      // #502-T16
+      it("keeps the first pinned currency when the same payment is told again with another one", async () => {
+        const s = await seed(engine);
+        await apply(s, paid(s));
+
+        await apply(s, paid(s, { providerCurrency: "eur" }));
+
+        expect(await intentOf(s)).toMatchObject({ providerCurrency: "usd" });
+      });
+
+      // #502-T19
+      it("names the workspace and the intent on the review of a refused payment that names our intent", async () => {
+        const s = await seed(engine);
+
+        const result = await apply(s, {
+          type: "payment.refused",
+          eventId: nextId("evt"),
+          occurredAt: at(0),
+          payment: s.payment,
+          intentId: s.intentId,
+        });
+
+        expect(result).toMatchObject({
+          outcome: "amount_rejected",
+          workspaceId: s.workspaceId,
+          needsReview: true,
+        });
+        expect(
+          await s.db
+            .selectFrom("billing_webhook_events")
+            .select(["workspace_id", "intent_id"])
+            .execute(),
+        ).toEqual([{ workspace_id: s.workspaceId, intent_id: s.intentId }]);
+      });
+
+      // #502-T19
+      it("leaves the workspace and the intent empty on the review of a refused payment that names none of ours", async () => {
+        const s = await seed(engine);
+
+        await apply(s, {
+          type: "payment.refused",
+          eventId: nextId("evt"),
+          occurredAt: at(0),
+          payment: s.payment,
+          intentId: "not-one-of-ours",
+        });
+
+        expect(
+          await s.db
+            .selectFrom("billing_webhook_events")
+            .select(["workspace_id", "intent_id"])
+            .execute(),
+        ).toEqual([{ workspace_id: null, intent_id: null }]);
       });
 
       // #502-T03
