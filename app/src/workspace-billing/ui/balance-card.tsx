@@ -52,12 +52,16 @@ export function BalanceCard({ view }: { view: WorkspaceBillingView }) {
         {view.heldMicroUsd > 0 ? (
           <p className="text-sm text-muted-foreground">
             {HELD_TEXT}:{" "}
-            <span className="tabular-nums">{formatMoney(view.heldMicroUsd)}</span>
+            <span className="tabular-nums">
+              {formatMoney(view.heldMicroUsd)}
+            </span>
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">{BALANCE_EXPLAINER}</p>
         {pause === null ? null : (
-          <Alert variant={view.state === "negative" ? "destructive" : "warning"}>
+          <Alert
+            variant={view.state === "negative" ? "destructive" : "warning"}
+          >
             <AlertTitle>{pause.title}</AlertTitle>
             <AlertDescription>
               <p>{pause.body}</p>

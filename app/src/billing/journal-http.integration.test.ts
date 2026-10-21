@@ -73,7 +73,8 @@ describe("GET /api/w/:workspace/billing/journal", () => {
   // #505-T02
   it("gives a Member the journal of their workspace page by page, with no-store", async () => {
     const t = await start();
-    for (const amount of [1, 2, 3]) await fundWorkspace(t.db, t.workspaceId, amount * USD);
+    for (const amount of [1, 2, 3])
+      await fundWorkspace(t.db, t.workspaceId, amount * USD);
 
     const first = await t.route.get(
       t.get("?limit=2"),
@@ -87,7 +88,10 @@ describe("GET /api/w/:workspace/billing/journal", () => {
       rows: Array<{ amountMicroUsd: number }>;
       next: string | null;
     };
-    expect(page.rows.map((row) => row.amountMicroUsd)).toEqual([3 * USD, 2 * USD]);
+    expect(page.rows.map((row) => row.amountMicroUsd)).toEqual([
+      3 * USD,
+      2 * USD,
+    ]);
     expect(page.next).not.toBeNull();
     const second = await t.route.get(
       t.get(`?limit=2&cursor=${page.next}`),
@@ -107,7 +111,11 @@ describe("GET /api/w/:workspace/billing/journal", () => {
     const outsider = await t.person("owner", "u-outsider", t.otherWorkspaceId);
 
     const outside = await t.route.get(t.get(), "acme", t.as(outsider));
-    const anonymous = await t.route.get(t.get(), "acme", t.as({ kind: "none" }));
+    const anonymous = await t.route.get(
+      t.get(),
+      "acme",
+      t.as({ kind: "none" }),
+    );
 
     expect(outside.status).toBe(404);
     expect(anonymous.status).toBe(401);
@@ -115,30 +123,34 @@ describe("GET /api/w/:workspace/billing/journal", () => {
   });
 
   // #505-T02
-  it.each(["cursor=abc", "cursor=0", "limit=0", "limit=51", "limit=x", "limit=1.5"])(
-    "refuses the query %s with a stable code",
-    async (query) => {
-      const t = await start();
+  it.each([
+    "cursor=abc",
+    "cursor=0",
+    "limit=0",
+    "limit=51",
+    "limit=x",
+    "limit=1.5",
+  ])("refuses the query %s with a stable code", async (query) => {
+    const t = await start();
 
-      const response = await t.route.get(
-        t.get(`?${query}`),
-        "acme",
-        t.as(await t.person("member")),
-      );
+    const response = await t.route.get(
+      t.get(`?${query}`),
+      "acme",
+      t.as(await t.person("member")),
+    );
 
-      expect(response.status).toBe(422);
-      expect(await response.json()).toEqual({ error: "journal_query_invalid" });
-    },
-  );
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "journal_query_invalid" });
+  });
 
   // #505-T11
   it("is the missing path while billing is off, before anything else is asked", async () => {
     const t = await start({ billingOn: false });
     const withAccess = vi.fn(t.as(await t.person("member")));
 
-    await expect(t.route.get(t.get(), "acme", withAccess)).rejects.toBeInstanceOf(
-      NotFound,
-    );
+    await expect(
+      t.route.get(t.get(), "acme", withAccess),
+    ).rejects.toBeInstanceOf(NotFound);
     expect(withAccess).not.toHaveBeenCalled();
   });
 });

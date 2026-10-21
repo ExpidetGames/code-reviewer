@@ -73,7 +73,10 @@ export function BillingPageContent({
     <SettingsScreen workspaceSlug={workspaceSlug} current="billing" showBilling>
       <div className="flex max-w-[64rem] flex-col gap-6">
         {returned === null ? null : (
-          <Alert variant={returned === "success" ? "info" : "default"} role="status">
+          <Alert
+            variant={returned === "success" ? "info" : "default"}
+            role="status"
+          >
             <AlertDescription>
               {returned === "success" ? RETURN_SUCCESS : RETURN_CANCELLED}
             </AlertDescription>

@@ -15,11 +15,7 @@ import {
   CardTitle,
 } from "../../components/ui/card.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
-import {
-  Field,
-  FieldError,
-  FieldLabel,
-} from "../../components/ui/field.tsx";
+import { Field, FieldError, FieldLabel } from "../../components/ui/field.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import type { WorkspaceBillingApi } from "../api.ts";
 import {
@@ -74,7 +70,8 @@ export function ProfileCard({
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const optional = (value: string) => (value.trim() === "" ? null : value.trim());
+    const optional = (value: string) =>
+      value.trim() === "" ? null : value.trim();
     void run("save", async () => {
       const result = await api.saveProfile({
         legalName: draft.legalName.trim(),

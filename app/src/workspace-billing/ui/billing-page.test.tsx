@@ -210,23 +210,34 @@ describe("what a Member sees", () => {
     expect(screen.getByRole("region", { name: "Balance" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Journal" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Add credit" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Billing details" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Billing details" }),
+    ).toBeNull();
     expect(
       screen.queryByRole("region", { name: "Monthly spending limit" }),
     ).toBeNull();
-    expect(screen.getByText(/You can see the balance and the journal/)).toBeTruthy();
+    expect(
+      screen.getByText(/You can see the balance and the journal/),
+    ).toBeTruthy();
   });
 });
 
 describe("the manual adapter", () => {
   // #505-T10
   it("shows no form and asks the person to ask the operator", () => {
-    page({ ...OWNER_VIEW, topUpAvailable: false, profileRequired: false, profile: null });
+    page({
+      ...OWNER_VIEW,
+      topUpAvailable: false,
+      profileRequired: false,
+      profile: null,
+    });
 
     const card = screen.getByRole("region", { name: "Add credit" });
     expect(card.textContent).toContain("Ask your operator to add credit");
     expect(within(card).queryByRole("button")).toBeNull();
-    expect(screen.queryByRole("region", { name: "Billing details" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Billing details" }),
+    ).toBeNull();
   });
 });
 
@@ -242,10 +253,12 @@ describe("the top-up", () => {
   // #505-T03
   it("saves the billing details, starts the payment with the business confirmation and goes to the payment page", async () => {
     const user = userEvent.setup();
-    const { api, navigate } = page({ ...OWNER_VIEW, profile: null });
+    const { api } = page({ ...OWNER_VIEW, profile: null });
 
     await fillProfile(user);
-    await user.click(screen.getByRole("button", { name: "Save billing details" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save billing details" }),
+    );
     await waitFor(() => expect(api.saveProfile).toHaveBeenCalledTimes(1));
     expect(api.saveProfile).toHaveBeenCalledWith({
       legalName: "Acme GmbH",
@@ -265,16 +278,26 @@ describe("the top-up", () => {
     const { api, navigate } = page(OWNER_VIEW);
 
     await user.click(screen.getByRole("radio", { name: "$25" }));
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
     expect(api.startTopUp).not.toHaveBeenCalled();
     expect(
-      screen.getByText("Confirm that you are buying for a business to continue."),
+      screen.getByText(
+        "Confirm that you are buying for a business to continue.",
+      ),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole("checkbox", { name: /buying for a business/ }));
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: /buying for a business/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("https://pay.example.test/c/1"));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith("https://pay.example.test/c/1"),
+    );
     expect(api.startTopUp).toHaveBeenCalledWith({
       amountCents: 2_500,
       confirmBusiness: true,
@@ -290,9 +313,13 @@ describe("the top-up", () => {
       profile: { ...PROFILE, businessConfirmed: true },
     });
 
-    expect(screen.queryByRole("checkbox", { name: /buying for a business/ })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: /buying for a business/ }),
+    ).toBeNull();
     await user.click(screen.getByRole("radio", { name: "$100" }));
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
 
     await waitFor(() => expect(navigate).toHaveBeenCalled());
     expect(api.startTopUp).toHaveBeenCalledWith(
@@ -303,23 +330,34 @@ describe("the top-up", () => {
   // #505-T03
   it("takes another amount from $10 to $500 and refuses anything else before it asks the server", async () => {
     const user = userEvent.setup();
-    const { api } = page({ ...OWNER_VIEW, profile: { ...PROFILE, businessConfirmed: true } });
+    const { api } = page({
+      ...OWNER_VIEW,
+      profile: { ...PROFILE, businessConfirmed: true },
+    });
     const custom = screen.getByLabelText("Other amount (USD)");
 
     await user.type(custom, "9.99");
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
     expect(screen.getByText("Enter an amount from $10 to $500.")).toBeTruthy();
     await user.clear(custom);
     await user.type(custom, "twelve");
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
     expect(
-      screen.getByText("Enter an amount in US dollars, for example 25 or 25.50."),
+      screen.getByText(
+        "Enter an amount in US dollars, for example 25 or 25.50.",
+      ),
     ).toBeTruthy();
     expect(api.startTopUp).not.toHaveBeenCalled();
 
     await user.clear(custom);
     await user.type(custom, "37.50");
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
     await waitFor(() =>
       expect(api.startTopUp).toHaveBeenCalledWith(
         expect.objectContaining({ amountCents: 3_750 }),
@@ -338,11 +376,15 @@ describe("the top-up", () => {
       { api },
     );
 
-    await user.click(screen.getByRole("button", { name: "Continue to payment" }));
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment" }),
+    );
 
     await waitFor(() =>
       expect(
-        screen.getByText("The payment provider could not be reached. Try again in a moment."),
+        screen.getByText(
+          "The payment provider could not be reached. Try again in a moment.",
+        ),
       ).toBeTruthy(),
     );
     expect(navigate).not.toHaveBeenCalled();
@@ -355,8 +397,11 @@ describe("the top-up", () => {
     const card = screen.getByRole("region", { name: "Add credit" });
     expect(card.textContent).toContain("Save your billing details first");
     expect(
-      (within(card).getByRole("button", { name: "Continue to payment" }) as HTMLButtonElement)
-        .disabled,
+      (
+        within(card).getByRole("button", {
+          name: "Continue to payment",
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
   });
 
@@ -365,31 +410,46 @@ describe("the top-up", () => {
     const user = userEvent.setup();
     const api = fakeApi({
       saveProfile: vi.fn(() =>
-        Promise.resolve(refused("invalid_input", [{ field: "vatId", code: "vat_id_invalid" }])),
+        Promise.resolve(
+          refused("invalid_input", [
+            { field: "vatId", code: "vat_id_invalid" },
+          ]),
+        ),
       ),
     });
     page({ ...OWNER_VIEW, profile: null }, { api });
     await fillProfile(user);
     await user.type(screen.getByLabelText("VAT ID (optional)"), "DE12");
 
-    await user.click(screen.getByRole("button", { name: "Save billing details" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save billing details" }),
+    );
 
     await waitFor(() =>
       expect(
         screen.getByText("This does not look like a VAT ID of that country."),
       ).toBeTruthy(),
     );
-    expect((screen.getByLabelText("VAT ID (optional)") as HTMLInputElement).value).toBe("DE12");
+    expect(
+      (screen.getByLabelText("VAT ID (optional)") as HTMLInputElement).value,
+    ).toBe("DE12");
   });
 
   // #505-T03
   it("fills the billing details form from the saved profile and sends an empty optional field as nothing", async () => {
     const user = userEvent.setup();
-    const { api } = page({ ...OWNER_VIEW, profile: { ...PROFILE, vatId: "DE123456789" } });
+    const { api } = page({
+      ...OWNER_VIEW,
+      profile: { ...PROFILE, vatId: "DE123456789" },
+    });
 
-    expect((screen.getByLabelText("Legal name") as HTMLInputElement).value).toBe("Acme GmbH");
+    expect(
+      (screen.getByLabelText("Legal name") as HTMLInputElement).value,
+    ).toBe("Acme GmbH");
     await user.clear(screen.getByLabelText("VAT ID (optional)"));
-    await user.click(screen.getByRole("button", { name: "Save billing details" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save billing details" }),
+    );
 
     await waitFor(() => expect(api.saveProfile).toHaveBeenCalled());
     expect(api.saveProfile).toHaveBeenCalledWith(
@@ -413,7 +473,9 @@ describe("a payment on its way", () => {
 
     const list = screen.getByRole("region", { name: "Payments on their way" });
     expect(within(list).getByText("$25.00")).toBeTruthy();
-    await user.click(within(list).getByRole("button", { name: "Check payment" }));
+    await user.click(
+      within(list).getByRole("button", { name: "Check payment" }),
+    );
 
     await waitFor(() => expect(api.checkPayment).toHaveBeenCalledWith("p1"));
     expect(
@@ -426,14 +488,18 @@ describe("a payment on its way", () => {
   it("says the payment is still open when the provider has not confirmed it", async () => {
     const user = userEvent.setup();
     const api = fakeApi({
-      checkPayment: vi.fn(() => Promise.resolve(ok({ intentId: "p1", state: "pending" }))),
+      checkPayment: vi.fn(() =>
+        Promise.resolve(ok({ intentId: "p1", state: "pending" })),
+      ),
     });
     page({ ...OWNER_VIEW, pendingTopUps: [PENDING] }, { api });
 
     await user.click(screen.getByRole("button", { name: "Check payment" }));
 
     expect(
-      await screen.findByText("The payment has not been confirmed yet. Check again in a moment."),
+      await screen.findByText(
+        "The payment has not been confirmed yet. Check again in a moment.",
+      ),
     ).toBeTruthy();
   });
 
@@ -461,7 +527,9 @@ describe("a payment on its way", () => {
     vi.useFakeTimers();
     page(OWNER_VIEW, { returned: "cancelled" });
 
-    expect(screen.getByText("The payment was cancelled. Nothing was charged.")).toBeTruthy();
+    expect(
+      screen.getByText("The payment was cancelled. Nothing was charged."),
+    ).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
@@ -484,7 +552,9 @@ describe("the journal", () => {
       name: "acme/widgets #7",
     });
     expect(link.getAttribute("href")).toBe("/w/acme/runs/run-1");
-    expect(within(rows[2] as HTMLElement).getByText("Credit added")).toBeTruthy();
+    expect(
+      within(rows[2] as HTMLElement).getByText("Credit added"),
+    ).toBeTruthy();
     expect(within(rows[2] as HTMLElement).getByText("+$10.00")).toBeTruthy();
   });
 
@@ -498,7 +568,9 @@ describe("the journal", () => {
     const own = rows[1] as HTMLElement;
     expect(within(own).getByText("Infrastructure")).toBeTruthy();
     expect(within(own).queryByText("AI")).toBeNull();
-    expect(within(own).getByText("$0.26", { selector: "span.tabular-nums" })).toBeTruthy();
+    expect(
+      within(own).getByText("$0.26", { selector: "span.tabular-nums" }),
+    ).toBeTruthy();
   });
 
   // #505-T01
@@ -531,13 +603,20 @@ describe("the journal", () => {
         ),
       ),
     });
-    page({ ...OWNER_VIEW, journal: { ...OWNER_VIEW.journal, next: "41" } }, { api });
+    page(
+      { ...OWNER_VIEW, journal: { ...OWNER_VIEW.journal, next: "41" } },
+      { api },
+    );
 
-    await user.click(screen.getByRole("button", { name: "Show older entries" }));
+    await user.click(
+      screen.getByRole("button", { name: "Show older entries" }),
+    );
 
     await waitFor(() => expect(api.journal).toHaveBeenCalledWith("41"));
     expect(await screen.findByText("Start credit")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Show older entries" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Show older entries" }),
+    ).toBeNull();
   });
 
   // #505-T01
@@ -546,11 +625,20 @@ describe("the journal", () => {
     const api = fakeApi({
       journal: vi.fn(() => Promise.resolve(refused("journal_query_invalid"))),
     });
-    page({ ...OWNER_VIEW, journal: { ...OWNER_VIEW.journal, next: "41" } }, { api });
+    page(
+      { ...OWNER_VIEW, journal: { ...OWNER_VIEW.journal, next: "41" } },
+      { api },
+    );
 
-    await user.click(screen.getByRole("button", { name: "Show older entries" }));
+    await user.click(
+      screen.getByRole("button", { name: "Show older entries" }),
+    );
 
-    expect(await screen.findByText("The journal could not be loaded. Reload the page.")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "The journal could not be loaded. Reload the page.",
+      ),
+    ).toBeTruthy();
     expect(screen.getByText("Credit added")).toBeTruthy();
   });
 });
@@ -564,7 +652,9 @@ describe("the monthly limit", () => {
     await user.type(screen.getByLabelText(/^Monthly limit/), "250");
     await user.click(screen.getByRole("button", { name: "Save limit" }));
 
-    await waitFor(() => expect(api.setMonthlyLimit).toHaveBeenCalledWith(25_000));
+    await waitFor(() =>
+      expect(api.setMonthlyLimit).toHaveBeenCalledWith(25_000),
+    );
     expect(await screen.findByText("Limit saved.")).toBeTruthy();
     expect(navigation.refresh).toHaveBeenCalled();
   });
@@ -591,7 +681,9 @@ describe("the monthly limit", () => {
 
     await user.type(field, "0.50");
     await user.click(screen.getByRole("button", { name: "Save limit" }));
-    expect(screen.getByText("Enter an amount from $1 to $1,000,000.")).toBeTruthy();
+    expect(
+      screen.getByText("Enter an amount from $1 to $1,000,000."),
+    ).toBeTruthy();
     await user.clear(field);
     await user.type(field, "lots");
     await user.click(screen.getByRole("button", { name: "Save limit" }));
@@ -603,7 +695,9 @@ describe("the monthly limit", () => {
     page(OWNER_VIEW);
 
     const card = screen.getByRole("region", { name: "Monthly spending limit" });
-    expect(card.textContent).toContain("Reviews that are already running always finish");
+    expect(card.textContent).toContain(
+      "Reviews that are already running always finish",
+    );
     expect(card.textContent).toContain("$1.25");
   });
 });
@@ -638,7 +732,9 @@ describe("the key and the invoices", () => {
 
     expect(screen.getByText(/infrastructure price only/)).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: "Choose the key on the LLM access page" }).getAttribute("href"),
+      screen
+        .getByRole("link", { name: "Choose the key on the LLM access page" })
+        .getAttribute("href"),
     ).toBe("/w/acme/settings/llm");
   });
 
@@ -646,8 +742,12 @@ describe("the key and the invoices", () => {
   it("says who issues the invoices, links to link.com and promises nothing about VAT", () => {
     const { container } = page(OWNER_VIEW);
 
-    expect(screen.getByText(/Invoices and receipts are issued and emailed by Link/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "link.com" }).getAttribute("href")).toBe("https://link.com");
+    expect(
+      screen.getByText(/Invoices and receipts are issued and emailed by Link/),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "link.com" }).getAttribute("href"),
+    ).toBe("https://link.com");
     expect(container.textContent).not.toMatch(/VAT-compliant|tax invoice/i);
   });
 });

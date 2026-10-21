@@ -105,7 +105,10 @@ describe("the price of a review on the Runs pages", () => {
   it("says nothing about a review that is still open, one that was claimed with billing off, or a job that never ran", async () => {
     const t = await start();
     const open = await t.review(4, { keyMode: "managed", state: "open" });
-    const unbilled = await t.review(5, { keyMode: "managed", state: "unbilled" });
+    const unbilled = await t.review(5, {
+      keyMode: "managed",
+      state: "unbilled",
+    });
     const queued = (await t.fixture.enqueueNew({ prNumber: 6 })).id;
 
     const prices = await t.source.pricesOf([open, unbilled, queued]);
@@ -123,7 +126,9 @@ describe("the price of a review on the Runs pages", () => {
     });
     const otherId = await addWorkspace(t.fixture.db, "other");
 
-    const prices = await createRunPriceSource(t.fixture.db, otherId).pricesOf([id]);
+    const prices = await createRunPriceSource(t.fixture.db, otherId).pricesOf([
+      id,
+    ]);
 
     expect(prices.size).toBe(0);
   });

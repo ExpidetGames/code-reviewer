@@ -56,7 +56,8 @@ function PendingRow({
         {formatMoney(item.amountMicroUsd)}
       </span>
       <span className="text-xs text-muted-foreground">
-        Started <time dateTime={item.createdAt}>{formatUtc(item.createdAt)}</time>
+        Started{" "}
+        <time dateTime={item.createdAt}>{formatUtc(item.createdAt)}</time>
       </span>
       {item.canCheck ? (
         <Button

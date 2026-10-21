@@ -51,12 +51,17 @@ describe("the settings navigation", () => {
 });
 
 describe("the settings navigation while billing is on (#505)", () => {
-  function billingLinks(options: { showPlan?: boolean; showBilling?: boolean }) {
+  function billingLinks(options: {
+    showPlan?: boolean;
+    showBilling?: boolean;
+  }) {
     render(
       <SettingsNav
         workspaceSlug="acme"
         current=""
-        {...(options.showPlan === undefined ? {} : { showPlan: options.showPlan })}
+        {...(options.showPlan === undefined
+          ? {}
+          : { showPlan: options.showPlan })}
         {...(options.showBilling === undefined
           ? {}
           : { showBilling: options.showBilling })}

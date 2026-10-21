@@ -46,14 +46,18 @@ export function createRunPriceSource(
           records.map((record) => record.job_id),
         )
         .execute();
-      const chargeOf = new Map(charges.map((charge) => [charge.ref_key, charge]));
+      const chargeOf = new Map(
+        charges.map((charge) => [charge.ref_key, charge]),
+      );
       for (const record of records) {
         const charge = chargeOf.get(record.job_id);
         if (charge !== undefined) {
           prices.set(record.job_id, {
             state: "charged",
             aiMicroUsd:
-              record.key_mode === "own" ? null : Number(charge.ai_micro_usd ?? 0),
+              record.key_mode === "own"
+                ? null
+                : Number(charge.ai_micro_usd ?? 0),
             infraMicroUsd: Number(charge.infra_micro_usd ?? 0),
           });
           continue;

@@ -14,7 +14,11 @@ describe("the price of a review", () => {
   it("names the AI price and the infrastructure price", () => {
     render(
       <RunPriceText
-        price={{ state: "charged", aiMicroUsd: 1_500_000, infraMicroUsd: 130_000 }}
+        price={{
+          state: "charged",
+          aiMicroUsd: 1_500_000,
+          infraMicroUsd: 130_000,
+        }}
       />,
     );
 

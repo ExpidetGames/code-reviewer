@@ -8,10 +8,7 @@ import {
   type FetchLike,
   type RequestResult,
 } from "../ui/json-request.ts";
-import type {
-  BillingProfileFormView,
-  JournalPageView,
-} from "./view.ts";
+import type { BillingProfileFormView, JournalPageView } from "./view.ts";
 
 /** What the profile form sends: the content only. The business confirmation goes with the first top-up. */
 export type BillingProfileInput = Omit<

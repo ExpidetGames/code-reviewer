@@ -28,8 +28,16 @@ async function start(options: { pricesOn?: boolean } = {}) {
       ? {}
       : { prices: (ids: readonly string[]) => source.pricesOf(ids) }),
   });
-  const records = createUsageRecordsRepository(f.db, f.workspaceId, f.clock.now);
-  const journal = createBillingJournalRepository(f.db, f.workspaceId, f.clock.now);
+  const records = createUsageRecordsRepository(
+    f.db,
+    f.workspaceId,
+    f.clock.now,
+  );
+  const journal = createBillingJournalRepository(
+    f.db,
+    f.workspaceId,
+    f.clock.now,
+  );
   async function billed(
     keyMode: "own" | "managed",
     charge: { ai: number; infra: number } | null,
@@ -54,7 +62,10 @@ describe("the price of a review in the Runs list and the run detail", () => {
   // #505-T05
   it("shows the two prices of a charged review and not charged for a free one, in the list and in the detail", async () => {
     const t = await start();
-    const charged = await t.billed("managed", { ai: 1_500_000, infra: 130_000 });
+    const charged = await t.billed("managed", {
+      ai: 1_500_000,
+      infra: 130_000,
+    });
     const free = await t.billed("managed", null);
 
     const list = await t.service.list({});

@@ -31,7 +31,9 @@ describe("the link of the refusal notice with billing", () => {
     const { db, links } = await start();
     await setBillingSwitch(db, true);
 
-    expect(await links.settingsUrl("acme")).toBe(`${BASE}/w/acme/settings/billing`);
+    expect(await links.settingsUrl("acme")).toBe(
+      `${BASE}/w/acme/settings/billing`,
+    );
   });
 
   // #505-T12
@@ -45,7 +47,11 @@ describe("the link of the refusal notice with billing", () => {
   // #505-T12
   it("points the plan link to the billing page while billing is on and the instance has a plan page", async () => {
     const { db, settings, links } = await start();
-    await settings.set("plan_management_url", "https://plans.example/manage", null);
+    await settings.set(
+      "plan_management_url",
+      "https://plans.example/manage",
+      null,
+    );
     await setBillingSwitch(db, true);
 
     const link = await links.planPageUrl("acme");
@@ -60,9 +66,15 @@ describe("the link of the refusal notice with billing", () => {
     await setBillingSwitch(db, false);
     expect(await links.planPageUrl("acme")).toBeNull();
 
-    await settings.set("plan_management_url", "https://plans.example/manage", null);
+    await settings.set(
+      "plan_management_url",
+      "https://plans.example/manage",
+      null,
+    );
 
-    expect(await links.planPageUrl("acme")).toBe(`${BASE}/w/acme/settings/plan`);
+    expect(await links.planPageUrl("acme")).toBe(
+      `${BASE}/w/acme/settings/plan`,
+    );
   });
 
   // #505-T12

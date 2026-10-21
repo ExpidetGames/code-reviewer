@@ -257,7 +257,9 @@ export function RunsList({
               <TableHead className={showPrice ? "w-[9%]" : "w-[10%]"}>
                 Duration
               </TableHead>
-              {showPrice ? <TableHead className="w-[14%]">Price</TableHead> : null}
+              {showPrice ? (
+                <TableHead className="w-[14%]">Price</TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>

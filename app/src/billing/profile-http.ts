@@ -21,10 +21,7 @@ import {
 } from "../http/json-body.ts";
 import { isCrossSite } from "../http/request-checks.ts";
 import { guardBillingRoute, type BillingRouteGuard } from "./enabled.ts";
-import type {
-  BillingActor,
-  BillingProfileService,
-} from "./profile-service.ts";
+import type { BillingActor, BillingProfileService } from "./profile-service.ts";
 import type { WithAccess } from "./topup-http.ts";
 
 /** A profile is a handful of short fields: a few hundred bytes, 8 KiB at the most. */

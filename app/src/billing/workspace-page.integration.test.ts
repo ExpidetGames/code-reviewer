@@ -96,7 +96,9 @@ describe("the billing page data of a workspace", () => {
     expect(view.balanceMicroUsd).toBe(20 * USD - 1_630_000);
     expect(view.heldMicroUsd).toBe(0);
     expect(view.state).toBe("ok");
-    expect(view.journal.rows.map((row) => [row.kind, row.amountMicroUsd])).toEqual([
+    expect(
+      view.journal.rows.map((row) => [row.kind, row.amountMicroUsd]),
+    ).toEqual([
       ["usage", -1_630_000],
       ["top_up", 20 * USD],
     ]);
@@ -111,30 +113,33 @@ describe("the billing page data of a workspace", () => {
   it("pages the journal by a cursor that ends on the last page", async () => {
     const t = await start();
     for (let index = 1; index <= 5; index += 1)
-      await fundWorkspace(t.db, t.workspaceId, index * USD, t.fixture.clock.now);
+      await fundWorkspace(
+        t.db,
+        t.workspaceId,
+        index * USD,
+        t.fixture.clock.now,
+      );
 
     const first = await t.service.journal(t.actor("member"), { limit: 2 });
-    expect(first.ok && first.page.rows.map((row) => row.amountMicroUsd)).toEqual([
-      5 * USD,
-      4 * USD,
-    ]);
+    expect(
+      first.ok && first.page.rows.map((row) => row.amountMicroUsd),
+    ).toEqual([5 * USD, 4 * USD]);
     const cursor = first.ok ? first.page.next : null;
     expect(cursor).not.toBeNull();
     const second = await t.service.journal(t.actor("member"), {
       limit: 2,
       cursor,
     });
-    expect(second.ok && second.page.rows.map((row) => row.amountMicroUsd)).toEqual([
-      3 * USD,
-      2 * USD,
-    ]);
+    expect(
+      second.ok && second.page.rows.map((row) => row.amountMicroUsd),
+    ).toEqual([3 * USD, 2 * USD]);
     const third = await t.service.journal(t.actor("member"), {
       limit: 2,
       cursor: second.ok ? second.page.next : null,
     });
-    expect(third.ok && third.page.rows.map((row) => row.amountMicroUsd)).toEqual([
-      1 * USD,
-    ]);
+    expect(
+      third.ok && third.page.rows.map((row) => row.amountMicroUsd),
+    ).toEqual([1 * USD]);
     expect(third.ok && third.page.next).toBeNull();
   });
 
@@ -281,7 +286,10 @@ describe("the billing page data of a workspace", () => {
 
     const view = await overviewOf(t);
 
-    expect(view).toMatchObject({ topUpAvailable: false, profileRequired: false });
+    expect(view).toMatchObject({
+      topUpAvailable: false,
+      profileRequired: false,
+    });
   });
 
   // #505-T10
@@ -405,12 +413,18 @@ describe("the billing page data of a workspace", () => {
     expect(managedRow).toMatchObject({
       aiMicroUsd: 1 * USD,
       infraMicroUsd: 200_000,
-      run: { id: managed.id, label: expect.stringMatching(/^acme\/(widgets|gadgets) #7$/) },
+      run: {
+        id: managed.id,
+        label: expect.stringMatching(/^acme\/(widgets|gadgets) #7$/),
+      },
     });
     expect(ownRow).toMatchObject({
       aiMicroUsd: null,
       infraMicroUsd: 300_000,
-      run: { id: own.id, label: expect.stringMatching(/^acme\/(widgets|gadgets) #8$/) },
+      run: {
+        id: own.id,
+        label: expect.stringMatching(/^acme\/(widgets|gadgets) #8$/),
+      },
     });
   });
 });

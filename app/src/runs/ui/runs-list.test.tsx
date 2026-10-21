@@ -460,7 +460,11 @@ describe("the price of a review in the list (#505)", () => {
         initial={snapshot([
           run({
             id: "charged-run",
-            price: { state: "charged", aiMicroUsd: 1_500_000, infraMicroUsd: 130_000 },
+            price: {
+              state: "charged",
+              aiMicroUsd: 1_500_000,
+              infraMicroUsd: 130_000,
+            },
           }),
           run({ id: "free-run", price: { state: "not_charged" } }),
           run({ id: "open-run" }),

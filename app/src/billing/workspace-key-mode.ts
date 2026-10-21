@@ -10,7 +10,8 @@ import type { WorkspaceKeyMode } from "../workspace-billing/view.ts";
 export function workspaceKeyModeOf(
   summary: WorkspaceLlmSummary,
 ): WorkspaceKeyMode {
-  if (summary.configured) return summary.source === "operator" ? "managed" : "own";
+  if (summary.configured)
+    return summary.source === "operator" ? "managed" : "own";
   switch (summary.reason) {
     case "operator_key_missing":
     case "operator_key_unreadable":

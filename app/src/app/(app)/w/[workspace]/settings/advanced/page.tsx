@@ -24,13 +24,13 @@ export default async function AdvancedSettingsPage({
   const llm = getWorkspaceLlm();
   const [keyStatuses, nativeStatuses, summary, showPlan, showBilling] =
     await Promise.all([
-    llm.keyServiceFor(workspaceId).statusAll(),
-    // The keys of the catalog providers (#555) can be removed here too, whatever the catalog offers now.
-    llm.keyServiceFor(workspaceId).nativeStatuses(),
-    llm.summaryFor(workspaceId),
-    planPageLinkedFor(workspaceId),
-    billingPageLinkedFor(),
-  ]);
+      llm.keyServiceFor(workspaceId).statusAll(),
+      // The keys of the catalog providers (#555) can be removed here too, whatever the catalog offers now.
+      llm.keyServiceFor(workspaceId).nativeStatuses(),
+      llm.summaryFor(workspaceId),
+      planPageLinkedFor(workspaceId),
+      billingPageLinkedFor(),
+    ]);
   const catalogLabels =
     nativeStatuses.length === 0
       ? new Map<string, string>()

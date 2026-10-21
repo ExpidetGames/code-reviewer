@@ -125,6 +125,8 @@ describe("a typed monthly limit", () => {
 
   // #505-T09
   it("states the bounds the server judges", () => {
-    expect([MONTHLY_LIMIT_MIN_CENTS, MONTHLY_LIMIT_MAX_CENTS]).toEqual([100, 100_000_000]);
+    expect([MONTHLY_LIMIT_MIN_CENTS, MONTHLY_LIMIT_MAX_CENTS]).toEqual([
+      100, 100_000_000,
+    ]);
   });
 });

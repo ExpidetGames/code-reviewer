@@ -88,7 +88,8 @@ export const CHECK_RESULT: Record<string, string> = {
 
 export const RETURN_SUCCESS =
   "Thank you. Your payment is on its way; the balance rises as soon as it is confirmed.";
-export const RETURN_CANCELLED = "The payment was cancelled. Nothing was charged.";
+export const RETURN_CANCELLED =
+  "The payment was cancelled. Nothing was charged.";
 
 export const JOURNAL_HEADING = "Journal";
 export const JOURNAL_EMPTY = "Nothing has been booked yet.";
@@ -140,7 +141,8 @@ const FAILURE_COPY: Record<string, string> = {
   limits_unavailable: UNAVAILABLE,
   amount_invalid: "Enter an amount in US dollars, for example 25 or 25.50.",
   amount_out_of_range: "Enter an amount from $10 to $500.",
-  intent_id_invalid: "The payment could not be recognized. Reload the page and try again.",
+  intent_id_invalid:
+    "The payment could not be recognized. Reload the page and try again.",
   checkout_unavailable: "Payments are not available for this workspace.",
   profile_required: "Save your billing details first.",
   business_confirmation_required:

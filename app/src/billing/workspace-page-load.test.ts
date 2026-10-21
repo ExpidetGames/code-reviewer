@@ -4,10 +4,7 @@
 // exist then), the data of the person's workspace while it is on, and what the payment page said on the way back.
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceBillingView } from "../workspace-billing/view.ts";
-import {
-  loadWorkspaceBillingPage,
-  returnedOf,
-} from "./workspace-page-load.ts";
+import { loadWorkspaceBillingPage, returnedOf } from "./workspace-page-load.ts";
 
 const VIEW = { canManage: true } as WorkspaceBillingView;
 const ACTOR = { workspaceId: "w1", userId: "u1", role: "owner" } as const;
@@ -33,7 +30,7 @@ describe("loading the billing page", () => {
 
     const result = await loadWorkspaceBillingPage({
       isOn: () => Promise.resolve(false),
-      service: { overview, journal: vi.fn() },
+      service: { overview },
       actor: ACTOR,
       topup: undefined,
     });
@@ -44,11 +41,13 @@ describe("loading the billing page", () => {
 
   // #505-T01
   it("gives the view of the person's workspace and the return state while billing is on", async () => {
-    const overview = vi.fn(() => Promise.resolve({ ok: true as const, view: VIEW }));
+    const overview = vi.fn(() =>
+      Promise.resolve({ ok: true as const, view: VIEW }),
+    );
 
     const result = await loadWorkspaceBillingPage({
       isOn: () => Promise.resolve(true),
-      service: { overview, journal: vi.fn() },
+      service: { overview },
       actor: ACTOR,
       topup: "success",
     });
@@ -62,8 +61,8 @@ describe("loading the billing page", () => {
     const result = await loadWorkspaceBillingPage({
       isOn: () => Promise.resolve(true),
       service: {
-        overview: () => Promise.resolve({ ok: false as const, error: "forbidden" as const }),
-        journal: vi.fn(),
+        overview: () =>
+          Promise.resolve({ ok: false as const, error: "forbidden" as const }),
       },
       actor: ACTOR,
       topup: undefined,

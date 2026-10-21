@@ -39,7 +39,11 @@ export function BillingNotes({
       {showInvoices ? (
         <p>
           {INVOICES_TEXT}{" "}
-          <a href={INVOICES_LINK_HREF} target="_blank" rel="noopener noreferrer">
+          <a
+            href={INVOICES_LINK_HREF}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             {INVOICES_LINK_TEXT}
           </a>
         </p>

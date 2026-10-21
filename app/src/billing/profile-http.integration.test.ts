@@ -76,7 +76,17 @@ async function start(options: { billingOn?: boolean } = {}) {
   const get = () => new Request(`${BASE_URL}/api/w/acme/billing/profile`);
   const stored = (workspace = workspaceId) =>
     createBillingProfilesRepository(db, workspace).get();
-  return { db, workspaceId, otherWorkspaceId, route, as, person, put, get, stored };
+  return {
+    db,
+    workspaceId,
+    otherWorkspaceId,
+    route,
+    as,
+    person,
+    put,
+    get,
+    stored,
+  };
 }
 
 describe("PUT /api/w/:workspace/billing/profile", () => {
@@ -84,7 +94,11 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
   it("lets an Owner and an Admin save the profile and answers it back with no-store", async () => {
     const t = await start();
 
-    const owner = await t.route.put(t.put(PROFILE), "acme", t.as(await t.person("owner")));
+    const owner = await t.route.put(
+      t.put(PROFILE),
+      "acme",
+      t.as(await t.person("owner")),
+    );
     const admin = await t.route.put(
       t.put({ ...PROFILE, city: "Hamburg" }),
       "acme",
@@ -95,9 +109,16 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
     expect(admin.status).toBe(200);
     expect(admin.headers.get("cache-control")).toBe("no-store");
     expect(await admin.json()).toMatchObject({
-      profile: { legalName: "Acme GmbH", city: "Hamburg", businessConfirmed: false },
+      profile: {
+        legalName: "Acme GmbH",
+        city: "Hamburg",
+        businessConfirmed: false,
+      },
     });
-    expect(await t.stored()).toMatchObject({ city: "Hamburg", vatId: "DE123456789" });
+    expect(await t.stored()).toMatchObject({
+      city: "Hamburg",
+      vatId: "DE123456789",
+    });
     expect(await t.stored(t.otherWorkspaceId)).toBeUndefined();
   });
 
@@ -127,7 +148,11 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
     const outsider = await t.person("owner", "u-outsider", t.otherWorkspaceId);
 
     const outside = await t.route.put(t.put(PROFILE), "acme", t.as(outsider));
-    const anonymous = await t.route.put(t.put(PROFILE), "acme", t.as({ kind: "none" }));
+    const anonymous = await t.route.put(
+      t.put(PROFILE),
+      "acme",
+      t.as({ kind: "none" }),
+    );
 
     expect(outside.status).toBe(404);
     expect(anonymous.status).toBe(401);
@@ -140,7 +165,12 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
     const owner = await t.person("owner");
 
     const response = await t.route.put(
-      t.put({ ...PROFILE, legalName: "", vatId: "DE12", postalCode: "SECRET-POSTAL\u0007" }),
+      t.put({
+        ...PROFILE,
+        legalName: "",
+        vatId: "DE12",
+        postalCode: "SECRET-POSTAL\u0007",
+      }),
       "acme",
       t.as(owner),
     );
@@ -170,7 +200,9 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
     const after = await t.route.get(t.get(), "acme", t.as(owner));
 
     expect(await before.json()).toEqual({ profile: null });
-    expect(await after.json()).toMatchObject({ profile: { vatId: "DE123456789" } });
+    expect(await after.json()).toMatchObject({
+      profile: { vatId: "DE123456789" },
+    });
   });
 
   // #505-T03
@@ -228,7 +260,9 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
       t.as(owner),
     );
 
-    expect([crossSite.status, notJson.status, tooLarge.status]).toEqual([403, 415, 413]);
+    expect([crossSite.status, notJson.status, tooLarge.status]).toEqual([
+      403, 415, 413,
+    ]);
     expect(await t.stored()).toBeUndefined();
   });
 
@@ -237,8 +271,12 @@ describe("PUT /api/w/:workspace/billing/profile", () => {
     const t = await start({ billingOn: false });
     const withAccess = vi.fn(t.as(await t.person("owner")));
 
-    await expect(t.route.put(t.put(PROFILE), "acme", withAccess)).rejects.toBeInstanceOf(NotFound);
-    await expect(t.route.get(t.get(), "acme", withAccess)).rejects.toBeInstanceOf(NotFound);
+    await expect(
+      t.route.put(t.put(PROFILE), "acme", withAccess),
+    ).rejects.toBeInstanceOf(NotFound);
+    await expect(
+      t.route.get(t.get(), "acme", withAccess),
+    ).rejects.toBeInstanceOf(NotFound);
     expect(withAccess).not.toHaveBeenCalled();
   });
 });

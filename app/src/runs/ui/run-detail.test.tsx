@@ -803,7 +803,11 @@ describe("the price of a review on the detail page (#505)", () => {
         workspaceSlug="acme"
         initial={snap(
           detail({
-            price: { state: "charged", aiMicroUsd: 1_500_000, infraMicroUsd: 130_000 },
+            price: {
+              state: "charged",
+              aiMicroUsd: 1_500_000,
+              infraMicroUsd: 130_000,
+            },
           }),
         )}
         api={apiAnswering([])}
@@ -824,7 +828,11 @@ describe("the price of a review on the detail page (#505)", () => {
         workspaceSlug="acme"
         initial={snap(
           detail({
-            price: { state: "charged", aiMicroUsd: null, infraMicroUsd: 260_000 },
+            price: {
+              state: "charged",
+              aiMicroUsd: null,
+              infraMicroUsd: 260_000,
+            },
           }),
         )}
         api={apiAnswering([])}
@@ -851,7 +859,11 @@ describe("the price of a review on the detail page (#505)", () => {
   // #505-T11
   it("has no Price line without a price", () => {
     const { container } = render(
-      <RunDetail workspaceSlug="acme" initial={snap(detail())} api={apiAnswering([])} />,
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
     );
 
     expect(text(container)).not.toContain("Price");

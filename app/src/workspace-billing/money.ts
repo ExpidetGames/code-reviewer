@@ -60,7 +60,8 @@ export function parseTopUpCents(text: string): TopUpAmount {
   if (match === null) return { ok: false, error: "amount_invalid" };
   const [, whole = "", fraction = ""] = match;
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  if (!Number.isSafeInteger(cents)) return { ok: false, error: "amount_invalid" };
+  if (!Number.isSafeInteger(cents))
+    return { ok: false, error: "amount_invalid" };
   if (cents < TOP_UP_MIN_CENTS || cents > TOP_UP_MAX_CENTS)
     return { ok: false, error: "amount_out_of_range" };
   return { ok: true, cents };
@@ -87,7 +88,8 @@ export function parseLimitCents(text: string): LimitAmount {
   if (match === null) return { ok: false, error: "limit_invalid" };
   const [, whole = "", fraction = ""] = match;
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  if (!Number.isSafeInteger(cents)) return { ok: false, error: "limit_invalid" };
+  if (!Number.isSafeInteger(cents))
+    return { ok: false, error: "limit_invalid" };
   if (cents < MONTHLY_LIMIT_MIN_CENTS || cents > MONTHLY_LIMIT_MAX_CENTS)
     return { ok: false, error: "limit_out_of_range" };
   return { ok: true, cents };

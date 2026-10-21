@@ -65,8 +65,7 @@ export type WorkspaceBillingService = {
   overview(
     actor: BillingActor,
   ): Promise<
-    | { ok: true; view: WorkspaceBillingView }
-    | { ok: false; error: "forbidden" }
+    { ok: true; view: WorkspaceBillingView } | { ok: false; error: "forbidden" }
   >;
   journal(
     actor: BillingActor,

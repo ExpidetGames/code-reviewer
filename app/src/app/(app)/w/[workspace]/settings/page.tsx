@@ -75,16 +75,16 @@ async function GeneralSettingsContent({
     showPlan,
     showBilling,
   ] = await Promise.all([
-      // Only the instance admin gets the names of the variables that are wrong.
-      getConfigStatusFor(user),
-      getWorkspaceLlm().summaryFor(workspaceId),
-      createInstanceSettingsRepository(getDatabase()).get("tenancy"),
-      getMembersService().list(workspaceId),
-      // Only asked for somebody the role lets through: a Member's page never reads the setting.
-      canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
-      planPageLinkedFor(workspaceId),
-      billingPageLinkedFor(),
-    ]);
+    // Only the instance admin gets the names of the variables that are wrong.
+    getConfigStatusFor(user),
+    getWorkspaceLlm().summaryFor(workspaceId),
+    createInstanceSettingsRepository(getDatabase()).get("tenancy"),
+    getMembersService().list(workspaceId),
+    // Only asked for somebody the role lets through: a Member's page never reads the setting.
+    canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
+    planPageLinkedFor(workspaceId),
+    billingPageLinkedFor(),
+  ]);
   return (
     <GeneralSettingsPageContent
       workspaceSlug={workspaceSlug}
