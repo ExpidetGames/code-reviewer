@@ -3,8 +3,7 @@
 // The monthly total limit and the hidden hourly brake at claim (#499; ADR 0006, 2.9; src/billing/README.md, "Limits"), on SQLite
 // and, when TEST_DATABASE_URL is set, on Postgres. Both act at the claim only, in the claim's transaction, after the
 // entitlements and before the balance; a refusal is free (no usage record, no journal entry). Made-up rates
-// (test-support/billing-switch.ts): a Diff hold on the workspace's own key is 25 minutes x 13,000 = 325,000 micro-USD, a Dynamic
-// hold on the operator's key 5,400,000.
+// (test-support/billing-switch.ts). Nothing is held at the claim since #605, so a limit never meets a hold.
 import type { Kysely, KyselyPlugin } from "kysely";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -39,8 +38,6 @@ import { addWorkspace } from "../test-support/workspaces.ts";
 import type { EntitlementsData } from "../workspaces/entitlements.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
-const DIFF_OWN_HOLD = 325_000;
-const DYNAMIC_MANAGED_HOLD = 5_400_000;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
@@ -176,8 +173,7 @@ describe.each(databases)(
       seeded += 1;
       const journal = journalOf(fixture, workspaceId);
       const jobId = `charged-${String(seeded)}`;
-      await journal.reserve(micro, jobId);
-      await journal.settle(jobId, {
+      await journal.charge(jobId, {
         aiMicroUsd: Math.floor(micro / 2),
         infraMicroUsd: micro - Math.floor(micro / 2),
         minutes: 3,
@@ -265,7 +261,7 @@ describe.each(databases)(
 
       // #499-T02
       run(
-        "starts a job while the charges are one micro-USD below the limit, even when its hold would pass the limit",
+        "starts a job while the charges are one micro-USD below the limit, even when its price would pass the limit",
         async () => {
           const fixture = await start({ monthlyLimitMicroUsd: 1_000_000 });
           await charge(fixture, 1_000_000 - 1);
@@ -275,9 +271,7 @@ describe.each(databases)(
 
           expect(claimed?.job.id).toBe(job.id);
           expect(await usageRecords(fixture)).toHaveLength(1);
-          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
-            DIFF_OWN_HOLD,
-          );
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
         },
       );
 
@@ -304,7 +298,7 @@ describe.each(databases)(
 
       // #499-T19
       run(
-        "ignores the holds of the runs in flight and the hold of the job: only settled charges count, and a running review is never touched",
+        "counts only settled charges, not the runs in flight or the job that asks, and a running review is never touched",
         async () => {
           const fixture = await start({ monthlyLimitMicroUsd: 100_000 });
           await charge(fixture, 99_000);
@@ -312,18 +306,14 @@ describe.each(databases)(
           expect(
             (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
           ).toBe(running.id);
-          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
-            DIFF_OWN_HOLD,
-          );
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
           const second = await enqueue(fixture);
 
-          // 99,000 charged is below 100,000: starts, with a hold of 325,000 on top of the 325,000 in flight.
+          // 99,000 charged is below 100,000: starts, next to the run in flight.
           expect(
             (await fixture.queue.claimNext("runner-b", ENGINES))?.job.id,
           ).toBe(second.id);
-          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
-            2 * DIFF_OWN_HOLD,
-          );
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
 
           // Once a settled charge reaches the limit the next claim is refused, and the two running reviews go on.
           await charge(fixture, 1_000);
@@ -339,7 +329,7 @@ describe.each(databases)(
 
       // #499-T19
       run(
-        "does not count the hold of a job by its kind and key: a Dynamic job on the operator's key starts under a tiny limit",
+        "does not count the price of a job by its kind and key: a Dynamic job on the operator's key starts under a tiny limit",
         async () => {
           const fixture = await start({ monthlyLimitMicroUsd: 1 });
           await createWorkspaceEntitlementsRepository(
@@ -352,9 +342,7 @@ describe.each(databases)(
           const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
 
           expect(claimed?.job.id).toBe(dynamic.id);
-          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
-            DYNAMIC_MANAGED_HOLD,
-          );
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
         },
       );
 

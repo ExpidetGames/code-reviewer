@@ -112,7 +112,6 @@ describe("the entry types of the journal", () => {
         "reservation_required",
         "job_entry_required",
         "reservation_released",
-        "balance_exhausted",
         "balance_negative",
       ]),
     );

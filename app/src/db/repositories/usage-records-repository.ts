@@ -91,6 +91,17 @@ export type UsageRecordsRepository = {
    * never counts twice. A job of another workspace, or none, gets no record.
    */
   reserve(jobId: string, keyMode: UsageKeyMode): Promise<void>;
+  /**
+   * Marks the record of a job that a claim with billing on handed out: its money is `open` (#605). A record that has a state
+   * keeps it, so a job claimed again after a lost lease is not opened twice and a settled one is never reopened. Called by the
+   * claim only while billing is on; with billing off nothing writes the column.
+   */
+  openBilling(jobId: string): Promise<void>;
+  /**
+   * Ends the billing of a job: `open` becomes `settled`. Returns whether this call did it, so of two settlements racing for one
+   * job exactly one goes on to charge (the row lock of the update decides; the other finds it `settled`).
+   */
+  closeBilling(jobId: string): Promise<boolean>;
   /** Corrects the key mode of a record that is still `reserved`; any other record is left as it is. */
   setKeyMode(jobId: string, keyMode: UsageKeyMode): Promise<void>;
   /**
@@ -244,6 +255,28 @@ export function createUsageRecordsRepository(
         })
         .onConflict((conflict) => conflict.column("job_id").doNothing())
         .execute();
+    },
+
+    async openBilling(jobId) {
+      await db
+        .updateTable("usage_records")
+        .set({ billing_state: "open" })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("billing_state", "is", null)
+        .execute();
+    },
+
+    async closeBilling(jobId) {
+      const closed = await db
+        .updateTable("usage_records")
+        .set({ billing_state: "settled" })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("billing_state", "=", "open")
+        .returning("job_id")
+        .executeTakeFirst();
+      return closed !== undefined;
     },
 
     async setKeyMode(jobId, keyMode) {
