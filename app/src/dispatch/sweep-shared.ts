@@ -8,6 +8,7 @@ import { createJobDispatchesRepository } from "../db/repositories/job-dispatches
 import { getDatabase } from "../db/startup.ts";
 import { getCheckRunService } from "../check-runs/shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
+import { releaseStrandedHoldsWhileBillingOn } from "../billing/stranded-holds.ts";
 import { cleanUpExpiredRows } from "../maintenance/cleanup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import { getModelsDevService } from "../models-dev/shared.ts";
@@ -41,6 +42,11 @@ export function getDispatchSweep(
     checks: getCheckRunService(),
     // #548: the daily fetch of the models.dev catalog, last.
     modelsDev: getModelsDevService(),
+    // #591: the holds of jobs that ended while billing was off, while billing is on.
+    billingHolds: {
+      releaseStranded: () =>
+        releaseStrandedHoldsWhileBillingOn(db, () => new Date()),
+    },
     cleanup: () =>
       cleanUpExpiredRows(db, undefined, {
         // Read when it matters, never remembered: the admin can add or remove the mail server at any time.
