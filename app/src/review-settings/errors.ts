@@ -22,6 +22,12 @@ export const REVIEW_SETTINGS_ERROR_CODES = [
    * LLM key; an Owner or Admin confirms it. Nothing was stored. 403.
    */
   "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
+  /**
+   * The save would pin an address for a catalog provider that another project of the workspace holds differently (#614), for
+   * example a model-only save of a selection from before pins, and the person may not manage the workspace's LLM key. Nothing
+   * was stored. 403.
+   */
+  "PROVIDER_ADDRESS_OTHER_PROJECT_PIN",
 ] as const;
 export type ReviewSettingsErrorCode =
   (typeof REVIEW_SETTINGS_ERROR_CODES)[number];
@@ -31,6 +37,7 @@ export const REVIEW_SETTINGS_ERROR_STATUS: Record<
   400 | 403 | 404 | 413 | 415
 > = {
   PROVIDER_ADDRESS_CONFIRM_FORBIDDEN: 403,
+  PROVIDER_ADDRESS_OTHER_PROJECT_PIN: 403,
   REVIEW_SETTINGS_INVALID: 400,
   REVIEW_SETTINGS_REQUEST_INVALID: 400,
   REVIEW_SETTINGS_CROSS_SITE_REQUEST: 403,

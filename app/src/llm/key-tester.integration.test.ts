@@ -106,10 +106,8 @@ describe("the key test as the server wires it, held to the pins of the workspace
   });
 
   // #588-T49
-  it("ignores the pins of projects that do not use the provider: Diff Review, switched off, another workspace", async () => {
+  it("ignores the pins of another workspace", async () => {
     const t = await setup();
-    await t.pin(t.projects, t.first.id, { reviewKind: "diff" });
-    await t.pin(t.projects, t.second.id, { reviewKind: "dynamic" }, false);
     const otherWorkspace = await addWorkspace(t.db, "beta");
     const other = await seedRepositories(t.db, otherWorkspace, "9999");
     const otherProjects = createProjectsRepository(t.db, otherWorkspace);
@@ -117,5 +115,15 @@ describe("the key test as the server wires it, held to the pins of the workspace
 
     expect(await t.test()).toMatchObject({ ok: true });
     expect(t.fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  // #614-T01
+  it("still holds to the pin of a project that was switched to Diff Review or off, so a Member cannot drop it from the test", async () => {
+    const t = await setup();
+    await t.pin(t.projects, t.first.id, { reviewKind: "diff" });
+    await t.pin(t.projects, t.second.id, { reviewKind: "dynamic" }, false);
+
+    expect(await t.test()).toEqual(ADDRESS_CHANGED);
+    expect(t.fetchImpl).not.toHaveBeenCalled();
   });
 });

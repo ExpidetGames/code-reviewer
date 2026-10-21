@@ -200,6 +200,9 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   // #588: the address of a catalog provider is confirmed, moved or dropped by an Owner or Admin only.
   PROVIDER_ADDRESS_CONFIRM_FORBIDDEN:
     "The address of this provider changed. Only an Owner or Admin of the workspace can confirm it or change the provider of this project.",
+  // #614: a save that would pin an address another project of the workspace holds differently (also a model-only save of an older selection).
+  PROVIDER_ADDRESS_OTHER_PROJECT_PIN:
+    "Another project of this workspace uses this provider at a different address, so this project cannot take the current one. Ask an Owner or Admin of the workspace to save it.",
 };
 
 /** The sentence for a save (or reset) that failed as a whole. */
