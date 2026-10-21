@@ -442,7 +442,8 @@ export function validateProjectSettingsPatch(
   for (const [name, raw] of Object.entries(input)) {
     if (name === CONFIRM_PROVIDER_ADDRESS) {
       if (raw === true) confirmProviderAddress = true;
-      else issues.push({ field: name, code: "INVALID_TYPE" });
+      else if (raw !== false)
+        issues.push({ field: name, code: "INVALID_TYPE" });
       continue;
     }
     if (isProjectDynamicField(name)) {

@@ -69,8 +69,8 @@ export type NativeCatalogReader = {
   /** Whether a project may save this provider and model: only a listed model of an offered provider. */
   checkSelection(slug: string, modelId: string): Promise<NativeChoice>;
   /**
-   * The address the catalog trusts for an offered provider, in the one spelling the claim and the runner accept, or undefined
-   * when the provider is not offered (#588). A selection pins it when it is made; a claim and the key test hold to the pin.
+   * The address the catalog trusts for a provider a claim would serve (offered, or no longer listed), in the one spelling the claim
+   * and the runner accept, or undefined when it is none (#588). A selection pins it when it is made; a claim and the key test hold to the pin.
    */
   addressOf(slug: string): Promise<string | undefined>;
 };
@@ -94,18 +94,28 @@ export type NativeCatalogDependencies = {
   legacyProviders: readonly string[];
 };
 
-function offered(
+/**
+ * What a claim would serve (`entryFor`): a supported provider with a trusted, canonical address. A provider models.dev no longer
+ * lists is served too (its models stay usable, #548); it is just not offered for a new choice (`offered`).
+ */
+function servable(
   provider: StoredProvider | undefined,
 ): provider is StoredProvider {
   return (
     provider !== undefined &&
-    provider.unlistedAt === null &&
     supportedProvider(provider.id) !== undefined &&
     isUsable(provider.url) &&
     // What the claim (`entryFor`) would refuse is not offered: the picker, the key and the choice agree with it.
     provider.url.trustedUrl !== null &&
     isCanonicalCatalogAddress(provider.url.trustedUrl)
   );
+}
+
+/** What a new choice, the picker and the key may use: servable, and still listed. */
+function offered(
+  provider: StoredProvider | undefined,
+): provider is StoredProvider {
+  return servable(provider) && provider.unlistedAt === null;
 }
 
 function priceOf(model: StoredModel): NativeModelPrice | null {
@@ -139,12 +149,14 @@ export function createNativeCatalogReader({
   const providerIdOf = (slug: string) =>
     nativeProviderIdOf(slug, legacyProviders);
 
-  async function offeredProvider(slug: string) {
+  async function providerOf(slug: string, test: typeof offered) {
     const providerId = providerIdOf(slug);
     if (providerId === null) return undefined;
     const provider = await models.getProvider(providerId);
-    return offered(provider) ? provider : undefined;
+    return test(provider) ? provider : undefined;
   }
+
+  const offeredProvider = (slug: string) => providerOf(slug, offered);
 
   return {
     async providers() {
@@ -178,8 +190,9 @@ export function createNativeCatalogReader({
     },
 
     async addressOf(slug) {
-      // `offered` has checked that the address is trusted and canonical.
-      return (await offeredProvider(slug))?.url.trustedUrl ?? undefined;
+      // `servable` has checked that the address is trusted and canonical. A provider models.dev no longer lists counts: a claim
+      // serves it, so its pin must be readable (and confirmable) as well.
+      return (await providerOf(slug, servable))?.url.trustedUrl ?? undefined;
     },
 
     async checkSelection(slug, modelId) {

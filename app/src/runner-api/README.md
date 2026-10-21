@@ -205,7 +205,7 @@ reason=<catalog_price_unconfirmed|catalog_model_unavailable>:<reason>`), with no
       (`Selection.pinnedAddress`); `entryFor` serves the entry only if the catalog trusts exactly that address, else the job ends
       `provider_address_changed` (free; the Runs copy tells an Owner or Admin to confirm the new address in the review settings of
       the project), before any key or token exists. A selection with no pin (made before this) is pinned by its first claim to the
-      address the entry names (`ClaimDeps.providerPins.adopt`); a claim that loses that race to another pin holds to the pin in force.
+      address the entry names (`ClaimDeps.providerPins.adopt`); a claim that loses that race to another pin holds to the pin in force, and it adopts nothing when another project of the workspace pinned another address for the provider (the job is refused). A failed adoption gives the job back with `provider_pin_check_failed`.
 
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;

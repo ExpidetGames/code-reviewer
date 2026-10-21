@@ -493,7 +493,10 @@ function mergeProjectSettings(
   trusted: { provider: string; address: string } | undefined,
 ): ProjectSettings {
   const hasDiffFields = Object.keys(patch.review).length > 0;
-  const hasProjectFields = Object.keys(patch.dynamic).length > 0;
+  // The confirmation of the provider's address is an action of the Dynamic group: on its own it leaves the Diff group alone (#588).
+  const hasProjectFields =
+    Object.keys(patch.dynamic).length > 0 ||
+    patch.confirmProviderAddress === true;
   // A project-only request (project fields, no Diff field) never touches the Diff group; anything
   // else replaces it, including an empty request (every Diff override cleared).
   const review =

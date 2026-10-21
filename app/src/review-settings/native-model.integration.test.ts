@@ -492,6 +492,23 @@ describe("who may move the pin (#588)", () => {
     expect(await pinOf(app, app.first.id)).toBe(MOVED);
   });
 
+  // #588-T56
+  it("confirms the address without touching the Diff overrides of the project: it is an action of the Dynamic group", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, { maxFindings: 7 });
+    await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
+    ADDRESSES.set("deepseek", MOVED);
+
+    const view = await app.service.updateProjectSettings(
+      app.first.id,
+      { confirmProviderAddress: true },
+      ADMIN,
+    );
+
+    expect(await pinOf(app, app.first.id)).toBe(MOVED);
+    expect(view.overrides).toMatchObject({ maxFindings: 7 });
+  });
+
   // #588-T34
   it("refuses a Member who drops the provider while the pin differs from what the catalog trusts, and lets an Admin (P2)", async () => {
     const app = await setup();

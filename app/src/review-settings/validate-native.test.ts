@@ -115,14 +115,18 @@ describe("the address a project pins for its catalog provider (#588)", () => {
   });
 
   // #588-T04
-  it("is confirmed anew by a request that says so, and only by `true`", () => {
+  it("is confirmed anew by a request that says `true`; `false` is no confirmation and anything else is invalid", () => {
     expect(
       validateProjectSettingsPatch({ confirmProviderAddress: true }),
     ).toEqual({
       ok: true,
       value: { review: {}, dynamic: {}, confirmProviderAddress: true },
     });
-    for (const value of [false, "true", 1, null])
+    // `false` is "do not confirm": the same as leaving it out.
+    expect(
+      validateProjectSettingsPatch({ confirmProviderAddress: false }),
+    ).toEqual({ ok: true, value: { review: {}, dynamic: {} } });
+    for (const value of ["true", 1, null])
       expect(
         validateProjectSettingsPatch({ confirmProviderAddress: value }),
       ).toEqual({

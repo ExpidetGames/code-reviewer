@@ -360,15 +360,41 @@ describe.each(MODELS_DEV_ENGINES)(
       it_("is none for a provider that is not offered", async () => {
         const { reader } = await setup();
 
-        for (const slug of [
-          "google",
-          "amazon_bedrock",
-          "openrouter",
-          "xai",
-          "nope",
-        ])
+        for (const slug of ["google", "amazon_bedrock", "openrouter", "nope"])
           expect(await reader.addressOf(slug)).toBeUndefined();
       });
+
+      // #588-T55
+      it_(
+        "is the trusted address of a provider models.dev no longer lists, as the claim serves it: a pin of it can be confirmed",
+        async () => {
+          const { db, reader } = await setup();
+          const claim = createNativeCostService({
+            prices: {
+              availability: () => Promise.reject(new Error("not asked")),
+              catalogPrice: () => Promise.reject(new Error("not asked")),
+            },
+            settings: { get: () => Promise.resolve(undefined) },
+            catalog: createModelsDevRepository(db),
+            legacyProviders: ["openrouter", "anthropic"],
+            registryAddresses: {},
+          });
+          const ref = { providerId: "xai", modelId: "grok-4.5" };
+
+          // The claim serves it (a model that is gone stays usable) at the address the catalog trusts, and holds it to a pin.
+          expect(await claim.entryFor(ref)).toMatchObject({
+            ok: true,
+            unlisted: true,
+          });
+          expect(
+            await claim.entryFor(ref, "https://api.xai-old.example"),
+          ).toEqual({ ok: false, code: "provider_address_changed" });
+          // So the settings page and the confirmation know the address the claim would send the key to.
+          expect(await reader.addressOf("xai")).toBe("https://api.xai.example");
+          // It is still not offered for a new choice.
+          expect(await reader.providerAvailable("xai")).toBe(false);
+        },
+      );
     });
 
     describe("a model a claim has to serve", () => {

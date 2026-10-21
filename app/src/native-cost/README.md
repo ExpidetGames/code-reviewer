@@ -125,7 +125,8 @@ runner (before the key is used):
   `entryFor(ref, pinned)` serves the entry only when the catalog still trusts exactly that address; otherwise the job ends
   `provider_address_changed` (free, `entry_provider_address_changed` in the log, no address in it) before any key exists. Nothing
   moves the pin but the person: selecting another provider pins the new provider's address, and the "Confirm the new address" action
-  of the settings page (`confirmProviderAddress: true`) pins what the catalog trusts now. A selection made before pins existed has
+  of the settings page (`confirmProviderAddress: true`) pins what the catalog trusts now. Writing or moving a pin that way is for the roles
+  that manage the workspace's LLM key (`review-settings/README.md`, "Who may move it"). A selection made before pins existed has
   none; its first claim pins the address it is about to send the key to (`ClaimDeps.providerPins.adopt`, a compare-and-set on the
   project's settings, so two claims cannot pin two addresses) and holds to it from then on. The "Test key" of a catalog provider
   holds to the same pins (`llm_provider_address_changed`, nothing sent). **The registry's two providers get no pin**: their address

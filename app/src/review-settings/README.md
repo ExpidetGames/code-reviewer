@@ -110,9 +110,18 @@ migration: it is one more key of `projects.settings`.
 - **Legacy selections.** Not re-selected: that would stop reviews of running customers. The first claim pins
   (`adoptProviderAddress`, a compare-and-set inside the settings write), at the address it is about to send the key to, which is
   the trust the selection had until then.
-- **Who may confirm.** The save is the project settings save, which the permission matrix gives to every member
-  (`change_project_settings`); the notices ask an Owner or Admin because they run the workspace's key. Whether the confirmation should
-  need Admin is a decision for the maintainers (follow-up on #588).
+- **Who may move it.** A Member saves the settings of a project (`change_project_settings`), but writing or moving the pin is for the
+  roles that manage the workspace's LLM key (`manage_llm_key`, Owner and Admin; `provider-pin.ts`, `pinMoveNeedsRight`). The route
+  passes the right (`canManageLlmKey`, from the role) to `updateProjectSettings` and `resetProjectSettings`; left out, the actor may
+  not. A save that would **drop or replace a pin that is not the address the catalog trusts now** (the confirmation, a reset, going back
+  to the registry or to another provider) or **write a pin that differs from one another project of the workspace holds for the
+  provider** (selecting it in a second project, or a model-only save of a selection from before pins) is refused for anyone else with
+  `PROVIDER_ADDRESS_CONFIRM_FORBIDDEN` (403) and stores nothing. The first pin of a provider in a workspace, and every save that
+  leaves the pin as it is, need no right. The claim adopts a legacy selection's address only when no other project of the workspace
+  pinned another one; else it holds to that pin and the job is refused (`provider_address_changed`). The form shows the confirmation
+  checkbox only to those who may confirm, and tells everyone else that an Owner or Admin must. A confirmation on its own leaves the
+  Diff overrides of the project alone. Known and accepted: a stored pin of a shape no address has is dropped when read, and an older
+  instance that saves during a rolling deploy does not know the field and drops it (the next claim adopts it again).
 
 ## Provider and catalog entry per kind (#430)
 
