@@ -16,6 +16,9 @@ import { findStrandedHolds } from "../db/repositories/billing-holds-sweep.ts";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import type { JobOutcome } from "../jobs/job-types.ts";
+import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
+import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { describeQuery } from "../test-support/query-hook.ts";
 import {
@@ -41,6 +44,7 @@ import {
 } from "./stranded-holds.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
+const SECOND = 1000;
 const FUNDING = 100_000_000;
 /** The hold of a Diff job on the workspace's own key: 25 minutes x 13,000 (hold.test.ts). */
 const OWN_KEY_DIFF_HOLD = 325_000;
@@ -472,6 +476,162 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
       // Only the three new holds are reserved.
       expect(verified.reservedMicroUsd).toBe(3 * OWN_KEY_DIFF_HOLD);
       expect(jobs).toHaveLength(3);
+    },
+  );
+  /**
+   * A managed-key Diff job whose Worker takes part in the supersede protocol, running with a VM; a newer push replaces it, so
+   * it is `superseded` while its Worker still drains, with billing ON (#397; settle-jobs.integration.test.ts, #498-T09).
+   */
+  async function drainingSuperseded(fixture: JobQueueFixture) {
+    await createWorkspaceEntitlementsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ).put(
+      {
+        planLabel: "plan",
+        keyMode: "managed",
+        periodStart: "2026-10-01T00:00:00.000Z",
+        suspended: false,
+        suspensionCode: null,
+        limits: {
+          diffRunsPerPeriod: null,
+          dynamicRunsPerPeriod: null,
+          managedCostLimitMicroUsd: null,
+          ownKeyCostLimitMicroUsd: null,
+        },
+      },
+      null,
+    );
+    pr += 1;
+    fixture.clock.advance(1);
+    const enqueued = await fixture.enqueueNew({ prNumber: pr });
+    const claimed = await fixture.queue.claimNext("runner-a", ENGINES, {
+      acceptsSupersede: true,
+    });
+    if (claimed === null || claimed.job.id !== enqueued.id)
+      throw new Error("The job was not claimed.");
+    const { job, leaseToken } = claimed;
+    await createUsageRecordsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ).setKeyMode(job.id, "managed");
+    const vmRuns = createJobVmRunsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    );
+    expect(
+      await vmRuns.recordStart({
+        jobId: job.id,
+        vmName: "vm-1",
+        claimedAt: job.claimedAt ?? "",
+        attempt: 1,
+        startedAt: fixture.clock.now(),
+        vmTimeoutSeconds: 1500,
+      }),
+    ).toBe("recorded");
+    fixture.clock.advance(60 * SECOND);
+    await fixture.queue.enqueue({
+      repositoryId: job.repositoryId,
+      prNumber: job.prNumber,
+      prUrl: job.prUrl,
+      headSha: sha("e"),
+      command: "review",
+      triggerKind: "webhook",
+      actorLogin: "octocat",
+    });
+    fixture.clock.advance(30 * SECOND);
+    await vmRuns.confirmStopped(job.id, ["vm-1"], fixture.clock.now());
+    expect(await fixture.queue.get(job.id)).toMatchObject({
+      status: "superseded",
+    });
+    return { job, leaseToken };
+  }
+  const MANAGED_DIFF_HOLD = 1_075_000;
+
+  // #591-T19
+  run(
+    "leaves the hold of a superseded run that still drains alone, so its Worker's report is charged as without the sweep",
+    async () => {
+      const fixture = await start();
+      const { job, leaseToken } = await drainingSuperseded(fixture);
+
+      // The sweep runs between the push and the report, with billing on.
+      expect(
+        await releaseStrandedHoldsWhileBillingOn(fixture.db, fixture.clock.now),
+      ).toEqual({ released: 0 });
+      expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
+      await fixture.queue.complete(job.id, leaseToken, delivered);
+
+      // The same entries as a settlement without the sweep (settle-jobs #498-T09): released AND charged.
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -MANAGED_DIFF_HOLD],
+        ["release", MANAGED_DIFF_HOLD],
+        ["usage", -2_526_000],
+      ]);
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+        reservedMicroUsd: 0,
+      });
+    },
+  );
+
+  // #591-T20
+  run(
+    "leaves the hold of a superseded run whose Worker never reports alone, so the expiry charges it as without the sweep",
+    async () => {
+      const fixture = await start();
+      const { job } = await drainingSuperseded(fixture);
+      expect(
+        await releaseStrandedHoldsWhileBillingOn(fixture.db, fixture.clock.now),
+      ).toEqual({ released: 0 });
+      // The drain window and the grace for a late report pass without a report.
+      fixture.clock.advance(10 * 60 * SECOND);
+
+      await fixture.queue.expireStaleJobs();
+
+      // settle-jobs #498-T09: 120 seconds from the VM's start, 2 minutes, the AI cost unknown.
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -MANAGED_DIFF_HOLD],
+        ["release", MANAGED_DIFF_HOLD],
+        ["usage", -26_000],
+      ]);
+    },
+  );
+
+  // #591-T21
+  run(
+    "verify() is consistent while a superseded run drains, and flags it when its settlement ended with billing off",
+    async () => {
+      const fixture = await start();
+      const { job, leaseToken } = await drainingSuperseded(fixture);
+
+      // A normal drain is not a stranded hold: the report is still to come.
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+        strandedHoldCount: 0,
+        strandedHoldMicroUsd: 0,
+        reservedMicroUsd: MANAGED_DIFF_HOLD,
+      });
+
+      // The report arrives with billing off: the record is settled, nothing releases the hold.
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(job.id, leaseToken, delivered);
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: false,
+        strandedHoldCount: 1,
+        strandedHoldMicroUsd: MANAGED_DIFF_HOLD,
+      });
+      await setBillingSwitch(fixture.db, true);
+      expect(
+        await releaseStrandedHoldsWhileBillingOn(fixture.db, fixture.clock.now),
+      ).toEqual({ released: 1 });
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -MANAGED_DIFF_HOLD],
+        ["release", MANAGED_DIFF_HOLD],
+      ]);
     },
   );
 });
