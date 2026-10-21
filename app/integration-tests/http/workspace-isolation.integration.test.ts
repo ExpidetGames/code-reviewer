@@ -400,15 +400,8 @@ const ENTRIES: Entry[] = [
     method: "PUT",
     minRole: MINIMUM_ROLE.manage_billing,
     path: () => "/billing/profile",
-    body: () => ({
-      legalName: "Acme GmbH",
-      country: "DE",
-      addressLine1: "Hauptstrasse 1",
-      addressLine2: null,
-      postalCode: "10115",
-      city: "Berlin",
-      vatId: null,
-    }),
+    // An empty profile: at the right role the answer is 422 and nothing is stored, so the top-up entries above keep a workspace without one.
+    body: () => ({}),
     params: () => ({}),
     file: "billing/profile/route.ts",
     takesNoIds: true,
