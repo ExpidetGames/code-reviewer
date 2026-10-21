@@ -42,6 +42,7 @@ async function snapshot(
       table.name === "model_catalog_entries" ||
       table.name === "billing_journal_entries" ||
       table.name === "billing_balances" ||
+      table.name === "billing_start_credit_grants" ||
       table.name === "job_vm_runs" ||
       table.name === "billing_topup_intents" ||
       table.name === "models_dev_providers" ||

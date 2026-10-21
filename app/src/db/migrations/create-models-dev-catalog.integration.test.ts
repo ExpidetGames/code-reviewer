@@ -17,7 +17,11 @@ const NEW_TABLES = [
   "models_dev_fetch_state",
 ];
 
-const LATER_TABLES = ["model_enablements", "model_price_confirmations"];
+const LATER_TABLES = [
+  "model_enablements",
+  "model_price_confirmations",
+  "billing_start_credit_grants",
+];
 
 const beforeThisMigration: MigrationProvider = {
   async getMigrations() {

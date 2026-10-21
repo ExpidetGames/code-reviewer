@@ -38,7 +38,8 @@ async function rowsOfEveryTable(
       table.name === "models_dev_fetch_state" ||
       table.name === "model_enablements" ||
       table.name === "model_price_confirmations" ||
-      table.name === "billing_webhook_events"
+      table.name === "billing_webhook_events" ||
+      table.name === "billing_start_credit_grants"
     )
       continue;
     const { rows } =
