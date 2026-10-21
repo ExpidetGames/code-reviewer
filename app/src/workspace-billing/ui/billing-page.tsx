@@ -55,6 +55,7 @@ export function BillingPageContent({
   view,
   returned,
   termsHref,
+  privacyHref,
   api: apiProp,
   navigate = (url) => window.location.assign(url),
 }: {
@@ -62,8 +63,10 @@ export function BillingPageContent({
   view: WorkspaceBillingView;
   /** The payment page sent the person back with `?topup=success` or `?topup=cancelled`. */
   returned: "success" | "cancelled" | null;
-  /** The operator's terms, when the instance has a page for them; null shows no link. */
+  /** The operator's terms, when the instance has set a link to them; null shows no link. */
   termsHref: string | null;
+  /** The operator's privacy statement, when the instance has set a link to it; null shows no link. */
+  privacyHref: string | null;
   /** Only tests pass these: a server component cannot hand functions to a client component. */
   api?: WorkspaceBillingApi;
   navigate?: (url: string) => void;
@@ -95,6 +98,7 @@ export function BillingPageContent({
             api={api}
             navigate={navigate}
             termsHref={termsHref}
+            privacyHref={privacyHref}
           />
         ) : null}
         {view.canManage ? (
