@@ -112,6 +112,8 @@ const ADDRESS: Spec = {
 };
 const CUSTOMER_FIELDS: { [key: string]: Spec } = {
   name: "s",
+  // Probed against the sandbox on 2026-10-21 (2025-03-31.basil): the name of the business, next to `name`.
+  business_name: "s",
   email: "s",
   description: "s",
   phone: "s",
@@ -231,7 +233,10 @@ const MANAGED_UNSUPPORTED = [
   "shipping_address_collection",
   "billing_address_collection",
 ] as const;
-const TAX_CODE = /^txcd_\d{8}$/;
+// The sandbox (2026-10-21) took txcd_10000000, txcd_10103000, txcd_10103001 and txcd_10105002 and refused txcd_99999999,
+// txcd_00000000, txcd_20030000 and a text that is no code: the digital family is what the fake takes. Which other codes the
+// real list holds was not probed.
+const TAX_CODE = /^txcd_10\d{6}$/;
 const TAX_CODE_DOCS =
   "https://docs.stripe.com/payments/managed-payments/eligibility#product-tax-code-requirements";
 
@@ -352,10 +357,9 @@ function createSession(context: RouteContext): {
         throw invalidRequest(
           `Invalid ${at}: the product tax code is missing. Set the product's tax_code field to an eligible product tax code. See ${TAX_CODE_DOCS} for more details.`,
         );
-      // UNVERIFIED: the sandbox accepted txcd_10103001 and txcd_10105002; which codes it refuses was not probed.
       if (!TAX_CODE.test(productData.tax_code))
         throw invalidRequest(
-          `Invalid ${at}: the product tax code is not an eligible product tax code. See ${TAX_CODE_DOCS} for more details.`,
+          `Invalid ${at}: this product tax code is ineligible for Managed Payments. Update the product's tax_code field to an eligible product tax code. See ${TAX_CODE_DOCS} for more details.`,
         );
     }
     currencies.add(priceData.currency);

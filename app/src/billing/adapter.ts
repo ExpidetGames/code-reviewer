@@ -58,6 +58,18 @@ export const BILLING_ADAPTER_ERROR_CODES = [
   "adapter_id_duplicate",
   /** An adapter handed over an event that breaks the rules of a normalized event. */
   "event_invalid",
+  /** A top-up at a provider that needs the buyer's customer object was started without one. */
+  "customer_missing",
+  /** The provider is not set up (no usable credential): nothing was sent. */
+  "provider_not_configured",
+  /** The provider did not answer in time, could not be reached, failed or is limiting the app: the request may be tried again. */
+  "provider_unavailable",
+  /** The provider refused the request, or answered with something the app cannot read: trying again will not help. */
+  "provider_rejected",
+  /** The provider did not accept the buyer's VAT ID. */
+  "vat_id_rejected",
+  /** The provider is still working on the very same request (a second click while the first runs): nothing is wrong. */
+  "request_in_progress",
 ] as const;
 export type BillingAdapterErrorCode =
   (typeof BILLING_ADAPTER_ERROR_CODES)[number];
@@ -110,6 +122,8 @@ export type BillingCapabilities = {
   currencies: readonly BillingCurrency[];
   /** The provider may refund or concede a dispute by itself within this window, whatever our policy is. */
   providerMayRefund: { windowDays: number } | null;
+  /** A top-up goes through the provider's checkout page. False: there is none and the operator adds credit by hand. */
+  checkout: boolean;
   /** A top-up needs the workspace's billing profile first. */
   requiresBillingProfile: boolean;
   /** Who issues receipts and invoices. */
@@ -135,12 +149,15 @@ export interface BillingAdapter {
   readonly id: string;
   readonly capabilities: BillingCapabilities;
   /**
-   * Makes sure the provider knows the buyer, from the billing profile; idempotent. `null` when the provider has no
-   * such object (the `manual` adapter).
+   * Makes sure the provider knows the buyer, from the billing profile: creates the customer, or brings the one the
+   * application holds (`customer`, the id it stored from an earlier call, or null) up to date; idempotent. A customer the
+   * provider no longer knows is made again. Returns the id to store. `null` when the provider has no such object (the
+   * `manual` adapter).
    */
   ensureCustomer(input: {
     workspace: WorkspaceRef;
     profile: BillingProfile;
+    customer: ProviderRef | null;
   }): Promise<ProviderRef | null>;
   /**
    * Starts a top-up for an intent the application wrote FIRST (the intent id is the idempotency key at the provider and
@@ -157,6 +174,15 @@ export interface BillingAdapter {
     session: ProviderRef | null;
     payment: ProviderRef | null;
   }>;
+  /**
+   * Asks the provider about the page of a top-up that has one already (`createTopUpCheckout` returned its `session`): the
+   * address while the buyer can still use it, or `closed` (paid, expired, or unknown to the provider). Never makes a page,
+   * so a repeat of a start after the provider forgot its idempotency key cannot make a second one for the same intent.
+   * Absent when the adapter has no checkout.
+   */
+  resumeTopUpCheckout?(input: {
+    checkout: ProviderRef;
+  }): Promise<{ kind: "open"; url: string } | { kind: "closed" }>;
   /**
    * Checks the signature of a webhook over the exact bytes of its body and parses it into ONE normalized event. A body
    * is data until its signature is verified. `rawBody` is the bytes as received, not decoded text: a signature is a MAC

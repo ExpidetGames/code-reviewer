@@ -63,6 +63,7 @@ import {
 } from "./settings.ts";
 import { createBillingSettingsStore } from "./settings-store.ts";
 import {
+  STRIPE_MANAGED_PAYMENTS_API_VERSION,
   stripeKeyEnvironment,
   StripeClientError,
   type StripeClient,
@@ -639,6 +640,8 @@ export function createBillingAdminService({
         url: webhookUrl,
         enabled_events: [...STRIPE_WEBHOOK_EVENTS],
         description: "Code Reviewer",
+        // The events are rendered in the version the client's calls use, not the account's default, which can change.
+        api_version: STRIPE_MANAGED_PAYMENTS_API_VERSION,
       });
       const seen = environmentOf(created.livemode);
       if (seen !== null && seen !== environment) {

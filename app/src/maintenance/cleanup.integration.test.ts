@@ -25,6 +25,7 @@ import {
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 import { FETCH_NOW_WINDOW_MS } from "../models-dev/admin-service.ts";
+import { TOP_UP_REQUESTS_WINDOW_MS } from "../billing/topup-limits.ts";
 import { PLAN_HANDOFF_WINDOW_MS } from "../plan-handoff/limits.ts";
 import { WORKSPACE_WINDOWS_MS } from "../workspaces/rate-limits.ts";
 import {
@@ -131,6 +132,7 @@ describe("the cleanup of old rows", () => {
       VERIFY_TOKEN_WINDOW_MS,
       ...WORKSPACE_WINDOWS_MS,
       PLAN_HANDOFF_WINDOW_MS,
+      TOP_UP_REQUESTS_WINDOW_MS,
       FETCH_NOW_WINDOW_MS,
       PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS,
       PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,

@@ -297,6 +297,47 @@ describe("merging the instance admin with an imported operator", () => {
     expect(await githubIdentityLinked(ctx.db, "admin")).toBe(true);
   });
 
+  // #501-T15
+  it("keeps who confirmed the billing profile: the confirmation moves to the admin when the operator is retired", async () => {
+    const ctx = await setup();
+    await adminAndImportedOperator(ctx);
+    await ctx.db
+      .insertInto("billing_profiles")
+      .values({
+        workspace_id: ctx.workspace.id,
+        legal_name: "Example GmbH",
+        country: "DE",
+        address_line1: "Teststrasse 1",
+        address_line2: null,
+        postal_code: "10115",
+        city: "Berlin",
+        vat_id: null,
+        confirmed_at: "2026-10-11T08:30:00.000Z",
+        confirmed_by: "operator",
+        terms_version: "2026-10-01",
+        customer_adapter: null,
+        customer_ref: null,
+        created_at: "2026-10-11T08:00:00.000Z",
+        updated_at: "2026-10-11T08:30:00.000Z",
+      })
+      .execute();
+
+    expect(await ctx.link(ADMIN)).toEqual({ ok: true, outcome: "merged" });
+
+    expect(
+      await ctx.db
+        .selectFrom("billing_profiles")
+        .select(["confirmed_by", "confirmed_at", "terms_version"])
+        .execute(),
+    ).toEqual([
+      {
+        confirmed_by: "admin",
+        confirmed_at: "2026-10-11T08:30:00.000Z",
+        terms_version: "2026-10-01",
+      },
+    ]);
+  });
+
   // #102-GH-25
   it("keeps the higher role where both are members, in either direction, without a duplicate membership", async () => {
     const ctx = await setup();

@@ -31,6 +31,7 @@ import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts"
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
 import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
+import { createBillingProfilesRepository } from "./billing-profiles-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -55,6 +56,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
     billing: createBillingJournalRepository(db, workspaceId),
     topUpIntents: createBillingTopUpIntentsRepository(db, workspaceId),
+    profiles: createBillingProfilesRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -302,8 +304,25 @@ async function seed(
     checkoutRef: `cs-${tag}`,
     paymentRef: `pi-intent-${tag}`,
   });
+  // One that never got a page (#501), which a sweep of the other workspace must not fail.
+  const unpagedIntent = await repos.topUpIntents.create({
+    adapter: "fake",
+    amountMicroUsd: 10_000_000,
+  });
+  // The billing profile (#501): customer data, with a customer, so the other workspace has a profile to reach for.
+  await repos.profiles.save({
+    legalName: `Legal ${tag} GmbH`,
+    country: "DE",
+    addressLine1: `Street ${tag}`,
+    addressLine2: null,
+    postalCode: "10115",
+    city: "Berlin",
+    vatId: null,
+  });
+  await repos.profiles.setCustomer("fake", `cus_${tag}`);
   return {
     topUpIntentId: topUpIntent.id,
+    unpagedIntentId: unpagedIntent.id,
     workspaceId,
     userId: `user-${tag}`,
     journalEntryId: topUp.entry.id,
@@ -415,6 +434,11 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    billingProfiles: await db
+      .selectFrom("billing_profiles")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
       .execute(),
     appSettings: await db
       .selectFrom("app_settings")
@@ -1276,8 +1300,10 @@ const CASES: Case[] = [
     run: (a) => a.topUpIntents.list({ limit: 50 }),
     expectAnswer: (answer, a) => {
       const intents = answer as Array<{ workspaceId: string }>;
-      expect(intents).toHaveLength(1);
-      expect(intents[0]?.workspaceId).toBe(a.workspaceId);
+      expect(intents).toHaveLength(2);
+      expect(
+        intents.every((intent) => intent.workspaceId === a.workspaceId),
+      ).toBe(true);
     },
   },
   {
@@ -1316,9 +1342,68 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "topUpIntents.markFailedUnlessPage",
+    run: (a, b) => a.topUpIntents.markFailedUnlessPage(b.unpagedIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    // Every pending intent of B without a page is old enough for this cutoff, and none of them is A's to fail.
+    name: "topUpIntents.failPendingWithoutPage",
+    run: (a) => a.topUpIntents.failPendingWithoutPage(-60_000),
+    expectAnswer: (answer) => expect(answer).toBe(1),
+  },
+  {
     name: "topUpIntents.markFailed",
     run: (a, b) => a.topUpIntents.markFailed(b.topUpIntentId),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // the billing profile (#501): A reads and writes its own; B's profile, confirmation and customer are not reachable from A
+  {
+    name: "profiles.get",
+    run: (a) => a.profiles.get(),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        legalName: "Legal a GmbH",
+        customerRef: "cus_a",
+        createdAt: expect.any(String),
+      }),
+  },
+  {
+    name: "profiles.save",
+    run: (a) =>
+      a.profiles.save({
+        legalName: "Changed GmbH",
+        country: "FR",
+        addressLine1: "Rue 1",
+        addressLine2: null,
+        postalCode: "75001",
+        city: "Paris",
+        vatId: null,
+      }),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        legalName: "Changed GmbH",
+        customerRef: "cus_a",
+      }),
+  },
+  {
+    name: "profiles.confirmBusiness",
+    run: (a) =>
+      a.profiles.confirmBusiness({ userId: "user-a", termsVersion: "1" }),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        confirmedBy: "user-a",
+        legalName: "Legal a GmbH",
+      }),
+  },
+  {
+    name: "profiles.setCustomer",
+    run: (a) => a.profiles.setCustomer("fake", "cus_new"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        customerRef: "cus_new",
+        legalName: "Legal a GmbH",
+      }),
   },
   // runs
   {

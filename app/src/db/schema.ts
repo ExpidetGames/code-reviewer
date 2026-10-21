@@ -854,6 +854,32 @@ export interface BillingBalancesTable {
 }
 
 /**
+ * The billing profile of one workspace (#501; customer data, never logged): the business that buys credit, the
+ * confirmation of the first top-up and the provider's customer made from it. One row per workspace.
+ */
+export interface BillingProfilesTable {
+  workspace_id: string;
+  legal_name: string;
+  /** ISO 3166-1 alpha-2, upper case. */
+  country: string;
+  address_line1: string;
+  address_line2: string | null;
+  postal_code: string;
+  city: string;
+  /** Normalized, a light format check only. */
+  vat_id: string | null;
+  /** The business confirmation: when (ISO 8601, UTC), by which user (null once the user is gone) and the terms version. */
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  terms_version: string | null;
+  /** The adapter's id and its opaque id of the customer made from this profile; both null until the first top-up. */
+  customer_adapter: string | null;
+  customer_ref: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * The memory of the start credit (src/billing/README.md, ADR 0006, 2.16; #507): one row for each GitHub account that was
  * granted it. Instance level, a numeric id and a workspace id only, and no foreign key: it outlives the workspace.
  */
@@ -947,6 +973,7 @@ export interface Database {
   model_price_confirmations: ModelPriceConfirmationsTable;
   billing_journal_entries: BillingJournalEntriesTable;
   billing_balances: BillingBalancesTable;
+  billing_profiles: BillingProfilesTable;
   billing_start_credit_grants: BillingStartCreditGrantsTable;
   billing_topup_intents: BillingTopupIntentsTable;
   billing_webhook_events: BillingWebhookEventsTable;
