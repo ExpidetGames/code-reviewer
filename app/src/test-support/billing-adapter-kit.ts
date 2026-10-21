@@ -205,6 +205,11 @@ export type ApplicationFixtures = {
   refunded: WebhookRequest;
   /** What the refund takes, in micro-USD. */
   refundAmount: number;
+  /**
+   * What "Check payment" gives `lookupTopUp` to find the payment of the intent (the checkout the application recorded). The
+   * default is nothing, for a provider that finds a top-up by our intent id.
+   */
+  lookupRefs?: { checkout: string | null; payment: string | null };
 };
 
 export type ApplicationSubject = {
@@ -290,8 +295,8 @@ export function describeAdapterApplication(
 
           const found = await adapter.lookupTopUp({
             intentId,
-            checkout: null,
-            payment: null,
+            checkout: fixtures.lookupRefs?.checkout ?? null,
+            payment: fixtures.lookupRefs?.payment ?? null,
           });
           if (found === null) throw new Error("the lookup found nothing");
           const first = await applyBillingEvent(db, {

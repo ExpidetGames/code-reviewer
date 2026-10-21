@@ -217,7 +217,7 @@ export interface BillingAdapter {
   }): Promise<WebhookResult>;
   /**
    * Asks the provider what became of a top-up and returns it as a normalized payment event (`payment.succeeded`,
-   * `payment.failed` or `payment.expired`), or null when the provider knows nothing of it (yet) or the object is gone
+   * `payment.refused`, `payment.failed` or `payment.expired`), or null when the provider knows nothing of it (yet) or the object is gone
    * (a `resource_missing` is normal, never an error). It is the one outbound call of the adapter, made in a user's
    * request (#502's "Check payment"), never in the webhook; the event goes through `applyBillingEvent` like a webhook's,
    * so a lost webhook, a late one and a click are idempotent together. Absent when the provider cannot be asked (the
@@ -233,7 +233,13 @@ export interface BillingAdapter {
 /** What a lookup of a top-up may answer. */
 export type TopUpLookupEvent = Extract<
   BillingEvent,
-  { type: "payment.succeeded" | "payment.failed" | "payment.expired" }
+  {
+    type:
+      | "payment.succeeded"
+      | "payment.refused"
+      | "payment.failed"
+      | "payment.expired";
+  }
 >;
 
 export type WebhookResult =

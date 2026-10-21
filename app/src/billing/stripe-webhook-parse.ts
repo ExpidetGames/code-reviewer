@@ -66,6 +66,19 @@ const envelopeSchema = z.object({
 
 type Meta = { eventId: string; occurredAt: string };
 
+/** What the end of a Checkout Session can be: the payment's three ends, a refused payment, or nothing for us. */
+export type SessionPaymentEvent = Extract<
+  BillingEvent,
+  {
+    type:
+      | "payment.succeeded"
+      | "payment.refused"
+      | "payment.failed"
+      | "payment.expired"
+      | "ignored";
+  }
+>;
+
 function isoTime(seconds: number): string | undefined {
   if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds > 4e9)
     return undefined;
@@ -97,8 +110,8 @@ export function paymentEventOfSession(
   meta: Meta,
   environment: StripeEnvironment,
   end: "paid" | "failed" | "expired",
-): BillingEvent {
-  const refused = (): BillingEvent => ({
+): SessionPaymentEvent {
+  const refused = (): SessionPaymentEvent => ({
     type: "payment.refused",
     ...meta,
     payment: session.payment_intent,
