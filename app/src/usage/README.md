@@ -101,6 +101,14 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
 
 `reserved` and `settled` count towards a limit (#277, below), `void` does not.
 
+## Billing and the record (#498)
+
+While billing is on (`src/billing/README.md`, "Reserve, settle, release"), the record has a twin in the balance journal: the claim writes the
+`reservation` entry in the transaction that reserves the record (or refuses the job and writes neither), and the transaction that settles or
+voids the record, whichever path it is, writes the `release` and the `usage` entry of the price. The record keeps reporting the **real** model cost
+(`cost_micro_usd`, the operator feed, the sums of the limits); the journal holds the price (AI cost times A plus started minutes times B). A record
+settles once and so does its entry: a repeated completion changes neither. With billing off none of this runs.
+
 ## Limits and suspension at claim (#277)
 
 What an operator allows a workspace (`src/workspaces/README.md`, "Entitlements") is enforced where a job is claimed,
