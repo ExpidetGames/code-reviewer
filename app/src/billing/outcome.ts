@@ -46,6 +46,7 @@ type ClaimCode =
   | "llm_not_configured"
   | "llm_provider_unsupported"
   | "llm_model_unavailable"
+  | "provider_address_changed"
   | "job_llm_options_invalid"
   | "job_args_invalid"
   | "job_env_invalid"
@@ -58,7 +59,8 @@ type ClaimCode =
   | "git_access_unavailable"
   | "pull_request_unavailable"
   | "claim_failed"
-  | "price_check_failed";
+  | "price_check_failed"
+  | "provider_pin_check_failed";
 
 /** The codes that arrive through the release call of a Dispatcher (`KnownReleaseReason` in the contract). */
 type ReleaseReason = "launch_failed" | "worker_exited";
@@ -147,6 +149,7 @@ export const ERROR_CODE_CLASSES = {
   llm_not_configured: "free",
   llm_provider_unsupported: "free",
   llm_model_unavailable: "free",
+  provider_address_changed: "free",
   job_llm_options_invalid: "free",
   job_args_invalid: "free",
   job_env_invalid: "free",
@@ -160,6 +163,7 @@ export const ERROR_CODE_CLASSES = {
   pull_request_unavailable: "free",
   claim_failed: "free",
   price_check_failed: "free",
+  provider_pin_check_failed: "free",
   // Dynamic Review.
   dynamic_engine_unavailable: "free",
   dynamic_isolation_self_check_failed: "free",

@@ -24,6 +24,7 @@ import {
   editSkill,
   resetSkill,
   setCatalogEntry,
+  setConfirmProviderAddress,
   setDynamicModel,
   setDynamicProvider,
   setReviewKind,
@@ -540,5 +541,56 @@ describe("a project save of a workspace on its own key", () => {
       ok: false,
       issues: [{ field: "provider", code: "PROVIDER_UNKNOWN" }],
     });
+  });
+});
+
+// The address a project pinned for its catalog provider (#588): confirming the new one is an action of its own, sent only when
+// the person ticked it, never as a side effect of another change.
+describe("confirming the address of a catalog provider", () => {
+  function changedView(): ProjectDynamicView {
+    return {
+      ...dynamicView({
+        reviewKind: "dynamic",
+        dynamicProvider: "deepseek",
+        dynamicModel: "deepseek-v4-pro",
+      }),
+      providerAddress: {
+        pinned: "https://api.deepseek.example",
+        current: "https://api.deepseek-new.example",
+        state: "changed",
+      },
+    };
+  }
+
+  // #588-T27
+  it("is sent as confirmProviderAddress: true when the person ticked it, and only then", () => {
+    const m = model({}, changedView());
+    const untouched = plan(m);
+    expect(untouched.steps).toEqual([]);
+
+    const ticked = setConfirmProviderAddress(initialFormState(m), true);
+    expect(plan(m, ticked).steps).toEqual([
+      { cards: ["kind"], body: { confirmProviderAddress: true } },
+    ]);
+
+    const unticked = setConfirmProviderAddress(ticked, false);
+    expect(plan(m, unticked).steps).toEqual([]);
+  });
+
+  // #588-T27
+  it("is dropped with the provider: a provider chosen instead is pinned by its own selection", () => {
+    const m = model({}, changedView());
+    const state = setDynamicProvider(
+      setConfirmProviderAddress(initialFormState(m), true),
+      "openai",
+    );
+
+    const body = plan(m, setDynamicModel(state, "gpt-5.5")).steps.map(
+      (step) => step.body,
+    );
+
+    expect(body).toEqual([
+      { dynamicProvider: "openai", dynamicModel: "gpt-5.5" },
+    ]);
   });
 });

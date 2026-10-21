@@ -86,7 +86,12 @@ export type SelectableEntry = Pick<
 >;
 
 /** The model fields of one settings layer for one kind: `provider` and `model` of Diff, or `dynamicProvider` and `dynamicModel`. */
-export type ModelLayer = { provider?: string; model?: string };
+export type ModelLayer = {
+  provider?: string;
+  model?: string;
+  /** The address the layer pinned for its catalog provider when the provider was selected (#588); a Dynamic project layer only. */
+  address?: string;
+};
 
 type Common = {
   /** The job's kind, pinned when the job was queued. */
@@ -145,6 +150,11 @@ export type Selection =
        * row and builds its entry before any key is loaded. Absent for a provider of the registry.
        */
       catalog?: true;
+      /**
+       * The address the project pinned for the catalog provider when it selected it (#588). The claim sends the key to exactly this
+       * address, or refuses the job when the catalog trusts another one; absent for a selection made before pins existed.
+       */
+      pinnedAddress?: string;
       /** An own selection has no entry. */
       entry?: never;
     }
@@ -296,7 +306,13 @@ function resolveOwn(
 
   const descriptor = providers.find(provider);
   if (descriptor === undefined && nativeAllowed(input, provider))
-    return resolveOwnNative(kind, provider, setModel, modelProvider);
+    return resolveOwnNative(
+      kind,
+      provider,
+      setModel,
+      modelProvider,
+      layers.project?.address,
+    );
   if (descriptor === undefined || !advertised(runnerProviders, descriptor.id))
     return {
       ok: false,
@@ -357,6 +373,7 @@ function resolveOwnNative(
   provider: string,
   model: string | undefined,
   modelProvider: string,
+  pinnedAddress: string | undefined,
 ): SelectionResult {
   if (model === undefined)
     return {
@@ -385,6 +402,7 @@ function resolveOwnNative(
       model,
       keySource: "workspace",
       catalog: true,
+      ...(pinnedAddress === undefined ? {} : { pinnedAddress }),
     },
   };
 }

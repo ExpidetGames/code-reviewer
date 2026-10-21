@@ -70,6 +70,7 @@ export function ReviewKindFieldset({
   handlers,
   choice,
   nativeModelField,
+  addressNote,
   nativeProvidersHint = false,
   workspaceSlug,
   providers,
@@ -87,6 +88,8 @@ export function ReviewKindFieldset({
    * one of the models.dev catalog, whose models are a list to pick from and not a name to type.
    */
   nativeModelField?: ReactNode;
+  /** The address pinned for the chosen catalog provider, read-only, with the action that confirms a new one (#588). */
+  addressNote?: ReactNode;
   /** The form offers the catalog providers the workspace holds a key for: say where to add the key of another. */
   nativeProvidersHint?: boolean;
   workspaceSlug: string;
@@ -269,6 +272,7 @@ export function ReviewKindFieldset({
                   }}
                 />
               )}
+              {addressNote}
             </>
           )}
           <SkillEditor

@@ -153,6 +153,9 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   // #555: the catalog is the list of a catalog provider; a model new at the provider is missing for up to a day.
   MODEL_NOT_IN_CATALOG: () =>
     "This model is not in the catalog. Pick one from the list. A model that was released only recently can take up to a day to appear.",
+  // #588: the address of a catalog provider cannot be confirmed when there is none.
+  PROVIDER_ADDRESS_NOT_PINNABLE: () =>
+    "There is no provider address to confirm right now. Choose the provider and a model from the catalog first.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
     "This workspace reviews with its own AI key, so the choices of this instance cannot be used. They can be chosen once the AI access comes from this instance.",
@@ -194,6 +197,9 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository was not found. Reload the Projects page and try again.",
+  // #588: the address of a catalog provider is confirmed, moved or dropped by an Owner or Admin only.
+  PROVIDER_ADDRESS_CONFIRM_FORBIDDEN:
+    "The address of this provider changed. Only an Owner or Admin of the workspace can confirm it or change the provider of this project.",
 };
 
 /** The sentence for a save (or reset) that failed as a whole. */
