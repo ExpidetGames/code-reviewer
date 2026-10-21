@@ -103,9 +103,9 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
 
 ## Billing and the record (#498)
 
-While billing is on (`src/billing/README.md`, "Reserve, settle, release"), the record has a twin in the balance journal: the claim writes the
-`reservation` entry in the transaction that reserves the record (or refuses the job and writes neither), and the transaction that settles or
-voids the record, whichever path it is, writes the `release` and the `usage` entry of the price. The record keeps reporting the **real** model cost
+While billing is on (`src/billing/README.md`, "Start, settle"), the record says whether its money is still to be settled (`billing_state`, #605: `open` from a claim
+with billing on, `settled` after the one settlement, null for a job claimed with billing off), and the transaction that settles or voids the record, whichever path it
+is, writes the `usage` entry of the price (none when the run is free). Nothing is held at the claim. The record keeps reporting the **real** model cost
 (`cost_micro_usd`, the operator feed, the sums of the limits); the journal holds the price (AI cost times A plus started minutes times B). A record
 settles once and so does its entry: a repeated completion changes neither. With billing off none of this runs.
 

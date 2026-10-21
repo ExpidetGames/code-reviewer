@@ -469,7 +469,7 @@ existing row, so an app of the previous release on the same database is unaffect
   `integer` on SQLite, which is 64 bit already, so the "text and integer columns only" convention holds there, and
   `bigint` on Postgres. Postgres returns a `bigint` as text, so the repository converts every amount with `Number`
   (exact up to 2^53).
-- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` and `reserveUpTo` take
+- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` (an old hold) and `charge` (the price of a job, #605) take
   the balance row's lock (Postgres `FOR UPDATE`; SQLite's `begin immediate` already serializes writers), answer a
   repeated job from the entry they wrote, and `settle` and `release` take the same lock before they read what the job
   has, so a settlement never charges a job a concurrent release voided. `append` takes it too, before it writes: every

@@ -287,8 +287,8 @@ export function BillingRatesCard({
           {input(
             "reserve",
             "AI reserve per Diff review (USD)",
-            "Real model cost before the factor A. The AI part of the hold a Diff review takes when it starts; the charge is what the run really cost.",
-            "A Diff review has no cost cap, so a hold of this size keeps a workspace with little balance from starting a review it cannot pay. At A = 5, a reserve of 0.15 holds 0.75 USD.",
+            "Real model cost before the factor A. Not used any more: a review starts whenever the balance is above zero, nothing is held, and the charge is what the run really cost.",
+            "The field is still required to switch billing on and will be removed in a later change. Any value in range will do.",
           )}
           {input(
             "startCredit",

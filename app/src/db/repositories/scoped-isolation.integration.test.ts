@@ -969,6 +969,16 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.openBilling",
+    run: (a, b) => a.usage.openBilling(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.closeBilling",
+    run: (a, b) => a.usage.closeBilling(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
     name: "usage.setKeyMode",
     run: (a, b) => a.usage.setKeyMode(b.job.id, "own"),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
@@ -1241,11 +1251,17 @@ const CASES: Case[] = [
       }),
   },
   {
-    name: "billing.reserveUpTo",
-    run: (a, b) => a.billing.reserveUpTo(b.heldJobId, 1_000_000),
+    // #605: the price of a job is keyed by workspace and job, so a job id of B writes an entry of A, never of B
+    name: "billing.charge",
+    run: (a, b) =>
+      a.billing.charge(b.heldJobId, {
+        aiMicroUsd: 0,
+        infraMicroUsd: 500_000,
+        minutes: 1,
+        reviewKind: "diff",
+      }),
     expectAnswer: (answer, a) =>
       expect(answer).toMatchObject({
-        ok: true,
         created: true,
         entry: { workspaceId: a.workspaceId },
       }),

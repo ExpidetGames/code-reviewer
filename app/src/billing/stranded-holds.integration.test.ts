@@ -6,6 +6,10 @@
 // means no charge. The reconciliation runs when billing is switched on (inside the transaction that writes `enabled`) and as a
 // step of the sweep while billing is on, and `verify()` flags what is left. On SQLite and, when TEST_DATABASE_URL is set,
 // on Postgres.
+//
+// #605: no claim takes a hold any more, so this machinery is dormant: it acts on the reservations an earlier release wrote and
+// on nothing a new job leaves. The tests keep pinning it for those rows; `claim` writes such a reservation by hand after the
+// claim (what the claim of an earlier release did), and one test shows that a job claimed since #605 leaves nothing to release.
 import { sql, type KyselyPlugin } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
@@ -113,6 +117,8 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
     const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
     if (claimed === null || claimed.job.id !== job.id)
       throw new Error("The job was not claimed.");
+    // The hold an earlier release took at the claim.
+    await journalOf(fixture).reserve(OWN_KEY_DIFF_HOLD, job.id);
     return { job: claimed.job, leaseToken: claimed.leaseToken };
   }
 

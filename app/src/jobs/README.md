@@ -187,14 +187,14 @@ from `jobQueueFor` (`src/dispatch/producers.test.ts`).
    running job. Two runners claiming at once are serialized by the write lock; each gets a different
    job or nothing.
 
-**Billing (#498).** After the admission and before the record, `claimNext` takes the hold of the job from the balance of its workspace while billing
-is on, or fails the job with `insufficient_balance`, `balance_negative` or `billing_rates_incomplete` (no attempt, no record, no entry, a notice on
+**Billing (#498, #605).** After the admission and before the record, `claimNext` checks the balance of the workspace while billing is on (above zero starts the job, and
+nothing is held), or fails the job with `insufficient_balance`, `balance_negative` or `billing_rates_incomplete` (no attempt, no record, no entry, a notice on
 the pull request for the first two). **#499:** before the balance, while billing is on, the claim also checks the hidden hourly brake and the workspace's monthly
 total limit and fails the job with `reviews_paused` or `monthly_limit_reached` (a notice on the pull request for both), or with
 `billing_limits_unreadable` when it could not evaluate them for good (no notice); a failure that may pass (a deadlock, a timeout, a busy database) instead puts the job back in the queue, due 15 seconds later with an attempt counted, and it fails with that code only when its attempts are used up; the plan run quotas of the entitlements are not enforced then
-(`src/billing/README.md`, "Limits at claim"). Every transaction below that ends a job, or ends its record, settles the hold in the same transaction
-(`src/billing/README.md`, "Reserve, settle, release"): `complete`, the expiry of leases and runtimes, `release` on the last attempt, `cancelClaimed`,
-`failUndispatched`, the drain of a superseded run, and the cancelling or replacing of waiting jobs. A requeue keeps the hold. With billing off none of it runs.
+(`src/billing/README.md`, "Limits at claim"). Every transaction below that ends a job, or ends its record, settles the job's money in the same transaction, one `usage` entry unless the run is free
+(`src/billing/README.md`, "Start, settle"): `complete`, the expiry of leases and runtimes, `release` on the last attempt, `cancelClaimed`,
+`failUndispatched`, the drain of a superseded run, and the cancelling or replacing of waiting jobs. With billing off none of it runs.
 
 The claim also reserves the job's usage record (`usage_records`, `src/usage/README.md`) in the same
 transaction, `complete` settles it, and every transition that ends a job without `complete` closes it: settled with an
