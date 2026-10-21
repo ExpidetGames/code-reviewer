@@ -465,6 +465,11 @@ describe("who may move the pin (#588)", () => {
     expect(error.code).toBe("PROVIDER_ADDRESS_CONFIRM_FORBIDDEN");
   }
 
+  async function otherProjectPin(promise: Promise<unknown>) {
+    const error = await refusal(promise);
+    expect(error.code).toBe("PROVIDER_ADDRESS_OTHER_PROJECT_PIN");
+  }
+
   // #588-T33
   it("refuses a Member who confirms a moved address, keeps the pin, and lets an Admin do it (P1)", async () => {
     const app = await setup();
@@ -566,12 +571,12 @@ describe("who may move the pin (#588)", () => {
     expect(await pinOf(app, app.first.id)).toBeUndefined();
   });
 
-  // #588-T37
+  // #588-T37, #614-T02
   it("refuses a Member who selects the provider in a second project at an address other projects of the workspace did not pin, and lets an Admin (P4)", async () => {
     const app = await setup();
     await pinnedThenMoved(app);
 
-    await forbidden(
+    await otherProjectPin(
       app.service.updateProjectSettings(app.second.id, SELECT, MEMBER),
     );
     expect(await pinOf(app, app.second.id)).toBeUndefined();
@@ -592,7 +597,7 @@ describe("who may move the pin (#588)", () => {
     expect(await pinOf(app, app.second.id)).toBe(DEEPSEEK);
   });
 
-  // #588-T39
+  // #588-T39, #614-T02
   it("refuses a model-only save of a selection made before pins existed when it would pin an address another project does not hold (P5)", async () => {
     const app = await setup();
     await app.service.updateProjectSettings(app.first.id, SELECT, MEMBER);
@@ -603,7 +608,7 @@ describe("who may move the pin (#588)", () => {
     }));
     ADDRESSES.set("deepseek", MOVED);
 
-    await forbidden(
+    await otherProjectPin(
       app.service.updateProjectSettings(
         app.second.id,
         { dynamicModel: "deepseek-v4-pro" },

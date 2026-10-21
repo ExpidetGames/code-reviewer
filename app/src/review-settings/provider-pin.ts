@@ -57,13 +57,26 @@ export type PinMove = {
  * first pin of a provider, with no other, is the first sight and needs no right). A save that leaves the pin as it is needs none.
  */
 export function pinMoveNeedsRight(move: PinMove): boolean {
-  if (move.newPin === move.storedPin) return false;
+  return pinMoveReason(move) !== null;
+}
+
+/**
+ * Why a save needs that right, for the message of the refusal (#614): `pin_not_trusted` (it drops or replaces a pin that is not the
+ * address the catalog trusts now) or `other_project_pin` (it writes a pin that another project of the workspace holds differently,
+ * for example a model-only save of a selection from before pins, which the Member did not mean as a move). null: no right needed.
+ */
+export type PinMoveReason = "pin_not_trusted" | "other_project_pin";
+
+export function pinMoveReason(move: PinMove): PinMoveReason | null {
+  if (move.newPin === move.storedPin) return null;
   if (move.storedPin !== undefined && move.storedPin !== move.trustedForStored)
-    return true;
-  return (
+    return "pin_not_trusted";
+  if (
     move.newPin !== undefined &&
     move.otherPins.some((pin) => pin !== move.newPin)
-  );
+  )
+    return "other_project_pin";
+  return null;
 }
 
 /** How the pinned address compares with what the catalog trusts now, for the settings page. */

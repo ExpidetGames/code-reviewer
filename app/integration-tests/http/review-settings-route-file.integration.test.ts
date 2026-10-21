@@ -353,21 +353,29 @@ describe("the pinned address of a catalog provider on the project route (#588)",
     expect(await app.pinOf(app.first.id)).toBe(DEEPSEEK);
     await app.moveAddress();
 
+    // The last one writes a pin another project holds differently: its own code since #614, the same 403.
     const refused = [
-      await app.put(app.first.id, { confirmProviderAddress: true }),
-      await app.put(app.first.id, {
-        dynamicProvider: null,
-        dynamicModel: null,
-      }),
-      await app.reset(app.first.id),
-      await app.put(app.second.id, SELECT),
-    ];
+      [
+        await app.put(app.first.id, { confirmProviderAddress: true }),
+        "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
+      ],
+      [
+        await app.put(app.first.id, {
+          dynamicProvider: null,
+          dynamicModel: null,
+        }),
+        "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
+      ],
+      [await app.reset(app.first.id), "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN"],
+      [
+        await app.put(app.second.id, SELECT),
+        "PROVIDER_ADDRESS_OTHER_PROJECT_PIN",
+      ],
+    ] as const;
 
-    for (const response of refused) {
+    for (const [response, error] of refused) {
       expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
-      });
+      expect(await response.json()).toEqual({ error });
     }
     expect(await app.pinOf(app.first.id)).toBe(DEEPSEEK);
     expect(await app.pinOf(app.second.id)).toBeUndefined();
