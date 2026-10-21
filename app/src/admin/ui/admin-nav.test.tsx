@@ -80,6 +80,7 @@ describe("the sections of the portal", () => {
       "Mail",
       "LLM keys",
       "Billing",
+      "Payment reviews",
       "Catalog",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
@@ -103,7 +104,7 @@ describe("the sections of the portal", () => {
       ADMIN_NAV_ITEMS.filter((item) => /billing/i.test(item.href)).map(
         (item) => item.href,
       ),
-    ).toEqual(["/admin/billing"]);
+    ).toEqual(["/admin/billing", "/admin/billing/reviews"]);
   });
 
   // #185: the nested GitHub App page under Integrations (#182 lead note).
@@ -118,8 +119,9 @@ describe("the sections of the portal", () => {
         .filter((link) => link.getAttribute("aria-current") === "page")
         .map((link) => link.textContent),
     ).toEqual(["GitHub App"]);
+    // Integrations nests the GitHub App page, and Billing nests the payment reviews (#603).
     expect(nav.querySelectorAll('[data-slot="sidebar-menu-sub"]').length).toBe(
-      1,
+      2,
     );
   });
 
@@ -164,6 +166,7 @@ describe("the sections on a narrow screen", () => {
       "Mail",
       "LLM keys",
       "Billing",
+      "Payment reviews",
       "Catalog",
     ]);
   });

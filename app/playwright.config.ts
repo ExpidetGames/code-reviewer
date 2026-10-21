@@ -88,6 +88,7 @@ export default defineConfig({
         /e2e\/admin\/github-integration\.e2e\.ts$/,
         /e2e\/admin\/catalog\.e2e\.ts$/,
         /e2e\/admin\/billing\.e2e\.ts$/,
+        /e2e\/admin\/billing-reviews\.e2e\.ts$/,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
@@ -212,6 +213,16 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
       testMatch: /e2e\/admin\/billing\.e2e\.ts$/,
       dependencies: ["catalog-admin"],
+    },
+    // The journey of the payment reviews in the admin portal (#603): the same app, after the billing journey, because it leaves
+    // review rows there and credits the default workspace by hand.
+    {
+      name: "billing-reviews-admin",
+      // No retry: a second attempt would find the rows closed and the credit written.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/admin\/billing-reviews\.e2e\.ts$/,
+      dependencies: ["billing-admin"],
     },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and

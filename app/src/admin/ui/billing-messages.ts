@@ -43,6 +43,21 @@ const FAILURE_COPY: Record<string, string> = {
   workspace_not_found: NOT_AVAILABLE_TO_YOU,
   request_conflict:
     "This request was already made with another amount. Reload the page and enter it again.",
+  review_not_found: "This row is not under review any more. Reload the page.",
+  review_already_resolved:
+    "This row was closed already (by you or by another admin). Reload the page to see how.",
+  review_workspace_unknown:
+    "This row names no workspace, so there is nobody to credit. Close it with a note, or credit the workspace on the Billing page.",
+  review_has_no_intent:
+    "This row names no top-up of ours, so there is nothing to check at Stripe.",
+  payment_check_not_possible:
+    "Stripe cannot be asked about this payment: billing has no Stripe adapter that can look a payment up, or it is not set up.",
+  payment_check_unavailable:
+    "Stripe could not be asked, or refused the question. Try again in a moment.",
+  review_credit_type_mismatch:
+    "This row calls for another kind of entry than the one asked for (a credit for a payment, a correction for a refund or a dispute). Reload the page.",
+  intent_state_changed:
+    "The top-up of this row changed since you loaded the page (a payment may have been applied). Reload the page, look at the balance and the top-up, then decide again.",
   api_key_missing: "Save the Stripe API key first.",
   api_key_unreadable:
     "The saved API key cannot be read. Enter it again and save.",

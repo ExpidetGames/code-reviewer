@@ -225,16 +225,37 @@ function conflictNotice(count: number): AttentionNotice {
   };
 }
 
+function reviewsNotice(count: number): AttentionNotice {
+  return {
+    id: "billing-reviews",
+    severity: "warning",
+    title:
+      count === 1
+        ? "1 payment needs a review."
+        : `${String(count)} payments need a review.`,
+    detail: (
+      <>
+        A payment, refund or dispute was not applied to a balance, so a buyer
+        may have paid and not been credited.{" "}
+        <Link href="/admin/billing/reviews">Payment reviews</Link>
+      </>
+    ),
+  };
+}
+
 export function Overview({
   settings,
   github,
   emailConflictCount = 0,
+  billingReviewCount = 0,
 }: {
   settings: AdminSettingsView;
   /** The GitHub integration (src/github-config/); left out, the checklist asks nothing about it. */
   github?: GithubConfigView;
   /** Users whose placeholder address could not be replaced because another account has GitHub's address. */
   emailConflictCount?: number;
+  /** Billing review rows that are open (#603); the first thing to attend to, because a buyer may have paid and not been credited. */
+  billingReviewCount?: number;
 }) {
   const broken = settings.secrets.filter(
     (secret) => secret.state === "undecryptable",
@@ -242,6 +263,7 @@ export function Overview({
   // Status first (#180): the one attention region of the screen, at most three rows, each with a link
   // into the section that fixes it.
   const attention: AttentionNotice[] = [
+    ...(billingReviewCount > 0 ? [reviewsNotice(billingReviewCount)] : []),
     ...(broken.length > 0 ? [secretsNotice(broken.length)] : []),
     ...(settings.signUpRuleState.failClosed ? [failClosedAttention()] : []),
     ...(emailConflictCount > 0 ? [conflictNotice(emailConflictCount)] : []),

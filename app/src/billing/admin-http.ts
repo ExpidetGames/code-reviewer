@@ -20,6 +20,11 @@
 //   GET  /api/admin/billing/workspaces/<id>                  a workspace's balance and its recent entries
 //   POST /api/admin/billing/workspaces/<id>/credit           { "type": "credit" | "correction", "amountMicroUsd", "note",
 //                                                            "requestId" }   (required: it makes a retry one entry)
+//   GET  /api/admin/billing/reviews?state=&page=             the review rows (#603): "open" (default) or "resolved", newest first
+//   POST /api/admin/billing/reviews/resolve                  { "provider", "eventId", "note", "credit"?: { "type"?, "amountMicroUsd", "intentState"? } }
+//                                                            closes a row; with "credit" the workspace of the row is credited
+//                                                            (or corrected) by hand first, once per row
+//   POST /api/admin/billing/reviews/check                    { "provider", "eventId" }: asks the provider about the row's top-up
 //
 // These routes configure billing, so they work while billing is off: only the instance admin reaches them. The routes of
 // billing itself (the webhook, checkout) answer the 404 of a missing path while it is off (`enabled.ts`).
@@ -38,6 +43,11 @@ import type {
   CreditFailure,
 } from "./admin-credit-service.ts";
 import type { BillingAdminService, BillingFailure } from "./admin-service.ts";
+import type {
+  BillingReviewService,
+  ReviewFailure,
+} from "./admin-review-service.ts";
+import { REVIEW_STATES } from "../admin/ui/billing-review-view.ts";
 
 /** A few short fields: the biggest body is well below this. */
 export const BILLING_REQUEST_MAX_BYTES = 16 * 1024;
@@ -51,6 +61,7 @@ export type BillingRouteDependencies = {
   notFound: () => never;
   service: BillingAdminService;
   credit: BillingCreditService;
+  reviews: BillingReviewService;
 };
 
 export type BillingRouteHandlers = {
@@ -61,6 +72,9 @@ export type BillingRouteHandlers = {
   searchWorkspaces(request: Request): Promise<Response>;
   workspace(request: Request, workspaceId: string): Promise<Response>;
   credit(request: Request, workspaceId: string): Promise<Response>;
+  reviews(request: Request): Promise<Response>;
+  resolveReview(request: Request): Promise<Response>;
+  checkReview(request: Request): Promise<Response>;
 };
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -82,7 +96,9 @@ function refusal(
   );
 }
 
-function fromFailure(result: BillingFailure | CreditFailure): Response {
+function fromFailure(
+  result: BillingFailure | CreditFailure | ReviewFailure,
+): Response {
   const { error, ...details } = result;
   delete (details as { ok?: boolean }).ok;
   return refusal(error, details);
@@ -93,6 +109,7 @@ export function createBillingRouteHandlers({
   notFound,
   service,
   credit,
+  reviews,
 }: BillingRouteDependencies): BillingRouteHandlers {
   // The user first. The proxy has turned these away already; this is the second guard.
   async function admin(): Promise<SessionUser | Response> {
@@ -244,6 +261,51 @@ export function createBillingRouteHandlers({
         { ok: true, workspace: found },
         { headers: NO_STORE },
       );
+    },
+
+    async reviews(request) {
+      const who = await admin();
+      if (who instanceof Response) return who;
+      const params = new URL(request.url).searchParams;
+      const state = params.get("state") ?? "open";
+      const page = params.get("page") ?? "1";
+      const issues = [
+        ...(REVIEW_STATES.some((known) => known === state)
+          ? []
+          : [{ field: "state", code: "body_invalid" }]),
+        ...(/^[1-9][0-9]{0,5}$/.test(page)
+          ? []
+          : [{ field: "page", code: "body_invalid" }]),
+      ];
+      if (issues.length > 0) return refusal("invalid_input", { issues });
+      const list = await guarded(() =>
+        reviews.list({
+          state: state === "resolved" ? "resolved" : "open",
+          page: Number(page),
+        }),
+      );
+      if (list instanceof Response) return list;
+      return Response.json(list, { headers: NO_STORE });
+    },
+
+    async resolveReview(request) {
+      const read = await adminWithBody(request);
+      if (read instanceof Response) return read;
+      const result = await guarded(() =>
+        reviews.resolve(read.who.id, read.body),
+      );
+      if (result instanceof Response) return result;
+      if (!result.ok) return fromFailure(result);
+      return Response.json(result, { headers: NO_STORE });
+    },
+
+    async checkReview(request) {
+      const read = await adminWithBody(request);
+      if (read instanceof Response) return read;
+      const result = await guarded(() => reviews.check(read.who.id, read.body));
+      if (result instanceof Response) return result;
+      if (!result.ok) return fromFailure(result);
+      return Response.json(result, { headers: NO_STORE });
     },
   };
 }
