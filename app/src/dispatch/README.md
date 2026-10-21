@@ -186,7 +186,10 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
 7. **`billing_holds`** (#591): while billing is on, the holds of jobs that ended while it was off are released
    (`src/billing/README.md`, "Holds of jobs that ended while billing was off"), at most 500 a run. It reads only the
    billing switch while billing is off. A failure is a failed step (`billing_holds`) and is tried again by the next run.
-8. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
+8. **`balance_mails`** (#506): mails the balance crossings that are due (`src/billing/README.md`, "Balance notices"): a settlement
+   of this sweep or of a superseded job has no response to send after. It reads only the billing switch while billing is off and
+   never throws; a failure is a failed step (`balance_mails`). The answer of the route counts the mails sent (`balanceMailsSent`).
+9. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
    than 23 hours old and the last failure more than an hour old; it is last so that a slow answer from the internet never
    delays the steps above. A fetch that fails records its own failure (`models_dev_fetch_state`) and keeps the rows it has;
    that is not a failed step. The whole step (fetch, lookups and write) has one deadline of `MODELS_DEV_BUDGET_MS` (90 s;

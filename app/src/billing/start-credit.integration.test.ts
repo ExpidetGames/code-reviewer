@@ -124,6 +124,11 @@ async function eraseWorkspace(db: Kysely<Database>, workspaceId: string) {
     .deleteFrom("billing_balances")
     .where("workspace_id", "=", workspaceId)
     .execute();
+  // #506: the start credit is below the default threshold, so the workspace has a (silent) low-balance row.
+  await db
+    .deleteFrom("billing_notifications")
+    .where("workspace_id", "=", workspaceId)
+    .execute();
   await db
     .deleteFrom("integrations")
     .where("workspace_id", "=", workspaceId)

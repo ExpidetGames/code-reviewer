@@ -67,6 +67,9 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     releaseStranded: vi.fn<() => Promise<{ released: number }>>(async () => ({
       released: 0,
     })),
+    deliverDue: vi.fn<() => Promise<{ delivered: number; failed: number }>>(
+      async () => ({ delivered: 0, failed: 0 }),
+    ),
     info: vi.fn<(line: string) => void>(),
     error: vi.fn<(line: string) => void>(),
   };
@@ -85,6 +88,7 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     checks: { reconcileDue: mocks.reconcileDue },
     modelsDev: { refreshIfDue: mocks.refreshIfDue },
     billingHolds: { releaseStranded: mocks.releaseStranded },
+    balanceMails: { deliverDue: mocks.deliverDue },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
     log: { info: mocks.info, error: mocks.error },
   });
@@ -239,6 +243,50 @@ describe("the holds of ended jobs in a run of the sweep (#591)", () => {
     expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
     expect(t.error).toHaveBeenCalledWith(
       "[sweep] SWEEP_STEP_FAILED step=billing_holds",
+    );
+  });
+});
+
+describe("the balance mails in a run of the sweep (#506)", () => {
+  // #506-T16
+  it("delivers the due balance mails after the release of the holds and before the models.dev fetch, and reports how many were sent", async () => {
+    const t = setup();
+    const order: string[] = [];
+    t.releaseStranded.mockImplementationOnce(async () => {
+      order.push("billing_holds");
+      return { released: 1 };
+    });
+    t.deliverDue.mockImplementationOnce(async () => {
+      order.push("balance_mails");
+      return { delivered: 2, failed: 1 };
+    });
+    t.refreshIfDue.mockImplementationOnce(async () => {
+      order.push("models_dev");
+      return { status: "skipped", reason: "not_due" };
+    });
+
+    const report = await t.sweep.run();
+
+    expect(order).toEqual(["billing_holds", "balance_mails", "models_dev"]);
+    expect(report.balanceMailsSent).toBe(2);
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #506-T16
+  it("names a failed step without what it said, and still does the others", async () => {
+    const t = setup();
+    t.deliverDue.mockRejectedValueOnce(
+      new Error("postgres://u:hunter2@db/app"),
+    );
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["balance_mails"]);
+    expect(report.balanceMailsSent).toBe(0);
+    expect(t.refreshIfDue).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+    expect(t.error).toHaveBeenCalledWith(
+      "[sweep] SWEEP_STEP_FAILED step=balance_mails",
     );
   });
 });

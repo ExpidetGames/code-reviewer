@@ -120,6 +120,7 @@ describe("the migrations of both epics", () => {
       "20261021210200_add_limit_query_indexes",
       "20261022010000_add_usage_record_billing_state",
       "20261022020000_add_billing_webhook_events_resolution",
+      "20261022030000_create_billing_notifications",
     ]);
   });
 
@@ -164,6 +165,7 @@ describe("starting the database", () => {
       "app_settings",
       "billing_balances",
       "billing_journal_entries",
+      "billing_notifications",
       "billing_profiles",
       "billing_start_credit_grants",
       "billing_topup_intents",
