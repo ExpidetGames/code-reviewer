@@ -71,6 +71,7 @@ import { migration as createBillingWorkspaceSettings } from "./20261021210100_cr
 import { migration as addLimitQueryIndexes } from "./20261021210200_add_limit_query_indexes.ts";
 import { migration as addUsageRecordBillingState } from "./20261022010000_add_usage_record_billing_state.ts";
 import { migration as addBillingWebhookEventsResolution } from "./20261022020000_add_billing_webhook_events_resolution.ts";
+import { migration as createBillingNotifications } from "./20261022030000_create_billing_notifications.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -152,6 +153,7 @@ const migrations: Record<string, Migration> = {
   "20261022010000_add_usage_record_billing_state": addUsageRecordBillingState,
   "20261022020000_add_billing_webhook_events_resolution":
     addBillingWebhookEventsResolution,
+  "20261022030000_create_billing_notifications": createBillingNotifications,
 };
 
 export const migrationProvider: MigrationProvider = {

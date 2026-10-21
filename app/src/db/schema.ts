@@ -899,6 +899,23 @@ export interface BillingWorkspaceSettingsTable {
 }
 
 /**
+ * What a workspace has been told about its balance (src/billing/README.md, "Balance notifications"; ADR 0006, D9; #506): one row
+ * for each workspace and kind, made by the first crossing.
+ */
+export interface BillingNotificationsTable {
+  workspace_id: string;
+  /** A BalanceNotificationKind (src/billing/balance-notifications.ts): `low` or `empty`. */
+  kind: string;
+  /** `armed`: the next drop into the state is told; `sent`: told (or known) since the last time the balance was out of it. */
+  state: string;
+  /** ISO 8601 text in UTC; null while armed and for a crossing that was not mailed. */
+  sent_at: string | null;
+  /** A BalanceMailDelivery (src/billing/balance-notifications.ts): none, due, sending, delivered or failed. */
+  delivery: string;
+  updated_at: string;
+}
+
+/**
  * The memory of the start credit (src/billing/README.md, ADR 0006, 2.16; #507): one row for each GitHub account that was
  * granted it. Instance level, a numeric id and a workspace id only, and no foreign key: it outlives the workspace.
  */
@@ -1010,6 +1027,7 @@ export interface Database {
   billing_profiles: BillingProfilesTable;
   billing_start_credit_grants: BillingStartCreditGrantsTable;
   billing_workspace_settings: BillingWorkspaceSettingsTable;
+  billing_notifications: BillingNotificationsTable;
   billing_topup_intents: BillingTopupIntentsTable;
   billing_webhook_events: BillingWebhookEventsTable;
   password_reset_tokens: PasswordResetTokensTable;

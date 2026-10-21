@@ -49,6 +49,8 @@ import {
   type WorkspaceBillingService,
 } from "./workspace-page.ts";
 import { getWorkspaceLlm } from "../llm/shared.ts";
+import type { BalanceBannerView } from "../workspace-billing/banner.ts";
+import type { WorkspaceRole } from "../workspaces/roles.ts";
 import { createCheckPaymentLimits, createTopUpLimits } from "./topup-limits.ts";
 import { createTopUpCheckService } from "./topup-check.ts";
 import {
@@ -57,6 +59,9 @@ import {
 } from "./topup-check-http.ts";
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
+import { getMailSender } from "../mail/shared.ts";
+import { loadBalanceBanner } from "./balance-banner.ts";
+import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
@@ -118,6 +123,22 @@ export function billingPageLinkedFor(): Promise<boolean> {
   return isBillingOn(getDatabase());
 }
 
+/**
+ * The balance banner of the pages of a workspace (#506): for an Owner and an Admin while billing is on and the balance is low, zero
+ * or below zero, else null. A database that cannot answer must not break every page of the workspace, so it is no banner.
+ */
+export async function balanceBannerFor(
+  workspace: { id: string; slug: string },
+  role: WorkspaceRole,
+): Promise<BalanceBannerView | null> {
+  try {
+    return await loadBalanceBanner({ db: getDatabase(), workspace, role });
+  } catch {
+    console.error("[billing] BALANCE_BANNER_UNAVAILABLE");
+    return null;
+  }
+}
+
 /** The data of the billing page of a workspace (#505), wired to the running server. */
 export function getWorkspaceBillingService(): WorkspaceBillingService {
   const db = getDatabase();
@@ -172,6 +193,7 @@ export function getBillingWebhookHandler(): (
     db,
     guard: { isOn: () => isBillingOn(db), notFound },
     activeAdapter: createActiveAdapterResolver(db, getBillingAdapterRegistry()),
+    afterApplied: deliverBalanceMails,
   });
 }
 
@@ -196,7 +218,10 @@ export function getBillingAdminService(): BillingAdminService {
 
 /** The manual credit of the admin portal on the running server (#504). */
 export function getBillingCreditService(): BillingCreditService {
-  return createBillingCreditService({ db: getDatabase() });
+  return createBillingCreditService({
+    db: getDatabase(),
+    afterWritten: deliverBalanceMails,
+  });
 }
 
 /**
@@ -241,4 +266,35 @@ export function recordWallClocks(jobIds: readonly string[]): void {
   } catch {
     console.error("[billing] WALL_CLOCK_NOT_RECORDED");
   }
+}
+
+/**
+ * Mails the balance crossings that are due (#506), after the response and best effort: the decision was made in the transaction
+ * that moved the balance, so this only sends. Called when claims ended, when a claim was refused for the balance and when a
+ * billing webhook was applied; a call that finds nothing due does one small read. Never throws, never delays the call, and
+ * logs only a stable code.
+ */
+export function deliverBalanceMails(): void {
+  runAfterResponse(async () => {
+    try {
+      await deliverDueBalanceMailsNow();
+    } catch {
+      console.error("[billing] BALANCE_MAIL_FAILED code=unavailable");
+    }
+  });
+}
+
+/**
+ * The same delivery, awaited, for the timers that have no response to run after: the cron sweep and the hourly timer of a server
+ * (#506), which mail what a settlement without a hook of its own (a sweep, a superseded job) left due. Billing off: a no-op.
+ */
+export function deliverDueBalanceMailsNow(): Promise<{
+  delivered: number;
+  failed: number;
+}> {
+  return deliverDueBalanceMails({
+    db: getDatabase(),
+    mail: getMailSender(),
+    baseUrl: publicAddress(),
+  });
 }
