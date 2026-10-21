@@ -38,6 +38,9 @@ export function toTopUpIntent(
     creditedMicroUsd: Number(row.credited_micro_usd),
     refundedMicroUsd: Number(row.refunded_micro_usd),
     disputedMicroUsd: Number(row.disputed_micro_usd),
+    providerAmount:
+      row.provider_amount === null ? null : Number(row.provider_amount),
+    providerCurrency: row.provider_currency,
     checkoutRef: row.provider_checkout_ref,
     paymentRef: row.provider_payment_ref,
     createdAt: row.created_at,
@@ -71,7 +74,8 @@ export type BillingTopUpIntentsRepository = {
   ): Promise<IntentChange | undefined>;
   /**
    * `pending`/`failed`/`expired` to `paid`, with the payment id and what the payment credited (net, positive). Repeating
-   * it changes nothing, also with another amount: what a payment credited is fixed when it is paid.
+   * it changes nothing, also with another amount: what a payment credited is fixed when it is paid, and so is the amount the
+   * buyer was charged (`providerAmount` and its `providerCurrency`, each set while it is still unknown and never changed).
    */
   markPaid(
     id: string,
@@ -79,6 +83,10 @@ export type BillingTopUpIntentsRepository = {
       paymentRef: string;
       checkoutRef?: string;
       creditedMicroUsd: number;
+      /** What the buyer was charged, gross, in the provider's unit; pinned once and never changed. */
+      providerAmount?: number;
+      /** The lower case ISO 4217 code of `providerAmount`; pinned once and never changed. */
+      providerCurrency?: string;
     },
   ): Promise<IntentChange | undefined>;
   /** `pending` to `failed`. Any other state stays as it is. */
@@ -196,6 +204,8 @@ export function createBillingTopUpIntentsRepository(
       creditedMicroUsd?: number;
       refundedMicroUsd?: number;
       disputedMicroUsd?: number;
+      providerAmount?: number | null;
+      providerCurrency?: string | null;
     },
   ): Promise<TopUpIntent> {
     const row = await trx
@@ -205,6 +215,14 @@ export function createBillingTopUpIntentsRepository(
         credited_micro_usd: patch.creditedMicroUsd ?? intent.creditedMicroUsd,
         refunded_micro_usd: patch.refundedMicroUsd ?? intent.refundedMicroUsd,
         disputed_micro_usd: patch.disputedMicroUsd ?? intent.disputedMicroUsd,
+        provider_amount:
+          patch.providerAmount === undefined
+            ? intent.providerAmount
+            : patch.providerAmount,
+        provider_currency:
+          patch.providerCurrency === undefined
+            ? intent.providerCurrency
+            : patch.providerCurrency,
         provider_checkout_ref: patch.checkoutRef,
         provider_payment_ref: patch.paymentRef,
         updated_at: formatTimestamp(now()),
@@ -241,6 +259,8 @@ export function createBillingTopUpIntentsRepository(
           credited_micro_usd: 0,
           refunded_micro_usd: 0,
           disputed_micro_usd: 0,
+          provider_amount: null,
+          provider_currency: null,
           provider_checkout_ref: null,
           provider_payment_ref: null,
           created_at: timestamp,
@@ -279,7 +299,10 @@ export function createBillingTopUpIntentsRepository(
       });
     },
 
-    markPaid(id, { creditedMicroUsd, ...refs }) {
+    markPaid(
+      id,
+      { creditedMicroUsd, providerAmount, providerCurrency, ...refs },
+    ) {
       return inTransaction(db, async (trx) => {
         const intent = await find(trx, id, true);
         if (intent === undefined) return undefined;
@@ -288,17 +311,41 @@ export function createBillingTopUpIntentsRepository(
             "amount_out_of_range",
             "a payment credits a positive whole amount",
           );
+        if (
+          providerAmount !== undefined &&
+          (!Number.isSafeInteger(providerAmount) || providerAmount <= 0)
+        )
+          throw new TopUpIntentError(
+            "amount_out_of_range",
+            "the amount a buyer was charged is a positive whole number",
+          );
+        if (
+          providerCurrency !== undefined &&
+          !/^[a-z]{3}$/.test(providerCurrency)
+        )
+          throw new TopUpIntentError(
+            "amount_out_of_range",
+            "the currency a buyer was charged in is a lower case code",
+          );
         const merged = await mergeRefs(trx, intent, refs);
+        // Pinned while unknown, never changed: the first told amount (and currency) is the one every later refund is
+        // related to.
+        const pin = intent.providerAmount ?? providerAmount ?? null;
+        const currencyPin = intent.providerCurrency ?? providerCurrency ?? null;
         if (
           intent.state === "paid" &&
           merged.checkoutRef === intent.checkoutRef &&
-          merged.paymentRef === intent.paymentRef
+          merged.paymentRef === intent.paymentRef &&
+          pin === intent.providerAmount &&
+          currencyPin === intent.providerCurrency
         )
           return { intent, changed: false };
         return {
           intent: await write(trx, intent, {
             ...merged,
             state: "paid",
+            providerAmount: pin,
+            providerCurrency: currencyPin,
             // Fixed when the payment is paid; a repeat (the same payment again) keeps it.
             creditedMicroUsd:
               intent.state === "paid"

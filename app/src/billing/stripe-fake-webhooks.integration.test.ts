@@ -209,6 +209,26 @@ describe("the buyer pays a session", () => {
     expect(paid.session.currency).toBe("usd");
     expect(paid.paymentIntent).toMatchObject({ currency: "eur", amount: 2310 });
     expect(paid.charge).toMatchObject({ currency: "eur", amount: 2310 });
+    // The session says what the buyer paid, the way Stripe does since API version 2025-03-31 (#502).
+    expect(paid.session.presentment_details).toEqual({
+      presentment_amount: 2310,
+      presentment_currency: "eur",
+    });
+  });
+
+  // #502-T17
+  it("takes a discount off the subtotal and says so in the total details of the paid session", async () => {
+    const { fake, session } = await setup();
+    const paid = fake.buyer.pay(session.id, {
+      taxAmount: 500,
+      discountAmount: 250,
+    });
+    expect(paid.session).toMatchObject({
+      amount_subtotal: 2500,
+      amount_total: 2750,
+      total_details: { amount_discount: 250, amount_tax: 500 },
+    });
+    expect(paid.paymentIntent).toMatchObject({ amount: 2750 });
   });
 
   // #500-T11

@@ -597,7 +597,30 @@ the 404 of a path that does not exist (#497, ADR 0006). When billing is on and t
 - **A bad signature is `401` with an empty body**, a body the adapter cannot read `400`, a failure `500` (the provider
   redelivers). A signed event that is no event, and a payment that could not be credited (an unknown intent, an amount above what was asked), are answered `200` and not retried: watch the error log for `billing_webhook_event_invalid` and `billing_webhook_needs_review outcome=...`, and review the open rows of `billing_webhook_events` (`review_state = 'open'`). The logs name a code (`billing_webhook_rejected code=signature_invalid`) and never the body.
 
-Which events to register at the provider, and its signing secret, belong to its adapter (Stripe: #502).
+**Stripe (#502).** The route is the one webhook endpoint of the instance; you do not create it by hand. In the admin portal, menu
+**Billing**, "Create webhook endpoint" registers `https://<the App's production domain>/api/billing/webhook` at Stripe (the
+address is the configured `BETTER_AUTH_URL`, never a request header, and must be reachable from the internet over https) with
+the API version the App's calls use and these events, and stores the signing secret it gets back (an endpoint of the other
+environment than the API key's is refused):
+
+| Event | What the App does |
+|---|---|
+| `checkout.session.completed`, `checkout.session.async_payment_succeeded` | Credits the **net** amount of the top-up (the amount without VAT), once per payment, to the workspace of **our own intent row**; a delayed method that is not paid yet is waited for. |
+| `checkout.session.async_payment_failed`, `checkout.session.expired` | Marks the intent `failed` or `expired`. A payment that still arrives pays it. |
+| `refund.created`, `refund.updated`, `refund.failed` | Debits the share of the credit that the refund takes back (one event per refund), or reverses that debit once when the refund fails or is canceled. |
+| `charge.dispute.created`, `charge.dispute.funds_withdrawn` | Debits the disputed share (Stripe takes the money when a dispute opens). |
+| `charge.dispute.closed`, `charge.dispute.funds_reinstated` | A lost dispute stays debited; a won one is reversed once. |
+
+Anything else Stripe sends (for example `payment_intent.succeeded`, `charge.refunded` or `invoice.paid`) is answered `200` and
+recorded `ignored_type`: add no further event types to the endpoint. The signing secret is checked over the exact bytes of the
+body, within five minutes of the signature's time, and the same event id is never applied twice; make sure the clock of the
+servers is right. Nothing may rewrite the body in front of the route (a proxy that re-encodes JSON breaks every signature).
+An event of the other environment than the API key's (a test event at a live instance) is `400`. Stripe retries a `5xx` for
+up to three days (in the sandbox three times): the credit is idempotent per payment, so a retry never credits twice.
+
+**Check payment.** If a webhook is ever lost, an Owner or Admin of the workspace can press "Check payment" on a top-up
+(`POST /api/w/<workspace>/billing/top-ups/<id>/check`): the App asks Stripe for that Checkout Session, once, in that request, and
+applies the answer exactly as the webhook would have. A second press, or the webhook arriving late, changes nothing.
 
 **Outbound from the App when billing runs on Stripe (#501).** A top-up is the one place the App calls out: the App function
 reaches `api.stripe.com` over TLS (port 443; a few calls per top-up, 10 seconds at most per request, no redirect followed). On

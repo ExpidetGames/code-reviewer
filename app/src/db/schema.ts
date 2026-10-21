@@ -913,6 +913,13 @@ export interface BillingTopupIntentsTable {
   /** What refunds took back of it, and what disputes did; together never above the credit (a check). */
   refunded_micro_usd: Generated<number>;
   disputed_micro_usd: Generated<number>;
+  /**
+   * What the buyer was charged, gross, in the provider's unit (cents of the currency paid in), pinned when the payment is
+   * credited; null before that, for an intent paid before the column existed and for a provider that does not say (#502).
+   */
+  provider_amount: number | null;
+  /** The lower case ISO 4217 code of `provider_amount`, pinned with it; null whenever the amount is (#502). */
+  provider_currency: string | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
   updated_at: string;
@@ -934,6 +941,9 @@ export interface BillingWebhookEventsTable {
   received_at: string;
   /** 'open' for an event an operator must review (BILLING_REVIEW_OUTCOMES), 'resolved' once it was; null otherwise. */
   review_state: string | null;
+  /** Whose payment the event is, when the application could attribute it to one of its intents (#502); else null. */
+  workspace_id: string | null;
+  intent_id: string | null;
 }
 
 export interface Database {

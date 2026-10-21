@@ -135,6 +135,8 @@ export type StripeFake = {
       options?: {
         /** Tax added on top of the net amount, in cents. */
         taxAmount?: number;
+        /** A discount taken off the subtotal, in cents. */
+        discountAmount?: number;
         /** What the buyer's card is charged when it is not the session's amount and currency (Adaptive Pricing). */
         charged?: { currency: string; amount: number };
       },
@@ -612,6 +614,9 @@ export async function startStripeFake(
             ...(body.tax_amount === undefined
               ? {}
               : { taxAmount: body.tax_amount }),
+            ...(body.discount_amount === undefined
+              ? {}
+              : { discountAmount: body.discount_amount }),
             ...(body.charged === undefined ? {} : { charged: body.charged }),
           });
           return reply(200, {

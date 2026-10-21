@@ -57,6 +57,13 @@ export const stripeCheckoutSessionSchema = z.object({
   amount_total: z.number().nullable(),
   total_details: z.object({ amount_tax: z.number() }).nullish(),
   currency: text.nullable(),
+  /**
+   * What the buyer saw and paid when Adaptive Pricing localized the price (API version 2025-03-31 and later: the session
+   * itself stays in the currency we priced in). The refunds and disputes of the payment are in this currency.
+   */
+  presentment_details: z
+    .object({ presentment_amount: z.number(), presentment_currency: text })
+    .nullish(),
   expires_at: z.number(),
   created: z.number(),
   livemode: z.boolean(),
@@ -109,6 +116,20 @@ export const stripeRefundSchema = z.object({
   created: z.number(),
 });
 export type StripeRefund = z.infer<typeof stripeRefundSchema>;
+
+export const stripeDisputeSchema = z.object({
+  id: text,
+  object: z.literal("dispute"),
+  amount: z.number(),
+  currency: text,
+  charge: expandableId.nullable(),
+  payment_intent: expandableId.nullish(),
+  /** `warning_*`, `needs_response`, `under_review`, `won`, `lost` (and the old `charge_refunded`). */
+  status: text,
+  livemode: z.boolean().optional(),
+  created: z.number(),
+});
+export type StripeDispute = z.infer<typeof stripeDisputeSchema>;
 
 export const stripeWebhookEndpointSchema = z.object({
   id: text,

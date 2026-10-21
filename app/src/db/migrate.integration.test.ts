@@ -112,6 +112,9 @@ describe("the migrations of both epics", () => {
       "20261021120000_add_billing_balances_reserved_index",
       "20261021130000_create_billing_profiles",
       "20261021150000_create_billing_start_credit_grants",
+      "20261021170000_add_billing_topup_intents_provider_amount",
+      "20261021190000_add_billing_topup_intents_provider_currency",
+      "20261021190100_add_billing_webhook_events_review_context",
     ]);
   });
 

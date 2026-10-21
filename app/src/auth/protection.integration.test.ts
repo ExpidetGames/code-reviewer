@@ -164,6 +164,7 @@ const PROTECTED_DATA_ROUTES = [
   // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/api/w/[workspace]",
   "/api/w/[workspace]/billing/top-ups",
+  "/api/w/[workspace]/billing/top-ups/[id]/check",
   "/api/w/[workspace]/github/connect",
   "/api/w/[workspace]/github/installations",
   "/api/w/[workspace]/github/installations/choose",
