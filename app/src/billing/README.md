@@ -486,8 +486,8 @@ written first**, the Customer and the session. Refusals are `{ "error": <code> }
 `amount_out_of_range`, `intent_id_invalid`, `profile_required`, `business_confirmation_required`, `intent_conflict`,
 `checkout_unavailable`, `rate_limited`, `provider_unavailable` (502: a timeout, a 5xx, a rate limit), `provider_rejected`,
 `provider_not_configured` (503), `vat_id_rejected`. When the provider fails the intent becomes `failed` (a payment that still
-arrives can pay it, as for any failed intent) so none stays pending without a way back; the person tries again with a new
-intent id. A start that crashed between the provider and the database leaves a `pending` intent whose session Stripe expires on
+arrives can pay it, as for any failed intent) so none stays pending without a way back, except one that already has a page
+(a repeated click that Stripe could not answer): the buyer may be on that page. The person tries again with a new intent id. A start that crashed between the provider and the database leaves a `pending` intent whose session Stripe expires on
 its own (#502 turns `checkout.session.expired` into `payment.expired`). The log carries the workspace id and a result code
 (`[billing] TOPUP_STARTED workspace=<id> result=ok`), never an amount, a name, an address, a VAT ID, a customer or a page.
 

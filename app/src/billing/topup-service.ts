@@ -216,8 +216,10 @@ export function createTopUpService({
           url: started.checkout.url,
         });
       } catch (error) {
-        // No intent stays pending without a way back, whatever went wrong.
-        await intents.markFailed(intent.id).catch(() => undefined);
+        // No intent stays pending without a way back, whatever went wrong. One that has a page already (a repeat of a click
+        // that got through) stays: the buyer may be on that page.
+        if (intent.checkoutRef === null)
+          await intents.markFailed(intent.id).catch(() => undefined);
         if (error instanceof BillingAdapterError)
           return refuse(
             ADAPTER_ERROR_TO_CODE[error.code] ?? "provider_rejected",

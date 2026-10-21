@@ -419,6 +419,28 @@ function suite(engine: BillingEngine) {
     });
 
     // #501-T07
+    it("keeps pending an intent whose page already exists when a repeat of the click cannot reach Stripe", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      const first = await t.top({ intentId: INTENT_A });
+      t.fake.faults.failWith(
+        { method: "POST", path: "/v1/checkout/sessions" },
+        503,
+        { times: 10 },
+      );
+
+      const again = await t.top({ intentId: INTENT_A });
+
+      expect(first).toMatchObject({ ok: true });
+      expect(again).toEqual({ ok: false, error: "provider_unavailable" });
+      // The buyer may be on that page right now, and a payment must find its intent waiting.
+      expect(await t.intents.get(INTENT_A)).toMatchObject({
+        state: "pending",
+        checkoutRef: t.fake.checkoutSessions()[0]?.id,
+      });
+    });
+
+    // #501-T07
     it("answers provider_unavailable for a customer that cannot be made, and a rate limit", async () => {
       const t = await start();
       await t.profiles.save(PROFILE);
