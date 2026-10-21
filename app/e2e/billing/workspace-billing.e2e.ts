@@ -16,7 +16,8 @@ import {
   switchBillingOnWithFakeStripe,
 } from "../helpers/stripe-fake";
 
-const CHECKOUT = "https://checkout.example.test/**";
+// The address of a Checkout session at the fake Stripe: the buyer would pay there; the journey serves a stub page instead.
+const CHECKOUT = `${e2eEnv.stripeFakeUrl}/c/pay/**`;
 
 async function signInAsAdmin(page: Page): Promise<void> {
   await page.goto("/login");
@@ -51,7 +52,7 @@ async function payAt(page: Page): Promise<string> {
     }),
   );
   await page.getByRole("button", { name: "Continue to payment" }).click();
-  await page.waitForURL(/checkout\.example\.test\/c\/pay\/cs_/);
+  await page.waitForURL(/\/c\/pay\/cs_/);
   const match = /\/c\/pay\/(cs_[A-Za-z0-9_]+)/.exec(page.url());
   if (match?.[1] === undefined) throw new Error(`No session in ${page.url()}.`);
   return match[1];
@@ -107,8 +108,12 @@ test.describe("the billing page of a workspace", () => {
     // Back from the payment page: it is on its way, and the page says so until the credit arrives.
     await page.goto("/w/default/settings/billing?topup=success");
     await expect(page.getByText(/Your payment is on its way/)).toBeVisible();
+    // (An earlier journey of this app left a payment without a payment page in the list; it has no Check payment.)
     const waiting = page.getByRole("region", { name: "Payments on their way" });
-    await expect(waiting.getByText("$25.00")).toBeVisible();
+    await expect(waiting.getByText("$25.00").first()).toBeVisible();
+    await expect(
+      waiting.getByRole("button", { name: "Check payment" }),
+    ).toHaveCount(1);
     expect(await balanceCents(page)).toBe(before);
 
     // The buyer pays at Stripe; Stripe delivers its signed events to the app's webhook route; the page notices without a reload.
@@ -120,7 +125,9 @@ test.describe("the billing page of a workspace", () => {
       dollars(before + 2_500),
       { timeout: 30_000 },
     );
-    await expect(waiting).toHaveCount(0);
+    await expect(
+      waiting.getByRole("button", { name: "Check payment" }),
+    ).toHaveCount(0);
     const journal = page.getByRole("region", { name: "Journal" });
     await expect(journal.getByText("Credit added").first()).toBeVisible();
     await expect(journal.getByText("+$25.00")).toBeVisible();
@@ -139,8 +146,10 @@ test.describe("the billing page of a workspace", () => {
     await signInAsAdmin(page);
     await page.goto("/w/default/settings/billing");
     const before = await balanceCents(page);
+    const journal = page.getByRole("region", { name: "Journal" });
+    const credited = await journal.getByText("+$10.00").count();
 
-    await page.getByRole("radio", { name: "$10" }).click();
+    await page.getByRole("radio", { name: "$10", exact: true }).click();
     const session = await payAt(page);
     await payFakeSession(session);
     // The events wait at the fake: the webhook is "lost" for now.
@@ -162,9 +171,7 @@ test.describe("the billing page of a workspace", () => {
     expect(delivered.length).toBeGreaterThan(0);
     await page.reload();
     expect(await balanceCents(page)).toBe(before + 1_000);
-    await expect(
-      page.getByRole("region", { name: "Journal" }).getByText("+$10.00"),
-    ).toHaveCount(1);
+    await expect(journal.getByText("+$10.00")).toHaveCount(credited + 1);
   });
 
   // #505-T09
@@ -210,8 +217,8 @@ test.describe("the billing page of a workspace", () => {
       0,
     );
     // Nothing of billing answers: the page and the routes are paths that do not exist.
-    const billingPage = await page.request.get("/w/default/settings/billing");
-    expect(billingPage.status()).toBe(404);
+    await page.goto("/w/default/settings/billing");
+    await expect(page.getByText("This page could not be found.")).toBeVisible();
     for (const path of ["journal", "profile", "monthly-limit"]) {
       const answer = await page.request.get(`/api/w/default/billing/${path}`);
       expect(answer.status(), path).toBe(404);
