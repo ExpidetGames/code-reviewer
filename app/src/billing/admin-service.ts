@@ -418,11 +418,14 @@ export function createBillingAdminService({
           previousEnvironment !== stripeKeyEnvironment(newKey);
         // The switch may have been turned on since the first read: the credentials stay while it is on, except for a new key
         // of the same environment that was checked above. A key of the other one would take the webhook secret and the
-        // endpoint with it and turn billing off without a word.
+        // endpoint with it and turn billing off without a word. A stored key that cannot be read has no environment to compare
+        // with, so that is refused as well (fail closed).
         if (
           latest.enabled &&
           newKey !== undefined &&
-          (checkedEnvironment === undefined || environmentChanges)
+          (checkedEnvironment === undefined ||
+            environmentChanges ||
+            previousEnvironment === null)
         )
           return { refuse: { ok: false, error: "billing_disable_first" } };
         let next = latest;
