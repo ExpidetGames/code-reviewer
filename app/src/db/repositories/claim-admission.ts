@@ -24,6 +24,8 @@ import type { Database, JobsTable } from "../schema.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { readEffectiveEntitlements } from "../../workspaces/effective-entitlements.ts";
+import { keyModeAtClaim } from "../../billing/claim-key-mode.ts";
+import type { KeyMode } from "../../workspaces/entitlements.ts";
 
 /** What the claim did to a job it refused; handed to `onRefused` once the transaction has committed. */
 export type ClaimRefusal = {
@@ -49,6 +51,8 @@ export type ClaimAdmission = {
   hadRecord: boolean;
   /** The entitlements hold a cost limit next to the own key, which nothing reads (#277). */
   ignoredCostLimit: boolean;
+  /** Whose key the job runs on, as far as the claim knows it: what the hold of #498 depends on (`keyModeAtClaim`). */
+  keyMode: KeyMode;
 };
 
 export async function admitClaimedJob(
@@ -62,8 +66,14 @@ export async function admitClaimedJob(
   const hadRecord = own !== undefined;
 
   const entitlements = await readEffectiveEntitlements(trx, workspaceId, now);
+  const keyMode = keyModeAtClaim(entitlements);
   if (entitlements.kind === "unlimited")
-    return { admission: { allow: true }, hadRecord, ignoredCostLimit: false };
+    return {
+      admission: { allow: true },
+      hadRecord,
+      ignoredCostLimit: false,
+      keyMode,
+    };
   const ignoredCostLimit = ignoresCostLimit(entitlements);
 
   const reviewKind = job.review_kind as ProjectReviewKind;
@@ -94,5 +104,6 @@ export async function admitClaimedJob(
     admission: await decideAdmission(entitlements, reviewKind, usage),
     hadRecord,
     ignoredCostLimit,
+    keyMode,
   };
 }

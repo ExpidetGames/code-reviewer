@@ -5,7 +5,11 @@ import {
   PLAN_RETURN_PATH_SECTION,
   planReturnPath,
 } from "../plan-handoff/return-path.ts";
-import { planPagePath, planPageUrl } from "./plan-page.ts";
+import {
+  planPagePath,
+  planPageUrl,
+  workspaceSettingsUrl,
+} from "./plan-page.ts";
 
 describe("the address of the plan page of a workspace", () => {
   // #281-T09
@@ -27,5 +31,17 @@ describe("the address of the plan page of a workspace", () => {
     expect(planReturnPath("acme")).toBe("/w/acme/settings/plan");
     expect(planPagePath("acme")).toBe(planReturnPath("acme"));
     expect(PLAN_RETURN_PATH_SECTION).toBe("/plan");
+  });
+});
+
+describe("the address of the settings of a workspace", () => {
+  // #498-T03
+  it("is the settings of the workspace on the configured address of the app, with a slug that cannot change the path", () => {
+    expect(workspaceSettingsUrl("https://reviews.example.com", "acme")).toBe(
+      "https://reviews.example.com/w/acme/settings",
+    );
+    expect(workspaceSettingsUrl("https://reviews.example.com", "a/../b")).toBe(
+      "https://reviews.example.com/w/a%2F..%2Fb/settings",
+    );
   });
 });

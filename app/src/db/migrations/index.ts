@@ -58,6 +58,8 @@ import { migration as createBillingTopupIntents } from "./20261019170000_create_
 import { migration as addJobsCreatedAtIndex } from "./20261019183000_add_jobs_created_at_index.ts";
 import { migration as createModelsDevCatalog } from "./20261019200000_create_models_dev_catalog.ts";
 import { migration as createModelDecisions } from "./20261020090000_create_model_decisions.ts";
+import { migration as widenRefusalNoticeCodes } from "./20261021090000_widen_refusal_notice_codes.ts";
+import { migration as widenJobVmRunsEndSource } from "./20261021090100_widen_job_vm_runs_end_source.ts";
 import { migration as createBillingProfiles } from "./20261021120000_create_billing_profiles.ts";
 
 const migrations: Record<string, Migration> = {
@@ -119,6 +121,8 @@ const migrations: Record<string, Migration> = {
   "20261019183000_add_jobs_created_at_index": addJobsCreatedAtIndex,
   "20261019200000_create_models_dev_catalog": createModelsDevCatalog,
   "20261020090000_create_model_decisions": createModelDecisions,
+  "20261021090000_widen_refusal_notice_codes": widenRefusalNoticeCodes,
+  "20261021090100_widen_job_vm_runs_end_source": widenJobVmRunsEndSource,
   "20261021120000_create_billing_profiles": createBillingProfiles,
 };
 

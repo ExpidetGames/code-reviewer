@@ -118,6 +118,11 @@ export type UsageRecordsRepository = {
    */
   voidEndedJobs(): Promise<void>;
   /**
+   * `voidEndedJobs` that says whose record it voided (#498: the caller settles their holds in the same transaction).
+   * The ids are those of this workspace's jobs only.
+   */
+  voidEndedJobsWithIds(): Promise<string[]>;
+  /**
    * #397: marks the `reserved` records of these jobs of this workspace as superseded runs (reason `superseded`): the
    * run was replaced by a newer push and is draining. It stays `reserved` until its Worker reports or the drain ends,
    * but it no longer counts as a run of the quota, and `voidEndedJobs` leaves it alone.
@@ -185,6 +190,31 @@ export function createUsageRecordsRepository(
       .where("id", "=", jobId)
       .where("workspace_id", "=", workspaceId)
       .executeTakeFirst();
+  }
+
+  async function voidEnded(): Promise<string[]> {
+    const voided = await db
+      .updateTable("usage_records")
+      .set({ state: "void" })
+      .where("workspace_id", "=", workspaceId)
+      // A run that was superseded while it ran keeps its record until it reports (#397).
+      .where("settled_reason", "is", null)
+      // A literal, not a bound value, so the planner can use the partial index of the reserved records.
+      .where("state", "=", sql.lit("reserved"))
+      // Driven by the few reserved records, each probing its job by primary key.
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom("jobs")
+            .select("jobs.id")
+            .whereRef("jobs.id", "=", "usage_records.job_id")
+            .where("jobs.workspace_id", "=", workspaceId)
+            .where("jobs.status", "in", ENDED_JOB_STATUSES),
+        ),
+      )
+      .returning("job_id")
+      .execute();
+    return voided.map((row) => row.job_id);
   }
 
   return {
@@ -288,28 +318,11 @@ export function createUsageRecordsRepository(
         .execute();
     },
 
-    async voidEndedJobs() {
-      await db
-        .updateTable("usage_records")
-        .set({ state: "void" })
-        .where("workspace_id", "=", workspaceId)
-        // A run that was superseded while it ran keeps its record until it reports (#397).
-        .where("settled_reason", "is", null)
-        // A literal, not a bound value, so the planner can use the partial index of the reserved records.
-        .where("state", "=", sql.lit("reserved"))
-        // Driven by the few reserved records, each probing its job by primary key.
-        .where((eb) =>
-          eb.exists(
-            eb
-              .selectFrom("jobs")
-              .select("jobs.id")
-              .whereRef("jobs.id", "=", "usage_records.job_id")
-              .where("jobs.workspace_id", "=", workspaceId)
-              .where("jobs.status", "in", ENDED_JOB_STATUSES),
-          ),
-        )
-        .execute();
+    voidEndedJobs: async () => {
+      await voidEnded();
     },
+
+    voidEndedJobsWithIds: voidEnded,
 
     async get(jobId) {
       const row = await db

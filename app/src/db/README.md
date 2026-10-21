@@ -425,6 +425,16 @@ models.dev catalog, not owned by a workspace, and **a confirmation is never chan
   unreadable (never as "no confirmation"), and a new confirmation repairs it. Triggers refuse an update, a delete and (Postgres) a truncate, like the billing journal.
   `confirmed_by` and `changed_by` have no foreign key: the history stays as written when a user is deleted.
 
+### Billing at the claim (#498)
+
+Two migrations, both only widen a check, so an app of the previous release on the same database keeps working and no row changes:
+`20261021090000_widen_refusal_notice_codes` (`refusal_notices.code` takes `insufficient_balance` and `balance_negative`) and
+`20261021090100_widen_job_vm_runs_end_source` (`job_vm_runs.end_source` takes `app_stop_unreported` and `claim_wall_clock`). Postgres replaces the
+constraint; SQLite cannot change a check in place, so the table is rebuilt (a new one with the wider check gets every row, the old one is dropped with
+its indexes, the new one takes its name and its indexes back). Nothing references either table. The instance setting `dispatcher_sightings`
+(`{ withVmLifecycleAt, withoutVmLifecycleAt }`) needs no migration. **Retention:** `job_vm_runs` has non-cascading foreign keys to `jobs` and
+`workspaces`; whoever adds retention or workspace deletion must delete its rows first (the review of #524, N-5).
+
 ### Billing journal and balances
 
 Migration `20261019150000_create_billing_journal` (#495; epic #489, ADR 0006, 2.7). It adds two empty tables and touches no

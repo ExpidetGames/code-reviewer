@@ -17,13 +17,24 @@ import {
   STRIPE_ADAPTER_ID,
   type BillingMissingItem,
 } from "./readiness.ts";
+import { billingRatesOf, type BillingRates } from "./rates.ts";
 import { DEFAULT_ADAPTER_ID, readBillingSettings } from "./settings.ts";
+import { isUndecodableText } from "./settings-store.ts";
 
-/** The stored value of `billing_settings`, as it is. The one place that reads it: the switch and the active adapter both ask here. */
-export function readStoredBillingSettings(
+/**
+ * The stored value of `billing_settings`, as it is. The one place that reads it: the switch and the active adapter both ask
+ * here. Text that is no JSON at all is damaged data like any other, so it reads as not set (a claim must not throw for it,
+ * #498); anything else (a lost connection, a busy database) is not a statement about the setting and goes on.
+ */
+export async function readStoredBillingSettings(
   db: Kysely<Database>,
 ): Promise<unknown> {
-  return createInstanceSettingsRepository(db).get("billing_settings");
+  try {
+    return await createInstanceSettingsRepository(db).get("billing_settings");
+  } catch (error) {
+    if (!isUndecodableText(error)) throw error;
+    return undefined;
+  }
 }
 
 export type BillingSwitch = {
@@ -31,6 +42,8 @@ export type BillingSwitch = {
   enabled: boolean;
   /** What stands between the setting and a billing that is on (empty: nothing). Only read while the switch is on. */
   missing: BillingMissingItem[];
+  /** The complete rates (A, both B, the Diff AI reserve), or null when one is missing. Only read while the switch is on. */
+  rates: BillingRates | null;
 };
 
 /**
@@ -42,9 +55,9 @@ export async function readBillingSwitch(
   db: Kysely<Database>,
 ): Promise<BillingSwitch> {
   const stored = await readStoredBillingSettings(db);
-  if (stored === undefined) return { enabled: false, missing: [] };
+  if (stored === undefined) return { enabled: false, missing: [], rates: null };
   const settings = readBillingSettings(stored);
-  if (!settings.enabled) return { enabled: false, missing: [] };
+  if (!settings.enabled) return { enabled: false, missing: [], rates: null };
   const usesStripe =
     (settings.adapter ?? DEFAULT_ADAPTER_ID) === STRIPE_ADAPTER_ID;
   const rows = createSecretsRepository(db);
@@ -55,7 +68,11 @@ export async function readBillingSwitch(
         webhookSecret: (await rows.get("stripe_webhook_secret")) !== undefined,
       }
     : { apiKey: false, webhookSecret: false };
-  return { enabled: true, missing: missingItemsOf({ settings, secrets }) };
+  return {
+    enabled: true,
+    missing: missingItemsOf({ settings, secrets }),
+    rates: billingRatesOf(settings),
+  };
 }
 
 export async function isBillingOn(db: Kysely<Database>): Promise<boolean> {

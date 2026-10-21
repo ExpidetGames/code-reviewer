@@ -23,9 +23,10 @@ describe("the reader of the billing switch", () => {
     );
 
     // The module itself, the wiring that hands it to the routes, the sweep step that asks it, the page's view that shows its
-    // answer, and the first line of every billing route.
+    // answer, the first line of every billing route, and the claim, which tells "off" from "set, but not ready" (#498).
     expect(deciders.sort()).toEqual([
       "admin-service.ts",
+      "claim-billing.ts",
       "enabled.ts",
       "shared.ts",
       "wall-clock.ts",

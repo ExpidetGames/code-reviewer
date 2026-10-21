@@ -24,6 +24,7 @@ import {
   type JobVmRunsRepository,
 } from "../db/repositories/job-vm-runs-repository.ts";
 import type { Database } from "../db/schema.ts";
+import { correctLateMinutes } from "../billing/late-minutes.ts";
 import { VM_NAME_PATTERN } from "../runner-api/contract.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
 import { buildStopRequest } from "./request.ts";
@@ -222,7 +223,14 @@ export function createStopService(options: {
     try {
       const workspaceId = await dispatches.workspaceOf(jobId);
       if (workspaceId === undefined) return;
-      await vmRuns(workspaceId).confirmStopped(jobId, names, at);
+      const changed = await vmRuns(workspaceId).confirmStopped(
+        jobId,
+        names,
+        at,
+      );
+      // #498: the job settled with the backstop; a real end that moves its minutes is a correction of the charge.
+      if (changed > 0)
+        await correctLateMinutes(options.db, workspaceId, jobId, now);
     } catch {
       fail(jobId, "DISPATCH_VM_END_FAILED");
     }

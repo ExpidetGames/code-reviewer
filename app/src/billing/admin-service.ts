@@ -49,6 +49,11 @@ import {
   type BillingRateErrorCode,
 } from "./rates.ts";
 import { createBillingRatesService } from "./rates-service.ts";
+import {
+  canSwitchBillingOnWithDispatcher,
+  DISPATCHER_LACKS_VM_LIFECYCLE,
+  readStoredDispatcherSightings,
+} from "./dispatcher-features.ts";
 import { missingItemsOf, STRIPE_ADAPTER_ID } from "./readiness.ts";
 import {
   DEFAULT_ADAPTER_ID,
@@ -554,6 +559,18 @@ export function createBillingAdminService({
             },
           });
           if (freshCheckFailed) missing.push("connection_check_failed");
+          // The rates are judged above; a Dispatcher that does not report its VMs is read here, through the transaction, so
+          // the sighting and the switch are judged together (#498).
+          const dispatcher = canSwitchBillingOnWithDispatcher(
+            current,
+            await readStoredDispatcherSightings(executor),
+            now(),
+          );
+          if (
+            !dispatcher.ok &&
+            dispatcher.code === DISPATCHER_LACKS_VM_LIFECYCLE
+          )
+            missing.push(DISPATCHER_LACKS_VM_LIFECYCLE);
           // Exactly what was checked, in the transaction that writes the switch: a rate or a credential cannot go in between.
           if (missing.length > 0)
             return {
