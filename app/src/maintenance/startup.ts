@@ -4,6 +4,7 @@
 // (cleanup.ts). Called from `src/instrumentation.ts`. Other environments (the dev server, tests) run no
 // timer. A failing run is logged by its code and tried again at the next hour; it never stops the app.
 import "server-only";
+import { releaseStrandedHoldsWhileBillingOn } from "../billing/stranded-holds.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import { cleanUpExpiredRows, type CleanupResult } from "./cleanup.ts";
@@ -14,6 +15,8 @@ export type CleanupTimer = { stop: () => void };
 
 type StartOptions = {
   run?: () => Promise<CleanupResult>;
+  /** #591: releases the holds of jobs that ended while billing was off, while billing is on. Not given: see `startCleanup`. */
+  releaseHolds?: () => Promise<{ released: number }>;
   /** Calls `callback` every `intervalMs`; returns a function that cancels it. */
   setTimer?: (callback: () => void, intervalMs: number) => () => void;
   log?: Pick<Console, "info" | "error">;
@@ -26,19 +29,31 @@ function defaultSetTimer(callback: () => void, intervalMs: number): () => void {
   return () => clearInterval(timer);
 }
 
-/** Runs the cleanup now and again at every interval. */
+function releaseHoldsOfEndedJobs(): Promise<{ released: number }> {
+  return releaseStrandedHoldsWhileBillingOn(getDatabase(), () => new Date());
+}
+
+/**
+ * Runs the cleanup now and again at every interval, and then the release of the holds of ended jobs (#591: with billing on,
+ * a job that ended in the moment billing was switched on is not seen by the switch-on). The real cleanup comes with the real
+ * release; a `run` that is handed in (a test) comes without it unless a `releaseHolds` is handed in too.
+ */
 export function startCleanup({
-  run = () =>
-    cleanUpExpiredRows(getDatabase(), undefined, {
-      // Read when it matters, never remembered: the admin can add or remove the mail server at any time.
-      mailConfigured: () => getMailSender().isConfigured(),
-    }),
+  run,
+  releaseHolds = run === undefined ? releaseHoldsOfEndedJobs : undefined,
   setTimer = defaultSetTimer,
   log = console,
 }: StartOptions = {}): CleanupTimer {
+  const cleanUp =
+    run ??
+    (() =>
+      cleanUpExpiredRows(getDatabase(), undefined, {
+        // Read when it matters, never remembered: the admin can add or remove the mail server at any time.
+        mailConfigured: () => getMailSender().isConfigured(),
+      }));
   const once = async (): Promise<void> => {
     try {
-      const removed = await run();
+      const removed = await cleanUp();
       if (
         removed.rateLimits +
           removed.unverifiedAccounts +
@@ -54,6 +69,14 @@ export function startCleanup({
     } catch {
       log.error(
         "[maintenance] CLEANUP_FAILED: old rows could not be removed; trying again at the next hour.",
+      );
+    }
+    if (releaseHolds === undefined) return;
+    try {
+      await releaseHolds();
+    } catch {
+      log.error(
+        "[maintenance] BILLING_HOLDS_SWEEP_FAILED: the holds of ended jobs could not be released; trying again at the next hour.",
       );
     }
   };

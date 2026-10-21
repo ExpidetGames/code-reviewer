@@ -525,6 +525,14 @@ of the instance admin (`job-directory-repository.ts`) lists the newest jobs of e
 index each call sorts every job of the instance. `job-directory-repository.integration.test.ts` reads the query plan on
 SQLite.
 
+### The balances that hold something
+
+Migration `20261021120000_add_billing_balances_reserved_index` (#591). It adds the partial index `billing_balances_reserved` on
+`billing_balances (workspace_id) where reserved_micro_usd > 0` (the same on both engines) and touches no column and no row. The sweep
+of stranded holds asks which workspaces have money reserved in every run; the index makes that read grow with the holds that are open,
+not with the number of workspaces (`billing-holds-sweep.ts`; `stranded-holds.integration.test.ts` checks on Postgres that the read
+needs no sequential scan, `add-billing-balances-reserved-index.integration.test.ts` that the migration adds the index and keeps the rows).
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):

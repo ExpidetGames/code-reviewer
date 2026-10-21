@@ -23,6 +23,7 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `claim-billing.ts`                                                                                                                | Billing at the claim (#498): `readClaimBilling` (off, rates incomplete, or on with the rates), `holdOf`, `reserveAtClaim`.                                                                                                                                                                                                                                                                                                                     |
 | `claim-key-mode.ts`                                                                                                               | `keyModeAtClaim`: whose key a job runs on, as far as the claim knows. The seam of #496.                                                                                                                                                                                                                                                                                                                                                        |
 | `settle-jobs.ts`                                                                                                                  | `settleEndedJobs`: prices the jobs a transaction ended and writes a `release` and, unless free, a `usage` entry (#498).                                                                                                                                                                                                                                                                                                                        |
+| `stranded-holds.ts`                                                                                                               | `releaseStrandedHolds` (#591): releases the holds of ended jobs that have none released (a job that ended while billing was off), never charging; run by the switch-on and the sweep.                                                                                                                                                                                                                                                          |
 | `late-minutes.ts`                                                                                                                 | `correctLateMinutes`: one `correction` when the real end of a VM arrives within a day and moves the minutes by more than one (#498).                                                                                                                                                                                                                                                                                                           |
 | `dispatcher-features.ts`                                                                                                          | Which Dispatchers the app has seen (with and without `vm_lifecycle`) and `canSwitchBillingOnWithDispatcher` (#498).                                                                                                                                                                                                                                                                                                                            |
 | `enabled.ts`, `readiness.ts`                                                                                                      | `isBillingOn(db)`: the one reader of the switch (on = the switch is set and the adapter is ready, `readiness.ts`); `readBillingSwitch(db)`: the same with what is missing. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                         |
@@ -289,8 +290,41 @@ journal holds the price.
   (`runner_error`, `launch_failed`, ...) makes it free. That is the behaviour today; whether it should be charged in full instead awaits a
   maintainer decision.
 - A job whose billing was **off at the claim** has no hold and is never settled, even if billing is switched on while it runs. A job whose
-  billing is switched **off after** its claim ends without a settlement (none runs while billing is off): its hold stays in the journal. Releasing
-  such holds when billing is switched back on (or off) is a follow-up of the admin page (#504).
+  billing is switched **off after** its claim ends without a settlement (none runs while billing is off): its hold stays in the journal
+  until it is released (next section).
+
+**Holds of jobs that ended while billing was off (`stranded-holds.ts`, #591).** A run that ended while billing was off is **released, not
+charged**: billing off means no charge, and the customer was shown no price for that time. (This is the safe default; the maintainer
+confirms it on #591. If they want the run charged, the change is the one `release` in `releaseStrandedHolds`: hand the job ids to
+`settleEndedJobs`, the one interpretation of the price.) `releaseStrandedHolds(db, now)` finds the `reservation` entries of **jobs that
+have ended, have no `release` and whose usage record is no longer `reserved`** (`findStrandedHolds`) and gives each hold back with
+the journal's `release`: one `release` entry, no `usage`, so the balance is whole again and `reserved` falls by the hold. A job that is
+still running, queued again after a lost attempt, or already settled is never touched, and neither is a **superseded run that still drains**:
+its job is `superseded` at once, but its usage record stays `reserved` until its Worker reports or the drain window and the grace run out, and
+that settlement (a `release` and the `usage` of what the run used) is still to come; releasing it earlier would lose the charge. Every job that
+ends closes its record in the transaction that ends it, so "the record is no longer `reserved`" means that nothing is left to settle the
+hold. The finder works in two steps so that the work grows with the holds that are open and not with the journal: (1) the workspaces whose
+`reserved_micro_usd` is more than the holds that belong to a `reserved` record explain (the partial index of the reserved records, the unique key
+of the journal, and the partial index `billing_balances_reserved` of the balances that hold something), which is none in steady state;
+(2) only for those workspaces, their open reservations of ended jobs. A workspace whose cache says more is reserved than its holds explain, and
+that has no stranded hold (a job row is gone, a damaged cache), takes step 2 in every run; `verify()` is where it shows. It runs in two places:
+
+- **When billing is switched on**, in the transaction that writes `enabled` (`admin-service.ts`, under `lockBillingSettings`): billing is
+  never on with the money of an ended run still held, and a refused switch-on releases nothing (the transaction does not commit).
+- **In the sweep while billing is on**: the step `billing_holds` of the cron sweep of a hosted deployment, and the hourly timer of a server
+  (`maintenance/startup.ts`), through `releaseStrandedHoldsWhileBillingOn`, which reads only the switch while billing is off. It catches a
+  job that ended in the same moment the switch-on committed (the switch-on's transaction does not see it), and any other leftover.
+
+Both are idempotent and safe next to settlement and claims: every release goes through the journal's `release`, which takes the lock of
+the workspace's balance row first and writes under the key of the job, so a settlement racing it either finds the release (and charges
+nothing) or wrote its own (and the release finds it); a claim only ever takes a hold under another job's key. At most 500 holds a run
+(`STRANDED_HOLDS_BATCH`); the rest goes with the next run. **Lock order.** The balance row of a workspace is locked at the first release
+of its job and held until the transaction ends, so the switch-on (up to 500 holds, in the order workspace, then job) and `settleEndedJobs`
+(the jobs of one transaction, in the same order: workspace, then job) lock the workspaces in one global order, and two such transactions cannot each
+wait for a row the other holds. A hold of a job whose row is gone is not found (the journal keeps opaque job ids).
+The log line is `[billing] BILLING_HOLDS_RELEASED count=<n>`. **`verify()`** counts the stranded holds of the workspace
+(`strandedHoldCount`, `strandedHoldMicroUsd`) and is not `consistent` while there is one. A job that is still running when billing is switched
+off and ends after it is switched on again settles as any other (billing is on when it ends).
 
 **Late minutes (`late-minutes.ts`).** A job settles with the best end of its VM known when it ends (the confirmed stop, else the bounded backstop).
 When the answer to the App's stop call arrives later (`dispatch/stop.ts`, after `confirmStopped`), within a day of the settlement, and the started
@@ -453,8 +487,9 @@ through `applyBillingEvent` (below).
   (`invalid_entry`, `idempotency_conflict`, `already_reversed`, `reversed_entry_not_found`, `reservation_required`,
   `job_entry_required`), answered by `reserve`, `reserveUpTo`, `settle` and `release` (`insufficient_balance`,
   `balance_exhausted`, `balance_negative`, `reservation_released`, `reservation_not_found`, `job_already_released`).
-- **`verify()`** returns the cache and the sum of the journal side by side with the difference of each (cache minus sum) and
-  `consistent`, read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The nightly job
+- **`verify()`** returns the cache and the sum of the journal side by side with the difference of each (cache minus sum), the holds of
+  jobs that ended with nothing left to settle them and without a release (`strandedHoldCount`, `strandedHoldMicroUsd`, #591; a superseded run
+  that still drains is not one) and `consistent` (both differences zero and no stranded hold), read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The nightly job
   that runs it is #510's.
 - **Order.** Every entry has a `seq`, the order it was written in (a Postgres identity, the SQLite row id). `entries()`
   lists by it, so a `release` and its `usage`, written in one millisecond, keep their order. On Postgres a transaction
