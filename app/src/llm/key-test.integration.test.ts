@@ -266,6 +266,7 @@ describe("the limits of the test button", () => {
     const fake = await setup();
     const lines: string[] = [];
     const key = createLlmKeyTestService({
+      pinnedAddresses: async () => [],
       rateLimits: createRateLimitsRepository(db, now),
       baseUrlOf: () => fake.baseUrl,
       now,
@@ -321,6 +322,7 @@ describe("the limits of the test button", () => {
     const fake = await setup();
     const checked: string[] = [];
     const key = createLlmKeyTestService({
+      pinnedAddresses: async () => [],
       rateLimits: createRateLimitsRepository(db),
       baseUrlOf: () => fake.baseUrl,
       adapters: createAdapterRegistry([

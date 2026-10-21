@@ -80,7 +80,23 @@ export type LlmKeyTestResult =
   | { ok: true; verified: false }
   | { ok: false; error: "rate_limited"; retryAfterSeconds: number };
 
+/** The answer of a key test whose catalog provider moved its address after a project of the workspace selected it (#588). */
+const ADDRESS_CHANGED = {
+  ok: false,
+  error: "llm_provider_address_changed",
+  detail: null,
+} as const satisfies LlmKeyTestResult;
+
 export type LlmKeyTestService = {
+  /**
+   * What to answer before the key is needed (#588): the failure when the provider is a catalog provider and a project of the
+   * workspace pinned another address than the catalog trusts now, else null. A caller asks it before it decrypts a stored key, so a
+   * key whose test would be refused is not read for nothing. Counts against no allowance.
+   */
+  preflight(input: {
+    workspaceId: string;
+    provider: LlmProvider | string;
+  }): Promise<LlmKeyTestResult | null>;
   /** Tests the key (the caller has chosen which one: the typed one or the stored one). */
   test(input: {
     workspaceId: string;
@@ -111,17 +127,29 @@ export function createLlmKeyTestService({
   /** The key test of a catalog provider (#555); left out, a provider outside the registry is a provider error. */
   native?: NativeKeyTester;
   /**
-   * The addresses the workspace's projects pinned for a catalog provider (#588); the test of that provider is held to them as a
-   * claim is. Left out, none (a test of another behavior).
+   * The addresses the workspace's projects that use a catalog provider pinned for it (#588); the test of that provider is held to
+   * them as a claim is. Required: a test that has no pins says so with an empty list, so the running server cannot leave it out.
    */
-  pinnedAddresses?: (
+  pinnedAddresses: (
     workspaceId: string,
     slug: string,
   ) => Promise<readonly string[]>;
   now?: () => Date;
   log?: (line: string) => void;
 }): LlmKeyTestService {
+  const isCatalogProvider = (provider: string) =>
+    native !== undefined &&
+    nativeProviderIdOf(provider, llmProviderDescriptors.ids) !== null;
+
   return {
+    async preflight({ workspaceId, provider }) {
+      if (native === undefined || !isCatalogProvider(provider)) return null;
+      const pinned = await pinnedAddresses(workspaceId, provider);
+      if (await native.addressHolds(provider, pinned)) return null;
+      log(`[llm] KEY_TEST_FAILED: ${ADDRESS_CHANGED.error}`);
+      return ADDRESS_CHANGED;
+    },
+
     async test({ workspaceId, provider, apiKey }) {
       const limited = (hit: { windowStartedAt: Date }) =>
         ({
@@ -150,13 +178,12 @@ export function createLlmKeyTestService({
       }
 
       const result =
-        native !== undefined &&
-        nativeProviderIdOf(provider, llmProviderDescriptors.ids) !== null
+        native !== undefined && isCatalogProvider(provider)
           ? await testCatalogKey(
               native,
               provider,
               apiKey,
-              (await pinnedAddresses?.(workspaceId, provider)) ?? [],
+              await pinnedAddresses(workspaceId, provider),
             )
           : await checkLlmKey({
               baseUrl: baseUrlOf(provider as LlmProvider),
@@ -189,7 +216,7 @@ async function testCatalogKey(
     case "unreachable":
       return { ok: false, error: "llm_unreachable", detail: null };
     case "address_changed":
-      return { ok: false, error: "llm_provider_address_changed", detail: null };
+      return ADDRESS_CHANGED;
     case "provider_error":
     case "unavailable":
       return { ok: false, error: "llm_provider_error", detail: null };

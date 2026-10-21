@@ -49,7 +49,7 @@ describe("the key test of a catalog provider", () => {
   it("asks the model list of the trusted address with the key in the header of the provider's wire", async () => {
     const t = setup(provider(), () => new Response("{}", { status: 200 }));
 
-    expect(await t.tester.test("deepseek", KEY)).toBe("accepted");
+    expect(await t.tester.test("deepseek", KEY, [])).toBe("accepted");
     expect(t.calls).toHaveLength(1);
     expect(t.calls[0]?.url).toBe("https://api.deepseek.example/models");
     expect(t.calls[0]?.headers.get("authorization")).toBe(`Bearer ${KEY}`);
@@ -62,7 +62,7 @@ describe("the key test of a catalog provider", () => {
         await setup(
           provider(),
           () => new Response("", { status: code }),
-        ).tester.test("deepseek", KEY),
+        ).tester.test("deepseek", KEY, []),
       ).toBe("rejected");
   });
 
@@ -73,7 +73,7 @@ describe("the key test of a catalog provider", () => {
         await setup(
           provider(),
           () => new Response("", { status: code }),
-        ).tester.test("deepseek", KEY),
+        ).tester.test("deepseek", KEY, []),
       ).toBe("not_verified");
   });
 
@@ -85,9 +85,9 @@ describe("the key test of a catalog provider", () => {
       throw new Error(`connect failed for ${KEY}`);
     });
 
-    expect(await down.tester.test("deepseek", KEY)).toBe("unreachable");
-    expect(await odd.tester.test("deepseek", KEY)).toBe("provider_error");
-    expect(await broken.tester.test("deepseek", KEY)).toBe("unreachable");
+    expect(await down.tester.test("deepseek", KEY, [])).toBe("unreachable");
+    expect(await odd.tester.test("deepseek", KEY, [])).toBe("provider_error");
+    expect(await broken.tester.test("deepseek", KEY, [])).toBe("unreachable");
   });
 
   // #555-T02
@@ -106,12 +106,12 @@ describe("the key test of a catalog provider", () => {
     const missing = setup(undefined, () => new Response("", { status: 200 }));
     const legacy = setup(provider(), () => new Response("", { status: 200 }));
 
-    expect(await blocked.tester.test("deepseek", KEY)).toBe("unavailable");
-    expect(await missing.tester.test("deepseek", KEY)).toBe("unavailable");
-    expect(await missing.tester.test("amazon_bedrock", KEY)).toBe(
+    expect(await blocked.tester.test("deepseek", KEY, [])).toBe("unavailable");
+    expect(await missing.tester.test("deepseek", KEY, [])).toBe("unavailable");
+    expect(await missing.tester.test("amazon_bedrock", KEY, [])).toBe(
       "unavailable",
     );
-    expect(await legacy.tester.test("openrouter", KEY)).toBe("unavailable");
+    expect(await legacy.tester.test("openrouter", KEY, [])).toBe("unavailable");
     for (const t of [blocked, missing, legacy])
       expect(t.fetchImpl).not.toHaveBeenCalled();
   });
@@ -152,6 +152,39 @@ describe("the key test of a catalog provider", () => {
       const t = setup(provider(), () => new Response("{}", { status: 200 }));
 
       expect(await t.tester.test("deepseek", KEY, [])).toBe("accepted");
+    });
+
+    // #588-T46
+    it("says whether the pins hold before any key is touched: every pin is the trusted address, or there is none", async () => {
+      const t = setup(provider(), () => new Response("{}", { status: 200 }));
+      const trusted = "https://api.deepseek.example";
+
+      expect(await t.tester.addressHolds("deepseek", [])).toBe(true);
+      expect(await t.tester.addressHolds("deepseek", [trusted, trusted])).toBe(
+        true,
+      );
+      expect(
+        await t.tester.addressHolds("deepseek", [
+          trusted,
+          "https://api.deepseek-old.example",
+        ]),
+      ).toBe(false);
+      expect(t.fetchImpl).not.toHaveBeenCalled();
+    });
+
+    // #588-T46
+    it("has nothing to hold for a provider that is not usable: the test itself answers unavailable", async () => {
+      const missing = setup(undefined, () => new Response("{}"));
+
+      expect(
+        await missing.tester.addressHolds("deepseek", ["https://old.example"]),
+      ).toBe(true);
+      expect(
+        await setup(provider(), () => new Response("{}")).tester.addressHolds(
+          "openrouter",
+          ["https://old.example"],
+        ),
+      ).toBe(true);
     });
   });
 
@@ -219,7 +252,7 @@ describe("the key test of a catalog provider", () => {
       const { tester, resolveAddresses } = testerFor("10.0.0.7");
 
       try {
-        expect(await tester.test("deepseek", KEY)).toBe("unreachable");
+        expect(await tester.test("deepseek", KEY, [])).toBe("unreachable");
         expect(resolveAddresses).toHaveBeenCalledWith("api.deepseek.com");
         expect(connectedTo).toEqual([]);
         expect(written).not.toHaveBeenCalled();
@@ -236,7 +269,7 @@ describe("the key test of a catalog provider", () => {
       const { tester } = testerFor("93.184.216.34");
 
       try {
-        await tester.test("deepseek", KEY);
+        await tester.test("deepseek", KEY, []);
         expect(connectedTo).toEqual(["93.184.216.34"]);
       } finally {
         connect.mockRestore();

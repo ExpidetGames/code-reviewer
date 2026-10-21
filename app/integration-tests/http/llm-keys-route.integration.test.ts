@@ -16,7 +16,10 @@ import {
   getDatabase,
   initializeDatabaseOnStart,
 } from "../../src/db/startup.ts";
+import { createModelsDevRepository } from "../../src/db/repositories/models-dev-repository.ts";
+import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { KEY_TEST_WORKSPACE_MAX } from "../../src/llm/key-test.ts";
+import { seedRepositories } from "../../src/test-support/review-settings-harness.ts";
 import { LlmAccessSection } from "../../src/llm/ui/llm-access-section.tsx";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
@@ -439,6 +442,83 @@ describe("the test button", () => {
       expect(await limited.json()).toEqual({ error: "rate_limited" });
     }
     expect(t.fake.keyChecks()).toHaveLength(KEY_TEST_WORKSPACE_MAX);
+  });
+});
+
+describe("the test button of a catalog provider, held to the pins of the workspace (#588)", () => {
+  const T1 = "2026-10-19T03:00:00.000Z";
+  const DEEPSEEK_KEY = "sk-deepseek-dummy-0123456789abcdef0123456789abcdef";
+
+  // The route files with the running server's wiring: a project of the workspace pinned the address the catalog trusted when it
+  // selected the provider, the catalog trusts another one now, and the test is refused before the stored key is read.
+  // #588-T50
+  it("answers llm_provider_address_changed, for a stored key and a typed one, and sends nothing to the new address", async () => {
+    const t = await start();
+    const repository = createModelsDevRepository(t.db);
+    await repository.apply({
+      providers: [
+        {
+          id: "deepseek",
+          name: "deepseek",
+          url: {
+            state: "trusted",
+            trustedUrl: "https://api.deepseek-moved.example",
+            pendingUrl: null,
+            problem: null,
+          },
+          urlChangedAt: null,
+          firstSeenAt: T1,
+          unlistedAt: null,
+          updatedAt: T1,
+        },
+      ],
+      models: [
+        {
+          providerId: "deepseek",
+          id: "deepseek-v4-pro",
+          name: "deepseek-v4-pro",
+          family: null,
+          limit: { context: 128_000, output: 8_000 },
+          reasoning: false,
+          temperature: true,
+          attachment: false,
+          modalities: { input: ["text"], output: ["text"] },
+          status: null,
+          cost: { input: "0.66", output: "1.98" },
+          lastUpdated: null,
+          interleaved: null,
+          firstSeenAt: T1,
+          unlistedAt: null,
+          updatedAt: T1,
+        },
+      ],
+    });
+    const { first } = await seedRepositories(t.db, t.alpha.id, "5151");
+    const projects = createProjectsRepository(t.db, t.alpha.id);
+    await projects.activate(first.id);
+    await projects.updateSettingsWith(first.id, () => ({
+      reviewKind: "dynamic",
+      dynamicProvider: "deepseek",
+      dynamicModel: "deepseek-v4-pro",
+      dynamicProviderAddress: "https://api.deepseek.example",
+    }));
+    t.as("admin");
+    expect(
+      (await t.handle.put({ apiKey: DEEPSEEK_KEY }, "deepseek")).status,
+    ).toBe(200);
+
+    const stored = await t.handle.test({}, "deepseek");
+    const typed = await t.handle.test({ apiKey: DEEPSEEK_KEY }, "deepseek");
+
+    for (const response of [stored, typed]) {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "llm_provider_address_changed",
+        detail: null,
+      });
+    }
+    expect(logged.join("\n")).not.toContain(DEEPSEEK_KEY);
   });
 });
 

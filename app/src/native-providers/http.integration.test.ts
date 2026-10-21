@@ -18,7 +18,7 @@ import { llmProviderDescriptors } from "../llm/providers/index.ts";
 const APP_SECRET = "native-http-test-app-secret-0123456789-0123456";
 const KEY = "sk-deepseek-dummy-0123456789abcdef0123456789abcdef";
 
-async function setup(offered: readonly string[] = ["deepseek"]) {
+async function setup(offered: readonly string[] = ["deepseek"], moved = false) {
   const { db } = await createTestDatabase();
   const workspaceId = await addWorkspace(db, "alpha");
   await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
@@ -34,14 +34,36 @@ async function setup(offered: readonly string[] = ["deepseek"]) {
     providers: withNativeProviders(llmProviderDescriptors),
   });
   const tested: Array<{ provider: string; apiKey: string }> = [];
+  const preflighted: string[] = [];
   const tester: LlmKeyTestService = {
+    preflight: ({ provider }) => {
+      preflighted.push(provider);
+      return Promise.resolve(
+        moved
+          ? ({
+              ok: false,
+              error: "llm_provider_address_changed",
+              detail: null,
+            } as const)
+          : null,
+      );
+    },
     test: ({ provider, apiKey }) => {
       tested.push({ provider, apiKey });
       return Promise.resolve({ ok: true, verified: false });
     },
   };
+  // The key service as the route sees it, counting the times a stored key is decrypted.
+  const revealed: string[] = [];
+  const spied: typeof keys = {
+    ...keys,
+    reveal: (provider) => {
+      revealed.push(provider);
+      return keys.reveal(provider);
+    },
+  };
   const handlers = createLlmKeyRouteHandlers({
-    keys,
+    keys: spied,
     tester,
     catalog: {
       providerAvailable: (slug) => Promise.resolve(offered.includes(slug)),
@@ -59,7 +81,7 @@ async function setup(offered: readonly string[] = ["deepseek"]) {
       headers: body === undefined ? {} : { "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  return { handlers, access, request, keys, tested };
+  return { handlers, access, request, keys, tested, revealed, preflighted };
 }
 
 describe("the key routes for a catalog provider", () => {
@@ -181,6 +203,47 @@ describe("the key routes for a catalog provider", () => {
       { provider: "deepseek", apiKey: `${KEY}-typed` },
       { provider: "deepseek", apiKey: KEY },
     ]);
+  });
+
+  // #588-T47
+  it("refuse the test of a provider whose address moved before the stored key is decrypted, for a typed key too", async () => {
+    const t = await setup(["deepseek"], true);
+    await t.keys.save({ provider: "deepseek", apiKey: KEY }, null);
+
+    const stored = await t.handlers.test(
+      t.request("POST", {}),
+      t.access("owner"),
+      "deepseek",
+    );
+    const typed = await t.handlers.test(
+      t.request("POST", { apiKey: `${KEY}-typed` }),
+      t.access("owner"),
+      "deepseek",
+    );
+
+    for (const response of [stored, typed]) {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "llm_provider_address_changed",
+        detail: null,
+      });
+    }
+    expect(t.preflighted).toEqual(["deepseek", "deepseek"]);
+    expect(t.revealed).toEqual([]);
+    expect(t.tested).toEqual([]);
+  });
+
+  // #588-T47
+  it("decrypts the stored key for a test only after the address check passed", async () => {
+    const t = await setup(["deepseek"], false);
+    await t.keys.save({ provider: "deepseek", apiKey: KEY }, null);
+
+    await t.handlers.test(t.request("POST", {}), t.access("owner"), "deepseek");
+
+    expect(t.preflighted).toEqual(["deepseek"]);
+    expect(t.revealed).toEqual(["deepseek"]);
+    expect(t.tested).toEqual([{ provider: "deepseek", apiKey: KEY }]);
   });
 
   // #555-T02

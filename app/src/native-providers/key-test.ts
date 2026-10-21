@@ -29,8 +29,13 @@ export type NativeKeyTester = {
   test(
     slug: string,
     apiKey: string,
-    pinned?: readonly string[],
+    pinned: readonly string[],
   ): Promise<NativeKeyOutcome>;
+  /**
+   * Whether the pins hold, asked before a stored key is decrypted (#588): true when the provider is not one that would be asked, or
+   * when every pin is the address the catalog trusts now. `test` makes the same judgement again before it sends anything.
+   */
+  addressHolds(slug: string, pinned: readonly string[]): Promise<boolean>;
 };
 
 export function createNativeKeyTester({
@@ -47,28 +52,44 @@ export function createNativeKeyTester({
   resolveAddresses?: AddressResolver;
   timeoutMs?: number;
 }): NativeKeyTester {
+  /** The provider of this slug as the test would ask it, or undefined when nothing would be sent. */
+  async function usable(slug: string) {
+    const providerId = nativeProviderIdOf(slug, legacyProviders);
+    if (providerId === null) return undefined;
+    const provider = await models.getProvider(providerId);
+    if (provider === undefined) return undefined;
+    const built = createGenericAdapter(
+      provider,
+      [],
+      resolveAddresses === undefined ? {} : { resolveAddresses },
+    );
+    return built.ok ? { provider, adapter: built.adapter } : undefined;
+  }
+
+  /** #588: the rule of the claim. A pin that is not the address the catalog trusts now means the address moved after a project selected the provider. */
+  const holds = (trusted: string | null, pinned: readonly string[]) =>
+    pinned.every((address) => address === trusted);
+
   return {
-    async test(slug, apiKey, pinned = []) {
-      const providerId = nativeProviderIdOf(slug, legacyProviders);
-      if (providerId === null) return "unavailable";
-      const provider = await models.getProvider(providerId);
-      if (provider === undefined) return "unavailable";
-      const built = createGenericAdapter(
-        provider,
-        [],
-        resolveAddresses === undefined ? {} : { resolveAddresses },
-      );
-      if (!built.ok) return "unavailable";
-      // #588: the rule of the claim. A pin that is not the address the catalog trusts now means the address moved after a project
-      // selected the provider; the key is not sent to the new address, and an Owner or Admin confirms it in the project settings.
-      if (pinned.some((address) => address !== provider.url.trustedUrl))
+    async test(slug, apiKey, pinned) {
+      const found = await usable(slug);
+      if (found === undefined) return "unavailable";
+      // The key is not sent to the new address; an Owner or Admin confirms it in the project settings.
+      if (!holds(found.provider.url.trustedUrl, pinned))
         return "address_changed";
-      const check = await built.adapter.testKey({
+      const check = await found.adapter.testKey({
         apiKey,
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
       return check.outcome;
+    },
+
+    async addressHolds(slug, pinned) {
+      const found = await usable(slug);
+      return (
+        found === undefined || holds(found.provider.url.trustedUrl, pinned)
+      );
     },
   };
 }

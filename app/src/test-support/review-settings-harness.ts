@@ -34,12 +34,14 @@ export const TEST_DEFAULT_SKILL = readDefaultReviewSkill();
 export async function seedRepositories(
   db: Kysely<Database>,
   workspaceId?: string,
+  /** The external id of the integration; a second workspace needs another one (an installation belongs to one workspace). */
+  integrationExternalId = "4242",
 ) {
   const workspace = workspaceId ?? (await defaultWorkspaceId(db));
   const integration = await createIntegrationsRepository(db, workspace).create({
     type: "github_app",
     displayName: "acme",
-    externalId: "4242",
+    externalId: integrationExternalId,
     config: {},
   });
   const repositories = createRepositoriesRepository(db, workspace);
