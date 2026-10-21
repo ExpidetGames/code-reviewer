@@ -98,6 +98,10 @@ export async function settleEndedJobs(
       "review_kind",
     ])
     .where("id", "in", [...new Set(jobIds)])
+    // Workspace first: the balance row of each workspace is locked at its first release and held until the transaction ends,
+    // and the switch-on takes the rows of up to a batch of holds in the same order (`findStrandedHolds`, #591). Two
+    // transactions that lock several workspaces in one global order cannot each wait for what the other holds.
+    .orderBy("workspace_id")
     .orderBy("id")
     .execute();
   for (const job of jobs) {

@@ -19,6 +19,8 @@ import {
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import type { JobOutcome } from "../jobs/job-types.ts";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -39,6 +41,7 @@ import {
 } from "../test-support/postgres-test-database.ts";
 import { SETUP_TEST_SECRET } from "../test-support/setup-harness.ts";
 import { insertUser } from "../test-support/users.ts";
+import { addWorkspace } from "../test-support/workspaces.ts";
 import { createBillingAdminService } from "./admin-service.ts";
 import { settleEndedJobs } from "./settle-jobs.ts";
 import {
@@ -822,6 +825,154 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
       expect(
         (await entriesOf(fixture, job.id)).filter((e) => e.type === "release"),
       ).toHaveLength(1);
+    },
+  );
+  /**
+   * Two workspaces with one ended job and one open hold each, the job ids in the opposite order to the workspace ids (the
+   * job of the workspace that sorts last has the smaller id). The jobs ended without a settlement, as if billing had been off.
+   */
+  async function twoWorkspacesWithOppositeOrders(fixture: JobQueueFixture) {
+    const second = await addWorkspace(fixture.db, "second-591");
+    const [firstWorkspace, lastWorkspace] = [
+      fixture.workspaceId,
+      second,
+    ].sort();
+    if (firstWorkspace === undefined || lastWorkspace === undefined)
+      throw new Error("Two workspaces were expected.");
+    const template = await fixture.db
+      .selectFrom("jobs")
+      .selectAll()
+      .limit(1)
+      .executeTakeFirst();
+    const base =
+      template ??
+      (await (async () => {
+        const created = await fixture.enqueueNew({ prNumber: 800 });
+        return fixture.db
+          .selectFrom("jobs")
+          .selectAll()
+          .where("id", "=", created.id)
+          .executeTakeFirstOrThrow();
+      })());
+    /** A repository of the workspace (a job and its repository belong to the same workspace). */
+    async function repositoryOf(workspaceId: string, externalId: string) {
+      if (workspaceId === fixture.workspaceId) return base.repository_id;
+      const integration = await createIntegrationsRepository(
+        fixture.db,
+        workspaceId,
+        fixture.clock.now,
+      ).create({
+        type: "github_app",
+        displayName: "other",
+        externalId,
+        config: {},
+      });
+      const repositories = createRepositoriesRepository(
+        fixture.db,
+        workspaceId,
+        fixture.clock.now,
+      );
+      await repositories.reconcile(integration.id, [
+        {
+          integrationId: integration.id,
+          externalId,
+          fullName: "other/widgets",
+          url: "https://github.test/other/widgets",
+        },
+      ]);
+      const [repository] = await repositories.list({
+        integrationId: integration.id,
+      });
+      if (repository === undefined) throw new Error("No repository.");
+      return repository.id;
+    }
+    const jobs: Array<{ workspaceId: string; jobId: string }> = [];
+    for (const [index, workspaceId] of [
+      lastWorkspace,
+      firstWorkspace,
+    ].entries()) {
+      const jobId = `job-${String(index)}-591`;
+      await fixture.db
+        .insertInto("jobs")
+        .values({
+          ...base,
+          id: jobId,
+          workspace_id: workspaceId,
+          repository_id: await repositoryOf(workspaceId, "9001"),
+          pr_number: 810 + index,
+          head_sha: sha(String(index)),
+          status: "succeeded",
+          lease_token: null,
+          lease_expires_at: null,
+        })
+        .execute();
+      await fundWorkspace(fixture.db, workspaceId, FUNDING);
+      await createBillingJournalRepository(
+        fixture.db,
+        workspaceId,
+        fixture.clock.now,
+      ).reserve(OWN_KEY_DIFF_HOLD, jobId);
+      jobs.push({ workspaceId, jobId });
+    }
+    // The job of the last workspace has the smaller id.
+    expect(jobs.map((job) => job.jobId)).toEqual(["job-0-591", "job-1-591"]);
+    return { firstWorkspace, lastWorkspace, jobs };
+  }
+
+  /** The workspaces in the order in which their holds were released (the order of the journal's sequence). */
+  async function releaseOrder(fixture: JobQueueFixture) {
+    const rows = await fixture.db
+      .selectFrom("billing_journal_entries")
+      .select("workspace_id")
+      .where("type", "=", "release")
+      .orderBy("seq")
+      .execute();
+    return rows.map((row) => row.workspace_id);
+  }
+
+  // #591-T27
+  run(
+    "the settlement of ended jobs locks the workspaces in the order of the switch-on: by workspace, not by job id",
+    async () => {
+      const fixture = await start();
+      const { firstWorkspace, lastWorkspace, jobs } =
+        await twoWorkspacesWithOppositeOrders(fixture);
+
+      await fixture.db.transaction().execute((trx) =>
+        settleEndedJobs(
+          trx,
+          jobs.map((job) => job.jobId),
+          fixture.clock.now,
+        ),
+      );
+
+      // Two transactions that take the balance rows of several workspaces must take them in one global order, or two of
+      // them can each hold what the other waits for.
+      expect(await releaseOrder(fixture)).toEqual([
+        firstWorkspace,
+        lastWorkspace,
+      ]);
+    },
+  );
+
+  // #591-T28
+  run(
+    "the switch-on releases the holds of several workspaces in the same order: by workspace, then job",
+    async () => {
+      const fixture = await start();
+      const { firstWorkspace, lastWorkspace } =
+        await twoWorkspacesWithOppositeOrders(fixture);
+
+      expect(
+        await fixture.db
+          .transaction()
+          .execute((trx) => releaseStrandedHolds(trx, fixture.clock.now)),
+      ).toEqual({ released: 2 });
+
+      expect(await releaseOrder(fixture)).toEqual([
+        firstWorkspace,
+        lastWorkspace,
+      ]);
     },
   );
 });
