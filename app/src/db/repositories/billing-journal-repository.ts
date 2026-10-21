@@ -35,7 +35,7 @@ import {
   type NewJournalEntry,
   type ReserveRefusal,
 } from "../../billing/journal.ts";
-import { noteBalanceMoved } from "../../billing/balance-notifications.ts";
+import { noteBalanceMovedSafely } from "../../billing/balance-notifications.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
@@ -465,7 +465,7 @@ export function createBillingJournalRepository(
     timestamp: string,
   ): Promise<void> {
     await applyToBalanceRow(trx, entry, timestamp);
-    await noteBalanceMoved(trx, {
+    await noteBalanceMovedSafely(trx, {
       workspaceId,
       move: entry.amountMicroUsd < 0 ? "down" : "up",
       now,

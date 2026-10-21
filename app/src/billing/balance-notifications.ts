@@ -14,8 +14,13 @@
 // follows the next drop. When one drop is into both states only the more serious mail is due.
 //
 // With billing off, or switched on but not ready, nothing is read but the switch and nothing is written.
+//
+// The decision never undoes the money write it follows: callers run it through `noteBalanceMovedSafely` / `guardedBalanceNote`,
+// which put it in a savepoint. Anything that goes wrong in it (a table that cannot be written, a damaged row) is rolled back to
+// the savepoint, logged as `BALANCE_NOTE_FAILED workspace=<id> code=note_failed` (the id and a fixed code, never an address or
+// the text of the database) and skipped; the charge, the credit or the refusal commits, the workspace is simply not told this time.
 import "server-only";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { createBillingNotificationsRepository } from "../db/repositories/billing-notifications-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { BALANCE_NOTIFICATION_KINDS, kindsInStateOf } from "./balance-state.ts";
@@ -61,4 +66,35 @@ export async function noteBalanceMoved(
       mailDue = true;
   }
   return { state: "noted", mailDue };
+}
+
+const SAVEPOINT = "billing_balance_note";
+export const BALANCE_NOTE_FAILED_LOG_CODE = "BALANCE_NOTE_FAILED";
+
+/** Runs `work` in a savepoint of the caller's transaction; a failure is undone, logged with a stable code and swallowed. */
+export async function guardedBalanceNote(
+  trx: Kysely<Database>,
+  workspaceId: string,
+  work: () => Promise<unknown>,
+): Promise<void> {
+  await sql.raw(`savepoint ${SAVEPOINT}`).execute(trx);
+  try {
+    await work();
+    await sql.raw(`release savepoint ${SAVEPOINT}`).execute(trx);
+  } catch {
+    await sql.raw(`rollback to savepoint ${SAVEPOINT}`).execute(trx);
+    console.warn(
+      `[billing] ${BALANCE_NOTE_FAILED_LOG_CODE} workspace=${workspaceId} code=note_failed`,
+    );
+  }
+}
+
+/** `noteBalanceMoved` that cannot fail its caller: see the top of the file. */
+export function noteBalanceMovedSafely(
+  trx: Kysely<Database>,
+  input: { workspaceId: string; move: BalanceMove; now: () => Date },
+): Promise<void> {
+  return guardedBalanceNote(trx, input.workspaceId, () =>
+    noteBalanceMoved(trx, input),
+  );
 }

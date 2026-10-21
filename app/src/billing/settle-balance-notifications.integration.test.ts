@@ -4,7 +4,7 @@
 // to be told is made in the same transaction; a mail server that is down changes neither. On SQLite and, when TEST_DATABASE_URL is set,
 // on Postgres. Made-up rates (test-support/billing-switch.ts) and the default threshold (5 USD).
 import type { Kysely } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingNotificationsRepository } from "../db/repositories/billing-notifications-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -16,6 +16,7 @@ import {
   fundWorkspace,
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
+import { failWritesToBalanceNotifications } from "../test-support/failing-notifications.ts";
 import { createFakeMail } from "../test-support/fake-mail.ts";
 import {
   createJobQueueFixture,
@@ -218,6 +219,46 @@ describe.each(databases)("the notices at a settlement on %s", (name, open) => {
       expect(await notifications(fixture).list()).toEqual([
         expect.objectContaining({ kind: "low", delivery: "failed" }),
       ]);
+    },
+  );
+
+  // #506-T12
+  run(
+    "commits the charge and the job's end when the notification cannot be written, and skips the notification",
+    async () => {
+      const fixture = await start(6 * USD);
+      const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await failWritesToBalanceNotifications(fixture.db);
+        pr += 1;
+        fixture.clock.advance(1);
+        const job = await fixture.enqueueNew({
+          prNumber: pr,
+          reviewKind: "diff",
+        });
+        const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+        if (claimed === null) throw new Error("The job was not claimed.");
+        fixture.clock.advance(60_000);
+
+        await fixture.queue.complete(
+          job.id,
+          claimed.leaseToken,
+          delivered(0.5),
+        );
+
+        expect(await fixture.queue.get(job.id)).toMatchObject({
+          status: "succeeded",
+        });
+        expect(await balanceOf(fixture)).toBeLessThan(5 * USD);
+        expect(await notifications(fixture).list()).toEqual([]);
+        expect(warnings.mock.calls).toEqual([
+          [
+            `[billing] BALANCE_NOTE_FAILED workspace=${fixture.workspaceId} code=note_failed`,
+          ],
+        ]);
+      } finally {
+        warnings.mockRestore();
+      }
     },
   );
 

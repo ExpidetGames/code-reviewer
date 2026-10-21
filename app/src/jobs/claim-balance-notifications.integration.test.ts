@@ -4,7 +4,7 @@
 // transaction, the mail goes out after it). On SQLite and, when TEST_DATABASE_URL is set, on Postgres. Made-up rates and the default
 // threshold (5 USD) of test-support/billing-switch.ts.
 import type { Kysely } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { deliverDueBalanceMails } from "../billing/balance-mail.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingNotificationsRepository } from "../db/repositories/billing-notifications-repository.ts";
@@ -14,6 +14,7 @@ import {
   fundWorkspace,
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
+import { failWritesToBalanceNotifications } from "../test-support/failing-notifications.ts";
 import { createFakeMail } from "../test-support/fake-mail.ts";
 import {
   createJobQueueFixture,
@@ -176,6 +177,34 @@ describe.each(databases)(
         expect(lines).toEqual([
           `[billing] BALANCE_MAIL_FAILED workspace=${fixture.workspaceId} kind=empty code=not_configured recipients=1`,
         ]);
+      },
+    );
+
+    // #506-T14
+    run(
+      "saves the refusal and returns normally from the claim when the notification cannot be written",
+      async () => {
+        const fixture = await start();
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          await failWritesToBalanceNotifications(fixture.db);
+          const job = await enqueue(fixture);
+
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+          expect(await fixture.queue.get(job.id)).toMatchObject({
+            status: "failed",
+            errorCode: "insufficient_balance",
+          });
+          expect(await notifications(fixture).list()).toEqual([]);
+          expect(warnings.mock.calls).toEqual([
+            [
+              `[billing] BALANCE_NOTE_FAILED workspace=${fixture.workspaceId} code=note_failed`,
+            ],
+          ]);
+        } finally {
+          warnings.mockRestore();
+        }
       },
     );
 

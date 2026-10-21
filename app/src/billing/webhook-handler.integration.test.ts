@@ -13,6 +13,7 @@ import {
   type BillingEngine,
 } from "../test-support/billing-engines.ts";
 import { setBillingSwitch } from "../test-support/billing-switch.ts";
+import { failWritesToBalanceNotifications } from "../test-support/failing-notifications.ts";
 import { describeQuery } from "../test-support/query-hook.ts";
 import {
   createFakeBillingAdapter,
@@ -219,6 +220,51 @@ function suite(engine: BillingEngine) {
         { kind: "low", state: "sent", delivery: "none" },
       ]);
       expect(afterApplied).toHaveBeenCalled();
+    });
+
+    // #506-T13
+    it("applies the credit and the refund of a webhook when the notification cannot be written, and still calls the delivery", async () => {
+      const afterApplied = vi.fn();
+      const s = await setup({ afterApplied });
+      const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await failWritesToBalanceNotifications(s.db);
+        await s.journal.charge("job-1", {
+          aiMicroUsd: 22 * USD,
+          infraMicroUsd: 0,
+          minutes: 1,
+          reviewKind: "diff",
+        });
+
+        // A credit that lands below the threshold would mark the state: that write fails, the credit does not.
+        const credit = await s.post(s.handler, fakeWebhookRequest(s.payment));
+        expect(await credit.json()).toEqual({ outcome: "applied" });
+        expect((await s.journal.balance()).balanceMicroUsd).toBe(3 * USD);
+
+        const refund = await s.post(
+          s.handler,
+          fakeWebhookRequest({
+            id: "evt_refund",
+            kind: "refund",
+            created: T,
+            payment: "pi_1",
+            refund: "re_1",
+            amount: 25 * USD,
+            payment_amount: 25 * USD,
+            status: "approved",
+          }),
+        );
+        expect(await refund.json()).toEqual({ outcome: "applied" });
+        expect((await s.journal.balance()).balanceMicroUsd).toBe(-22 * USD);
+        const rows = await s.db
+          .selectFrom("billing_notifications")
+          .select("kind")
+          .execute();
+        expect(rows).toEqual([]);
+        expect(afterApplied).toHaveBeenCalled();
+      } finally {
+        warnings.mockRestore();
+      }
     });
 
     // #506-T08

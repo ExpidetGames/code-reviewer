@@ -14,7 +14,10 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import type { Database } from "../db/schema.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
-import { noteBalanceMoved } from "./balance-notifications.ts";
+import {
+  guardedBalanceNote,
+  noteBalanceMoved,
+} from "./balance-notifications.ts";
 import { readBillingSwitch } from "./enabled.ts";
 import { BILLING_RATES_INCOMPLETE } from "./rates.ts";
 import type { BillingRates } from "./rates.ts";
@@ -118,10 +121,13 @@ export async function noteRefusalForBalance(
   trx: Kysely<Database>,
   input: { workspaceId: string; now: () => Date },
 ): Promise<void> {
-  await createBillingJournalRepository(
-    trx,
-    input.workspaceId,
-    input.now,
-  ).lockBalance();
-  await noteBalanceMoved(trx, { ...input, move: "down" });
+  // In a savepoint (`guardedBalanceNote`): a note that cannot be written must not lose the refusal that was saved before it.
+  await guardedBalanceNote(trx, input.workspaceId, async () => {
+    await createBillingJournalRepository(
+      trx,
+      input.workspaceId,
+      input.now,
+    ).lockBalance();
+    await noteBalanceMoved(trx, { ...input, move: "down" });
+  });
 }
