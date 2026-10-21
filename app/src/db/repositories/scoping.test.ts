@@ -111,7 +111,9 @@ const SCOPED = [
  *   account of an installation, which no workspace owns, so it is asked across workspaces and the row outlives the
  *   workspace. A numeric account id, a workspace id and a time; no name, login or address, so it is not customer data;
  * - billing-webhook-events: the record of provider events by `(provider, event id)` (#497): an id, an outcome and the
- *   order of the states of a refund or dispute. No payload, no amount and no workspace, so it is not customer data.
+ *   order of the states of a refund or dispute, and for an event under review the ids of our own top-up and workspace it belongs to and
+ *   what an operator recorded when closing it (#603: their id, time and note, and the journal entry). No payload, no amount and no
+ *   buyer, so it is not customer data.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",

@@ -719,7 +719,7 @@ paid, an amount above what we asked, a payment that changes the amount of a cred
 (a refund before its payment, or beyond the caps). Each is recorded with `review_state = 'open'` and the subject it was
 about (`payment:<id>`, `refund:<id>`, `dispute:<id>`) and, when the application could attribute the event to one of its intents, the
 **workspace id and the intent id** (`workspace_id`, `intent_id`; null for an event about a payment that is none of ours);
-`listOpenReviews` reads them; the admin view of them is a follow-up of #504 (a go-live blocker), logged
+`listReviews` reads them; the admin view of them is "Payment reviews" (#603, below); each is logged
 at error level with its code (`billing_webhook_needs_review outcome=...`), and answered 200: the provider's retry would
 not change it. The repair is the operator's: a `manual` grant or correction, or "Check payment" (#502) when the provider's
 state is the doubt. A signed event that is not a normalized event (an adapter bug, a provider change) is recorded
@@ -834,7 +834,7 @@ journal. The workspace billing page (#505) states why.
 - An `event_invalid` row is final as well (a redelivery is `duplicate_ignored`), so after an adapter fix "Check payment" or a manual
   grant is the repair. A signed event whose id is not even an id is answered 200 and cannot be recorded: the log line
   `billing_webhook_event_invalid` is the whole record.
-- A review row is closed with `resolveReview(provider, eventId)` of the events repository (N7); the screen for it is a follow-up of #504.
+- A review row is closed with `resolveReview(provider, eventId, resolution)` of the events repository (N7), from the admin page "Payment reviews" (#603, below).
 
 **Check payment.** `POST /api/w/:workspace/billing/top-ups/:id/check` (an Owner or an Admin; same site; 20 per person and workspace
 and 300 for the instance in 10 minutes; the 404 of a missing path while billing is off or for an adapter with no lookup). It finds
@@ -848,6 +848,45 @@ error; a Stripe that is down is `provider_unavailable` (502) and changes nothing
 **What is not done.** The exact split of a payment refunded in several parts (the last refund taking the remainder, note N1: today
 each share is rounded down, so the residue is under one micro-USD per refund) and a reconcile sweep over Stripe's Events API are
 follow-ups.
+
+## Payment reviews (#603)
+
+`/admin/billing/reviews` (the child of Billing in the admin menu; data routes below `/api/admin/billing/reviews`; instance admin only,
+`Cache-Control: no-store`, the guards of `src/admin/README.md`) is the operator's surface for the rows of `billing_webhook_events` with
+`review_state` `open` or `resolved` (`BILLING_REVIEW_OUTCOMES`). Before it, a buyer who paid and was not credited was visible only in the
+error log and the database. The logic is `admin-review-service.ts`, the handlers are in `admin-http.ts`, the page is
+`src/admin/ui/billing-reviews-page.tsx`.
+
+- **The list** (`GET /reviews?state=open|resolved&page=N`, newest first, 25 to a page; the state and the page are in the address of the
+  page). A row shows: the outcome with a plain reading of it (`billing-review-copy.ts`), the provider's object (`payment:<id>`,
+  `refund:<id>`, `dispute:<id>` as stored), the workspace (name and slug) and our top-up when the application could attribute the
+  event (its state, the amount WE asked for, the checkout session and payment recorded on it), and when the event arrived. A payment that
+  is none of ours has no workspace and no top-up. **Nothing else is stored, so nothing else is shown**: no payload, no amount or currency
+  the provider sent, no buyer. (The one amount on the page is our own top-up's, which prefills a credit; the amount a buyer actually paid
+  is looked up in the Stripe dashboard.) The count of open rows is also in the answer, and shown on the Billing entries of the menu and on
+  the "Needs attention" region of the overview (`countOpenBillingReviews`, which counts none when the database cannot answer, so a
+  broken table cannot take the portal down). The oldest-first order of `listOpenReviews` is left for callers that want it; the page lists
+  newest first (an old unresolved row does not hide a new one).
+- **Closing a row** (`POST /reviews/resolve` `{ provider, eventId, note, credit? }`): the note is required (`note_required`,
+  `note_too_long`, 500 characters), the admin is the actor. The row keeps `resolved_at`, `resolved_by`, `resolution_note` and
+  `resolution_entry_id` (migration `20261021230000`); a second close is `review_already_resolved` (409) and the first resolution stays.
+  Closing without `credit` changes no money. The audit line is `billing_review_resolved provider=... event=... actor=<user id>
+entry=<id|none>`: never the note, which may name a customer. A row redelivered by the provider (`intent_unresolved` is the only outcome
+  that lets the same id be handled again) starts over without the earlier resolution.
+- **Crediting from the row** (`credit: { type: "credit" | "correction", amountMicroUsd }`) is the existing manual credit
+  (`admin-credit-service.ts`, the manual adapter, the admin as the actor, the note as the journal note). The workspace is the one **the
+  row names**, never one the caller sends (a body with another key is `invalid_input`; a row with no workspace is
+  `review_workspace_unknown`). The request id is derived from the row (`review-` and a hash of provider and event id), so the row credits
+  at most once: a repeat finds the same journal entry, a repeat with another amount is `request_conflict`, and a close that was lost after
+  the credit is made by the retry with the same entry. Two admins at the same moment write one entry; the second sees
+  `review_already_resolved`. The page prefills a credit with the amount of our top-up when the row is a payment of a top-up that is not
+  paid yet, and offers a signed correction with no amount for a refund or a dispute (the operator types what to take back).
+- **Check payment** (`POST /reviews/check` `{ provider, eventId }`) runs the check of a workspace owner (`topup-check.ts`) for the top-up
+  of the row, as an Owner of the row's workspace, and answers the state of the top-up; the row stays open until the admin closes it
+  (`review_has_no_intent` for a row with no top-up, `payment_check_not_possible` when billing has no adapter that can look a payment up
+  or it is not the provider of the row, `payment_check_unavailable` when the provider could not be asked). Asking is not rate limited:
+  only the instance admin gets here.
+- Out of scope, as in the issue: pruning `billing_webhook_events`, a reconcile sweep over Stripe's Events API, mail notifications.
 
 ## The manual adapter
 
