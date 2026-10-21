@@ -64,6 +64,10 @@ import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import {
+  ensureStartCreditWhileOn,
+  logStartCreditGranted,
+} from "../../billing/start-credit.ts";
 import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import {
   settlementOfOutcome,
@@ -288,6 +292,9 @@ function runningWhere(scope: RunningScope) {
           ]),
     ]);
 }
+
+/** A start credit a claim granted: logged after the claim committed (#507). */
+type GrantedStartCredit = { workspaceId: string; amountMicroUsd: number };
 
 export function createRunnerJobsRepository(
   db: Kysely<Database>,
@@ -728,6 +735,7 @@ export function createRunnerJobsRepository(
     async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       const refusals: ClaimRefusal[] = [];
       const ignoredCostLimits = new Set<string>();
+      const grantedCredits: GrantedStartCredit[] = []; // #507: logged after the commit
       const claimed = await inAlertingTransaction(
         async (trx, unknownCost, endedClaims) => {
           const current = now();
@@ -753,6 +761,7 @@ export function createRunnerJobsRepository(
           const reviewKinds = reviewKindsForEngines(engines);
           // #498: read at most once per claim, and only when a job passes the admission; a claim that finds no job reads nothing.
           let billing: ClaimBilling | undefined;
+          const startCreditTried = new Set<string>();
           // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
           // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
           // connection (SQLite): two claims of one pool cannot both count below the cap and then both
@@ -835,6 +844,26 @@ export function createRunnerJobsRepository(
             // a refused job leaves neither a record nor an entry, and a job handed out has both. Billing off reads no
             // billing table.
             billing ??= await readClaimBilling(trx);
+            // #507: the start credit comes first, in this transaction, so the first job of a new workspace can use it. It is
+            // granted once per GitHub account and only while billing is on and ready (a state that is not "on" reads nothing).
+            // It never fails the claim (a failed grant is skipped and logged), and a workspace is tried once per claim:
+            // a refused job's workspace meets its next candidate job with the same answer.
+            if (
+              billing.state === "on" &&
+              !startCreditTried.has(row.workspace_id)
+            ) {
+              startCreditTried.add(row.workspace_id);
+              const credit = await ensureStartCreditWhileOn(
+                trx,
+                row.workspace_id,
+                () => current,
+              );
+              if (credit.status === "granted")
+                grantedCredits.push({
+                  workspaceId: row.workspace_id,
+                  amountMicroUsd: credit.entry.amountMicroUsd,
+                });
+            }
             const held: ReserveOutcome =
               billing.state === "off"
                 ? { ok: true }
@@ -890,7 +919,11 @@ export function createRunnerJobsRepository(
           return null;
         },
       );
-      // After the commit, and never able to fail it: a claimed job is already running under its lease.
+      // After the commit, and never able to fail it: a claimed job is already running under its lease. A claim inside the
+      // transaction of a caller cannot see that commit: the caller's own code logs nothing for it.
+      if (!db.isTransaction)
+        for (const credit of grantedCredits)
+          logStartCreditGranted(credit.workspaceId, credit.amountMicroUsd);
       for (const refusal of refusals)
         notify("claim_refusal_log_failed", () => options.onRefused?.(refusal));
       for (const workspaceId of ignoredCostLimits)

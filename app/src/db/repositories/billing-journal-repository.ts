@@ -171,6 +171,12 @@ export type BillingJournalRepository = {
   settle(jobId: string, charge: JobCharge): Promise<SettleResult>;
   /** Gives the hold of a job back without a charge (a job that never ran). Repeating it changes nothing. */
   release(jobId: string): Promise<ReleaseResult>;
+  /**
+   * Takes the balance row's lock (Postgres `FOR UPDATE`; SQLite's writer lock is the transaction's) and keeps it until the
+   * transaction ends, for a caller that writes another table before it appends (the start credit's grants table, #507): the
+   * rule is the lock first, then any write. A workspace without a balance row has nothing to lock.
+   */
+  lockBalance(): Promise<void>;
   /** The entry of this workspace with a type and key (a payment, a refund, a dispute, a job), or undefined (#497). */
   findByKey(
     type: BillingEntryType,
@@ -521,6 +527,12 @@ export function createBillingJournalRepository(
   }
 
   return {
+    async lockBalance() {
+      await inTransaction(db, async (trx) => {
+        await lockBalance(trx);
+      });
+    },
+
     async append(entry) {
       requireAppendable(entry);
       const timestamp = formatTimestamp(now());
