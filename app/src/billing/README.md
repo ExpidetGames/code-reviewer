@@ -558,7 +558,9 @@ from it (`customer_adapter`, `customer_ref`, an opaque id). It is customer data:
 (`manage_billing`) read or write it through `profile-service.ts`, a Member gets `forbidden` and nothing, it is never logged,
 and it is sent to the payment provider and nowhere else (a test scans every table and the logs for it). `profile.ts`
 validates what was typed and answers a **field and a code** (`required`, `too_long`, `invalid_characters`,
-`country_unknown`, `vat_id_invalid`, `vat_country_unsupported`), never the value. The VAT ID check is **light**: the shape
+`country_unknown`, `vat_id_invalid`, `vat_country_unsupported`), never the value. Control, line and paragraph separators and
+format characters (a right-to-left override, a zero-width space, a byte order mark) are `invalid_characters`: the text is
+printed on an invoice. The VAT ID check is **light**: the shape
 of the country's number (the EU, Great Britain, Norway, Switzerland; Greece is `EL`); it is never a claim that the number is
 valid, and a country without a shape takes no VAT ID. The business confirmation text is bumped by `BILLING_TERMS_VERSION`.
 
@@ -581,17 +583,30 @@ Capabilities: `merchantOfRecord`, `customAmount`, `partialRefund` (to be confirm
 `{ intentId, url }`; the buyer is sent to `url`. It never credits: the balance changes when the webhook arrives (#502), and the
 success page only says the payment is on its way (#505). The order (`topup-http.ts`, `topup-service.ts`): billing on and an
 adapter with a checkout (else the 404 of a path that does not exist, also for the `manual` adapter), same site, session and
-role (`manage_billing`), a limit of 10 starts per person and workspace in 10 minutes, a JSON body of at most 4 KiB, then the
+role (`manage_billing`), a limit of 10 starts per person and workspace in 10 minutes and of 200 for the whole instance (one API key serves all workspaces; `top_ups_busy`, 503; the counters are shared across app instances and the route **fails closed**: counters that cannot be read are `limits_unavailable`, 503, and Stripe is not asked), a JSON body of at most 4 KiB, then the
 amount, the intent id (a UUID the form makes once per attempt, so a repeated click is the same intent), the profile, the
 **business confirmation at the first top-up** (stored with the time, the user and the terms version), the **intent row
 written first**, the Customer and the session. Refusals are `{ "error": <code> }`: `forbidden`, `amount_invalid`,
 `amount_out_of_range`, `intent_id_invalid`, `profile_required`, `business_confirmation_required`, `intent_conflict`,
-`checkout_unavailable`, `rate_limited`, `provider_unavailable` (502: a timeout, a 5xx, a rate limit), `provider_rejected`,
+`checkout_unavailable`, `rate_limited`, `top_ups_busy`, `limits_unavailable`, `request_in_progress` (409: the same start is still running at Stripe, the 409 `idempotency_key_in_use`; try again in a moment, the intent is untouched), `provider_unavailable` (502: a timeout, a 5xx, a rate limit), `provider_rejected`,
 `provider_not_configured` (503), `vat_id_rejected`. When the provider fails the intent becomes `failed` (a payment that still
 arrives can pay it, as for any failed intent) so none stays pending without a way back, except one that already has a page
-(a repeated click that Stripe could not answer): the buyer may be on that page. The person tries again with a new intent id. A start that crashed between the provider and the database leaves a `pending` intent whose session Stripe expires on
+(judged on the row under the lock, not on what the request read first) or whose same start is still running: the buyer may be on
+that page, or the winning request decides. The person tries again with a new intent id.
+
+**One page per intent.** An intent that has a page (`provider_checkout_ref`) never gets a second one. A repeat of its id asks
+the adapter about the page it has (`resumeTopUpCheckout`, a GET, never a create): while the session is `open` the same address
+is returned, otherwise (paid, expired, unknown to Stripe, or an adapter that cannot ask) the answer is `intent_conflict` and the
+form must use a new intent. Stripe forgets an Idempotency-Key after 24 hours, so without this rule a late repeat would create a
+second payable session and then fail on the unique ref, leaving the first payable and the second unreachable. For the same
+reason an intent that never got a page is failed after `TOP_UP_PENDING_WITHOUT_PAGE_MS` (30 minutes, swept at the next start of
+the workspace and refused on a late repeat): the start that wrote it died before Stripe was asked or before the page was recorded. A start that crashed between the provider and the database leaves a `pending` intent whose session Stripe expires on
 its own (#502 turns `checkout.session.expired` into `payment.expired`). The log carries the workspace id and a result code
 (`[billing] TOPUP_STARTED workspace=<id> result=ok`), never an amount, a name, an address, a VAT ID, a customer or a page.
+
+**Go-live order.** The route for the billing-profile form (#505) **must not ship before #502** (the webhook and the
+crediting). Once a profile can be saved, the top-up route becomes usable (`profile_required` is the only thing keeping a
+buyer out today), and a payment made before #502 is taken by Stripe and credited to nobody. The rule is also on #510 (go-live).
 
 **What is not here.** The pages (#505, which also needs a route for the profile form: `profile-service.ts` is ready for it),
 the webhook, refunds and chargebacks (#502), the sandbox plan for invoices and VAT (#503), auto-recharge.
