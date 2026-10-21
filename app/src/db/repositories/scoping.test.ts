@@ -82,6 +82,8 @@ const SCOPED = [
  *   lists, the answer names its own workspace, and the one statement that uses a token up and the check of the member's
  *   role both run on the workspace the token was made for. Making a token goes through the scoped plan handoff tokens
  *   repository; the clean-up deletes expired rows of every workspace and reads nothing;
+ * - own-key-count: how many workspaces hold a stored own LLM key (#504), for the instance admin who is about to switch billing
+ *   on; it counts across workspaces, takes no argument, and returns one number, no row and no name;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds;
@@ -124,6 +126,7 @@ const INSTANCE_LEVEL = [
   "model-enablements-repository.ts",
   "model-price-confirmations-repository.ts",
   "models-dev-repository.ts",
+  "own-key-count-repository.ts",
   "plan-handoff-redeem-repository.ts",
   "rate-limits-repository.ts",
   "refusal-notices-sweep.ts",

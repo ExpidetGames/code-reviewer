@@ -3,7 +3,14 @@
 import { describe, expect, it } from "vitest";
 import {
   BILLING_RATE_ERROR_CODES,
+  DEFAULT_HOURLY_REVIEW_LIMIT,
+  DEFAULT_LOW_BALANCE_MICRO_USD,
+  DEFAULT_START_CREDIT_MICRO_USD,
   DIFF_AI_RESERVE_MAX_MICRO_USD,
+  HOURLY_REVIEW_LIMIT_MAX,
+  LOW_BALANCE_MAX_MICRO_USD,
+  START_CREDIT_MAX_MICRO_USD,
+  billingNumbersOf,
   FACTOR_A_MAX,
   FACTOR_A_MIN,
   MINUTE_RATE_MAX_MICRO_USD,
@@ -164,6 +171,9 @@ describe("a patch of the rates", () => {
       "factor_invalid",
       "rate_invalid",
       "reserve_invalid",
+      "start_credit_invalid",
+      "low_balance_invalid",
+      "hourly_limit_invalid",
     ]);
   });
 });
@@ -232,5 +242,67 @@ describe("whether the rates are complete", () => {
         minuteRateMicroUsd: { diff: 0, dynamic: 0 },
       }),
     ).toStrictEqual({ ok: true });
+  });
+});
+
+describe("the start credit, the low-balance threshold and the hourly brake", () => {
+  // #504-T09
+  it.each([
+    ["startCreditMicroUsd", [0, 2_000_000, START_CREDIT_MAX_MICRO_USD]],
+    ["lowBalanceMicroUsd", [0, 5_000_000, LOW_BALANCE_MAX_MICRO_USD]],
+    ["hourlyReviewLimit", [1, 60, HOURLY_REVIEW_LIMIT_MAX]],
+  ] as const)("accepts %s within its bounds", (field, values) => {
+    for (const value of values)
+      expect(validateRatesPatch({ [field]: value })).toStrictEqual({
+        ok: true,
+        value: { [field]: value },
+      });
+  });
+
+  // #504-T09
+  it.each([
+    [
+      "startCreditMicroUsd",
+      "start_credit_invalid",
+      [-1, START_CREDIT_MAX_MICRO_USD + 1],
+    ],
+    [
+      "lowBalanceMicroUsd",
+      "low_balance_invalid",
+      [-1, LOW_BALANCE_MAX_MICRO_USD + 1],
+    ],
+    [
+      "hourlyReviewLimit",
+      "hourly_limit_invalid",
+      [0, -3, HOURLY_REVIEW_LIMIT_MAX + 1],
+    ],
+  ] as const)("refuses %s out of its bounds with %s", (field, code, values) => {
+    for (const value of [...values, 1.5, "2000000", null, Number.NaN])
+      expect(validateRatesPatch({ [field]: value })).toStrictEqual({
+        ok: false,
+        code,
+        field,
+      });
+  });
+
+  // #504-T09
+  it("has a default only where the decision record gives one", () => {
+    expect(billingNumbersOf({})).toStrictEqual({
+      startCreditMicroUsd: DEFAULT_START_CREDIT_MICRO_USD,
+      lowBalanceMicroUsd: DEFAULT_LOW_BALANCE_MICRO_USD,
+      hourlyReviewLimit: DEFAULT_HOURLY_REVIEW_LIMIT,
+    });
+    expect(DEFAULT_START_CREDIT_MICRO_USD).toBe(2_000_000);
+    expect(
+      billingNumbersOf({
+        startCreditMicroUsd: 0,
+        lowBalanceMicroUsd: 7_000_000,
+        hourlyReviewLimit: 12,
+      }),
+    ).toStrictEqual({
+      startCreditMicroUsd: 0,
+      lowBalanceMicroUsd: 7_000_000,
+      hourlyReviewLimit: 12,
+    });
   });
 });
