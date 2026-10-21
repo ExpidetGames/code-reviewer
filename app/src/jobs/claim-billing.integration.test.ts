@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The hold at claim (#498; ADR 0006, 2.8): while billing is on, the claim takes a hold from the workspace's balance in the
-// same transaction that reserves the usage record, or refuses the job without leaving a record or an entry. On SQLite and,
-// when TEST_DATABASE_URL is set, on Postgres. Made-up rates (test-support/billing-switch.ts): A = 5.0, B(Diff) = 13,000,
-// B(Dynamic) = 16,000 micro-USD a minute, so a Diff hold is 25 minutes x 13,000 = 325,000 on the workspace's own key, and a
-// Dynamic hold on the operator's key is 25 x 16,000 + 1,000,000 x 5.0 = 5,400,000.
+// Billing at the claim (#605, which replaces the hold of #498; ADR 0006, 2.8): while billing is on, the claim starts a job
+// whenever the workspace's balance is above zero and holds nothing, or refuses it without leaving a record or an entry. The
+// price is charged when the job ends (settle-jobs.integration.test.ts). On SQLite and, when TEST_DATABASE_URL is set, on
+// Postgres. Made-up rates (test-support/billing-switch.ts): A = 5.0, B(Diff) = 13,000, B(Dynamic) = 16,000 micro-USD a minute.
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
@@ -30,8 +29,8 @@ import type { ClaimRefusal } from "../db/repositories/claim-admission.ts";
 import { createRunnerQueue } from "./runner-queue.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
-const DIFF_OWN_HOLD = 325_000;
-const DYNAMIC_MANAGED_HOLD = 5_400_000;
+/** One cent: far below what any hold of #498 would have been. */
+const ONE_CENT = 10_000;
 
 const databases: Array<
   [string, (() => Promise<Kysely<Database>>) | undefined]
@@ -61,7 +60,7 @@ function entitlements(keyMode: "own" | "managed"): EntitlementsData {
   };
 }
 
-describe.each(databases)("the hold at claim on %s", (name, open) => {
+describe.each(databases)("billing at the claim without a hold on %s", (name, open) => {
   const run = name === "Postgres" && open === undefined ? it.skip : it;
 
   async function start(
@@ -109,91 +108,57 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
     return fixture.enqueueNew({ prNumber: pr, reviewKind });
   }
 
-  // #498-T01
+  const entryTypes = async (fixture: JobQueueFixture) =>
+    (await journalOf(fixture).entries({ limit: 20 })).entries.map(
+      (entry) => entry.type,
+    );
+
+  // #605-T01
   run(
-    "reserves the usage record and a hold of the longest minutes and the budget for a Dynamic job on the operator's key",
+    "starts a Dynamic job on the operator's key with one cent of balance and holds nothing",
     async () => {
       const fixture = await start();
       await setKeyMode(fixture, "managed");
-      await fundWorkspace(fixture.db, fixture.workspaceId, 10_000_000);
+      await fundWorkspace(fixture.db, fixture.workspaceId, ONE_CENT);
       const job = await enqueue(fixture, "dynamic");
 
       const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
 
       expect(claimed?.job.id).toBe(job.id);
       expect(await usageRecords(fixture)).toEqual([
-        expect.objectContaining({ job_id: job.id, state: "reserved" }),
+        expect.objectContaining({
+          job_id: job.id,
+          state: "reserved",
+          billing_state: "open",
+        }),
       ]);
-      const { entries } = await journalOf(fixture).entries({ limit: 10 });
-      expect(
-        entries.map((entry) => [entry.type, entry.amountMicroUsd]),
-      ).toEqual([
-        ["reservation", -DYNAMIC_MANAGED_HOLD],
-        ["top_up", 10_000_000],
-      ]);
-      expect(entries[0]).toMatchObject({ jobId: job.id, refKey: job.id });
+      // No reservation: the only entry is the top-up, and the balance and the reserve are untouched.
+      expect(await entryTypes(fixture)).toEqual(["top_up"]);
       expect(await journalOf(fixture).balance()).toEqual({
-        balanceMicroUsd: 10_000_000 - DYNAMIC_MANAGED_HOLD,
-        reservedMicroUsd: DYNAMIC_MANAGED_HOLD,
+        balanceMicroUsd: ONE_CENT,
+        reservedMicroUsd: 0,
+      });
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
       });
     },
   );
 
-  // #498-T02
-  run(
-    "holds the minutes only for a job on the workspace's own key",
-    async () => {
-      const fixture = await start();
-      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
-      const job = await enqueue(fixture);
-
-      await fixture.queue.claimNext("runner-a", ENGINES);
-
-      const reservation = await journalOf(fixture).findByKey(
-        "reservation",
-        job.id,
-      );
-      expect(reservation?.amountMicroUsd).toBe(-DIFF_OWN_HOLD);
-    },
-  );
-
-  // #498-T02
-  run(
-    "holds the minutes only for an own-key Dynamic job, whatever its cost limit",
-    async () => {
-      const fixture = await start();
-      await setKeyMode(fixture, "own");
-      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
-      const job = await enqueue(fixture, "dynamic");
-
-      await fixture.queue.claimNext("runner-a", ENGINES);
-
-      expect(
-        (await journalOf(fixture).findByKey("reservation", job.id))
-          ?.amountMicroUsd,
-      ).toBe(-25 * 16_000);
-    },
-  );
-
-  // #498-T01
-  run("holds the AI reserve of a Diff job on the operator's key", async () => {
+  // #605-T01
+  run("starts a Diff job on the workspace's own key with one cent", async () => {
     const fixture = await start();
-    await setKeyMode(fixture, "managed");
-    await fundWorkspace(fixture.db, fixture.workspaceId, 10_000_000);
+    await fundWorkspace(fixture.db, fixture.workspaceId, ONE_CENT);
     const job = await enqueue(fixture);
 
-    await fixture.queue.claimNext("runner-a", ENGINES);
+    const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
 
-    // 25 x 13,000 for the minutes, 150,000 x 5.0 for the AI.
-    expect(
-      (await journalOf(fixture).findByKey("reservation", job.id))
-        ?.amountMicroUsd,
-    ).toBe(-(325_000 + 750_000));
+    expect(claimed?.job.id).toBe(job.id);
+    expect(await entryTypes(fixture)).toEqual(["top_up"]);
   });
 
-  // #498-T03
+  // #605-T02
   run(
-    "refuses a job when nothing can be held, leaving no record and no entry, and reports it for a notice",
+    "refuses a job when the balance is zero, leaving no record and no entry, and reports it for a notice",
     async () => {
       const refusals: ClaimRefusal[] = [];
       const fixture = await start({
@@ -224,31 +189,32 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
     },
   );
 
-  // #498-T03
+  // #605-T02
   run(
-    "holds no more than the balance when the balance is below the hold (decision 5 of #489)",
+    "refuses a job when a balance that was positive is spent down to exactly zero",
     async () => {
       const fixture = await start();
-      await fundWorkspace(fixture.db, fixture.workspaceId, 100_000);
+      await fundWorkspace(fixture.db, fixture.workspaceId, ONE_CENT);
+      await journalOf(fixture).append({
+        type: "correction",
+        amountMicroUsd: -ONE_CENT,
+        refKey: "spent",
+        note: "spent",
+      });
       const job = await enqueue(fixture);
 
-      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+      expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
 
-      expect(claimed?.job.id).toBe(job.id);
-      expect(
-        (await journalOf(fixture).findByKey("reservation", job.id))
-          ?.amountMicroUsd,
-      ).toBe(-100_000);
-      expect(await journalOf(fixture).balance()).toEqual({
-        balanceMicroUsd: 0,
-        reservedMicroUsd: 100_000,
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "insufficient_balance",
       });
     },
   );
 
-  // #498-T04
+  // #605-T03
   run(
-    "refuses a job when the balance is below zero, also when the hold is zero",
+    "refuses a job when the balance is below zero, also when the job cannot cost anything",
     async () => {
       const fixture = await start({
         rates: {
@@ -278,85 +244,62 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
     },
   );
 
-  // #498-T04
-  run("lets a job with a hold of zero run on a balance of zero", async () => {
-    const fixture = await start({
-      rates: {
-        factorA: 50_000,
-        minuteRateMicroUsd: { diff: 0, dynamic: 16_000 },
-        diffAiReserveMicroUsd: 150_000,
-      },
-    });
-    const job = await enqueue(fixture);
-
-    const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
-
-    expect(claimed?.job.id).toBe(job.id);
-    expect(await journalOf(fixture).findByKey("reservation", job.id)).toBe(
-      undefined,
-    );
-    expect(await usageRecords(fixture)).toHaveLength(1);
-  });
-
-  // #498-T05
+  // #605-T03
   run(
-    "lets exactly one of two claims at the same moment take the last of a balance",
+    "lets a job that cannot cost anything (own key, a rate of zero) run on a balance of zero",
     async () => {
-      const fixture = await start();
-      await fundWorkspace(fixture.db, fixture.workspaceId, DIFF_OWN_HOLD);
-      const one = await enqueue(fixture);
-      const two = await enqueue(fixture);
-
-      // Two connections of one pool on Postgres; on SQLite the database lock serializes them (the processes test
-      // races two real processes).
-      const answers = await Promise.all([
-        fixture.queue.claimNext("runner-a", ENGINES),
-        fixture.queue.claimNext("runner-b", ENGINES),
-      ]);
-
-      expect(answers.filter((answer) => answer !== null)).toHaveLength(1);
-      const statuses = await Promise.all(
-        [one, two].map(
-          async (job) => (await fixture.queue.get(job.id))?.status,
-        ),
-      );
-      expect(statuses.sort()).toEqual(["failed", "running"]);
-      expect(await usageRecords(fixture)).toHaveLength(1);
-      expect(await journalOf(fixture).verify()).toMatchObject({
-        consistent: true,
-        balanceMicroUsd: 0,
+      const fixture = await start({
+        rates: {
+          factorA: 50_000,
+          minuteRateMicroUsd: { diff: 0, dynamic: 16_000 },
+          diffAiReserveMicroUsd: 150_000,
+        },
       });
+      const job = await enqueue(fixture);
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+      expect(claimed?.job.id).toBe(job.id);
+      expect(await entryTypes(fixture)).toEqual([]);
+      expect(await usageRecords(fixture)).toHaveLength(1);
     },
   );
 
-  // #498-T05
+  // #605-T04
   run(
-    "never lets many claims at the same moment hold more than the balance",
+    "starts every one of many jobs claimed at the same moment on a balance of one cent, which stays as it is",
     async () => {
       const fixture = await start();
-      await fundWorkspace(fixture.db, fixture.workspaceId, DIFF_OWN_HOLD * 3);
+      await fundWorkspace(fixture.db, fixture.workspaceId, ONE_CENT);
       for (let index = 0; index < 8; index += 1) await enqueue(fixture);
 
+      // Two or more connections of one pool on Postgres; on SQLite the database lock serializes them (the processes test
+      // races real processes).
       const answers = await Promise.all(
         Array.from({ length: 8 }, (_, index) =>
           fixture.queue.claimNext(`runner-${String(index)}`, ENGINES),
         ),
       );
 
-      expect(answers.filter((answer) => answer !== null)).toHaveLength(3);
+      expect(answers.filter((answer) => answer !== null)).toHaveLength(8);
+      expect(await usageRecords(fixture)).toHaveLength(8);
+      expect(await entryTypes(fixture)).toEqual(["top_up"]);
       expect(await journalOf(fixture).balance()).toEqual({
-        balanceMicroUsd: 0,
-        reservedMicroUsd: DIFF_OWN_HOLD * 3,
+        balanceMicroUsd: ONE_CENT,
+        reservedMicroUsd: 0,
+      });
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
       });
     },
   );
 
-  // #498-T01
+  // #605-T05
   run(
-    "takes the hold once for a job claimed again after a lost lease",
+    "writes no entry for a job claimed again after a lost lease, and keeps its one record",
     async () => {
       const fixture = await start();
-      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
+      await fundWorkspace(fixture.db, fixture.workspaceId, ONE_CENT);
       const job = await enqueue(fixture);
       const first = await fixture.queue.claimNext("runner-a", ENGINES);
       expect(first?.job.id).toBe(job.id);
@@ -369,12 +312,38 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
       const second = await fixture.queue.claimNext("runner-b", ENGINES);
 
       expect(second?.job.id).toBe(job.id);
-      expect(await usageRecords(fixture)).toHaveLength(1);
-      expect(
-        (await journalOf(fixture).entries({ limit: 10 })).entries.map(
-          (entry) => entry.type,
-        ),
-      ).toEqual(["reservation", "top_up"]);
+      expect(await usageRecords(fixture)).toEqual([
+        expect.objectContaining({ job_id: job.id, billing_state: "open" }),
+      ]);
+      expect(await entryTypes(fixture)).toEqual(["top_up"]);
+    },
+  );
+
+  // #605-T06
+  run(
+    "marks a job claimed again with billing on as billed when its first claim was made with billing off",
+    async () => {
+      const fixture = await start();
+      await fundWorkspace(fixture.db, fixture.workspaceId, ONE_CENT);
+      await setBillingSwitch(fixture.db, false);
+      const job = await enqueue(fixture);
+      const first = await fixture.queue.claimNext("runner-a", ENGINES);
+      expect(await usageRecords(fixture)).toEqual([
+        expect.objectContaining({ billing_state: null }),
+      ]);
+      await fixture.queue.release(
+        job.id,
+        first?.leaseToken ?? "",
+        "worker_exited",
+      );
+      await setBillingSwitch(fixture.db, true);
+
+      const second = await fixture.queue.claimNext("runner-b", ENGINES);
+
+      expect(second?.job.id).toBe(job.id);
+      expect(await usageRecords(fixture)).toEqual([
+        expect.objectContaining({ billing_state: "open" }),
+      ]);
     },
   );
 
@@ -393,43 +362,6 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
         errorCode: "billing_rates_incomplete",
       });
       expect(await usageRecords(fixture)).toEqual([]);
-    },
-  );
-
-  // #498-T22
-  run(
-    "refuses a job claimed again after its hold was released with billing_hold_released, and holds nothing more",
-    async () => {
-      const fixture = await start();
-      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
-      const job = await enqueue(fixture);
-      const first = await fixture.queue.claimNext("runner-a", ENGINES);
-      await fixture.queue.release(
-        job.id,
-        first?.leaseToken ?? "",
-        "worker_exited",
-      );
-      // The hold is given back while the job waits again (a settlement that ran for it).
-      expect(await journalOf(fixture).release(job.id)).toMatchObject({
-        ok: true,
-      });
-
-      const second = await fixture.queue.claimNext("runner-b", ENGINES);
-
-      expect(second).toBeNull();
-      expect(await fixture.queue.get(job.id)).toMatchObject({
-        status: "failed",
-        errorCode: "billing_hold_released",
-      });
-      expect(
-        (await journalOf(fixture).entries({ limit: 10 })).entries.map(
-          (entry) => entry.type,
-        ),
-      ).toEqual(["release", "reservation", "top_up"]);
-      expect(await journalOf(fixture).balance()).toEqual({
-        balanceMicroUsd: 1_000_000,
-        reservedMicroUsd: 0,
-      });
     },
   );
 
@@ -533,6 +465,7 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
         expect.objectContaining({
           state: "settled",
           cost_micro_usd: 500_000,
+          billing_state: null,
         }),
       ]);
       expect(

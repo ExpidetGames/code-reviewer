@@ -43,8 +43,9 @@ export const JOB_ENTRY_TYPES = ["reservation", "usage", "release"] as const;
 /**
  * What a caller of the repository branches on. `invalid_entry`, `idempotency_conflict` and `already_reversed` are
  * thrown (the caller has a bug or a replay with other numbers), and so are `reversed_entry_not_found`,
- * `reservation_required` and `job_entry_required`; the rest come back as the answer of `reserve`, `reserveUpTo`,
- * `settle` and `release`.
+ * `reservation_required` and `job_entry_required`; the rest come back as the answer of `reserve`, `settle` and `release`.
+ * `reservation_not_found`, `job_already_released`, `reservation_released` and the answers of `reserve` belong to the holds an
+ * earlier release took: since #605 no claim takes one, and a job is priced by one `usage` entry (`charge`).
  */
 export const BILLING_JOURNAL_ERROR_CODES = [
   "invalid_entry",
@@ -57,7 +58,6 @@ export const BILLING_JOURNAL_ERROR_CODES = [
   "job_already_released",
   "reservation_released",
   "insufficient_balance",
-  "balance_exhausted",
   "balance_negative",
 ] as const;
 
@@ -65,15 +65,13 @@ export type BillingJournalErrorCode =
   (typeof BILLING_JOURNAL_ERROR_CODES)[number];
 
 /**
- * Why `reserve` and `reserveUpTo` refuse: the balance is below the hold (`insufficient_balance`), exactly zero
- * (`balance_exhausted`, from `reserveUpTo`: there is nothing to hold), or below zero (`balance_negative`: a refund,
- * chargeback or final charge took it there, the workspace is blocked), or the job's hold was given back already
+ * Why `reserve` refuses: the balance is below the hold (`insufficient_balance`), or below zero (`balance_negative`: a
+ * refund, chargeback or final charge took it there, the workspace is blocked), or the job's hold was given back already
  * (`reservation_released`: the job ended; it is not held again under its id).
  */
 export type ReserveRefusal = Extract<
   BillingJournalErrorCode,
   | "insufficient_balance"
-  | "balance_exhausted"
   | "balance_negative"
   | "reservation_released"
 >;

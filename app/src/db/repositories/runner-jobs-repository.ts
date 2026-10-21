@@ -54,10 +54,10 @@ import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import {
   RATES_INCOMPLETE_REFUSAL,
+  admitAtClaim,
   readClaimBilling,
-  reserveAtClaim,
+  type AdmitOutcome,
   type ClaimBilling,
-  type ReserveOutcome,
 } from "../../billing/claim-billing.ts";
 import {
   CLAIM_CAPS_RETRY_MS,
@@ -902,9 +902,9 @@ export function createRunnerJobsRepository(
               }
               return null;
             }
-            // #498: while billing is on, the hold comes after the admission and before the record, in the same transaction:
-            // a refused job leaves neither a record nor an entry, and a job handed out has both. Billing off reads no
-            // billing table.
+            // #605: while billing is on, the balance check comes after the admission and before the record, in the same
+            // transaction: a refused job leaves no record, and no job takes a hold (the price is charged when it ends).
+            // Billing off reads no billing table.
             // #507: the start credit comes first, in this transaction, so the first job of a new workspace can use it. It is
             // granted once per GitHub account and only while billing is on and ready (a state that is not "on" reads nothing),
             // and not for a job a limit refused. It never fails the claim (a failed grant is skipped and logged), and a
@@ -926,16 +926,15 @@ export function createRunnerJobsRepository(
                   amountMicroUsd: credit.entry.amountMicroUsd,
                 });
             }
-            const held: ReserveOutcome | CapOutcome = !capped.ok
+            const held: AdmitOutcome | CapOutcome = !capped.ok
               ? capped
               : billing.state === "off"
                 ? { ok: true }
                 : billing.state === "rates_incomplete"
                   ? RATES_INCOMPLETE_REFUSAL
-                  : await reserveAtClaim(trx, {
+                  : await admitAtClaim(trx, {
                       rates: billing.rates,
                       job: {
-                        id: row.id,
                         workspaceId: row.workspace_id,
                         reviewKind: row.review_kind as ProjectReviewKind,
                       },
@@ -967,11 +966,14 @@ export function createRunnerJobsRepository(
             // The record is reserved in the transaction of the claim, so a job handed out always counts. The
             // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
             // job claimed again keeps the record it has.
-            await createUsageRecordsRepository(
+            const records = createUsageRecordsRepository(
               trx,
               row.workspace_id,
               () => current,
-            ).reserve(row.id, "own");
+            );
+            await records.reserve(row.id, "own");
+            // #605: the money of this job is settled when it ends, and only a job claimed with billing on is.
+            if (billing.state === "on") await records.openBilling(row.id);
             return {
               job: toJob(row),
               leaseToken,
@@ -1180,7 +1182,12 @@ export function createRunnerJobsRepository(
               stored.workspace_id,
               now,
             ).settle(stored.id, settlement);
-            await settleEndedJobs(trx, [stored.id], now);
+            // The job of a superseded run keeps no error code; the one the Worker reports (ours or not) prices the run.
+            await settleEndedJobs(trx, [stored.id], now, {
+              reportedErrorCodes: new Map(
+                outcome.ok ? [] : [[stored.id, outcome.errorCode]],
+              ),
+            });
             if (
               settled &&
               settlement.state === "settled" &&
