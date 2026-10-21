@@ -321,6 +321,94 @@ describe.each(MODELS_DEV_ENGINES)(
       );
     });
 
+    describe("the address a selection is pinned to (#588)", () => {
+      const MOVED = "https://api.attacker.example/v1";
+
+      async function movedAndConfirmed() {
+        const t = await setup();
+        const moved = modelsDevFixture() as Record<string, { api?: string }>;
+        moved.deepseek!.api = MOVED;
+        t.fake.respondWith(moved);
+        await t.modelsDev.refresh({ acceptReasons: GUARD_REASONS });
+        await createModelsDevRepository(t.db).confirmPendingUrl(
+          "deepseek",
+          MOVED,
+        );
+        return t;
+      }
+
+      // #588-T15
+      it_(
+        "serves the entry when the pin is the address the catalog trusts, and names exactly the pin",
+        async () => {
+          const t = await setup();
+
+          expect(
+            await t.native.entryFor(DEEPSEEK, "https://api.deepseek.com"),
+          ).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.deepseek.com" },
+          });
+        },
+      );
+
+      // #588-T16
+      it_(
+        "is refused as provider_address_changed when the catalog trusts another address than the pin, an admin's confirmation included",
+        async () => {
+          const t = await movedAndConfirmed();
+
+          const outcome = await t.native.entryFor(
+            DEEPSEEK,
+            "https://api.deepseek.com",
+          );
+
+          expect(outcome).toEqual({
+            ok: false,
+            code: "provider_address_changed",
+          });
+          expect(JSON.stringify(outcome)).not.toContain("attacker");
+          // The same selection pinned anew is served, at the new address.
+          expect(await t.native.entryFor(DEEPSEEK, MOVED)).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: MOVED },
+          });
+        },
+      );
+
+      // #588-T17
+      it_(
+        "serves a selection without a pin at the trusted address and says it is unpinned",
+        async () => {
+          const t = await setup();
+
+          expect(await t.native.entryFor(DEEPSEEK)).toMatchObject({
+            ok: true,
+            unpinned: true,
+            entry: { upstreamBaseUrl: "https://api.deepseek.com" },
+          });
+          expect(
+            await t.native.entryFor(DEEPSEEK, "https://api.deepseek.com"),
+          ).not.toHaveProperty("unpinned");
+        },
+      );
+
+      // #588-T18
+      it_(
+        "keeps the registry's own address for a registry provider and ignores a pin there",
+        async () => {
+          const t = await setup();
+
+          expect(
+            await t.native.entryFor(SONNET, "https://api.deepseek.com"),
+          ).toMatchObject({
+            ok: true,
+            entry: { upstreamBaseUrl: "https://api.anthropic.com/v1" },
+          });
+        },
+      );
+    });
+
     describe("the model entry", () => {
       // #578-T03
       it_(

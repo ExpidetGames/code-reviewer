@@ -74,6 +74,9 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   llm_model_unavailable:
     "The AI model chosen in the model settings of this project is not available any more, so this run did not start and no AI model was used. Choose another model in the review settings of the project.",
 
+  provider_address_changed:
+    "The address of the AI provider chosen in the model settings of this project has changed since it was chosen, so this run did not start, your AI key was not sent anywhere and no AI model was used. An Owner or Admin of the workspace can check the provider and confirm the new address in the review settings of the project.",
+
   // The claim of the runner API
   llm_not_configured:
     "No access to an AI model is set up on this server. Ask whoever runs it to set the LLM provider and key.",

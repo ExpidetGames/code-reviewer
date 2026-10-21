@@ -61,7 +61,10 @@ import {
   clampMaxTokens,
   UNKNOWN_WINDOW_MAX_TOKENS,
 } from "../model-catalog/token-budget.ts";
-import type { NativeCostService } from "../native-cost/service.ts";
+import {
+  PROVIDER_ADDRESS_CHANGED,
+  type NativeCostService,
+} from "../native-cost/service.ts";
 import type { CostPolicyJson } from "../native-cost/policy.ts";
 import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
@@ -116,6 +119,9 @@ export const CLAIM_FAILURE_CODES = [
   "llm_provider_unsupported",
   // #555: an own job names a catalog model the catalog no longer serves (its row is gone). Never a move to another model.
   "llm_model_unavailable",
+  // #588: an own job names a catalog provider whose trusted address is no longer the one the project pinned when it selected it.
+  // The key is not sent anywhere; an Owner or Admin confirms the new address in the settings of the project. Free.
+  "provider_address_changed",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -214,6 +220,18 @@ export type ClaimDeps = {
    * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
    */
   nativeCost?: Pick<NativeCostService, "refOf" | "policyFor" | "entryFor">;
+  /**
+   * #588: where the address a selection of a catalog provider was pinned to is adopted for a selection made before pins existed:
+   * the claim pins the address it is about to send the key to, once. Answers the pin in force, or null when the project no
+   * longer selects the provider. Only asked for such a selection.
+   */
+  providerPins: {
+    adopt: (
+      job: Job,
+      provider: string,
+      address: string,
+    ) => Promise<string | null>;
+  };
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -506,7 +524,11 @@ async function costOf(
   // keeps the refusal it always had. A model the catalog cannot describe (or whose provider's address is not trusted) is
   // refused like an unavailable one: on the operator's key, which we pay, as `managed_model_unavailable` (free); on the
   // workspace's own key as a model Dynamic Review cannot use. No key exists yet in either case.
-  const entry = await native.entryFor(ref);
+  const catalog = selection.keyMode === "own" && selection.catalog === true;
+  const entry = await native.entryFor(
+    ref,
+    catalog ? selection.pinnedAddress : undefined,
+  );
   if (!entry.ok) {
     if (entry.code === "check_failed") return { kind: "retry" };
     return {
@@ -514,6 +536,28 @@ async function costOf(
       errorCode: entryRefusalCode(selection, entry.code),
       detail: `${whose(selection)}kind=${selection.kind} reason=entry_${entry.code}`,
     };
+  }
+  // #588: a selection made before pins existed is pinned now, to the address this claim is about to send the key to. If another
+  // pin got there first, the job holds to that one, as every other claim does.
+  if (catalog && entry.unpinned === true) {
+    let inForce: string | null;
+    try {
+      inForce = await deps.providerPins.adopt(
+        job,
+        selection.provider,
+        entry.entry.upstreamBaseUrl,
+      );
+    } catch {
+      // No error text: it could carry whatever the failing layer held. The job is given back and judged again.
+      return { kind: "retry" };
+    }
+    if (inForce === null) return { kind: "retry" };
+    if (inForce !== entry.entry.upstreamBaseUrl)
+      return {
+        kind: "refused",
+        errorCode: entryRefusalCode(selection, "provider_address_changed"),
+        detail: `${whose(selection)}kind=${selection.kind} reason=entry_provider_address_changed`,
+      };
   }
   // #555 (decision of 2026-10-19 on #548): a model models.dev stopped listing keeps being served from its last known row.
   if (entry.unlisted === true)
@@ -546,6 +590,8 @@ function entryRefusalCode(
 ): string {
   if (selection.keyMode === "managed") return MANAGED_MODEL_UNAVAILABLE;
   if (selection.catalog !== true) return "dynamic_model_features_unsupported";
+  // #588: the catalog's address moved since the workspace selected the provider; the key stays where it is.
+  if (code === "provider_address_changed") return PROVIDER_ADDRESS_CHANGED;
   return code === "model_not_in_catalog" ||
     code === "entry_invalid" ||
     code === "model_not_of_provider"

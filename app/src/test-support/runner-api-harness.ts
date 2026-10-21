@@ -440,6 +440,14 @@ export async function startRunnerApiHarness(
       ...(options.nativeCost === undefined
         ? {}
         : { nativeCost: options.nativeCost }),
+      providerPins: {
+        adopt: (job, provider, address) =>
+          reviewSettings.adoptProviderAddress(
+            job.repositoryId,
+            provider,
+            address,
+          ),
+      },
       claimedKeys,
       ...(options.hooks ?? {}),
       now: fixture.clock.now,

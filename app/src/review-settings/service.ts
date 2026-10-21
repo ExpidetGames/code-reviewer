@@ -163,7 +163,7 @@ export type ProjectDynamicView = {
    * The address pinned for the project's catalog provider and what the catalog trusts for it now (#588); `null` when the
    * project selects no catalog provider, and for a workspace on the operator's key.
    */
-  providerAddress: ProviderAddressView | null;
+  providerAddress?: ProviderAddressView | null;
   /** The kind, Dynamic model and skill a review would use. */
   effective: {
     reviewKind: ProjectReviewKind;
@@ -304,6 +304,9 @@ function dynamicLayerOf(layer: ProjectDynamicOverrides): ModelLayer {
       ? {}
       : { provider: layer.dynamicProvider }),
     ...(layer.dynamicModel == null ? {} : { model: layer.dynamicModel }),
+    ...(layer.dynamicProviderAddress === undefined
+      ? {}
+      : { address: layer.dynamicProviderAddress }),
   };
 }
 
@@ -501,16 +504,16 @@ function mergeProjectSettings(
   if (dynamic.dynamicProvider !== undefined && dynamic.dynamicProvider !== null)
     next.dynamicProvider = dynamic.dynamicProvider;
   // #588: the address of the catalog provider, written when it is selected or confirmed and kept otherwise.
+  const nextProvider =
+    typeof next.dynamicProvider === "string" ? next.dynamicProvider : undefined;
   const pin = pinAfterSave({
-    nextProvider: next.dynamicProvider,
+    nextProvider,
     storedProvider: storedDynamic.dynamicProvider,
     storedPin: storedDynamic.dynamicProviderAddress,
-    native:
-      next.dynamicProvider !== undefined &&
-      isNativeProvider(next.dynamicProvider),
+    native: nextProvider !== undefined && isNativeProvider(nextProvider),
     // Read before the transaction for the provider the request implied; a provider that changed meanwhile has no address here.
     trusted:
-      trusted !== undefined && trusted.provider === next.dynamicProvider
+      trusted !== undefined && trusted.provider === nextProvider
         ? trusted.address
         : undefined,
     confirm: patch.confirmProviderAddress === true,

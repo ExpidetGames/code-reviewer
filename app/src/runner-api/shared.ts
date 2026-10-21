@@ -141,6 +141,15 @@ function sharedDeps(): WorkerApiDeps {
     // #553: the cost policy and the entry of a native job. A provider outside the registry (#555) is always native, there is no
     // legacy wire for it; the two registry providers are native only while the switch of the native path is on (#578).
     nativeCost,
+    // #588: a selection of a catalog provider made before pins existed is pinned by its first claim, in the job's own workspace.
+    providerPins: {
+      adopt: (job, provider, address) =>
+        reviewSettingsServiceFor(job.workspaceId).adoptProviderAddress(
+          job.repositoryId,
+          provider,
+          address,
+        ),
+    },
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,
