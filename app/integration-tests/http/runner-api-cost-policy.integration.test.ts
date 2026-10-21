@@ -15,6 +15,11 @@ import {
 } from "../../src/llm/providers/fake-adapter.ts";
 import { openrouterDescriptor } from "../../src/llm/providers/openrouter/descriptor.ts";
 import { createProviderRegistry } from "../../src/llm/providers/registry.ts";
+import { createLlmKeyModeStore } from "../../src/llm/key-mode-store.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../../src/test-support/billing-switch.ts";
 import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
@@ -137,6 +142,11 @@ type Started = RunnerApiHarness & {
 
 async function start(options: {
   keyMode: "own" | "managed";
+  /**
+   * #496: billing is on and the workspace chose this key mode; `keyMode` is then only what the entitlements say, which is not
+   * consulted, and the settings of the project follow the choice.
+   */
+  billingChoice?: "own" | "managed";
   dynamic?: boolean;
   availability?: ManagedAvailabilityJson;
   catalogPrice?: PriceBookJson | null;
@@ -215,9 +225,18 @@ async function start(options: {
     h.workspaceId,
     h.clock.now,
   ).put(entitlements(options.keyMode), null);
+  const chosen = options.billingChoice ?? options.keyMode;
+  if (options.billingChoice !== undefined) {
+    await setBillingSwitch(h.db, true);
+    await fundWorkspace(h.db, h.workspaceId, 5_000_000, h.clock.now);
+    await createLlmKeyModeStore(h.db, h.workspaceId, h.clock.now).set(
+      options.billingChoice,
+      null,
+    );
+  }
   await h.projectService.activateProject(h.repositoryId);
   await h.reviewSettings.updateProjectSettings(h.repositoryId, {
-    ...(options.keyMode === "managed"
+    ...(chosen === "managed"
       ? { catalogEntryDynamic: entry.id, catalogEntryDiff: entry.id }
       : {
           dynamicProvider: options.provider ?? FAKE_PROVIDER_ID,
@@ -554,6 +573,66 @@ describe("the own key (the user pays the provider)", () => {
     });
     expect(second.job.input).toMatchObject({
       dynamic: { cost: { maxTotalTokens: 2_000_000 } },
+    });
+  });
+});
+
+describe("the workspace's choice while billing is on (#496)", () => {
+  // #496-T06
+  it("holds a workspace that chose our models to the price check, though its entitlements say own", async () => {
+    const h = await start({
+      keyMode: "own",
+      billingChoice: "managed",
+      availability: {
+        selectable: false,
+        reason: "price_unconfirmed",
+        code: "catalog_price_unconfirmed",
+      },
+    });
+    const [job] = await h.snapshotJobs();
+
+    const response = await h.claim(CLAIM);
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job!.id)).toMatchObject({
+      status: "failed",
+      errorCode: "managed_model_unavailable",
+    });
+    expect(h.asked.availability).toBe(1);
+  });
+
+  // #496-T04
+  it("gives a workspace that chose its own key the token cap and its own key, though its entitlements say managed", async () => {
+    const h = await start({
+      keyMode: "managed",
+      billingChoice: "own",
+      availability: {
+        selectable: false,
+        reason: "price_unconfirmed",
+        code: "catalog_price_unconfirmed",
+      },
+    });
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({
+      dynamic: {
+        cost: { keyMode: "own", priceBook: BOOK, maxTotalTokens: 4_000_000 },
+      },
+      llm: { provider: FAKE_PROVIDER_ID, apiKey: FAKE_WORKSPACE_KEY },
+    });
+    expect(h.asked.availability).toBe(0);
+  });
+
+  // #496-T06
+  it("gives a workspace that chose our models the operator's key and the confirmed book", async () => {
+    const h = await start({ keyMode: "own", billingChoice: "managed" });
+
+    const { job } = await h.claimed(CLAIM);
+
+    expect(job.input).toMatchObject({
+      dynamic: { cost: { keyMode: "managed", priceBook: BOOK } },
+      llm: { provider: FAKE_PROVIDER_ID, apiKey: FAKE_OPERATOR_KEY },
     });
   });
 });
