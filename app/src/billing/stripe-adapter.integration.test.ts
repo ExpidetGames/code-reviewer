@@ -333,6 +333,49 @@ describe("the top-up checkout", () => {
     expect(fake.checkoutSessions()).toHaveLength(0);
   });
 
+  // #501-T13
+  it("tells whether the page of a session is still open, and never makes a session", async () => {
+    const { fake, adapter, customer } = await withCustomer();
+    const made = await adapter.createTopUpCheckout(topUp(customer));
+    const session = made.session as string;
+    if (made.checkout.kind !== "redirect") throw new Error("no page");
+
+    expect(await adapter.resumeTopUpCheckout!({ checkout: session })).toEqual({
+      kind: "open",
+      url: made.checkout.url,
+    });
+    await clientFor(fake).expireCheckoutSession(session);
+    expect(await adapter.resumeTopUpCheckout!({ checkout: session })).toEqual({
+      kind: "closed",
+    });
+    expect(
+      await adapter.resumeTopUpCheckout!({ checkout: "cs_Fake99999999" }),
+    ).toEqual({ kind: "closed" });
+    expect(fake.checkoutSessions()).toHaveLength(1);
+  });
+
+  // #501-T13
+  it("says a paid session is closed, and is provider_unavailable when Stripe cannot say", async () => {
+    const { fake, adapter, customer } = await withCustomer();
+    const made = await adapter.createTopUpCheckout(topUp(customer));
+    const session = made.session as string;
+    fake.faults.failWith(
+      { method: "GET", path: `/v1/checkout/sessions/${session}` },
+      503,
+      { times: 10 },
+    );
+    expect(
+      await codeOf(adapter.resumeTopUpCheckout!({ checkout: session })),
+    ).toBe("provider_unavailable");
+    fake.faults.clear();
+
+    fake.buyer.pay(session);
+
+    expect(await adapter.resumeTopUpCheckout!({ checkout: session })).toEqual({
+      kind: "closed",
+    });
+  });
+
   // #501-T05
   it("is accepted by Managed Payments for every amount of the range, down to 10 and up to 500 USD", async () => {
     const { fake, adapter, customer } = await withCustomer();

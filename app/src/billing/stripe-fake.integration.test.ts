@@ -327,6 +327,47 @@ describe("idempotency", () => {
     expect(raw.json.error.message).toContain("same parameters");
   });
 
+  // #501-T14
+  it("answers 409 idempotency_key_in_use to a request whose key another request is still using, and saves nothing of it", async () => {
+    const fake = await startTestStripe();
+    const client = clientFor(fake);
+    fake.faults.delay({ method: "POST", path: "/v1/customers" }, 200);
+
+    const first = client.createCustomer(
+      { name: "Once" },
+      { idempotencyKey: "key-1" },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const error = await errorOf(
+      client.createCustomer({ name: "Once" }, { idempotencyKey: "key-1" }),
+    );
+
+    expect(error).toMatchObject({ code: "conflict", status: 409 });
+    const created = await first;
+    // The key is free again once the first answer is out, and it answers the saved response.
+    expect(
+      await client.createCustomer(
+        { name: "Once" },
+        { idempotencyKey: "key-1" },
+      ),
+    ).toEqual(created);
+    expect(fake.customers()).toHaveLength(1);
+    const raws = fake.requests().map((request) => request.status);
+    expect(raws).toEqual([200, 409, 200]);
+  });
+
+  // #501-T13
+  it("runs a request again with a key it forgot, as Stripe does after 24 hours", async () => {
+    const fake = await startTestStripe();
+    const client = clientFor(fake);
+    await client.createCustomer({ name: "Once" }, { idempotencyKey: "key-1" });
+
+    fake.forgetIdempotencyKeys();
+    await client.createCustomer({ name: "Once" }, { idempotencyKey: "key-1" });
+
+    expect(fake.customers()).toHaveLength(2);
+  });
+
   // #500-T02
   it("scopes a key to its path: the same key on another endpoint is another request", async () => {
     const fake = await startTestStripe();

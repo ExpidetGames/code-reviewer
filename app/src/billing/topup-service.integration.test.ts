@@ -419,7 +419,7 @@ function suite(engine: BillingEngine) {
     });
 
     // #501-T07
-    it("keeps pending an intent whose page already exists when a repeat of the click cannot reach Stripe", async () => {
+    it("keeps pending an intent whose page already exists when Stripe cannot make sessions, and gives the page again", async () => {
       const t = await start();
       await t.profiles.save(PROFILE);
       const first = await t.top({ intentId: INTENT_A });
@@ -429,10 +429,20 @@ function suite(engine: BillingEngine) {
         { times: 10 },
       );
 
+      // A repeat asks Stripe about the page it has, it never asks for a new one (#501-T13).
       const again = await t.top({ intentId: INTENT_A });
 
       expect(first).toMatchObject({ ok: true });
-      expect(again).toEqual({ ok: false, error: "provider_unavailable" });
+      expect(again).toEqual(first);
+      expect(
+        t.fake
+          .requests()
+          .filter(
+            (request) =>
+              request.method === "POST" &&
+              request.path === "/v1/checkout/sessions",
+          ),
+      ).toHaveLength(1);
       // The buyer may be on that page right now, and a payment must find its intent waiting.
       expect(await t.intents.get(INTENT_A)).toMatchObject({
         state: "pending",
@@ -589,6 +599,118 @@ function suite(engine: BillingEngine) {
           if (table !== "billing_profiles")
             expect(json, `${table} holds ${text}`).not.toContain(text);
       expect(rows["billing_profiles"]).toContain("Teststrasse");
+    });
+
+    // #501-T13
+    it("gives the open page of an intent that has one, also after Stripe forgot the idempotency key", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      const first = await t.top({ intentId: INTENT_A });
+      t.fake.forgetIdempotencyKeys();
+
+      const again = await t.top({ intentId: INTENT_A });
+
+      expect(again).toEqual(first);
+      expect(t.fake.checkoutSessions()).toHaveLength(1);
+      const intent = (await t.intents.get(INTENT_A))!;
+      expect(intent.state).toBe("pending");
+      expect(intent.checkoutRef).toBe(t.fake.checkoutSessions()[0]!.id);
+    });
+
+    // #501-T13
+    it("makes no second session for an intent whose page is paid or expired, after Stripe forgot the key", async () => {
+      for (const ending of ["paid", "expired"] as const) {
+        const t = await start();
+        await t.profiles.save(PROFILE);
+        await t.top({ intentId: INTENT_A });
+        const session = t.fake.checkoutSessions()[0]!.id as string;
+        if (ending === "paid") t.fake.buyer.pay(session);
+        else await clientFor(t.fake).expireCheckoutSession(session);
+        t.fake.forgetIdempotencyKeys();
+
+        const again = await t.top({ intentId: INTENT_A });
+
+        expect(again, ending).toEqual({ ok: false, error: "intent_conflict" });
+        expect(t.fake.checkoutSessions(), ending).toHaveLength(1);
+        expect((await t.intents.get(INTENT_A))!.checkoutRef, ending).toBe(
+          session,
+        );
+      }
+    });
+
+    // #501-T13
+    it("makes no session at another Stripe for an intent that has one, and does not fail with a server error", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      await t.top({ intentId: INTENT_A });
+      const elsewhere = await startTestStripe();
+      const service = createTopUpService({
+        db: t.db,
+        adapter: createStripeAdapter({
+          client: () => Promise.resolve(clientFor(elsewhere)),
+        }),
+        log: (line) => t.logs.push(line),
+      });
+
+      const again = await service.start(t.actor(), {
+        amountCents: 2500,
+        confirmBusiness: true,
+        intentId: INTENT_A,
+        returnUrl: RETURN_URL,
+      });
+
+      expect(again).toEqual({ ok: false, error: "intent_conflict" });
+      expect(elsewhere.checkoutSessions()).toEqual([]);
+      expect((await t.intents.get(INTENT_A))!.state).toBe("pending");
+    });
+
+    // #501-T13
+    it("says provider_unavailable when Stripe cannot say whether the page is still open, and keeps the intent as it is", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      const first = await t.top({ intentId: INTENT_A });
+      t.fake.faults.failWith(
+        { method: "GET", path: /^\/v1\/checkout\/sessions\// },
+        503,
+        {
+          times: 10,
+        },
+      );
+
+      expect(await t.top({ intentId: INTENT_A })).toEqual({
+        ok: false,
+        error: "provider_unavailable",
+      });
+      t.fake.faults.clear();
+
+      expect((await t.intents.get(INTENT_A))!.state).toBe("pending");
+      expect(await t.top({ intentId: INTENT_A })).toEqual(first);
+    });
+
+    // #501-T14
+    it("keeps pending the intent of a click that lost against the same click still at Stripe", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      // The first request to reach Stripe runs and its answer takes a while; the other one meets the 409 of Stripe.
+      t.fake.faults.delay(
+        { method: "POST", path: "/v1/checkout/sessions" },
+        300,
+      );
+
+      const [one, two] = await Promise.all([
+        t.top({ intentId: INTENT_A }),
+        t.top({ intentId: INTENT_A }),
+      ]);
+
+      const results = [one, two];
+      const winner = results.find((result) => result.ok);
+      const loser = results.find((result) => !result.ok);
+      expect(winner).toMatchObject({ ok: true, intentId: INTENT_A });
+      expect(loser).toEqual({ ok: false, error: "request_in_progress" });
+      expect(t.fake.checkoutSessions()).toHaveLength(1);
+      const intent = (await t.intents.get(INTENT_A))!;
+      expect(intent.state).toBe("pending");
+      expect(intent.checkoutRef).toBe(t.fake.checkoutSessions()[0]!.id);
     });
 
     it("has stable codes", () => {

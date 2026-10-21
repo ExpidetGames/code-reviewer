@@ -62,8 +62,9 @@ no webhooks, so it does not replace it. The app's client (`app/src/billing/strip
   `Idempotent-Replayed: true`); with other parameters it answers the `idempotency_error`. Known differences from Stripe:
   the fake saves only **2xx** answers, while Stripe replays the result of any request that began executing (also a 4xx or
   5xx; not a failed validation of the parameters, not a refusal because of a concurrent request), so a repeat of a refused
-  request is run again here and replayed there; a saved answer never expires (Stripe: 24 hours); the fake runs one request
-  at a time and never answers the 409 for a concurrent request with the same key. Code that relies on the replay of an
+  request is run again here and replayed there; a saved answer never expires (Stripe: 24 hours) unless a test calls `fake.forgetIdempotencyKeys()`; the fake runs one request
+  at a time, so the 409 `idempotency_key_in_use` for a concurrent request with the same key happens only while a `delay` fault holds the
+  answer of the first request (the request ran, its answer is on its way; the refusal is not saved). Code that relies on the replay of an
   error must not take the fake as proof.
 - **Managed Payments.** A one-time Checkout session with `managed_payments[enabled]=true` is refused when it carries
   `tax_id_collection`, `invoice_creation`, `customer_update`, `payment_method_types`, `custom_text` and the other parameters

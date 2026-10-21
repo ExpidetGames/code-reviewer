@@ -16,6 +16,9 @@
 //   8. customer     the provider's customer is made or brought up to date from the profile and its id is stored
 //   9. checkout     the provider's page, asked for with the intent as the idempotency key: the same intent is the same page
 //
+// An intent that has a page (`checkoutRef`) never gets a second one: a repeat gets the same page while it is open and
+// `intent_conflict` otherwise, whatever the provider's idempotency window says (step 9 is skipped).
+//
 // A provider that fails leaves no intent pending: it becomes `failed` (a payment that still arrives later can pay it, as for any
 // failed intent) and the person tries again with a new one. Nothing is credited here: the balance changes only when the
 // provider says the money arrived (#502). The log gets a result code and the workspace id, never a name, an address, a VAT ID,
@@ -55,6 +58,8 @@ export const TOP_UP_ERROR_CODES = [
   /** The intent id is taken: by another amount, another workspace, or an intent that is not waiting any more. */
   "intent_conflict",
   "provider_unavailable",
+  /** The same start is still running (a second click while the first one asks the provider): try again in a moment. */
+  "request_in_progress",
   "provider_rejected",
   "provider_not_configured",
   "vat_id_rejected",
@@ -87,6 +92,7 @@ const ADAPTER_ERROR_TO_CODE: Partial<
   Record<BillingAdapterError["code"], TopUpErrorCode>
 > = {
   provider_unavailable: "provider_unavailable",
+  request_in_progress: "request_in_progress",
   provider_not_configured: "provider_not_configured",
   vat_id_rejected: "vat_id_rejected",
 };
@@ -185,6 +191,30 @@ export function createTopUpService({
           return refuse("intent_conflict");
       }
 
+      // An intent that has a page already never gets a second one: the provider forgets an idempotency key after a day, and a
+      // new page would be payable beside the first with nothing to tell which pays the intent. The page is shown again while
+      // it is open; otherwise the form must start a new intent.
+      if (intent.checkoutRef !== null) {
+        if (adapter.resumeTopUpCheckout === undefined)
+          return refuse("intent_conflict");
+        try {
+          const page = await adapter.resumeTopUpCheckout({
+            checkout: intent.checkoutRef,
+          });
+          if (page.kind !== "open") return refuse("intent_conflict");
+          return done({ ok: true, intentId: intent.id, url: page.url });
+        } catch (error) {
+          if (error instanceof BillingAdapterError)
+            return refuse(
+              ADAPTER_ERROR_TO_CODE[error.code] ?? "provider_rejected",
+            );
+          log(
+            `[billing] TOPUP_STARTED workspace=${actor.workspaceId} result=unexpected_error`,
+          );
+          throw error;
+        }
+      }
+
       try {
         let customer: string | null = null;
         if (profile !== undefined) {
@@ -205,7 +235,7 @@ export function createTopUpService({
           returnUrl: request.returnUrl,
         });
         if (started.checkout.kind !== "redirect") {
-          await intents.markFailed(intent.id);
+          await intents.markFailedUnlessPage(intent.id);
           return refuse("checkout_unavailable");
         }
         if (started.session !== null)
@@ -216,10 +246,14 @@ export function createTopUpService({
           url: started.checkout.url,
         });
       } catch (error) {
-        // No intent stays pending without a way back, whatever went wrong. One that has a page already (a repeat of a click
-        // that got through) stays: the buyer may be on that page.
-        if (intent.checkoutRef === null)
-          await intents.markFailed(intent.id).catch(() => undefined);
+        // No intent stays pending without a way back, whatever went wrong, except where another request owns it: one that
+        // has a page already (judged on the row, not on what this request read first) stays, because the buyer may be on
+        // that page, and so does one whose same start is still running at the provider, because that request decides it.
+        const owned =
+          error instanceof BillingAdapterError &&
+          error.code === "request_in_progress";
+        if (!owned)
+          await intents.markFailedUnlessPage(intent.id).catch(() => undefined);
         if (error instanceof BillingAdapterError)
           return refuse(
             ADAPTER_ERROR_TO_CODE[error.code] ?? "provider_rejected",

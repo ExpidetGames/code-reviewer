@@ -238,6 +238,8 @@ describe("the Stripe adapter", () => {
       ["a 401", 401, "provider_not_configured"],
       ["a 403", 403, "provider_not_configured"],
       ["a 404", 404, "provider_rejected"],
+      // Stripe: another request with the same Idempotency-Key is still running (#501-T14).
+      ["a 409", 409, "request_in_progress"],
     ];
     for (const [label, status, code] of cases) {
       const { adapter } = fail(status);

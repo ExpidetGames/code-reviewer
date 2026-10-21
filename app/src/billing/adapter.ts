@@ -68,6 +68,8 @@ export const BILLING_ADAPTER_ERROR_CODES = [
   "provider_rejected",
   /** The provider did not accept the buyer's VAT ID. */
   "vat_id_rejected",
+  /** The provider is still working on the very same request (a second click while the first runs): nothing is wrong. */
+  "request_in_progress",
 ] as const;
 export type BillingAdapterErrorCode =
   (typeof BILLING_ADAPTER_ERROR_CODES)[number];
@@ -172,6 +174,15 @@ export interface BillingAdapter {
     session: ProviderRef | null;
     payment: ProviderRef | null;
   }>;
+  /**
+   * Asks the provider about the page of a top-up that has one already (`createTopUpCheckout` returned its `session`): the
+   * address while the buyer can still use it, or `closed` (paid, expired, or unknown to the provider). Never makes a page,
+   * so a repeat of a start after the provider forgot its idempotency key cannot make a second one for the same intent.
+   * Absent when the adapter has no checkout.
+   */
+  resumeTopUpCheckout?(input: {
+    checkout: ProviderRef;
+  }): Promise<{ kind: "open"; url: string } | { kind: "closed" }>;
   /**
    * Checks the signature of a webhook over the exact bytes of its body and parses it into ONE normalized event. A body
    * is data until its signature is verified. `rawBody` is the bytes as received, not decoded text: a signature is a MAC

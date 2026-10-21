@@ -83,6 +83,11 @@ export type BillingTopUpIntentsRepository = {
   ): Promise<IntentChange | undefined>;
   /** `pending` to `failed`. Any other state stays as it is. */
   markFailed(id: string): Promise<IntentChange | undefined>;
+  /**
+   * `pending` to `failed` only while the intent has no checkout page, judged on the row under the lock: a page that was
+   * recorded in the meantime (by the request that won) is not abandoned. Any other intent stays as it is.
+   */
+  markFailedUnlessPage(id: string): Promise<IntentChange | undefined>;
   /** `pending` to `expired` (the checkout ended unpaid). Any other state stays as it is; a late payment still pays it. */
   markExpired(id: string): Promise<IntentChange | undefined>;
   /**
@@ -340,6 +345,23 @@ export function createBillingTopUpIntentsRepository(
             paymentRef: intent.paymentRef,
             refundedMicroUsd: refunded,
             disputedMicroUsd: disputed,
+          }),
+          changed: true,
+        };
+      });
+    },
+
+    markFailedUnlessPage(id) {
+      return inTransaction(db, async (trx) => {
+        const intent = await find(trx, id, true);
+        if (intent === undefined) return undefined;
+        if (intent.state !== "pending" || intent.checkoutRef !== null)
+          return { intent, changed: false };
+        return {
+          intent: await write(trx, intent, {
+            checkoutRef: null,
+            paymentRef: intent.paymentRef,
+            state: "failed",
           }),
           changed: true,
         };

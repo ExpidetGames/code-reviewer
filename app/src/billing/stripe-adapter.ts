@@ -111,10 +111,15 @@ function adapterErrorOf(error: StripeClientError): BillingAdapterError {
     case "network_error":
     case "rate_limited":
     case "server_error":
-    case "conflict":
       return new BillingAdapterError(
         "provider_unavailable",
         "the payment provider is not available right now",
+      );
+    case "conflict":
+      // Stripe answers 409 while another request with the same Idempotency-Key is still running.
+      return new BillingAdapterError(
+        "request_in_progress",
+        "the payment provider is still working on the same request",
       );
     case "unauthorized":
     case "forbidden":
@@ -276,6 +281,23 @@ export function createStripeAdapter({
       }
       await syncTaxId(client, id, profile);
       return id;
+    },
+
+    async resumeTopUpCheckout({ checkout }) {
+      const client = await clientOf();
+      let session;
+      try {
+        session = await client.getCheckoutSession(checkout);
+      } catch (error) {
+        // A session Stripe does not know (the other environment, or gone) is a page nobody can use.
+        if (error instanceof StripeClientError && error.code === "not_found")
+          return { kind: "closed" };
+        if (error instanceof StripeClientError) throw adapterErrorOf(error);
+        throw error;
+      }
+      if (session.status !== "open" || session.url === null)
+        return { kind: "closed" };
+      return { kind: "open", url: session.url };
     },
 
     async createTopUpCheckout({ customer, intentId, amount, returnUrl }) {
