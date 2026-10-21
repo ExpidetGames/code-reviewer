@@ -265,3 +265,74 @@ describe("the Dynamic provider and model of a project on its own key", () => {
     expect(document.body.textContent).not.toContain("DeepSeek");
   });
 });
+
+describe("the pinned address of a catalog provider in the project form (#588)", () => {
+  const OLD = "https://api.deepseek.example";
+  const NEW = "https://api.deepseek-new.example";
+
+  function withAddress(
+    providerAddress: NonNullable<ProjectDynamicView["providerAddress"]>,
+  ) {
+    return {
+      ...view({ dynamicProvider: "deepseek", dynamicModel: "deepseek-v4-pro" }),
+      providerAddress,
+    };
+  }
+
+  // #588-T30
+  it("shows the pinned address of the project's catalog provider, read-only", async () => {
+    renderForm(
+      model(withAddress({ pinned: OLD, current: OLD, state: "pinned" })),
+      fakeApi().api,
+    );
+
+    expect(await screen.findByText(OLD)).toBeTruthy();
+    expect(
+      screen.queryByRole("checkbox", { name: /confirm the new address/i }),
+    ).toBeNull();
+  });
+
+  // #588-T30
+  it("saves the confirmation of a new address as its own action, with no other field", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    renderForm(
+      model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
+      api,
+    );
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    await user.click(
+      screen.getByRole("checkbox", { name: /confirm the new address/i }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0]?.[0]).toEqual({ confirmProviderAddress: true });
+  });
+
+  // #588-T30
+  it("hides the note for a provider the person chose instead, whose address is fixed by its own selection", async () => {
+    const user = userEvent.setup();
+    renderForm(
+      model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
+      fakeApi().api,
+    );
+    expect(await screen.findByRole("alert")).toBeTruthy();
+
+    await choose(user, "Dynamic Review provider", "OpenAI");
+
+    expect(
+      screen.queryByRole("checkbox", { name: /confirm the new address/i }),
+    ).toBeNull();
+  });
+
+  // #588-T30
+  it("shows no address for a project on a registry provider", () => {
+    renderForm(model(view({ reviewKind: "dynamic" })), fakeApi().api);
+
+    expect(document.body.textContent).not.toContain("fixed when this provider");
+  });
+});

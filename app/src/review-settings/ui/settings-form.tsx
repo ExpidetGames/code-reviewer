@@ -57,6 +57,7 @@ import {
   resetSkill,
   setCatalogEntry,
   setDynamicModel,
+  setConfirmProviderAddress,
   setDynamicProvider,
   setReviewKind,
   setReviewVerdict,
@@ -83,6 +84,7 @@ import {
 } from "./form-state.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ModelFieldset } from "./model-fieldset.tsx";
+import { ProviderAddressNote } from "./provider-address-note.tsx";
 import { ModelChoice, ModelChoiceNote } from "./model-choice.tsx";
 import { CatalogModelPicker } from "../../native-providers/ui/catalog-model-picker.tsx";
 import type { NativeFormData } from "../../native-providers/form-data.ts";
@@ -608,6 +610,25 @@ export function SettingsForm({
             workspaceSlug={workspaceSlug}
             providers={dynamicProviderChoices}
             nativeProvidersHint={nativeCatalog !== undefined}
+            {...(projectView.providerAddress == null ||
+            chosenDynamicProvider !== projectView.effective.dynamicProvider
+              ? {}
+              : {
+                  // #588: only for the provider the project has pinned; one chosen instead is pinned by its own selection.
+                  addressNote: (
+                    <ProviderAddressNote
+                      address={projectView.providerAddress}
+                      confirm={state.dynamic.confirmProviderAddress}
+                      disabled={disabled}
+                      onConfirmChange={(confirm) =>
+                        edit(
+                          setConfirmProviderAddress(state, confirm),
+                          "dynamicProvider",
+                        )
+                      }
+                    />
+                  ),
+                })}
             {...(nativeCatalog === undefined || chosenNative === undefined
               ? {}
               : {
