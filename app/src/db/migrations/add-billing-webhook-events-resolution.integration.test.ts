@@ -16,7 +16,7 @@ import {
 import { createTestDirectory } from "../../test-support/test-database.ts";
 import { migrationProvider } from "./index.ts";
 
-const THIS = "20261021230000_add_billing_webhook_events_resolution";
+const THIS = "20261022020000_add_billing_webhook_events_resolution";
 const T = "2026-10-21T08:00:00.000Z";
 
 const beforeThisMigration: MigrationProvider = {

@@ -6,6 +6,10 @@
 // means no charge. The reconciliation runs when billing is switched on (inside the transaction that writes `enabled`) and as a
 // step of the sweep while billing is on, and `verify()` flags what is left. On SQLite and, when TEST_DATABASE_URL is set,
 // on Postgres.
+//
+// #605: no claim takes a hold any more, so this machinery is dormant: it acts on the reservations an earlier release wrote and
+// on nothing a new job leaves. The tests keep pinning it for those rows; `claim` writes such a reservation by hand after the
+// claim (what the claim of an earlier release did), and one test shows that a job claimed since #605 leaves nothing to release.
 import { sql, type KyselyPlugin } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
@@ -54,6 +58,8 @@ const SECOND = 1000;
 const FUNDING = 100_000_000;
 /** The hold of a Diff job on the workspace's own key: 25 minutes x 13,000 (hold.test.ts). */
 const OWN_KEY_DIFF_HOLD = 325_000;
+/** The same on the operator's key: 25 minutes x 13,000 and 150,000 x 5.0 for the AI. */
+const MANAGED_DIFF_HOLD = 1_075_000;
 
 const databases: Array<
   [string, (() => Promise<Kysely<Database>>) | undefined]
@@ -113,6 +119,8 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
     const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
     if (claimed === null || claimed.job.id !== job.id)
       throw new Error("The job was not claimed.");
+    // The hold an earlier release took at the claim.
+    await journalOf(fixture).reserve(OWN_KEY_DIFF_HOLD, job.id);
     return { job: claimed.job, leaseToken: claimed.leaseToken };
   }
 
@@ -491,8 +499,8 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
       ).toEqual(["reservation", "release"]);
       const verified = await journalOf(fixture).verify();
       expect(verified).toMatchObject({ consistent: true });
-      // Only the three new holds are reserved.
-      expect(verified.reservedMicroUsd).toBe(3 * OWN_KEY_DIFF_HOLD);
+      // The three new jobs hold nothing (#605); the old hold is given back.
+      expect(verified.reservedMicroUsd).toBe(0);
       expect(jobs).toHaveLength(3);
     },
   );
@@ -530,6 +538,8 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
     if (claimed === null || claimed.job.id !== enqueued.id)
       throw new Error("The job was not claimed.");
     const { job, leaseToken } = claimed;
+    // The hold an earlier release took at the claim (what makes the run subject to the old machinery).
+    await journalOf(fixture).reserve(MANAGED_DIFF_HOLD, job.id);
     await createUsageRecordsRepository(
       fixture.db,
       fixture.workspaceId,
@@ -567,7 +577,6 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
     });
     return { job, leaseToken };
   }
-  const MANAGED_DIFF_HOLD = 1_075_000;
 
   // #591-T19
   run(
@@ -765,11 +774,11 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
     },
   );
 
-  // #591-T25
+  // #591-T25, changed by #605: a claim takes no hold and no lock of the balance row, so it no longer waits for a release.
+  // #605-T40
   onPostgres(
-    "a claim that starts while a release is in flight waits for it and is decided against the balance that includes it",
+    "a claim that starts while a release is in flight does not wait for it, and the release and the claim leave the journal consistent",
     async () => {
-      // After the stranded hold the balance is 175,000, less than one hold; after its release it is 500,000.
       const fixture = await start({ funding: 500_000 });
       const stranded = await endedWhileOff(fixture);
       await setBillingSwitch(fixture.db, true);
@@ -780,14 +789,15 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
         fixture.queue.claimNext("runner-b", ENGINES),
       );
 
-      expect(staged.before).toBe("blocked");
+      expect(staged.before).toBe("done");
       expect(staged.other?.job.id).toBe(next.id);
       expect(
         (await entriesOf(fixture, stranded.id)).map((e) => e.type),
       ).toEqual(["reservation", "release"]);
+      // The old hold is given back and the new job holds nothing.
       expect(await journalOf(fixture).balance()).toEqual({
-        balanceMicroUsd: 500_000 - OWN_KEY_DIFF_HOLD,
-        reservedMicroUsd: OWN_KEY_DIFF_HOLD,
+        balanceMicroUsd: 500_000,
+        reservedMicroUsd: 0,
       });
       expect(await journalOf(fixture).verify()).toMatchObject({
         consistent: true,
@@ -973,6 +983,38 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
         firstWorkspace,
         lastWorkspace,
       ]);
+    },
+  );
+
+  // #605-T41
+  run(
+    "finds nothing for a job claimed since #605 that ended while billing was off: it holds nothing, so nothing is stranded",
+    async () => {
+      const fixture = await start();
+      pr += 1;
+      fixture.clock.advance(1);
+      const job = await fixture.enqueueNew({ prNumber: pr });
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(
+        job.id,
+        claimed?.leaseToken ?? "",
+        delivered,
+      );
+      await setBillingSwitch(fixture.db, true);
+
+      expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
+      expect(await releaseStrandedHolds(fixture.db, fixture.clock.now)).toEqual(
+        { released: 0 },
+      );
+
+      expect(await entriesOf(fixture, job.id)).toEqual([]);
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+        balanceMicroUsd: FUNDING,
+        reservedMicroUsd: 0,
+        strandedHoldCount: 0,
+      });
     },
   );
 });

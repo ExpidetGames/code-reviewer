@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The settlement of a job's hold (#498; ADR 0006, 2.6 and 2.8): in the transaction that ends the job, the journal gets a
-// `release` of the hold and, unless the outcome is free, a `usage` entry with the AI and infrastructure parts. On SQLite and,
-// when TEST_DATABASE_URL is set, on Postgres. Made-up rates (test-support/billing-switch.ts): A = 5.0, B(Diff) = 13,000,
-// B(Dynamic) = 16,000 micro-USD a minute, a Diff AI reserve of 150,000. A run whose VM lived 90 seconds is 2 started minutes.
+// The settlement of a job (#498, reworked by #605; ADR 0006, 2.6 and 2.8): no amount is held at the claim, so in the
+// transaction that ends the job the journal gets one `usage` entry with the AI and infrastructure parts, unless the outcome
+// is free or prices to nothing, and the balance may go below zero. A job that holds an old reservation (written before #605)
+// is still settled with a release and the usage. On SQLite and, when TEST_DATABASE_URL is set, on Postgres. Made-up rates
+// (test-support/billing-switch.ts): A = 5.0, B(Diff) = 13,000, B(Dynamic) = 16,000 micro-USD a minute. A run whose VM lived
+// 90 seconds is 2 started minutes.
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
@@ -13,6 +15,7 @@ import {
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { decideOutcome } from "../dispatch/outcome.ts";
+import { settleEndedJobs } from "./settle-jobs.ts";
 import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -85,7 +88,7 @@ const delivered = (
   },
 });
 
-describe.each(databases)("the settlement of a hold on %s", (name, open) => {
+describe.each(databases)("the settlement of a job on %s", (name, open) => {
   const run = name === "Postgres" && open === undefined ? it.skip : it;
 
   async function start(
@@ -214,12 +217,21 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
     );
   }
 
+  const billingStateOf = async (fixture: JobQueueFixture, jobId: string) =>
+    (
+      await fixture.db
+        .selectFrom("usage_records")
+        .select("billing_state")
+        .where("job_id", "=", jobId)
+        .executeTakeFirstOrThrow()
+    ).billing_state;
+
   const shape = (entries: JournalEntry[]) =>
     entries.map((entry) => [entry.type, entry.amountMicroUsd]);
 
   // #498-T06
   run(
-    "releases the hold and charges the AI and the infrastructure part of a delivered result with a known cost",
+    "charges the AI and the infrastructure part of a delivered result with a known cost, and writes nothing else",
     async () => {
       const fixture = await start({ keyMode: "managed" });
       const { job, leaseToken } = await claim(fixture, { managed: true });
@@ -227,13 +239,9 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
 
       const entries = await entriesOf(fixture, job.id);
-      // The hold was 25 x 13,000 for the minutes and 150,000 x 5.0 for the AI; the price is 500,000 x 5.0 and 2 x 13,000.
-      expect(shape(entries)).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
-        ["usage", -2_526_000],
-      ]);
-      expect(entries[2]).toMatchObject({
+      // The price is 500,000 x 5.0 for the AI and 2 x 13,000 for the minutes.
+      expect(shape(entries)).toEqual([["usage", -2_526_000]]);
+      expect(entries[0]).toMatchObject({
         aiMicroUsd: 2_500_000,
         infraMicroUsd: 26_000,
         minutes: 2,
@@ -246,6 +254,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       expect(await journalOf(fixture).verify()).toMatchObject({
         consistent: true,
       });
+      expect(await billingStateOf(fixture, job.id)).toBe("settled");
     },
   );
 
@@ -259,13 +268,9 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
 
       const entries = await entriesOf(fixture, job.id);
-      // The hold was 25 x 13,000 for the minutes alone; the AI cost is the customer's own and costs them nothing here.
-      expect(shape(entries)).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
-        ["usage", -26_000],
-      ]);
-      expect(entries[2]).toMatchObject({
+      // The AI cost is the customer's own and costs them nothing here.
+      expect(shape(entries)).toEqual([["usage", -26_000]]);
+      expect(entries[0]).toMatchObject({
         aiMicroUsd: 0,
         infraMicroUsd: 26_000,
         minutes: 2,
@@ -299,8 +304,9 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
   );
 
   // #498-T07
+  // #605-T07
   run(
-    "charges the full price of a Diff run above its hold, takes the balance below zero and refuses the next claim",
+    "charges the full price of a Diff run above the balance, takes the balance below zero and refuses the next claim",
     async () => {
       const fixture = await start({ keyMode: "managed", funding: 1_075_000 });
       const { job, leaseToken } = await claim(fixture, { managed: true });
@@ -309,8 +315,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
 
       // AI 2,000,000 x 5.0 = 10,000,000 and 2 minutes x 13,000.
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
         ["usage", -10_026_000],
       ]);
       expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
@@ -329,15 +333,19 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
   );
 
   // #498-T07b
+  // #605-T07
   run(
-    "charges the full price of a Dynamic run above its hold (usage.limitExceededBy), and refuses the next claim",
+    "charges the full price of a Dynamic run above the balance (usage.limitExceededBy), and refuses the next claim",
     async () => {
       const fixture = await start({ keyMode: "managed", funding: 5_400_000 });
       const { job, leaseToken } = await claim(fixture, {
         kind: "dynamic",
         managed: true,
       });
-      expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(0);
+      // Nothing was held: the claim left the whole balance.
+      expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
+        5_400_000,
+      );
 
       await fixture.queue.complete(
         job.id,
@@ -345,10 +353,8 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         delivered(1.34, { limitExceededBy: 0.34 }),
       );
 
-      // AI 1,340,000 x 5.0 = 6,700,000 and 2 minutes x 16,000, against a hold of 5,400,000.
+      // AI 1,340,000 x 5.0 = 6,700,000 and 2 minutes x 16,000, against a balance of 5,400,000.
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -5_400_000],
-        ["release", 5_400_000],
         ["usage", -6_732_000],
       ]);
       expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
@@ -382,12 +388,8 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       });
 
       const entries = await entriesOf(fixture, job.id);
-      expect(shape(entries)).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
-        ["usage", -26_000],
-      ]);
-      expect(entries[2]).toMatchObject({
+      expect(shape(entries)).toEqual([["usage", -26_000]]);
+      expect(entries[0]).toMatchObject({
         aiMicroUsd: 0,
         infraMicroUsd: 26_000,
       });
@@ -404,8 +406,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, delivered(null));
 
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
         ["usage", -26_000],
       ]);
     },
@@ -421,8 +421,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, delivered(null));
 
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -25 * 16_000],
-        ["release", 25 * 16_000],
         ["usage", -32_000],
       ]);
     },
@@ -430,7 +428,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
 
   // #498-T08b
   run(
-    "releases the hold of a managed Dynamic run that ended dynamic_accounting_failed and charges nothing",
+    "charges nothing for a managed Dynamic run that ended dynamic_accounting_failed",
     async () => {
       const fixture = await start({ keyMode: "managed" });
       const { job, leaseToken } = await claim(fixture, {
@@ -446,10 +444,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         },
       });
 
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -5_400_000],
-        ["release", 5_400_000],
-      ]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
       expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
         100_000_000,
       );
@@ -493,8 +488,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       });
       // 90 seconds from the start of the VM to its confirmed stop: 2 minutes.
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
         ["usage", -2_526_000],
       ]);
     },
@@ -528,18 +521,14 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
 
       // The backstop is the push plus 60 seconds: 120 seconds from the start, 2 minutes. The AI cost is unknown.
       const entries = await entriesOf(fixture, job.id);
-      expect(shape(entries)).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
-        ["usage", -26_000],
-      ]);
-      expect(entries[2]).toMatchObject({ aiMicroUsd: 0, minutes: 2 });
+      expect(shape(entries)).toEqual([["usage", -26_000]]);
+      expect(entries[0]).toMatchObject({ aiMicroUsd: 0, minutes: 2 });
     },
   );
 
   // #498-T10
   run.each(["launch_failed", "worker_exited"])(
-    "releases the hold and charges nothing for a job the Dispatcher gave back as %s on its last attempt",
+    "charges nothing for a job the Dispatcher gave back as %s on its last attempt",
     async (reason) => {
       const fixture = await start({ keyMode: "managed", maxAttempts: 1 });
       const { job, leaseToken } = await claim(fixture, { managed: true });
@@ -550,16 +539,13 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         status: "failed",
         errorCode: reason,
       });
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
-      ]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
     },
   );
 
   // #498-T10
   run(
-    "releases the hold and charges nothing when the lease ran out on the last attempt",
+    "charges nothing when the lease ran out on the last attempt",
     async () => {
       const fixture = await start({ keyMode: "managed", maxAttempts: 1 });
       const { job } = await claim(fixture, { managed: true });
@@ -571,16 +557,13 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         status: "failed",
         errorCode: "lease_expired",
       });
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
-      ]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
     },
   );
 
   // #498-T11
   run(
-    "takes no hold from a workspace whose claim the entitlements refuse",
+    "writes no entry for a workspace whose claim the entitlements refuse",
     async () => {
       const fixture = await start();
       await createWorkspaceEntitlementsRepository(
@@ -615,7 +598,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
 
   // #498-T11
   run(
-    "releases the hold of a job that waited again after a lost attempt and was replaced",
+    "charges nothing for a job that waited again after a lost attempt and was replaced, and closes its billing",
     async () => {
       const fixture = await start();
       const { job, leaseToken } = await claim(fixture);
@@ -623,9 +606,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         (await fixture.queue.release(job.id, leaseToken, "worker_exited"))
           .status,
       ).toBe("requeued");
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -325_000],
-      ]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
 
       await fixture.queue.enqueue({
         repositoryId: job.repositoryId,
@@ -640,23 +621,22 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       expect(await fixture.queue.get(job.id)).toMatchObject({
         status: "superseded",
       });
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
-      ]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
+      expect(await billingStateOf(fixture, job.id)).toBe("settled");
     },
   );
 
   // #498-T21
   run(
-    "releases the hold of a job that waited again after a lost attempt and was cancelled, and restores the balance",
+    "charges nothing for a job that waited again after a lost attempt and was cancelled, and leaves the balance",
     async () => {
       const fixture = await start();
       const { job, leaseToken } = await claim(fixture);
       await fixture.queue.release(job.id, leaseToken, "worker_exited");
-      expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
-        325_000,
-      );
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: 100_000_000,
+        reservedMicroUsd: 0,
+      });
 
       expect(
         await fixture.queue.cancelWaitingForRepository(fixture.repositoryId),
@@ -665,10 +645,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       expect(await fixture.queue.get(job.id)).toMatchObject({
         status: "cancelled",
       });
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
-      ]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
       expect(await journalOf(fixture).balance()).toEqual({
         balanceMicroUsd: 100_000_000,
         reservedMicroUsd: 0,
@@ -677,7 +654,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
   );
 
   // #498-T12
-  run("voids a job refused after the hold and releases the hold", async () => {
+  run("voids a job refused after the claim and charges nothing", async () => {
     const fixture = await start({ keyMode: "managed" });
     const { job, leaseToken } = await claim(fixture, {
       managed: true,
@@ -690,10 +667,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       errorCode: "llm_not_configured",
     });
 
-    expect(shape(await entriesOf(fixture, job.id))).toEqual([
-      ["reservation", -1_075_000],
-      ["release", 1_075_000],
-    ]);
+    expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
     expect(await recordsOf(fixture).get(job.id)).toMatchObject({
       state: "void",
     });
@@ -701,7 +675,7 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
 
   // #498-T13
   run(
-    "writes one usage and one release when the completion is delivered twice and a sweep follows",
+    "writes one usage when the completion is delivered twice and a sweep follows",
     async () => {
       const fixture = await start({ keyMode: "managed" });
       const { job, leaseToken } = await claim(fixture, { managed: true });
@@ -723,8 +697,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       expect(first.status).toBe("completed");
       expect(second.status).toBe("already_completed");
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -1_075_000],
-        ["release", 1_075_000],
         ["usage", -2_526_000],
       ]);
       expect(await journalOf(fixture).verify()).toMatchObject({
@@ -789,12 +761,8 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, delivered(null));
 
       const entries = await entriesOf(fixture, job.id);
-      expect(shape(entries)).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
-        ["usage", -39_000],
-      ]);
-      expect(entries[2]).toMatchObject({ minutes: 3 });
+      expect(shape(entries)).toEqual([["usage", -39_000]]);
+      expect(entries[0]).toMatchObject({ minutes: 3 });
       expect(await vmRunsOf(fixture).list(job.id)).toEqual([
         expect.objectContaining({
           endSource: "claim_wall_clock",
@@ -816,8 +784,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.complete(job.id, leaseToken, delivered(null));
 
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
         ["usage", -39_000],
       ]);
       expect((await vmRunsOf(fixture).list(job.id))[0]).toMatchObject({
@@ -842,8 +808,6 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       );
 
       expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
         ["usage", -13_000],
       ]);
     },
@@ -860,10 +824,223 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
       await fixture.queue.release(job.id, leaseToken, "launch_failed");
 
       expect(await vmRunsOf(fixture).list(job.id)).toEqual([]);
-      expect(shape(await entriesOf(fixture, job.id))).toEqual([
-        ["reservation", -325_000],
-        ["release", 325_000],
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
+    },
+  );
+
+  /**
+   * A run a newer push replaces while it runs: claimed on a runner that accepts it, its VM started and stopped 90 seconds
+   * later (2 started minutes), and the job superseded. The Worker still holds the lease and may report.
+   */
+  async function supersededRun(fixture: JobQueueFixture, managed: boolean) {
+    const { job, leaseToken } = await claim(fixture, {
+      managed,
+      vmSeconds: null,
+      acceptsSupersede: true,
+    });
+    await startVm(fixture, job, "vm-1");
+    fixture.clock.advance(60 * SECOND);
+    await fixture.queue.enqueue({
+      repositoryId: job.repositoryId,
+      prNumber: job.prNumber,
+      prUrl: job.prUrl,
+      headSha: sha("e"),
+      command: "review",
+      triggerKind: "webhook",
+      actorLogin: "octocat",
+    });
+    fixture.clock.advance(30 * SECOND);
+    await vmRunsOf(fixture).confirmStopped(
+      job.id,
+      ["vm-1"],
+      fixture.clock.now(),
+    );
+    expect(await fixture.queue.get(job.id)).toMatchObject({
+      status: "superseded",
+    });
+    return { job, leaseToken };
+  }
+
+  // #605-T10 (decision of #489, comment 6310423523: our error wins over superseded-is-charged)
+  run.each(["runner_error", "invalid_job", "git_unavailable"])(
+    "charges nothing for a superseded run whose Worker reports our error %s",
+    async (errorCode) => {
+      const fixture = await start({ keyMode: "managed" });
+      const { job, leaseToken } = await supersededRun(fixture, true);
+
+      const completed = await fixture.queue.complete(job.id, leaseToken, {
+        ok: false,
+        errorCode,
+        result: {
+          usage: { promptTokens: 5, completionTokens: 1, costUsd: 0.5 },
+        },
+      });
+
+      expect(completed.status).toBe("completed");
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
+      expect(await billingStateOf(fixture, job.id)).toBe("settled");
+      expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
+        100_000_000,
+      );
+    },
+  );
+
+  // #605-T10
+  run(
+    "charges nothing for a superseded run on the operator's key whose Worker reports a provider failure, which is ours there",
+    async () => {
+      const fixture = await start({ keyMode: "managed" });
+      const { job, leaseToken } = await supersededRun(fixture, true);
+
+      await fixture.queue.complete(job.id, leaseToken, {
+        ok: false,
+        errorCode: "llm_unavailable",
+      });
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
+    },
+  );
+
+  // #605-T10
+  run(
+    "still charges a superseded run whose Worker reports a failure that is not ours, and one that reports a result",
+    async () => {
+      const own = await start({ keyMode: "own" });
+      const failed = await supersededRun(own, false);
+      await own.queue.complete(failed.job.id, failed.leaseToken, {
+        ok: false,
+        errorCode: "llm_unavailable",
+      });
+      // The provider failure is the customer's on their own key: the minutes, 2 x 13,000.
+      expect(shape(await entriesOf(own, failed.job.id))).toEqual([
+        ["usage", -26_000],
+      ]);
+
+      const managed = await start({ keyMode: "managed" });
+      const delivered05 = await supersededRun(managed, true);
+      await managed.queue.complete(
+        delivered05.job.id,
+        delivered05.leaseToken,
+        delivered(0.5),
+      );
+      expect(shape(await entriesOf(managed, delivered05.job.id))).toEqual([
+        ["usage", -2_526_000],
       ]);
     },
   );
+
+  // #605-T11
+  run(
+    "does not charge a job that was claimed with billing off and ended with billing on",
+    async () => {
+      const fixture = await start({ keyMode: "managed" });
+      await setBillingSwitch(fixture.db, false);
+      const { job, leaseToken } = await claim(fixture, { managed: true });
+      await setBillingSwitch(fixture.db, true);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
+      expect(await billingStateOf(fixture, job.id)).toBeNull();
+      expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
+        100_000_000,
+      );
+    },
+  );
+
+  // #605-T12
+  run(
+    "does not charge a job that ended while billing was off, also after billing is switched on again and swept",
+    async () => {
+      const fixture = await start({ keyMode: "managed" });
+      const { job, leaseToken } = await claim(fixture, { managed: true });
+      await setBillingSwitch(fixture.db, false);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+      await setBillingSwitch(fixture.db, true);
+      fixture.clock.advance(60 * 60 * SECOND);
+      await fixture.queue.expireStaleJobs();
+      await fixture.queue.claimNext("runner-b", ENGINES);
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([]);
+      expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(
+        100_000_000,
+      );
+    },
+  );
+
+  // #605-T13
+  run(
+    "charges a job once when its settlement is called twice at the same moment",
+    async () => {
+      const fixture = await start({ keyMode: "managed" });
+      const { job, leaseToken } = await claim(fixture, { managed: true });
+      // It ended while billing was off, so nothing settled it; billing is back on and two callers settle it at once.
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+      await setBillingSwitch(fixture.db, true);
+      expect(await billingStateOf(fixture, job.id)).toBe("open");
+
+      await Promise.all([
+        fixture.db
+          .transaction()
+          .execute((trx) => settleEndedJobs(trx, [job.id], fixture.clock.now)),
+        fixture.db
+          .transaction()
+          .execute((trx) => settleEndedJobs(trx, [job.id], fixture.clock.now)),
+      ]);
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["usage", -2_526_000],
+      ]);
+      expect(await billingStateOf(fixture, job.id)).toBe("settled");
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+        balanceMicroUsd: 100_000_000 - 2_526_000,
+      });
+    },
+  );
+
+  // #605-T14 (old rows: an instance that took holds before #605)
+  run(
+    "settles a job that holds an old reservation with a release and the usage, as before",
+    async () => {
+      const fixture = await start({ keyMode: "own" });
+      const { job, leaseToken } = await claim(fixture);
+      // What the claim of an earlier release wrote.
+      expect(await journalOf(fixture).reserve(325_000, job.id)).toMatchObject({
+        ok: true,
+      });
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(0.5));
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+        ["usage", -26_000],
+      ]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: 100_000_000 - 26_000,
+        reservedMicroUsd: 0,
+      });
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+      });
+    },
+  );
+
+  // #605-T14
+  run("releases an old reservation of a job that ended free", async () => {
+    const fixture = await start({ maxAttempts: 1 });
+    const { job, leaseToken } = await claim(fixture);
+    await journalOf(fixture).reserve(325_000, job.id);
+
+    await fixture.queue.release(job.id, leaseToken, "launch_failed");
+
+    expect(shape(await entriesOf(fixture, job.id))).toEqual([
+      ["reservation", -325_000],
+      ["release", 325_000],
+    ]);
+    expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
+  });
 });

@@ -5,19 +5,19 @@
 // micro-USD integers, as the sum of an append-only journal; the balance row is a cache updated in the transaction of
 // every entry, and `verify()` compares the two.
 //
-// Everything that writes runs in one transaction (the caller's, when it hands in a transaction, so a later issue can put
-// a reservation into the claim transaction) and is idempotent on the key `(workspace, type, ref_key)`: the same key with
+// Everything that writes runs in one transaction (the caller's, when it hands in a transaction) and is idempotent on the key `(workspace, type, ref_key)`: the same key with
 // the same amount returns the entry that exists, with another amount it is `idempotency_conflict`. A `reserve` is the one
 // conditional write, a hold of at most the balance: it takes the balance row's lock first (SQLite's `begin immediate`
 // already serializes writers; Postgres `FOR UPDATE`), answers a repeated job from the entry it wrote, and runs
 // `UPDATE ... SET balance = balance - :hold WHERE balance >= :hold`, so two claims of one workspace can never spend the
-// same money. `reserveUpTo` is the same write for a claim: a job with a reservation gets it back unchanged, otherwise the
-// hold is `min(wanted, balance)`. `settle` and `release` take the same lock before they read what a job has, so a
-// settlement and a release of one job are decided one after the other and a voided job is never charged. Every other
-// entry updates the balance unconditionally: a settlement, a refund, a chargeback or a correction may take it below
-// zero: a balance of exactly zero refuses a `reserveUpTo` with `balance_exhausted`, one below zero with `balance_negative`
-// (and every `reserve`). Every writer takes the balance row's lock before it writes anything, `append` included, so no two
-// of them can wait for each other; `release` and `usage` are written only by `release()` and `settle()`.
+// same money. Since #605 no claim takes a hold: a job's price is written when it ends, as one `usage` entry by `charge`,
+// which takes the balance row's lock like every writer and, being keyed by the job, writes it once. `reserve`, `settle` and
+// `release` remain for the holds an earlier release wrote: `settle` and `release` take the same lock before they read what a
+// job has, so a settlement and a release of one job are decided one after the other and a voided job is never charged. Every
+// other entry updates the balance unconditionally: a charge, a refund, a chargeback or a correction may take it below zero,
+// and a balance below zero refuses every `reserve`. Every writer takes the balance row's lock before it writes anything,
+// `append` included, so no two of them can wait for each other; `release` and `usage` are written only by `release()`,
+// `settle()` and `charge()`.
 //
 // Entries are listed by `seq`, the order they were written in; `created_at` is a millisecond and not unique.
 //
@@ -132,6 +132,8 @@ export type SettleResult =
     }
   | { ok: false; code: "reservation_not_found" | "job_already_released" };
 
+export type ChargeResult = { entry: JournalEntry; created: boolean };
+
 export type ReleaseResult =
   | { ok: true; entry: JournalEntry; created: boolean }
   | { ok: false; code: "reservation_not_found" };
@@ -154,14 +156,13 @@ export type BillingJournalRepository = {
    */
   reserve(holdMicroUsd: number, jobId: string): Promise<ReserveResult>;
   /**
-   * The hold of a claim (#498): at most `maxHoldMicroUsd`, and never more than the balance. Under the same lock as
-   * `reserve`: a job that has a reservation gets it back unchanged (`created: false`), whatever its amount is, so a retried
-   * claim after a top-up or a refund is not a conflict; otherwise it holds `min(maxHold, balance)`. A balance of exactly
-   * zero refuses with `balance_exhausted`, one below zero with `balance_negative`, and writes nothing. A job whose
-   * reservation was released (it ended free, or it was settled) is `reservation_released`, not a reservation: nothing is
-   * held, so a retry must not run (#498 decides; a requeue keeps the hold and never releases).
+   * The price of a finished job (#605): one `usage` entry for the job, with no hold behind it. Takes the balance row's lock
+   * first, may take the balance below zero, and is idempotent on the job: the same charge returns the entry that exists
+   * (`created: false`), another one is `idempotency_conflict`. The caller decides that a charge is due (a run that is free
+   * or prices to nothing writes nothing); a charge of zero is `invalid_entry`. For a job that holds an old reservation use
+   * `settle`.
    */
-  reserveUpTo(jobId: string, maxHoldMicroUsd: number): Promise<ReserveResult>;
+  charge(jobId: string, charge: JobCharge): Promise<ChargeResult>;
   /**
    * Ends the hold of a job with its charge: a `release` of the whole hold and a `usage` of the charge, in one
    * transaction. A charge of zero writes only the release. Repeating it changes nothing; repeating it with other parts,
@@ -240,6 +241,22 @@ function sameCharge(existing: JournalEntry, entry: NewJournalEntry): boolean {
     existing.minutes === (entry.minutes ?? null) &&
     existing.reviewKind === (entry.reviewKind ?? null)
   );
+}
+
+/** The total of a charge, or `invalid_entry` when it is not made of non-negative integer parts of a job. */
+function chargeTotal(jobId: string, charge: JobCharge): number {
+  const total = charge.aiMicroUsd + charge.infraMicroUsd;
+  const parts = [charge.aiMicroUsd, charge.infraMicroUsd];
+  if (
+    jobId === "" ||
+    !Number.isSafeInteger(total) ||
+    parts.some((part) => !Number.isSafeInteger(part) || part < 0)
+  )
+    throw new BillingJournalError(
+      "invalid_entry",
+      "a charge is made of non-negative integer parts",
+    );
+  return total;
 }
 
 function requireHold(holdMicroUsd: number, jobId: string): void {
@@ -567,44 +584,36 @@ export function createBillingJournalRepository(
       });
     },
 
-    async reserveUpTo(jobId, maxHoldMicroUsd) {
-      requireHold(maxHoldMicroUsd, jobId);
+    async charge(jobId, charge) {
+      const total = chargeTotal(jobId, charge);
+      if (total === 0)
+        throw new BillingJournalError(
+          "invalid_entry",
+          "a charge is more than zero",
+        );
       const timestamp = formatTimestamp(now());
-      return inTransaction(db, async (trx): Promise<ReserveResult> => {
-        const current = await lockBalance(trx);
-        const existing = await findEntry(trx, "reservation", jobId);
-        if (existing !== undefined)
-          return reservationOf(trx, existing, current);
-        const balanceMicroUsd = current?.balanceMicroUsd ?? 0;
-        if (balanceMicroUsd <= 0)
-          return {
-            ok: false,
-            code:
-              balanceMicroUsd < 0 ? "balance_negative" : "balance_exhausted",
-            balanceMicroUsd,
-          };
-        return takeHold(
+      return inTransaction(db, async (trx): Promise<ChargeResult> => {
+        await lockBalance(trx);
+        const usage = await appendIn(
           trx,
-          Math.min(maxHoldMicroUsd, balanceMicroUsd),
-          jobId,
-          current,
+          {
+            type: "usage",
+            amountMicroUsd: -total,
+            jobId,
+            refKey: jobId,
+            reviewKind: charge.reviewKind,
+            minutes: charge.minutes,
+            aiMicroUsd: charge.aiMicroUsd,
+            infraMicroUsd: charge.infraMicroUsd,
+          },
           timestamp,
         );
+        return { entry: usage.entry, created: usage.created };
       });
     },
 
     async settle(jobId, charge) {
-      const total = charge.aiMicroUsd + charge.infraMicroUsd;
-      const parts = [charge.aiMicroUsd, charge.infraMicroUsd];
-      if (
-        jobId === "" ||
-        !Number.isSafeInteger(total) ||
-        parts.some((part) => !Number.isSafeInteger(part) || part < 0)
-      )
-        throw new BillingJournalError(
-          "invalid_entry",
-          "a charge is made of non-negative integer parts",
-        );
+      const total = chargeTotal(jobId, charge);
       const timestamp = formatTimestamp(now());
       return inTransaction(db, async (trx): Promise<SettleResult> => {
         // The lock a release takes as well: what the job has (a release, a usage) is read after any other writer of the

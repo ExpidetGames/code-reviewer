@@ -94,7 +94,7 @@ there (`src/plan-handoff/README.md`). A setting that cannot be read costs the no
 
 ## The balance (#498)
 
-A job the claim refuses because the balance cannot hold it (`insufficient_balance`, `balance_negative`) gets a notice too. The text is "No review
+A job the claim refuses because the balance is zero or below zero (`insufficient_balance`, `balance_negative`; no amount is held since #605) gets a notice too. The text is "No review
 ran for this change." and "This workspace has no credit left for reviews." (or "The balance of this workspace is below zero."), then "Add credit to
 continue": with a link to the workspace settings (`/w/<slug>/settings`, `settingsUrl`; the balance page of #505 will take it over) it says an Owner or
 Admin can do so there, without one it says to contact an Owner or Admin. It names no amount, rate, formula or model. It is **one per pull request head**,

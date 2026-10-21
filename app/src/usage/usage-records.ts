@@ -16,6 +16,15 @@ export const USAGE_STATES = ["reserved", "settled", "void"] as const;
 export type UsageState = (typeof USAGE_STATES)[number];
 
 /**
+ * Whether the money of a run is still to be settled (#605, `usage_records.billing_state`). `open`: the claim that handed the
+ * job out had billing on, nothing is held, and the price is charged once when the job ends. `settled`: that happened (a charge,
+ * or none when the run is free). A record that was never `open` (the job was claimed with billing off) is null and is never
+ * charged.
+ */
+export const BILLING_STATES = ["open", "settled"] as const;
+export type BillingState = (typeof BILLING_STATES)[number];
+
+/**
  * Why a record was settled without a report of its run. `no_result`: the job ended without any result from the
  * runner (it died, its lease ran out on the last attempt, it ran past the hard limit), so the model may have been
  * used and nobody can say how much: the record counts, with an unknown cost and unknown tokens. A run that

@@ -647,7 +647,7 @@ describe.each(databases)("the start credit on %s", (name, open) => {
 
   // #507-T01
   run(
-    "grants at the first claim, so the credit pays the hold of that job, and never again",
+    "grants at the first claim, so the credit lets that job start (nothing is held, #605), and never again",
     async () => {
       const database = await open?.();
       if (database === undefined) throw new Error("No database.");
@@ -671,11 +671,7 @@ describe.each(databases)("the start credit on %s", (name, open) => {
       const entries = (
         await journalOf(fixture.db, fixture.workspaceId).entries({ limit: 20 })
       ).entries.reverse();
-      expect(entries.map((entry) => entry.type)).toEqual([
-        "start_credit",
-        "reservation",
-        "reservation",
-      ]);
+      expect(entries.map((entry) => entry.type)).toEqual(["start_credit"]);
       expect(entries[0]?.amountMicroUsd).toBe(TWO_USD);
       expect(
         await journalOf(fixture.db, fixture.workspaceId).verify(),
@@ -767,7 +763,7 @@ describe.each(databases)("the start credit on %s", (name, open) => {
 
       const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
 
-      // The installation next to the poison row still earns the credit, which pays the hold.
+      // The installation next to the poison row still earns the credit, which lets the job start.
       expect(claimed).not.toBeNull();
       expect(refused).toEqual([]);
       expect(
@@ -839,7 +835,7 @@ describe.each(databases)("the start credit on %s", (name, open) => {
 
         const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
 
-        // The claim is unaffected: judged on its balance, which pays the hold.
+        // The claim is unaffected: judged on its balance, which lets the job start.
         expect(claimed).not.toBeNull();
         expect(refused).toEqual([]);
         expect(await startCreditsOf(fixture.db, fixture.workspaceId)).toEqual(

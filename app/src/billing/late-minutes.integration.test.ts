@@ -163,17 +163,11 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
   it("credits one correction when the real end arrives within a day and is more than a minute before the backstop", async () => {
     const t = await setup();
     const id = await t.settledJob(5);
-    expect(await t.entries(id)).toEqual([
-      ["reservation", -325_000, null],
-      ["release", 325_000, null],
-      ["usage", -78_000, 6],
-    ]);
+    expect(await t.entries(id)).toEqual([["usage", -78_000, 6]]);
 
     expect(await learnEndBefore(t, id, 2)).toBe("corrected");
 
     expect(await t.entries(id)).toEqual([
-      ["reservation", -325_000, null],
-      ["release", 325_000, null],
       ["usage", -78_000, 6],
       // The VM ended 3 started minutes in, not 6: 3 minutes x 13,000 back.
       ["correction", 39_000, 3],
@@ -191,11 +185,7 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
 
     await t.service.stopJobs([id]);
 
-    expect(await t.entries(id)).toEqual([
-      ["reservation", -325_000, null],
-      ["release", 325_000, null],
-      ["usage", -26_000, 2],
-    ]);
+    expect(await t.entries(id)).toEqual([["usage", -26_000, 2]]);
     expect(await t.journal.balance()).toEqual({
       balanceMicroUsd: 10_000_000 - 26_000,
       reservedMicroUsd: 0,
@@ -211,11 +201,7 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
 
     await t.service.stopJobs([id]);
 
-    expect(await t.entries(id)).toEqual([
-      ["reservation", -325_000, null],
-      ["release", 325_000, null],
-      ["usage", -26_000, 2],
-    ]);
+    expect(await t.entries(id)).toEqual([["usage", -26_000, 2]]);
   });
 
   // #498-T14
@@ -226,11 +212,7 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
 
     expect(await learnEndBefore(t, id, 25 * 60 + 2)).toBe("too_late");
 
-    expect((await t.entries(id)).map(([type]) => type)).toEqual([
-      "reservation",
-      "release",
-      "usage",
-    ]);
+    expect((await t.entries(id)).map(([type]) => type)).toEqual(["usage"]);
   });
 
   // #498-T14

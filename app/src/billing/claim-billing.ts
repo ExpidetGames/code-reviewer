@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Billing at the claim (ADR 0006, 2.8; #498): inside the claim transaction, after the admission checks, the job takes a hold
-// from the balance of its workspace or is refused. Nothing here runs while billing is off: the only thing read is the
-// switch itself, which lives in the instance settings, never a billing table.
+// Billing at the claim (ADR 0006, 2.8; #498, reworked by #605): inside the claim transaction, after the admission checks, a job
+// starts when the balance of its workspace is above zero and is refused otherwise. NOTHING is held: with a hold, ten dollars
+// would carry three Dynamic reviews at a time. The price is charged when the job ends (settle-jobs.ts) and may take the
+// balance below zero, which then refuses every claim (`balance_negative`) until the workspace tops up. Nothing here runs while
+// billing is off: the only thing read is the switch itself, which lives in the instance settings, never a billing table.
 //
-// The hold is `reserveFor` (the longest the VM lives times B, plus on the operator's key the AI budget times A). It is at
-// most the balance (decision 5 of #489: "holds reserve at most the available balance; the final charge may take the
-// balance slightly negative"), so a workspace with a little credit still runs, and only an empty one is refused
-// (`insufficient_balance`). A balance below zero refuses every job (`balance_negative`), also one whose hold is zero.
+// A job that cannot cost anything (the workspace's own key and a rate B of zero) needs no balance, only one that is not
+// negative: it is charged nothing, so refusing it at a balance of exactly zero would protect nothing.
 import "server-only";
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
@@ -15,8 +15,6 @@ import type { Database } from "../db/schema.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
 import { readBillingSwitch } from "./enabled.ts";
-import { DYNAMIC_COST_LIMIT_MICRO_USD, maxVmMinutes } from "./hold.ts";
-import { reserveFor } from "./pricing.ts";
 import { BILLING_RATES_INCOMPLETE } from "./rates.ts";
 import type { BillingRates } from "./rates.ts";
 
@@ -55,72 +53,56 @@ export const CLAIM_BILLING_REFUSALS = [
   "insufficient_balance",
   "balance_negative",
   "billing_rates_incomplete",
-  "billing_hold_released",
 ] as const;
 export type ClaimBillingRefusal = (typeof CLAIM_BILLING_REFUSALS)[number];
 
-export type ReserveOutcome =
+export type AdmitOutcome =
   { ok: true } | { ok: false; code: ClaimBillingRefusal };
 
-export const RATES_INCOMPLETE_REFUSAL: ReserveOutcome = {
+export const RATES_INCOMPLETE_REFUSAL: AdmitOutcome = {
   ok: false,
   code: BILLING_RATES_INCOMPLETE,
 };
 
-/** The hold of a job in micro-USD: what `reserveFor` says for the key mode, the kind and the rates. */
-export function holdOf(input: {
+/** Whether a run of this kind on this key can be charged anything at all under these rates. */
+export function canCostAnything(input: {
   keyMode: KeyMode;
   reviewKind: ProjectReviewKind;
   rates: BillingRates;
-}): number {
-  return reserveFor({
-    keyMode: input.keyMode,
-    reviewKind: input.reviewKind,
-    maxMinutes: maxVmMinutes(input.reviewKind),
-    rates: input.rates,
-    dynamicCostLimitMicroUsd: DYNAMIC_COST_LIMIT_MICRO_USD,
-  }).totalMicroUsd;
+}): boolean {
+  return (
+    input.keyMode === "managed" ||
+    input.rates.minuteRateMicroUsd[input.reviewKind] > 0
+  );
 }
 
 /**
- * Takes the hold of a claimed job, in the claim's transaction, or says why not. A job that was claimed before keeps the hold
- * it has. A hold of zero (the workspace's own key and B = 0) writes nothing, but a balance below zero still refuses.
+ * Whether the workspace of a job may start it, in the claim's transaction: a balance above zero, or (for a job that cannot
+ * cost anything) one that is not negative. Writes nothing and holds nothing; a balance that falls to zero or below while
+ * jobs run only refuses the claims that follow, and many jobs may start on a small balance at the same moment (accepted,
+ * #605; the hourly brake of #499 still limits how many start).
  */
-export async function reserveAtClaim(
+export async function admitAtClaim(
   trx: Kysely<Database>,
   input: {
     rates: BillingRates;
-    job: { id: string; workspaceId: string; reviewKind: ProjectReviewKind };
+    job: { workspaceId: string; reviewKind: ProjectReviewKind };
     keyMode: KeyMode;
     now: () => Date;
   },
-): Promise<ReserveOutcome> {
-  const { job } = input;
-  const journal = createBillingJournalRepository(
+): Promise<AdmitOutcome> {
+  const { balanceMicroUsd } = await createBillingJournalRepository(
     trx,
-    job.workspaceId,
+    input.job.workspaceId,
     input.now,
-  );
-  const hold = holdOf({
+  ).balance();
+  if (balanceMicroUsd < 0) return { ok: false, code: "balance_negative" };
+  if (balanceMicroUsd > 0) return { ok: true };
+  return canCostAnything({
     keyMode: input.keyMode,
-    reviewKind: job.reviewKind,
+    reviewKind: input.job.reviewKind,
     rates: input.rates,
-  });
-  if (hold === 0) {
-    const { balanceMicroUsd } = await journal.balance();
-    return balanceMicroUsd < 0
-      ? { ok: false, code: "balance_negative" }
-      : { ok: true };
-  }
-  const reserved = await journal.reserveUpTo(job.id, hold);
-  if (reserved.ok) return { ok: true };
-  switch (reserved.code) {
-    case "balance_negative":
-      return { ok: false, code: "balance_negative" };
-    case "reservation_released":
-      return { ok: false, code: "billing_hold_released" };
-    case "balance_exhausted":
-    case "insufficient_balance":
-      return { ok: false, code: "insufficient_balance" };
-  }
+  })
+    ? { ok: false, code: "insufficient_balance" }
+    : { ok: true };
 }
