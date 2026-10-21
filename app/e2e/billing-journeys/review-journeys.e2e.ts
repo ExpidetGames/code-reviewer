@@ -374,6 +374,15 @@ test.describe("the billing journeys of a review", () => {
     const credit = await balanceMicro(page);
     expect(credit).toBe(2 * MICRO);
 
+    // The balance is below the low threshold: the Owner is warned on the pages of the workspace, with the balance and the way to billing.
+    await page.goto("/w/default/projects");
+    const banner = page.locator("[data-slot=balance-banner]");
+    await expect(banner).toContainText("Your balance is low");
+    await expect(banner).toContainText("$2.00");
+    await expect(
+      banner.getByRole("link", { name: "Go to billing" }),
+    ).toHaveAttribute("href", BILLING_PAGE);
+
     // A Diff review on our key: two prices on the run and in the journal, and the balance is the credit minus them.
     const diffJob = await review(request, "diff", DIFF_COST_USD);
     expect(diffJob.llm.apiKey).toBe(OPERATOR_KEY);
@@ -459,11 +468,16 @@ test.describe("the billing journeys of a review", () => {
     expectNoNumber(notice);
 
     // The Owner pays at the (fake) checkout and Stripe's signed event credits the workspace.
-    await page.goto(BILLING_PAGE);
-    await expect(page.getByText("No credit left")).toBeVisible();
+    // The Owner sees it at once: an alert on the pages of the workspace that leads to the billing page.
+    await page.goto("/w/default/projects");
+    const banner = page.locator("[data-slot=balance-banner]");
+    await expect(banner).toContainText("No credit left");
+    await banner.getByRole("link", { name: "Go to billing" }).click();
+    await expect(page).toHaveURL(new RegExp(`${BILLING_PAGE}$`));
     payments["first"] = await topUp(page, 10);
     expect(await balanceMicro(page)).toBe(10 * MICRO);
-    await expect(page.getByText("No credit left")).toHaveCount(0);
+    await page.goto("/w/default/projects");
+    await expect(banner).toHaveCount(0);
 
     // The next push is reviewed and charged.
     const job = await review(request, "diff", DIFF_COST_USD);
@@ -492,7 +506,11 @@ test.describe("the billing journeys of a review", () => {
     await expect
       .poll(async () => balanceMicro(page).catch(() => 0), { timeout: 30_000 })
       .toBe(before - 10 * MICRO);
-    await expect(page.getByText("The balance is below zero")).toBeVisible();
+    await page.goto("/w/default/projects");
+    const banner = page.locator("[data-slot=balance-banner]");
+    await expect(banner).toContainText("The balance is below zero");
+    await expect(banner).toContainText(money(before - 10 * MICRO));
+    await page.goto(BILLING_PAGE);
     const journal = page.getByRole("region", { name: "Journal" });
     await expect(journal.getByText("Refund").first()).toBeVisible();
 
@@ -505,6 +523,8 @@ test.describe("the billing journeys of a review", () => {
     // A top-up unblocks: the balance is positive again and the next push is reviewed.
     payments["second"] = await topUp(page, 10);
     expect(await balanceMicro(page)).toBe(before);
+    await page.goto("/w/default/projects");
+    await expect(banner).toHaveCount(0);
     const job = await review(request, "diff", DIFF_COST_USD);
     await page.goto(BILLING_PAGE);
     expect(await balanceMicro(page)).toBe(before - DIFF_PRICE);
