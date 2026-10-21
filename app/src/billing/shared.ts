@@ -218,7 +218,10 @@ export function getBillingAdminService(): BillingAdminService {
 
 /** The manual credit of the admin portal on the running server (#504). */
 export function getBillingCreditService(): BillingCreditService {
-  return createBillingCreditService({ db: getDatabase() });
+  return createBillingCreditService({
+    db: getDatabase(),
+    afterWritten: deliverBalanceMails,
+  });
 }
 
 /**
