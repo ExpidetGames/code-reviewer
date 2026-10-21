@@ -304,6 +304,11 @@ async function seed(
     checkoutRef: `cs-${tag}`,
     paymentRef: `pi-intent-${tag}`,
   });
+  // One that never got a page (#501), which a sweep of the other workspace must not fail.
+  const unpagedIntent = await repos.topUpIntents.create({
+    adapter: "fake",
+    amountMicroUsd: 10_000_000,
+  });
   // The billing profile (#501): customer data, with a customer, so the other workspace has a profile to reach for.
   await repos.profiles.save({
     legalName: `Legal ${tag} GmbH`,
@@ -317,6 +322,7 @@ async function seed(
   await repos.profiles.setCustomer("fake", `cus_${tag}`);
   return {
     topUpIntentId: topUpIntent.id,
+    unpagedIntentId: unpagedIntent.id,
     workspaceId,
     userId: `user-${tag}`,
     journalEntryId: topUp.entry.id,
@@ -1288,8 +1294,10 @@ const CASES: Case[] = [
     run: (a) => a.topUpIntents.list({ limit: 50 }),
     expectAnswer: (answer, a) => {
       const intents = answer as Array<{ workspaceId: string }>;
-      expect(intents).toHaveLength(1);
-      expect(intents[0]?.workspaceId).toBe(a.workspaceId);
+      expect(intents).toHaveLength(2);
+      expect(
+        intents.every((intent) => intent.workspaceId === a.workspaceId),
+      ).toBe(true);
     },
   },
   {
@@ -1326,6 +1334,17 @@ const CASES: Case[] = [
     name: "topUpIntents.addDebited",
     run: (a, b) => a.topUpIntents.addDebited(b.topUpIntentId, "refund", 1),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "topUpIntents.markFailedUnlessPage",
+    run: (a, b) => a.topUpIntents.markFailedUnlessPage(b.unpagedIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    // Every pending intent of B without a page is old enough for this cutoff, and none of them is A's to fail.
+    name: "topUpIntents.failPendingWithoutPage",
+    run: (a) => a.topUpIntents.failPendingWithoutPage(-60_000),
+    expectAnswer: (answer) => expect(answer).toBe(1),
   },
   {
     name: "topUpIntents.markFailed",
