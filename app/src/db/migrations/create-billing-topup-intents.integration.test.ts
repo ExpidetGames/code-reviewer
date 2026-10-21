@@ -79,6 +79,11 @@ for (const engine of BILLING_ENGINES) {
             "outcome",
             "provider",
             "received_at",
+            // Added by #603 (20261022020000): how an operator closed a review (their id, time and note, and the journal entry).
+            "resolution_entry_id",
+            "resolution_note",
+            "resolved_at",
+            "resolved_by",
             "review_state",
             "subject",
             "workspace_id",

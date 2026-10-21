@@ -75,11 +75,15 @@ describe("the guards of the admin portal", () => {
     expect(billing.map(({ route }) => route).sort()).toEqual([
       "/api/instance-portal/billing",
       "/api/instance-portal/billing/check",
+      "/api/instance-portal/billing/reviews",
+      "/api/instance-portal/billing/reviews/check",
+      "/api/instance-portal/billing/reviews/resolve",
       "/api/instance-portal/billing/webhook-endpoint",
       "/api/instance-portal/billing/workspaces",
       "/api/instance-portal/billing/workspaces/[id]",
       "/api/instance-portal/billing/workspaces/[id]/credit",
       "/instance-portal/billing",
+      "/instance-portal/billing/reviews",
     ]);
     for (const { route, file } of billing) {
       expect(isInternalPortalPath(concretePath(route))).toBe(true);

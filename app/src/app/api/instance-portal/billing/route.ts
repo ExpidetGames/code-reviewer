@@ -11,6 +11,7 @@ import { createBillingRouteHandlers } from "@/billing/admin-http";
 import {
   getBillingAdminService,
   getBillingCreditService,
+  getBillingReviewService,
 } from "@/billing/shared";
 
 async function handlers() {
@@ -22,6 +23,7 @@ async function handlers() {
     notFound,
     service: getBillingAdminService(),
     credit: getBillingCreditService(),
+    reviews: getBillingReviewService(),
   });
 }
 
