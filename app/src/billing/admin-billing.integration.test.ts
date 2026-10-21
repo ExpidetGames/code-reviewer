@@ -798,7 +798,7 @@ describe("the webhook endpoint at Stripe", () => {
     ])(
       "refuses an endpoint that is %s, and changes nothing",
       async (_name, patch) => {
-        const { s } = await withEndpoint((endpoint) => ({
+        const { s, made } = await withEndpoint((endpoint) => ({
           ...endpoint,
           ...patch,
         }));
