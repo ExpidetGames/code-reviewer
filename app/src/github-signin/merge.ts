@@ -59,6 +59,7 @@ export const USER_REFERENCES: ReadonlyArray<{
   { table: "secrets", column: "updated_by", handling: "move" },
   { table: "workspace_secrets", column: "updated_by", handling: "move" },
   { table: "workspace_entitlements", column: "updated_by", handling: "move" },
+  { table: "billing_profiles", column: "confirmed_by", handling: "move" },
   { table: "invitations", column: "invited_by", handling: "move" },
   { table: "invitations", column: "accepted_by", handling: "move" },
   {

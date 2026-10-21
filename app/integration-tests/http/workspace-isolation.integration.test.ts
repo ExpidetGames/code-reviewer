@@ -27,6 +27,7 @@ import { createIntegrationsRepository } from "../../src/db/repositories/integrat
 import { createInvitationsRepository } from "../../src/db/repositories/invitations-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
+import { createSecretsRepository } from "../../src/db/repositories/secrets-repository.ts";
 import { createWorkspacesRepository } from "../../src/db/repositories/workspaces-repository.ts";
 import {
   closeDatabase,
@@ -92,6 +93,11 @@ type Entry = {
    * by the service (a person may leave; who may remove whom is src/workspaces/members.integration.test.ts).
    */
   notInRoleMatrix?: boolean;
+  /**
+   * The route is a missing path while billing is off or its adapter has no checkout: the instance gets billing on with
+   * Stripe (made-up credentials that are never used: no workspace here has a billing profile, so nothing is sent) first.
+   */
+  billing?: boolean;
 };
 
 const ENTRIES: Entry[] = [
@@ -327,6 +333,20 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    // #501-T04: a top-up is for an Admin and an Owner. No workspace of this table has a billing profile, so the answer at the
+    // right role is 409 `profile_required` and Stripe is never called.
+    name: "POST billing/top-ups",
+    route: "/api/w/[workspace]/billing/top-ups",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/top-ups",
+    body: () => ({ amountCents: 2500, confirmBusiness: true }),
+    params: () => ({}),
+    file: "billing/top-ups/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
     name: "PATCH workspace",
     route: "/api/w/[workspace]",
     method: "PATCH",
@@ -524,6 +544,35 @@ async function seedWorkspace(
   };
 }
 
+/** Billing on with the Stripe adapter: the switch, the rates, a passed check and the two credentials (present, never used). */
+async function switchBillingOnWithStripe() {
+  const db = getDatabase();
+  await createInstanceSettingsRepository(db).set(
+    "billing_settings",
+    {
+      enabled: true,
+      adapter: "stripe",
+      factorA: 50_000,
+      minuteRateMicroUsd: { diff: 13_000, dynamic: 16_000 },
+      diffAiReserveMicroUsd: 150_000,
+      stripe: {
+        checkedAt: "2026-10-21T10:00:00.000Z",
+        checkedEnvironment: "test",
+      },
+    },
+    null,
+  );
+  for (const name of ["stripe_api_key", "stripe_webhook_secret"] as const)
+    await createSecretsRepository(db).put({
+      name,
+      ciphertext: "c",
+      nonce: "n",
+      keyVersion: 1,
+      lastFour: null,
+      updatedBy: null,
+    });
+}
+
 async function start() {
   const fake = await startGithubFake({
     appId: TEST_APP_ID,
@@ -593,6 +642,7 @@ async function start() {
       request: Request,
       context: { params: Promise<Record<string, string>> },
     ) => Promise<Response>;
+    if (entry.billing === true) await switchBillingOnWithStripe();
     const body = entry.body?.(ids);
     return handler(
       new Request(`https://app.test/api/w/${slug}${entry.path(ids)}`, {

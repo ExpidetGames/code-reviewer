@@ -22,7 +22,10 @@
 // an amount, a customer or a page.
 import "server-only";
 import type { Kysely } from "kysely";
-import { createBillingProfilesRepository } from "../db/repositories/billing-profiles-repository.ts";
+import {
+  createBillingProfilesRepository,
+  type StoredBillingProfile,
+} from "../db/repositories/billing-profiles-repository.ts";
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { can } from "../workspaces/permissions.ts";
@@ -228,13 +231,7 @@ export function createTopUpService({
   };
 }
 
-function billingProfileOf(
-  profile: NonNullable<
-    Awaited<
-      ReturnType<ReturnType<typeof createBillingProfilesRepository>["get"]>
-    >
-  >,
-): BillingProfile {
+function billingProfileOf(profile: StoredBillingProfile): BillingProfile {
   return {
     legalName: profile.legalName,
     country: profile.country,

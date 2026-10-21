@@ -159,6 +159,39 @@ function suite(engine: BillingEngine) {
     });
 
     // #501-T01
+    it("writes the intent before the provider is asked for anything", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      const seen: Array<string | undefined> = [];
+      const watching = {
+        ...t.adapter,
+        capabilities: t.adapter.capabilities,
+        ensureCustomer: async (
+          input: Parameters<typeof t.adapter.ensureCustomer>[0],
+        ) => {
+          seen.push((await t.intents.list({ limit: 10 }))[0]?.state);
+          return t.adapter.ensureCustomer(input);
+        },
+        createTopUpCheckout: async (
+          input: Parameters<typeof t.adapter.createTopUpCheckout>[0],
+        ) => {
+          seen.push((await t.intents.get(input.intentId))?.state);
+          return t.adapter.createTopUpCheckout(input);
+        },
+      };
+      const service = createTopUpService({ db: t.db, adapter: watching });
+
+      await service.start(t.actor(), {
+        amountCents: 2500,
+        confirmBusiness: true,
+        intentId: undefined,
+        returnUrl: RETURN_URL,
+      });
+
+      expect(seen).toEqual(["pending", "pending"]);
+    });
+
+    // #501-T01
     it("never credits: the balance is what it was", async () => {
       const t = await start();
       await t.profiles.save(PROFILE);
