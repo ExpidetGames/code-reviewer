@@ -18,6 +18,15 @@
 // `release`, which takes the lock of the workspace's balance row first and writes the release under the key of the job, so a
 // settlement racing it finds the release (and charges nothing) or has written its own (and the release finds it).
 //
+// What counts as stranded is decided by the finder (billing-holds-sweep.ts): an ended job, no `release`, and no usage record
+// that is still `reserved`. A superseded run whose Worker drains has its job ended and its record reserved: its settlement (the
+// release and the charge) is still to come, from the Worker's report or the expiry, and releasing its hold here would lose the
+// charge.
+//
+// Lock order: a release locks the balance row of its workspace until the transaction ends, and the switch-on does up to a batch
+// of them in one transaction, in the order workspace, then job. `settleEndedJobs` takes the jobs of its transaction in the same
+// order, so two transactions that lock several workspaces never wait for each other's rows in opposite orders.
+//
 // Billing off: `releaseStrandedHoldsWhileBillingOn` reads the instance setting and nothing else.
 import "server-only";
 import type { Kysely } from "kysely";
