@@ -64,6 +64,7 @@ import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import { ensureStartCreditWhileOn } from "../../billing/start-credit.ts";
 import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import {
   settlementOfOutcome,
@@ -835,6 +836,14 @@ export function createRunnerJobsRepository(
             // a refused job leaves neither a record nor an entry, and a job handed out has both. Billing off reads no
             // billing table.
             billing ??= await readClaimBilling(trx);
+            // #507: the start credit comes first, in this transaction, so the first job of a new workspace can use it. It is
+            // granted once per GitHub account and only while billing is on and ready (a state that is not "on" reads nothing).
+            if (billing.state === "on")
+              await ensureStartCreditWhileOn(
+                trx,
+                row.workspace_id,
+                () => current,
+              );
             const held: ReserveOutcome =
               billing.state === "off"
                 ? { ok: true }

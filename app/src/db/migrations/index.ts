@@ -60,6 +60,7 @@ import { migration as createModelsDevCatalog } from "./20261019200000_create_mod
 import { migration as createModelDecisions } from "./20261020090000_create_model_decisions.ts";
 import { migration as widenRefusalNoticeCodes } from "./20261021090000_widen_refusal_notice_codes.ts";
 import { migration as addBillingBalancesReservedIndex } from "./20261021120000_add_billing_balances_reserved_index.ts";
+import { migration as createBillingStartCreditGrants } from "./20261021150000_create_billing_start_credit_grants.ts";
 import { migration as widenJobVmRunsEndSource } from "./20261021090100_widen_job_vm_runs_end_source.ts";
 
 const migrations: Record<string, Migration> = {
@@ -125,6 +126,8 @@ const migrations: Record<string, Migration> = {
   "20261021090100_widen_job_vm_runs_end_source": widenJobVmRunsEndSource,
   "20261021120000_add_billing_balances_reserved_index":
     addBillingBalancesReservedIndex,
+  "20261021150000_create_billing_start_credit_grants":
+    createBillingStartCreditGrants,
 };
 
 export const migrationProvider: MigrationProvider = {

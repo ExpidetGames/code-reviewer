@@ -854,6 +854,19 @@ export interface BillingBalancesTable {
 }
 
 /**
+ * The memory of the start credit (src/billing/README.md, ADR 0006, 2.16; #507): one row for each GitHub account that was
+ * granted it. Instance level, a numeric id and a workspace id only, and no foreign key: it outlives the workspace.
+ */
+export interface BillingStartCreditGrantsTable {
+  /** The numeric id of the GitHub account of the installation, as text. The primary key: one grant per account. */
+  github_account_id: string;
+  /** The workspace that got the credit; it may be gone. */
+  workspace_id: string;
+  /** ISO 8601 text in UTC. */
+  granted_at: string;
+}
+
+/**
  * The row written before any checkout exists (src/billing/README.md, ADR 0006, 2.13; #497): the one way a payment reaches
  * a workspace. `amount_micro_usd` is what WE asked for and bounds the credit; the provider ids are recorded once known.
  */
@@ -934,6 +947,7 @@ export interface Database {
   model_price_confirmations: ModelPriceConfirmationsTable;
   billing_journal_entries: BillingJournalEntriesTable;
   billing_balances: BillingBalancesTable;
+  billing_start_credit_grants: BillingStartCreditGrantsTable;
   billing_topup_intents: BillingTopupIntentsTable;
   billing_webhook_events: BillingWebhookEventsTable;
   password_reset_tokens: PasswordResetTokensTable;
