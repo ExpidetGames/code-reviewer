@@ -157,6 +157,12 @@ export const JOB_ERROR_CODES = [
   "billing_rates_incomplete",
   /** Failed at claim because the hold of this job was released already: nothing is held, so it must not run (#498). */
   "billing_hold_released",
+  /** Failed at claim because this month's charges plus the hold would pass the workspace's own monthly limit (#499). */
+  "monthly_limit_reached",
+  /** Failed at claim by the hidden abuse brake: too many reviews of the workspace started in the last hour (#499). */
+  "hourly_review_limit",
+  /** Failed at claim because the monthly limit or the brake could not be evaluated: closed for this job, never open (#499). */
+  "billing_limits_unreadable",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 
