@@ -93,6 +93,8 @@ for (const engine of BILLING_ENGINES) {
             "credited_micro_usd",
             "disputed_micro_usd",
             "id",
+            // Added by #502 (20261021170000): what the buyer was charged, a number.
+            "provider_amount",
             "provider_checkout_ref",
             "provider_payment_ref",
             "refunded_micro_usd",
