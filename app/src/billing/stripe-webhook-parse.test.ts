@@ -108,6 +108,7 @@ describe("payments", () => {
       gross: 29_750_000,
       tax: 4_750_000,
       providerAmount: 2975,
+      providerCurrency: "usd",
     });
   });
 
@@ -131,6 +132,85 @@ describe("payments", () => {
       type: "payment.succeeded",
       creditable: 25 * USD,
       providerAmount: 2700,
+      providerCurrency: "eur",
+    });
+  });
+
+  // #502-T16
+  it("names the currency the buyer was charged in: the session's own without presentment details, the presented one with them", () => {
+    const own = eventOf(
+      parse(envelope("checkout.session.completed", session())),
+    );
+    const presented = eventOf(
+      parse(
+        envelope(
+          "checkout.session.completed",
+          session({
+            presentment_details: {
+              presentment_amount: 2200,
+              presentment_currency: "EUR",
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(own).toMatchObject({ providerCurrency: "usd" });
+    expect(presented).toMatchObject({ providerCurrency: "eur" });
+  });
+
+  // #502-T17
+  it("credits what the buyer paid net of tax, after a discount: the total less the tax, not the subtotal", () => {
+    // Subtotal 25.00, discount 2.50, tax 5.00 on top: the buyer paid 27.50 and 22.50 of it is ours.
+    const event = eventOf(
+      parse(
+        envelope(
+          "checkout.session.completed",
+          session({
+            amount_subtotal: 2500,
+            amount_total: 2750,
+            total_details: {
+              amount_tax: 500,
+              amount_discount: 250,
+              amount_shipping: 0,
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(event).toMatchObject({
+      type: "payment.succeeded",
+      creditable: 22_500_000,
+      gross: 27_500_000,
+      tax: 5_000_000,
+      providerAmount: 2750,
+    });
+  });
+
+  // #502-T17
+  it("credits the total of a discounted session that has no tax", () => {
+    const event = eventOf(
+      parse(
+        envelope(
+          "checkout.session.completed",
+          session({
+            amount_subtotal: 2500,
+            amount_total: 2250,
+            total_details: {
+              amount_tax: 0,
+              amount_discount: 250,
+              amount_shipping: 0,
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(event).toMatchObject({
+      type: "payment.succeeded",
+      creditable: 22_500_000,
+      tax: 0,
     });
   });
 
@@ -211,9 +291,23 @@ describe("payments", () => {
     ["another currency", { currency: "eur" }],
     ["the other environment", { livemode: true }],
     ["a reference that contradicts the metadata", { client_reference_id: "x" }],
-    ["no net amount", { amount_subtotal: null }],
-    ["a net amount of zero", { amount_subtotal: 0 }],
-    ["a fractional amount", { amount_subtotal: 2500.5 }],
+    ["no total", { amount_total: null }],
+    ["no tax figure", { total_details: null }],
+    [
+      "a net amount of zero",
+      { amount_total: 475, total_details: { amount_tax: 475 } },
+    ],
+    ["a tax above the total", { amount_total: 400 }],
+    ["a fractional amount", { amount_total: 2975.5 }],
+    [
+      "a presented currency that is no currency",
+      {
+        presentment_details: {
+          presentment_amount: 2200,
+          presentment_currency: "",
+        },
+      },
+    ],
     ["no payment intent", { payment_intent: null }],
   ])("refuses to credit a paid session with %s", (_name, overrides) => {
     const event = eventOf(
@@ -269,9 +363,19 @@ describe("refunds", () => {
       payment: "pi_1",
       refund: "re_1",
       amount: 1000,
+      currency: "usd",
       status: ours,
       occurredAt: OCCURRED_AT,
     });
+  });
+
+  // #502-T16
+  it("carries the currency of the refund, in lower case", () => {
+    const event = eventOf(
+      parse(envelope("refund.created", refundObject({ currency: "EUR" }))),
+    );
+
+    expect(event).toMatchObject({ type: "refund.updated", currency: "eur" });
   });
 
   // #502-T08
@@ -341,9 +445,21 @@ describe("disputes", () => {
       payment: "pi_1",
       dispute: "dp_1",
       amount: 2975,
+      currency: "usd",
       status,
     });
     expect(event).not.toHaveProperty("paymentAmount");
+  });
+
+  // #502-T16
+  it("carries the currency of the dispute, in lower case", () => {
+    const event = eventOf(
+      parse(
+        envelope("charge.dispute.created", disputeObject({ currency: "EUR" })),
+      ),
+    );
+
+    expect(event).toMatchObject({ type: "dispute.updated", currency: "eur" });
   });
 
   // #502-T07

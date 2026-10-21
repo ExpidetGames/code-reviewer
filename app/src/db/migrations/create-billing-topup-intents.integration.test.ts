@@ -73,12 +73,15 @@ for (const engine of BILLING_ENGINES) {
         expect(events).toEqual(
           [
             "event_id",
+            // Added by #502 (20261021190100): whose payment a reviewed event is, when it could be attributed.
+            "intent_id",
             "occurred_at",
             "outcome",
             "provider",
             "received_at",
             "review_state",
             "subject",
+            "workspace_id",
           ].sort(),
         );
         const intents = rows
@@ -95,6 +98,8 @@ for (const engine of BILLING_ENGINES) {
             "id",
             // Added by #502 (20261021170000): what the buyer was charged, a number.
             "provider_amount",
+            // Added by #502 (20261021190000): the currency of that amount.
+            "provider_currency",
             "provider_checkout_ref",
             "provider_payment_ref",
             "refunded_micro_usd",

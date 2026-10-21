@@ -183,26 +183,33 @@ function suite(engine: BillingEngine) {
       });
 
       // #497-T03
-      it("credits the net amount the intent allows and never the gross amount or more", async () => {
+      it("credits the net amount the intent asked for and never the gross amount", async () => {
         const s = await seed(engine);
 
         await apply(
           s,
           succeeded(s, {
-            creditable: toUsd(20 * USD),
-            gross: toUsd(25 * USD),
+            creditable: toUsd(25 * USD),
+            gross: toUsd(30 * USD),
             tax: toUsd(5 * USD),
           }),
         );
 
-        expect(await balance(s)).toBe(20 * USD);
+        expect(await balance(s)).toBe(25 * USD);
       });
 
       // #497-T03
-      it("refuses a credit above the amount we asked for, below the minimum or not a whole amount, and credits nothing", async () => {
+      // #502-T17: the credit is EXACTLY the amount we asked for; a smaller net (a discount) is not the top-up the buyer started.
+      it("refuses a credit that is not the amount we asked for (above, below, under the minimum), and credits nothing", async () => {
         const s = await seed(engine);
 
-        for (const creditable of [25 * USD + 1, 400 * USD, 9 * USD]) {
+        for (const creditable of [
+          25 * USD + 1,
+          25 * USD - 1,
+          22_500_000,
+          400 * USD,
+          9 * USD,
+        ]) {
           const result = await apply(
             s,
             succeeded(s, { creditable: toUsd(creditable) }),
@@ -359,6 +366,7 @@ function suite(engine: BillingEngine) {
       });
 
       // #497-T05
+      // #502-T17: another net amount than the intent asked for is refused before the journal is asked (it was a conflict of the key).
       it("answers a payment that arrives again with another amount without changing the credit", async () => {
         const s = await seed(engine);
         await apply(s, succeeded(s));
@@ -368,7 +376,7 @@ function suite(engine: BillingEngine) {
           succeeded(s, { creditable: toUsd(20 * USD) }),
         );
 
-        expect(again.outcome).toBe("amount_conflict");
+        expect(again.outcome).toBe("amount_rejected");
         expect(await balance(s)).toBe(25 * USD);
       });
 
@@ -485,17 +493,44 @@ function suite(engine: BillingEngine) {
       });
 
       // #497-T09
-      it("leaves a refund alone whose payment is unknown or was never credited", async () => {
+      // #502-T18: a refund whose payment is not credited yet is not final (the provider delivers it again after the credit);
+      // one that belongs to nothing of ours is.
+      it("asks for a redelivery of a refund whose payment is unknown or was never credited while a top-up is waiting, and records nothing", async () => {
         const s = await seed(engine);
-        const unknown = await apply(s, refund(s, { payment: "pi_unknown" }));
+        const retry = { code: "credit_pending" };
+
+        await expect(
+          apply(s, refund(s, { payment: "pi_unknown" })),
+        ).rejects.toMatchObject(retry);
         await createBillingTopUpIntentsRepository(
           s.db,
           s.workspaceId,
         ).attachRefs(s.intentId, { paymentRef: s.payment });
-        const notPaid = await apply(s, refund(s, { refund: "re_2" }));
+        await expect(
+          apply(s, refund(s, { refund: "re_2" })),
+        ).rejects.toMatchObject(retry);
 
-        expect(unknown.outcome).toBe("intent_unresolved");
-        expect(notPaid.outcome).toBe("intent_unresolved");
+        expect(await entries(s)).toEqual([]);
+        expect(
+          await s.db.selectFrom("billing_webhook_events").selectAll().execute(),
+        ).toEqual([]);
+      });
+
+      // #502-T18
+      it("leaves a refund of a payment that is no top-up of ours alone, with a review, when no top-up is waiting", async () => {
+        const s = await seed(engine);
+        await createBillingTopUpIntentsRepository(
+          s.db,
+          s.workspaceId,
+        ).markFailed(s.intentId);
+
+        const unknown = await apply(s, refund(s, { payment: "pi_unknown" }));
+
+        expect(unknown).toMatchObject({
+          outcome: "intent_unresolved",
+          needsReview: true,
+          workspaceId: null,
+        });
         expect(await entries(s)).toEqual([]);
       });
 
@@ -503,7 +538,9 @@ function suite(engine: BillingEngine) {
       it("applies a redelivered refund once its payment is known", async () => {
         const s = await seed(engine);
         const early = refund(s);
-        expect((await apply(s, early)).outcome).toBe("intent_unresolved");
+        await expect(apply(s, early)).rejects.toMatchObject({
+          code: "credit_pending",
+        });
         await apply(s, succeeded(s));
 
         expect((await apply(s, early)).outcome).toBe("applied");
@@ -1183,12 +1220,14 @@ function suite(engine: BillingEngine) {
         for (const row of rows)
           expect(Object.keys(row).sort()).toEqual([
             "event_id",
+            "intent_id",
             "occurred_at",
             "outcome",
             "provider",
             "received_at",
             "review_state",
             "subject",
+            "workspace_id",
           ]);
         expect(JSON.stringify(rows)).not.toContain(String(25 * USD));
       });

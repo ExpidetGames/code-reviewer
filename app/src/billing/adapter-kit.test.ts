@@ -352,6 +352,7 @@ const stripe: AdapterKitSubject = {
         gross: toUsd(29_750_000),
         tax: toUsd(4_750_000),
         providerAmount: toProviderAmount(2975),
+        providerCurrency: "usd",
       },
     },
     {
@@ -391,6 +392,7 @@ const stripe: AdapterKitSubject = {
           gross: toUsd(29_750_000),
           tax: toUsd(4_750_000),
           providerAmount: toProviderAmount(2975),
+          providerCurrency: "usd",
         },
       },
       {
@@ -416,6 +418,7 @@ const stripe: AdapterKitSubject = {
           payment: "pi_1",
           refund: "re_1",
           amount: toProviderAmount(1000),
+          currency: "usd",
           initiatedBy: "customer",
           status: "approved",
         },
@@ -441,6 +444,7 @@ const stripe: AdapterKitSubject = {
           payment: "pi_1",
           dispute: "dp_1",
           amount: toProviderAmount(2975),
+          currency: "usd",
           status: "lost",
         },
       },

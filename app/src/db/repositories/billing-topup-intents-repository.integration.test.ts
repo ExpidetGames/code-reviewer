@@ -575,7 +575,8 @@ function suite(engine: BillingEngine) {
     });
 
     // #497-T09
-    it("lists the events flagged for review, oldest first, and leaves the others out", async () => {
+    // #502-T19
+    it("lists the events flagged for review, oldest first, with whose payment each is when it was attributed, and leaves the others out", async () => {
       const { db } = await engine.create();
       const events = createBillingWebhookEventsRepository(db);
       const record = async (
@@ -583,6 +584,7 @@ function suite(engine: BillingEngine) {
         outcome: "applied" | "amount_rejected" | "intent_unresolved",
         review: boolean,
         receivedAt: string,
+        attribution?: { workspaceId: string; intentId: string },
       ) => {
         await events.claim("fake", id, receivedAt);
         await events.finish(
@@ -591,6 +593,7 @@ function suite(engine: BillingEngine) {
           outcome,
           { subject: `payment:pi_${id}`, occurredAt: null },
           review,
+          attribution,
         );
       };
       await record(
@@ -605,6 +608,7 @@ function suite(engine: BillingEngine) {
         "amount_rejected",
         true,
         "2026-10-19T08:00:00.000Z",
+        { workspaceId: "w-early", intentId: "i-early" },
       );
 
       const open = await events.listOpenReviews({ limit: 10 });
@@ -615,6 +619,8 @@ function suite(engine: BillingEngine) {
           eventId: "early",
           outcome: "amount_rejected",
           subject: "payment:pi_early",
+          workspaceId: "w-early",
+          intentId: "i-early",
           receivedAt: "2026-10-19T08:00:00.000Z",
         },
         {
@@ -622,6 +628,8 @@ function suite(engine: BillingEngine) {
           eventId: "late",
           outcome: "intent_unresolved",
           subject: "payment:pi_late",
+          workspaceId: null,
+          intentId: null,
           receivedAt: "2026-10-19T10:00:00.000Z",
         },
       ]);

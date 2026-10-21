@@ -9,12 +9,13 @@
 // The mapping (the events the admin page subscribes the endpoint to, `stripe-webhook-events.ts`):
 //
 //   checkout.session.completed, ...async_payment_succeeded   `payment.succeeded` when the session is paid (the net amount is
-//                                             `amount_subtotal`, VAT is on top and never credited), `ignored` while it is
-//                                             unpaid (a delayed method: the success or the failure follows), and
-//                                             `payment.refused` when the session contradicts what we asked for
+//                                             `amount_total` less `amount_tax`: what the buyer paid after any discount, VAT
+//                                             being on top and never credited), `ignored` while it is unpaid (a delayed
+//                                             method: the success or the failure follows), and `payment.refused` when the
+//                                             session contradicts what we asked for
 //   checkout.session.async_payment_failed     `payment.failed`
 //   checkout.session.expired                  `payment.expired`
-//   refund.created / refund.updated / refund.failed   `refund.updated`, one per refund with the amount of THAT refund
+//   refund.created / refund.updated / refund.failed   `refund.updated`, one per refund with the amount (and currency) of THAT refund
 //   charge.dispute.created, ...funds_withdrawn        `dispute.updated` `opened`
 //   charge.dispute.closed (won, lost, charge_refunded), ...funds_reinstated   `won` or `lost`
 //   anything else                              `ignored`
@@ -26,6 +27,7 @@
 import "server-only";
 import { z } from "zod";
 import {
+  isProviderCurrency,
   isProviderRef,
   toProviderAmount,
   toUsd,
@@ -111,12 +113,13 @@ export function paymentEventOfSession(
   environment: StripeEnvironment,
   end: "paid" | "failed" | "expired",
 ): SessionPaymentEvent {
+  const intentId = intentOfSession(session);
   const refused = (): SessionPaymentEvent => ({
     type: "payment.refused",
     ...meta,
     payment: session.payment_intent,
+    ...(isProviderRef(intentId) ? { intentId } : {}),
   });
-  const intentId = intentOfSession(session);
   if (end === "failed" || end === "expired") {
     if (intentId === undefined) return { type: "ignored", ...meta };
     return {
@@ -133,14 +136,30 @@ export function paymentEventOfSession(
   if (session.currency !== "usd") return refused();
   if (intentId === undefined || session.payment_intent === null)
     return refused();
-  const net = cents(session.amount_subtotal);
-  if (net === undefined || net === 0) return refused();
-  const total = cents(session.amount_total) ?? net;
-  if (total < net) return refused();
+  // What the buyer paid, net of the tax on top: the total after any discount, less the tax. The subtotal is the price BEFORE
+  // a discount and would credit more than was paid. The application then requires the net to be what the intent asked for.
+  const total = cents(session.amount_total);
   const tax = cents(session.total_details?.amount_tax);
-  const charged =
-    cents(session.presentment_details?.presentment_amount) ?? total;
-  if (charged === 0) return refused();
+  if (total === undefined || tax === undefined || tax >= total)
+    return refused();
+  const net = total - tax;
+  // The charge is in our currency, or in the one Adaptive Pricing presented to the buyer; the refunds and disputes of the
+  // payment are in that one.
+  let charged = total;
+  let currency = session.currency;
+  if (
+    session.presentment_details !== undefined &&
+    session.presentment_details !== null
+  ) {
+    const presented = cents(session.presentment_details.presentment_amount);
+    const presentedCurrency =
+      session.presentment_details.presentment_currency.toLowerCase();
+    if (presented === undefined || !isProviderCurrency(presentedCurrency))
+      return refused();
+    charged = presented;
+    currency = presentedCurrency;
+  }
+  if (charged === 0 || !isProviderCurrency(currency)) return refused();
   return {
     type: "payment.succeeded",
     ...meta,
@@ -149,8 +168,9 @@ export function paymentEventOfSession(
     checkout: session.id,
     creditable: toUsd(net * MICRO_USD_PER_CENT),
     gross: toUsd(total * MICRO_USD_PER_CENT),
-    tax: tax === undefined ? null : toUsd(tax * MICRO_USD_PER_CENT),
+    tax: toUsd(tax * MICRO_USD_PER_CENT),
     providerAmount: toProviderAmount(charged),
+    providerCurrency: currency,
   };
 }
 
@@ -174,7 +194,13 @@ function refundEvent(object: unknown, meta: Meta): StripeParseResult {
   const refund = stripeRefundSchema.safeParse(object);
   if (!refund.success) return NOT_READABLE;
   const { payment_intent: payment, amount, status } = refund.data;
-  if (payment === null || !Number.isSafeInteger(amount) || amount <= 0)
+  const currency = refund.data.currency.toLowerCase();
+  if (
+    payment === null ||
+    !Number.isSafeInteger(amount) ||
+    amount <= 0 ||
+    !isProviderCurrency(currency)
+  )
     return NOT_READABLE;
   return {
     ok: true,
@@ -184,6 +210,7 @@ function refundEvent(object: unknown, meta: Meta): StripeParseResult {
       payment,
       refund: refund.data.id,
       amount: toProviderAmount(amount),
+      currency,
       initiatedBy: refundInitiator(refund.data.reason, refund.data.metadata),
       // A refund with no status yet is on its way: the money is leaving, and a later failure reverses the debit.
       status:
@@ -225,10 +252,12 @@ function disputeEvent(
   if (status === undefined)
     return { ok: true, event: { type: "ignored", ...meta } };
   const payment = dispute.data.payment_intent ?? null;
+  const currency = dispute.data.currency.toLowerCase();
   if (
     payment === null ||
     !Number.isSafeInteger(dispute.data.amount) ||
-    dispute.data.amount <= 0
+    dispute.data.amount <= 0 ||
+    !isProviderCurrency(currency)
   )
     return NOT_READABLE;
   return {
@@ -239,6 +268,7 @@ function disputeEvent(
       payment,
       dispute: dispute.data.id,
       amount: toProviderAmount(dispute.data.amount),
+      currency,
       status,
     },
   };

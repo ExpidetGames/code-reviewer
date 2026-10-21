@@ -57,6 +57,11 @@ export function toProviderAmount(value: number): ProviderAmount {
   return value as ProviderAmount;
 }
 
+/** A currency as a provider names it in an event: three lower case letters (an ISO 4217 code). */
+export function isProviderCurrency(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z]{3}$/.test(value);
+}
+
 /** An opaque id at the provider (a payment, a checkout session, a refund, a dispute, a customer). No data. */
 export type ProviderRef = string;
 
@@ -316,6 +321,12 @@ export type BillingEvent =
        * Absent when the provider does not say.
        */
       providerAmount?: ProviderAmount;
+      /**
+       * The currency of `providerAmount` (lower case ISO 4217), pinned with it. A refund or dispute names its own currency,
+       * and an amount in another currency than the charge is no share of it (`amount_rejected`). Absent when the provider
+       * does not say (then its refunds and disputes carry no currency either).
+       */
+      providerCurrency?: string;
     })
   | (EventBase & {
       /**
@@ -325,6 +336,8 @@ export type BillingEvent =
        */
       type: "payment.refused";
       payment: ProviderRef | null;
+      /** Our intent id when the session names one: lets the review say whose payment it is, nothing more. */
+      intentId?: string | null;
     })
   | (EventBase & {
       type: "payment.failed";
@@ -350,6 +363,8 @@ export type BillingEvent =
        * the event is `amount_conflict`.
        */
       paymentAmount?: ProviderAmount;
+      /** The currency of `amount` (lower case): it must be the one the payment was pinned in. Absent: the provider does not say. */
+      currency?: string;
       initiatedBy: RefundInitiator;
       status: RefundStatus;
     })
@@ -361,6 +376,8 @@ export type BillingEvent =
       amount: ProviderAmount;
       /** As for a refund: absent when the provider's event does not carry it. */
       paymentAmount?: ProviderAmount;
+      /** As for a refund. */
+      currency?: string;
       status: DisputeStatus;
     })
   | (EventBase & { type: "ignored" });
@@ -542,6 +559,11 @@ function requireOptionalProviderAmount(value: unknown, what: string): void {
   if (value !== undefined) requireProviderAmount(value, what);
 }
 
+function requireOptionalCurrency(value: unknown, what: string): void {
+  if (value !== undefined && !isProviderCurrency(value))
+    refuseEvent(`${what} is not a lower case currency code`);
+}
+
 /**
  * Throws `event_invalid` when an adapter hands over something that is not a normalized event: an adapter is code, but
  * what it reads is a provider's data, and nothing past this function trusts an amount, a reference or a status that did
@@ -571,9 +593,12 @@ export function validateBillingEvent(event: BillingEvent): void {
       if (event.tax !== null && !isTaxAmount(event.tax))
         refuseEvent("the tax is not a non-negative integer");
       requireOptionalProviderAmount(event.providerAmount, "the payment amount");
+      requireOptionalCurrency(event.providerCurrency, "the payment currency");
       return;
     case "payment.refused":
       requireOptionalRef(event.payment, "the payment");
+      if (event.intentId !== undefined)
+        requireOptionalRef(event.intentId, "the intent id");
       return;
     case "payment.failed":
     case "payment.expired":
@@ -586,6 +611,7 @@ export function validateBillingEvent(event: BillingEvent): void {
       requireRef(event.refund, "the refund");
       requireProviderAmount(event.amount, "the refund amount");
       requireOptionalProviderAmount(event.paymentAmount, "the payment amount");
+      requireOptionalCurrency(event.currency, "the refund currency");
       if (!REFUND_INITIATORS.includes(event.initiatedBy))
         refuseEvent("unknown refund initiator");
       if (!REFUND_STATUSES.includes(event.status))
@@ -596,6 +622,7 @@ export function validateBillingEvent(event: BillingEvent): void {
       requireRef(event.dispute, "the dispute");
       requireProviderAmount(event.amount, "the dispute amount");
       requireOptionalProviderAmount(event.paymentAmount, "the payment amount");
+      requireOptionalCurrency(event.currency, "the dispute currency");
       if (!DISPUTE_STATUSES.includes(event.status))
         refuseEvent("unknown dispute status");
       return;

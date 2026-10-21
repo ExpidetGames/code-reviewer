@@ -20,7 +20,10 @@ import {
   type BillingEvent,
   type BillingWebhookRejectionCode,
 } from "../billing/adapter.ts";
-import { applyBillingEvent } from "../billing/apply-event.ts";
+import {
+  applyBillingEvent,
+  BillingEventRetryError,
+} from "../billing/apply-event.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import type { BillingEngine } from "./billing-engines.ts";
@@ -317,13 +320,15 @@ export function describeAdapterApplication(
           await ordered.apply(ordered.fixtures.refunded);
 
           const reordered = await prepare();
-          const early = await reordered.apply(reordered.fixtures.refunded);
+          // Not final: the refund waits for the credit of its payment and the provider is asked to deliver it again (#502).
+          await expect(
+            reordered.apply(reordered.fixtures.refunded),
+          ).rejects.toBeInstanceOf(BillingEventRetryError);
           await reordered.apply(reordered.fixtures.paid);
           // The provider delivers the refund again; it applies now that the payment is known.
           await reordered.apply(reordered.fixtures.refunded);
           await reordered.apply(reordered.fixtures.refunded);
 
-          expect(early.outcome).toBe("intent_unresolved");
           const expected = amount - ordered.fixtures.refundAmount;
           expect((await ordered.journal.balance()).balanceMicroUsd).toBe(
             expected,

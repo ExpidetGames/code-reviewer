@@ -58,6 +58,8 @@ export type TopUpIntent = {
    * refund or dispute that names only its own amount is related to. Null before the payment, and for a provider that did not say.
    */
   providerAmount: number | null;
+  /** The currency of `providerAmount` (lower case ISO 4217), pinned with it: a refund or dispute in another one is no share of it. */
+  providerCurrency: string | null;
   checkoutRef: string | null;
   paymentRef: string | null;
   createdAt: string;

@@ -111,6 +111,7 @@ function suite(engine: BillingEngine) {
         const repository = createBillingTopUpIntentsRepository(
           db,
           options.workspace ?? workspaceId,
+          () => new Date(clock),
         );
         const intent = await repository.create({
           adapter: "stripe",
@@ -145,6 +146,33 @@ function suite(engine: BillingEngine) {
         if (options.record !== false)
           await repository.attachRefs(intent.id, { checkoutRef: session.id });
         return { intent, session };
+      }
+
+      /** A payment made elsewhere on the same Stripe account: its reference is no intent of ours. */
+      async function startStranger() {
+        keys += 1;
+        return client.createCheckoutSession(
+          {
+            mode: "payment",
+            line_items: [
+              {
+                quantity: 1,
+                price_data: {
+                  currency: "usd",
+                  unit_amount: 2500,
+                  tax_behavior: "exclusive",
+                  product_data: { name: "Other", tax_code: "txcd_10105002" },
+                },
+              },
+            ],
+            success_url: "https://app.example.test/billing",
+            cancel_url: "https://app.example.test/billing",
+            client_reference_id: "not-one-of-ours",
+            metadata: { intent: "not-one-of-ours" },
+            managed_payments: { enabled: true },
+          },
+          { idempotencyKey: `e2e-stranger-${keys}` },
+        );
       }
 
       const typesOf = (events: StripeEvent[]) => events.map((e) => e.type);
@@ -205,6 +233,7 @@ function suite(engine: BillingEngine) {
         intents,
         journal,
         startTopUp,
+        startStranger,
         tick,
         typesOf,
         eventsOf,
@@ -781,6 +810,268 @@ function suite(engine: BillingEngine) {
           limit: 10,
         }),
       ).toHaveLength(1);
+    });
+
+    /** An event of the fake with the fields of its object changed by hand, under an id of its own. */
+    const withObject = (
+      event: StripeEvent,
+      id: string,
+      patch: Record<string, unknown>,
+    ): Wire => ({
+      ...event,
+      id,
+      data: { object: { ...(event.data.object as object), ...patch } },
+    });
+    const reviewsOf = (s: Setup) =>
+      createBillingWebhookEventsRepository(s.db).listOpenReviews({ limit: 20 });
+    const lastOf = (s: Setup, type: string) => {
+      const found = s.eventsOf(type).at(-1);
+      if (found === undefined) throw new Error(`no ${type} event`);
+      return found;
+    };
+
+    // #502-T16
+    it("rejects a refund in another currency than the charge, with the credit kept and a review, however much it names", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      const paid = pay(s, session);
+      await s.post(lastOf(s, "checkout.session.completed"));
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        providerAmount: 2975,
+        providerCurrency: "usd",
+      });
+      s.tick();
+      s.fake.stripe.refund({ paymentIntent: paid.paymentIntent.id });
+      // The whole payment refunded, in euros: 2200 EUR cents is not a share of 2975 USD cents.
+      const euro = withObject(lastOf(s, "refund.created"), "evt_refund_eur", {
+        currency: "eur",
+        amount: 2200,
+      });
+
+      const response = await s.post(euro);
+
+      expect(response.status).toBe(200);
+      expect(await s.outcomeOf(response)).toBe("amount_rejected");
+      expect((await s.entries()).filter((e) => e.type === "refund")).toEqual(
+        [],
+      );
+      expect(await s.balance()).toBe(25 * USD);
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        refundedMicroUsd: 0,
+      });
+      expect(await reviewsOf(s)).toMatchObject([
+        { eventId: "evt_refund_eur", outcome: "amount_rejected" },
+      ]);
+    });
+
+    // #502-T16
+    it("rejects a dispute in another currency than the charge, and books the same dispute in the pinned one", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      const paid = pay(s, session);
+      await s.post(lastOf(s, "checkout.session.completed"));
+      s.tick();
+      s.fake.stripe.openDispute(paid.charge.id);
+      const dispute = lastOf(s, "charge.dispute.created");
+
+      const euro = await s.post(
+        withObject(dispute, "evt_dispute_eur", {
+          currency: "eur",
+          amount: 2200,
+        }),
+      );
+      // The same dispute in the pinned currency is booked.
+      const usd = await s.post(dispute);
+
+      expect(await s.outcomeOf(euro)).toBe("amount_rejected");
+      expect(await s.outcomeOf(usd)).toBe("applied");
+      expect(await s.balance()).toBe(0);
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        disputedMicroUsd: 25 * USD,
+      });
+    });
+
+    // #502-T16
+    it("relates a refund to a payment that was charged in euros by its presentment: the same currency is booked, dollars are not", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      const paid = s.fake.buyer.pay(session.id, {
+        taxAmount: 475,
+        charged: { currency: "eur", amount: 2200 },
+      });
+      await s.post(lastOf(s, "checkout.session.completed"));
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2200,
+        providerCurrency: "eur",
+      });
+      s.tick();
+      s.fake.stripe.refund({
+        paymentIntent: paid.paymentIntent.id,
+        amount: 880,
+      });
+      const refund = lastOf(s, "refund.created");
+
+      const dollars = await s.post(
+        withObject(refund, "evt_refund_usd", { currency: "usd" }),
+      );
+      const euros = await s.post(refund);
+
+      expect(await s.outcomeOf(dollars)).toBe("amount_rejected");
+      expect(await s.outcomeOf(euros)).toBe("applied");
+      // 880 of 2200 is 40 percent of the 25 USD credit.
+      expect(await s.balance()).toBe(15 * USD);
+    });
+
+    // #502-T17
+    it("credits nothing for a discounted payment whose net is not what we asked for, and flags it (a discount with tax)", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      s.fake.buyer.pay(session.id, { taxAmount: 500, discountAmount: 250 });
+
+      const response = await s.post(lastOf(s, "checkout.session.completed"));
+
+      // Subtotal 25.00, discount 2.50, tax 5.00: the buyer paid 27.50, 22.50 of it net, and we asked for 25.00.
+      expect(response.status).toBe(200);
+      expect(await s.outcomeOf(response)).toBe("amount_rejected");
+      expect(await s.topUps()).toEqual([]);
+      expect(await s.balance()).toBe(0);
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        state: "pending",
+      });
+      expect(await reviewsOf(s)).toHaveLength(1);
+    });
+
+    // #502-T17
+    it("credits nothing for a discounted payment without tax either", async () => {
+      const s = await setup();
+      const { session } = await s.startTopUp();
+      s.fake.buyer.pay(session.id, { discountAmount: 250 });
+
+      const response = await s.post(lastOf(s, "checkout.session.completed"));
+
+      expect(await s.outcomeOf(response)).toBe("amount_rejected");
+      expect(await s.topUps()).toEqual([]);
+      expect(await reviewsOf(s)).toHaveLength(1);
+    });
+
+    // #502-T18
+    it("answers a refund that comes before the credit with a retry, and books it when Stripe delivers it again", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      const paid = pay(s, session);
+      s.tick();
+      s.fake.stripe.refund({ paymentIntent: paid.paymentIntent.id });
+      const refund = lastOf(s, "refund.created");
+
+      // The refund is first: the checkout.session.completed of the payment is still on its way.
+      const early = await s.post(refund);
+
+      expect(early.status).toBe(503);
+      expect(await early.text()).toBe("");
+      expect(
+        s.lines.some((l) => l === "error billing_webhook_credit_pending"),
+      ).toBe(true);
+      expect(await s.balance()).toBe(0);
+      // Nothing of the refund is recorded as final, so the redelivery is applied and not "seen".
+      expect(await reviewsOf(s)).toEqual([]);
+
+      await s.post(lastOf(s, "checkout.session.completed"));
+      const retried = await s.post(refund);
+
+      expect(await s.outcomeOf(retried)).toBe("applied");
+      expect(await s.balance()).toBe(0);
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        state: "paid",
+        refundedMicroUsd: 25 * USD,
+      });
+    });
+
+    // #502-T18
+    it("answers a dispute that comes before the credit with a retry as well, and a mapped intent that is not paid", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      const paid = pay(s, session);
+      s.tick();
+      s.fake.stripe.openDispute(paid.charge.id);
+      const dispute = lastOf(s, "charge.dispute.created");
+
+      const early = await s.post(dispute);
+      // The payment is known on the intent but not credited (a "Check payment" recorded it, say): same answer.
+      await s.intents.attachRefs(intent.id, {
+        paymentRef: paid.paymentIntent.id,
+      });
+      const known = await s.post(withObject(dispute, "evt_dispute_again", {}));
+
+      expect(early.status).toBe(503);
+      expect(known.status).toBe(503);
+
+      await s.post(lastOf(s, "checkout.session.completed"));
+      const retried = await s.post(dispute);
+
+      expect(await s.outcomeOf(retried)).toBe("applied");
+      expect(await s.balance()).toBe(0);
+    });
+
+    // #502-T18
+    it("keeps answering 200 with a review for a refund of a payment that is not ours when no top-up of ours could be the one", async () => {
+      const s = await setup();
+      const stranger = await s.startStranger();
+      const paid = pay(s, stranger);
+      s.tick();
+      s.fake.stripe.refund({ paymentIntent: paid.paymentIntent.id });
+
+      const response = await s.post(lastOf(s, "refund.created"));
+
+      expect(response.status).toBe(200);
+      expect(await s.outcomeOf(response)).toBe("intent_unresolved");
+      expect(await reviewsOf(s)).toMatchObject([
+        { outcome: "intent_unresolved" },
+      ]);
+      expect(
+        s.lines.some((l) => l.startsWith("error billing_webhook_needs_review")),
+      ).toBe(true);
+    });
+
+    // #502-T18
+    it("does not make Stripe retry a foreign refund for days because an old top-up was never paid", async () => {
+      const s = await setup();
+      // A top-up whose page nobody paid, four days old: it cannot be the payment the refund belongs to.
+      await s.startTopUp();
+      s.tick(4 * 24 * 3600);
+      const stranger = await s.startStranger();
+      const paid = pay(s, stranger);
+      s.tick();
+      s.fake.stripe.refund({ paymentIntent: paid.paymentIntent.id });
+
+      const response = await s.post(lastOf(s, "refund.created"));
+
+      expect(response.status).toBe(200);
+      expect(await s.outcomeOf(response)).toBe("intent_unresolved");
+    });
+
+    // #502-T19
+    it("names the workspace and the intent on the review of a payment it could attribute, and on none it could not", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      s.fake.buyer.pay(session.id, { taxAmount: 500, discountAmount: 250 });
+      await s.post(lastOf(s, "checkout.session.completed"));
+      const stranger = await s.startStranger();
+      const foreign = pay(s, stranger);
+      s.fake.stripe.refund({ paymentIntent: foreign.paymentIntent.id });
+      // The only pending top-up was refused above and is still pending: the foreign refund is retried while it could be it.
+      expect((await s.post(lastOf(s, "refund.created"))).status).toBe(503);
+
+      const reviews = await reviewsOf(s);
+
+      expect(reviews).toMatchObject([
+        {
+          outcome: "amount_rejected",
+          subject: expect.stringMatching(/^payment:pi_/),
+          workspaceId: s.workspaceId,
+          intentId: intent.id,
+        },
+      ]);
     });
 
     // #502-T10

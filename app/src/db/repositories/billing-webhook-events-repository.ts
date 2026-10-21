@@ -32,7 +32,16 @@ export type EventReview = {
   outcome: string;
   /** 'payment:<id>', 'refund:<id>' or 'dispute:<id>': what the event was about, when it said. */
   subject: string | null;
+  /** Whose payment it is, when the application could attribute the event to one of its intents; else null (#502). */
+  workspaceId: string | null;
+  intentId: string | null;
   receivedAt: string;
+};
+
+/** The intent an event was attributed to: two ids of our own, kept on the row so a review can say whose payment it is. */
+export type EventAttribution = {
+  workspaceId: string | null;
+  intentId: string | null;
 };
 
 export type EventClaim =
@@ -50,7 +59,8 @@ export type BillingWebhookEventsRepository = {
   ): Promise<EventClaim>;
   /**
    * Records what came of the event. `subject` and `occurredAt` order the states of one refund or dispute. `review` opens
-   * a review of the event (see above).
+   * a review of the event (see above); `attribution` names the workspace and the intent the event belongs to when the
+   * application knows them.
    */
   finish(
     provider: string,
@@ -58,6 +68,7 @@ export type BillingWebhookEventsRepository = {
     outcome: BillingEventOutcome,
     order: { subject: string | null; occurredAt: string | null },
     review?: boolean,
+    attribution?: EventAttribution,
   ): Promise<void>;
   /** The events waiting for an operator, oldest first. */
   listOpenReviews(options: { limit: number }): Promise<EventReview[]>;
@@ -93,6 +104,8 @@ export function createBillingWebhookEventsRepository(
           subject: null,
           occurred_at: null,
           review_state: null,
+          workspace_id: null,
+          intent_id: null,
           received_at: normalize(receivedAt) ?? receivedAt,
         })
         .onConflict((conflict) => conflict.doNothing())
@@ -116,6 +129,8 @@ export function createBillingWebhookEventsRepository(
         .set({
           outcome: "processing",
           review_state: null,
+          workspace_id: null,
+          intent_id: null,
           received_at: normalize(receivedAt) ?? receivedAt,
         })
         .where("provider", "=", provider)
@@ -124,7 +139,14 @@ export function createBillingWebhookEventsRepository(
       return { claimed: true };
     },
 
-    async finish(provider, eventId, outcome, { subject, occurredAt }, review) {
+    async finish(
+      provider,
+      eventId,
+      outcome,
+      { subject, occurredAt },
+      review,
+      attribution,
+    ) {
       await db
         .updateTable("billing_webhook_events")
         .set({
@@ -132,6 +154,8 @@ export function createBillingWebhookEventsRepository(
           subject,
           occurred_at: normalize(occurredAt),
           review_state: review === true ? "open" : null,
+          workspace_id: attribution?.workspaceId ?? null,
+          intent_id: attribution?.intentId ?? null,
         })
         .where("provider", "=", provider)
         .where("event_id", "=", eventId)
@@ -141,7 +165,15 @@ export function createBillingWebhookEventsRepository(
     async listOpenReviews({ limit }) {
       const rows = await db
         .selectFrom("billing_webhook_events")
-        .select(["provider", "event_id", "outcome", "subject", "received_at"])
+        .select([
+          "provider",
+          "event_id",
+          "outcome",
+          "subject",
+          "workspace_id",
+          "intent_id",
+          "received_at",
+        ])
         .where("review_state", "=", "open")
         .orderBy("received_at", "asc")
         .orderBy("event_id", "asc")
@@ -152,6 +184,8 @@ export function createBillingWebhookEventsRepository(
         eventId: row.event_id,
         outcome: row.outcome,
         subject: row.subject,
+        workspaceId: row.workspace_id,
+        intentId: row.intent_id,
         receivedAt: row.received_at,
       }));
     },
