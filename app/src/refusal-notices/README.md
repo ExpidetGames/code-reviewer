@@ -102,6 +102,17 @@ not per period: the row is recorded under `head:<commit id>` in the `period_star
 so a new push after a top-up that was not enough is told again and the same head is told once. `billing_rates_incomplete` and `billing_hold_released`
 have no notice: they are the operator's side. The check of `refusal_notices.code` took the two codes with migration `20261021090000_widen_refusal_notice_codes`.
 
+## The limits (#499)
+
+A job the claim refuses for the workspace's own monthly total limit (`monthly_limit_reached`) or for the hidden hourly brake (`hourly_review_limit`)
+gets a notice too, keyed by the head like the balance's (`head:<commit id>`). The monthly limit's text is "The monthly spending limit of this workspace
+was reached." and who can change it: with a link to the workspace settings (`settingsUrl`) "An Owner or Admin of this workspace can change it on the
+workspace settings", without one "An Owner or Admin of this workspace can change it." The brake's text is "Reviews are paused for this workspace for a
+while." and "Please try again later.": **it never names the number of reviews, the window it counts over, or that it is a limit at all**, and it points to no
+page, because nobody in the workspace can lift it (`noticeLinkKind`). Neither text holds a digit or an amount. `billing_limits_unreadable` has no notice:
+it is the operator's side. The check of `refusal_notices.code` took the two codes with migration
+`20261021190000_widen_refusal_notice_codes_for_limits`.
+
 ## Not covered
 
 - Other refusals (`llm_not_configured`, `entitlements_invalid`, a gate that is off) get no notice: out of scope of #281.
