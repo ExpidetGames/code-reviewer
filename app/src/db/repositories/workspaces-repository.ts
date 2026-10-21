@@ -5,7 +5,7 @@
 // rather than a workspace (which workspaces does this person belong to, in which role); the members of
 // one workspace are in workspace-members-repository.ts. See src/workspaces/README.md.
 import "server-only";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
 import type { Database, WorkspacesTable } from "../schema.ts";
@@ -58,6 +58,13 @@ export type WorkspacesRepository = {
   ): Promise<void>;
   /** Whether the workspace has at least one Owner. */
   hasOwner(workspaceId: string): Promise<boolean>;
+  /** How many workspaces the instance has. */
+  count(): Promise<number>;
+  /**
+   * The workspaces whose name holds the text (any case, `%` and `_` are plain characters), by name, at most `limit`; an
+   * empty text lists the first ones. For the manual credit of the admin portal (#504).
+   */
+  search(text: string, limit: number): Promise<Workspace[]>;
   /**
    * A page of workspaces ordered by id, those after `after` (exclusive) when given. `hasMore` says whether
    * another page follows. For the operator API (#275): instance level, like the table.
@@ -132,6 +139,29 @@ export function createWorkspacesRepository(
     },
 
     findDefault,
+
+    async count() {
+      const row = await db
+        .selectFrom("workspaces")
+        .select((builder) => builder.fn.countAll<string | number>().as("count"))
+        .executeTakeFirst();
+      return Number(row?.count ?? 0);
+    },
+
+    async search(text, limit) {
+      const escaped = text.toLowerCase().replace(/[\\%_]/g, "\\$&");
+      let query = db.selectFrom("workspaces").selectAll();
+      if (escaped !== "")
+        query = query.where(
+          sql<boolean>`lower(name) like ${`%${escaped}%`} escape '\\'`,
+        );
+      const rows = await query
+        .orderBy(sql`lower(name)`)
+        .orderBy("id")
+        .limit(limit)
+        .execute();
+      return rows.map(toWorkspace);
+    },
 
     async slugExists(slug) {
       const row = await db

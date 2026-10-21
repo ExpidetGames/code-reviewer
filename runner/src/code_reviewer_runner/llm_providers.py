@@ -274,3 +274,18 @@ def with_prefix(provider: LlmProviderSpec, model: str) -> str:
 def without_prefix(provider: LlmProviderSpec, model: str) -> str:
     """The model name without the routing prefix, to compare two names."""
     return model.removeprefix(provider.litellm_prefix)
+
+
+def upstream_base_is_the_providers(provider_id: str, upstream_base_url: str) -> bool:
+    """Whether the address a native job's entry names is the one the key is for (#578).
+
+    The key of a provider this registry has an entry for goes to that provider's own API, the one
+    the legacy path always used (`default_api_base`); an entry that names another address would
+    send the key there, so only the registry's address passes (a trailing slash aside). A provider
+    the registry has no entry for is not judged here, so this helper is open for it: the caller that
+    sends a key asks `key_destination` (`passthrough/destination.py`), which applies this helper to
+    a registry provider and the rule of the catalog (#555) to any other."""
+    provider = provider_for(provider_id)
+    if provider is None:
+        return True
+    return upstream_base_url.removesuffix("/") == provider.default_api_base.removesuffix("/")

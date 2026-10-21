@@ -157,9 +157,17 @@ request. A pinned `baseUrl` per provider (mentioned in #548 C) is **not** part o
 
 ## What is not here
 
-The claim-time refusal that calls `availability` and the price book in the claim (#553). The pages, the "fetch now" route and
-the confirmation of a changed provider address are built (#554: `/admin/catalog`, `src/admin/catalog-models/`,
-`src/models-dev/admin-*.ts`). **The release guard on the named entries of #425** is
-deferred too: it needs the map from a registry slug to the models.dev id (#553/#555), so it is not here. **Order of the
-cut-over:** when #553 enforces `availability` at claim, every managed entry that is already released is refused until an
-admin enables and confirms its model, so the screens of #554 (live now) must be used before #553 enforces it.
+The claim-time refusal and the price book in the claim are built (#553, `src/native-cost/README.md`): the claim calls
+`availability` and refuses with `managed_model_unavailable`; `catalogPrice` gives an own key the confirmed book or else the
+catalog's price. How the ledger bills what the book holds is decided (#551, #553): reasoning tokens at the reasoning price (else
+the output price), a tier for a prompt strictly above its size (the older `contextOver200k` is the tier of 200,000), audio
+**not at all** (a call with audio tokens is unknown, whatever the book says), a cache read at its own price only (the book of a
+claim does not price one as input), a cache write at the price of its lifetime. The pages, the "fetch now" route and the
+confirmation of a changed provider address are built (#554: `/admin/catalog`, `src/admin/catalog-models/`,
+`src/models-dev/admin-*.ts`). **The release guard on the named entries of #425** is still deferred: the map from a registry slug
+to the models.dev id exists now (`src/native-cost/catalog-ref.ts`), the guard needs the screens of #555.
+
+**Order of the cut-over.** `availability` is asked only for a **native** selection (a selection that names a catalog model), and the
+registry accepts no native slug yet, so shipping #553 refuses no entry that is released today. The cut-over the comment of #549
+describes happens when the wiring lets a managed entry name a catalog model: from then on that entry is refused until an admin
+has enabled its model and confirmed its price, so the screens of #554 (live) must have been used before that entry is switched.

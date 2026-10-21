@@ -29,6 +29,7 @@ import {
   type RunnerEngine,
 } from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
+import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import {
   newLeaseToken,
   newWorkerCredential,
@@ -51,10 +52,28 @@ import type { Database } from "../schema.ts";
 import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
 import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
+import {
+  RATES_INCOMPLETE_REFUSAL,
+  admitAtClaim,
+  readClaimBilling,
+  type AdmitOutcome,
+  type ClaimBilling,
+} from "../../billing/claim-billing.ts";
+import {
+  CLAIM_CAPS_RETRY_MS,
+  checkClaimCaps,
+  type CapOutcome,
+} from "../../billing/claim-caps.ts";
+import { headNoticeKey } from "../../refusal-notices/notice-key.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import {
+  ensureStartCreditWhileOn,
+  logStartCreditGranted,
+} from "../../billing/start-credit.ts";
+import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import {
   settlementOfOutcome,
   settlementOfSupersededOutcome,
@@ -278,6 +297,9 @@ function runningWhere(scope: RunningScope) {
           ]),
     ]);
 }
+
+/** A start credit a claim granted: logged after the claim committed (#507). */
+type GrantedStartCredit = { workspaceId: string; amountMicroUsd: number };
 
 export function createRunnerJobsRepository(
   db: Kysely<Database>,
@@ -718,6 +740,7 @@ export function createRunnerJobsRepository(
     async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       const refusals: ClaimRefusal[] = [];
       const ignoredCostLimits = new Set<string>();
+      const grantedCredits: GrantedStartCredit[] = []; // #507: logged after the commit
       const claimed = await inAlertingTransaction(
         async (trx, unknownCost, endedClaims) => {
           const current = now();
@@ -741,6 +764,9 @@ export function createRunnerJobsRepository(
               : {}),
           };
           const reviewKinds = reviewKindsForEngines(engines);
+          // #498: read at most once per claim, and only when a job passes the admission; a claim that finds no job reads nothing.
+          let billing: ClaimBilling | undefined;
+          const startCreditTried = new Set<string>();
           // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
           // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
           // connection (SQLite): two claims of one pool cannot both count below the cap and then both
@@ -757,11 +783,16 @@ export function createRunnerJobsRepository(
                 : claimOldestDueJob
             )(trx, claim, reviewKinds, claimOptions.jobId);
             if (row === undefined) return null;
+            // #498: read once per claim, for the first job that is taken (a claim that finds no job reads nothing). #499
+            // needs it before the admission: while billing is on, the run quotas of the plan are not enforced.
+            billing ??= await readClaimBilling(trx);
             // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
             // the record is reserved: a refused job leaves no record, and two claims cannot both take the
             // last unit of a limit.
-            const { admission, hadRecord, ignoredCostLimit } =
-              await admitClaimedJob(trx, row, () => current);
+            const { admission, hadRecord, ignoredCostLimit, keyMode } =
+              await admitClaimedJob(trx, row, () => current, {
+                runQuotas: billing.state !== "on",
+              });
             if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
             if (!admission.allow) {
               const detail = {
@@ -819,14 +850,130 @@ export function createRunnerJobsRepository(
               });
               continue;
             }
+            // #499: while billing is on, the hidden hourly brake and the workspace's monthly limit come after the admission and
+            // before the balance. They never fail the claim (their savepoint turns a failure into a refusal of this job).
+            const capped: CapOutcome =
+              billing.state === "on"
+                ? await checkClaimCaps(trx, {
+                    hourlyReviewLimit: billing.hourlyReviewLimit,
+                    job: { id: row.id, workspaceId: row.workspace_id },
+                    now: () => current,
+                  })
+                : { ok: true };
+            // #499: a limit that could not be read for now (a deadlock, a timeout, a busy database) is no verdict on the job: it goes
+            // back to the queue like a lost attempt, due again after CLAIM_CAPS_RETRY_MS, and fails (closed) only when its attempts
+            // are used up. The pass ends here, so a database in trouble is not asked again while this transaction holds the gate lock;
+            // the job is not due for the next pass, so it does not block the queue head.
+            if (!capped.ok && capped.transient === true) {
+              const lost = await loseAttempt(
+                trx,
+                { claim: { jobId: row.id, leaseToken } },
+                capped.code,
+                formatTimestamp(current),
+                formatTimestamp(
+                  new Date(current.getTime() + CLAIM_CAPS_RETRY_MS),
+                ),
+              );
+              if (lost.failed > 0) {
+                if (hadRecord)
+                  unknownCost.push(
+                    ...(await closeRecordsOfEndedJobs(
+                      trx,
+                      formatTimestamp(current),
+                    )),
+                  );
+                const ended = await trx
+                  .selectFrom("jobs")
+                  .select("error_code")
+                  .where("id", "=", row.id)
+                  .executeTakeFirstOrThrow();
+                const noticeKey = headNoticeKey(row.head_sha);
+                refusals.push({
+                  jobId: row.id,
+                  workspaceId: row.workspace_id,
+                  repositoryId: row.repository_id,
+                  prNumber: row.pr_number,
+                  triggerKind: row.trigger_kind,
+                  errorCode: ended.error_code ?? capped.code,
+                  ...(noticeKey === undefined
+                    ? {}
+                    : { periodStart: noticeKey }),
+                });
+              }
+              return null;
+            }
+            // #605: while billing is on, the balance check comes after the admission and before the record, in the same
+            // transaction: a refused job leaves no record, and no job takes a hold (the price is charged when it ends).
+            // Billing off reads no billing table.
+            // #507: the start credit comes first, in this transaction, so the first job of a new workspace can use it. It is
+            // granted once per GitHub account and only while billing is on and ready (a state that is not "on" reads nothing),
+            // and not for a job a limit refused. It never fails the claim (a failed grant is skipped and logged), and a
+            // workspace is tried once per claim: a refused job's workspace meets its next candidate job with the same answer.
+            if (
+              billing.state === "on" &&
+              capped.ok &&
+              !startCreditTried.has(row.workspace_id)
+            ) {
+              startCreditTried.add(row.workspace_id);
+              const credit = await ensureStartCreditWhileOn(
+                trx,
+                row.workspace_id,
+                () => current,
+              );
+              if (credit.status === "granted")
+                grantedCredits.push({
+                  workspaceId: row.workspace_id,
+                  amountMicroUsd: credit.entry.amountMicroUsd,
+                });
+            }
+            const held: AdmitOutcome | CapOutcome = !capped.ok
+              ? capped
+              : billing.state === "off"
+                ? { ok: true }
+                : billing.state === "rates_incomplete"
+                  ? RATES_INCOMPLETE_REFUSAL
+                  : await admitAtClaim(trx, {
+                      rates: billing.rates,
+                      job: {
+                        workspaceId: row.workspace_id,
+                        reviewKind: row.review_kind as ProjectReviewKind,
+                      },
+                      keyMode,
+                      now: () => current,
+                    });
+            if (!held.ok) {
+              await refuseClaimedJob(trx, row.id, held.code, current);
+              // A job claimed again after a lost lease had a record and a hold that counted: they end with the job.
+              if (hadRecord)
+                unknownCost.push(
+                  ...(await closeRecordsOfEndedJobs(
+                    trx,
+                    formatTimestamp(current),
+                  )),
+                );
+              const noticeKey = headNoticeKey(row.head_sha);
+              refusals.push({
+                jobId: row.id,
+                workspaceId: row.workspace_id,
+                repositoryId: row.repository_id,
+                prNumber: row.pr_number,
+                triggerKind: row.trigger_kind,
+                errorCode: held.code,
+                ...(noticeKey === undefined ? {} : { periodStart: noticeKey }),
+              });
+              continue;
+            }
             // The record is reserved in the transaction of the claim, so a job handed out always counts. The
             // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
             // job claimed again keeps the record it has.
-            await createUsageRecordsRepository(
+            const records = createUsageRecordsRepository(
               trx,
               row.workspace_id,
               () => current,
-            ).reserve(row.id, "own");
+            );
+            await records.reserve(row.id, "own");
+            // #605: the money of this job is settled when it ends, and only a job claimed with billing on is.
+            if (billing.state === "on") await records.openBilling(row.id);
             return {
               job: toJob(row),
               leaseToken,
@@ -837,7 +984,11 @@ export function createRunnerJobsRepository(
           return null;
         },
       );
-      // After the commit, and never able to fail it: a claimed job is already running under its lease.
+      // After the commit, and never able to fail it: a claimed job is already running under its lease. A claim inside the
+      // transaction of a caller cannot see that commit: the caller's own code logs nothing for it.
+      if (!db.isTransaction)
+        for (const credit of grantedCredits)
+          logStartCreditGranted(credit.workspaceId, credit.amountMicroUsd);
       for (const refusal of refusals)
         notify("claim_refusal_log_failed", () => options.onRefused?.(refusal));
       for (const workspaceId of ignoredCostLimits)
@@ -966,6 +1117,8 @@ export function createRunnerJobsRepository(
               finished.workspace_id,
               now,
             ).settle(finished.id, settlement);
+            // #498: the hold of the job is released and its price charged, in the transaction that ended it.
+            await settleEndedJobs(trx, [finished.id], now);
             // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
             // call settled the record, not when it was settled already).
             if (
@@ -1029,6 +1182,12 @@ export function createRunnerJobsRepository(
               stored.workspace_id,
               now,
             ).settle(stored.id, settlement);
+            // The job of a superseded run keeps no error code; the one the Worker reports (ours or not) prices the run.
+            await settleEndedJobs(trx, [stored.id], now, {
+              reportedErrorCodes: new Map(
+                outcome.ok ? [] : [[stored.id, outcome.errorCode]],
+              ),
+            });
             if (
               settled &&
               settlement.state === "settled" &&

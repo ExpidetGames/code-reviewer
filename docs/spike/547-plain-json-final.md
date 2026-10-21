@@ -8,13 +8,22 @@ scripted loopback providers. How well each real model family follows the instruc
 measured here; section 7 is the checklist for the live run (`/review` on the playground, once the
 new path is deployed behind a switch). Nothing in `src/` changed.
 
-Everything that is claimed below as "proven" has a test:
+Everything that is claimed below as "proven" had a test:
 
 - `runner/tests/engine/test_engine_plain_json_final.py` (14 cases, real engine),
 - `runner/tests/unit/test_plain_json_final.py` (extractor and messages),
 - the reference code in `runner/tests/engine/plain_json_final.py` (extractor, final line, repair
   message, finish-now message) and `runner/tests/engine/plain_json_engine.py` (the adapter turn
   logic as a `DynamicEngine` subclass: what #552 changes).
+
+**Promoted in #552.** The prototype is gone; its successors are production code and tests:
+`dynamic_review/final_json.py` (extractor), `final_messages.py` (final line, finish-now, repair),
+`plain_final.py` (the turns), the ledger's `arm_final` / `wrap_up_due` / `RefusedForFinal`
+(`budget.py`), `tests/unit/test_final_json.py` (the extractor table, ported), `test_plain_final.py`,
+`test_final_above_wire_ledger.py` and `tests/engine/test_engine_plain_final.py` (the real engine
+through the passthrough proxy). The text below is the report as it was written, with the prototype's
+names. The spike's `tools` map probe (a per-message tool restriction, not used) has no production
+successor: the finding stays in section 4.
 
 ## 1. Verdict
 

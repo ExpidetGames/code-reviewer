@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  toProviderAmount,
   BILLING_ADAPTER_ERROR_CODES,
   BILLING_EVENT_OUTCOMES,
   BILLING_EVENT_TYPES,
@@ -33,6 +34,7 @@ const CAPABILITIES: BillingCapabilities = {
   maxTopUp: toUsd(500 * USD),
   currencies: ["usd"],
   providerMayRefund: { windowDays: 60 },
+  checkout: true,
   requiresBillingProfile: true,
   receiptsFrom: "provider",
 };
@@ -282,8 +284,8 @@ describe("validating a normalized event", () => {
         type: "refund.updated",
         payment: "pi_1",
         refund: "re_1",
-        amount: 5 * USD,
-        paymentAmount: 30 * USD,
+        amount: toProviderAmount(5 * USD),
+        paymentAmount: toProviderAmount(30 * USD),
         initiatedBy: "provider",
         status: "approved",
       },
@@ -292,8 +294,8 @@ describe("validating a normalized event", () => {
         type: "dispute.updated",
         payment: "pi_1",
         dispute: "dp_1",
-        amount: 25 * USD,
-        paymentAmount: 30 * USD,
+        amount: toProviderAmount(25 * USD),
+        paymentAmount: toProviderAmount(30 * USD),
         status: "lost",
       },
       { ...base, type: "ignored" },
@@ -312,20 +314,75 @@ describe("validating a normalized event", () => {
     ).toBe("event_invalid");
   });
 
-  // #497-T13
-  it("refuses a refund or dispute without a whole payment amount next to its own", () => {
+  // #502-T16
+  it("takes a currency as three lower case letters on a payment, a refund and a dispute, and refuses anything else", () => {
+    const payment = {
+      ...base,
+      type: "payment.succeeded",
+      intentId: "intent-1",
+      payment: "pi_1",
+      checkout: "cs_1",
+      creditable: toUsd(25 * USD),
+      gross: toUsd(30 * USD),
+      tax: toUsd(5 * USD),
+      providerAmount: toProviderAmount(2975),
+    } as const;
     const refund = {
       ...base,
       type: "refund.updated",
       payment: "pi_1",
       refund: "re_1",
-      amount: 5 * USD,
-      paymentAmount: 30 * USD,
+      amount: toProviderAmount(1000),
+      initiatedBy: "provider",
+      status: "approved",
+    } as const;
+    const dispute = {
+      ...base,
+      type: "dispute.updated",
+      payment: "pi_1",
+      dispute: "dp_1",
+      amount: toProviderAmount(1000),
+      status: "lost",
+    } as const;
+
+    for (const [event, field] of [
+      [payment, "providerCurrency"],
+      [refund, "currency"],
+      [dispute, "currency"],
+    ] as const) {
+      expect(() =>
+        validateBillingEvent({ ...event, [field]: "eur" } as never),
+      ).not.toThrow();
+      expect(() => validateBillingEvent(event)).not.toThrow();
+      for (const bad of ["EUR", "eu", "euro", "", "e1r", 3, null])
+        expect(
+          codeOf(() =>
+            validateBillingEvent({ ...event, [field]: bad } as never),
+          ),
+          `${event.type} ${String(bad)}`,
+        ).toBe("event_invalid");
+    }
+  });
+
+  // #497-T13
+  it("refuses a refund or dispute whose payment amount is not a whole positive amount, and takes one without it", () => {
+    const refund = {
+      ...base,
+      type: "refund.updated",
+      payment: "pi_1",
+      refund: "re_1",
+      amount: toProviderAmount(5 * USD),
+      paymentAmount: toProviderAmount(30 * USD),
       initiatedBy: "provider",
       status: "approved",
     } as const;
     expect(() => validateBillingEvent(refund)).not.toThrow();
-    for (const paymentAmount of [0, -1, 1.5, Number.NaN, undefined])
+    // Changed with #502: the payment amount is optional now (Stripe's refund carries none; the application takes the amount
+    // it pinned from the payment), so its absence is no longer an invalid event. A wrong one still is.
+    expect(() =>
+      validateBillingEvent({ ...refund, paymentAmount: undefined }),
+    ).not.toThrow();
+    for (const paymentAmount of [0, -1, 1.5, Number.NaN])
       expect(
         codeOf(() =>
           validateBillingEvent({
@@ -343,10 +400,22 @@ describe("validating a normalized event", () => {
           payment: "pi_1",
           dispute: "dp_1",
           amount: 5 * USD,
+          paymentAmount: 0,
           status: "lost",
         } as never),
       ),
     ).toBe("event_invalid");
+    // Changed with #502: a dispute that names only its own amount is a valid event (the pinned total completes it).
+    expect(() =>
+      validateBillingEvent({
+        ...base,
+        type: "dispute.updated",
+        payment: "pi_1",
+        dispute: "dp_1",
+        amount: toProviderAmount(5 * USD),
+        status: "lost",
+      }),
+    ).not.toThrow();
   });
 
   // #497-T13
@@ -390,8 +459,8 @@ describe("validating a normalized event", () => {
           type: "dispute.updated",
           payment: "pi_1",
           dispute: "dp_1",
-          amount: 1,
-          paymentAmount: 1,
+          amount: toProviderAmount(1),
+          paymentAmount: toProviderAmount(1),
           status: "under_review" as never,
         }),
       ),

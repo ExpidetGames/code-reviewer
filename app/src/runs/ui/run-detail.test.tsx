@@ -114,6 +114,8 @@ describe("the usage of a run", () => {
   it.each([
     ["cost_limit", /cost limit/],
     ["time_limit", /time limit/],
+    // #553-R07
+    ["token_limit", /token limit/],
   ] as const)(
     "says in neutral words that a review stopped early at its %s and may be incomplete",
     (stoppedEarly, limit) => {
@@ -790,5 +792,80 @@ describe("the call trace of a run", () => {
 
     expect(screen.queryByRole("region", { name: "Call trace" })).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
+  });
+});
+
+describe("the price of a review on the detail page (#505)", () => {
+  // #505-T05
+  it("shows the AI price and the infrastructure price of a charged review", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            price: {
+              state: "charged",
+              aiMicroUsd: 1_500_000,
+              infraMicroUsd: 130_000,
+            },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain("Price");
+    expect(text(container)).toContain("AI");
+    expect(text(container)).toContain("$1.50");
+    expect(text(container)).toContain("Infrastructure");
+    expect(text(container)).toContain("$0.13");
+  });
+
+  // #505-T07
+  it("shows the infrastructure price alone for a review on the workspace's own key", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            price: {
+              state: "charged",
+              aiMicroUsd: null,
+              infraMicroUsd: 260_000,
+            },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain("$0.26");
+    expect(text(container)).not.toMatch(/\bAI\b/);
+  });
+
+  // #505-T05
+  it("says Not charged for a free review", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ price: { state: "not_charged" } }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain("Not charged");
+  });
+
+  // #505-T11
+  it("has no Price line without a price", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).not.toContain("Price");
   });
 });

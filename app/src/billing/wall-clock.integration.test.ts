@@ -9,7 +9,10 @@ import { createJobDispatchesRepository } from "../db/repositories/job-dispatches
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { decideOutcome } from "../dispatch/outcome.ts";
-import { setBillingSwitch } from "../test-support/billing-switch.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../test-support/billing-switch.ts";
 import { createJobQueueFixture } from "../test-support/jobs.ts";
 import {
   createPostgresTestDatabase,
@@ -41,6 +44,9 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
       ...(database === undefined ? {} : { database }),
     });
     await setBillingSwitch(fixture.db, options.billing);
+    // While billing is on the claim holds money (#498): the workspace has some.
+    if (options.billing)
+      await fundWorkspace(fixture.db, fixture.workspaceId, 100_000_000);
     const recorder = createWallClockRecorder({
       db: fixture.db,
       now: fixture.clock.now,
@@ -52,19 +58,31 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
     );
     let pr = 6;
     /** A job a runner claimed and finished after `seconds`. */
-    async function finishedJob(seconds: number, finish = true) {
+    async function finishedJob(
+      seconds: number,
+      finish = true,
+      /** Runs while the job runs: a Dispatcher acknowledging it (#498 measures a job when it ends, so it is hosted by then). */
+      whileRunning?: (jobId: string) => Promise<void>,
+      /** How the claim ends; the default is a delivered result. */
+      outcome: Parameters<typeof fixture.queue.complete>[2] = {
+        ok: true,
+        result: {},
+      },
+    ) {
       pr += 1;
       const job = await fixture.enqueueNew({
         prNumber: pr,
         prUrl: `https://github.test/acme/widgets/pull/${String(pr)}`,
       });
       const claimed = await fixture.queue.claimNext("self-hosted");
+      await whileRunning?.(job.id);
       fixture.clock.advance(seconds * SECOND);
       if (finish)
-        await fixture.queue.complete(job.id, claimed?.leaseToken as string, {
-          ok: true,
-          result: {},
-        });
+        await fixture.queue.complete(
+          job.id,
+          claimed?.leaseToken as string,
+          outcome,
+        );
       return job.id;
     }
     return { fixture, recorder, runs, finishedJob };
@@ -101,19 +119,32 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
   // #493-T09
   it("leaves a job that a Dispatcher started to its VM", async () => {
     const t = await setup({ billing: true });
-    const id = await t.finishedJob(90);
     const dispatches = createJobDispatchesRepository(
       t.fixture.db,
       t.fixture.clock.now,
     );
-    const at = t.fixture.clock.now();
-    await dispatches.create(id, at);
-    const row = await dispatches.get(id);
-    await dispatches.claimSend(id, row?.nextDispatchAt ?? "", at);
-    await dispatches.record(id, decideOutcome({ kind: "accepted" }, 0, at), at);
+    // The run fails with a code that is clearly ours: settlement prices it free and does not measure it, so any row for the job
+    // would be the recorder's.
+    const id = await t.finishedJob(
+      90,
+      true,
+      async (jobId) => {
+        const at = t.fixture.clock.now();
+        await dispatches.create(jobId, at);
+        const row = await dispatches.get(jobId);
+        await dispatches.claimSend(jobId, row?.nextDispatchAt ?? "", at);
+        await dispatches.record(
+          jobId,
+          decideOutcome({ kind: "accepted" }, 0, at),
+          at,
+        );
+      },
+      { ok: false, errorCode: "runner_error", result: null },
+    );
 
     await t.recorder.recordFor([id]);
 
+    // The recorder adds nothing for a job a Dispatcher started: that is the VM's.
     expect(await t.runs.list(id)).toStrictEqual([]);
   });
 

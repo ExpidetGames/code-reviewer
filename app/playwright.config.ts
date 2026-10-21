@@ -87,8 +87,12 @@ export default defineConfig({
         /e2e\/admin\/mail\.e2e\.ts$/,
         /e2e\/admin\/github-integration\.e2e\.ts$/,
         /e2e\/admin\/catalog\.e2e\.ts$/,
+        /e2e\/admin\/billing\.e2e\.ts$/,
+        /e2e\/admin\/billing-reviews\.e2e\.ts$/,
+        /e2e\/billing\//,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
+        /e2e\/settings\/native-provider\.e2e\.ts$/,
         /e2e\/upgrade\//,
         /e2e\/operator\//,
       ],
@@ -122,6 +126,14 @@ export default defineConfig({
       testMatch: /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
       dependencies: ["prepare", "mail"],
     },
+    // The journey of a catalog provider (#555) opens a pull request and has a script claim its Dynamic job, so it puts a run
+    // into the queue of the first app: it runs after the Runs journeys, which expect an empty queue when they start.
+    {
+      name: "native-provider",
+      use: browser,
+      testMatch: /e2e\/settings\/native-provider\.e2e\.ts$/,
+      dependencies: ["chromium", "runs", "reviews"],
+    },
     // The journey of the invitations changes who belongs to the workspace of the first app and needs its
     // sign-up rule to be "everyone", which the admin portal journey changes for a while: it runs after
     // every journey of that app.
@@ -129,7 +141,7 @@ export default defineConfig({
       name: "invitations",
       use: browser,
       testMatch: /e2e\/workspaces\/invite-and-accept\.e2e\.ts$/,
-      dependencies: ["chromium", "runs", "reviews"],
+      dependencies: ["chromium", "runs", "reviews", "native-provider"],
     },
     // The journeys of the workspaces in a multi-tenant instance have an app of their own (the fifth): people
     // create workspaces there, and a single-tenant instance does not let them.
@@ -192,6 +204,37 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
       testMatch: /e2e\/admin\/catalog\.e2e\.ts$/,
       dependencies: ["prepare"],
+    },
+    // The journey of the billing page in the admin portal (#504): it uses the app of the catalog admin journey (a single-tenant
+    // instance of its own), after that journey, because it switches billing on and off again and credits a workspace there.
+    {
+      name: "billing-admin",
+      // No retry: a second attempt would find the credentials saved and the journal written.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/admin\/billing\.e2e\.ts$/,
+      dependencies: ["catalog-admin"],
+    },
+    // The journey of the payment reviews in the admin portal (#603): the same app, after the billing journey, because it leaves
+    // review rows there and credits the default workspace by hand.
+    {
+      name: "billing-reviews-admin",
+      // No retry: a second attempt would find the rows closed and the credit written.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/admin\/billing-reviews\.e2e\.ts$/,
+      dependencies: ["billing-admin"],
+    },
+    // The journey of the billing page of a workspace (#505): the same app, after the payment reviews, against the fake Stripe the
+    // run starts. The journey configures billing with the Stripe adapter through the admin routes, so it needs the rates, the
+    // webhook endpoint and the credentials to be its own; it adds credit, so it comes after the journeys that count the balance.
+    {
+      name: "billing-workspace",
+      // No retry: a second attempt would find the payments made and the profile saved.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing\/.*\.e2e\.ts$/,
+      dependencies: ["billing-reviews-admin"],
     },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and
@@ -287,6 +330,19 @@ export default defineConfig({
         GITHUB_FAKE_SELF_LINKS: "true",
       },
       url: `${e2eEnv.githubUrl}/__fake/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    {
+      // The fake Stripe of the billing journey of a workspace (#505): the catalog admin app is pointed at it
+      // (STRIPE_API_BASE_URL with ALLOW_TEST_STRIPE_ENDPOINTS=true), and the journey pays, refunds and delivers events over its
+      // control API under /__fake/.
+      command: "node ../fakes/stripe/main.ts",
+      env: {
+        STRIPE_FAKE_PORT: String(e2eEnv.stripeFakePort),
+        STRIPE_FAKE_API_KEY: e2eEnv.stripeFakeApiKey,
+      },
+      url: `${e2eEnv.stripeFakeUrl}/__fake/health`,
       reuseExistingServer: false,
       timeout: 30_000,
     },
@@ -439,6 +495,10 @@ export default defineConfig({
         // This app fetches the catalog, from the fake models.dev of the journey (#554).
         MODELS_DEV_FETCH: "on",
         MODELS_DEV_URL: e2eEnv.modelsDevFakeUrl,
+        // The billing journeys of this app (#504, #505) talk to the fake Stripe: the app ignores the address without the flag, and
+        // accepts only a loopback one with it (src/stripe-endpoints.ts).
+        STRIPE_API_BASE_URL: e2eEnv.stripeFakeUrl,
+        ALLOW_TEST_STRIPE_ENDPOINTS: "true",
       },
       url: e2eEnv.catalogAdminAppUrl,
       reuseExistingServer: false,

@@ -23,7 +23,7 @@ import type { SecretStore } from "../secrets/store.ts";
 import { checkLlmApiKey } from "./config.ts";
 import { llmProviderDescriptors } from "./providers/index.ts";
 import type { OperatorKeyForJob } from "./resolve.ts";
-import type { ProviderLookup } from "./workspace-key.ts";
+import type { OperatorProviderLookup } from "./workspace-key.ts";
 
 export const OPERATOR_KEY_ISSUE_CODES = [
   /** The provider is not one of the supported ones. */
@@ -96,7 +96,7 @@ export function createOperatorLlmKeyService({
 }: {
   store: Pick<SecretStore, "status" | "save" | "remove" | "use">;
   /** The providers the app supports; a test passes its own. */
-  providers?: ProviderLookup;
+  providers?: OperatorProviderLookup;
 }): OperatorLlmKeyService {
   // The name a provider's operator key is stored under, for the id exactly: no trimming and no case folding. A
   // registry of a test may have providers the types do not know, hence the cast.

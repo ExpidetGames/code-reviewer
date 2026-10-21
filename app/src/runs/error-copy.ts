@@ -15,6 +15,12 @@
  */
 export const HISTORIC_ERROR_CODES = ["managed_tier_unavailable"] as const;
 
+/**
+ * Codes that are never shown to the customer, in the check run, on the run page or in any answer: the sentence says all
+ * there is to say. The code of the hidden hourly brake (#499) is one: it would tell a reader that a count exists.
+ */
+export const UNSHOWN_ERROR_CODES = ["reviews_paused"] as const;
+
 export const ERROR_COPY: Readonly<Record<string, string>> = {
   // The queue
   lease_expired:
@@ -42,6 +48,20 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "This workspace has used up what its plan allows for the current period, so this run did not start and no AI model was used. Reviews start again when the period renews or the limit is raised.",
   entitlements_invalid:
     "The plan settings of this workspace could not be read, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan to check them.",
+  balance_negative:
+    "The balance of this workspace is below zero, so this run did not start and no AI model was used. Add credit to continue.",
+  insufficient_balance:
+    "The balance of this workspace is used up, so this run did not start and no AI model was used. Add credit to continue.",
+  billing_rates_incomplete:
+    "Billing is switched on for this instance but its prices are not all set, so this run did not start and no AI model was used. Ask whoever runs this instance.",
+  billing_hold_released:
+    "The credit held for this run was released before it could start, so it did not start and no AI model was used. It will run again on the next push or review request.",
+  monthly_limit_reached:
+    "The monthly spending limit of this workspace was reached, so this run did not start and no AI model was used. An Owner or Admin of the workspace can change the limit in the workspace settings.",
+  reviews_paused:
+    "Reviews are paused for this workspace for a while, so this run did not start and no AI model was used. It will run again on the next push or review request.",
+  billing_limits_unreadable:
+    "The spending limits of this workspace could not be checked, so this run did not start and no AI model was used. It will run again on the next push or review request. If this keeps happening, ask whoever runs this instance.",
   // A code of a job from before the catalog (#434): nothing ends a job with it any more (see HISTORIC_ERROR_CODES).
   managed_tier_unavailable:
     "The quality level chosen for this project was not available when this run was made, so it did not start and no AI model was used. Quality levels have since been replaced by review options, which a workspace Owner or Admin can choose in the review settings of the project.",
@@ -50,6 +70,12 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The review option chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another option in the review settings of the project. If none is available, contact whoever runs this instance.",
   llm_provider_unsupported:
     "The AI provider chosen in the model settings of this project cannot be used for this run, so it did not start and no AI model was used. Check the model settings of the project, or ask whoever runs this instance.",
+
+  llm_model_unavailable:
+    "The AI model chosen in the model settings of this project is not available any more, so this run did not start and no AI model was used. Choose another model in the review settings of the project.",
+
+  provider_address_changed:
+    "The address of the AI provider chosen in the model settings of this project has changed since it was chosen, so this run did not start, your AI key was not sent anywhere and no AI model was used. An Owner or Admin of the workspace can check the provider and confirm the new address in the review settings of the project.",
 
   // The claim of the runner API
   llm_not_configured:
@@ -77,6 +103,10 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The pull request could not be read from GitHub, even after several tries.",
   claim_failed:
     "The server could not prepare this run, even after several tries.",
+  price_check_failed:
+    "The server could not check the model for this run, even after several tries.",
+  provider_pin_check_failed:
+    "The server could not check the address of the model provider for this run, even after several tries.",
   launch_failed:
     "The worker for this run could not be started, even after several tries.",
   worker_exited:
@@ -201,7 +231,9 @@ export function describeErrorCode(code: string): ErrorDescription {
   const shown = CODE_SHAPE.test(code) ? code : null;
   if (shown !== null && Object.hasOwn(ERROR_COPY, shown)) {
     return {
-      code: shown,
+      code: (UNSHOWN_ERROR_CODES as readonly string[]).includes(shown)
+        ? null
+        : shown,
       text: ERROR_COPY[shown] ?? UNKNOWN_ERROR_COPY,
       known: true,
     };

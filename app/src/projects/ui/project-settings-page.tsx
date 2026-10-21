@@ -14,6 +14,7 @@ import type {
 import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { NeedsAttention } from "../../components/needs-attention.tsx";
 import { describeConfigNotices } from "../../config-status/notices.ts";
+import type { NativeFormData } from "../../native-providers/form-data.ts";
 import { ReviewSettingsError } from "../../review-settings/errors.ts";
 import type { ReviewSettingsService } from "../../review-settings/service.ts";
 import type { SettingsApi } from "../../review-settings/ui/api.ts";
@@ -91,6 +92,8 @@ export function ProjectSettingsPageContent({
   audience = "member",
   llmNotice = null,
   keyedProviders,
+  nativeCatalog,
+  canConfirmProviderAddress = false,
   data,
   api,
 }: {
@@ -102,6 +105,10 @@ export function ProjectSettingsPageContent({
   llmNotice?: AttentionNotice | null;
   /** The providers that have a stored key in the workspace (#433): the form warns about a chosen one that has none. */
   keyedProviders?: readonly string[];
+  /** The models.dev catalog for the Dynamic provider and model of a workspace on its own key (#555); absent otherwise. */
+  nativeCatalog?: NativeFormData;
+  /** The person may manage the workspace's LLM key, so they may confirm a new address of the project's catalog provider (#588). */
+  canConfirmProviderAddress?: boolean;
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
@@ -131,6 +138,8 @@ export function ProjectSettingsPageContent({
           dynamicReviewEnabled={data.dynamicReviewEnabled}
           repositoryId={data.row.repositoryId}
           {...(keyedProviders === undefined ? {} : { keyedProviders })}
+          {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
+          canConfirmProviderAddress={canConfirmProviderAddress}
           {...(api === undefined ? {} : { api })}
         />
       </div>

@@ -87,11 +87,14 @@ describe("boundedEnd", () => {
 
 describe("the end sources", () => {
   // #493-T09
-  it("are the three of ADR 0006 (2.11) that end a run", () => {
+  // #498-B1: two more, so that a hosted job whose VM was never reported is flagged and never priced at zero silently.
+  it("are the three of ADR 0006 (2.11) that end a run, and the two of #498 for a VM nobody reported", () => {
     expect([...VM_END_SOURCES]).toStrictEqual([
       "app_stop_confirmed",
       "timeout_backstop",
       "job_wall_clock",
+      "app_stop_unreported",
+      "claim_wall_clock",
     ]);
   });
 });

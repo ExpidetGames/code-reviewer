@@ -17,9 +17,13 @@ export type SaveKeyAnswer = {
   key: WorkspaceLlmKeyStatus;
 };
 
-/** The answer of the test button: it worked, or a class of failure with a safe detail. */
+/**
+ * The answer of the test button: it worked, the provider has no way to check a key (`verified: false`, #555: not an error and not
+ * a verified key), or a class of failure with a safe detail.
+ */
 export type TestKeyAnswer =
-  { ok: true } | { ok: false; error: string; detail: string | null };
+  | { ok: true; verified?: false }
+  | { ok: false; error: string; detail: string | null };
 
 /** Every call is for the key of one provider (`/llm-keys/:provider`, #426). */
 export type LlmKeyApi = {

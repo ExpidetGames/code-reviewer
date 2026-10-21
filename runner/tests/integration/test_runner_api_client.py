@@ -72,7 +72,7 @@ def test_a_claim_with_a_job_returns_the_lease_and_the_input_and_sends_token_and_
     # #396: and that it stops gracefully when its run is superseded.
     assert app.requests[0]["body"] == {
         "engines": ["pr-agent"],
-        "features": ["dynamic_capabilities", "supersede"],
+        "features": ["dynamic_capabilities", "supersede", "dynamic_cost_policy"],
         # #424-T08: and the providers its registry holds.
         "llmProviders": ["openrouter", "anthropic"],
     }
@@ -95,7 +95,7 @@ def test_a_claim_advertises_the_configured_engines(app: FakeApp) -> None:
 
     assert app.requests[0]["body"] == {
         "engines": ["pr-agent", "opencode"],
-        "features": ["dynamic_capabilities", "supersede"],
+        "features": ["dynamic_capabilities", "supersede", "dynamic_cost_policy"],
         "llmProviders": ["openrouter", "anthropic"],
     }
     assert app.violations == []

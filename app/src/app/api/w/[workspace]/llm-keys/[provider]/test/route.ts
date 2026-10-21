@@ -7,6 +7,7 @@
 import { connection } from "next/server";
 import { createLlmKeyRouteHandlers } from "@/llm/http";
 import { getLlmKeyTester, getWorkspaceLlm } from "@/llm/shared";
+import { getNativeCatalog } from "@/native-providers/shared";
 import { withWorkspace } from "@/workspaces/access-runtime";
 
 export async function POST(
@@ -20,6 +21,7 @@ export async function POST(
     createLlmKeyRouteHandlers({
       keys: getWorkspaceLlm().keyServiceFor(access.workspace.id),
       tester: getLlmKeyTester(),
+      catalog: getNativeCatalog(),
     }).test(request, access, provider),
   );
 }

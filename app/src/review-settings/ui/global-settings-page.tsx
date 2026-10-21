@@ -26,6 +26,7 @@ export function GlobalSettingsPageContent({
   workspaceSlug,
   canEdit = true,
   showPlan = false,
+  showBilling = false,
   keyedProviders,
   data,
   api,
@@ -36,6 +37,8 @@ export function GlobalSettingsPageContent({
   canEdit?: boolean;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
+  /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
+  showBilling?: boolean;
   /** The providers that have a stored key in the workspace (#433): the form warns about a chosen one that has none. */
   keyedProviders?: readonly string[];
   data: GlobalSettingsPageData;
@@ -46,6 +49,7 @@ export function GlobalSettingsPageContent({
       workspaceSlug={workspaceSlug}
       current="review-defaults"
       showPlan={showPlan}
+      showBilling={showBilling}
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">

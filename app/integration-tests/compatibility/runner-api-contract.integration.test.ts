@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { REVIEW_COMMANDS } from "../../src/integrations/types.ts";
+import type { JobModelEntry } from "../../src/models-dev/job-entry.ts";
 import { LLM_PROVIDERS } from "../../src/llm/config.ts";
 import {
   LLM_PROVIDER_ID_PATTERN,
@@ -32,6 +33,27 @@ import {
 } from "../../src/test-support/runner-api-harness.ts";
 
 const contract = createContractValidator();
+// The entry of a native job is the object of its own file (#578).
+const entryValidator = createContractValidator("job-model-entry.v1.json");
+const NATIVE_ENTRY: JobModelEntry = {
+  version: 1,
+  providerId: "deepseek",
+  npm: "@ai-sdk/openai-compatible",
+  family: "openai-chat",
+  authHeader: "Authorization",
+  upstreamBaseUrl: "https://api.deepseek.com",
+  modelId: "deepseek-v4-pro",
+  model: {
+    name: "DeepSeek V4 Pro",
+    status: "active",
+    tool_call: true,
+    reasoning: true,
+    temperature: true,
+    limit: { context: 1_000_000, output: 384_000 },
+    modalities: { input: ["text"], output: ["text"] },
+    interleaved: { field: "reasoning_content" },
+  },
+};
 
 function expectValid(definition: string, document: unknown) {
   const { valid, errors } = contract.check(definition, document);
@@ -724,6 +746,224 @@ describe("the model capabilities of a Dynamic job", () => {
 
     expect(claim.job.input.dynamic?.capabilities).toBeDefined();
     expectValid("ClaimResponse", claim);
+  });
+});
+
+// #553-T02: the cost policy of a native job. The examples are valid, the policy is closed and typed, and the type the app
+// builds (`CostPolicyJson`) is what the file describes.
+describe("the cost policy of a native job", () => {
+  const FIXTURES = new URL("../../../fakes/fixtures/", import.meta.url);
+  const read = (name: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  const costOf = (job: Record<string, unknown>) =>
+    (job.dynamic as { cost: Record<string, unknown> }).cost;
+
+  it.each([
+    "dynamic-review-job-cost-managed.json",
+    "dynamic-review-job-cost-own.json",
+  ])("accepts the golden Dynamic job %s", (name) => {
+    expectValid("RunnerJobInput", read(name));
+  });
+
+  it("refuses a policy that is not closed, typed and complete", () => {
+    const changes: Array<[string, (cost: Record<string, unknown>) => void]> = [
+      ["an unknown key", (cost) => Object.assign(cost, { command: "x" })],
+      ["no key mode", (cost) => delete cost.keyMode],
+      [
+        "a bad key mode",
+        (cost) => Object.assign(cost, { keyMode: "operator" }),
+      ],
+      ["no book key", (cost) => delete cost.priceBook],
+      ["no cap key", (cost) => delete cost.maxTotalTokens],
+      [
+        "a cap as text",
+        (cost) => Object.assign(cost, { maxTotalTokens: "4000000" }),
+      ],
+      ["a cap of zero", (cost) => Object.assign(cost, { maxTotalTokens: 0 })],
+      [
+        "a fractional cap",
+        (cost) => Object.assign(cost, { maxTotalTokens: 1.5 }),
+      ],
+      [
+        "a huge cap",
+        (cost) => Object.assign(cost, { maxTotalTokens: 10 ** 12 }),
+      ],
+    ];
+    for (const [name, change] of changes) {
+      const job = read("dynamic-review-job-cost-own.json");
+      change(costOf(job));
+      expect({
+        name,
+        valid: contract.check("RunnerJobInput", job).valid,
+      }).toEqual({
+        name,
+        valid: false,
+      });
+    }
+  });
+
+  it("refuses a managed policy without a book, with a cap, or with a book that is not exact", () => {
+    const changes: Array<[string, (cost: Record<string, unknown>) => void]> = [
+      ["no book", (cost) => Object.assign(cost, { priceBook: null })],
+      ["a cap", (cost) => Object.assign(cost, { maxTotalTokens: 4_000_000 })],
+      [
+        "an amount as a number",
+        (cost) => Object.assign(cost.priceBook as object, { input: 3 }),
+      ],
+      [
+        "a decimal amount",
+        (cost) => Object.assign(cost.priceBook as object, { input: "3.5" }),
+      ],
+      [
+        "a negative amount",
+        (cost) => Object.assign(cost.priceBook as object, { output: "-1" }),
+      ],
+      [
+        "an unknown price",
+        (cost) => Object.assign(cost.priceBook as object, { cacheBlend: "1" }),
+      ],
+      [
+        "a tier without a size",
+        (cost) =>
+          Object.assign(cost.priceBook as object, {
+            tiers: [{ input: "1", output: "2" }],
+          }),
+      ],
+    ];
+    for (const [name, change] of changes) {
+      const job = read("dynamic-review-job-cost-managed.json");
+      change(costOf(job));
+      expect({
+        name,
+        valid: contract.check("RunnerJobInput", job).valid,
+      }).toEqual({
+        name,
+        valid: false,
+      });
+    }
+  });
+
+  it("accepts an own policy with the catalog's price, tiers and a level that states fewer prices", () => {
+    const job = read("dynamic-review-job-cost-own.json");
+    Object.assign(costOf(job), {
+      priceBook: {
+        input: "3000000",
+        output: "15000000",
+        cacheRead: null,
+        contextOver200k: { input: "6000000", output: "22500000" },
+        tiers: [{ contextOver: 128000, input: "4000000", output: "16000000" }],
+      },
+    });
+    expectValid("RunnerJobInput", job);
+  });
+
+  it("names the feature a runner says it enforces the policy with, and the reason a run may stop for", () => {
+    const features = readContract().$defs.KnownClaimFeature?.enum ?? [];
+    expect(features).toContain("dynamic_cost_policy");
+    const usage = readContract().$defs.RunnerUsage as {
+      properties: { stoppedEarly: { enum: Array<string | null> } };
+    };
+    expect(usage.properties.stoppedEarly.enum).toContain("token_limit");
+  });
+
+  it("gives the real claim answer of the app the shape of the file", async () => {
+    const h = await startRunnerApiHarness({
+      projects: true,
+      nativeCost: {
+        refOf: () => ({ providerId: "deepseek", modelId: "deepseek-v4-pro" }),
+        policyFor: async () => ({
+          ok: true,
+          policy: {
+            keyMode: "own",
+            priceBook: null,
+            maxTotalTokens: 4_000_000,
+          },
+          confirmation: null,
+        }),
+        entryFor: async () => ({ ok: true, entry: NATIVE_ENTRY }),
+      },
+    });
+    await h.projectService.activateProject(h.repositoryId);
+    await h.reviewSettings.updateProjectSettings(h.repositoryId, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+    });
+    await h.enqueueNew();
+
+    const claim = await h.claimed({
+      engines: ["opencode"],
+      features: ["dynamic_capabilities", "dynamic_cost_policy"],
+    });
+
+    expect(claim.job.input.dynamic?.cost).toEqual({
+      keyMode: "own",
+      priceBook: null,
+      maxTotalTokens: 4_000_000,
+    });
+    expect(claim.job.input.dynamic?.modelEntry).toEqual(NATIVE_ENTRY);
+    expectValid("ClaimResponse", claim);
+    // The entry is the object of its own file, which the file of the runner API does not repeat.
+    expect(
+      entryValidator.check(
+        "JobModelEntry",
+        claim.job.input.dynamic?.modelEntry,
+      ),
+    ).toEqual({ valid: true, errors: "" });
+  });
+});
+
+// #578-T07: the entry of a native job. The runner API says only that it is an object that goes with the cost policy; the
+// entry's own file says what it is, and every golden job is held against both.
+describe("the model entry of a native job", () => {
+  const FIXTURES = new URL("../../../fakes/fixtures/", import.meta.url);
+  const read = (name: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  const dynamicOf = (job: Record<string, unknown>) =>
+    job.dynamic as Record<string, unknown>;
+
+  it.each([
+    "dynamic-review-job-native-managed.json",
+    "dynamic-review-job-native-own.json",
+  ])("accepts the golden native job %s and its entry", (name) => {
+    const job = read(name);
+
+    expectValid("RunnerJobInput", job);
+    expect(
+      entryValidator.check("JobModelEntry", dynamicOf(job).modelEntry),
+    ).toEqual({ valid: true, errors: "" });
+  });
+
+  it.each([
+    "dynamic-review-job.json",
+    "dynamic-review-job-cost-managed.json",
+    "dynamic-review-job-cost-own.json",
+  ])("still accepts the job without an entry %s", (name) => {
+    expectValid("RunnerJobInput", read(name));
+  });
+
+  it("refuses an entry without the cost policy it goes with", () => {
+    const job = read("dynamic-review-job-native-own.json");
+    delete dynamicOf(job).cost;
+
+    expect(contract.check("RunnerJobInput", job).valid).toBe(false);
+  });
+
+  it("refuses an entry that is not an object, and the entry's file refuses one with a key", () => {
+    const job = read("dynamic-review-job-native-own.json");
+    dynamicOf(job).modelEntry = "anthropic";
+    expect(contract.check("RunnerJobInput", job).valid).toBe(false);
+
+    const entry = structuredClone(
+      dynamicOf(read("dynamic-review-job-native-own.json")).modelEntry,
+    ) as Record<string, unknown>;
+    entry.apiKey = "sk-live-1";
+    expect(entryValidator.check("JobModelEntry", entry).valid).toBe(false);
   });
 });
 

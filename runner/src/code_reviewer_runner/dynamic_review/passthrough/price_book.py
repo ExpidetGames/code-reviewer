@@ -86,6 +86,9 @@ class PriceBook:
     over_200k: PriceLevel | None = None
     # From the smallest size up.
     tiers: tuple[PriceTier, ...] = ()
+    # The book of a claim (#553): a cache read the level states no price for is not priced as input
+    # (the descriptor of a legacy job still is), the call has no cost.
+    strict_cache_read: bool = False
 
     def level_for(self, prompt_tokens: int) -> PriceLevel | None:
         """The level that prices a prompt of this size, or None when two of one size disagree.
@@ -187,10 +190,11 @@ def _tier(value: Any) -> PriceTier | None:
     return None if level is None else PriceTier(size, level)
 
 
-def parse_price_book(document: object) -> PriceBook | None:
+def parse_price_book(document: object, *, strict_cache_read: bool = False) -> PriceBook | None:
     """The price book of this JSON (the form of `priceBookToJson`), or None when it is not exactly
     one: an unknown key, an amount that is not whole micro-USD digits, a missing input or output
-    price, a tier that is not above the one before it."""
+    price, a tier that is not above the one before it. `strict_cache_read` is set for the book of a
+    claim (#553)."""
     if not isinstance(document, dict):
         return None
     given: dict[str, Any] = document  # pyright: ignore[reportUnknownVariableType]
@@ -211,7 +215,9 @@ def parse_price_book(document: object) -> PriceBook | None:
         if tier is None or (tiers and tier.context_over <= tiers[-1].context_over):
             return None
         tiers.append(tier)
-    return PriceBook(base=base, over_200k=over_200k, tiers=tuple(tiers))
+    return PriceBook(
+        base=base, over_200k=over_200k, tiers=tuple(tiers), strict_cache_read=strict_cache_read
+    )
 
 
 def _micro_usd(usd_per_mtok: Decimal | None, name: str) -> int | None:

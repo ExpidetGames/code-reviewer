@@ -1,0 +1,16 @@
+{
+  "id": "acct_FakeTemplate",
+  "object": "account",
+  "business_profile": { "name": "Fake Merchant", "url": null },
+  "business_type": null,
+  "capabilities": {},
+  "charges_enabled": true,
+  "controller": { "type": "account" },
+  "country": "DE",
+  "created": 1700000000,
+  "default_currency": "eur",
+  "details_submitted": true,
+  "email": null,
+  "payouts_enabled": true,
+  "type": "standard"
+}

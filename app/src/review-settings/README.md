@@ -91,6 +91,38 @@ operator's and the workspace never sees them (`src/model-catalog/README.md`):
 - **A reset keeps the stored models.** `DELETE` on a project removes every override but the models saved on the
   workspace's own key (`model`, `fallbackModel`, Dynamic model), like a save does.
 
+## The address pinned for a catalog provider (#588)
+
+A project that selects a provider of the models.dev catalog (own key, #555) gets one more stored field, `dynamicProviderAddress`: the
+address the catalog trusted for that provider when it was selected. It is written by the server only (a request that names it is
+`UNKNOWN_FIELD`) and the claim sends the key to exactly that address (`src/native-cost/README.md`, "Where the key goes"). No table, no
+migration: it is one more key of `projects.settings`.
+
+- **When it is written** (`provider-pin.ts`, `pinAfterSave`): when the save leaves the project with a catalog provider that it did not have
+  (selecting, or changing the provider), and when the request carries `confirmProviderAddress: true`, the action behind "Confirm the new
+  address" on the settings page (`PROVIDER_ADDRESS_NOT_PINNABLE` when there is no catalog provider or the catalog trusts no address
+  for it). Every other save keeps the pin, whatever the catalog trusts now; a model change alone does not move it. Going back to a
+  provider of the registry removes it; a managed workspace's saves carry it through; a reset on the own key clears it.
+- **What the view says** (`ProjectDynamicView.providerAddress`): `pinned`, `current` (what the catalog trusts now) and a state:
+  `pinned`, `unpinned` (a selection from before pins; its first review pins it), `changed` (reviews are refused until confirmed) or
+  `unavailable` (the catalog trusts no address for the provider now). The form shows it as small read-only text, with the
+  confirmation checkbox only for `changed`.
+- **Legacy selections.** Not re-selected: that would stop reviews of running customers. The first claim pins
+  (`adoptProviderAddress`, a compare-and-set inside the settings write), at the address it is about to send the key to, which is
+  the trust the selection had until then.
+- **Who may move it.** A Member saves the settings of a project (`change_project_settings`), but writing or moving the pin is for the
+  roles that manage the workspace's LLM key (`manage_llm_key`, Owner and Admin; `provider-pin.ts`, `pinMoveNeedsRight`). The route
+  passes the right (`canManageLlmKey`, from the role) to `updateProjectSettings` and `resetProjectSettings`; left out, the actor may
+  not. A save that would **drop or replace a pin that is not the address the catalog trusts now** (the confirmation, a reset, going back
+  to the registry or to another provider) or **write a pin that differs from one another project of the workspace holds for the
+  provider** (selecting it in a second project, or a model-only save of a selection from before pins) is refused for anyone else with
+  `PROVIDER_ADDRESS_CONFIRM_FORBIDDEN` (403) and stores nothing. The first pin of a provider in a workspace, and every save that
+  leaves the pin as it is, need no right. The claim adopts a legacy selection's address only when no other project of the workspace
+  pinned another one; else it holds to that pin and the job is refused (`provider_address_changed`). The form shows the confirmation
+  checkbox only to those who may confirm, and tells everyone else that an Owner or Admin must. A confirmation on its own leaves the
+  Diff overrides of the project alone. Known and accepted: a stored pin of a shape no address has is dropped when read, and an older
+  instance that saves during a rolling deploy does not know the field and drops it (the next claim adopts it again).
+
 ## Provider and catalog entry per kind (#430)
 
 Additive fields of the same settings JSON (ADR 0005, 2.7): no table, no migration, every setting stored before them stays
@@ -378,6 +410,33 @@ keeps the typed values of the others). Global defaults still use `buildPatch` (`
 skill, where each comes from, the shipped defaults, whether the skill is the default, the default
 skill's identity and the size limit.
 
+## A catalog provider and model for Dynamic Review (#555)
+
+A workspace on its **own key** may choose, for Dynamic Review only, any provider of the models.dev catalog that OpenCode supports
+with a static key (`contracts/opencode-providers.v1.json`) and one of that provider's tool-calling models. The catalog is read by
+`src/native-providers/` (its README has the whole picture); this module only checks and stores the pair.
+
+- `dynamicProvider` may be a catalog provider's slug (`validate.ts`: `nativeDynamicProvider`; the model is held to the shape of a
+  job entry, `isCatalogModelId`), and `dynamicModel` is then required. A provider of the registry keeps its own path, **Diff is
+  unchanged** (its fields keep their two providers until #558), and a catalog provider is never accepted for Diff.
+- **The save** (`service.ts`: `refuseUnfitNativeChoice`, pure part in `native-choice.ts`) puts the pair to
+  `NativeCatalogReader.checkSelection` when the save sets the provider or the model. A model the catalog does not list
+  (released today before the next daily fetch, or no longer listed) is refused with `MODEL_NOT_IN_CATALOG` on `dynamicModel`
+  and nothing is stored; the admin's "Refresh now" (#554) is the way to get it sooner. A missing model is `EMPTY`. The provider's own
+  model metadata is not asked (the catalog is the list), so `checkDynamicModel` skips a catalog provider. A pair that is already
+  stored is **not** checked again by a save that does not touch it, so an unrelated save does not fail because a model has left the
+  catalog since.
+- **Retired later.** A stored model that models.dev stopped listing keeps being served by the claim from its last known row (the
+  decision of #548, see `src/runner-api/README.md`, "A catalog model on the workspace's own key"); the picker shows a warning.
+  Only a row that is gone fails closed (`llm_model_unavailable`).
+- **A workspace on the operator's key never gets this**: it chooses named catalog entries, the save does not read the catalog
+  of providers and the form shows no provider or model id (a save naming a provider or a model is refused with `MODEL_MANAGED_BY_INSTANCE`, #283).
+- **The form.** The Dynamic card shows the provider (the registry's two and the catalog providers the workspace holds a key for,
+  `native-providers/form-data.ts`), then, for a catalog provider, `CatalogModelPicker` (search, name, context, price when known)
+  instead of the free-text model field, and `OwnKeyCostNote`: with an unknown price the run is bounded by the token cap and the time
+  limit and the own-key cost limit does not apply; with a known price the cost limit applies as before and the price source is shown;
+  with billing on the note says that a run on the own key is charged for infrastructure minutes only (no rate, no formula).
+
 ## The pages
 
 The workspace settings are sub-pages with a sub-nav (#178). `/w/:workspace/settings` is **General** (the
@@ -431,7 +490,7 @@ The claim of the runner API and the webhook intake use `service.resolveForReposi
 `validate.test.ts`, `effective.test.ts`, `runner-settings.test.ts`, `cost.test.ts`, `catalog-selection.test.ts` and
 `dynamic-check.test.ts` (unit, pure),
 `service.integration.test.ts`, `selection.integration.test.ts` (the provider and catalog selection, a real catalog),
-`dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
+`validate-native.test.ts` and `native-model.integration.test.ts` (#555: a catalog provider and model, the refusal of a model outside the catalog, a managed workspace refused; SQLite), `dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
 `src/db/repositories/`, and in `integration-tests/http/` the proxy in front of the routes
 (`review-settings-route.integration.test.ts`) and the real route files
 (`review-settings-route-file.integration.test.ts`). The test cases that need the real PR-Agent against the

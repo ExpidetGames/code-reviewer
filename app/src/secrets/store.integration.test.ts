@@ -369,6 +369,8 @@ describe("the status of every secret", () => {
       "operator_llm_key",
       "operator_llm_key.anthropic",
       "smtp_password",
+      "stripe_api_key",
+      "stripe_webhook_secret",
     ]);
     expect(statuses.map(({ state }) => state)).toEqual([
       "not_configured",
@@ -377,6 +379,8 @@ describe("the status of every secret", () => {
       "not_configured",
       "not_configured",
       "configured",
+      "not_configured",
+      "not_configured",
     ]);
   });
 
@@ -411,6 +415,8 @@ describe("the status of every secret", () => {
       "operator_llm_key",
       "operator_llm_key.anthropic",
       "smtp_password",
+      "stripe_api_key",
+      "stripe_webhook_secret",
     ]);
     expect(statuses.find(({ name }) => name === "smtp_password")?.state).toBe(
       "configured",

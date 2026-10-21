@@ -66,17 +66,82 @@ describe("the guards of the admin portal", () => {
     expect(readFileSync(page!.file, "utf8")).toMatch(/\brequireAdmin\(\)/);
   });
 
-  // #491-T08
-  it("has no billing page or billing data route until the billing admin page is built again on these guards", () => {
+  // #504-T11
+  it("guard the billing page and its data routes like every other part of the portal", () => {
     const billing = discoverRoutes().filter(({ route }) =>
-      /billing/i.test(concretePath(route)),
+      /^\/(api\/)?instance-portal\/billing/.test(concretePath(route)),
     );
 
-    // #497: the provider-facing webhook is the one billing route so far. It is public by design (the signature is its
-    // credential, src/auth/access.ts) and not part of the portal; every page and portal data route is still to come.
-    expect(billing.map(({ route }) => concretePath(route))).toEqual([
+    expect(billing.map(({ route }) => route).sort()).toEqual([
+      "/api/instance-portal/billing",
+      "/api/instance-portal/billing/check",
+      "/api/instance-portal/billing/reviews",
+      "/api/instance-portal/billing/reviews/check",
+      "/api/instance-portal/billing/reviews/resolve",
+      "/api/instance-portal/billing/webhook-endpoint",
+      "/api/instance-portal/billing/workspaces",
+      "/api/instance-portal/billing/workspaces/[id]",
+      "/api/instance-portal/billing/workspaces/[id]/credit",
+      "/instance-portal/billing",
+      "/instance-portal/billing/reviews",
+    ]);
+    for (const { route, file } of billing) {
+      expect(isInternalPortalPath(concretePath(route))).toBe(true);
+      const source = readFileSync(file, "utf8");
+      if (/page\.tsx?$/.test(file))
+        expect(source, route).toMatch(/\brequireAdmin\(\)/);
+      else {
+        expect(source, route).toMatch(/\bcreateBillingRouteHandlers\(/);
+        expect(source, route).toMatch(/\baccess:\s*lookupAdmin\b/);
+      }
+    }
+  });
+
+  // #504-T01
+  it("keeps the provider-facing webhook the only public billing route outside the portal", () => {
+    const outside = discoverRoutes().filter(
+      ({ route }) =>
+        /billing/i.test(concretePath(route)) &&
+        !isInternalPortalPath(concretePath(route)) &&
+        // A route of a workspace is not public: it runs through `withWorkspace` (the membership and the role of the
+        // person), which `src/workspaces/guard-rule.test.ts` pins for every route below `/api/w/`. #501 adds the top-up.
+        !concretePath(route).startsWith("/api/w/") &&
+        // A page of a workspace asks for the workspace itself, as the member it is for (`requireWorkspace`, the second guard of
+        // every page below `/w/`, pinned by `auth/protection.integration.test.ts`). #505 adds the billing page.
+        !concretePath(route).startsWith("/w/"),
+    );
+
+    // The signature checked by the active adapter is its credential (src/auth/access.ts); every page and data route of the
+    // billing admin is below the portal and guarded above.
+    expect(outside.map(({ route }) => concretePath(route))).toEqual([
       "/api/billing/webhook",
     ]);
+  });
+
+  // #501-T04
+  it("runs every billing route of a workspace through the access check of a workspace with the billing action", () => {
+    const routes = discoverRoutes().filter(
+      ({ route }) =>
+        /billing/i.test(concretePath(route)) &&
+        concretePath(route).startsWith("/api/w/"),
+    );
+
+    // Changed with #502 and #499: "Check payment" and the monthly limit are billing routes of a workspace, and they pass the same guard.
+    // Changed with #505: the profile is another one, and the journal is read by every member (`view`): it is the one route here
+    // that does not need the billing action, because a Member reads the balance and the journal of their workspace.
+    expect(routes.map(({ route }) => concretePath(route)).sort()).toEqual([
+      "/api/w/x/billing/journal",
+      "/api/w/x/billing/monthly-limit",
+      "/api/w/x/billing/profile",
+      "/api/w/x/billing/top-ups",
+      "/api/w/x/billing/top-ups/x/check",
+    ]);
+    for (const { route, file } of routes)
+      expect(readFileSync(file, "utf8"), route).toMatch(
+        concretePath(route) === "/api/w/x/billing/journal"
+          ? /\bwithWorkspace\(\s*workspace,\s*"view"/
+          : /\bwithWorkspace\(\s*workspace,\s*"manage_billing"/,
+      );
   });
 
   // #429-T08
@@ -167,7 +232,7 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval|Catalog|ModelPrice|ModelsDev)RouteHandlers\(/.test(
+          /\bcreate(Admin|Github|Approval|Billing|Catalog|ModelPrice|ModelsDev)RouteHandlers\(/.test(
             source,
           ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );

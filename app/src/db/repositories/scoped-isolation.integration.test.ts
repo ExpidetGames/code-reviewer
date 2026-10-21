@@ -31,6 +31,8 @@ import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts"
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
 import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
+import { createBillingProfilesRepository } from "./billing-profiles-repository.ts";
+import { createBillingWorkspaceSettingsRepository } from "./billing-workspace-settings-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -55,6 +57,8 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     planHandoff: createPlanHandoffTokensRepository(db, workspaceId),
     billing: createBillingJournalRepository(db, workspaceId),
     topUpIntents: createBillingTopUpIntentsRepository(db, workspaceId),
+    profiles: createBillingProfilesRepository(db, workspaceId),
+    limits: createBillingWorkspaceSettingsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -302,8 +306,30 @@ async function seed(
     checkoutRef: `cs-${tag}`,
     paymentRef: `pi-intent-${tag}`,
   });
+  // One that never got a page (#501), which a sweep of the other workspace must not fail.
+  const unpagedIntent = await repos.topUpIntents.create({
+    adapter: "fake",
+    amountMicroUsd: 10_000_000,
+  });
+  // The billing profile (#501): customer data, with a customer, so the other workspace has a profile to reach for.
+  await repos.profiles.save({
+    legalName: `Legal ${tag} GmbH`,
+    country: "DE",
+    addressLine1: `Street ${tag}`,
+    addressLine2: null,
+    postalCode: "10115",
+    city: "Berlin",
+    vatId: null,
+  });
+  await repos.profiles.setCustomer("fake", `cus_${tag}`);
+  // The monthly limit (#499): each workspace has its own, so the other's is there to be reached for.
+  await repos.limits.setMonthlyLimit(
+    tag === "a" ? 10_000_000 : 20_000_000,
+    null,
+  );
   return {
     topUpIntentId: topUpIntent.id,
+    unpagedIntentId: unpagedIntent.id,
     workspaceId,
     userId: `user-${tag}`,
     journalEntryId: topUp.entry.id,
@@ -415,6 +441,16 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    billingProfiles: await db
+      .selectFrom("billing_profiles")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .execute(),
+    billingWorkspaceSettings: await db
+      .selectFrom("billing_workspace_settings")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
       .execute(),
     appSettings: await db
       .selectFrom("app_settings")
@@ -868,6 +904,13 @@ const CASES: Case[] = [
       }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
+  // #555: the names of a catalog provider's key slots are listed for one workspace only
+  {
+    name: "workspaceSecrets.names",
+    run: (a) => a.workspaceSecrets.names(),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual(["llm_api_key", "llm_api_key.fakeai"]),
+  },
   {
     name: "workspaceSecrets.remove",
     run: (a) => a.workspaceSecrets.remove("llm_api_key"),
@@ -926,6 +969,16 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.openBilling",
+    run: (a, b) => a.usage.openBilling(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "usage.closeBilling",
+    run: (a, b) => a.usage.closeBilling(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
     name: "usage.setKeyMode",
     run: (a, b) => a.usage.setKeyMode(b.job.id, "own"),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
@@ -962,6 +1015,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.voidEndedJobsWithIds",
+    run: (a) => a.usage.voidEndedJobsWithIds(),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
     name: "usage.get",
     run: (a, b) => a.usage.get(b.job.id),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
@@ -970,6 +1028,12 @@ const CASES: Case[] = [
     name: "usage.countByKind",
     run: (a) => a.usage.countByKind("2000-01-01T00:00:00.000Z"),
     expectAnswer: (answer) => expect(answer).toEqual({ diff: 1, dynamic: 0 }),
+  },
+  // the started reviews (#499): A counts its own record, never B's
+  {
+    name: "usage.startedSince",
+    run: (a) => a.usage.startedSince("2000-01-01T00:00:00.000Z"),
+    expectAnswer: (answer) => expect(answer).toBe(1),
   },
   {
     name: "usage.sumSettledCostMicroUsd",
@@ -1187,11 +1251,17 @@ const CASES: Case[] = [
       }),
   },
   {
-    name: "billing.reserveUpTo",
-    run: (a, b) => a.billing.reserveUpTo(b.heldJobId, 1_000_000),
+    // #605: the price of a job is keyed by workspace and job, so a job id of B writes an entry of A, never of B
+    name: "billing.charge",
+    run: (a, b) =>
+      a.billing.charge(b.heldJobId, {
+        aiMicroUsd: 0,
+        infraMicroUsd: 500_000,
+        minutes: 1,
+        reviewKind: "diff",
+      }),
     expectAnswer: (answer, a) =>
       expect(answer).toMatchObject({
-        ok: true,
         created: true,
         entry: { workspaceId: a.workspaceId },
       }),
@@ -1235,6 +1305,18 @@ const CASES: Case[] = [
       ]);
     },
   },
+  // the charged total (#499): A was charged nothing, whatever B was
+  {
+    name: "billing.chargedSince",
+    run: (a) => a.billing.chargedSince("2000-01-01T00:00:00.000Z"),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  // the balance lock (#507) writes nothing, and it locks the row of A's own workspace only
+  {
+    name: "billing.lockBalance",
+    run: (a) => a.billing.lockBalance(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
   {
     name: "billing.verify",
     run: (a) => a.billing.verify(),
@@ -1258,8 +1340,10 @@ const CASES: Case[] = [
     run: (a) => a.topUpIntents.list({ limit: 50 }),
     expectAnswer: (answer, a) => {
       const intents = answer as Array<{ workspaceId: string }>;
-      expect(intents).toHaveLength(1);
-      expect(intents[0]?.workspaceId).toBe(a.workspaceId);
+      expect(intents).toHaveLength(2);
+      expect(
+        intents.every((intent) => intent.workspaceId === a.workspaceId),
+      ).toBe(true);
     },
   },
   {
@@ -1298,9 +1382,86 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "topUpIntents.markFailedUnlessPage",
+    run: (a, b) => a.topUpIntents.markFailedUnlessPage(b.unpagedIntentId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    // Every pending intent of B without a page is old enough for this cutoff, and none of them is A's to fail.
+    name: "topUpIntents.failPendingWithoutPage",
+    run: (a) => a.topUpIntents.failPendingWithoutPage(-60_000),
+    expectAnswer: (answer) => expect(answer).toBe(1),
+  },
+  {
     name: "topUpIntents.markFailed",
     run: (a, b) => a.topUpIntents.markFailed(b.topUpIntentId),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // the billing profile (#501): A reads and writes its own; B's profile, confirmation and customer are not reachable from A
+  {
+    name: "profiles.get",
+    run: (a) => a.profiles.get(),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        legalName: "Legal a GmbH",
+        customerRef: "cus_a",
+        createdAt: expect.any(String),
+      }),
+  },
+  {
+    name: "profiles.save",
+    run: (a) =>
+      a.profiles.save({
+        legalName: "Changed GmbH",
+        country: "FR",
+        addressLine1: "Rue 1",
+        addressLine2: null,
+        postalCode: "75001",
+        city: "Paris",
+        vatId: null,
+      }),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        legalName: "Changed GmbH",
+        customerRef: "cus_a",
+      }),
+  },
+  {
+    name: "profiles.confirmBusiness",
+    run: (a) =>
+      a.profiles.confirmBusiness({ userId: "user-a", termsVersion: "1" }),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        confirmedBy: "user-a",
+        legalName: "Legal a GmbH",
+      }),
+  },
+  {
+    name: "profiles.setCustomer",
+    run: (a) => a.profiles.setCustomer("fake", "cus_new"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        customerRef: "cus_new",
+        legalName: "Legal a GmbH",
+      }),
+  },
+  // the workspace billing settings (#499): A reads and sets its own limit; B's stays as it is
+  {
+    name: "limits.get",
+    run: (a) => a.limits.get(),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ monthlyLimitMicroUsd: 10_000_000 }),
+  },
+  {
+    name: "limits.monthlyLimitMicroUsd",
+    run: (a) => a.limits.monthlyLimitMicroUsd(),
+    expectAnswer: (answer) => expect(answer).toBe(10_000_000),
+  },
+  {
+    name: "limits.setMonthlyLimit",
+    run: (a) => a.limits.setMonthlyLimit(null, null),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ monthlyLimitMicroUsd: null }),
   },
   // runs
   {

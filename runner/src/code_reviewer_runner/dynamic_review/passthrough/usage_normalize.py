@@ -249,20 +249,23 @@ class _Counts:
     write_1h: int = 0
     reasoning: int = 0
     stated_cost: Decimal | None = None
+    stated_total: int | None = None
 
 
-def _total(f: _Fields, expected: int) -> None:
-    """A total the provider states must be the sum of the counts it states."""
+def _total(f: _Fields, expected: int) -> int | None:
+    """A total the provider states must be the sum of the counts it states. Returned as stated,
+    for the token cap of an own key (#553)."""
     total = f.stated(_TOTAL[f.root])
     if total is not None and total != expected:
         f.mark(_TOTAL[f.root])
+    return total
 
 
 def _chat(f: _Fields) -> _Counts | None:
     prompt, completion = f.required("prompt_tokens"), f.required("completion_tokens")
     if prompt is None or completion is None:
         return None
-    _total(f, prompt + completion)
+    total = _total(f, prompt + completion)
     # The cache is stated as `cached_tokens` (OpenAI, OpenRouter) or as DeepSeek's hit and miss
     # tokens (miss = prompt - hit): every statement there is must agree.
     read = f.agree(
@@ -282,19 +285,28 @@ def _chat(f: _Fields) -> _Counts | None:
     read = read or 0
     f.fit(read + written, prompt, "prompt_tokens_details")
     f.fit(reasoning, completion, "completion_tokens_details", "reasoning_tokens")
-    return _Counts(prompt, completion, read, written, 0, reasoning, stated_cost=f.charge("cost"))
+    return _Counts(
+        prompt,
+        completion,
+        read,
+        written,
+        0,
+        reasoning,
+        stated_cost=f.charge("cost"),
+        stated_total=total,
+    )
 
 
 def _responses(f: _Fields) -> _Counts | None:
     prompt, completion = f.required("input_tokens"), f.required("output_tokens")
     if prompt is None or completion is None:
         return None
-    _total(f, prompt + completion)
+    total = _total(f, prompt + completion)
     read = f.optional("input_tokens_details", "cached_tokens")
     reasoning = f.optional("output_tokens_details", "reasoning_tokens")
     f.fit(read, prompt, "input_tokens_details", "cached_tokens")
     f.fit(reasoning, completion, "output_tokens_details", "reasoning_tokens")
-    return _Counts(prompt, completion, read, reasoning=reasoning)
+    return _Counts(prompt, completion, read, reasoning=reasoning, stated_total=total)
 
 
 def _messages(f: _Fields) -> _Counts | None:
@@ -328,11 +340,17 @@ def _google(f: _Fields) -> _Counts | None:
     if prompt is None or (candidates is None and thoughts is None):
         return None
     tool_use = f.optional("toolUsePromptTokenCount")
-    _total(f, prompt + (candidates or 0) + (thoughts or 0) + tool_use)
+    total = _total(f, prompt + (candidates or 0) + (thoughts or 0) + tool_use)
     cached = f.optional("cachedContentTokenCount")
     f.fit(cached, prompt, "cachedContentTokenCount")
     # Thoughts are billed as output and are not part of the candidates. UNCONFIRMED live (L14).
-    return _Counts(prompt, (candidates or 0) + (thoughts or 0), cached, reasoning=thoughts or 0)
+    return _Counts(
+        prompt,
+        (candidates or 0) + (thoughts or 0),
+        cached,
+        reasoning=thoughts or 0,
+        stated_total=total,
+    )
 
 
 _READERS: Final = {
@@ -427,6 +445,7 @@ def normalize(
         cache_write_1h=counts.write_1h,
         reasoning_tokens=counts.reasoning,
         stated_cost=counts.stated_cost,
+        stated_total=counts.stated_total,
         unknown_fields=tuple(names),
     )
 

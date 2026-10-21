@@ -396,6 +396,11 @@ export interface UsageRecordsTable {
   settled_at: string | null;
   /** Why the record was settled without a report of its run (SETTLED_REASONS); null when the run reported. */
   settled_reason: string | null;
+  /**
+   * `open` from a claim made with billing on until its one settlement, then `settled` (BILLING_STATES, #605); null for a job
+   * claimed with billing off, which is never charged.
+   */
+  billing_state: string | null;
 }
 
 /** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */
@@ -854,6 +859,59 @@ export interface BillingBalancesTable {
 }
 
 /**
+ * The billing profile of one workspace (#501; customer data, never logged): the business that buys credit, the
+ * confirmation of the first top-up and the provider's customer made from it. One row per workspace.
+ */
+export interface BillingProfilesTable {
+  workspace_id: string;
+  legal_name: string;
+  /** ISO 3166-1 alpha-2, upper case. */
+  country: string;
+  address_line1: string;
+  address_line2: string | null;
+  postal_code: string;
+  city: string;
+  /** Normalized, a light format check only. */
+  vat_id: string | null;
+  /** The business confirmation: when (ISO 8601, UTC), by which user (null once the user is gone) and the terms version. */
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  terms_version: string | null;
+  /** The adapter's id and its opaque id of the customer made from this profile; both null until the first top-up. */
+  customer_adapter: string | null;
+  customer_ref: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * What a workspace sets for its own billing (src/billing/README.md, ADR 0006, 2.9; #499): the optional monthly total limit.
+ * One row per workspace, made by the first change; no row means no limit.
+ */
+export interface BillingWorkspaceSettingsTable {
+  workspace_id: string;
+  /** Micro-USD, positive; null is no limit. `bigint` on Postgres, which reads it back as text (the repository converts). */
+  monthly_limit_micro_usd: number | null;
+  /** The user who last changed it; null once that user is gone. */
+  updated_by: string | null;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+}
+
+/**
+ * The memory of the start credit (src/billing/README.md, ADR 0006, 2.16; #507): one row for each GitHub account that was
+ * granted it. Instance level, a numeric id and a workspace id only, and no foreign key: it outlives the workspace.
+ */
+export interface BillingStartCreditGrantsTable {
+  /** The numeric id of the GitHub account of the installation, as text. The primary key: one grant per account. */
+  github_account_id: string;
+  /** The workspace that got the credit; it may be gone. */
+  workspace_id: string;
+  /** ISO 8601 text in UTC. */
+  granted_at: string;
+}
+
+/**
  * The row written before any checkout exists (src/billing/README.md, ADR 0006, 2.13; #497): the one way a payment reaches
  * a workspace. `amount_micro_usd` is what WE asked for and bounds the credit; the provider ids are recorded once known.
  */
@@ -874,6 +932,13 @@ export interface BillingTopupIntentsTable {
   /** What refunds took back of it, and what disputes did; together never above the credit (a check). */
   refunded_micro_usd: Generated<number>;
   disputed_micro_usd: Generated<number>;
+  /**
+   * What the buyer was charged, gross, in the provider's unit (cents of the currency paid in), pinned when the payment is
+   * credited; null before that, for an intent paid before the column existed and for a provider that does not say (#502).
+   */
+  provider_amount: number | null;
+  /** The lower case ISO 4217 code of `provider_amount`, pinned with it; null whenever the amount is (#502). */
+  provider_currency: string | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
   updated_at: string;
@@ -895,6 +960,14 @@ export interface BillingWebhookEventsTable {
   received_at: string;
   /** 'open' for an event an operator must review (BILLING_REVIEW_OUTCOMES), 'resolved' once it was; null otherwise. */
   review_state: string | null;
+  /** Whose payment the event is, when the application could attribute it to one of its intents (#502); else null. */
+  workspace_id: string | null;
+  intent_id: string | null;
+  /** The resolution of a review (#603), null while open and for a review closed before it existed: when (ISO 8601, UTC), who (a user id), why, and the journal entry of a manual credit or correction. */
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  resolution_entry_id: string | null;
 }
 
 export interface Database {
@@ -934,6 +1007,9 @@ export interface Database {
   model_price_confirmations: ModelPriceConfirmationsTable;
   billing_journal_entries: BillingJournalEntriesTable;
   billing_balances: BillingBalancesTable;
+  billing_profiles: BillingProfilesTable;
+  billing_start_credit_grants: BillingStartCreditGrantsTable;
+  billing_workspace_settings: BillingWorkspaceSettingsTable;
   billing_topup_intents: BillingTopupIntentsTable;
   billing_webhook_events: BillingWebhookEventsTable;
   password_reset_tokens: PasswordResetTokensTable;

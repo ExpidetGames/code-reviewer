@@ -450,3 +450,49 @@ describe("polling the list", () => {
     });
   });
 });
+
+describe("the price of a review in the list (#505)", () => {
+  // #505-T05
+  it("adds a Price column with the two prices of a charged review and Not charged for a free one", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({
+            id: "charged-run",
+            price: {
+              state: "charged",
+              aiMicroUsd: 1_500_000,
+              infraMicroUsd: 130_000,
+            },
+          }),
+          run({ id: "free-run", price: { state: "not_charged" } }),
+          run({ id: "open-run" }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Price" })).toBeTruthy();
+    const [charged, free, open] = dataRows();
+    expect(within(charged as HTMLElement).getByText("$1.50")).toBeTruthy();
+    expect(within(charged as HTMLElement).getByText("$0.13")).toBeTruthy();
+    expect(within(free as HTMLElement).getByText("Not charged")).toBeTruthy();
+    expect(within(open as HTMLElement).queryByText("Not charged")).toBeNull();
+  });
+
+  // #505-T11
+  it("adds no column while no run has a price, as when billing is off", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([run({ id: "a" }), run({ id: "b" })])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.queryByRole("columnheader", { name: "Price" })).toBeNull();
+  });
+});

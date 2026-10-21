@@ -25,6 +25,10 @@
 // does not decide that a workspace holds no key for the provider (`llm_not_configured`, reason `no_key`, decision C7): it
 // has not looked.
 import type { CatalogEntry } from "../model-catalog/entries.ts";
+import {
+  isCatalogModelId,
+  nativeProviderIdOf,
+} from "../native-cost/catalog-ref.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
   ENTITLEMENTS_INVALID_CODE,
@@ -82,7 +86,12 @@ export type SelectableEntry = Pick<
 >;
 
 /** The model fields of one settings layer for one kind: `provider` and `model` of Diff, or `dynamicProvider` and `dynamicModel`. */
-export type ModelLayer = { provider?: string; model?: string };
+export type ModelLayer = {
+  provider?: string;
+  model?: string;
+  /** The address the layer pinned for its catalog provider when the provider was selected (#588); a Dynamic project layer only. */
+  address?: string;
+};
 
 type Common = {
   /** The job's kind, pinned when the job was queued. */
@@ -97,6 +106,12 @@ type Common = {
 export type SelectionInput =
   | (Common & {
       keyMode: "own";
+      /**
+       * The caller that will run the job can run a catalog model (#555): a Dynamic job whose provider is a catalog provider
+       * (`contracts/opencode-providers.v1.json`) takes this path only then. Left out, or false, such a job fails closed with
+       * `llm_provider_unsupported`, the answer for a provider the caller did not list. A Diff job never takes it (#558).
+       */
+      nativeModels?: boolean;
       /** The model of the kind for the default provider when no layer sets one (`LLM_MODEL`, or the Dynamic default). */
       builtInModel: string;
       /**
@@ -130,6 +145,16 @@ export type Selection =
       model: string;
       /** The key to load: the workspace's own key of `provider`. */
       keySource: "workspace";
+      /**
+       * The model is one of the models.dev catalog, named by the slug of its provider (#555): the claim serves it from the stored
+       * row and builds its entry before any key is loaded. Absent for a provider of the registry.
+       */
+      catalog?: true;
+      /**
+       * The address the project pinned for the catalog provider when it selected it (#588). The claim sends the key to exactly this
+       * address, or refuses the job when the catalog trusts another one; absent for a selection made before pins existed.
+       */
+      pinnedAddress?: string;
       /** An own selection has no entry. */
       entry?: never;
     }
@@ -280,6 +305,14 @@ function resolveOwn(
   let model = setModel;
 
   const descriptor = providers.find(provider);
+  if (descriptor === undefined && nativeAllowed(input, provider))
+    return resolveOwnNative(
+      kind,
+      provider,
+      setModel,
+      modelProvider,
+      layers.project?.address,
+    );
   if (descriptor === undefined || !advertised(runnerProviders, descriptor.id))
     return {
       ok: false,
@@ -315,6 +348,61 @@ function resolveOwn(
       provider: descriptor.id,
       model,
       keySource: "workspace",
+    },
+  };
+}
+
+/** Whether a provider outside the registry is a catalog provider this job may run (#555): Dynamic, a capable caller, supported. */
+function nativeAllowed(
+  input: Extract<SelectionInput, { keyMode: "own" }>,
+  provider: string,
+): boolean {
+  return (
+    input.kind === "dynamic" &&
+    input.nativeModels === true &&
+    nativeProviderIdOf(provider, llmProviderDescriptors.ids) !== null
+  );
+}
+
+/**
+ * A catalog provider and its model (#555). The model is the project's: a catalog provider has no built-in one. Whether the
+ * catalog still serves it is the claim's question (`resolve` of the catalog reader), asked before any key is loaded.
+ */
+function resolveOwnNative(
+  kind: ProjectReviewKind,
+  provider: string,
+  model: string | undefined,
+  modelProvider: string,
+  pinnedAddress: string | undefined,
+): SelectionResult {
+  if (model === undefined)
+    return {
+      ok: false,
+      errorCode: JOB_LLM_OPTIONS_INVALID,
+      reason: "model_invalid",
+    };
+  if (modelProvider !== provider)
+    return {
+      ok: false,
+      errorCode: JOB_LLM_OPTIONS_INVALID,
+      reason: "model_provider_mismatch",
+    };
+  if (!isCatalogModelId(model))
+    return {
+      ok: false,
+      errorCode: JOB_LLM_OPTIONS_INVALID,
+      reason: "model_invalid",
+    };
+  return {
+    ok: true,
+    selection: {
+      keyMode: "own",
+      kind,
+      provider,
+      model,
+      keySource: "workspace",
+      catalog: true,
+      ...(pinnedAddress === undefined ? {} : { pinnedAddress }),
     },
   };
 }

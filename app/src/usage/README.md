@@ -101,6 +101,23 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
 
 `reserved` and `settled` count towards a limit (#277, below), `void` does not.
 
+## Billing and the record (#498)
+
+While billing is on (`src/billing/README.md`, "Start, settle"), the record says whether its money is still to be settled (`billing_state`, #605: `open` from a claim
+with billing on, `settled` after the one settlement, null for a job claimed with billing off), and the transaction that settles or voids the record, whichever path it
+is, writes the `usage` entry of the price (none when the run is free). Nothing is held at the claim. The record keeps reporting the **real** model cost
+(`cost_micro_usd`, the operator feed, the sums of the limits); the journal holds the price (AI cost times A plus started minutes times B). A record
+settles once and so does its entry: a repeated completion changes neither. With billing off none of this runs.
+
+## Run quotas and the plan page while billing is on (#499)
+
+While billing is on (`isBillingOn`: the switch is set and the adapter is ready) the per-period run limits of an entitlements row are not enforced and the plan
+and usage page shows no "Reviews in this period" rows: `PlanView.runs` is `null` and `readPlanView` does not even count the runs. The plan label, the start
+of the period, the paused notice and the cost-limit bar (the own-key limit of #361 and the managed one) stay. The monthly total limit and the hourly brake
+that replace the quotas are in `src/billing/README.md`, "Limits at claim". The operator API's limits are not touched (ADR 0006, section 6, no. 3 is still
+open).
+Since #505 the page itself is not shown while billing is on: `/w/<slug>/settings/plan` leads on to the billing page (`/w/<slug>/settings/billing`, `src/billing/README.md`, "The workspace page"), which takes its place in the settings navigation. The data route `GET /api/w/<slug>/plan` is unchanged.
+
 ## Limits and suspension at claim (#277)
 
 What an operator allows a workspace (`src/workspaces/README.md`, "Entitlements") is enforced where a job is claimed,
@@ -115,7 +132,10 @@ split claim of a Dispatcher and the claim by job id.
 2. `suspended`: `workspace_suspended`.
 3. The run limit of the job's kind (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`): the records of that kind (`reserved`
    or `settled`) reserved at or after `period_start` at or above the limit refuse with `quota_exhausted` (detail
-   `diff_runs` or `dynamic_runs`). `0` allows none, `null` is unlimited and is not read.
+   `diff_runs` or `dynamic_runs`). `0` allows none, `null` is unlimited and is not read. **Skipped while billing is on
+   (#499, ADR 0006, D5):** the claim passes `runQuotas: false` then, and the limit is neither read nor counted (`readsUsage`
+   takes the same option, so a workspace with nothing but a run limit takes no lock). With billing off nothing changes: a
+   self-hosting operator keeps the limits of epic #268. Steps 1, 2 and 4 are not affected by billing.
 4. The cost limit of the key the job runs on (#361): `managedCostLimitMicroUsd` for a workspace whose key mode is
    `managed` (the operator's key), `ownKeyCostLimitMicroUsd` for one whose key mode is `own` (its own key). The sum
    of the settled `cost_micro_usd` of **that key mode** reserved at or after `period_start` at or above the limit

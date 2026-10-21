@@ -47,6 +47,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
       ...never,
     },
     maxWorkspacesPerUser: { value: 10, ...never },
+    ownKeyTokenCap: { value: 4_000_000, ...never },
     dynamicReview: { value: false, ...never },
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
@@ -404,6 +405,27 @@ describe("the instance form", () => {
     );
   });
 
+  // #553-T11
+  it("changes the token cap of runs on a workspace's own key and sends only that", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(
+      /Token limit for a run on a workspace's own key/,
+    );
+    expect((field as HTMLInputElement).value).toBe("4000000");
+
+    await user.clear(field);
+    await user.type(field, "2500000");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(change).toHaveBeenCalled());
+    expect(change).toHaveBeenCalledWith({ ownKeyTokenCap: 2_500_000 });
+    expect(change).toHaveBeenCalledTimes(1);
+  });
+
   // #98-AD-06
   it("says how many workspaces stand in the way when the change to single-tenant is refused", async () => {
     const { api } = apiAnswering(refused("too_many_workspaces"));
@@ -525,7 +547,7 @@ describe("the instance form", () => {
   it("says that a setting was never changed", () => {
     render(<InstanceForm settings={view()} />);
 
-    expect(screen.getAllByText(/Never changed/)).toHaveLength(4);
+    expect(screen.getAllByText(/Never changed/)).toHaveLength(5);
   });
 
   it("shows the server's reason for a number that is not allowed", async () => {

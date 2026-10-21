@@ -6,10 +6,10 @@
 import "server-only";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { getDatabase } from "../db/startup.ts";
-import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createWorkspaceLlm, type WorkspaceLlmAssembly } from "./assemble.ts";
 import { llmApiBaseUrl } from "./endpoint.ts";
-import { createLlmKeyTestService, type LlmKeyTestService } from "./key-test.ts";
+import { createWiredLlmKeyTester } from "./key-tester.ts";
+import type { LlmKeyTestService } from "./key-test.ts";
 import { createModelCapabilityChecker } from "./model-capabilities.ts";
 
 // One checker for the process, so a supported answer is remembered across requests and workspaces: the
@@ -37,8 +37,8 @@ export function getWorkspaceLlm(): WorkspaceLlmAssembly {
  * the provider's own address only (src/llm/endpoint.ts: the test stack may point it at the fake LLM).
  */
 export function getLlmKeyTester(): LlmKeyTestService {
-  return createLlmKeyTestService({
-    rateLimits: createRateLimitsRepository(getDatabase()),
-    baseUrlOf: (provider) => llmApiBaseUrl(process.env, provider).url,
+  return createWiredLlmKeyTester({
+    db: getDatabase(),
+    env: () => process.env,
   });
 }

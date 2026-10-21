@@ -190,6 +190,17 @@ describe("the check run of a finished review", () => {
     expect(check.summary).toMatch(/incomplete/);
   });
 
+  // #553-R07
+  it("says that a review stopped at its token limit may be incomplete, and still succeeds", () => {
+    const check = describeCheck(
+      subject({ status: "succeeded", stoppedEarly: "token_limit" }),
+    );
+
+    expect(check.conclusion).toBe("success");
+    expect(check.summary).toMatch(/token limit/);
+    expect(check.summary).toMatch(/incomplete/);
+  });
+
   it("leaves out a link that is not a web address", () => {
     for (const commentUrl of [
       "javascript:alert(1)",
@@ -232,6 +243,19 @@ describe("the check run of a job that did not finish", () => {
     });
     expect(check.summary).toContain("The AI provider refused the API key.");
     expect(check.summary).toContain("`llm_auth`");
+  });
+
+  // #499-T13
+  it("says that reviews are paused for a refused job of the hidden brake, with no code, number or window", () => {
+    const check = describeCheck(
+      subject({ status: "failed", errorCode: "reviews_paused" }),
+    );
+
+    expect(check.conclusion).toBe("neutral");
+    expect(check.summary).toContain("Reviews are paused for this workspace");
+    expect(check.summary).not.toContain("`");
+    expect(check.summary).not.toContain("reviews_paused");
+    expect(check.summary).not.toMatch(/\d|hour|brake|window/i);
   });
 
   // #405-T06

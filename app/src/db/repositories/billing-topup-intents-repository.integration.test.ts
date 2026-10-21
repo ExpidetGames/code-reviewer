@@ -49,6 +49,30 @@ function suite(engine: BillingEngine) {
       ]);
     });
 
+    // #501-T06
+    it("writes an intent under the id the caller chose, once: a second with that id is refused and nothing changes", async () => {
+      const { db, workspaceId, otherWorkspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const others = createBillingTopUpIntentsRepository(db, otherWorkspaceId);
+      const id = "6f1f4a2e-0c52-4b8e-9a43-0d0f6f1d2a11";
+
+      const first = await intents.create({
+        id,
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+
+      expect(first.id).toBe(id);
+      await expect(
+        intents.create({ id, adapter: "fake", amountMicroUsd: 30 * USD }),
+      ).rejects.toThrow();
+      await expect(
+        others.create({ id, adapter: "fake", amountMicroUsd: 30 * USD }),
+      ).rejects.toThrow();
+      expect(await intents.get(id)).toEqual(first);
+      expect(await others.get(id)).toBeUndefined();
+    });
+
     // #497-T03
     it("refuses an amount outside 10 to 500 USD, a fraction and an adapter id that is not one", async () => {
       const { db, workspaceId } = await engine.create();
@@ -194,6 +218,112 @@ function suite(engine: BillingEngine) {
       expect((await intents.get(intent.id))?.creditedMicroUsd).toBe(20 * USD);
     });
 
+    // #502-T08
+    it("pins what the buyer was charged when the payment is credited: once, never changed, and a bad amount is refused", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      expect(intent.providerAmount).toBeNull();
+
+      for (const providerAmount of [0, -5, 1.5, Number.NaN])
+        expect(
+          await codeOf(
+            intents.markPaid(intent.id, {
+              paymentRef: "pi_1",
+              creditedMicroUsd: 25 * USD,
+              providerAmount,
+            }),
+          ),
+          String(providerAmount),
+        ).toBe("amount_out_of_range");
+      expect((await intents.get(intent.id))?.state).toBe("pending");
+
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2975,
+      });
+      const again = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 5000,
+      });
+
+      expect(again?.changed).toBe(false);
+      expect((await intents.get(intent.id))?.providerAmount).toBe(2975);
+    });
+
+    // #502-T16
+    it("pins the currency of what the buyer was charged with it: once, never changed, and a bad code is refused", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      expect(intent.providerCurrency).toBeNull();
+
+      for (const providerCurrency of ["EUR", "eu", "euro", "", "e1r"])
+        expect(
+          await codeOf(
+            intents.markPaid(intent.id, {
+              paymentRef: "pi_1",
+              creditedMicroUsd: 25 * USD,
+              providerAmount: 2200,
+              providerCurrency,
+            }),
+          ),
+          providerCurrency,
+        ).toBe("amount_out_of_range");
+      expect((await intents.get(intent.id))?.state).toBe("pending");
+
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2200,
+        providerCurrency: "eur",
+      });
+      const again = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2200,
+        providerCurrency: "usd",
+      });
+
+      expect(again?.changed).toBe(false);
+      expect(await intents.get(intent.id)).toMatchObject({
+        providerAmount: 2200,
+        providerCurrency: "eur",
+      });
+    });
+
+    // #502-T08
+    it("pins the amount of a payment that was credited without one when it is told later, and leaves an unpinned intent unpinned otherwise", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+      expect((await intents.get(intent.id))?.providerAmount).toBeNull();
+
+      const late = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2975,
+      });
+
+      expect(late?.changed).toBe(true);
+      expect((await intents.get(intent.id))?.providerAmount).toBe(2975);
+    });
+
     // #497-T07
     it("keeps running totals of what refunds and disputes debited, inside what the payment credited", async () => {
       const { db, workspaceId } = await engine.create();
@@ -257,6 +387,60 @@ function suite(engine: BillingEngine) {
           .where("id", "=", intent.id)
           .execute(),
       ).rejects.toThrow();
+    });
+
+    // #501-T18
+    it("fails the pending intents without a page that are old enough, in this workspace only, and leaves the others", async () => {
+      const { db, workspaceId, otherWorkspaceId } = await engine.create();
+      const at = (minutes: number) => () =>
+        new Date(Date.UTC(2026, 9, 21, 10, minutes));
+      const old = createBillingTopUpIntentsRepository(db, workspaceId, at(0));
+      const others = createBillingTopUpIntentsRepository(
+        db,
+        otherWorkspaceId,
+        at(0),
+      );
+      const stale = await old.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      const paged = await old.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await old.attachRefs(paged.id, { checkoutRef: "cs_1" });
+      const paid = await old.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await old.markPaid(paid.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+      const foreign = await others.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      const fresh = await createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        at(25),
+      ).create({ adapter: "fake", amountMicroUsd: 25 * USD });
+      const sweeper = createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        at(30),
+      );
+
+      expect(await sweeper.failPendingWithoutPage(30 * 60_000)).toBe(1);
+      expect(await sweeper.failPendingWithoutPage(30 * 60_000)).toBe(0);
+
+      const state = async (id: string) => (await old.get(id))!.state;
+      expect(await state(stale.id)).toBe("failed");
+      expect(await state(paged.id)).toBe("pending");
+      expect(await state(paid.id)).toBe("paid");
+      expect(await state(fresh.id)).toBe("pending");
+      expect((await others.get(foreign.id))!.state).toBe("pending");
     });
 
     // #497-T03
@@ -349,6 +533,54 @@ function suite(engine: BillingEngine) {
       expect((await directory.lockById(mine.id))?.id).toBe(mine.id);
       expect(await directory.lockById("missing")).toBeUndefined();
     });
+
+    // #502-T18
+    it("says whether a top-up of an adapter is still waiting for its payment, and only a recent one without a payment", async () => {
+      const { db, workspaceId } = await engine.create();
+      const clock = { now: Date.parse("2026-10-21T10:00:00.000Z") };
+      const intents = createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        () => new Date(clock.now),
+      );
+      const directory = createBillingTopUpIntentDirectory(db);
+      const since = "2026-10-20T10:00:00.000Z";
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        false,
+      );
+
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        true,
+      );
+      // Another adapter's top-up is not it, and neither is one older than the window.
+      expect(await directory.hasPendingWithoutPayment("stripe", since)).toBe(
+        false,
+      );
+      expect(
+        await directory.hasPendingWithoutPayment(
+          "fake",
+          "2026-10-21T10:00:00.001Z",
+        ),
+      ).toBe(false);
+      // Not pending any more (paid, failed, expired) or with a payment recorded: not waiting.
+      await intents.attachRefs(intent.id, { paymentRef: "pi_1" });
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        false,
+      );
+      const second = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markFailed(second.id);
+      expect(await directory.hasPendingWithoutPayment("fake", since)).toBe(
+        false,
+      );
+    });
   });
 
   describe.skipIf(engine.skip)(`webhook events on ${engine.name}`, () => {
@@ -435,7 +667,8 @@ function suite(engine: BillingEngine) {
     });
 
     // #497-T09
-    it("lists the events flagged for review, oldest first, and leaves the others out", async () => {
+    // #502-T19
+    it("lists the events flagged for review, oldest first, with whose payment each is when it was attributed, and leaves the others out", async () => {
       const { db } = await engine.create();
       const events = createBillingWebhookEventsRepository(db);
       const record = async (
@@ -443,6 +676,7 @@ function suite(engine: BillingEngine) {
         outcome: "applied" | "amount_rejected" | "intent_unresolved",
         review: boolean,
         receivedAt: string,
+        attribution?: { workspaceId: string; intentId: string },
       ) => {
         await events.claim("fake", id, receivedAt);
         await events.finish(
@@ -451,6 +685,7 @@ function suite(engine: BillingEngine) {
           outcome,
           { subject: `payment:pi_${id}`, occurredAt: null },
           review,
+          attribution,
         );
       };
       await record(
@@ -465,6 +700,7 @@ function suite(engine: BillingEngine) {
         "amount_rejected",
         true,
         "2026-10-19T08:00:00.000Z",
+        { workspaceId: "w-early", intentId: "i-early" },
       );
 
       const open = await events.listOpenReviews({ limit: 10 });
@@ -475,6 +711,8 @@ function suite(engine: BillingEngine) {
           eventId: "early",
           outcome: "amount_rejected",
           subject: "payment:pi_early",
+          workspaceId: "w-early",
+          intentId: "i-early",
           receivedAt: "2026-10-19T08:00:00.000Z",
         },
         {
@@ -482,6 +720,8 @@ function suite(engine: BillingEngine) {
           eventId: "late",
           outcome: "intent_unresolved",
           subject: "payment:pi_late",
+          workspaceId: null,
+          intentId: null,
           receivedAt: "2026-10-19T10:00:00.000Z",
         },
       ]);

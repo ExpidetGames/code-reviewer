@@ -35,6 +35,11 @@ export type SelectionDeps = {
   providers?: SelectionProviders & { readonly ids: readonly string[] };
   /** The model of a kind when no layer of the settings sets one (`LLM_MODEL`, or the Dynamic default). */
   builtInModel: (kind: ProjectReviewKind) => string;
+  /**
+   * #555: a Dynamic job on the workspace's own key may name a catalog model (`contracts/opencode-providers.v1.json`). Left out,
+   * or false, such a selection fails closed as an unsupported provider, which is the answer of a claim that cannot run it.
+   */
+  nativeModels?: boolean;
 };
 
 /** Why the claim does not go on: the code the job ends with and the detail the log gets (names and codes, never a value). */
@@ -134,6 +139,7 @@ export async function selectModel(
       keyMode,
       kind,
       runnerProviders,
+      ...(deps.nativeModels === true ? { nativeModels: true } : {}),
       builtInModel: deps.builtInModel(kind),
       layers: layersOf(options, kind),
     };

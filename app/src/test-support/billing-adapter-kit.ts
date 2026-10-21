@@ -20,7 +20,10 @@ import {
   type BillingEvent,
   type BillingWebhookRejectionCode,
 } from "../billing/adapter.ts";
-import { applyBillingEvent } from "../billing/apply-event.ts";
+import {
+  applyBillingEvent,
+  BillingEventRetryError,
+} from "../billing/apply-event.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import type { BillingEngine } from "./billing-engines.ts";
@@ -83,7 +86,10 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
     // #497-T14
     it("starts a top-up only as a redirect or as none", async () => {
       const started = await adapter.createTopUpCheckout({
-        customer: null,
+        // An adapter that needs the buyer's profile needs the customer made from it.
+        customer: adapter.capabilities.requiresBillingProfile
+          ? "cus_kit"
+          : null,
         intentId: "intent-kit",
         amount: toUsd(25_000_000),
         returnUrl: "https://app.example.test/billing",
@@ -91,6 +97,10 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
       expect(["redirect", "none"]).toContain(started.checkout.kind);
       if (started.checkout.kind === "redirect")
         expect(started.checkout.url).toMatch(/^https:\/\//);
+      // #501-T10: the capability is what the route reads to answer the missing path for an adapter with no checkout.
+      expect(started.checkout.kind === "redirect").toBe(
+        adapter.capabilities.checkout,
+      );
     });
 
     // #497-T14
@@ -198,6 +208,11 @@ export type ApplicationFixtures = {
   refunded: WebhookRequest;
   /** What the refund takes, in micro-USD. */
   refundAmount: number;
+  /**
+   * What "Check payment" gives `lookupTopUp` to find the payment of the intent (the checkout the application recorded). The
+   * default is nothing, for a provider that finds a top-up by our intent id.
+   */
+  lookupRefs?: { checkout: string | null; payment: string | null };
 };
 
 export type ApplicationSubject = {
@@ -283,8 +298,8 @@ export function describeAdapterApplication(
 
           const found = await adapter.lookupTopUp({
             intentId,
-            checkout: null,
-            payment: null,
+            checkout: fixtures.lookupRefs?.checkout ?? null,
+            payment: fixtures.lookupRefs?.payment ?? null,
           });
           if (found === null) throw new Error("the lookup found nothing");
           const first = await applyBillingEvent(db, {
@@ -305,13 +320,15 @@ export function describeAdapterApplication(
           await ordered.apply(ordered.fixtures.refunded);
 
           const reordered = await prepare();
-          const early = await reordered.apply(reordered.fixtures.refunded);
+          // Not final: the refund waits for the credit of its payment and the provider is asked to deliver it again (#502).
+          await expect(
+            reordered.apply(reordered.fixtures.refunded),
+          ).rejects.toBeInstanceOf(BillingEventRetryError);
           await reordered.apply(reordered.fixtures.paid);
           // The provider delivers the refund again; it applies now that the payment is known.
           await reordered.apply(reordered.fixtures.refunded);
           await reordered.apply(reordered.fixtures.refunded);
 
-          expect(early.outcome).toBe("intent_unresolved");
           const expected = amount - ordered.fixtures.refundAmount;
           expect((await ordered.journal.balance()).balanceMicroUsd).toBe(
             expected,

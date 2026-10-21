@@ -7,11 +7,11 @@
 // 2026-10-19 (#489, #523): a run is free only when the failure is clearly our fault, and charged in full otherwise. The
 // minutes-only class is left for a run whose AI cost is unknown. No database, no clock.
 import "server-only";
-import type { JobErrorCode } from "../jobs/job-types.ts";
 import type {
-  RunnerCheckoutReason,
-  RunnerErrorCode,
-} from "../runner-api/contract.ts";
+  KnownCheckoutReason,
+  KnownRunnerErrorCode,
+} from "../contracts/runner-api.ts";
+import type { JobErrorCode } from "../jobs/job-types.ts";
 import type { SettledReason } from "../usage/usage-records.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
 
@@ -40,6 +40,28 @@ export const AI_COST_FAILURE_CODES = [
   "llm_context_length_exceeded",
 ] as const;
 
+/** The codes a claim ends or hands back a job with (`CLAIM_FAILURE_CODES` and `CLAIM_RELEASE_REASONS`, #553); a test compares. */
+type ClaimCode =
+  | "managed_model_unavailable"
+  | "llm_not_configured"
+  | "llm_provider_unsupported"
+  | "llm_model_unavailable"
+  | "provider_address_changed"
+  | "job_llm_options_invalid"
+  | "job_args_invalid"
+  | "job_env_invalid"
+  | "git_connection_disabled"
+  | "git_connection_gone"
+  | "git_connection_suspended"
+  | "git_scope_refused"
+  | "git_app_auth_failed"
+  | "git_access_failed"
+  | "git_access_unavailable"
+  | "pull_request_unavailable"
+  | "claim_failed"
+  | "price_check_failed"
+  | "provider_pin_check_failed";
+
 /** The codes that arrive through the release call of a Dispatcher (`KnownReleaseReason` in the contract). */
 type ReleaseReason = "launch_failed" | "worker_exited";
 
@@ -64,10 +86,20 @@ export const ERROR_CODE_CLASSES = {
   dynamic_review_disabled: "free",
   command_removed: "charged",
   dispatch_unavailable: "free",
-  // Refused at claim by the operator's switch or the workspace's limit.
+  // Refused at claim by the operator's switch (`workspace_suspended`) or by the limit of the plan the operator assigned
+  // (`quota_exhausted`). The job never ran, so it prices to nothing whatever its class; and no hold was taken.
   workspace_suspended: "charged",
   quota_exhausted: "charged",
   entitlements_invalid: "free",
+  // Refused at claim by billing (#498): a claim refusal is free. No hold was taken (or it is released with the job).
+  balance_negative: "free",
+  insufficient_balance: "free",
+  billing_rates_incomplete: "free",
+  billing_hold_released: "free",
+  // Refused at claim by the customer's monthly limit or the hidden brake (#499): free, and no hold was taken.
+  monthly_limit_reached: "free",
+  reviews_paused: "free",
+  billing_limits_unreadable: "free",
   // The Dispatcher gave the job back.
   launch_failed: "free",
   worker_exited: "free",
@@ -111,11 +143,34 @@ export const ERROR_CODE_CLASSES = {
   llm_quota: "charged",
   model_unknown: "charged",
   llm_parameters_unsupported: "charged",
+  // Refused or handed back at claim (#553): nothing ran, the model was not asked and no VM was kept. The codes that name the
+  // customer's side of the line (a closed pull request, a missing one, the Dynamic settings) keep their class above.
+  managed_model_unavailable: "free",
+  llm_not_configured: "free",
+  llm_provider_unsupported: "free",
+  llm_model_unavailable: "free",
+  provider_address_changed: "free",
+  job_llm_options_invalid: "free",
+  job_args_invalid: "free",
+  job_env_invalid: "free",
+  git_connection_disabled: "free",
+  git_connection_gone: "free",
+  git_connection_suspended: "free",
+  git_scope_refused: "free",
+  git_app_auth_failed: "free",
+  git_access_failed: "free",
+  git_access_unavailable: "free",
+  pull_request_unavailable: "free",
+  claim_failed: "free",
+  price_check_failed: "free",
+  provider_pin_check_failed: "free",
   // Dynamic Review.
   dynamic_engine_unavailable: "free",
   dynamic_isolation_self_check_failed: "free",
   dynamic_accounting_failed: "free",
-  dynamic_config_invalid: "charged",
+  // Raised for missing job options, missing model prices or an invalid operator environment, before any model call: the
+  // operator's side (#498, the review of #525).
+  dynamic_config_invalid: "free",
   dynamic_policy_violation: AI_COST_FAILURE_CLASS,
   dynamic_budget_exceeded: AI_COST_FAILURE_CLASS,
   dynamic_model_features_unsupported: "charged",
@@ -123,7 +178,7 @@ export const ERROR_CODE_CLASSES = {
   // Replaced by a newer push; it reported what it used. In full.
   superseded: "charged",
 } as const satisfies Record<
-  JobErrorCode | RunnerErrorCode | ReleaseReason,
+  JobErrorCode | KnownRunnerErrorCode | ReleaseReason | ClaimCode,
   OutcomeClass
 >;
 export type ClassifiedCode = keyof typeof ERROR_CODE_CLASSES;
@@ -163,7 +218,7 @@ export const CHECKOUT_REASON_CLASSES = {
   budget_exposed: "charged",
   diff_too_large: "charged",
   input_too_large: "charged",
-} as const satisfies Record<RunnerCheckoutReason, OutcomeClass>;
+} as const satisfies Record<KnownCheckoutReason, OutcomeClass>;
 
 /**
  * The finer names the loop of a runner gives for a process it had to end (`NO_RESULT_ERROR_REASONS`): the model may have

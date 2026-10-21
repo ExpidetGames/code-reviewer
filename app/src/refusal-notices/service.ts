@@ -26,6 +26,7 @@ import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { RepoRef } from "../integrations/types.ts";
 import {
   isNoticeCode,
+  noticeLinkKind,
   noticeBody,
   noticeMarker,
   type NoticeCode,
@@ -95,6 +96,13 @@ export type RefusalNoticeDeps = {
   planPageUrl: (
     workspaceSlug: string,
   ) => string | null | Promise<string | null>;
+  /**
+   * The link to the settings of a workspace, where an Owner or Admin adds credit (#498; until the balance page exists, #505) or
+   * changes the monthly limit (#499): for a refusal for the balance or the monthly limit. Absent: no link.
+   */
+  settingsUrl?: (
+    workspaceSlug: string,
+  ) => string | null | Promise<string | null>;
   now: () => Date;
   /** Receives lines of ids and stable codes only. */
   log: { info(line: string): void; error(line: string): void };
@@ -141,9 +149,19 @@ export function createRefusalNoticeService(
     new Date(deps.now().getTime() + RETRY_WAIT_MS * notice.attempts);
 
   /** The link, or none: a notice without one is still the notice, so a setting that cannot be read costs only the link. */
-  async function planPageLink(workspaceSlug: string): Promise<string | null> {
+  async function noticeLink(
+    code: NoticeCode,
+    workspaceSlug: string,
+  ): Promise<string | null> {
     try {
-      return await deps.planPageUrl(workspaceSlug);
+      switch (noticeLinkKind(code)) {
+        case "settings":
+          return (await deps.settingsUrl?.(workspaceSlug)) ?? null;
+        case "none":
+          return null;
+        case "plan":
+          return await deps.planPageUrl(workspaceSlug);
+      }
     } catch {
       return null;
     }
@@ -210,11 +228,11 @@ export function createRefusalNoticeService(
     const { notice } = taken;
 
     const workspace = await deps.workspaces.get(workspaceId);
-    const planPageUrl =
-      workspace === undefined ? null : await planPageLink(workspace.slug);
+    const link =
+      workspace === undefined ? null : await noticeLink(code, workspace.slug);
     try {
       await provider.postPullRequestNotice(integration, repo, prNumber, {
-        body: noticeBody(code, periodStart, planPageUrl),
+        body: noticeBody(code, periodStart, link),
         marker: noticeMarker(periodStart),
         // A later attempt may follow one that posted and then stopped before it was noted: look first.
         ...(notice.attempts > 1

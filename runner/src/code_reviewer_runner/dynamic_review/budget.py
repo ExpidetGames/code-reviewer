@@ -90,6 +90,48 @@ the same last call as the wrap-up's (nothing is granted after it), so a run has 
 two, and it does not count as stopping early: the review is not cut short by a limit. If it fails,
 the run fails as it did before.
 
+**Finalization above the wire (#552).** On the native path the proxy relays the engine's bytes
+and never rewrites a request, so it cannot make the final call. The adapter asks for the answer
+instead, and the ledger gives it the same guarantee, with the same bound: a run never ends without
+a review because of the cost guard. The adapter declares this (`enable_final_above_wire`); from then
+on a call the guard refuses for the cost or the clock is a `RefusedForFinal`, which is **not** the
+run's failure (`record_failure` counts it, `refusals`) but the signal to abort the turn and send
+one "answer now" message. The adapter takes the count when a turn starts and reacts only to an
+increase: a refusal that landed between two turns belongs to neither. Before refusing, the adapter
+can ask whether the answer is due (`wrap_up_due`, read only: the arithmetic of the wrap-up above
+and, for the clock, a lead of `WRAP_UP_ANNOUNCE_LEAD` of the reserve) and announce it to the model
+by an ordinary message, best effort; a model that complies is wrapped up without any refusal.
+
+*The clock reserve.* The reserve is one provider call (`WRAP_UP_RESERVE_SECONDS`, 150 s, or a
+quarter of a shorter deadline). Once less than that is left, a normal call is refused
+(`RefusedForFinal`) and only the marked call is admitted, so the final call always has a call's
+time to run in. A normal call that was admitted just before the reserve began can still run into
+it (a call may take up to the proxy's call timeout, bounded by the deadline): the reserve is
+measured when a call is admitted, not when it ends, as in the legacy wrap-up. The deadline itself
+is never passed.
+
+*The mark.* The final call is admitted past the limit when the adapter marked it (`arm_final`,
+with the exact runner text it is about to send). The mark is one call and needs nothing in flight;
+a second mark exists for the one repair of an answer that is not the review, there is no third.
+It belongs to the request that **holds that text as a JSON body holds it** (quotes and line breaks
+escaped, with or without non-ASCII escapes, with or without the HTML-safe escapes of `<`, `>`, `&`
+and `'`), **holds a random token of that message once in the whole body and in its last user
+message** (the proxy parses the body; the system prompt, a tool result, what the assistant said or
+an earlier message holding the token does not count, and the announcement carries no token),
+**and is no larger than the history the run had**: the last settled request, plus one output
+allowance (the model's last answer), plus the tool results the audit saw since that call (frozen
+when the mark is armed, so reports after it widen nothing), plus the message, plus
+`RECOVERY_REQUEST_SLACK_BYTES` for the engine's framing. Any other request is a normal call: it
+must fit the limit or it is refused, and the mark stays armed. So an engine cannot spend the mark
+on a request of its own choosing, and a request cannot make itself final; a result the engine does
+not report widens nothing (the final call is then refused and the run ends without a review, which
+a hostile engine does to itself). A marked call the provider turns away before it generated
+anything (a 429 or 5xx, settled as unbilled) gives its mark back, at most `MAX_MARK_RETURNS` times
+per mark: the engine retries such a call itself. A call that may have been billed keeps the mark
+spent. The bound is the one above: the limit, plus the excess of the last normal call, plus the
+final call, plus the one repair. A failure that is recorded (a limit, a policy violation) admits no
+later call at all.
+
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was
 denser, and never below the last settled prompt. It is an estimate, not a bound: it prices the
@@ -100,6 +142,7 @@ The proven bound stays the byte count (a BPE token is never fewer than one byte)
 provider reports above it is an accounting failure.
 """
 
+import json
 import math
 import re
 import threading
@@ -147,6 +190,21 @@ WRAP_UP_RESERVE_SECONDS = 150.0
 WRAP_UP_RESERVE_FRACTION = 0.25
 STOPPED_EARLY_COST = "cost_limit"
 STOPPED_EARLY_TIME = "time_limit"
+STOPPED_EARLY_TOKENS = "token_limit"
+# The adapter asks the model for its answer this much before the clock reserve starts (a share of
+# the reserve), so a model that complies is never refused; the reserve itself is the hard rule.
+WRAP_UP_ANNOUNCE_LEAD = 0.4
+# The calls the adapter may mark as final (#552): the answer, and the one repair of an answer that
+# is not the review.
+MAX_FINAL_MARKS = 2
+# How often one mark comes back when its call was turned away unbilled (a 429 or a 5xx before the
+# provider generated anything): the engine retries such a call by itself.
+MAX_MARK_RETURNS = 2
+# The files the ledger holds as read, and the longest path it holds (#552). A path comes from what
+# a tool returned (itself bounded) or from an argument the engine reported, which is the engine's
+# to choose; neither may make the ledger hold without end.
+MAX_COUNTED_FILES = 100_000
+MAX_FILE_PATH_CHARS = 4_096
 # What the recovery call's request is larger than the last call's by, besides the model's own last
 # answer (one output allowance): the engine's recovery message and the runner's instruction.
 RECOVERY_REQUEST_SLACK_BYTES = 4096
@@ -169,6 +227,11 @@ GROWTH_FLOOR_TOKENS = 4_096
 # The factor on (this call + a final call after it) in the wrap-up test: both are expectations, and
 # a normal call that costs a little more must not take the room of the final one.
 RESERVE_MARGIN = Decimal("1.25")
+# What a call of a model that thinks reserves of its output at least (#553): its thinking is output
+# nobody can predict, so the floor is higher than the one of a model that does not think. Not the
+# whole cap: reserving 32,000 tokens at 15 USD per million would make the first call of a 1 USD run
+# the final call.
+REASONING_OUTPUT_FLOOR_TOKENS = 8_192
 # The nearest-rank percentile of the observed completions and rounds, in percent.
 OBSERVED_PERCENTILE = 95
 # A request smaller than this says nothing about the content's density: the provider's own
@@ -186,6 +249,15 @@ class LimitError(Exception):
         super().__init__(f"{code.value}: {detail}")
         self.code = code
         self.detail = detail
+
+
+class RefusedForFinal(LimitError):
+    """The guard refused a call that the adapter can answer with a final call (#552): the cost
+    limit is used up, the clock reserve has started, or a call came after the final one.
+
+    It is a `LimitError` like any other, so a ledger without `enable_final_above_wire` records it
+    as the run's failure; with it, it is a counted refusal (`refusals`).
+    """
 
 
 @dataclass(frozen=True)
@@ -281,11 +353,16 @@ class Reservation:
     byte_bound: int = 0
     request_bytes: int = 0
     cost: Decimal = Decimal(0)
+    # The tokens the call is expected to use, counted against the token cap of an own key (#553).
+    tokens: int = 0
     # True for the one call that the run is wrapped up with (#293): the proxy rewrites it.
     final: bool = False
     # True when that final call is the recovery of a turn without an answer (#309), which carries
     # the recovery instruction instead of the wrap-up one.
     recovery: bool = False
+    # True when the final call is the one the adapter marked (`arm_final`, #552): a call the
+    # provider turns away unbilled gives its mark back.
+    marked: bool = False
     # Which reservation this is (0: none). The ledger settles each once, so a call that an error
     # handler settles again after the normal path already did is booked once (#550).
     serial: int = 0
@@ -314,8 +391,16 @@ class _Counters:
     priced_calls: int = 0
     # Calls whose usage was never seen (#550): booked at their worst case.
     unknown_calls: int = 0
+    # An own key (#553): the tokens held for calls in flight, the tokens booked for calls whose
+    # usage was never seen, and the calls whose tokens were read but whose cost could not be.
+    reserved_tokens: int = 0
+    unknown_tokens: int = 0
+    unpriced_calls: int = 0
     tool_calls: int = 0
     returned_bytes: int = 0
+    # What the tools had returned when the last call settled: the growth of the history since is
+    # what the audit saw them return after (#552, the size of the final request).
+    returned_at_settle: int = 0
     files: set[str] = field(default_factory=lambda: set[str]())
 
 
@@ -372,6 +457,24 @@ def reserved_tokens(text: str) -> int:
     return len(text.encode("utf-8", errors="replace"))
 
 
+def _json_forms(message: str) -> tuple[bytes, ...]:
+    """The bytes a JSON body holds `message` as: the inside of a JSON string, with or without the
+    non-ASCII characters escaped, and with or without the HTML-safe escapes of `<`, `>`, `&` and
+    `'` (an encoder is free to do any of these; the text is the same to whoever decodes it)."""
+    forms: set[bytes] = set()
+    for ascii_only in (True, False):
+        plain = json.dumps(message, ensure_ascii=ascii_only)[1:-1]
+        forms.add(plain.encode("utf-8"))
+        safe = plain
+        for character, escape in _HTML_SAFE:
+            safe = safe.replace(character, escape)
+        forms.add(safe.encode("utf-8"))
+    return tuple(sorted(forms))
+
+
+_HTML_SAFE = (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), ("'", "\\u0027"))
+
+
 def _byte_size(text: str | bytes) -> int:
     """The bytes of a request: the length of the bytes the passthrough proxy relays (#550), the
     UTF-8 length of the text the legacy proxy builds."""
@@ -397,6 +500,10 @@ class BudgetLedger:
         reserved_output_tokens: int | None = None,
         unit_costs: UnitCosts,
         book: "PriceBook | None" = None,
+        priced: bool = True,
+        unknown_cost_tolerated: bool = False,
+        max_total_tokens: int | None = None,
+        reserve_full_output: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if window_tokens < 1:
@@ -414,6 +521,14 @@ class BudgetLedger:
             else min(max(reserved_output_tokens, 1), self.output_tokens)
         )
         self._unit_costs = unit_costs
+        # The cost policy of a native job (#553, `cost_policy.py`). `priced` is False when no price
+        # is known: no dollar is counted and the cost of the run is unknown. An own key tolerates
+        # a cost that is unknown and is bound by `max_total_tokens` once one is. A reasoning model
+        # reserves its whole output cap, since its thinking is output nobody can predict.
+        self._priced = priced
+        self._tolerates_unknown_cost = unknown_cost_tolerated
+        self._max_total_tokens = max_total_tokens
+        self._reserve_full_output = reserve_full_output
         # What the worst case of a call is priced with: the book of the model when there is one
         # (tiers, reasoning, both cache writes), else the job's unit costs as a one-level book.
         # Imported here: the price book module reads `UnitCosts` from this one.
@@ -438,7 +553,19 @@ class BudgetLedger:
         # A normal call settled over the limit (#540): the agent phase is over, the next request
         # that can be rewritten is the final call. And whether the retry past the limit was used.
         self._overshot = False
+        self._overshot_by_tokens = False
         self._retried_past_limit = False
+        # Finalization above the wire (#552): declared by the adapter, then marks and refusals.
+        self._above_wire = False
+        self._final_armed = False
+        self._final_needles: tuple[bytes, ...] = ()
+        self._final_token = ""
+        self._final_message_bytes = 0
+        self._final_results = 0
+        self._mark_returns = 0
+        self._marks_used = 0
+        self._refusals = 0
+        self._refusal_reason: str | None = None
         self._stopped_early: str | None = None
         self._clock = clock
         self._started = clock()
@@ -476,13 +603,193 @@ class BudgetLedger:
         not a success.
         """
         with self._lock:
-            if self._failure is None:
+            if self._above_wire and isinstance(error, RefusedForFinal):
+                # Not the run's failure: the adapter asks for the answer (#552).
+                self._refusals += 1
+            elif self._failure is None:
                 self._failure = error
 
     @property
     def failure(self) -> LimitError | None:
         with self._lock:
             return self._failure
+
+    def enable_final_above_wire(self) -> None:
+        """The adapter will ask for the answer itself (#552): a call the guard refuses for the cost
+        or the clock is then a pending refusal and not the run's failure, and a call the adapter
+        marked (`arm_final`) is admitted as the final call. The ledger of a run on the legacy path
+        never calls this."""
+        with self._lock:
+            self._above_wire = True
+
+    @property
+    def refusals(self) -> int:
+        """How many calls the guard has refused for the adapter to finalize, ever. The adapter
+        takes this count when a turn starts and reacts only to an increase (#552): a refusal that
+        landed between two turns belongs to neither."""
+        with self._lock:
+            return self._refusals
+
+    @property
+    def refusal_reason(self) -> str | None:
+        """Why the guard last refused a call for the adapter to finalize (`cost_limit` or
+        `time_limit`). The run stopped early only when the adapter acts on a refusal
+        (`note_wrap_up`): a refusal nobody acts on, a stray retry that came after a review, says
+        nothing about how the run ended."""
+        with self._lock:
+            return self._refusal_reason
+
+    def wait_idle(self, timeout: float) -> bool:
+        """Wait until no reserved call is open; False when `timeout` ran out first (#552). A call
+        of the aborted turn can still be answered by the provider when the adapter wants to mark
+        the next one, and the mark needs nothing in flight."""
+        until = time.monotonic() + max(timeout, 0.0)
+        while True:
+            with self._lock:
+                if not self._open:
+                    return True
+            if time.monotonic() >= until:
+                return False
+            time.sleep(min(0.01, max(until - time.monotonic(), 0.0)))
+
+    def note_wrap_up(self, reason: str) -> None:
+        """The model was asked to answer now (`wrap_up_due`): that is why the run stopped early.
+        The first reason wins."""
+        with self._lock:
+            if self._stopped_early is None:
+                self._stopped_early = reason
+
+    def wrap_up_due(self) -> str | None:
+        """Why the model should be asked for its answer now, or None. Read only (#552).
+
+        It is the arithmetic of the wrap-up (`_wrap_up_reason`) for the call the run would make
+        next, priced from what the run has shown, and the clock a little before its reserve
+        starts, so that a model that answers when asked is never refused. Nothing is recorded.
+        """
+        with self._lock:
+            if self._final_granted or self._final_armed:
+                return None
+            reserve = self._wrap_up_seconds
+            if self.remaining_seconds() <= reserve * (1 + WRAP_UP_ANNOUNCE_LEAD):
+                return STOPPED_EARLY_TIME
+            counters = self._counters
+            if counters.last_prompt_tokens == 0:
+                return None  # no call settled yet: nothing to price a next one with
+            priced = counters.last_prompt_tokens + self._growth_tokens()
+            allowance = self.output_tokens
+            held = counters.cost + counters.reserved_cost
+            return self._wrap_up_reason(
+                held, self._expected_cost(priced, allowance), priced, allowance
+            )
+
+    def arm_final(self, message: str, token: str) -> bool:
+        """Mark the next call as the run's final call, or say that it cannot be (#552).
+
+        The final call is admitted past the cost limit (see "The bound"), once. The adapter marks
+        it after it aborted the turn, so nothing is in flight; the call that follows is the
+        engine's answer to the adapter's message. `message` is that message, exactly, and `token`
+        the random one inside it: the mark belongs to the request whose last user message holds
+        the token, once in the whole body, with the message in it, and which is no larger than the
+        history the run had plus that message (see "The mark"). Any other request is a normal call.
+
+        Not possible: a call is in flight, the mark is armed already, both marks (the answer and
+        its one repair) are used, the deadline has passed, or the run failed. `final_refusal` says
+        which.
+        """
+        with self._lock:
+            if self._failure is not None or self._final_armed or self._open:
+                return False
+            if self._marks_used >= MAX_FINAL_MARKS or self.remaining_seconds() <= 0:
+                return False
+            held = self._counters.cost + self._counters.reserved_cost
+            if not (
+                self._final_granted or (self._final_admissible(held) and self._tokens_admit_final())
+            ):
+                return False
+            self._final_armed = True
+            self._final_needles = _json_forms(message)
+            self._final_token = token
+            self._final_message_bytes = len(message.encode("utf-8", errors="replace"))
+            # What the tools returned since the last call, frozen now: reports that come after the
+            # mark cannot widen what the final request may be (the audit is the engine's report).
+            self._final_results = max(
+                self._counters.returned_bytes - self._counters.returned_at_settle, 0
+            )
+            self._mark_returns = 0
+            self._marks_used += 1
+            return True
+
+    def final_refusal(self) -> LimitError:
+        """Why `arm_final` said no, with the code and the words of that cause (#552). Call it after
+        `arm_final` returned False: the failure of the run if there is one, a call of the aborted
+        turn that is still running, the deadline, both marks used, or a spend that leaves no call
+        for the answer (not reachable today: every way over the limit ends the agent phase)."""
+        with self._lock:
+            if self._failure is not None:
+                return self._failure
+            if self._open:
+                return LimitError(
+                    ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+                    "a model call of the aborted turn was still running when the answer was due",
+                )
+            if self.remaining_seconds() <= 0:
+                return LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the whole-job deadline was reached before the answer could be asked for",
+                )
+            if self._marks_used >= MAX_FINAL_MARKS:
+                return LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the call for the answer and its repair are used",
+                )
+            if self._final_armed:
+                return LimitError(
+                    ErrorCode.RUNNER_ERROR, "a call for the answer was marked already"
+                )
+            return LimitError(
+                ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                "the spend passes a limit and no call is left for the answer",
+            )
+
+    @property
+    def final_armed(self) -> bool:
+        """True while a mark waits for the call that carries the adapter's message."""
+        with self._lock:
+            return self._final_armed
+
+    def _carries_mark(
+        self, request_text: str | bytes, size: int, allowance: int, last_user_text: str | None
+    ) -> bool:
+        """Whether this request is the one the armed mark is for. Call with the lock held.
+
+        It holds the adapter's message as a JSON body holds text, and it is no larger than the
+        history the run had at its last settled call plus what can have been added since: the
+        model's answer (one output allowance), the tool results the audit saw after that call, the
+        message, and the engine's framing (`RECOVERY_REQUEST_SLACK_BYTES`). A body that fails
+        either test is an ordinary call: it must fit, or it is refused, and the mark stays.
+        """
+        if not self._final_armed:
+            return False
+        counters = self._counters
+        history = counters.last_request_bytes or self.limits.max_request_bytes
+        allowed = (
+            history
+            + math.ceil(allowance * WINDOW_CHECK_DENSITY)
+            + self._final_results
+            + self._final_message_bytes
+            + RECOVERY_REQUEST_SLACK_BYTES
+        )
+        if size > allowed:
+            return False
+        # The token stands once in the whole body, and in the last user message: the system prompt,
+        # a tool result, what the assistant said or an earlier message holding it is not the
+        # adapter's message being asked for.
+        if last_user_text is None or self._final_token not in last_user_text:
+            return False
+        body = request_text if isinstance(request_text, bytes) else request_text.encode()
+        if body.count(self._final_token.encode("utf-8")) != 1:
+            return False
+        return any(needle in body for needle in self._final_needles)
 
     def check_deadline(self, *, tolerance: float = 0.0) -> None:
         """Raise when the deadline has passed, or is closer than `tolerance` seconds."""
@@ -508,6 +815,22 @@ class BudgetLedger:
             return excess if excess > 0 else None
 
     @property
+    def tokens_used(self) -> int:
+        """The tokens settled and booked so far: what the token cap of an own key counts (#553)."""
+        with self._lock:
+            return self._tokens_used()
+
+    @property
+    def priced(self) -> bool:
+        """False for a run with no price at all: no dollar is counted and its cost is unknown."""
+        return self._priced
+
+    @property
+    def tolerates_unknown_cost(self) -> bool:
+        """True for an own key, whose run goes on when a cost is unknown."""
+        return self._tolerates_unknown_cost
+
+    @property
     def recovered(self) -> bool:
         """True when the run's final call was the recovery of a turn without an answer (#309)."""
         with self._lock:
@@ -530,7 +853,10 @@ class BudgetLedger:
                 return False
             if counters.model_calls == 0 or self.remaining_seconds() <= self._wrap_up_seconds:
                 return False
-            if not self._final_admissible(counters.cost + counters.reserved_cost):
+            if not (
+                self._final_admissible(counters.cost + counters.reserved_cost)
+                and self._tokens_admit_final()
+            ):
                 return False
             self._recovery_armed = True
             return True
@@ -565,6 +891,7 @@ class BudgetLedger:
         can_wrap_up: bool = False,
         wrap_up_text: str = "",
         recovery_text: str = "",
+        last_user_text: str | None = None,
     ) -> Reservation:
         """Reserve one model call before its request is sent. Raises when it cannot fit.
 
@@ -573,21 +900,35 @@ class BudgetLedger:
         the window at a lenient density (a backstop in front of the provider's own limit, which
         refuses only what cannot fit at all), and the cost spent, the cost reserved for calls in
         flight and the cost this call could have must stay within the limit.
+
+        `last_user_text` is the text of the last message of the request when that is a user message
+        (the proxy parsed it); an armed mark applies only to a request whose last user text holds
+        its token (#552).
         """
         self.check_deadline()
         size = _byte_size(request_text)
         allowance = self.output_tokens if output_tokens is None else output_tokens
         counters = self._counters
         with self._lock:
-            if self._final_granted:
+            if self._above_wire and self._failure is not None:
+                # The run has failed (#552): no call is admitted after a recorded failure.
+                raise LimitError(self._failure.code, self._failure.detail)
+            marked = self._carries_mark(request_text, size, allowance, last_user_text)
+            if self._final_granted and not marked:
                 if self._final_unanswered:
                     raise LimitError(
                         ErrorCode.LLM_OUTPUT_INVALID,
                         "the final call returned no structured answer",
                     )
-                raise LimitError(
+                raise RefusedForFinal(
                     ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
                     "the run asked for a call after its final call",
+                )
+            if self._above_wire and not marked and self._wrap_up_started():
+                self._refusal_reason = STOPPED_EARLY_TIME
+                raise RefusedForFinal(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the clock reserve for the answer has started",
                 )
             # The estimate prices the reservation. The last settled prompt is a heuristic floor:
             # it usually predicts the next prompt in a tool loop, and after a compaction or a
@@ -603,19 +944,20 @@ class BudgetLedger:
             held = counters.cost + counters.reserved_cost
             priced = self._priced_input(size, estimate)
             cost = self._expected_cost(priced, allowance)
+            tokens = priced + self._expected_output(allowance)
             recovery = self._recovery_armed and can_wrap_up
-            if self._overshot and not can_wrap_up:
+            if self._overshot and not can_wrap_up and not marked:
                 # A normal call settled over the limit: nothing but the final call follows.
-                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
-            if recovery:
+                raise self._used_up()
+            if recovery or marked:
                 reason = None
             elif self._overshot:
-                reason = STOPPED_EARLY_COST
+                reason = STOPPED_EARLY_TOKENS if self._overshot_by_tokens else STOPPED_EARLY_COST
             elif can_wrap_up:
                 reason = self._wrap_up_reason(held, cost, priced, allowance)
             else:
                 reason = None
-            final = reason is not None or recovery
+            final = reason is not None or recovery or marked
             if final:
                 # The last call of the run: it carries the instruction and nothing else grows.
                 text = recovery_text if recovery else wrap_up_text
@@ -625,23 +967,33 @@ class BudgetLedger:
                 cost = self._expected_cost(
                     self._priced_input(size, estimate), allowance, final=True
                 )
+                tokens = self._priced_input(size, estimate) + self._expected_output(
+                    allowance, final=True
+                )
             # A normal call is admitted only when its expected cost fits. The final call is the last
             # chance of a review, so it is admitted whenever the spend and what is in flight are
             # within the limit, even when its expected cost no longer fits (#540).
-            fits = (
+            # A call the adapter marked was checked when it was marked (`arm_final`).
+            fits = marked or (
                 self._final_admissible(held) if final else held + cost <= self.limits.max_cost_usd
             )
             if not fits:
-                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+                raise self._cost_refusal()
+            if not (marked or self._tokens_fit(tokens, final)):
+                raise self._token_refusal()
             if final:
                 self._final_granted = True
-                if recovery:
+                if marked:
+                    # Why the run stopped early, if it did, is noted by the adapter when it acts.
+                    self._final_armed = False
+                elif recovery:
                     self._recovery_armed = False
                     self._recovered = True
                 else:
                     self._stopped_early = reason
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            counters.reserved_tokens += tokens
             serial = self._issue()
         return Reservation(
             input_tokens=estimate,
@@ -649,10 +1001,22 @@ class BudgetLedger:
             byte_bound=bound,
             request_bytes=size,
             cost=cost,
+            tokens=tokens,
             final=final,
             recovery=recovery,
+            marked=marked,
             serial=serial,
         )
+
+    def _wrap_up_started(self) -> bool:
+        """The clock reserve for the answer has started. Call with the lock held."""
+        return self.remaining_seconds() <= self._wrap_up_seconds
+
+    def _cost_refusal(self) -> RefusedForFinal:
+        """The error of a call the cost limit cannot hold. Call with the lock held."""
+        if self._above_wire:
+            self._refusal_reason = STOPPED_EARLY_COST
+        return RefusedForFinal(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
 
     def try_reserve_final_retry(
         self, request_text: str | bytes, *, output_tokens: int | None = None
@@ -677,12 +1041,18 @@ class BudgetLedger:
             estimate = self._estimate(size)
             bound = max(size, counters.last_prompt_tokens)
             cost = self._expected_cost(self._priced_input(size, estimate), allowance, final=True)
-            if counters.cost + counters.reserved_cost > self.limits.max_cost_usd:
+            tokens = self._priced_input(size, estimate) + self._expected_output(
+                allowance, final=True
+            )
+            if counters.cost + counters.reserved_cost > self.limits.max_cost_usd or (
+                self._tokens_over_cap()
+            ):
                 if self._retried_past_limit:
                     return None
                 self._retried_past_limit = True
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
+            counters.reserved_tokens += tokens
             serial = self._issue()
         return Reservation(
             input_tokens=estimate,
@@ -690,6 +1060,7 @@ class BudgetLedger:
             byte_bound=bound,
             request_bytes=size,
             cost=cost,
+            tokens=tokens,
             final=True,
             serial=serial,
         )
@@ -700,6 +1071,54 @@ class BudgetLedger:
         run (#540). Its expected cost is not asked: the final call is delivered whatever it costs.
         """
         return self._overshot or held <= self.limits.max_cost_usd
+
+    def _token_cap_binds(self) -> bool:
+        """Whether a token cap bounds the run (#553): always, for an own key. With a price the run
+        is bound by the dollar limit of #540 and the cap is a ceiling over it; without one the cap
+        is the bound. The managed key has no cap. Call with the lock held."""
+        return self._max_total_tokens is not None
+
+    def _tokens_used(self) -> int:
+        counters = self._counters
+        return counters.prompt_tokens + counters.completion_tokens + counters.unknown_tokens
+
+    def _tokens_over_cap(self) -> bool:
+        """The tokens used and held already pass the cap. Call with the lock held."""
+        cap = self._max_total_tokens
+        if cap is None or not self._token_cap_binds():
+            return False
+        return self._tokens_used() + self._counters.reserved_tokens > cap
+
+    def _tokens_fit(self, tokens: int, final: bool) -> bool:
+        """The token cap's half of admission, as the cost limit's: a normal call is admitted only
+        when its expected tokens fit, the final call whenever the tokens used and held are within
+        the cap or a normal call settled over it. Call with the lock held."""
+        cap = self._max_total_tokens
+        if cap is None or not self._token_cap_binds():
+            return True
+        held = self._tokens_used() + self._counters.reserved_tokens
+        return (self._overshot or held <= cap) if final else held + tokens <= cap
+
+    def _token_refusal(self) -> RefusedForFinal:
+        """The error of a call the token cap of an own key cannot hold (#553). Like the cost
+        limit's it is a call the adapter answers with the final call. Call with the lock held."""
+        if self._above_wire:
+            self._refusal_reason = STOPPED_EARLY_TOKENS
+        return RefusedForFinal(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token cap is used up")
+
+    def _used_up(self) -> RefusedForFinal:
+        """The refusal of a normal call after one settled over a limit: the cap's when the tokens
+        were what ended the agent phase, else the cost limit's. Call with the lock held."""
+        return self._token_refusal() if self._overshot_by_tokens else self._cost_refusal()
+
+    def _tokens_admit_final(self) -> bool:
+        """The token cap's half of "a final call may start": the tokens used and held are within
+        the cap, or a normal call settled over it and this is the call that ends the run. Call
+        with the lock held."""
+        cap = self._max_total_tokens
+        if cap is None:
+            return True
+        return self._overshot or self._tokens_used() + self._counters.reserved_tokens <= cap
 
     def _estimate(self, size: int) -> int:
         return max(math.ceil(size / self._counters.density), self._counters.last_prompt_tokens)
@@ -739,6 +1158,8 @@ class BudgetLedger:
             return cap
         observed = _percentile(self._counters.completions)
         floor = FINAL_OUTPUT_FLOOR_TOKENS if final else OUTPUT_FLOOR_TOKENS
+        if self._reserve_full_output:
+            floor = max(floor, REASONING_OUTPUT_FLOOR_TOKENS)
         return min(cap, max(floor, observed))
 
     def _growth_tokens(self) -> int:
@@ -780,6 +1201,20 @@ class BudgetLedger:
             self.limits.max_cost_usd
         ):
             return STOPPED_EARLY_COST
+        return self._wrap_up_for_tokens(priced, allowance)
+
+    def _wrap_up_for_tokens(self, priced: int, allowance: int) -> str | None:
+        """The same test for the token cap of an own key (#553): this call and a final call after
+        it must fit, with the margin, or this call is the final one."""
+        cap = self._max_total_tokens
+        if cap is None or not self._token_cap_binds():
+            return None
+        counters = self._counters
+        now = priced + self._expected_output(allowance)
+        after = priced + self._growth_tokens() + self._expected_output(allowance, final=True)
+        held = self._tokens_used() + counters.reserved_tokens
+        if held + math.ceil((now + after) * float(RESERVE_MARGIN)) > cap:
+            return STOPPED_EARLY_TOKENS
         return None
 
     def settle_call(
@@ -791,6 +1226,8 @@ class BudgetLedger:
         cost: Decimal | None = None,
         cache_read_tokens: int | None = None,
         cache_write_tokens: int | None = None,
+        allow_unpriced: bool = False,
+        extra_tokens: int = 0,
     ) -> None:
         """Replace a reservation with what the provider actually reported. Missing usage fails.
 
@@ -802,7 +1239,10 @@ class BudgetLedger:
         `cost` is what this call cost: the charge the provider states (`exact_cost`), or the usage
         priced with the provider's price list (`LlmProviderSpec.cost_extractor`). A call without one
         cannot be bounded by money: the tokens are recorded, then the run is stopped, and it is
-        never read as zero.
+        never read as zero. The one exception is an own key (#553): with `allow_unpriced` the tokens
+        are booked, the call is counted as unpriced, the cost of the run is unknown, and the token
+        cap bounds the run from then on. A ledger that does not tolerate an unknown cost refuses it
+        like any call without a price.
         """
         if not self._is_open(reservation):
             return  # settled already (an error handler came after the normal path)
@@ -830,6 +1270,9 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
+            # Tokens the provider billed beyond the counts it states (reasoning on top, a total
+            # above the parts): they count against the cap and nowhere else (#553).
+            counters.unknown_tokens += max(extra_tokens, 0)
             if not reservation.final:
                 counters.completions.append(completion_tokens)
                 if 0 < counters.last_prompt_tokens < prompt_tokens:
@@ -837,23 +1280,28 @@ class BudgetLedger:
             counters.last_prompt_tokens = prompt_tokens
             counters.last_completion_tokens = completion_tokens
             counters.last_request_bytes = reservation.request_bytes
+            counters.returned_at_settle = counters.returned_bytes
             counters.last_cache_read = read
             counters.last_cache_write = written
             if prompt_tokens > 0 and reservation.request_bytes >= MIN_CALIBRATION_BYTES:
                 observed = reservation.request_bytes / prompt_tokens
                 counters.density = max(1.0, min(ASSUMED_DENSITY, observed))
-            if cost is None:
+            if cost is None and not (allow_unpriced and self._tolerates_unknown_cost):
                 raise LimitError(
                     ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
                     "the provider did not report the cost of a call",
                 )
-            counters.cost = _SUM.add(counters.cost, cost)
-            counters.priced_calls += 1
+            if cost is None:
+                counters.unpriced_calls += 1
+            else:
+                counters.cost = _SUM.add(counters.cost, cost)
+                counters.priced_calls += 1
             # The final call carries the answer: it is delivered even if it cost more than expected.
             # A normal call over the limit is delivered too, but it ends the agent phase: the next
             # request is the final call, and no normal call is admitted again (see "The bound").
             if counters.cost > self.limits.max_cost_usd and not reservation.final:
                 self._overshot = True
+            self._note_token_overshoot(reservation)
 
     def _book_over_report(
         self,
@@ -894,6 +1342,8 @@ class BudgetLedger:
 
     def _close(self, reservation: Reservation) -> None:
         """The reservation is settled. Call with the lock held."""
+        if reservation.serial in self._open:
+            self._counters.reserved_tokens -= reservation.tokens
         self._open.discard(reservation.serial)
 
     def settle_unbilled(self, reservation: Reservation) -> None:
@@ -912,6 +1362,17 @@ class BudgetLedger:
                 self._counters.reserved_cost, reservation.cost
             )
             self._counters.priced_calls += 1
+            self._return_mark(reservation)
+
+    def _return_mark(self, reservation: Reservation) -> None:
+        """A marked call the provider turned away before it generated anything did not carry the
+        answer: its mark comes back, a bounded number of times per mark (#552). Without it the
+        engine's own retry would meet "a call after the final call" and the run would end without
+        a review for a transient 429. Call with the lock held."""
+        if not (self._above_wire and reservation.marked) or self._mark_returns >= MAX_MARK_RETURNS:
+            return
+        self._mark_returns += 1
+        self._final_armed = True
 
     def worst_case_cost(self, reservation: Reservation) -> Decimal:
         """The most one reserved call can cost: the bytes of its request, each as a token of the
@@ -922,7 +1383,7 @@ class BudgetLedger:
             max(reservation.byte_bound, reservation.input_tokens), reservation.output_tokens
         )
 
-    def settle_unknown(self, reservation: Reservation) -> bool:
+    def settle_unknown(self, reservation: Reservation, *, worst_case: bool = True) -> bool:
         """Settle a call whose usage was never seen (a cut stream, an error inside a stream, a
         timeout after the request was sent, a server error) (#550).
 
@@ -931,8 +1392,17 @@ class BudgetLedger:
         expected to cost, and counted as unknown. Like any call without a reported cost it makes
         the cost of the whole run unknown, never a partial sum. Returns False (and books nothing)
         for a reservation that was settled already.
+
+        An own key (#553, `worst_case=False`, honoured only by a ledger that tolerates an unknown
+        cost) books what the call was expected to cost, and its expected tokens against the token
+        cap: the worst case of one cut stream would otherwise end a run whose user pays the
+        provider and bounds it by tokens.
         """
-        worst = self.worst_case_cost(reservation)
+        worst = (
+            self.worst_case_cost(reservation)
+            if worst_case or not self._tolerates_unknown_cost
+            else reservation.cost
+        )
         with self._lock:
             if reservation.serial and reservation.serial not in self._open:
                 return False  # settled already: an error handler came after the normal path
@@ -941,7 +1411,36 @@ class BudgetLedger:
             counters.reserved_cost = _SUM.subtract(counters.reserved_cost, reservation.cost)
             counters.cost = _SUM.add(counters.cost, max(worst, reservation.cost))
             counters.unknown_calls += 1
+            # The call may have used any of what it was allowed: the estimate of its input and
+            # the whole output allowance count against the token cap (#553).
+            counters.unknown_tokens += reservation.input_tokens + reservation.output_tokens
+            # Two rules, both end the agent phase and neither the review (#552, #553):
+            # a booking that passes the token cap (an own key, any cost), and a worst case that
+            # passes the cost limit. The final call is still admitted after either.
+            self._note_token_overshoot(reservation)
+            if (
+                self._above_wire
+                and counters.cost > self.limits.max_cost_usd
+                and not reservation.final
+            ):
+                # The worst case passes the limit: like a call that settled over it, this ends the
+                # agent phase, and the final call is still admitted (#552). An own key goes on
+                # after an unknown call; the review must not be lost to its booking.
+                self._overshot = True
         return True
+
+    def _note_token_overshoot(self, reservation: Reservation) -> None:
+        """A normal call that takes the tokens over the cap ends the agent phase, as one that
+        settles over the cost limit does (#553). Call with the lock held."""
+        if (
+            self._token_cap_binds()
+            and not reservation.final
+            and self._tokens_used() > (self._max_total_tokens or 0)
+        ):
+            self._overshot = True
+            self._overshot_by_tokens = self._overshot_by_tokens or not (
+                self._counters.cost > self.limits.max_cost_usd
+            )
 
     @property
     def unknown_calls(self) -> int:
@@ -958,8 +1457,15 @@ class BudgetLedger:
 
     def count_file(self, path: str) -> None:
         """Count a content-bearing file the run read. Distinct files, not calls. Not a budget."""
+        if len(path) > MAX_FILE_PATH_CHARS:
+            raise LimitError(ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a file path is too long")
         with self._lock:
-            self._counters.files.add(path)
+            files = self._counters.files
+            if path not in files and len(files) >= MAX_COUNTED_FILES:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "more distinct files than the ledger holds"
+                )
+            files.add(path)
 
     def add_result_bytes(self, size: int) -> None:
         """Count the UTF-8 bytes of one tool result delivered to the model."""
@@ -1034,7 +1540,12 @@ class BudgetLedger:
         """
         with self._lock:
             counters = self._counters
-            exact = counters.model_calls > 0 and counters.priced_calls == counters.model_calls
+            # A run with no price (#553) has no cost: unknown, never zero.
+            exact = (
+                self._priced
+                and counters.model_calls > 0
+                and counters.priced_calls == counters.model_calls
+            )
             total = float(counters.cost)
             excess = float(counters.cost - self.limits.max_cost_usd)
             return Usage(

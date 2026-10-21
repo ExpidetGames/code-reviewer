@@ -58,6 +58,19 @@ import { migration as createBillingTopupIntents } from "./20261019170000_create_
 import { migration as addJobsCreatedAtIndex } from "./20261019183000_add_jobs_created_at_index.ts";
 import { migration as createModelsDevCatalog } from "./20261019200000_create_models_dev_catalog.ts";
 import { migration as createModelDecisions } from "./20261020090000_create_model_decisions.ts";
+import { migration as widenRefusalNoticeCodes } from "./20261021090000_widen_refusal_notice_codes.ts";
+import { migration as addBillingBalancesReservedIndex } from "./20261021120000_add_billing_balances_reserved_index.ts";
+import { migration as createBillingStartCreditGrants } from "./20261021150000_create_billing_start_credit_grants.ts";
+import { migration as widenJobVmRunsEndSource } from "./20261021090100_widen_job_vm_runs_end_source.ts";
+import { migration as createBillingProfiles } from "./20261021130000_create_billing_profiles.ts";
+import { migration as addBillingTopupIntentsProviderAmount } from "./20261021170000_add_billing_topup_intents_provider_amount.ts";
+import { migration as addBillingTopupIntentsProviderCurrency } from "./20261021190000_add_billing_topup_intents_provider_currency.ts";
+import { migration as addBillingWebhookEventsReviewContext } from "./20261021190100_add_billing_webhook_events_review_context.ts";
+import { migration as widenRefusalNoticeCodesForLimits } from "./20261021210000_widen_refusal_notice_codes_for_limits.ts";
+import { migration as createBillingWorkspaceSettings } from "./20261021210100_create_billing_workspace_settings.ts";
+import { migration as addLimitQueryIndexes } from "./20261021210200_add_limit_query_indexes.ts";
+import { migration as addUsageRecordBillingState } from "./20261022010000_add_usage_record_billing_state.ts";
+import { migration as addBillingWebhookEventsResolution } from "./20261022020000_add_billing_webhook_events_resolution.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -118,6 +131,27 @@ const migrations: Record<string, Migration> = {
   "20261019183000_add_jobs_created_at_index": addJobsCreatedAtIndex,
   "20261019200000_create_models_dev_catalog": createModelsDevCatalog,
   "20261020090000_create_model_decisions": createModelDecisions,
+  "20261021090000_widen_refusal_notice_codes": widenRefusalNoticeCodes,
+  "20261021090100_widen_job_vm_runs_end_source": widenJobVmRunsEndSource,
+  "20261021120000_add_billing_balances_reserved_index":
+    addBillingBalancesReservedIndex,
+  "20261021130000_create_billing_profiles": createBillingProfiles,
+  "20261021150000_create_billing_start_credit_grants":
+    createBillingStartCreditGrants,
+  "20261021170000_add_billing_topup_intents_provider_amount":
+    addBillingTopupIntentsProviderAmount,
+  "20261021190000_add_billing_topup_intents_provider_currency":
+    addBillingTopupIntentsProviderCurrency,
+  "20261021190100_add_billing_webhook_events_review_context":
+    addBillingWebhookEventsReviewContext,
+  "20261021210000_widen_refusal_notice_codes_for_limits":
+    widenRefusalNoticeCodesForLimits,
+  "20261021210100_create_billing_workspace_settings":
+    createBillingWorkspaceSettings,
+  "20261021210200_add_limit_query_indexes": addLimitQueryIndexes,
+  "20261022010000_add_usage_record_billing_state": addUsageRecordBillingState,
+  "20261022020000_add_billing_webhook_events_resolution":
+    addBillingWebhookEventsResolution,
 };
 
 export const migrationProvider: MigrationProvider = {

@@ -44,6 +44,14 @@ connection, project, review settings) is looked up in the workspace of the job (
 credentials are those of the job's own connection. Nothing of this shows in the contract: the answers
 are the same as for a single workspace.
 
+## A managed Dynamic result without a cost (#553)
+
+`finishJob` (`report.ts`, shared by the runner API's `complete` and the Worker API's `result`) stores a Dynamic result of a job on
+the operator's key that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
+(`managed-cost-guard.ts`): a managed run never settles with an unknown cost, and the code is free for the customer. A failure keeps
+the runner's code. On the workspace's own key a null cost is a success whose usage record settles with an unknown cost (minutes
+only in billing).
+
 ## Authentication
 
 `Authorization: Bearer <RUNNER_TOKEN>` on every call. One shared token in the MVP, read from the
@@ -94,7 +102,11 @@ transaction, before the usage record is reserved, the entitlements of the job's 
 workspace, a used up run or cost limit, or entitlements that cannot be read): the job ends `failed` with
 `workspace_suspended`, `quota_exhausted` or `entitlements_invalid` and the next one is tried, so none of the steps
 below runs for it, no credential exists and no record is written (`src/usage/README.md`, "Limits and suspension at
-claim"). Every claim path passes through it: the legacy claim, the split claim of a Dispatcher and the claim by job
+claim"). **#498, #605: while billing is on, the balance check comes next, in the same transaction, and nothing is held:** a workspace whose balance is zero or below
+zero has the job end `failed` with `insufficient_balance` or `balance_negative` (and `billing_rates_incomplete` when a rate is missing), with no
+record and no entry. **#499:** before the balance it checks the hidden hourly brake and the workspace's monthly limit and ends the job `failed` with
+`reviews_paused`, `monthly_limit_reached` or, when it cannot evaluate them for good, `billing_limits_unreadable` (a failure that may pass puts the job back in the queue for a later claim instead, `src/billing/README.md`, "Limits at claim"), with no record and no entry either; otherwise the record is written (`src/billing/README.md`, "Start, settle"). Every claim
+path passes through it: the legacy claim, the split claim of a Dispatcher and the claim by job
 id (for which a refused job answers `204`, like any job that cannot be claimed). Then, for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
@@ -108,7 +120,9 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
      `JobOptions.selection.layers`, built by `review-settings-job-options.ts`) over the instance's model
      (`ClaimDeps.builtInModel`). A model counts only for the provider it was set for; a model next to a provider of
      another layer ends the job `job_llm_options_invalid` (the save refuses the same pairing, `MODEL_PROVIDER_MISMATCH`).
-     The catalog is not read and the plan's `modelAccess` is not evaluated (#432-T06, T16).
+     The plan's `modelAccess` is not evaluated (#432-T06, T16), and the entry catalog of the operator is not read. **A Dynamic project
+     may name a catalog provider and model** (#555, `src/native-providers/README.md`); that selection is carried through the
+     claim as a catalog model, see "A catalog model on the workspace's own key" below. A Diff job never is one.
    - **Operator's key:** the entry the project selected for the kind (`catalogEntryDiff`, `catalogEntryDynamic`), else the
      instance default entry of the kind, read from the catalog (`ClaimDeps.catalog`: the one entry, and the defaults only
      when the project names none). It must exist, be released, serve the kind, be allowed by the plan's `modelAccess`
@@ -150,6 +164,48 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    URL, and the MVP has no fallback chain); the runner adds OpenRouter's `provider.require_parameters` to every
    request for OpenRouter by itself (#270). The usage record itself was reserved by `claimNext`, in the transaction of
    the claim (`src/usage/README.md`); a failure of these calls gives the job back.
+
+   **The cost of a native job (#553).** Right after the selection and before the key is loaded, a Dynamic job whose selection
+   names a catalog model (`ClaimDeps.nativeCost`, `src/native-cost/README.md`) gets its cost policy. On the operator's key a model
+   that is not enabled with a confirmed price ends the job `managed_model_unavailable` (the log: `entry=<id> kind=<kind>
+reason=<catalog_price_unconfirmed|catalog_model_unavailable>:<reason>`), with no key, token or VM and a `void` usage record; a
+   price check that itself fails gives the job back instead. The policy goes into the job as `dynamic.cost`, only to a caller
+   that named `dynamic_cost_policy` (else the job ends `dynamic_engine_unavailable`). A job that is not native is unchanged and
+   the price service is not asked.
+
+   **The model entry of a native job (#578).** After the policy, the same decision step asks `nativeCost.entryFor` for the entry of
+   the model (the last known catalog row, no key, no price) and sends it as `dynamic.modelEntry` with the policy. An entry that
+   cannot be built ends the job like an unavailable model (`managed_model_unavailable` on the operator's key, with
+   `reason=entry_<code>` in the log; `dynamic_model_features_unsupported` on an own key of a registry provider), before any key or
+   token exists; a failed read gives the job back. The two registry providers keep their API address whatever the catalog trusts: an
+   entry whose address is not the registry's is refused with `reason=entry_upstream_not_registry`
+   (`src/native-cost/registry-addresses.ts`). A native job does not read the provider's model metadata. Whether a registry provider
+   is native at all is the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off; `src/native-cost/README.md`).
+
+   **A catalog model on the workspace's own key (#555).** A Dynamic job on the workspace's own key may name a provider of the
+   models.dev catalog and one of its models (`contracts/opencode-providers.v1.json`; the project settings save only a pair the
+   catalog lists, `MODEL_NOT_IN_CATALOG` otherwise). The sequence, all before any key, token or VM exists:
+   1. `resolveModelSelection` accepts the provider only when `ClaimDeps.nativeCost` is wired (`SelectionDeps.nativeModels`) and
+      marks the selection as a catalog model (`catalog: true`).
+   2. `costOf` builds the per-job entry of #548 with `nativeCost.entryFor` (`Checked.modelEntry`, sent as `dynamic.modelEntry`). **A
+      model that models.dev stopped listing keeps being served** from its last known row (decision of 2026-10-19 on #548; the claim
+      logs it and the settings page warns), because a provider's retirement is not the catalog's housekeeping. For a catalog
+      selection the refusals have their own codes: **a row that is gone** ends the job `llm_model_unavailable`, and **a provider that
+      cannot carry a key** (blocked by `url_changed` or `rejected`, no longer supported, an address that is not the trusted one in its
+      canonical form) ends it `llm_provider_unsupported`. The log names the kind and the stable reason (`entry_model_not_in_catalog`,
+      `entry_provider_url_blocked`, ...), never a provider or a model. There is no move to another model, provider or key.
+   3. The cost policy of #553 is judged first (an own key is never refused for a price; an unknown price gets the token cap).
+   4. `keyFor` reveals **only the chosen provider's key** (`llm_api_key.<slug>`). A workspace that has a key for another provider but
+      not for this one ends `llm_not_configured`; the key of provider B is never used for provider A.
+      The Runs copy for `llm_model_unavailable` says the model is no longer offered and asks the workspace to pick another one
+      (`runs/error-copy.ts`).
+   5. **Where the key goes.** For a provider outside the registry the destination is exactly the catalog's trusted address
+      (`src/native-cost/README.md`, "Where the key goes"); the workspace types none.
+      **The pin (#588).** The selection carries the address the project pinned when it selected the provider
+      (`Selection.pinnedAddress`); `entryFor` serves the entry only if the catalog trusts exactly that address, else the job ends
+      `provider_address_changed` (free; the Runs copy tells an Owner or Admin to confirm the new address in the review settings of
+      the project), before any key or token exists. A selection with no pin (made before this) is pinned by its first claim to the
+      address the entry names (`ClaimDeps.providerPins.adopt`); a claim that loses that race to another pin holds to the pin in force, and it adopts nothing when another project of the workspace pinned another address for the provider (the job is refused). A failed adoption gives the job back with `provider_pin_check_failed`.
 
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
@@ -358,7 +414,9 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   `404` for an unknown job; `409 RUNNER_JOB_ENDED` when the claim ended or is not the running one (nothing is stored; the
   backstop covers that VM). The credential is never logged. It only measures (`billing/README.md`, "Billable minutes"); a
   Dispatcher sends it best effort and a failure never touches a launch or a job. Advertised as the feature `vm_lifecycle`: a
-  Dispatcher sends nothing to an App that does not list it.
+  Dispatcher sends nothing to an App that does not list it. #498: a claim keeps at most four VMs (`MAX_VMS_PER_CLAIM`; the rest are answered `replayed`),
+  and the Dispatcher's claim names the claim feature `vm_lifecycle` next to `worker_credential` (the app notes which Dispatchers it serves,
+  `src/billing/dispatcher-features.ts`).
 - **Version.** `GET /api/runners/v1/version` answers `{ version: 1, appVersion, features }` with
   `features` from `APP_FEATURES` (`worker_api`, `claim_by_job_id`, `pool_cap`, `release`, `vm_lifecycle`). It takes the
   dispatcher credential; a Worker may also call it with its credential **and** `?jobId=<its job>` (the
@@ -466,6 +524,8 @@ jobs the policy let through.
 - `integration-tests/http/runner-api-claim.integration.test.ts`, `-report`, `-security` and
   `-route-files`: the real handlers with a real SQLite file and the fake GitHub; the route files with
   the wiring of the running server and a delivery that goes through the webhook route first.
+- `integration-tests/http/runner-api-native-own.integration.test.ts` (#555): a catalog model on the own key: the entry, the one key revealed,
+  `llm_not_configured` for a key of another provider, `llm_model_unavailable`, an unlisted model still served.
 - `integration-tests/http/runner-api-projects.integration.test.ts`: the wiring to the projects, the
   review settings and the LLM configuration (CR-46).
 - `integration-tests/compatibility/runner-api-contract.integration.test.ts`: the contract.

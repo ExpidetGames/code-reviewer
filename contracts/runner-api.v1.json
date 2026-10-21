@@ -83,9 +83,9 @@
       }
     },
     "KnownClaimFeature": {
-      "description": "The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request.",
+      "description": "The claim features this version of the contract defines (`features` in ClaimRequest). A reader ignores a feature name it does not know. `dynamic_capabilities` (#279): the runner reads `dynamic.capabilities`. `worker_credential` (#318): the caller is a Dispatcher and wants the split answer; the job input and its secrets reach only the Worker, with the per-job credential. `supersede` (#396): the runner understands `job.superseded` in a heartbeat answer and stops gracefully (it finishes the model requests in flight, sends no more, publishes nothing, reports its result and usage). The app supersedes a running job only when the claim named it. A Worker names it in the `features` of its details request. `dynamic_cost_policy` (#553): the runner reads `dynamic.cost` and enforces it (the price book of the managed key as the only price source, the token cap of an own key). A job that carries a cost policy goes only to a caller that named it; the app ends the job with `dynamic_engine_unavailable` otherwise, since a runner that did not read the policy would run without its bound. `vm_lifecycle` (#498): the caller is a Dispatcher that reports the VM it creates to the app (POST /api/runners/v1/jobs/{id}/vm, `KnownAppFeature` of the same name) so the app can measure billable minutes; the app records that it has seen a Dispatcher with and without it, and refuses to switch billing on while a Dispatcher without it has claimed recently.",
       "type": "string",
-      "enum": ["dynamic_capabilities", "worker_credential", "supersede"]
+      "enum": ["dynamic_capabilities", "worker_credential", "supersede", "dynamic_cost_policy", "vm_lifecycle"]
     },
     "WorkerCredential": {
       "description": "#318: the per-job credential. 256 random bits, base64url without padding, behind the prefix `crj_`. The app mints it at claim; it is valid only for that job and only while the claim holds, and it is the one thing a Worker holds (Authorization: Bearer). Secret: never log it, never put it in an argument, an environment variable or a file; the Dispatcher passes it to the Worker on stdin.",
@@ -97,6 +97,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["model", "skill", "limits"],
+      "dependentRequired": { "modelEntry": ["cost"] },
       "properties": {
         "model": {
           "type": "string",
@@ -113,7 +114,101 @@
             "maxFindings": { "type": "integer", "minimum": 1, "maximum": 30 }
           }
         },
-        "capabilities": { "$ref": "#/$defs/DynamicModelCapabilities" }
+        "capabilities": { "$ref": "#/$defs/DynamicModelCapabilities" },
+        "cost": { "$ref": "#/$defs/DynamicCostPolicy" },
+        "modelEntry": { "$ref": "#/$defs/DynamicModelEntry" }
+      }
+    },
+    "DynamicModelEntry": {
+      "description": "#578: the provider and the one model of a native job, the `JobModelEntry` of job-model-entry.v1.json (the closed object the runner reads strictly; this file does not repeat it, and both suites check every example against that file). Optional and additive: sent exactly when `cost` is, so only to a caller that named the claim feature `dynamic_cost_policy`; a job without it is a job of today. It holds no key. `upstreamBaseUrl` is the address the runner's supervisor connects to; the engine is never told it. Its `modelId` is `dynamic.model` and `llm.model`, and its `providerId` is the provider of `llm.provider` (the underscore of a slug is the hyphen of the id).",
+      "type": "object",
+      "required": ["version", "providerId", "npm", "family", "authHeader", "upstreamBaseUrl", "modelId", "model"]
+    },
+    "DynamicCostPolicy": {
+      "description": "#553: whose key pays for a native job (a job that runs through the passthrough proxy) and what bounds its cost. Optional, additive, and sent only to a caller that named the claim feature `dynamic_cost_policy`; a job without it is a job of today. A closed object. `managed` (the instance operator's key, which we pay): `priceBook` is the confirmed price of the model (the app's price confirmation, #549) and is the runner's **only** price source, never the engine's own cost and never models.dev; an unknown cost ends the run with `dynamic_accounting_failed`, which billing treats as our fault; there is no token cap. `own` (the workspace's key, the user pays the provider): `priceBook` is the catalog's price when it states one, else null; an unknown cost does not end the run, it is bound by `maxTotalTokens` (prompt, cache and completion tokens in all) and the clock, and the result reports `costUsd: null`, which billing charges as minutes only. A call that stated no usage at all still fails the run.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["keyMode", "priceBook", "maxTotalTokens"],
+          "properties": {
+            "keyMode": { "const": "managed" },
+            "priceBook": { "$ref": "#/$defs/DynamicPriceBook" },
+            "maxTotalTokens": { "type": "null" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["keyMode", "priceBook", "maxTotalTokens"],
+          "properties": {
+            "keyMode": { "const": "own" },
+            "priceBook": {
+              "oneOf": [{ "$ref": "#/$defs/DynamicPriceBook" }, { "type": "null" }]
+            },
+            "maxTotalTokens": { "type": "integer", "minimum": 1, "maximum": 10000000000 }
+          }
+        }
+      ]
+    },
+    "MicroUsdPerMtok": {
+      "description": "#553: a price in whole micro-USD per million tokens as digits only (2.50 USD is \"2500000\"); at most 100000 USD per million tokens.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,11})$"
+    },
+    "DynamicPriceLevel": {
+      "description": "#553: the prices of one level of a price book. `input` and `output` are required, every other price may be null or left out and then means \"not priced\", never zero. The audio prices are read and not used: a call with audio tokens is unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output"],
+      "properties": {
+        "input": { "$ref": "#/$defs/MicroUsdPerMtok" },
+        "output": { "$ref": "#/$defs/MicroUsdPerMtok" },
+        "cacheRead": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "cacheWrite5m": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "cacheWrite1h": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "reasoning": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "inputAudio": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "outputAudio": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] }
+      }
+    },
+    "DynamicPriceBook": {
+      "description": "#553: a price book in the JSON form of the app (`priceBookToJson`; `fakes/fixtures/price-books.json` is read by the app's and the runner's readers): the base level, models.dev's older `contextOver200k` level and up to 64 tiers, each for a prompt above `contextOver` tokens, from the smallest up. The runner reads it strictly and, for the book of a claim, does not price a cache read as input when the level has no read price (the call is then unpriced).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output"],
+      "properties": {
+        "input": { "$ref": "#/$defs/MicroUsdPerMtok" },
+        "output": { "$ref": "#/$defs/MicroUsdPerMtok" },
+        "cacheRead": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "cacheWrite5m": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "cacheWrite1h": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "reasoning": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "inputAudio": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "outputAudio": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+        "contextOver200k": {
+          "oneOf": [{ "$ref": "#/$defs/DynamicPriceLevel" }, { "type": "null" }]
+        },
+        "tiers": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contextOver", "input", "output"],
+            "properties": {
+              "contextOver": { "type": "integer", "minimum": 1, "maximum": 100000000 },
+              "input": { "$ref": "#/$defs/MicroUsdPerMtok" },
+              "output": { "$ref": "#/$defs/MicroUsdPerMtok" },
+              "cacheRead": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+              "cacheWrite5m": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+              "cacheWrite1h": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+              "reasoning": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+              "inputAudio": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] },
+              "outputAudio": { "oneOf": [{ "$ref": "#/$defs/MicroUsdPerMtok" }, { "type": "null" }] }
+            }
+          }
+        }
       }
     },
     "UnitPrice": {
@@ -274,7 +369,7 @@
           "required": ["provider", "model", "apiKey"],
           "properties": {
             "provider": {
-              "description": "#424: the slug of an LLM provider, checked against the registry of the runner (`runner/src/code_reviewer_runner/llm_providers.py`), which refuses one it has none for with invalid_job. The app sends a provider only to a caller that advertised it in `llmProviders`; this release knows KnownLlmProvider.",
+              "description": "#424: the slug of an LLM provider, checked against the registry of the runner (`runner/src/code_reviewer_runner/llm_providers.py`), which refuses one it has none for with invalid_job. The app sends a provider only to a caller that advertised it in `llmProviders`; this release knows KnownLlmProvider. #555: the one exception is a native job (`dynamic.modelEntry` present): its provider may be a provider of the models.dev catalog outside the registry, named by its slug (the hyphen of the catalog id is an underscore); its key goes only to the address of the entry, which the runner accepts only as a plain public https address in exactly one spelling (`contracts/key-destination-vectors.json`), and the job then carries no `llm.baseUrl`, `llm.requireParameters` or `llm.fallbackModels`.",
               "$ref": "#/$defs/LlmProviderId"
             },
             "model": { "type": "string", "minLength": 1, "maxLength": 200 },
@@ -410,13 +505,13 @@
         "aiCalls": { "type": "integer", "minimum": 0 },
         "fallbackUsed": { "type": "boolean" },
         "costUsd": {
-          "description": "The cost in US dollars, or null when it is not known. A Dynamic Review and a Diff Review report the exact sum of the charges their model provider stated for every call, and null when any call has no stated charge or ended without an answer that could have been billed; neither estimates one from tokens or a price table.",
+          "description": "The cost in US dollars, or null when it is not known. A Dynamic Review and a Diff Review report the exact sum of the charges their model provider stated for every call, and null when any call has no stated charge or ended without an answer that could have been billed; neither estimates one from tokens or a price table. #553: a native Dynamic Review reports null when its model is not priced or any call could not be priced; on the managed key such a run ends with `dynamic_accounting_failed` instead of succeeding, and the app refuses a managed success with a null cost.",
           "type": ["number", "null"],
           "minimum": 0
         },
         "stoppedEarly": {
-          "description": "Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.",
-          "enum": ["cost_limit", "time_limit", null]
+          "description": "Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit, its time limit or (#553, an own key whose price is not known) its token limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.",
+          "enum": ["cost_limit", "time_limit", "token_limit", null]
         },
         "limitExceededBy": {
           "description": "#540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.",

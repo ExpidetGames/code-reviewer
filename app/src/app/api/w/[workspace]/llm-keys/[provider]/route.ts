@@ -9,6 +9,7 @@
 import { connection } from "next/server";
 import { createLlmKeyRouteHandlers } from "@/llm/http";
 import { getLlmKeyTester, getWorkspaceLlm } from "@/llm/shared";
+import { getNativeCatalog } from "@/native-providers/shared";
 import { withWorkspace } from "@/workspaces/access-runtime";
 import type { WorkspaceAccess } from "@/workspaces/access";
 import type { WorkspaceAction } from "@/workspaces/permissions";
@@ -32,6 +33,7 @@ async function run(
       createLlmKeyRouteHandlers({
         keys: getWorkspaceLlm().keyServiceFor(access.workspace.id),
         tester: getLlmKeyTester(),
+        catalog: getNativeCatalog(),
       }),
       access,
       provider,

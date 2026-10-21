@@ -435,6 +435,7 @@ every secret: at least 32 characters, no white space or control characters.
 | `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`, when the next sweep looks at it (**up to 2 hours later than the time itself**). 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
 | `OPERATOR_API_TOKEN` | optional | **yes** | Switches on the operator API (`/api/operator/v1`: workspaces, entitlements and limits, usage). Unset, the API does not exist (404). At least 32 characters, different from `RUNNER_TOKEN` and `APP_SECRET`. |
 | `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the catalog entries its projects select (else the instance default entry of the kind; section 3.5), and its token budget is cut to the window of that entry's model. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
+| `NATIVE_OPENCODE_PROVIDERS` | optional | no | `1`, `true` or `on` runs Dynamic reviews on OpenRouter and Anthropic through the native OpenCode path (#578, design #544): the claim carries the model entry and the price of the catalog. Default off (unset). Needs catalog models that are enabled with a confirmed price for the operator's key (admin catalog), and Worker images and runners that read `dynamic.modelEntry`. Read at every claim, so removing it takes effect on the next claim. |
 | `MODELS_DEV_URL`, `MODELS_DEV_FETCH` | optional | no | The model catalog (`app/src/models-dev/README.md`): the sweep reads the public models.dev catalog into the database once a day (when the last read is more than 23 hours old), so a new model needs no release. `MODELS_DEV_URL` names a mirror instead; `MODELS_DEV_FETCH=off` switches the read off (the catalog stays empty and nothing else changes). A failed or implausible read keeps the catalog it has; there is no cron of its own. |
 
 Not set in the project, on purpose:
@@ -596,7 +597,37 @@ the 404 of a path that does not exist (#497, ADR 0006). When billing is on and t
 - **A bad signature is `401` with an empty body**, a body the adapter cannot read `400`, a failure `500` (the provider
   redelivers). A signed event that is no event, and a payment that could not be credited (an unknown intent, an amount above what was asked), are answered `200` and not retried: watch the error log for `billing_webhook_event_invalid` and `billing_webhook_needs_review outcome=...`, and review the open rows of `billing_webhook_events` (`review_state = 'open'`). The logs name a code (`billing_webhook_rejected code=signature_invalid`) and never the body.
 
-Which events to register at the provider, and its signing secret, belong to its adapter (Stripe: #502).
+**Stripe (#502).** The route is the one webhook endpoint of the instance; you do not create it by hand. In the admin portal, menu
+**Billing**, "Create webhook endpoint" registers `https://<the App's production domain>/api/billing/webhook` at Stripe (the
+address is the configured `BETTER_AUTH_URL`, never a request header, and must be reachable from the internet over https) with
+the API version the App's calls use and these events, and stores the signing secret it gets back (an endpoint of the other
+environment than the API key's is refused):
+
+| Event | What the App does |
+|---|---|
+| `checkout.session.completed`, `checkout.session.async_payment_succeeded` | Credits the **net** amount of the top-up (the amount without VAT), once per payment, to the workspace of **our own intent row**; a delayed method that is not paid yet is waited for. |
+| `checkout.session.async_payment_failed`, `checkout.session.expired` | Marks the intent `failed` or `expired`. A payment that still arrives pays it. |
+| `refund.created`, `refund.updated`, `refund.failed` | Debits the share of the credit that the refund takes back (one event per refund), or reverses that debit once when the refund fails or is canceled. |
+| `charge.dispute.created`, `charge.dispute.funds_withdrawn` | Debits the disputed share (Stripe takes the money when a dispute opens). |
+| `charge.dispute.closed`, `charge.dispute.funds_reinstated` | A lost dispute stays debited; a won one is reversed once. |
+
+Anything else Stripe sends (for example `payment_intent.succeeded`, `charge.refunded` or `invoice.paid`) is answered `200` and
+recorded `ignored_type`: add no further event types to the endpoint. The signing secret is checked over the exact bytes of the
+body, within five minutes of the signature's time, and the same event id is never applied twice; make sure the clock of the
+servers is right. Nothing may rewrite the body in front of the route (a proxy that re-encodes JSON breaks every signature).
+An event of the other environment than the API key's (a test event at a live instance) is `400`. Stripe retries a `5xx` for
+up to three days (in the sandbox three times): the credit is idempotent per payment, so a retry never credits twice.
+
+**Check payment.** If a webhook is ever lost, an Owner or Admin of the workspace can press "Check payment" on a top-up
+(`POST /api/w/<workspace>/billing/top-ups/<id>/check`): the App asks Stripe for that Checkout Session, once, in that request, and
+applies the answer exactly as the webhook would have. A second press, or the webhook arriving late, changes nothing.
+
+**Outbound from the App when billing runs on Stripe (#501).** A top-up is the one place the App calls out: the App function
+reaches `api.stripe.com` over TLS (port 443; a few calls per top-up, 10 seconds at most per request, no redirect followed). On
+Vercel nothing needs to be opened; on a network with an egress allow list add `api.stripe.com`. The credentials are the Stripe
+key and webhook secret of the admin portal's Billing page, never an environment variable. Nothing is sent while billing is off
+or when the active adapter is `manual`. The buyer's business name, address and VAT ID go to Stripe and nowhere else.
+
 
 ## 4. First deployment, step by step
 

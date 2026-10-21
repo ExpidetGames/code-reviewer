@@ -56,10 +56,12 @@ afterEach(() => {
 });
 
 describe("the routes of the portal", () => {
-  it("are found on the file system: the pages of the sections, the settings route, the test mail route, the routes of the GitHub integration and the synchronization and the routes of the model catalog and of the models.dev catalog", () => {
+  it("are found on the file system: the pages of the sections, the settings route, the test mail route, the routes of the GitHub integration and the synchronization and the routes of the model catalog and of the models.dev catalog and the page and the routes of billing", () => {
     expect(adminRoutes.map(({ route }) => route).sort()).toEqual([
       "/admin",
       "/admin/approvals",
+      "/admin/billing",
+      "/admin/billing/reviews",
       "/admin/catalog",
       "/admin/integrations",
       "/admin/integrations/github",
@@ -73,6 +75,15 @@ describe("the routes of the portal", () => {
       "/admin/setup/sign-in",
       "/admin/setup/sign-up",
       "/api/admin/approvals/[id]",
+      "/api/admin/billing",
+      "/api/admin/billing/check",
+      "/api/admin/billing/reviews",
+      "/api/admin/billing/reviews/check",
+      "/api/admin/billing/reviews/resolve",
+      "/api/admin/billing/webhook-endpoint",
+      "/api/admin/billing/workspaces",
+      "/api/admin/billing/workspaces/[id]",
+      "/api/admin/billing/workspaces/[id]/credit",
       "/api/admin/catalog-fetch",
       "/api/admin/catalog-models",
       "/api/admin/catalog-models/enablement",

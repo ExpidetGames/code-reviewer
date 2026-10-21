@@ -10,6 +10,7 @@ import type { ReactElement } from "react";
 const state = vi.hoisted(() => ({
   managed: false,
   statusAll: vi.fn(),
+  nativeStatuses: vi.fn(),
 }));
 
 vi.mock("@/workspaces/access-runtime", () => ({
@@ -22,8 +23,21 @@ vi.mock("@/workspaces/access-runtime", () => ({
 vi.mock("@/llm/shared", () => ({
   getWorkspaceLlm: () => ({
     summaryFor: async () => ({ configured: true }),
-    keyServiceFor: () => ({ statusAll: state.statusAll }),
+    keyServiceFor: () => ({
+      statusAll: state.statusAll,
+      nativeStatuses: state.nativeStatuses,
+    }),
   }),
+}));
+// The catalog providers of Dynamic Review on the own key (#555): one offered provider, billing off, the default token cap.
+vi.mock("@/native-providers/shared", () => ({
+  getNativeCatalog: () => ({
+    providers: async () => [{ id: "deepseek", label: "DeepSeek" }],
+  }),
+}));
+vi.mock("@/billing/enabled", () => ({ isBillingOn: async () => false }));
+vi.mock("@/db/repositories/instance-settings-repository", () => ({
+  createInstanceSettingsRepository: () => ({ get: async () => undefined }),
 }));
 vi.mock("@/llm/ui/llm-access-notice", () => ({
   llmAccessAttention: () => null,
@@ -84,11 +98,49 @@ describe("the project settings page", () => {
     expect(state.statusAll).not.toHaveBeenCalled();
   });
 
+  // #555-T08
+  it("hands a workspace on the operator's key nothing of the catalog providers and does not read their keys", async () => {
+    state.managed = true;
+    state.nativeStatuses.mockResolvedValue([]);
+
+    const props = await renderedProps();
+
+    expect(props).not.toHaveProperty("nativeCatalog");
+    expect(state.nativeStatuses).not.toHaveBeenCalled();
+  });
+
   // #433-T11
   it("hands a workspace on its own key the providers that have a stored key", async () => {
     state.managed = false;
     state.statusAll.mockResolvedValue(OWN_OPENROUTER_KEY);
 
     expect((await renderedProps()).keyedProviders).toEqual(["openrouter"]);
+  });
+
+  // #555-T01
+  it("hands a workspace on its own key the catalog providers it holds a key for, and no other", async () => {
+    state.managed = false;
+    state.statusAll.mockResolvedValue([]);
+    const configured = (provider: string) => ({
+      provider,
+      status: {
+        state: "configured",
+        provider,
+        lastFour: null,
+        updatedAt: "2026-10-01T00:00:00.000Z",
+        updatedBy: null,
+      },
+    });
+    state.nativeStatuses.mockResolvedValue([
+      configured("deepseek"),
+      configured("not_offered"),
+    ]);
+
+    const props = await renderedProps();
+
+    expect(props.nativeCatalog).toMatchObject({
+      providers: [{ id: "deepseek", label: "DeepSeek", hasKey: true }],
+      billingOn: false,
+    });
   });
 });

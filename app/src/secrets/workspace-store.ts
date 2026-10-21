@@ -100,6 +100,8 @@ export type WorkspaceSecretStore = {
   use(name: WorkspaceSecretName): Promise<UseWorkspaceSecretResult>;
   /** Forgets the secret; false when there was none. */
   remove(name: WorkspaceSecretName): Promise<boolean>;
+  /** The names of the secrets the workspace holds (configured or not readable); never a value. */
+  names(): Promise<string[]>;
 };
 
 export type WorkspaceSecretStoreOptions = {
@@ -208,5 +210,7 @@ export function createWorkspaceSecretStore({
     },
 
     remove: (name) => rows.remove(name),
+
+    names: () => rows.names(),
   };
 }

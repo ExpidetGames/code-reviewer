@@ -10,6 +10,8 @@
 //                             { "signUp": { "kind": "everyone" | "emails" | "domains", "entries": [...] } }
 //                             { "signInMethods": { "emailPassword": boolean, "github": boolean } }
 //                             { "limits": { "maxWorkspacesPerUser": number } }
+//                             { "ownKeyTokenCap": number }   the most tokens a Dynamic run on a workspace's own key may use
+//                             when the price of its model is not known (#553; src/native-cost/token-cap.ts)
 //                             { "dynamicReview": { "enabled": boolean } }   the Dynamic Review rollout gate
 //                             (contracts/README.md: off cancels the waiting Dynamic jobs, running ones finish)
 //                             { "planManagementUrl": "https://..." | null }   the operator-configured page "Manage plan"
@@ -120,6 +122,7 @@ const SETTING_KEYS = [
   "signUp",
   "signInMethods",
   "limits",
+  "ownKeyTokenCap",
   "dynamicReview",
   "planManagementUrl",
   "smtp",
@@ -188,6 +191,8 @@ export function createAdminRouteHandlers({
             return service.changeSignUpRule(who.id, fields.signUp);
           case "signInMethods":
             return service.changeSignInMethods(who.id, fields.signInMethods);
+          case "ownKeyTokenCap":
+            return service.changeOwnKeyTokenCap(who.id, fields.ownKeyTokenCap);
           case "dynamicReview":
             return service.changeDynamicReview(who.id, fields.dynamicReview);
           case "planManagementUrl":

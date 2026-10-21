@@ -21,6 +21,7 @@ export function AdvancedSettingsPageContent({
   instanceAccess = null,
   canResetDefaults,
   showPlan = false,
+  showBilling = false,
   removeApi,
   resetApi,
 }: {
@@ -31,7 +32,12 @@ export function AdvancedSettingsPageContent({
    * Every registered provider and whether a workspace key of it is saved (nothing to remove otherwise). All of
    * them are listed, so a component that removed its key stays mounted to confirm it.
    */
-  keys: ReadonlyArray<{ provider: string; configured: boolean }>;
+  keys: ReadonlyArray<{
+    provider: string;
+    configured: boolean;
+    /** The name of a catalog provider (#555) as the catalog spells it; the registry's providers are named by the registry. */
+    label?: string;
+  }>;
   /**
    * Set when this instance provides the access of the workspace (its key mode is managed, `instanceAccessOf`): the
    * provider behind that access is not for the workspace to read, so no card names one. A key the workspace stored
@@ -42,6 +48,8 @@ export function AdvancedSettingsPageContent({
   canResetDefaults: boolean;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
+  /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
+  showBilling?: boolean;
   /** Only tests pass these. */
   removeApi?: LlmKeyApi;
   resetApi?: Pick<SettingsApi, "save">;
@@ -51,19 +59,20 @@ export function AdvancedSettingsPageContent({
       workspaceSlug={workspaceSlug}
       current="advanced"
       showPlan={showPlan}
+      showBilling={showBilling}
     >
       <div className="flex max-w-[64rem] flex-col gap-6">
         {canManageKey
           ? keys
               .filter(({ configured }) => instanceAccess === null || configured)
-              .map(({ provider, configured }) => (
+              .map(({ provider, configured, label }) => (
                 <RemoveWorkspaceKey
                   key={provider}
                   workspaceSlug={workspaceSlug}
                   provider={provider}
                   label={
                     instanceAccess === null
-                      ? llmProviderDescriptors.labelOf(provider)
+                      ? (label ?? llmProviderDescriptors.labelOf(provider))
                       : null
                   }
                   keyConfigured={configured}
