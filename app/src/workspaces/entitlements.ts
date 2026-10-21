@@ -114,6 +114,31 @@ function limited(
 }
 
 /**
+ * What a workspace without entitlements looks like to the code that wants a limited entry (the model selection of a managed
+ * job, #496): no limit, not suspended, every released catalog entry (no `modelAccess`). Billing on gives such a workspace the
+ * managed key mode, and the selection reads its model access from this shape.
+ */
+export function noLimits(
+  keyMode: KeyMode,
+): Extract<ResolvedEntitlements, { kind: "limited" }> {
+  return {
+    kind: "limited",
+    source: "default",
+    planLabel: "",
+    keyMode,
+    limits: {
+      diffRunsPerPeriod: null,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
+    },
+    periodStart: new Date(0).toISOString(),
+    suspended: false,
+    suspensionCode: null,
+  };
+}
+
+/**
  * The entitlements that apply to a workspace. A row of its own wins entirely, with no field-wise merge with
  * the default; without a row the default applies; with neither the workspace is unlimited, which is what an
  * instance that never configured any of this has always been: the own key, no limits, not suspended.
