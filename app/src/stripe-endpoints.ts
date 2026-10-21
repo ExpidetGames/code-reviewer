@@ -28,7 +28,7 @@ function isLoopbackHost(hostname: string): boolean {
 export function stripeApiBaseUrlOf(env: Env): string {
   if (env[ALLOW_TEST_STRIPE_ENDPOINTS_FLAG]?.trim() !== "true")
     return STRIPE_API_ADDRESS;
-  const text = env[STRIPE_API_BASE_URL_VARIABLE]?.trim();
+  const text = env.STRIPE_API_BASE_URL?.trim();
   if (!text) return STRIPE_API_ADDRESS;
   let url: URL;
   try {

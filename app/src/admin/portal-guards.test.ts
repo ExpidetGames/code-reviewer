@@ -105,7 +105,10 @@ describe("the guards of the admin portal", () => {
         !isInternalPortalPath(concretePath(route)) &&
         // A route of a workspace is not public: it runs through `withWorkspace` (the membership and the role of the
         // person), which `src/workspaces/guard-rule.test.ts` pins for every route below `/api/w/`. #501 adds the top-up.
-        !concretePath(route).startsWith("/api/w/"),
+        !concretePath(route).startsWith("/api/w/") &&
+        // A page of a workspace asks for the workspace itself, as the member it is for (`requireWorkspace`, the second guard of
+        // every page below `/w/`, pinned by `auth/protection.integration.test.ts`). #505 adds the billing page.
+        !concretePath(route).startsWith("/w/"),
     );
 
     // The signature checked by the active adapter is its credential (src/auth/access.ts); every page and data route of the
