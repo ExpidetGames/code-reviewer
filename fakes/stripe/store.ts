@@ -358,6 +358,8 @@ export function createStore(options: { now: () => number }) {
       sessionId: string,
       options: {
         taxAmount?: number;
+        /** A discount taken off the subtotal, in cents (a coupon or a promotion code). */
+        discountAmount?: number;
         charged?: { currency: string; amount: number };
       } = {},
     ): { session: FakeObject; paymentIntent: FakeObject; charge: FakeObject } {
@@ -370,7 +372,8 @@ export function createStore(options: { now: () => number }) {
           { param: "session" },
         );
       const tax = options.taxAmount ?? 0;
-      const total = (session.amount_subtotal as number) + tax;
+      const discount = options.discountAmount ?? 0;
+      const total = (session.amount_subtotal as number) - discount + tax;
       const amount = options.charged?.amount ?? total;
       const currency =
         options.charged?.currency ?? (session.currency as string);
@@ -399,10 +402,16 @@ export function createStore(options: { now: () => number }) {
       session.payment_intent = intent.id;
       session.amount_total = total;
       session.total_details = {
-        amount_discount: 0,
+        amount_discount: discount,
         amount_shipping: 0,
         amount_tax: tax,
       };
+      // Adaptive Pricing (API version 2025-03-31 and later): the session stays in our currency and says what the buyer paid.
+      if (options.charged !== undefined)
+        session.presentment_details = {
+          presentment_amount: options.charged.amount,
+          presentment_currency: options.charged.currency,
+        };
       session.url = null;
       emit("payment_intent.succeeded", intent, NO_REQUEST);
       emit("charge.succeeded", charge, NO_REQUEST);

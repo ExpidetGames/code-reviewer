@@ -35,21 +35,33 @@ export type TopUpLimits = {
 };
 
 export function topUpLimitKey(workspaceId: string, userId: string): string {
+  return personKey("billing-top-up", workspaceId, userId);
+}
+
+function personKey(prefix: string, workspaceId: string, userId: string) {
   const hash = createHash("sha256")
     .update(`${workspaceId}\n${userId}`, "utf8")
     .digest("hex");
-  return `billing-top-up:${hash}`;
+  return `${prefix}:${hash}`;
 }
 
-export function createTopUpLimits(
+type LimitSettings = {
+  keyOf: (workspaceId: string, userId: string) => string;
+  instanceKey: string;
+  personMax: number;
+  instanceMax: number;
+};
+
+function createLimits(
   rateLimits: RateLimitsRepository,
-  now: () => Date = () => new Date(),
+  now: () => Date,
+  { keyOf, instanceKey, personMax, instanceMax }: LimitSettings,
 ): TopUpLimits {
   return {
     async hit({ workspaceId, userId }) {
-      const personKey = topUpLimitKey(workspaceId, userId);
+      const personKey = keyOf(workspaceId, userId);
       const person = await rateLimits.hit(personKey, TOP_UP_REQUESTS_WINDOW_MS);
-      if (person.count > TOP_UP_REQUESTS_MAX)
+      if (person.count > personMax)
         return {
           allowed: false,
           scope: "person",
@@ -60,14 +72,13 @@ export function createTopUpLimits(
           ),
         };
       const instance = await rateLimits.hit(
-        TOP_UP_INSTANCE_LIMIT_KEY,
+        instanceKey,
         TOP_UP_REQUESTS_WINDOW_MS,
       );
-      if (instance.count <= TOP_UP_INSTANCE_REQUESTS_MAX)
-        return { allowed: true };
-      // A start the instance refuses did not happen: it does not use up the person's allowance, and not the instance's.
+      if (instance.count <= instanceMax) return { allowed: true };
+      // A request the instance refuses did not happen: it does not use up the person's allowance, and not the instance's.
       await rateLimits.refund(personKey);
-      await rateLimits.refund(TOP_UP_INSTANCE_LIMIT_KEY);
+      await rateLimits.refund(instanceKey);
       return {
         allowed: false,
         scope: "instance",
@@ -79,4 +90,39 @@ export function createTopUpLimits(
       };
     },
   };
+}
+
+export function createTopUpLimits(
+  rateLimits: RateLimitsRepository,
+  now: () => Date = () => new Date(),
+): TopUpLimits {
+  return createLimits(rateLimits, now, {
+    keyOf: topUpLimitKey,
+    instanceKey: TOP_UP_INSTANCE_LIMIT_KEY,
+    personMax: TOP_UP_REQUESTS_MAX,
+    instanceMax: TOP_UP_INSTANCE_REQUESTS_MAX,
+  });
+}
+
+/**
+ * The limit on "Check payment" (#502): every check asks Stripe for a session, so it is counted like a start but apart from it
+ * (a person who presses the button does not use up the allowance to start a top-up), per person and workspace and for the
+ * whole instance, in the same window.
+ */
+export const CHECK_PAYMENT_REQUESTS_MAX = 20;
+export const CHECK_PAYMENT_INSTANCE_REQUESTS_MAX = 300;
+export const CHECK_PAYMENT_INSTANCE_LIMIT_KEY =
+  "billing-check-payment:instance";
+
+export function createCheckPaymentLimits(
+  rateLimits: RateLimitsRepository,
+  now: () => Date = () => new Date(),
+): TopUpLimits {
+  return createLimits(rateLimits, now, {
+    keyOf: (workspaceId, userId) =>
+      personKey("billing-check-payment", workspaceId, userId),
+    instanceKey: CHECK_PAYMENT_INSTANCE_LIMIT_KEY,
+    personMax: CHECK_PAYMENT_REQUESTS_MAX,
+    instanceMax: CHECK_PAYMENT_INSTANCE_REQUESTS_MAX,
+  });
 }

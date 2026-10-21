@@ -6,7 +6,11 @@ import { createSecretStore } from "../secrets/store.ts";
 import { startTestStripe } from "../test-support/stripe-fake.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { StripeClientError } from "./stripe-client.ts";
-import { stripeClientFromSecrets } from "./stripe-credentials.ts";
+import {
+  stripeEnvironmentFromSecrets,
+  stripeClientFromSecrets,
+  stripeWebhookSecretFromSecrets,
+} from "./stripe-credentials.ts";
 
 const APP_SECRET = "stripe-credentials-test-app-secret-0123456789-0123";
 
@@ -63,5 +67,47 @@ describe("the Stripe client of the instance", () => {
     const error = await client().catch((caught: unknown) => caught);
 
     expect(String(error)).not.toContain("not_a_secret_key");
+  });
+});
+
+describe("the webhook secret and the environment of the instance", () => {
+  // #502-T04
+  it("reads the stored webhook secret, and null while there is none", async () => {
+    const t = await start();
+    const read = stripeWebhookSecretFromSecrets({ secrets: () => t.secrets });
+
+    expect(await read()).toBeNull();
+
+    await t.secrets.save("stripe_webhook_secret", "whsec_StoredValue00000", {
+      updatedBy: null,
+    });
+    expect(await read()).toBe("whsec_StoredValue00000");
+  });
+
+  // #502-T09
+  it("tells the environment from the prefix of the stored key, and null for no key or a key of no shape", async () => {
+    const t = await start();
+    const environment = stripeEnvironmentFromSecrets({
+      secrets: () => t.secrets,
+    });
+
+    expect(await environment()).toBeNull();
+
+    await t.secrets.save("stripe_api_key", "pk_test_not_a_secret_key_0000", {
+      updatedBy: null,
+    });
+    expect(await environment()).toBeNull();
+
+    await t.secrets.save("stripe_api_key", "sk_test_StoredValue0000000000", {
+      updatedBy: null,
+    });
+    expect(await environment()).toBe("test");
+
+    await t.secrets.save(
+      "stripe_api_key",
+      ["sk", "live", "StoredValue0000000000"].join("_"),
+      { updatedBy: null },
+    );
+    expect(await environment()).toBe("live");
   });
 });

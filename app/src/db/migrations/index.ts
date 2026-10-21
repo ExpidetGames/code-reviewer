@@ -63,6 +63,9 @@ import { migration as addBillingBalancesReservedIndex } from "./20261021120000_a
 import { migration as createBillingStartCreditGrants } from "./20261021150000_create_billing_start_credit_grants.ts";
 import { migration as widenJobVmRunsEndSource } from "./20261021090100_widen_job_vm_runs_end_source.ts";
 import { migration as createBillingProfiles } from "./20261021130000_create_billing_profiles.ts";
+import { migration as addBillingTopupIntentsProviderAmount } from "./20261021170000_add_billing_topup_intents_provider_amount.ts";
+import { migration as addBillingTopupIntentsProviderCurrency } from "./20261021190000_add_billing_topup_intents_provider_currency.ts";
+import { migration as addBillingWebhookEventsReviewContext } from "./20261021190100_add_billing_webhook_events_review_context.ts";
 import { migration as widenRefusalNoticeCodesForLimits } from "./20261021210000_widen_refusal_notice_codes_for_limits.ts";
 import { migration as createBillingWorkspaceSettings } from "./20261021210100_create_billing_workspace_settings.ts";
 import { migration as addLimitQueryIndexes } from "./20261021210200_add_limit_query_indexes.ts";
@@ -133,6 +136,12 @@ const migrations: Record<string, Migration> = {
   "20261021130000_create_billing_profiles": createBillingProfiles,
   "20261021150000_create_billing_start_credit_grants":
     createBillingStartCreditGrants,
+  "20261021170000_add_billing_topup_intents_provider_amount":
+    addBillingTopupIntentsProviderAmount,
+  "20261021190000_add_billing_topup_intents_provider_currency":
+    addBillingTopupIntentsProviderCurrency,
+  "20261021190100_add_billing_webhook_events_review_context":
+    addBillingWebhookEventsReviewContext,
   "20261021210000_widen_refusal_notice_codes_for_limits":
     widenRefusalNoticeCodesForLimits,
   "20261021210100_create_billing_workspace_settings":

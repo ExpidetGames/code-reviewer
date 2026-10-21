@@ -14,15 +14,23 @@
 //                 a provider field says maps a payment to a workspace. The intent row is locked, so every event about
 //                 one payment (its credit, its refunds, its disputes) is applied one after the other.
 //   3. order      a state of a refund or dispute that is older than the last one applied is `stale_ignored`.
-//   4. bound      a credit is at most the amount WE asked for (and at least the minimum top-up). A refund or dispute
-//                 arrives GROSS, in the provider's unit, with the amount of the whole payment (`netShareMicroUsd`:
-//                 `credited x amount / paymentAmount`, rounded down): the net share is what is debited. The intent
+//   4. bound      a credit is EXACTLY the amount WE asked for: the provider's net must equal the intent's amount (a
+//                 discount, a coupon or a different price all end as `amount_rejected`, never as a smaller or larger
+//                 credit). A refund or dispute arrives GROSS, in the provider's unit and currency, with the amount of
+//                 the whole payment (`netShareMicroUsd`: `credited x amount / paymentAmount`, rounded down): the net
+//                 share is what is debited, and only when its currency is the one the payment was pinned in (an amount
+//                 in another currency is no share of it: `amount_rejected`). The intent
 //                 keeps two running totals, of refunds and of disputes, and together they never exceed what the
 //                 payment credited (a check in the database too). Provider amounts are data: they never exceed our
 //                 own record, whatever the provider repeats or accumulates.
 //   5. write      a `top_up` keyed by the payment (D14: two events for one payment credit once); a `refund` or
 //                 `chargeback` keyed by the refund or dispute, even beyond the unspent balance (it goes negative and
 //                 blocks the workspace); a `correction` that reverses a debit once and gives its room back.
+//
+// A refund or dispute whose payment is not credited yet is not final: when the payment is one of our intents that is not
+// `paid` (or could be one that is still pending), the event is answered with a retry (`BillingEventRetryError`, the
+// transaction rolls back, nothing is claimed) so the provider delivers it again after the credit. One that belongs to
+// nothing of ours stays `intent_unresolved`.
 //
 // The outcome (a code, no payload) is recorded with the event id in the same transaction. An event that moved money (or
 // claimed to) and changed nothing (`BILLING_REVIEW_OUTCOMES`) is recorded for review; a signed event that is not a
@@ -57,7 +65,35 @@ export type ApplyResult = {
   needsReview: boolean;
 };
 
-type Handled = { outcome: BillingEventOutcome; workspaceId: string | null };
+type Handled = {
+  outcome: BillingEventOutcome;
+  workspaceId: string | null;
+  /** The intent the event was attributed to, for the review of the event; absent when it could not be. */
+  intentId?: string;
+};
+
+/** The codes of a retry the provider is asked for: the event is not final and must be delivered again. */
+export const BILLING_RETRY_CODES = ["credit_pending"] as const;
+export type BillingRetryCode = (typeof BILLING_RETRY_CODES)[number];
+
+/**
+ * Thrown by `applyBillingEvent` (after the transaction rolled back, nothing claimed) for an event that has to wait for
+ * something that is on its way: the credit of the payment a refund or a dispute belongs to. The handler answers it 503.
+ */
+export class BillingEventRetryError extends Error {
+  readonly code: BillingRetryCode;
+  constructor(code: BillingRetryCode, message: string) {
+    super(message);
+    this.name = "BillingEventRetryError";
+    this.code = code;
+  }
+}
+
+/**
+ * How long a top-up that was started and not paid can still be the payment of a refund or dispute we cannot place: the
+ * provider redelivers for three days, and a checkout is open for a day (a delayed method takes a few more).
+ */
+const PENDING_TOP_UP_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 type Context = {
   trx: Kysely<Database>;
@@ -79,6 +115,8 @@ function orderOf(event: BillingEvent): {
 } {
   // A payment has no states to order; its reference is what a review of the event names.
   if (event.type === "payment.succeeded")
+    return { subject: `payment:${event.payment}`, occurredAt: null };
+  if (event.type === "payment.refused" && event.payment !== null)
     return { subject: `payment:${event.payment}`, occurredAt: null };
   if (event.type === "refund.updated")
     return { subject: `refund:${event.refund}`, occurredAt: event.occurredAt };
@@ -146,12 +184,13 @@ async function paymentSucceeded(
   if (intent === undefined) return unresolved;
   const workspaceId = intent.workspaceId;
 
-  // The provider's amount is data. The credit is at most what we asked for and at least the smallest top-up.
+  // The provider's amount is data. The credit is what we asked for, no more and no less: a payment of another net amount
+  // (a discount, a coupon, a price we did not set) is not the top-up the buyer started, and an operator decides.
   if (
     event.creditable < TOP_UP_MIN_MICRO_USD ||
-    event.creditable > intent.amountMicroUsd
+    event.creditable !== intent.amountMicroUsd
   )
-    return { outcome: "amount_rejected", workspaceId };
+    return { outcome: "amount_rejected", workspaceId, intentId: intent.id };
 
   const journal = createBillingJournalRepository(
     context.trx,
@@ -174,7 +213,7 @@ async function paymentSucceeded(
       error instanceof BillingJournalError &&
       error.code === "idempotency_conflict"
     )
-      return { outcome: "amount_conflict", workspaceId };
+      return { outcome: "amount_conflict", workspaceId, intentId: intent.id };
     throw error;
   }
   await createBillingTopUpIntentsRepository(
@@ -183,10 +222,20 @@ async function paymentSucceeded(
     context.now,
   ).markPaid(intent.id, {
     creditedMicroUsd: event.creditable,
+    ...(event.providerAmount === undefined
+      ? {}
+      : { providerAmount: event.providerAmount }),
+    ...(event.providerCurrency === undefined
+      ? {}
+      : { providerCurrency: event.providerCurrency }),
     paymentRef: event.payment,
     ...(event.checkout === null ? {} : { checkoutRef: event.checkout }),
   });
-  return { outcome: created ? "applied" : "duplicate_ignored", workspaceId };
+  return {
+    outcome: created ? "applied" : "duplicate_ignored",
+    workspaceId,
+    intentId: intent.id,
+  };
 }
 
 /** The end of a payment that did not happen: `failed` (it was refused) or `expired` (nobody paid the checkout). */
@@ -207,6 +256,29 @@ async function paymentEnded(
   return {
     outcome: change?.changed === true ? "applied" : "duplicate_ignored",
     workspaceId: intent.workspaceId,
+    intentId: intent.id,
+  };
+}
+
+/**
+ * The adapter read a payment that contradicts what we asked for: nothing is credited, an operator looks. The intent it
+ * names (when it does, and the payment agrees) says whose payment it is on the review; nothing is changed on it.
+ */
+async function paymentRefused(
+  context: Context,
+  event: Extract<BillingEvent, { type: "payment.refused" }>,
+): Promise<Handled> {
+  const intent = await resolveIntent(context, {
+    payment: event.payment,
+    checkout: null,
+    intentId: event.intentId ?? null,
+  });
+  if (intent === undefined)
+    return { outcome: "amount_rejected", workspaceId: null };
+  return {
+    outcome: "amount_rejected",
+    workspaceId: intent.workspaceId,
+    intentId: intent.id,
   };
 }
 
@@ -220,8 +292,31 @@ async function paymentReversal(
     checkout: null,
     intentId: null,
   });
-  // Nothing was credited for this payment (yet): a redelivery after the credit applies it.
-  if (intent === undefined || intent.state !== "paid") return unresolved;
+  // A payment of one of our intents that is not credited yet (its `checkout.session.completed` is late or was refused for a
+  // retry): the provider must deliver this event again after the credit, or the credit would stand beside a payment that
+  // was taken back. The same for a payment we cannot place while a top-up of ours is still waiting for its payment: it may
+  // be that one. Nothing is claimed (the transaction rolls back) so the redelivery is applied, not seen.
+  if (intent !== undefined && intent.state !== "paid")
+    throw new BillingEventRetryError(
+      "credit_pending",
+      "the payment is not credited yet",
+    );
+  if (intent === undefined) {
+    const since = formatTimestamp(
+      new Date(context.now().getTime() - PENDING_TOP_UP_WINDOW_MS),
+    );
+    if (
+      await createBillingTopUpIntentDirectory(
+        context.trx,
+      ).hasPendingWithoutPayment(context.provider, since)
+    )
+      throw new BillingEventRetryError(
+        "credit_pending",
+        "a top-up that could be the payment is waiting for its credit",
+      );
+    // Nothing of ours: a payment made elsewhere on a shared account. Final, and flagged for an operator.
+    return unresolved;
+  }
   const workspaceId = intent.workspaceId;
 
   const { subject, occurredAt } = orderOf(event);
@@ -234,7 +329,7 @@ async function paymentReversal(
       occurredAt,
     ))
   )
-    return { outcome: "stale_ignored", workspaceId };
+    return { outcome: "stale_ignored", workspaceId, intentId: intent.id };
 
   const isRefund = event.type === "refund.updated";
   const type = isRefund ? "refund" : "chargeback";
@@ -255,13 +350,35 @@ async function paymentReversal(
   );
 
   if (takesMoney) {
+    // An amount in another currency than the charge is no share of it, whatever it says (a full refund in euros of a payment
+    // pinned in dollars would otherwise be taken for "less than all of it"). A provider that names no currency is not judged.
+    if (
+      event.currency !== undefined &&
+      event.currency !== intent.providerCurrency
+    )
+      return { outcome: "amount_rejected", workspaceId, intentId: intent.id };
+
+    // The total of the payment: the one the event carries, or else the one pinned when the payment was credited (a Stripe
+    // refund names only its own amount). Both, when they differ, are a provider that contradicts itself.
+    const pinned = intent.providerAmount;
+    if (
+      event.paymentAmount !== undefined &&
+      pinned !== null &&
+      event.paymentAmount !== pinned
+    )
+      return { outcome: "amount_conflict", workspaceId, intentId: intent.id };
+    const paymentAmount = event.paymentAmount ?? pinned;
+    if (paymentAmount === null || paymentAmount === undefined)
+      return { outcome: "amount_rejected", workspaceId, intentId: intent.id };
+
     // The net share of what the payment credited, never more than the payment gave: the provider's amounts are gross.
     const net = netShareMicroUsd({
       credited: intent.creditedMicroUsd,
       amount: event.amount,
-      paymentAmount: event.paymentAmount,
+      paymentAmount,
     });
-    if (net === undefined) return { outcome: "amount_rejected", workspaceId };
+    if (net === undefined)
+      return { outcome: "amount_rejected", workspaceId, intentId: intent.id };
 
     // The debit of this refund or dispute exists already (a pending refund that is now approved, an opened dispute that
     // is now lost): it counts once.
@@ -273,6 +390,7 @@ async function paymentReversal(
             ? "duplicate_ignored"
             : "amount_conflict",
         workspaceId,
+        intentId: intent.id,
       };
 
     // Refunds and disputes of one payment together never debit more than it credited.
@@ -280,7 +398,7 @@ async function paymentReversal(
       intent.refundedMicroUsd + intent.disputedMicroUsd + net >
       intent.creditedMicroUsd
     )
-      return { outcome: "amount_rejected", workspaceId };
+      return { outcome: "amount_rejected", workspaceId, intentId: intent.id };
     try {
       const { created } = await journal.append({
         type,
@@ -296,20 +414,21 @@ async function paymentReversal(
       return {
         outcome: created ? "applied" : "duplicate_ignored",
         workspaceId,
+        intentId: intent.id,
       };
     } catch (error) {
       if (
         error instanceof BillingJournalError &&
         error.code === "idempotency_conflict"
       )
-        return { outcome: "amount_conflict", workspaceId };
+        return { outcome: "amount_conflict", workspaceId, intentId: intent.id };
       throw error;
     }
   }
 
   const original = await journal.findByKey(type, ref);
   if (original === undefined)
-    return { outcome: "nothing_to_reverse", workspaceId };
+    return { outcome: "nothing_to_reverse", workspaceId, intentId: intent.id };
   try {
     const { created } = await journal.append({
       type: "correction",
@@ -323,13 +442,17 @@ async function paymentReversal(
     // The room the debit took is free again.
     if (created)
       await intents.addDebited(intent.id, bucket, original.amountMicroUsd);
-    return { outcome: created ? "applied" : "duplicate_ignored", workspaceId };
+    return {
+      outcome: created ? "applied" : "duplicate_ignored",
+      workspaceId,
+      intentId: intent.id,
+    };
   } catch (error) {
     if (
       error instanceof BillingJournalError &&
       error.code === "already_reversed"
     )
-      return { outcome: "duplicate_ignored", workspaceId };
+      return { outcome: "duplicate_ignored", workspaceId, intentId: intent.id };
     throw error;
   }
 }
@@ -338,6 +461,8 @@ function handle(context: Context, event: BillingEvent): Promise<Handled> {
   switch (event.type) {
     case "ignored":
       return Promise.resolve({ outcome: "ignored_type", workspaceId: null });
+    case "payment.refused":
+      return paymentRefused(context, event);
     case "payment.succeeded":
       return paymentSucceeded(context, event);
     case "payment.failed":
@@ -353,6 +478,7 @@ function handle(context: Context, event: BillingEvent): Promise<Handled> {
 function movesMoney(event: BillingEvent): boolean {
   return (
     event.type === "payment.succeeded" ||
+    event.type === "payment.refused" ||
     event.type === "refund.updated" ||
     event.type === "dispute.updated"
   );
@@ -448,6 +574,7 @@ export async function applyBillingEvent(
       handled.outcome,
       orderOf(event),
       needsReview,
+      { workspaceId: handled.workspaceId, intentId: handled.intentId ?? null },
     );
     return { ...handled, needsReview };
   });

@@ -165,6 +165,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]",
   "/api/w/[workspace]/billing/monthly-limit",
   "/api/w/[workspace]/billing/top-ups",
+  "/api/w/[workspace]/billing/top-ups/[id]/check",
   "/api/w/[workspace]/github/connect",
   "/api/w/[workspace]/github/installations",
   "/api/w/[workspace]/github/installations/choose",

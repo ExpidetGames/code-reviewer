@@ -371,6 +371,20 @@ const ENTRIES: Entry[] = [
     billing: true,
   },
   {
+    // #502-T15: "Check payment" is for an Admin and an Owner. The intent of the address is looked up in the workspace of the
+    // address only (a foreign intent is `intent_not_found`, proven in src/billing/topup-check-http.integration.test.ts); here the
+    // intent does not exist, so the answer at the right role is 404 `intent_not_found` and Stripe is never called.
+    name: "POST billing/top-ups/[id]/check",
+    route: "/api/w/[workspace]/billing/top-ups/[id]/check",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/top-ups/no-such-intent/check",
+    params: () => ({ id: "no-such-intent" }),
+    file: "billing/top-ups/[id]/check/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
     name: "PATCH workspace",
     route: "/api/w/[workspace]",
     method: "PATCH",

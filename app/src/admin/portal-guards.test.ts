@@ -119,9 +119,11 @@ describe("the guards of the admin portal", () => {
         concretePath(route).startsWith("/api/w/"),
     );
 
+    // Changed with #502 and #499: "Check payment" and the monthly limit are billing routes of a workspace, and they pass the same guard.
     expect(routes.map(({ route }) => concretePath(route)).sort()).toEqual([
       "/api/w/x/billing/monthly-limit",
       "/api/w/x/billing/top-ups",
+      "/api/w/x/billing/top-ups/x/check",
     ]);
     for (const { route, file } of routes)
       expect(readFileSync(file, "utf8"), route).toMatch(

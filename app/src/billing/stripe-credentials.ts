@@ -11,9 +11,11 @@ import {
   createStripeClient,
   stripeKeyEnvironment,
   type StripeClient,
+  type StripeEnvironment,
 } from "./stripe-client.ts";
 
 const STRIPE_API_KEY = "stripe_api_key";
+const STRIPE_WEBHOOK_SECRET = "stripe_webhook_secret";
 
 export function stripeClientFromSecrets({
   secrets,
@@ -32,5 +34,32 @@ export function stripeClientFromSecrets({
     if (environment === null)
       throw new StripeClientError("environment_mismatch");
     return createStripeClient({ apiKey, baseUrl, environment });
+  };
+}
+
+/** The signing secret of the webhook endpoint the admin stored (#504), read when a webhook arrives; null while there is none. */
+export function stripeWebhookSecretFromSecrets({
+  secrets,
+}: {
+  secrets: () => SecretStore;
+}): () => Promise<string | null> {
+  return async () => {
+    const secret = await secrets().use(STRIPE_WEBHOOK_SECRET);
+    return secret.ok ? secret.value.reveal() : null;
+  };
+}
+
+/**
+ * The environment of the stored API key, from its prefix alone (the key is read, looked at and forgotten): the environment
+ * whose events the webhook and "Check payment" accept. Null while there is no key or it is of no shape.
+ */
+export function stripeEnvironmentFromSecrets({
+  secrets,
+}: {
+  secrets: () => SecretStore;
+}): () => Promise<StripeEnvironment | null> {
+  return async () => {
+    const key = await secrets().use(STRIPE_API_KEY);
+    return key.ok ? stripeKeyEnvironment(key.value.reveal()) : null;
   };
 }

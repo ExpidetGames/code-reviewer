@@ -492,7 +492,9 @@ tables and touches no existing row:
   for, a check `> 0`; `state`, a check of `pending`/`paid`/`failed`/`expired`; `provider_checkout_ref` and
   `provider_payment_ref`, opaque provider ids, null until known; `credited_micro_usd`, what the payment credited (net), 0
   until paid, and `refunded_micro_usd` and `disputed_micro_usd`, the running totals of what refunds and disputes took
-  back of it, with a check that neither is negative and that together they never exceed the credit; `created_at`,
+  back of it, with a check that neither is negative and that together they never exceed the credit; `provider_amount` and
+  `provider_currency`, what the buyer was charged (gross, in the provider's unit) and in which lower case ISO 4217 currency,
+  pinned when the payment is credited and null before (added by #502: `20261021170000` and `20261021190000`); `created_at`,
   `updated_at`). Unique per adapter on each
   of the two refs (NULLs do not collide), so one payment or checkout belongs to one intent. Written before any checkout
   exists; the only way a payment reaches a workspace. **Workspace scoped**
@@ -501,7 +503,8 @@ tables and touches no existing row:
 - `billing_webhook_events` (primary key `(provider, event_id)`; `outcome`; `subject` and `occurred_at`, which order the
   states of one refund or dispute, or name the payment of a payment event; `received_at`; `review_state`, `open` for an
   event an operator must review (a payment nobody could credit, a refund that could not be debited, a signed event that
-  is no event) and `resolved` once it was, null otherwise). The first idempotency layer: an id, an outcome and an order, **no
+  is no event) and `resolved` once it was, null otherwise; `workspace_id` and `intent_id`, two ids of our own, when the event
+  could be attributed to one of our intents, else null (#502)). The first idempotency layer: an id, an outcome and an order, **no
   payload, no amount, no name**, so it is instance level (`billing-webhook-events-repository.ts`). Not pruned yet.
 
 The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
