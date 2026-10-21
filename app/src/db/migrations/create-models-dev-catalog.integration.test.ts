@@ -23,6 +23,7 @@ const LATER_TABLES = [
   "billing_profiles",
   "billing_start_credit_grants",
   "billing_workspace_settings",
+  "billing_notifications",
 ];
 
 const beforeThisMigration: MigrationProvider = {
