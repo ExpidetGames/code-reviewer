@@ -6,7 +6,7 @@
 // and its final-call exemption are untouched).
 //
 // - The brake counts the reviews the workspace started in the last 60 minutes (usage records by `reserved_at`, every state: a
-//   review that was cancelled or replaced did start) and refuses `hourly_review_limit` once the instance's number is reached.
+//   review that was cancelled or replaced did start) and refuses `reviews_paused` once the instance's number is reached.
 //   The number is an instance setting (#504, default 60); nothing here, in a log or in a notice says what it is or how long
 //   the window is.
 // - The monthly limit is the customer's own, optional, null by default. A claim is refused `monthly_limit_reached` when the
@@ -38,7 +38,7 @@ const BRAKE_WINDOW_MS = 60 * 60 * 1000;
 
 /** The codes a claim is refused with by the limits; each is a `JobErrorCode`. */
 export const CLAIM_CAP_REFUSALS = [
-  "hourly_review_limit",
+  "reviews_paused",
   "monthly_limit_reached",
   "billing_limits_unreadable",
 ] as const;
@@ -79,7 +79,7 @@ async function evaluate(
     () => current,
   ).startedSince(brakeWindowStart(current), { exceptJobId: job.id });
   if (started >= input.hourlyReviewLimit)
-    return { ok: false, code: "hourly_review_limit" };
+    return { ok: false, code: "reviews_paused" };
 
   const limit = await createBillingWorkspaceSettingsRepository(
     trx,

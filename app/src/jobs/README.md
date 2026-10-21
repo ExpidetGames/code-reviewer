@@ -190,7 +190,7 @@ from `jobQueueFor` (`src/dispatch/producers.test.ts`).
 **Billing (#498).** After the admission and before the record, `claimNext` takes the hold of the job from the balance of its workspace while billing
 is on, or fails the job with `insufficient_balance`, `balance_negative` or `billing_rates_incomplete` (no attempt, no record, no entry, a notice on
 the pull request for the first two). **#499:** before the balance, while billing is on, the claim also checks the hidden hourly brake and the workspace's monthly
-total limit and fails the job with `hourly_review_limit` or `monthly_limit_reached` (a notice on the pull request for both), or with
+total limit and fails the job with `reviews_paused` or `monthly_limit_reached` (a notice on the pull request for both), or with
 `billing_limits_unreadable` when it could not evaluate them (no notice); the plan run quotas of the entitlements are not enforced then
 (`src/billing/README.md`, "Limits at claim"). Every transaction below that ends a job, or ends its record, settles the hold in the same transaction
 (`src/billing/README.md`, "Reserve, settle, release"): `complete`, the expiry of leases and runtimes, `release` on the last attempt, `cancelClaimed`,

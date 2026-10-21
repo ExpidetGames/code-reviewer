@@ -25,7 +25,7 @@ import {
 /**
  * The refusals that get a notice. The others (`entitlements_invalid`, `llm_not_configured`, `billing_rates_incomplete`: the
  * operator's side, and `billing_limits_unreadable`) do not. `insufficient_balance` and `balance_negative` (#498) are the
- * balance's, `monthly_limit_reached` and `hourly_review_limit` (#499) the limits': keep the check on `refusal_notices.code`
+ * balance's, `monthly_limit_reached` and `reviews_paused` (#499) the limits': keep the check on `refusal_notices.code`
  * (migrations `20261021090000_widen_refusal_notice_codes` and `20261021190000_widen_refusal_notice_codes_for_limits`) in step
  * with this list.
  */
@@ -35,7 +35,7 @@ export const NOTICE_CODES = [
   "insufficient_balance",
   "balance_negative",
   "monthly_limit_reached",
-  "hourly_review_limit",
+  "reviews_paused",
 ] as const;
 export type NoticeCode = (typeof NOTICE_CODES)[number];
 
@@ -57,7 +57,7 @@ export function isBalanceNoticeCode(code: NoticeCode): boolean {
 export function noticeLinkKind(code: NoticeCode): "settings" | "plan" | "none" {
   if (isBalanceNoticeCode(code) || code === "monthly_limit_reached")
     return "settings";
-  return code === "hourly_review_limit" ? "none" : "plan";
+  return code === "reviews_paused" ? "none" : "plan";
 }
 
 export function isNoticeCode(code: string): code is NoticeCode {
@@ -86,11 +86,11 @@ const REASON_OF: Record<NoticeCode, string> = {
   insufficient_balance: NOTICE_INSUFFICIENT_BALANCE,
   balance_negative: NOTICE_BALANCE_NEGATIVE,
   monthly_limit_reached: NOTICE_MONTHLY_LIMIT_REACHED,
-  hourly_review_limit: NOTICE_REVIEWS_PAUSED_FOR_A_WHILE,
+  reviews_paused: NOTICE_REVIEWS_PAUSED_FOR_A_WHILE,
 };
 
 function whoCanAct(code: NoticeCode, link: string | null): string {
-  if (code === "hourly_review_limit") return NOTICE_TRY_AGAIN_LATER;
+  if (code === "reviews_paused") return NOTICE_TRY_AGAIN_LATER;
   if (code === "monthly_limit_reached")
     return link === null
       ? NOTICE_MONTHLY_LIMIT_WHO

@@ -104,7 +104,7 @@ have no notice: they are the operator's side. The check of `refusal_notices.code
 
 ## The limits (#499)
 
-A job the claim refuses for the workspace's own monthly total limit (`monthly_limit_reached`) or for the hidden hourly brake (`hourly_review_limit`)
+A job the claim refuses for the workspace's own monthly total limit (`monthly_limit_reached`) or for the hidden hourly brake (`reviews_paused`)
 gets a notice too, keyed by the head like the balance's (`head:<commit id>`). The monthly limit's text is "The monthly spending limit of this workspace
 was reached." and who can change it: with a link to the workspace settings (`settingsUrl`) "An Owner or Admin of this workspace can change it on the
 workspace settings", without one "An Owner or Admin of this workspace can change it." The brake's text is "Reviews are paused for this workspace for a

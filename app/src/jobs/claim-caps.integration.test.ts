@@ -8,6 +8,9 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
+import { describeCheck } from "../check-runs/check-text.ts";
+import { noticeBody } from "../refusal-notices/notice-text.ts";
+import { toRunDetailView, toRunRowView } from "../runs/run-view.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
@@ -420,7 +423,7 @@ describe.each(databases)(
           });
           expect(await fixture.queue.get(fourth.id)).toMatchObject({
             status: "failed",
-            errorCode: "hourly_review_limit",
+            errorCode: "reviews_paused",
           });
           expect(
             (await usageRecords(fixture)).filter(
@@ -433,10 +436,59 @@ describe.each(databases)(
           expect(refusals).toEqual([
             expect.objectContaining({
               jobId: fourth.id,
-              errorCode: "hourly_review_limit",
+              errorCode: "reviews_paused",
               periodStart: `head:${fourth.headSha}`,
             }),
           ]);
+        },
+      );
+
+      // #499-T13
+      run(
+        "stores a neutral code for the refused job and shows the customer neither the window, nor the number, nor the code",
+        async () => {
+          const fixture = await start({ hourlyReviewLimit: 37 });
+          for (let started = 0; started < 37; started += 1) {
+            fixture.clock.advance(1);
+            const old = await fixture.seedHistoricalJob({
+              command: "review",
+              prNumber: 2_000 + started,
+            });
+            await createUsageRecordsRepository(
+              fixture.db,
+              fixture.workspaceId,
+              fixture.clock.now,
+            ).reserve(old.id, "own");
+          }
+          const refused = await enqueue(fixture);
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+          const stored = await fixture.queue.get(refused.id);
+
+          expect(stored).toMatchObject({
+            status: "failed",
+            errorCode: "reviews_paused",
+          });
+          if (stored === null) throw new Error("the refused job is missing");
+          const check = describeCheck({
+            status: "failed",
+            errorCode: stored.errorCode,
+            commentUrl: null,
+            findings: null,
+            stoppedEarly: null,
+          });
+          const detail = toRunDetailView(stored, "p", fixture.clock.now());
+          const row = toRunRowView(stored, "p", fixture.clock.now());
+          const customerSees = JSON.stringify([
+            check,
+            detail,
+            row,
+            noticeBody("reviews_paused", `head:${stored.headSha}`, null),
+          ]);
+
+          expect(detail.errorCode).toBeNull();
+          expect(customerSees).not.toMatch(/hour|brake|window|37|60|minute/i);
+          expect(customerSees).not.toContain("reviews_paused");
+          expect(customerSees).toContain("Reviews are paused");
         },
       );
 
@@ -461,7 +513,7 @@ describe.each(databases)(
 
           expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
           expect((await fixture.queue.get(sixtyFirst.id))?.errorCode).toBe(
-            "hourly_review_limit",
+            "reviews_paused",
           );
         },
       );
@@ -500,7 +552,7 @@ describe.each(databases)(
         const insideTheHour = await enqueue(fixture);
         expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
         expect((await fixture.queue.get(insideTheHour.id))?.errorCode).toBe(
-          "hourly_review_limit",
+          "reviews_paused",
         );
 
         // ... and over an hour after both, neither does.
@@ -529,7 +581,7 @@ describe.each(databases)(
           expect(fixture.clock.now().getTime()).toBe(startedAt + HOUR - 1);
           expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
           expect((await fixture.queue.get(inside.id))?.errorCode).toBe(
-            "hourly_review_limit",
+            "reviews_paused",
           );
 
           // And this one at exactly startedAt + HOUR: the first start is exactly an hour old, so it no longer counts.
@@ -559,7 +611,7 @@ describe.each(databases)(
 
         expect(answer).toBeNull();
         expect((await fixture.queue.get(newer.id))?.errorCode).toBe(
-          "hourly_review_limit",
+          "reviews_paused",
         );
       });
 
@@ -645,7 +697,7 @@ describe.each(databases)(
 
         expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
         expect((await fixture.queue.get(second.id))?.errorCode).toBe(
-          "hourly_review_limit",
+          "reviews_paused",
         );
         expect(first.id).not.toBe(second.id);
       });

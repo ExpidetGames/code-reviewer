@@ -2,7 +2,7 @@
 
 // #499: a review refused for the monthly total limit or the hourly abuse brake gets a notice on its pull request, like the
 // balance (#498), so the check on `refusal_notices.code` takes two more codes: `monthly_limit_reached` and
-// `hourly_review_limit`. The list is `NOTICE_CODES` in the code.
+// `reviews_paused`. The list is `NOTICE_CODES` in the code.
 //
 // Postgres replaces the constraint. SQLite cannot change a check in place, and cannot drop a column a check names, so the
 // table is rebuilt: a new one with the wider check gets every row, the old one is dropped (with its indexes) and the new one
@@ -17,7 +17,7 @@ import { databaseDriver } from "../driver.ts";
 
 const OLD_CODES =
   "'quota_exhausted', 'workspace_suspended', 'insufficient_balance', 'balance_negative'";
-const NEW_CODES = `${OLD_CODES}, 'monthly_limit_reached', 'hourly_review_limit'`;
+const NEW_CODES = `${OLD_CODES}, 'monthly_limit_reached', 'reviews_paused'`;
 
 async function createIndexes(db: Parameters<Migration["up"]>[0]) {
   await db.schema
@@ -108,7 +108,7 @@ export const migration: Migration = {
   async down(db) {
     // Notices of the limits have no place in the narrower check: they are dropped, as the dedupe row of a refusal is only a
     // record that a comment was posted.
-    await sql`delete from refusal_notices where code in ('monthly_limit_reached', 'hourly_review_limit')`.execute(
+    await sql`delete from refusal_notices where code in ('monthly_limit_reached', 'reviews_paused')`.execute(
       db,
     );
     if (databaseDriver(db) === "postgres")

@@ -160,7 +160,7 @@ export const JOB_ERROR_CODES = [
   /** Failed at claim because this month's charges plus the hold would pass the workspace's own monthly limit (#499). */
   "monthly_limit_reached",
   /** Failed at claim by the hidden abuse brake: too many reviews of the workspace started in the last hour (#499). */
-  "hourly_review_limit",
+  "reviews_paused",
   /** Failed at claim because the monthly limit or the brake could not be evaluated: closed for this job, never open (#499). */
   "billing_limits_unreadable",
 ] as const;

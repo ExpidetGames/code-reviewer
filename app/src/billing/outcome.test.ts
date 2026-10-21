@@ -139,7 +139,7 @@ describe("the class of a run's end", () => {
     ["billing_rates_incomplete", "free"],
     ["billing_hold_released", "free"],
     ["monthly_limit_reached", "free"],
-    ["hourly_review_limit", "free"],
+    ["reviews_paused", "free"],
     ["billing_limits_unreadable", "free"],
     ["runner_error", "free"],
     ["invalid_job", "free"],

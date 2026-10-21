@@ -207,7 +207,7 @@ describe("the notice of the hidden hourly brake (#499)", () => {
 
   // #499-T06
   it("says that reviews are paused for a while and never the number, the window or that it counts anything", () => {
-    const text = visible(noticeBody("hourly_review_limit", HEAD, null));
+    const text = visible(noticeBody("reviews_paused", HEAD, null));
 
     expect(text).toContain("No review ran for this change.");
     expect(text).toContain(
@@ -225,7 +225,7 @@ describe("the notice of the hidden hourly brake (#499)", () => {
   it("points to no page, because nobody in the workspace can lift it, even when it is given a link", () => {
     const text = visible(
       noticeBody(
-        "hourly_review_limit",
+        "reviews_paused",
         HEAD,
         "https://app.example/w/acme/settings",
       ),
@@ -237,7 +237,7 @@ describe("the notice of the hidden hourly brake (#499)", () => {
 
   // #499-T06
   it("keys the hidden marker on the head, like the balance", () => {
-    const body = noticeBody("hourly_review_limit", HEAD, null);
+    const body = noticeBody("reviews_paused", HEAD, null);
 
     expect(hasNoticeMarker(body, HEAD)).toBe(true);
     expect(hasNoticeMarker(body, "head:fedcba98")).toBe(false);

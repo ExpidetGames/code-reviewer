@@ -788,7 +788,7 @@ describe("the refusal for the monthly limit and the hidden brake (#499)", () => 
 
     expect(await h.queue.get(job.id)).toMatchObject({
       status: "failed",
-      errorCode: "hourly_review_limit",
+      errorCode: "reviews_paused",
     });
     expect(comments(h)).toHaveLength(1);
     const body = comments(h)[0]?.body ?? "";

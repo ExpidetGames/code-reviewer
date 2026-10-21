@@ -547,7 +547,7 @@ ids and a time only: no login, no name, no address. See `src/billing/README.md`,
 
 Three forward-only migrations, the same on SQLite and Postgres, none of which touches an existing row, so the release that is still running is not affected while
 they run. `20261021190000_widen_refusal_notice_codes_for_limits` replaces the check on `refusal_notices.code` (Postgres) or rebuilds the table with the wider check
-(SQLite, like #498) so it takes `monthly_limit_reached` and `hourly_review_limit`; its `down` deletes the notices of those two codes first.
+(SQLite, like #498) so it takes `monthly_limit_reached` and `reviews_paused`; its `down` deletes the notices of those two codes first.
 `20261021190100_create_billing_workspace_settings` adds `billing_workspace_settings`: `workspace_id` (primary key → `workspaces.id`, so at most one row per
 workspace; a workspace without a row has no limit), `monthly_limit_micro_usd` (`bigint` on Postgres, 64 bit `integer` on SQLite; null or positive, checked),
 `updated_by` (→ `users.id`, set null when the user is deleted) and `updated_at`. **Customer data, workspace scoped** (`billing-workspace-settings-repository.ts`,

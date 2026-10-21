@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // #499: a review refused for the monthly limit or the hourly brake gets a notice too, so the check on `refusal_notices.code`
-// takes two more codes (`monthly_limit_reached`, `hourly_review_limit`). The rows of an existing database survive the change, with
+// takes two more codes (`monthly_limit_reached`, `reviews_paused`). The rows of an existing database survive the change, with
 // their dedupe and the index of the sweep. SQLite rebuilds the table (a check cannot be changed in place); Postgres replaces the
 // constraint.
 import { sql } from "kysely";
@@ -76,7 +76,7 @@ describe("the refusal notice codes migration for the limits", () => {
       { id: "n-quota_exhausted-2026-10-01", code: "quota_exhausted" },
     ]);
     await seedNotice(db, "monthly_limit_reached", "head:def5678");
-    await seedNotice(db, "hourly_review_limit", "head:0123456");
+    await seedNotice(db, "reviews_paused", "head:0123456");
     await expect(
       seedNotice(db, "not_a_notice", "head:0000000"),
     ).rejects.toThrow();
@@ -109,7 +109,7 @@ describe("the refusal notice codes migration for the limits", () => {
     await migrateToLatest(db, migrationProvider);
     await seedNotice(db, "insufficient_balance", "head:abc1234");
     await seedNotice(db, "monthly_limit_reached", "head:def5678");
-    await seedNotice(db, "hourly_review_limit", "head:0123456");
+    await seedNotice(db, "reviews_paused", "head:0123456");
 
     const migrations = await migrationProvider.getMigrations();
     const widen = migrations[WIDEN];
@@ -137,7 +137,7 @@ describe("the refusal notice codes migration for the limits", () => {
       );
       await seedNotice(
         db as unknown as Db,
-        "hourly_review_limit",
+        "reviews_paused",
         "head:def5678",
       );
       await expect(
