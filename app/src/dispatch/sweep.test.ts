@@ -64,6 +64,9 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     >(async () => ({
       synced: 0,
     })),
+    releaseStranded: vi.fn<() => Promise<{ released: number }>>(async () => ({
+      released: 0,
+    })),
     info: vi.fn<(line: string) => void>(),
     error: vi.fn<(line: string) => void>(),
   };
@@ -81,6 +84,7 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     notices: { retryDue: mocks.retryDue },
     checks: { reconcileDue: mocks.reconcileDue },
     modelsDev: { refreshIfDue: mocks.refreshIfDue },
+    billingHolds: { releaseStranded: mocks.releaseStranded },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
     log: { info: mocks.info, error: mocks.error },
   });
@@ -192,6 +196,50 @@ describe("the check runs in a run of the sweep (#405)", () => {
     });
 
     expect((await bare.run()).checksSynced).toBe(0);
+  });
+});
+
+describe("the holds of ended jobs in a run of the sweep (#591)", () => {
+  // #591-T14
+  it("releases the stranded holds after the cleanup and before the models.dev fetch, and reports how many", async () => {
+    const t = setup();
+    const order: string[] = [];
+    t.cleanup.mockImplementationOnce(async () => {
+      order.push("cleanup");
+      return cleaned;
+    });
+    t.releaseStranded.mockImplementationOnce(async () => {
+      order.push("billing_holds");
+      return { released: 2 };
+    });
+    t.refreshIfDue.mockImplementationOnce(async () => {
+      order.push("models_dev");
+      return { status: "skipped", reason: "not_due" };
+    });
+
+    const report = await t.sweep.run();
+
+    expect(order).toEqual(["cleanup", "billing_holds", "models_dev"]);
+    expect(report.holdsReleased).toBe(2);
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #591-T15
+  it("names a failed step without what the database said, and still does the others", async () => {
+    const t = setup();
+    t.releaseStranded.mockRejectedValueOnce(
+      new Error("postgres://u:hunter2@db/app"),
+    );
+
+    const report = await t.sweep.run();
+
+    expect(report.failedSteps).toEqual(["billing_holds"]);
+    expect(report.holdsReleased).toBe(0);
+    expect(t.refreshIfDue).toHaveBeenCalledOnce();
+    expect(JSON.stringify(t.error.mock.calls)).not.toContain("hunter2");
+    expect(t.error).toHaveBeenCalledWith(
+      "[sweep] SWEEP_STEP_FAILED step=billing_holds",
+    );
   });
 });
 

@@ -153,3 +153,62 @@ describe("the cleanup timer", () => {
     expect(f.setTimer).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("the release of the holds of ended jobs on the timer (#591)", () => {
+  const nothingRemoved = () =>
+    Promise.resolve({
+      rateLimits: 0,
+      unverifiedAccounts: 0,
+      verificationTokens: 0,
+      passwordResetTokens: 0,
+      jobClaimedKeys: 0,
+      jobDispatches: 0,
+    });
+
+  // #591-T16
+  it("releases at the start and at every tick, after the cleanup", async () => {
+    const f = fixture(nothingRemoved);
+    const releaseHolds = vi.fn(async () => ({ released: 0 }));
+
+    startCleanup({ ...f, releaseHolds });
+    await vi.waitFor(() => expect(releaseHolds).toHaveBeenCalledTimes(1));
+    f.tick();
+    await vi.waitFor(() => expect(releaseHolds).toHaveBeenCalledTimes(2));
+
+    expect(f.run.mock.invocationCallOrder[0]).toBeLessThan(
+      releaseHolds.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  // #591-T17
+  it("names a failed release by its code, without what the database said, and still runs at the next tick", async () => {
+    const f = fixture(nothingRemoved);
+    const releaseHolds = vi
+      .fn<() => Promise<{ released: number }>>()
+      .mockRejectedValueOnce(new Error("postgres://u:hunter2@db/app"))
+      .mockResolvedValue({ released: 0 });
+
+    startCleanup({ ...f, releaseHolds });
+    await vi.waitFor(() => expect(f.log.error).toHaveBeenCalledTimes(1));
+    f.tick();
+    await vi.waitFor(() => expect(releaseHolds).toHaveBeenCalledTimes(2));
+
+    expect(f.log.error.mock.calls[0]?.[0]).toContain(
+      "BILLING_HOLDS_SWEEP_FAILED",
+    );
+    expect(JSON.stringify(f.log.error.mock.calls)).not.toContain("hunter2");
+  });
+
+  // #591-T18
+  it("releases even when the cleanup failed, and does not release when no release is given with a test run", async () => {
+    const failing = fixture(() => Promise.reject(new Error("no")));
+    const releaseHolds = vi.fn(async () => ({ released: 0 }));
+    startCleanup({ ...failing, releaseHolds });
+    await vi.waitFor(() => expect(releaseHolds).toHaveBeenCalledTimes(1));
+
+    const plain = fixture(nothingRemoved);
+    startCleanup(plain);
+    await vi.waitFor(() => expect(plain.run).toHaveBeenCalledTimes(1));
+    expect(plain.log.error).not.toHaveBeenCalled();
+  });
+});
