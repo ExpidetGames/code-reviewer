@@ -852,7 +852,7 @@ describe.each(databases)(
           .selectAll()
           .execute();
 
-      // #499-T18
+      // #499-T17
       run(
         "grants the start credit to a job the limits let through (the control of the next two cases)",
         async () => {
@@ -867,7 +867,7 @@ describe.each(databases)(
         },
       );
 
-      // #499-T18
+      // #499-T17
       run(
         "grants no start credit to a job the hidden brake refused: no entry, no journal change, no grant row",
         async () => {
@@ -896,7 +896,7 @@ describe.each(databases)(
         },
       );
 
-      // #499-T18
+      // #499-T17
       run(
         "grants no start credit to a job the monthly limit refused: no entry, no journal change, no grant row",
         async () => {
