@@ -6,6 +6,7 @@ import {
   planReturnPath,
 } from "../plan-handoff/return-path.ts";
 import {
+  billingPageUrl,
   planPagePath,
   planPageUrl,
   workspaceSettingsUrl,
@@ -42,6 +43,18 @@ describe("the address of the settings of a workspace", () => {
     );
     expect(workspaceSettingsUrl("https://reviews.example.com", "a/../b")).toBe(
       "https://reviews.example.com/w/a%2F..%2Fb/settings",
+    );
+  });
+});
+
+describe("the address of the billing page of a workspace", () => {
+  // #505-T12
+  it("is the billing page of the workspace on the configured address of the app, with a slug that cannot change the path", () => {
+    expect(billingPageUrl("https://reviews.example.com", "acme")).toBe(
+      "https://reviews.example.com/w/acme/settings/billing",
+    );
+    expect(billingPageUrl("https://reviews.example.com", "a/../b")).toBe(
+      "https://reviews.example.com/w/a%2F..%2Fb/settings/billing",
     );
   });
 });

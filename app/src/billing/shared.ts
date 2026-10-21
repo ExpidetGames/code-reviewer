@@ -109,6 +109,14 @@ export function getMonthlyLimitRoute(): MonthlyLimitRoute {
   });
 }
 
+/**
+ * Whether the settings navigation of a workspace lists the Billing page: billing is on (#505). The switch is the one instance
+ * setting; with billing off nothing else is read.
+ */
+export function billingPageLinkedFor(): Promise<boolean> {
+  return isBillingOn(getDatabase());
+}
+
 /** The data of the billing page of a workspace (#505), wired to the running server. */
 export function getWorkspaceBillingService(): WorkspaceBillingService {
   const db = getDatabase();
