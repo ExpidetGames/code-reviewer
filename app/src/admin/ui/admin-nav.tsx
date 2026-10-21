@@ -26,6 +26,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Badge } from "@/components/ui/badge";
 import { SIDEBAR_LINK_CLASS } from "@/shell/nav-items.ts";
 import {
   ADMIN_NAV_GROUPS,
@@ -33,7 +34,27 @@ import {
   type AdminNavItem,
 } from "./nav-items.ts";
 
-export function SectionLinks({ pathname }: { pathname: string | null }) {
+/** The number of open billing review rows next to a label, and in words for a screen reader (#603). */
+function ReviewCount({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <>
+      <Badge variant="warning" aria-hidden="true" className="ml-auto">
+        {count > 99 ? "99+" : count}
+      </Badge>
+      <span className="sr-only">, {count} open payment reviews</span>
+    </>
+  );
+}
+
+export function SectionLinks({
+  pathname,
+  reviewCount = 0,
+}: {
+  pathname: string | null;
+  /** How many billing review rows are open (#603). */
+  reviewCount?: number;
+}) {
   return (
     <SidebarContent>
       {ADMIN_NAV_GROUPS.map((group, index) => (
@@ -44,7 +65,12 @@ export function SectionLinks({ pathname }: { pathname: string | null }) {
             <SidebarGroupContent>
               <SidebarMenu className="m-0 list-none p-0">
                 {group.items.map((item) => (
-                  <AdminLink key={item.href} item={item} pathname={pathname} />
+                  <AdminLink
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    reviewCount={reviewCount}
+                  />
                 ))}
               </SidebarMenu>
             </SidebarGroupContent>
@@ -58,9 +84,11 @@ export function SectionLinks({ pathname }: { pathname: string | null }) {
 function AdminLink({
   item,
   pathname,
+  reviewCount,
 }: {
   item: (typeof ADMIN_NAV_GROUPS)[number]["items"][number];
   pathname: string | null;
+  reviewCount: number;
 }) {
   const { setOpenMobile } = useSidebar();
   const current = isCurrentSection(pathname, item);
@@ -74,12 +102,20 @@ function AdminLink({
           onClick={() => setOpenMobile(false)}
         >
           {item.label}
+          {item.showsReviewCount === true ? (
+            <ReviewCount count={reviewCount} />
+          ) : null}
         </Link>
       </SidebarMenuButton>
       {item.children === undefined ? null : (
         <SidebarMenuSub>
           {item.children.map((child) => (
-            <AdminSubLink key={child.href} item={child} pathname={pathname} />
+            <AdminSubLink
+              key={child.href}
+              item={child}
+              pathname={pathname}
+              reviewCount={reviewCount}
+            />
           ))}
         </SidebarMenuSub>
       )}
@@ -90,9 +126,11 @@ function AdminLink({
 function AdminSubLink({
   item,
   pathname,
+  reviewCount,
 }: {
   item: NonNullable<AdminNavItem["children"]>[number];
   pathname: string | null;
+  reviewCount: number;
 }) {
   const { setOpenMobile } = useSidebar();
   const current = isCurrentSection(pathname, item);
@@ -106,13 +144,16 @@ function AdminSubLink({
           onClick={() => setOpenMobile(false)}
         >
           {item.label}
+          {item.showsReviewCount === true ? (
+            <ReviewCount count={reviewCount} />
+          ) : null}
         </Link>
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   );
 }
 
-function CurrentSectionLinks() {
+function CurrentSectionLinks({ reviewCount }: { reviewCount: number }) {
   const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
   const shownPath = useRef(pathname);
@@ -124,10 +165,10 @@ function CurrentSectionLinks() {
     setOpenMobile(false);
   }, [pathname, setOpenMobile]);
 
-  return <SectionLinks pathname={pathname} />;
+  return <SectionLinks pathname={pathname} reviewCount={reviewCount} />;
 }
 
-export function AdminNav() {
+export function AdminNav({ reviewCount = 0 }: { reviewCount?: number }) {
   return (
     <Sidebar
       className="w-full md:absolute md:h-full md:w-64 md:border-r md:border-sidebar-border md:group-data-[collapsible=offcanvas]:-left-full"
@@ -137,8 +178,10 @@ export function AdminNav() {
       // visible, so it moves a full container width (the provider is not at the viewport edge).
     >
       <nav aria-label="Admin" className="flex min-h-0 flex-1 flex-col">
-        <Suspense fallback={<SectionLinks pathname={null} />}>
-          <CurrentSectionLinks />
+        <Suspense
+          fallback={<SectionLinks pathname={null} reviewCount={reviewCount} />}
+        >
+          <CurrentSectionLinks reviewCount={reviewCount} />
         </Suspense>
       </nav>
     </Sidebar>

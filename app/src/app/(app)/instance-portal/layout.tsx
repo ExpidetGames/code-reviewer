@@ -10,6 +10,7 @@ import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { requireAdmin } from "@/admin/session";
 import { AdminNav } from "@/admin/ui/admin-nav";
+import { countOpenBillingReviews } from "@/billing/shared";
 import { PageLoading } from "@/components/page-loading";
 import {
   SidebarProvider,
@@ -31,12 +32,15 @@ export default function AdminLayout({
 
 async function AdminFrame({ children }: { children: ReactNode }) {
   await requireAdmin();
+  // The number of billing review rows that are open, next to Billing in the menu: a buyer who paid and was not credited is
+  // seen without opening the list (#603).
+  const reviewCount = await countOpenBillingReviews();
   return (
     // `relative`: the admin sidebar's container is `absolute` inside it (admin-nav.tsx), and its
     // 16rem gap lines up with the centered content. `min-h-0`: the app frame already sets the
     // viewport minimum, so the admin frame must not add a second one (#168 review).
     <SidebarProvider className="relative min-h-0">
-      <AdminNav />
+      <AdminNav reviewCount={reviewCount} />
       {/* The shortcut belongs to the provider whose sidebar is rendered; the shell's provider (no
           workspace sidebar on an admin page) has none. */}
       <SidebarShortcut />

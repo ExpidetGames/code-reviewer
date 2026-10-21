@@ -119,6 +119,7 @@ describe("the migrations of both epics", () => {
       "20261021210100_create_billing_workspace_settings",
       "20261021210200_add_limit_query_indexes",
       "20261022010000_add_usage_record_billing_state",
+      "20261022020000_add_billing_webhook_events_resolution",
     ]);
   });
 

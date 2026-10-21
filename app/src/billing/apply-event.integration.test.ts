@@ -1225,6 +1225,11 @@ function suite(engine: BillingEngine) {
             "outcome",
             "provider",
             "received_at",
+            // Added by #603: how an operator closed a review (their id, time and note, and the journal entry), never the buyer.
+            "resolution_entry_id",
+            "resolution_note",
+            "resolved_at",
+            "resolved_by",
             "review_state",
             "subject",
             "workspace_id",
