@@ -22,6 +22,7 @@ import { createCatalogFixture } from "./review-settings-harness.ts";
 import type { CatalogEntry } from "../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import type { ClaimDeps } from "../runner-api/claim.ts";
 import {
@@ -157,6 +158,10 @@ export async function startRunnerApiHarness(
       planPageUrl?: (
         workspaceSlug: string,
       ) => string | null | Promise<string | null>;
+      /** The link to the settings of a workspace, for a refusal for the balance (#498); default none. */
+      settingsUrl?: (
+        workspaceSlug: string,
+      ) => string | null | Promise<string | null>;
       /** How long a request to GitHub may take. */
       githubRequestTimeoutMs?: number;
     };
@@ -250,6 +255,9 @@ export async function startRunnerApiHarness(
       db: fixture.db,
       registry,
       planPageUrl: noticeOptions?.planPageUrl ?? (() => null),
+      ...(noticeOptions?.settingsUrl === undefined
+        ? {}
+        : { settingsUrl: noticeOptions.settingsUrl }),
       now: fixture.clock.now,
       log: {
         info: (line) => noticeLines.push(line),
@@ -450,6 +458,8 @@ export async function startRunnerApiHarness(
         createJobVmRunsRepository(fixture.db, workspaceId, fixture.clock.now),
       runnerToken: () => configuredRunnerToken(env),
       appVersion: TEST_APP_VERSION,
+      noteClaimFeatures: (features) =>
+        noteDispatcherClaim(fixture.db, features, fixture.clock.now()),
     });
     // #320: the Worker API over the same collaborators (it has no dispatcher credential).
     const workerApi = createWorkerApi(apiDeps);

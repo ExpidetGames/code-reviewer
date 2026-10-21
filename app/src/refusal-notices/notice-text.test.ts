@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NOTICE_PLAN_PAGE_LINK_TEXT,
+  NOTICE_SETTINGS_LINK_TEXT,
   NOTICE_WHO_CAN_ACT,
 } from "../copy/refusal-notice.ts";
 import {
@@ -104,5 +105,62 @@ describe("the text of the notice", () => {
     expect(hasNoticeMarker("No review ran for this change.", PERIOD)).toBe(
       false,
     );
+  });
+});
+
+describe("the notice of a refusal for the balance", () => {
+  const HEAD = "head:0123456789abcdef0123456789abcdef01234567";
+
+  // #498-T03
+  it.each(["insufficient_balance", "balance_negative"] as const)(
+    "says that no review ran and asks to add credit, without a number, an amount, a rate or a model (%s)",
+    (code) => {
+      const text = visible(noticeBody(code, HEAD, null));
+
+      expect(text).toContain("No review ran for this change.");
+      expect(text).toContain("Add credit to continue");
+      expect(text).toContain("Owner or Admin");
+      expect(text).not.toMatch(/\d/);
+      expect(text).not.toMatch(/[$€£%]/);
+      expect(text).not.toMatch(
+        /\b(price|cost|usd|eur|dollar|euro|token|model|gpt|claude|rate|factor|formula|minute|tier)\b/i,
+      );
+      expect(text).not.toMatch(/https?:\/\//);
+    },
+  );
+
+  // #498-T03
+  it("says the balance is below zero for a negative balance and that nothing is left for an empty one", () => {
+    expect(visible(noticeBody("balance_negative", HEAD, null))).toContain(
+      "below zero",
+    );
+    expect(visible(noticeBody("insufficient_balance", HEAD, null))).toContain(
+      "no credit left",
+    );
+  });
+
+  // #498-T03
+  it("links to the workspace settings when it is given a link", () => {
+    const text = visible(
+      noticeBody(
+        "insufficient_balance",
+        HEAD,
+        "https://app.example/w/acme/settings",
+      ),
+    );
+
+    expect(text).toContain(
+      `[${NOTICE_SETTINGS_LINK_TEXT}](https://app.example/w/acme/settings)`,
+    );
+    expect(text).toContain("Add credit to continue");
+  });
+
+  // #498-T03
+  it("keys the hidden marker on the head, so a new push is told again and the same head once", () => {
+    const body = noticeBody("insufficient_balance", HEAD, null);
+
+    expect(body).toContain(noticeMarker(HEAD));
+    expect(hasNoticeMarker(body, HEAD)).toBe(true);
+    expect(hasNoticeMarker(body, "head:fedcba98")).toBe(false);
   });
 });

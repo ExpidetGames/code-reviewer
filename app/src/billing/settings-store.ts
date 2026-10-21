@@ -16,7 +16,7 @@ import type { Database } from "../db/schema.ts";
 import { readBillingSettings, type BillingSettings } from "./settings.ts";
 
 /** The error `decodeJson` throws for stored text that is no JSON (its cause is the parser's `SyntaxError`). */
-function isUndecodableText(error: unknown): boolean {
+export function isUndecodableText(error: unknown): boolean {
   return error instanceof Error && error.cause instanceof SyntaxError;
 }
 

@@ -29,6 +29,7 @@ import {
   readEntitlements,
   validateEntitlements,
 } from "../../workspaces/entitlements-validation.ts";
+import type { DispatcherSightings } from "../../billing/dispatcher-features.ts";
 import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
@@ -114,6 +115,12 @@ export type InstanceSettingValues = {
    * and inert (`isBillingOn`).
    */
   billing_settings: BillingSettings;
+  /**
+   * #498: when the app last saw a Dispatcher that reports its VMs (`vm_lifecycle`) and one that does not, so billing is not
+   * switched on over the second (src/billing/dispatcher-features.ts). Written by `noteDispatcherClaim` only; a value that is not the
+   * shape reads as no sighting. No row: no Dispatcher has claimed.
+   */
+  dispatcher_sightings: DispatcherSightings;
   /**
    * #504: the lease that serializes the creation of the Stripe webhook endpoint (src/billing/): one admin action at a time
    * makes one. Taken with `claim`, released with `release`; a lease that ran out is taken over.

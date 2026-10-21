@@ -102,7 +102,10 @@ transaction, before the usage record is reserved, the entitlements of the job's 
 workspace, a used up run or cost limit, or entitlements that cannot be read): the job ends `failed` with
 `workspace_suspended`, `quota_exhausted` or `entitlements_invalid` and the next one is tried, so none of the steps
 below runs for it, no credential exists and no record is written (`src/usage/README.md`, "Limits and suspension at
-claim"). Every claim path passes through it: the legacy claim, the split claim of a Dispatcher and the claim by job
+claim"). **#498: while billing is on, the hold comes next, in the same transaction:** a workspace whose balance is empty or below
+zero has the job end `failed` with `insufficient_balance` or `balance_negative` (and `billing_rates_incomplete` when a rate is missing), with no
+record and no entry; otherwise the record and the hold are written together (`src/billing/README.md`, "Reserve, settle, release"). Every claim
+path passes through it: the legacy claim, the split claim of a Dispatcher and the claim by job
 id (for which a refused job answers `204`, like any job that cannot be claimed). Then, for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
@@ -405,7 +408,9 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   `404` for an unknown job; `409 RUNNER_JOB_ENDED` when the claim ended or is not the running one (nothing is stored; the
   backstop covers that VM). The credential is never logged. It only measures (`billing/README.md`, "Billable minutes"); a
   Dispatcher sends it best effort and a failure never touches a launch or a job. Advertised as the feature `vm_lifecycle`: a
-  Dispatcher sends nothing to an App that does not list it.
+  Dispatcher sends nothing to an App that does not list it. #498: a claim keeps at most four VMs (`MAX_VMS_PER_CLAIM`; the rest are answered `replayed`),
+  and the Dispatcher's claim names the claim feature `vm_lifecycle` next to `worker_credential` (the app notes which Dispatchers it serves,
+  `src/billing/dispatcher-features.ts`).
 - **Version.** `GET /api/runners/v1/version` answers `{ version: 1, appVersion, features }` with
   `features` from `APP_FEATURES` (`worker_api`, `claim_by_job_id`, `pool_cap`, `release`, `vm_lifecycle`). It takes the
   dispatcher credential; a Worker may also call it with its credential **and** `?jobId=<its job>` (the

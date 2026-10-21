@@ -187,6 +187,12 @@ from `jobQueueFor` (`src/dispatch/producers.test.ts`).
    running job. Two runners claiming at once are serialized by the write lock; each gets a different
    job or nothing.
 
+**Billing (#498).** After the admission and before the record, `claimNext` takes the hold of the job from the balance of its workspace while billing
+is on, or fails the job with `insufficient_balance`, `balance_negative` or `billing_rates_incomplete` (no attempt, no record, no entry, a notice on
+the pull request for the first two). Every transaction below that ends a job, or ends its record, settles the hold in the same transaction
+(`src/billing/README.md`, "Reserve, settle, release"): `complete`, the expiry of leases and runtimes, `release` on the last attempt, `cancelClaimed`,
+`failUndispatched`, the drain of a superseded run, and the cancelling or replacing of waiting jobs. A requeue keeps the hold. With billing off none of it runs.
+
 The claim also reserves the job's usage record (`usage_records`, `src/usage/README.md`) in the same
 transaction, `complete` settles it, and every transition that ends a job without `complete` closes it: settled with an
 unknown cost (`no_result`) when a runner held the job and sent no result (lease lost on the last attempt, hard limit,

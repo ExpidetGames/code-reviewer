@@ -9,6 +9,7 @@ import { sql, type Kysely } from "kysely";
 import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
+import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import {
   NO_RESULT_JOB_ERROR_CODES,
   type UnknownCostSettlement,
@@ -37,6 +38,9 @@ const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
  *
  * Returns the records it settled without a cost (the first statement), so the caller can raise the alert for
  * unknown costs once its transaction committed (#361).
+ *
+ * #498: the hold of every job whose record this ended is settled in the same transaction (`settleEndedJobs`: a release and,
+ * unless the run is free, a usage entry), after the three statements; with billing off that reads the switch and nothing else.
  */
 export async function closeRecordsOfEndedJobs(
   executor: Kysely<Database>,
@@ -85,7 +89,7 @@ export async function closeRecordsOfEndedJobs(
     )
     .returning(["workspace_id", "job_id"])
     .execute();
-  await executor
+  const voided = await executor
     .updateTable("usage_records")
     .set({ state: "void" })
     .where("state", "=", sql.lit("reserved"))
@@ -100,7 +104,13 @@ export async function closeRecordsOfEndedJobs(
           .where("jobs.status", "in", ENDED_JOB_STATUSES),
       ),
     )
+    .returning("job_id")
     .execute();
+  await settleEndedJobs(
+    executor,
+    [...settled, ...drained, ...voided].map((row) => row.job_id),
+    () => new Date(settledAt),
+  );
   return [...settled, ...drained].map((row) => ({
     workspaceId: row.workspace_id,
     jobId: row.job_id,

@@ -46,6 +46,11 @@ export type RunnerApiDeps = ClaimDeps &
     appVersion: string;
     /** The configured shared secret (`RUNNER_TOKEN`), read for every request. */
     runnerToken: () => string | undefined;
+    /**
+     * #498: told the features of every claim that names the per-job credential (a Dispatcher's). It notes which Dispatchers the
+     * app serves, so billing is not switched on over one that reports no VMs. Never throws; absent: nothing is noted.
+     */
+    noteClaimFeatures?: (features: readonly string[]) => Promise<void>;
   };
 
 export type RunnerApi = {
@@ -110,6 +115,8 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
           return errorResponse(400, "RUNNER_REQUEST_INVALID", {
             fields: parsed.fields,
           });
+        if (parsed.value.features?.includes("worker_credential") === true)
+          await deps.noteClaimFeatures?.(parsed.value.features);
         return await handleClaim(
           deps,
           who.runnerId,
