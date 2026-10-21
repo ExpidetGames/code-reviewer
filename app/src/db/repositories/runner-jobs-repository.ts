@@ -792,6 +792,8 @@ export function createRunnerJobsRepository(
             const { admission, hadRecord, ignoredCostLimit, keyMode } =
               await admitClaimedJob(trx, row, () => current, {
                 runQuotas: billing.state !== "on",
+                // #496: the key mode follows the workspace's choice while billing is on.
+                billingOn: billing.state === "on",
               });
             if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
             if (!admission.allow) {
