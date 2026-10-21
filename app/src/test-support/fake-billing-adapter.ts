@@ -208,6 +208,7 @@ export function createFakeBillingAdapter(
       maxTopUp: TOP_UP_MAX_MICRO_USD,
       currencies: ["usd"],
       providerMayRefund: { windowDays: 30 },
+      checkout: true,
       requiresBillingProfile: false,
       receiptsFrom: "provider",
     },

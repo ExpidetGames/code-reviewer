@@ -33,6 +33,7 @@ const CAPABILITIES: BillingCapabilities = {
   maxTopUp: toUsd(500 * USD),
   currencies: ["usd"],
   providerMayRefund: { windowDays: 60 },
+  checkout: true,
   requiresBillingProfile: true,
   receiptsFrom: "provider",
 };

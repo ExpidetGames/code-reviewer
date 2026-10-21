@@ -61,6 +61,7 @@ import { migration as createModelDecisions } from "./20261020090000_create_model
 import { migration as widenRefusalNoticeCodes } from "./20261021090000_widen_refusal_notice_codes.ts";
 import { migration as addBillingBalancesReservedIndex } from "./20261021120000_add_billing_balances_reserved_index.ts";
 import { migration as widenJobVmRunsEndSource } from "./20261021090100_widen_job_vm_runs_end_source.ts";
+import { migration as createBillingProfiles } from "./20261021130000_create_billing_profiles.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -125,6 +126,7 @@ const migrations: Record<string, Migration> = {
   "20261021090100_widen_job_vm_runs_end_source": widenJobVmRunsEndSource,
   "20261021120000_add_billing_balances_reserved_index":
     addBillingBalancesReservedIndex,
+  "20261021130000_create_billing_profiles": createBillingProfiles,
 };
 
 export const migrationProvider: MigrationProvider = {

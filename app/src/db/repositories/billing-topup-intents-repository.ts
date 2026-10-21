@@ -49,8 +49,12 @@ export function toTopUpIntent(
 export type IntentChange = { intent: TopUpIntent; changed: boolean };
 
 export type BillingTopUpIntentsRepository = {
-  /** Writes a `pending` intent. The amount is a whole micro-USD amount from 10 to 500 USD. */
+  /**
+   * Writes a `pending` intent. The amount is a whole micro-USD amount from 10 to 500 USD. `id` is the id the caller chose
+   * (the top-up form makes one per attempt, so a repeated click is the same intent); another intent holding it throws.
+   */
   create(input: {
+    id?: string;
     adapter: string;
     amountMicroUsd: number;
   }): Promise<TopUpIntent>;
@@ -79,6 +83,17 @@ export type BillingTopUpIntentsRepository = {
   ): Promise<IntentChange | undefined>;
   /** `pending` to `failed`. Any other state stays as it is. */
   markFailed(id: string): Promise<IntentChange | undefined>;
+  /**
+   * `pending` to `failed` for the intents of the workspace that were written `olderThanMs` ago or more and still have no
+   * checkout page (the start died between the intent and the provider). One statement; an intent that got its page in the
+   * meantime is not touched. Returns how many.
+   */
+  failPendingWithoutPage(olderThanMs: number): Promise<number>;
+  /**
+   * `pending` to `failed` only while the intent has no checkout page, judged on the row under the lock: a page that was
+   * recorded in the meantime (by the request that won) is not abandoned. Any other intent stays as it is.
+   */
+  markFailedUnlessPage(id: string): Promise<IntentChange | undefined>;
   /** `pending` to `expired` (the checkout ended unpaid). Any other state stays as it is; a late payment still pays it. */
   markExpired(id: string): Promise<IntentChange | undefined>;
   /**
@@ -202,7 +217,7 @@ export function createBillingTopUpIntentsRepository(
   }
 
   return {
-    async create({ adapter, amountMicroUsd }) {
+    async create({ id, adapter, amountMicroUsd }) {
       if (!isAdapterId(adapter))
         throw new TopUpIntentError("adapter_invalid", "not an adapter id");
       if (
@@ -218,7 +233,7 @@ export function createBillingTopUpIntentsRepository(
       const row = await db
         .insertInto("billing_topup_intents")
         .values({
-          id: newId(),
+          id: id ?? newId(),
           workspace_id: workspaceId,
           adapter,
           amount_micro_usd: amountMicroUsd,
@@ -336,6 +351,37 @@ export function createBillingTopUpIntentsRepository(
             paymentRef: intent.paymentRef,
             refundedMicroUsd: refunded,
             disputedMicroUsd: disputed,
+          }),
+          changed: true,
+        };
+      });
+    },
+
+    async failPendingWithoutPage(olderThanMs) {
+      const current = now();
+      const cutoff = formatTimestamp(new Date(current.getTime() - olderThanMs));
+      const result = await db
+        .updateTable("billing_topup_intents")
+        .set({ state: "failed", updated_at: formatTimestamp(current) })
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "=", "pending")
+        .where("provider_checkout_ref", "is", null)
+        .where("created_at", "<=", cutoff)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows);
+    },
+
+    markFailedUnlessPage(id) {
+      return inTransaction(db, async (trx) => {
+        const intent = await find(trx, id, true);
+        if (intent === undefined) return undefined;
+        if (intent.state !== "pending" || intent.checkoutRef !== null)
+          return { intent, changed: false };
+        return {
+          intent: await write(trx, intent, {
+            checkoutRef: null,
+            paymentRef: intent.paymentRef,
+            state: "failed",
           }),
           changed: true,
         };

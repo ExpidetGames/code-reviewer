@@ -6,7 +6,7 @@ epic #489): prepaid pay-as-you-go through Stripe Managed Payments, a provider-ne
 earlier subscription design (plans, plan versions, prices with a payment provider, an admin page for them) was deleted
 before it reached a release (#491); the model catalog, the providers and `modelAccess` of epic #420 are unaffected.
 
-What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: a hold at claim, the settlement when the job ends and the refusal when the balance cannot hold it (#498, "Reserve, settle, release" below). Server-only: every
+What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: a hold at claim, the settlement when the job ends and the refusal when the balance cannot hold it (#498, "Reserve, settle, release" below), and the Stripe adapter with the billing profile and the top-up route (#501, below). Server-only: every
 source file imports `"server-only"` (`server-only.test.ts`).
 
 | File                                                                                                                              | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -35,6 +35,9 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `public-url.ts`                                                                                                                   | Whether an address can be reached from the internet (https, no credentials, no loopback, private, link-local or local name; pure), and the one spelling addresses are compared in. A Stripe webhook endpoint needs it.                                                                                                                                                                                                                         |
 | `stripe-client.ts`, `stripe-schemas.ts`                                                                                           | A thin typed `fetch` client of the Stripe API and our own schemas of the fields we read (#500); no SDK. Used by the Stripe adapter (#501) and the webhook route (#502).                                                                                                                                                                                                                                                                        |
 | `stripe-webhook-verify.ts`                                                                                                        | `verifyStripeSignature` (pure): the `Stripe-Signature` header over the raw body bytes (#500).                                                                                                                                                                                                                                                                                                                                                  |
+| `stripe-adapter.ts`, `stripe-credentials.ts`                                                                                      | The Stripe adapter (#501): `ensureCustomer` and `createTopUpCheckout` over the client, and the client made from the stored key when a top-up needs it.                                                                                                                                                                                                                                                                                         |
+| `profile.ts`, `profile-service.ts`                                                                                                | The billing profile (#501): validation of what a person typed (pure, stable field codes) and the service that lets an Owner and an Admin read and write it.                                                                                                                                                                                                                                                                                    |
+| `topup-service.ts`, `topup-http.ts`, `topup-limits.ts`                                                                            | Starting a top-up (#501): the checks in order, the handler behind `POST /api/w/:workspace/billing/top-ups` and its limit.                                                                                                                                                                                                                                                                                                                      |
 | `admin-service.ts`, `admin-credit-service.ts`, `admin-http.ts`, `admin-errors.ts`, `enabling-copy.ts`, `stripe-webhook-events.ts` | The billing page of the admin portal (#504): the settings service (adapter, credentials, rates, connection check, webhook endpoint, the switch), the manual credit, the handlers of the data routes with their stable codes, the wording of the enabling statement, and the events Stripe is told to send. The page itself is `src/admin/ui/billing-*` and `src/app/(app)/instance-portal/billing/`.                                           |
 
 ## The Stripe client and the webhook verifier
@@ -502,7 +505,11 @@ applies the events. The first real adapter is Stripe Managed Payments (#500 to #
 interface BillingAdapter {
   readonly id: string; // lower case letters, digits, _ and -; the key of the registry
   readonly capabilities: BillingCapabilities;
-  ensureCustomer(i): Promise<ProviderRef | null>; // null: the provider has no such object
+  ensureCustomer(i: {
+    workspace;
+    profile;
+    customer: ProviderRef | null; // the id the app stored from an earlier call
+  }): Promise<ProviderRef | null>; // null: the provider has no such object
   createTopUpCheckout(i): Promise<{
     checkout: { kind: "redirect"; url } | { kind: "none" };
     session: ProviderRef | null;
@@ -524,7 +531,7 @@ interface BillingAdapter {
 - **Refunds are an event only.** There is no `refund` method and no auto-recharge capability. The operator refunds in the
   provider's dashboard and the webhook books it.
 - **Capabilities** (`merchantOfRecord`, `customAmount`, `partialRefund`, `minTopUp`, `maxTopUp`, `currencies`,
-  `providerMayRefund`, `requiresBillingProfile`, `receiptsFrom`) drive the UI, so a page never names a provider. The
+  `providerMayRefund`, `checkout`, `requiresBillingProfile`, `receiptsFrom`) drive the UI, so a page never names a provider. The
   code constants are the currency USD and the top-up range **10 to 500 USD**; an adapter may **narrow** the range and
   never widen it (`assertValidCapabilities` fails the registry at startup; `assertTopUpAmount` checks an amount before a
   checkout is created).
@@ -571,8 +578,83 @@ engine; the same event twice, the same payment under another event id and the wr
 delivery). Both live in `src/test-support/billing-adapter-kit.ts`; the fake adapter in `fake-billing-adapter.ts` is the
 model, and `adapter-kit.test.ts` / `adapter-kit.integration.test.ts` show the call. The active adapter is the `adapter`
 field of the instance setting `billing_settings` (`manual` when it is not set or not an adapter id); the admin page sets it
-(#504). The Stripe adapter itself joins the registry with #501 and #502: until then a Stripe instance is configured and
-checked on the page, its routes answer the missing path (no adapter).
+(#504). The Stripe adapter is in the registry (#501); its webhook joins with #502, until then the webhook route answers the
+missing path for it. Errors of an adapter are `BillingAdapterError`s with a stable code (`provider_unavailable` for a timeout,
+a 5xx or a rate limit, `provider_rejected`, `provider_not_configured` for a key Stripe does not accept, `vat_id_rejected`,
+`customer_missing`) and never carry a word of what the provider said.
+
+## The billing profile, the Stripe adapter and the top-up (#501)
+
+**What is kept.** Managed Payments allows neither `tax_id_collection` nor `customer_update[name|address]`, so the app keeps
+the buyer's **billing profile** itself (`billing_profiles`, one row per workspace, repository
+`billing-profiles-repository.ts`, workspace-scoped): legal name, address (country, two lines, postal code, city), an optional
+VAT ID, the business confirmation (`confirmed_at`, `confirmed_by`, `terms_version`) and the id of the provider's customer made
+from it (`customer_adapter`, `customer_ref`, an opaque id). It is customer data: only an Owner and an Admin
+(`manage_billing`) read or write it through `profile-service.ts`, a Member gets `forbidden` and nothing, it is never logged,
+and it is sent to the payment provider and nowhere else (a test scans every table and the logs for it). `profile.ts`
+validates what was typed and answers a **field and a code** (`required`, `too_long`, `invalid_characters`,
+`country_unknown`, `vat_id_invalid`, `vat_country_unsupported`), never the value. Control, line and paragraph separators and
+format characters (a right-to-left override, a zero-width space, a byte order mark) are `invalid_characters`: the text is
+printed on an invoice. The VAT ID check is **light**: the shape
+of the country's number (the EU, Great Britain, Norway, Switzerland; Greece is `EL`); it is never a claim that the number is
+valid, and a country without a shape takes no VAT ID. The business confirmation text is bumped by `BILLING_TERMS_VERSION`.
+
+**What is sent to Stripe, and why.**
+
+| When                  | What                                                                                                                                                                                                                                                                                                                                                                  | Why                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ensureCustomer`      | A Customer with `name` and `business_name` (the legal name), `address`, `preferred_locales` (`en`: the UI is English), `metadata[workspace]` (an opaque id), and the VAT ID as a **tax id** (`eu_vat`, `gb_vat`, `ch_vat`; `no_vat` without the `NO` prefix, which Stripe refuses)                                                                                    | The invoice of Managed Payments is made from the Customer, and the Checkout cannot ask for it. Created once (the Idempotency-Key is the workspace and the exact content, the id is stored); the next top-up updates the same Customer, replaces a changed VAT ID, removes one that was cleared, and makes a new Customer when Stripe no longer knows the stored one. |
+| `createTopUpCheckout` | `mode=payment`, one line **"Review credit"** with `price_data` (USD, the amount in cents, `tax_behavior: exclusive`, `tax_code txcd_10105002`), `managed_payments[enabled]=true`, `customer`, `client_reference_id` and `metadata[intent]` (our intent id), `success_url` and `cancel_url` (the workspace's billing page with `?topup=success` or `?topup=cancelled`) | The intent id maps the payment back to the workspace (#502). The **Idempotency-Key is `topup-checkout:<intent id>`**: the same intent is the same session however often it is asked for (a lost answer, a repeated click, a retry after a crash).                                                                                                                    |
+
+`STRIPE_CHECKOUT_PARAMETERS` is the whole set of top-level parameters a session takes from us; a unit test pins it and
+asserts that none of `tax_id_collection`, `invoice_creation`, `customer_update`, `payment_method_types`, `custom_text`,
+`automatic_tax` and the address collections is sent. The amount is never the client's word: the route takes **integer cents
+from 1000 to 50000** and the adapter checks the range again (Stripe itself would take 50 cents, and the fake one cent, so
+the floor is ours: `stripe-adapter.integration.test.ts` shows the fake accepting 1 cent and the adapter not sending it).
+Capabilities: `merchantOfRecord`, `customAmount`, `partialRefund` (to be confirmed in #503), 10 to 500 USD, USD,
+`providerMayRefund` 60 days, `checkout`, `requiresBillingProfile`, `receiptsFrom: "provider"`.
+
+**The route.** `POST /api/w/:workspace/billing/top-ups` with `{ amountCents, confirmBusiness?, intentId? }` answers
+`{ intentId, url }`; the buyer is sent to `url`. It never credits: the balance changes when the webhook arrives (#502), and the
+success page only says the payment is on its way (#505). The order (`topup-http.ts`, `topup-service.ts`): billing on and an
+adapter with a checkout (else the 404 of a path that does not exist, also for the `manual` adapter), same site, session and
+role (`manage_billing`), a limit of 10 starts per person and workspace in 10 minutes and of 200 for the whole instance (one API key serves all workspaces; `top_ups_busy`, 503; the counters are shared across app instances and the route **fails closed**: counters that cannot be read are `limits_unavailable`, 503, and Stripe is not asked), a JSON body of at most 4 KiB, then the
+amount, the intent id (a UUID the form makes once per attempt, so a repeated click is the same intent), the profile, the
+**business confirmation at the first top-up** (stored with the time, the user and the terms version), the **intent row
+written first**, the Customer and the session. Refusals are `{ "error": <code> }`: `forbidden`, `amount_invalid`,
+`amount_out_of_range`, `intent_id_invalid`, `profile_required`, `business_confirmation_required`, `intent_conflict`,
+`checkout_unavailable`, `rate_limited`, `top_ups_busy`, `limits_unavailable`, `request_in_progress` (409: the same start is still running at Stripe, the 409 `idempotency_key_in_use`; try again in a moment, the intent is untouched), `provider_unavailable` (502: a timeout, a 5xx, a rate limit), `provider_rejected`,
+`provider_not_configured` (503), `vat_id_rejected`. When the provider fails the intent becomes `failed` (a payment that still
+arrives can pay it, as for any failed intent) so none stays pending without a way back, except one that already has a page
+(judged on the row under the lock, not on what the request read first) or whose same start is still running: the buyer may be on
+that page, or the winning request decides. The person tries again with a new intent id.
+
+**One page per intent.** An intent that has a page (`provider_checkout_ref`) never gets a second one. A repeat of its id asks
+the adapter about the page it has (`resumeTopUpCheckout`, a GET, never a create): while the session is `open` the same address
+is returned, otherwise (paid, expired, unknown to Stripe, or an adapter that cannot ask) the answer is `intent_conflict` and the
+form must use a new intent. Stripe forgets an Idempotency-Key after 24 hours, so without this rule a late repeat would create a
+second payable session and then fail on the unique ref, leaving the first payable and the second unreachable. For the same
+reason an intent that never got a page is failed after `TOP_UP_PENDING_WITHOUT_PAGE_MS` (30 minutes, swept at the next start of
+the workspace and refused on a late repeat): the start that wrote it died before Stripe was asked or before the page was recorded. A start that crashed between the provider and the database leaves a `pending` intent whose session Stripe expires on
+its own (#502 turns `checkout.session.expired` into `payment.expired`). The log carries the workspace id and a result code
+(`[billing] TOPUP_STARTED workspace=<id> result=ok`), never an amount, a name, an address, a VAT ID, a customer or a page.
+
+**Go-live order.** The route for the billing-profile form (#505) **must not ship before #502** (the webhook and the
+crediting). Once a profile can be saved, the top-up route becomes usable (`profile_required` is the only thing keeping a
+buyer out today), and a payment made before #502 is taken by Stripe and credited to nobody. The rule is also on #510 (go-live).
+
+**What is not here.** The pages (#505, which also needs a route for the profile form: `profile-service.ts` is ready for it),
+the webhook, refunds and chargebacks (#502), the sandbox plan for invoices and VAT (#503), auto-recharge.
+
+**Checked against the Stripe sandbox (test mode, 2026-10-21).** A Customer takes `business_name` at API version
+`2025-03-31.basil`; `eu_vat`, `gb_vat`, `ch_vat` (the compact form is stored as `CHE-123.456.789 MWST`) and `no_vat` (without
+`NO`) tax ids are taken, a malformed one is `400 Invalid value for <type>` (the adapter says `vat_id_rejected`), a customer
+holds at most five tax ids; an address update replaces the whole address. Managed Payments takes both `txcd_10105002` and
+`txcd_10103001` (and the rest of `txcd_10...` probed), refuses `txcd_99999999`, `txcd_00000000`, `txcd_20030000` and a text
+that is no code ("ineligible for Managed Payments"), and takes any amount, 999 cents included (the floor is ours). A webhook
+endpoint takes `api_version` as `2025-03-31.basil` and with the preview flag; the admin page now creates the endpoint with the
+version the client's calls use, so the events #502 reads are rendered in a pinned shape (an endpoint that already exists is
+adopted as it is).
 
 ## Top-up intents
 

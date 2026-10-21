@@ -9,7 +9,8 @@ import { notFound } from "next/navigation";
 import { loadAuthConfig } from "../auth/config.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
-import { getSecretStoreOn } from "../secrets/shared.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { getSecretStore, getSecretStoreOn } from "../secrets/shared.ts";
 import { createAdapterRegistry } from "./adapter.ts";
 import {
   createBillingCreditService,
@@ -19,15 +20,53 @@ import {
   createBillingAdminService,
   type BillingAdminService,
 } from "./admin-service.ts";
+import { createStripeAdapter } from "./stripe-adapter.ts";
+import { stripeClientFromSecrets } from "./stripe-credentials.ts";
 import { createStripeClient, STRIPE_API_BASE_URL } from "./stripe-client.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { isBillingOn } from "./enabled.ts";
 import { manualAdapter } from "./manual-adapter.ts";
+import { createTopUpLimits } from "./topup-limits.ts";
+import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
+import { createTopUpService } from "./topup-service.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
+/** The configured public address of the app (`BETTER_AUTH_URL`): the one place billing reads the environment. */
+function publicAddress(): string {
+  return loadAuthConfig(process.env).baseUrl;
+}
+
+/**
+ * The adapters of this instance: the `manual` one, and Stripe, which reads its key from the secret store when a top-up needs it
+ * (never at startup). The Stripe adapter has no webhook until #502.
+ */
 export function getBillingAdapterRegistry() {
-  return createAdapterRegistry([manualAdapter]);
+  return createAdapterRegistry([
+    manualAdapter,
+    createStripeAdapter({
+      client: stripeClientFromSecrets({
+        secrets: getSecretStore,
+        baseUrl: STRIPE_API_BASE_URL,
+      }),
+    }),
+  ]);
+}
+
+/**
+ * The handler of `POST /api/w/:workspace/billing/top-ups`, wired to the running server. The page the buyer returns to is built
+ * from the configured address of the app (`BETTER_AUTH_URL`), never from a request header.
+ */
+export function getTopUpRoute(): TopUpRoute {
+  const db = getDatabase();
+  return createTopUpRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    activeAdapter: createActiveAdapterResolver(db, getBillingAdapterRegistry()),
+    serviceFor: (adapter) => createTopUpService({ db, adapter }),
+    limits: createTopUpLimits(createRateLimitsRepository(db)),
+    baseUrl: publicAddress(),
+    log: console,
+  });
 }
 
 /** The handler of `POST /api/billing/webhook`, wired to the running server. */
@@ -51,7 +90,7 @@ export function getBillingAdminService(): BillingAdminService {
   return createBillingAdminService({
     db: getDatabase(),
     secretsOn: getSecretStoreOn,
-    publicUrl: loadAuthConfig(process.env).baseUrl,
+    publicUrl: publicAddress(),
     clientFor: (apiKey, environment) =>
       createStripeClient({
         apiKey,

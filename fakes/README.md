@@ -62,14 +62,19 @@ no webhooks, so it does not replace it. The app's client (`app/src/billing/strip
   `Idempotent-Replayed: true`); with other parameters it answers the `idempotency_error`. Known differences from Stripe:
   the fake saves only **2xx** answers, while Stripe replays the result of any request that began executing (also a 4xx or
   5xx; not a failed validation of the parameters, not a refusal because of a concurrent request), so a repeat of a refused
-  request is run again here and replayed there; a saved answer never expires (Stripe: 24 hours); the fake runs one request
-  at a time and never answers the 409 for a concurrent request with the same key. Code that relies on the replay of an
+  request is run again here and replayed there; a saved answer never expires (Stripe: 24 hours) unless a test calls `fake.forgetIdempotencyKeys()`; the fake runs one request
+  at a time, so the 409 `idempotency_key_in_use` for a concurrent request with the same key happens only while a `delay` fault holds the
+  answer of the first request (the request ran, its answer is on its way; the refusal is not saved). Code that relies on the replay of an
   error must not take the fake as proof.
 - **Managed Payments.** A one-time Checkout session with `managed_payments[enabled]=true` is refused when it carries
   `tax_id_collection`, `invoice_creation`, `customer_update`, `payment_method_types`, `custom_text` and the other parameters
   Stripe's documentation lists as unsupported, or a line item without an eligible product `tax_code`. The Stripe sandbox
   itself refused only `payment_method_types` and `custom_text` (2026-10-20); the fake is stricter on purpose, because the
-  documentation is what the money depends on.
+  documentation is what the money depends on. Of the tax codes the sandbox took `txcd_10000000`, `txcd_10103000`,
+  `txcd_10103001` and `txcd_10105002` and refused `txcd_99999999`, `txcd_00000000`, `txcd_20030000` and a text that is no
+  code (2026-10-21): the fake takes the `txcd_10......` family and refuses the rest with the sandbox's message; which other
+  codes are eligible was not probed. The fake takes **any amount from one cent**, and any tax id value of a type it knows
+  (Stripe checks the shape per type); a test of the 10 USD floor or of a VAT ID format must not lean on it.
 - **Bad days** (`fake.faults`): `dropResponse` (the request ran, the answer is lost: `hang` or `reset`), `failWith` (a 5xx or
   any status), `rateLimit` (429 with `Retry-After`), `delay`, `respondWith` (a raw answer: an oversize body, a redirect).
 - **The buyer and Stripe.** `fake.buyer.pay(sessionId, { taxAmount, charged })` pays an open session (the session completes, a

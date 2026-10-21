@@ -123,6 +123,8 @@ export type StripeFake = {
   events(): StripeEvent[];
   /** The signing secret of a webhook endpoint, which the API shows only in the answer to the create. */
   secretOf(endpointId: string): string | undefined;
+  /** Stripe forgets an idempotency key after 24 hours: the same key with the same parameters then runs again. */
+  forgetIdempotencyKeys(): void;
   /** Stripe deletes a customer when the buyer asks for their data to go. */
   deleteCustomer(customerId: string): void;
   /** The buyer at Stripe's page. */
@@ -223,6 +225,8 @@ export async function startStripeFake(
   const recorded: RecordedRequest[] = [];
   /** Saved answers by idempotency key: what the first request with it answered, and what it asked. */
   const saved = new Map<string, { fingerprint: string; answer: Answer }>();
+  /** Idempotency keys of requests that ran but whose answer is still on its way (a `delay`): a second one is a 409. */
+  const inFlight = new Set<string>();
   const timers = new Set<NodeJS.Timeout>();
   let origin = "";
 
@@ -405,7 +409,20 @@ export async function startStripeFake(
     const fingerprint = `${method} ${path} ${canonicalize(form)}`;
     const earlier =
       method === "POST" && key !== undefined ? saved.get(key) : undefined;
-    if (earlier !== undefined && earlier.fingerprint !== fingerprint) {
+    if (method === "POST" && key !== undefined && inFlight.has(key)) {
+      // Stripe: a request with a key that another request is still using is refused, and the refusal is not saved.
+      answer = {
+        status: 409,
+        body: {
+          error: {
+            type: "invalid_request_error",
+            code: "idempotency_key_in_use",
+            message: `There is currently another in-progress request using this Stripe idempotency key (that probably means you submitted twice, and the other request is still going through). Please try again later.`,
+          },
+        } satisfies StripeErrorBody,
+        headers: {},
+      };
+    } else if (earlier !== undefined && earlier.fingerprint !== fingerprint) {
       answer = errorAnswer(
         400,
         "idempotency_error",
@@ -445,8 +462,16 @@ export async function startStripeFake(
     }
     if (fault?.kind === "delay") {
       record.status = answer.status;
+      const held =
+        method === "POST" &&
+        key !== undefined &&
+        !record.replayed &&
+        answer.status >= 200 &&
+        answer.status < 300;
+      if (held) inFlight.add(key);
       const timer = setTimeout(() => {
         timers.delete(timer);
+        if (held) inFlight.delete(key);
         send(response, answer, requestId);
       }, fault.ms);
       timers.add(timer);
@@ -692,11 +717,13 @@ export async function startStripeFake(
       closeDispute: (disputeId, outcome) =>
         structuredClone(store.closeDispute(disputeId, outcome)),
     },
+    forgetIdempotencyKeys: () => saved.clear(),
     flush,
     reset() {
       store.reset();
       faults.clear();
       saved.clear();
+      inFlight.clear();
       recorded.length = 0;
     },
     async close() {

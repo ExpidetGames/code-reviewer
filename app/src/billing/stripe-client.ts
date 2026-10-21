@@ -163,6 +163,8 @@ type Address = {
 };
 export type CreateCustomerInput = {
   name?: string;
+  /** The business the customer is, next to `name` (probed against the sandbox on 2026-10-21, API version 2025-03-31.basil). */
+  business_name?: string;
   email?: string;
   description?: string;
   address?: Address;
@@ -174,6 +176,7 @@ export type CreateCustomerInput = {
 /** What can change on a customer. `null` clears a field (a metadata key set to `null` is removed). */
 export type CustomerPatch = {
   name?: string | null;
+  business_name?: string | null;
   email?: string | null;
   description?: string | null;
   address?: Address | null;

@@ -94,11 +94,14 @@ describe("the guards of the admin portal", () => {
   });
 
   // #504-T01
-  it("keeps the provider-facing webhook the only billing route outside the portal, and public by design", () => {
+  it("keeps the provider-facing webhook the only public billing route outside the portal", () => {
     const outside = discoverRoutes().filter(
       ({ route }) =>
         /billing/i.test(concretePath(route)) &&
-        !isInternalPortalPath(concretePath(route)),
+        !isInternalPortalPath(concretePath(route)) &&
+        // A route of a workspace is not public: it runs through `withWorkspace` (the membership and the role of the
+        // person), which `src/workspaces/guard-rule.test.ts` pins for every route below `/api/w/`. #501 adds the top-up.
+        !concretePath(route).startsWith("/api/w/"),
     );
 
     // The signature checked by the active adapter is its credential (src/auth/access.ts); every page and data route of the
@@ -106,6 +109,23 @@ describe("the guards of the admin portal", () => {
     expect(outside.map(({ route }) => concretePath(route))).toEqual([
       "/api/billing/webhook",
     ]);
+  });
+
+  // #501-T04
+  it("runs every billing route of a workspace through the access check of a workspace with the billing action", () => {
+    const routes = discoverRoutes().filter(
+      ({ route }) =>
+        /billing/i.test(concretePath(route)) &&
+        concretePath(route).startsWith("/api/w/"),
+    );
+
+    expect(routes.map(({ route }) => concretePath(route))).toEqual([
+      "/api/w/x/billing/top-ups",
+    ]);
+    for (const { route, file } of routes)
+      expect(readFileSync(file, "utf8"), route).toMatch(
+        /\bwithWorkspace\(\s*workspace,\s*"manage_billing"/,
+      );
   });
 
   // #429-T08

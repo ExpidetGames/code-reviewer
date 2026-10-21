@@ -16,6 +16,8 @@ import {
 } from "../test-support/fake-billing-adapter.ts";
 import { toUsd } from "./adapter.ts";
 import { manualAdapter } from "./manual-adapter.ts";
+import { createStripeClient } from "./stripe-client.ts";
+import { createStripeAdapter } from "./stripe-adapter.ts";
 
 const NOW = new Date("2026-10-19T08:00:00.000Z");
 const T = "2026-10-19T08:00:00.000Z";
@@ -230,7 +232,44 @@ const fake: AdapterKitSubject = {
   },
 };
 
-for (const subject of [manual, fake]) describeAdapterContract(subject);
+// #501: the Stripe adapter has no webhook and no lookup until #502; it still must be a well-formed adapter, and its
+// capability `checkout` must say what its top-up does.
+const stripe: AdapterKitSubject = {
+  name: "stripe",
+  create: () =>
+    createStripeAdapter({
+      client: () =>
+        Promise.resolve(
+          createStripeClient({
+            apiKey: "sk_test_dummyvalue_for_unit_tests_0001",
+            baseUrl: "https://stripe.invalid",
+            fetch: () =>
+              Promise.resolve(
+                Response.json({
+                  id: "cs_test_Kit0001",
+                  object: "checkout.session",
+                  status: "open",
+                  payment_status: "unpaid",
+                  mode: "payment",
+                  url: "https://checkout.example.test/c/pay/cs_test_Kit0001",
+                  customer: "cus_Kit0001",
+                  payment_intent: null,
+                  client_reference_id: "intent-kit",
+                  metadata: {},
+                  amount_total: 2500,
+                  amount_subtotal: 2500,
+                  currency: "usd",
+                  expires_at: 1_700_086_400,
+                  created: 1_700_000_000,
+                  livemode: false,
+                }),
+              ),
+          }),
+        ),
+    }),
+};
+
+for (const subject of [manual, fake, stripe]) describeAdapterContract(subject);
 
 describe("the kit", () => {
   // #497-T14
