@@ -11,7 +11,7 @@ import {
   notifyingRunnerQueue,
 } from "../check-runs/notifying-queues.ts";
 import { dispatchHook, stopEndedClaims } from "../dispatch/shared.ts";
-import { recordWallClocks } from "../billing/shared.ts";
+import { deliverBalanceMails, recordWallClocks } from "../billing/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "./job-limits.ts";
 import { noticeOfRefusal } from "../refusal-notices/shared.ts";
@@ -67,6 +67,12 @@ function createRunnerQueueOfTheServer(): RunnerQueue {
       );
       // #281: the pull request gets one notice per period, posted after the response of the claim.
       noticeOfRefusal(refusal);
+      // #506: a refusal for the balance decided in its transaction that the workspace is empty; the mail goes out now.
+      if (
+        refusal.errorCode === "insufficient_balance" ||
+        refusal.errorCode === "balance_negative"
+      )
+        deliverBalanceMails();
     },
     // #361: a run settled without a known cost, which no cost limit bounds. One line per run so it can be watched:
     // the ids only, never a figure, a model or a name.
@@ -79,6 +85,8 @@ function createRunnerQueueOfTheServer(): RunnerQueue {
     onClaimsEnded: (jobIds) => {
       stopEndedClaims(jobIds);
       recordWallClocks(jobIds);
+      // #506: the settlement of these jobs may have taken a balance below the threshold; the mail goes out after the response.
+      deliverBalanceMails();
     },
     // #277: a managed cost limit next to the own key is read by nothing; say so once, with the id of the workspace only.
     onIgnoredCostLimit: (workspaceId) => {

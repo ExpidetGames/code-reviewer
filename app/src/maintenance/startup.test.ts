@@ -221,3 +221,55 @@ describe("the release of the holds of ended jobs on the timer (#591)", () => {
     expect(plain.log.error).not.toHaveBeenCalled();
   });
 });
+
+describe("the delivery of balance mails on the timer (#506)", () => {
+  const nothingRemoved = () =>
+    Promise.resolve({
+      rateLimits: 0,
+      unverifiedAccounts: 0,
+      verificationTokens: 0,
+      passwordResetTokens: 0,
+      jobClaimedKeys: 0,
+      jobDispatches: 0,
+    });
+
+  // #506-T17
+  it("delivers at the start and at every tick, after the cleanup", async () => {
+    const f = fixture(nothingRemoved);
+    const deliverBalanceMails = vi.fn(async () => undefined);
+
+    startCleanup({ ...f, deliverBalanceMails });
+    await vi.waitFor(() =>
+      expect(deliverBalanceMails).toHaveBeenCalledTimes(1),
+    );
+    f.tick();
+    await vi.waitFor(() =>
+      expect(deliverBalanceMails).toHaveBeenCalledTimes(2),
+    );
+
+    expect(f.run.mock.invocationCallOrder[0]).toBeLessThan(
+      deliverBalanceMails.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  // #506-T17
+  it("names a failed delivery by its code, without what it said, and still runs at the next tick", async () => {
+    const f = fixture(nothingRemoved);
+    const deliverBalanceMails = vi
+      .fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(new Error("postgres://u:hunter2@db/app"))
+      .mockResolvedValue(undefined);
+
+    startCleanup({ ...f, deliverBalanceMails });
+    await vi.waitFor(() => expect(f.log.error).toHaveBeenCalledTimes(1));
+    f.tick();
+    await vi.waitFor(() =>
+      expect(deliverBalanceMails).toHaveBeenCalledTimes(2),
+    );
+
+    expect(String(f.log.error.mock.calls[0]?.[0])).toContain(
+      "BALANCE_MAILS_SWEEP_FAILED",
+    );
+    expect(String(f.log.error.mock.calls[0]?.[0])).not.toContain("hunter2");
+  });
+});
