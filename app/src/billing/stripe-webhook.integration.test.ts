@@ -398,6 +398,55 @@ function suite(engine: BillingEngine) {
       });
     });
 
+    // #502-T03
+    it("expires an intent whose page was never recorded (the start died after Stripe made the session) when Stripe expires the session", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp({ record: false });
+      await s.client.expireCheckoutSession(session.id);
+      const [expired] = s.eventsOf("checkout.session.expired");
+      if (expired === undefined) throw new Error("no event");
+
+      const response = await s.post(expired);
+
+      expect(await s.outcomeOf(response)).toBe("applied");
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        state: "expired",
+        checkoutRef: null,
+      });
+    });
+
+    // #502-T04
+    it("refuses every webhook while no webhook secret is stored: unconfigured is not open", async () => {
+      const s = await setup();
+      const { session } = await s.startTopUp();
+      pay(s, session);
+      const [completed] = s.eventsOf("checkout.session.completed");
+      if (completed === undefined) throw new Error("no event");
+      const unconfigured = createBillingWebhookHandler({
+        db: s.db,
+        guard: {
+          isOn: () => isBillingOn(s.db),
+          notFound: () => {
+            throw new NotFound("not found");
+          },
+        },
+        activeAdapter: () =>
+          Promise.resolve(
+            createStripeAdapter({
+              client: () => Promise.resolve(s.client),
+              webhookSecret: () => Promise.resolve(null),
+              environment: () => Promise.resolve("test"),
+            }),
+          ),
+        now: () => new Date(s.now()),
+      });
+
+      const response = await s.post(completed, { handler: unconfigured });
+
+      expect(response.status).toBe(401);
+      expect(await s.topUps()).toEqual([]);
+    });
+
     // #502-T04
     it("answers 401 with an empty body for a body signed with another secret, an altered body and an old timestamp, and changes nothing", async () => {
       const s = await setup();

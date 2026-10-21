@@ -218,6 +218,68 @@ function suite(engine: BillingEngine) {
       expect((await intents.get(intent.id))?.creditedMicroUsd).toBe(20 * USD);
     });
 
+    // #502-T08
+    it("pins what the buyer was charged when the payment is credited: once, never changed, and a bad amount is refused", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      expect(intent.providerAmount).toBeNull();
+
+      for (const providerAmount of [0, -5, 1.5, Number.NaN])
+        expect(
+          await codeOf(
+            intents.markPaid(intent.id, {
+              paymentRef: "pi_1",
+              creditedMicroUsd: 25 * USD,
+              providerAmount,
+            }),
+          ),
+          String(providerAmount),
+        ).toBe("amount_out_of_range");
+      expect((await intents.get(intent.id))?.state).toBe("pending");
+
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2975,
+      });
+      const again = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 5000,
+      });
+
+      expect(again?.changed).toBe(false);
+      expect((await intents.get(intent.id))?.providerAmount).toBe(2975);
+    });
+
+    // #502-T08
+    it("pins the amount of a payment that was credited without one when it is told later, and leaves an unpinned intent unpinned otherwise", async () => {
+      const { db, workspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+      expect((await intents.get(intent.id))?.providerAmount).toBeNull();
+
+      const late = await intents.markPaid(intent.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+        providerAmount: 2975,
+      });
+
+      expect(late?.changed).toBe(true);
+      expect((await intents.get(intent.id))?.providerAmount).toBe(2975);
+    });
+
     // #497-T07
     it("keeps running totals of what refunds and disputes debited, inside what the payment credited", async () => {
       const { db, workspaceId } = await engine.create();
