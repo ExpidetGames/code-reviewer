@@ -6,14 +6,11 @@
 import "server-only";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { getDatabase } from "../db/startup.ts";
-import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createWorkspaceLlm, type WorkspaceLlmAssembly } from "./assemble.ts";
 import { llmApiBaseUrl } from "./endpoint.ts";
-import { createLlmKeyTestService, type LlmKeyTestService } from "./key-test.ts";
+import { createWiredLlmKeyTester } from "./key-tester.ts";
+import type { LlmKeyTestService } from "./key-test.ts";
 import { createModelCapabilityChecker } from "./model-capabilities.ts";
-import { llmProviderDescriptors } from "./providers/index.ts";
-import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
-import { createNativeKeyTester } from "../native-providers/key-test.ts";
 
 // One checker for the process, so a supported answer is remembered across requests and workspaces: the
 // metadata is public and the same for everybody. The settings save (#269) and the claim of a Dynamic job
@@ -40,14 +37,8 @@ export function getWorkspaceLlm(): WorkspaceLlmAssembly {
  * the provider's own address only (src/llm/endpoint.ts: the test stack may point it at the fake LLM).
  */
 export function getLlmKeyTester(): LlmKeyTestService {
-  const db = getDatabase();
-  return createLlmKeyTestService({
-    rateLimits: createRateLimitsRepository(db),
-    baseUrlOf: (provider) => llmApiBaseUrl(process.env, provider).url,
-    // A catalog provider (#555) is tested at the trusted address of its row, through the connect guard.
-    native: createNativeKeyTester({
-      models: createModelsDevRepository(db),
-      legacyProviders: llmProviderDescriptors.ids,
-    }),
+  return createWiredLlmKeyTester({
+    db: getDatabase(),
+    env: () => process.env,
   });
 }

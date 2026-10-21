@@ -62,6 +62,7 @@ import type {
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { catalogSelectionFrom } from "../review-settings/catalog-selection.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
+import type { Selection } from "../llm/selection.ts";
 import { entryAllowed } from "../workspaces/entitlements.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
@@ -71,7 +72,11 @@ import {
 } from "../workspaces/effective-entitlements.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
 import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
-import type { NativeCatalogReader } from "../native-providers/catalog.ts";
+import type { NativeSelectionSource } from "../native-providers/catalog.ts";
+import {
+  createProviderPins,
+  type ProviderPins,
+} from "../runner-api/provider-pins.ts";
 
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
@@ -127,6 +132,10 @@ export async function startRunnerApiHarness(
     currentKeysFor?: (workspaceId: string) => Promise<readonly string[]>;
     /** Replaces how the claim loads the key of a selection (for example to answer with the operator's key, or to count the loads). */
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
+    /** #588: told each time the claim loads a key (the selection it loads for), before the real load; a refusal must not reach it. */
+    onKeyLoad?: (workspaceId: string, selection: Selection) => void;
+    /** #588: where a claim adopts the address of a legacy selection; default: the settings of the job's workspace, as on the running server. */
+    providerPins?: ProviderPins;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
     modelCapabilities?: ModelCapabilityChecker;
     /** #553: the cost policy of a native job (`ClaimDeps.nativeCost`). Left out, no job is native, as on the running server today. */
@@ -135,7 +144,7 @@ export async function startRunnerApiHarness(
      * #555: the catalog of providers and models a project may pick for Dynamic Review (the save of the settings). The claim
      * serves the model from `nativeCost.entryFor`, never from this reader.
      */
-    nativeCatalog?: Pick<NativeCatalogReader, "checkSelection">;
+    nativeCatalog?: NativeSelectionSource;
     /**
      * #432: the providers of the app, for a test that brings a second one (`createFakeAdapter`). The key services, the
      * claim and the selection all use it. Default: the registry of the app.
@@ -401,7 +410,10 @@ export async function startRunnerApiHarness(
       keyFor:
         options.loadLlm !== undefined
           ? (workspaceId) => options.loadLlm!(workspaceId)
-          : (workspaceId, selection) => llm.keyFor(workspaceId, selection),
+          : (workspaceId, selection) => {
+              options.onKeyLoad?.(workspaceId, selection);
+              return llm.keyFor(workspaceId, selection);
+            },
       recordSelection: (job, selection) =>
         createUsageRecordsRepository(
           fixture.db,
@@ -445,6 +457,8 @@ export async function startRunnerApiHarness(
       ...(options.nativeCost === undefined
         ? {}
         : { nativeCost: options.nativeCost }),
+      providerPins:
+        options.providerPins ?? createProviderPins(() => reviewSettings),
       claimedKeys,
       ...(options.hooks ?? {}),
       now: fixture.clock.now,

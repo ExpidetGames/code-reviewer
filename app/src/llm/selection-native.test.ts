@@ -131,4 +131,27 @@ describe("the own-key selection of a catalog model", () => {
         reason: "model_invalid",
       });
   });
+
+  // #588-T14
+  it("carries the address the project pinned for the provider, and none when it has no pin", () => {
+    const pinned = resolveModelSelection(
+      own({
+        layers: {
+          project: {
+            provider: "deepseek",
+            model: "deepseek-v4-pro",
+            address: "https://api.deepseek.com",
+          },
+        },
+      }),
+    );
+    expect(pinned).toMatchObject({
+      ok: true,
+      selection: { catalog: true, pinnedAddress: "https://api.deepseek.com" },
+    });
+
+    const unpinned = resolveModelSelection(own());
+    expect(unpinned).toMatchObject({ ok: true });
+    expect(JSON.stringify(unpinned)).not.toContain("pinnedAddress");
+  });
 });

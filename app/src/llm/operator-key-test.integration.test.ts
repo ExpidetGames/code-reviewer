@@ -99,6 +99,7 @@ describe("the test button of the operator's keys", () => {
   it("has counters of its own: it neither uses up nor is limited by the test button of a workspace", async () => {
     const { test, rateLimits, db, fake } = await start();
     const workspaceTest = createLlmKeyTestService({
+      pinnedAddresses: async () => [],
       rateLimits,
       baseUrlOf: () => fake.baseUrl,
     });

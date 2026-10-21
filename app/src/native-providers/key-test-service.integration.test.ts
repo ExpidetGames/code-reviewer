@@ -7,19 +7,30 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import {
   createLlmKeyTestService,
   KEY_TEST_WORKSPACE_MAX,
+  keyTestWorkspaceKey,
 } from "../llm/key-test.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import type { NativeKeyOutcome, NativeKeyTester } from "./key-test.ts";
 
 const KEY = "sk-deepseek-typed-0123456789abcdef";
 
-async function setup(outcome: NativeKeyOutcome = "accepted") {
+async function setup(
+  outcome: NativeKeyOutcome = "accepted",
+  holds = true,
+  pins: readonly string[] = ["https://api.deepseek.example"],
+) {
   const { db } = await createTestDatabase();
-  const asked: Array<{ slug: string; apiKey: string }> = [];
+  const asked: Array<{ slug: string; apiKey: string; pinned?: string[] }> = [];
+  const pinsAsked: Array<{ workspaceId: string; slug: string }> = [];
+  const held: Array<{ slug: string; pinned: string[] }> = [];
   const native: NativeKeyTester = {
-    test: (slug, apiKey) => {
-      asked.push({ slug, apiKey });
+    test: (slug, apiKey, pinned) => {
+      asked.push({ slug, apiKey, pinned: [...pinned] });
       return Promise.resolve(outcome);
+    },
+    addressHolds: (slug, pinned) => {
+      held.push({ slug, pinned: [...pinned] });
+      return Promise.resolve(holds);
     },
   };
   const lines: string[] = [];
@@ -27,9 +38,20 @@ async function setup(outcome: NativeKeyOutcome = "accepted") {
     rateLimits: createRateLimitsRepository(db),
     baseUrlOf: () => "https://registry.example/api/v1",
     native,
+    pinnedAddresses: (workspaceId, slug) => {
+      pinsAsked.push({ workspaceId, slug });
+      return Promise.resolve(pins);
+    },
     log: (line) => lines.push(line),
   });
-  return { service, asked, lines };
+  return {
+    service,
+    asked,
+    lines,
+    pinsAsked,
+    held,
+    rateLimits: createRateLimitsRepository(db),
+  };
 }
 
 const test = (
@@ -43,7 +65,82 @@ describe("the key test of a catalog provider", () => {
     const { service, asked } = await setup("accepted");
 
     expect(await test(service)).toEqual({ ok: true });
-    expect(asked).toEqual([{ slug: "deepseek", apiKey: KEY }]);
+    expect(asked).toEqual([
+      {
+        slug: "deepseek",
+        apiKey: KEY,
+        pinned: ["https://api.deepseek.example"],
+      },
+    ]);
+  });
+
+  // #588-T25
+  it("holds the test to the address the workspace's projects pinned: it asks for the pins of this workspace and this provider", async () => {
+    const { service, pinsAsked } = await setup("accepted");
+
+    await test(service, "ws-b");
+
+    expect(pinsAsked).toEqual([{ workspaceId: "ws-b", slug: "deepseek" }]);
+  });
+
+  // #588-T25
+  it("is llm_provider_address_changed, without the key, when the catalog's address is not the pinned one", async () => {
+    const { service, lines } = await setup("address_changed");
+
+    const result = await test(service);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "llm_provider_address_changed",
+      detail: null,
+    });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+    expect(lines).toEqual([
+      "[llm] KEY_TEST_FAILED: llm_provider_address_changed",
+    ]);
+  });
+
+  // #588-T46
+  it("refuses before the key is needed when the pins do not hold, leaves the allowance of the workspace alone and logs the class only", async () => {
+    const { service, held, asked, lines, rateLimits } = await setup(
+      "accepted",
+      false,
+      ["https://api.deepseek-old.example"],
+    );
+
+    const result = await service.preflight({
+      workspaceId: "ws-a",
+      provider: "deepseek",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "llm_provider_address_changed",
+      detail: null,
+    });
+    expect(held).toEqual([
+      { slug: "deepseek", pinned: ["https://api.deepseek-old.example"] },
+    ]);
+    expect(asked).toEqual([]);
+    expect(lines).toEqual([
+      "[llm] KEY_TEST_FAILED: llm_provider_address_changed",
+    ]);
+    expect(
+      await rateLimits.hit(keyTestWorkspaceKey("ws-a"), 1000),
+    ).toMatchObject({ count: 1 });
+  });
+
+  // #588-T46
+  it("lets the test go on when the pins hold, and asks nothing about a provider of the registry", async () => {
+    const { service, pinsAsked } = await setup("accepted", true);
+
+    expect(
+      await service.preflight({ workspaceId: "ws-a", provider: "deepseek" }),
+    ).toBeNull();
+    expect(
+      await service.preflight({ workspaceId: "ws-a", provider: "openrouter" }),
+    ).toBeNull();
+    expect(pinsAsked).toEqual([{ workspaceId: "ws-a", slug: "deepseek" }]);
   });
 
   // #555-T02
