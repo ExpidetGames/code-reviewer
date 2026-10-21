@@ -90,6 +90,7 @@ export default defineConfig({
         /e2e\/admin\/billing\.e2e\.ts$/,
         /e2e\/admin\/billing-reviews\.e2e\.ts$/,
         /e2e\/billing\//,
+        /e2e\/billing-journeys\//,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
@@ -235,6 +236,17 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
       testMatch: /e2e\/billing\/.*\.e2e\.ts$/,
       dependencies: ["billing-reviews-admin"],
+    },
+    // The billing journeys that need a review to run (#508): the same app, after the billing page of a workspace. A runner script
+    // hands out the jobs the pushes make and reports them, so the journeys count the balance, the prices and the notices; they leave
+    // the workspace with a bound installation, a project that is active and a journal of its own, so nothing comes after them.
+    {
+      name: "billing-journeys",
+      // No retry: a second attempt would find the credit granted, the payments made and the reviews run.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing-journeys\/.*\.e2e\.ts$/,
+      dependencies: ["billing-workspace"],
     },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and

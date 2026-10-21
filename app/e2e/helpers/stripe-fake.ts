@@ -9,7 +9,7 @@ import { e2eEnv } from "./e2e-env";
 /** The version header the app's client sends; the fake records it and accepts any. */
 const STRIPE_VERSION = "2025-03-31.basil; managed_payments_preview=v1";
 
-async function adminClient(baseURL: string): Promise<APIRequestContext> {
+export async function adminClient(baseURL: string): Promise<APIRequestContext> {
   const client = await request.newContext({ baseURL });
   const signedIn = await client.post("/api/auth/sign-in/email", {
     data: { email: e2eEnv.adminEmail, password: e2eEnv.adminPassword },
@@ -89,14 +89,22 @@ export async function switchBillingOff(appUrl: string): Promise<void> {
   }
 }
 
+/** The ids Stripe gave a payment: its PaymentIntent and its charge (what a refund or a dispute names). */
+export type FakePayment = { paymentIntent: string; charge: string };
+
 /** The buyer pays an open Checkout session at the fake. The events wait until `deliverEvents`. */
-export async function payFakeSession(sessionId: string): Promise<void> {
+export async function payFakeSession(sessionId: string): Promise<FakePayment> {
   const stripe = await request.newContext({ baseURL: e2eEnv.stripeFakeUrl });
   try {
     const paid = await stripe.post("/__fake/pay", {
       data: { session: sessionId },
     });
     expect(paid.status(), await paid.text()).toBe(200);
+    const body = (await paid.json()) as {
+      payment_intent: string;
+      charge: string;
+    };
+    return { paymentIntent: body.payment_intent, charge: body.charge };
   } finally {
     await stripe.dispose();
   }
@@ -114,5 +122,63 @@ export async function deliverEvents(): Promise<Array<number | null>> {
     return body.data.map((delivery) => delivery.status);
   } finally {
     await stripe.dispose();
+  }
+}
+
+/** Stripe refunds a payment (all of it, or `amountCents`). The events wait until `deliverEvents`. */
+export async function refundFakePayment(
+  payment: FakePayment,
+  amountCents?: number,
+): Promise<void> {
+  const stripe = await request.newContext({ baseURL: e2eEnv.stripeFakeUrl });
+  try {
+    const refunded = await stripe.post("/__fake/refund", {
+      data: {
+        payment_intent: payment.paymentIntent,
+        ...(amountCents === undefined ? {} : { amount: amountCents }),
+      },
+    });
+    expect(refunded.status(), await refunded.text()).toBe(200);
+  } finally {
+    await stripe.dispose();
+  }
+}
+
+/** The buyer's bank disputes a payment (a chargeback); returns the dispute id. The events wait until `deliverEvents`. */
+export async function openFakeDispute(payment: FakePayment): Promise<string> {
+  const stripe = await request.newContext({ baseURL: e2eEnv.stripeFakeUrl });
+  try {
+    const opened = await stripe.post("/__fake/dispute", {
+      data: { charge: payment.charge },
+    });
+    expect(opened.status(), await opened.text()).toBe(200);
+    return ((await opened.json()) as { dispute: string }).dispute;
+  } finally {
+    await stripe.dispose();
+  }
+}
+
+/** Puts billing on the manual adapter (no provider: the operator credits by hand) with the rates already saved, and switches it on. */
+export async function switchBillingOnWithManualAdapter(
+  appUrl: string,
+): Promise<void> {
+  const admin = await adminClient(appUrl);
+  try {
+    const change = async (data: Record<string, unknown>) => {
+      const answer = await admin.put("/api/admin/billing", { data });
+      expect(answer.status(), await answer.text()).toBe(200);
+    };
+    await change({ enabled: false });
+    await change({ adapter: "manual" });
+    await change({
+      rates: {
+        factorA: 50_000,
+        minuteRateMicroUsd: { diff: 13_000, dynamic: 16_000 },
+        diffAiReserveMicroUsd: 150_000,
+      },
+    });
+    await change({ enabled: true });
+  } finally {
+    await admin.dispose();
   }
 }
