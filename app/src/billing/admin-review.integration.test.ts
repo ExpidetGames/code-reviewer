@@ -470,7 +470,11 @@ describe("repairing a billing review row with a manual credit", () => {
       provider: "stripe",
       eventId: "evt_refused",
       note: "Paid 12.50 after a coupon, credited",
-      credit: { type: "credit", amountMicroUsd: 12_500_000 },
+      credit: {
+        type: "credit",
+        amountMicroUsd: 12_500_000,
+        intentState: "pending",
+      },
     });
 
     expect(response.status).toBe(200);
@@ -497,7 +501,11 @@ describe("repairing a billing review row with a manual credit", () => {
         provider: "stripe",
         eventId: "evt_refused",
         note: "credited",
-        credit: { type: "credit", amountMicroUsd: 12_500_000 },
+        credit: {
+          type: "credit",
+          amountMicroUsd: 12_500_000,
+          intentState: "pending",
+        },
       });
 
     const first = await send();
@@ -527,7 +535,11 @@ describe("repairing a billing review row with a manual credit", () => {
       provider: "stripe",
       eventId: "evt_refused",
       note: "credited",
-      credit: { type: "credit", amountMicroUsd: 12_500_000 },
+      credit: {
+        type: "credit",
+        amountMicroUsd: 12_500_000,
+        intentState: "pending",
+      },
     });
     await s.db
       .updateTable("billing_webhook_events")
@@ -538,7 +550,11 @@ describe("repairing a billing review row with a manual credit", () => {
       provider: "stripe",
       eventId: "evt_refused",
       note: "credited",
-      credit: { type: "credit", amountMicroUsd: 20_000_000 },
+      credit: {
+        type: "credit",
+        amountMicroUsd: 20_000_000,
+        intentState: "pending",
+      },
     });
 
     expect(other.status).toBe(409);
@@ -582,13 +598,21 @@ describe("repairing a billing review row with a manual credit", () => {
       provider: "stripe",
       eventId: "evt_refused",
       note: "n",
-      credit: { type: "credit", amountMicroUsd: 0 },
+      credit: {
+        type: "credit",
+        amountMicroUsd: 0,
+        intentState: "pending",
+      },
     });
     const kind = await s.resolve({
       provider: "stripe",
       eventId: "evt_refused",
       note: "n",
-      credit: { type: "refund", amountMicroUsd: USD },
+      credit: {
+        type: "refund",
+        amountMicroUsd: USD,
+        intentState: "pending",
+      },
     });
 
     expect(zero.status).toBe(422);
@@ -624,6 +648,223 @@ describe("repairing a billing review row with a manual credit", () => {
     expect(await s.entriesOf(acme)).toMatchObject([
       { type: "correction", amountMicroUsd: -5 * USD, provider: "manual" },
     ]);
+  });
+});
+
+describe("which entry a billing review row may write", () => {
+  const reopen = (s: Awaited<ReturnType<typeof start>>) =>
+    s.db
+      .updateTable("billing_webhook_events")
+      .set({ review_state: "open", resolved_at: null, resolved_by: null })
+      .execute();
+
+  // #603-T20
+  it("writes the type the row calls for when the request names none", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+
+    const response = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_refused",
+      note: "credited",
+      credit: { amountMicroUsd: 5 * USD, intentState: "pending" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await s.entriesOf(acme)).toMatchObject([{ type: "top_up" }]);
+  });
+
+  // #603-T21
+  it("refuses another type for a payment row, after a credit too, and the journal keeps its one entry", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+    await s.resolve({
+      provider: "stripe",
+      eventId: "evt_refused",
+      note: "credited",
+      credit: {
+        type: "credit",
+        amountMicroUsd: 5 * USD,
+        intentState: "pending",
+      },
+    });
+    await reopen(s);
+
+    const other = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_refused",
+      note: "credited",
+      credit: {
+        type: "correction",
+        amountMicroUsd: -5 * USD,
+        intentState: "pending",
+      },
+    });
+
+    expect(other.status).toBe(409);
+    expect(await other.json()).toEqual({
+      error: "review_credit_type_mismatch",
+    });
+    expect(await s.entriesOf(acme)).toMatchObject([{ type: "top_up" }]);
+  });
+
+  // #603-T21
+  it("refuses a credit for a refund row and a dispute row, and writes nothing", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+    await s.review("evt_refund", {
+      outcome: "intent_unresolved",
+      subject: "refund:re_1",
+      workspaceId: acme,
+    });
+    await s.review("evt_dispute", {
+      outcome: "intent_unresolved",
+      subject: "dispute:dp_1",
+      workspaceId: acme,
+    });
+
+    for (const eventId of ["evt_refund", "evt_dispute"]) {
+      const response = await s.resolve({
+        provider: "stripe",
+        eventId,
+        note: "n",
+        credit: { type: "credit", amountMicroUsd: 5 * USD },
+      });
+      expect(response.status, eventId).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "review_credit_type_mismatch",
+      });
+      expect((await s.events.getReview("stripe", eventId))?.reviewState).toBe(
+        "open",
+      );
+    }
+    expect(await s.entriesOf(acme)).toEqual([]);
+  });
+
+  // #603-T21
+  it("writes a correction for a dispute row", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+    await s.review("evt_dispute", {
+      outcome: "intent_unresolved",
+      subject: "dispute:dp_1",
+      workspaceId: acme,
+    });
+
+    const response = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_dispute",
+      note: "lost the dispute",
+      credit: { type: "correction", amountMicroUsd: -5 * USD },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await s.entriesOf(acme)).toMatchObject([{ type: "correction" }]);
+  });
+
+  // #603-T22
+  it("refuses a credit when the top-up is not in the state the admin saw, and credits once the admin has seen the new one", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+    // The payment was applied by a webhook after the admin loaded the page.
+    await s.db
+      .updateTable("billing_topup_intents")
+      .set({ state: "paid" })
+      .execute();
+    const credit = (intentState?: string) =>
+      s.resolve({
+        provider: "stripe",
+        eventId: "evt_refused",
+        note: "credited",
+        credit: {
+          type: "credit",
+          amountMicroUsd: 5 * USD,
+          ...(intentState === undefined ? {} : { intentState }),
+        },
+      });
+
+    const stale = await credit("pending");
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "intent_state_changed" });
+    expect(await s.entriesOf(acme)).toEqual([]);
+    expect(
+      (await s.events.getReview("stripe", "evt_refused"))?.reviewState,
+    ).toBe("open");
+    expect((await credit("paid")).status).toBe(200);
+    expect(await s.entriesOf(acme)).toHaveLength(1);
+  });
+
+  // #603-T22
+  it("asks for the state of the top-up of a row that names one", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+
+    const response = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_refused",
+      note: "credited",
+      credit: { type: "credit", amountMicroUsd: 5 * USD },
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      issues: [{ field: "intentState", code: "body_invalid" }],
+    });
+    expect(await s.entriesOf(acme)).toEqual([]);
+  });
+
+  // #603-T22
+  it("still credits a paid top-up of an amount conflict when the admin saw it paid", async () => {
+    const s = await start();
+    const acme = await s.workspace("Acme");
+    await s.intent(acme, "intent-paid");
+    await s.db
+      .updateTable("billing_topup_intents")
+      .set({ state: "paid" })
+      .execute();
+    await s.review("evt_conflict", {
+      outcome: "amount_conflict",
+      subject: "payment:pi_2",
+      workspaceId: acme,
+      intentId: "intent-paid",
+    });
+
+    const response = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_conflict",
+      note: "second payment for the same top-up",
+      credit: {
+        type: "credit",
+        amountMicroUsd: 25 * USD,
+        intentState: "paid",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await s.entriesOf(acme)).toMatchObject([
+      { type: "top_up", amountMicroUsd: 25 * USD },
+    ]);
+  });
+
+  // #603-T22
+  it("refuses a state that is no state of a top-up", async () => {
+    const s = await start();
+    const acme = await refusedPayment(s);
+
+    const response = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_refused",
+      note: "n",
+      credit: {
+        type: "credit",
+        amountMicroUsd: 5 * USD,
+        intentState: 3,
+      },
+    });
+
+    expect(response.status).toBe(422);
+    expect(await s.entriesOf(acme)).toEqual([]);
   });
 });
 
@@ -760,6 +1001,30 @@ describe("who may use the review routes", () => {
 
     for (const answer of answers)
       expect(answer.headers.get("cache-control")).toBe("no-store");
+  });
+
+  // #603-T24
+  it("sends no-store with the answer to a close and a check that worked", async () => {
+    const s = await start({
+      check: { result: { ok: true, intentId: "intent-1", state: "pending" } },
+    });
+    await refusedPayment(s);
+    await s.review("evt_second", { at: "2026-10-21T09:00:00.000Z" });
+
+    const checked = await s.call(CHECK, {
+      method: "POST",
+      body: { provider: "stripe", eventId: "evt_refused" },
+    });
+    const closed = await s.resolve({
+      provider: "stripe",
+      eventId: "evt_second",
+      note: "nothing to do",
+    });
+
+    expect(checked.status).toBe(200);
+    expect(checked.headers.get("cache-control")).toBe("no-store");
+    expect(closed.status).toBe(200);
+    expect(closed.headers.get("cache-control")).toBe("no-store");
   });
 
   // #603-T03

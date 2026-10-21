@@ -80,6 +80,10 @@ export const BILLING_ERROR_CODES = [
   "payment_check_not_possible",
   /** The payment provider could not be asked, or refused the question (#603). */
   "payment_check_unavailable",
+  /** A credit from a review row named another type than the row calls for: a credit for a payment, a correction for a refund or a dispute (#603). */
+  "review_credit_type_mismatch",
+  /** The top-up of the row is not in the state the admin saw when asking for the credit (#603). */
+  "intent_state_changed",
   ...BILLING_CHECK_ERROR_CODES,
 ] as const;
 export type BillingErrorCode = (typeof BILLING_ERROR_CODES)[number];
@@ -107,6 +111,8 @@ export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   review_has_no_intent: 409,
   payment_check_not_possible: 409,
   payment_check_unavailable: 502,
+  review_credit_type_mismatch: 409,
+  intent_state_changed: 409,
   api_key_missing: 409,
   api_key_unreadable: 409,
   stripe_key_rejected: 422,

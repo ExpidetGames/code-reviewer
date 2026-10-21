@@ -17,7 +17,12 @@ export type BillingReviewResolveInput = BillingReviewTarget & {
   /** Required: why the row is closed. */
   note: string;
   /** Credits (or corrects) the workspace of the row by hand first; the server picks the workspace, once per row. */
-  credit?: { type: "credit" | "correction"; amountMicroUsd: number };
+  credit?: {
+    type: "credit" | "correction";
+    amountMicroUsd: number;
+    /** The state of the row's top-up the admin saw (absent for a row with none); the server refuses the credit if it moved. */
+    intentState?: string;
+  };
 };
 
 export type BillingReviewApi = {

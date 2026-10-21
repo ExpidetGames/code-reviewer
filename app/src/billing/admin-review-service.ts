@@ -11,6 +11,12 @@
 //     (`admin-credit-service.ts`) for the workspace THE ROW names (never one the caller sends), under a request id derived from
 //     the row, so the same row credits once however often it is sent: a repeat finds the same journal entry, a repeat with
 //     another amount is `request_conflict`, and a close that was lost after the credit is closed by the retry.
+//   - The row, not the caller, decides what is written: a credit (`top_up`) for a payment or an event about none, a signed
+//     correction for a refund or a dispute. A request naming the other type is refused (`review_credit_type_mismatch`), and the
+//     request id carries the type as well, so no input can make a second entry of another type for one row (the journal keys
+//     an entry by workspace, type and request id).
+//   - The credit carries the state of the row's top-up the admin saw (`intentState`); if the top-up has moved since (a webhook
+//     paid it, the admin checked it), the credit is refused (`intent_state_changed`) and the admin looks again.
 //   - The audit line names the actor and the event, never the note (it may name a customer); the row keeps the note, the actor,
 //     the time and the journal entry.
 //   - A row holds an id, an outcome and ids of our own: no payload, no buyer and no amount the provider sent.
@@ -47,6 +53,8 @@ export type ReviewFailure =
   | { ok: false; error: "review_already_resolved" }
   | { ok: false; error: "review_workspace_unknown" }
   | { ok: false; error: "review_has_no_intent" }
+  | { ok: false; error: "review_credit_type_mismatch" }
+  | { ok: false; error: "intent_state_changed" }
   | { ok: false; error: "payment_check_not_possible" }
   | { ok: false; error: "payment_check_unavailable" }
   | { ok: false; error: "workspace_not_found" }
@@ -79,6 +87,15 @@ export type BillingReviewService = {
 
 const SUBJECT = /^(payment|refund|dispute):(.+)$/;
 
+/** What a credit from a row writes: a credit for a payment (or an event about none), a correction for a refund or dispute. */
+function creditTypeOf(
+  subject: BillingReviewView["subject"],
+): "credit" | "correction" {
+  return subject === null || subject.kind === "payment"
+    ? "credit"
+    : "correction";
+}
+
 function subjectOf(subject: string | null): BillingReviewView["subject"] {
   const match = subject === null ? null : SUBJECT.exec(subject);
   return match === null
@@ -91,8 +108,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** The request id of the manual credit of a row: one per row, so the row credits once however often it is sent. */
-export function reviewRequestId(provider: string, eventId: string): string {
-  return `review-${createHash("sha256").update(`${provider}\0${eventId}`).digest("hex").slice(0, 40)}`;
+export function reviewRequestId(
+  provider: string,
+  eventId: string,
+  type: "credit" | "correction",
+): string {
+  return `review-${createHash("sha256").update(`${provider}\0${eventId}\0${type}`).digest("hex").slice(0, 40)}`;
 }
 
 export function createBillingReviewService({
@@ -154,7 +175,7 @@ export function createBillingReviewService({
         const suggestion: BillingReviewView["suggestion"] =
           workspace === undefined
             ? null
-            : subject?.kind === "payment" || subject === null
+            : creditTypeOf(subject) === "credit"
               ? {
                   type: "credit",
                   amountMicroUsd:
@@ -285,13 +306,27 @@ export function createBillingReviewService({
         wanted !== undefined &&
         (!isRecord(wanted) ||
           Object.keys(wanted).some(
-            (key) => key !== "type" && key !== "amountMicroUsd",
+            (key) =>
+              key !== "type" &&
+              key !== "amountMicroUsd" &&
+              key !== "intentState",
           ))
       )
         return {
           ok: false,
           error: "invalid_input",
           issues: [{ field: "credit", code: "body_invalid" }],
+        };
+
+      if (
+        wanted !== undefined &&
+        wanted.intentState !== undefined &&
+        typeof wanted.intentState !== "string"
+      )
+        return {
+          ok: false,
+          error: "invalid_input",
+          issues: [{ field: "intentState", code: "body_invalid" }],
         };
 
       const row = await events.getReview(provider, eventId);
@@ -303,11 +338,38 @@ export function createBillingReviewService({
       if (wanted !== undefined) {
         if (row.workspaceId === null)
           return { ok: false, error: "review_workspace_unknown" };
+        const type = creditTypeOf(subjectOf(row.subject));
+        if (wanted.type !== undefined && wanted.type !== type) {
+          if (wanted.type !== "credit" && wanted.type !== "correction")
+            return {
+              ok: false,
+              error: "invalid_input",
+              issues: [{ field: "type", code: "type_invalid" }],
+            };
+          return { ok: false, error: "review_credit_type_mismatch" };
+        }
+        // What the admin saw of the top-up must still be so, or the credit might repeat what a payment applied since.
+        const intent =
+          row.intentId === null
+            ? undefined
+            : await intents.findById(provider, row.intentId);
+        const seen =
+          intent === undefined || intent.workspaceId !== row.workspaceId
+            ? undefined
+            : intent.state;
+        if (seen !== undefined && wanted.intentState === undefined)
+          return {
+            ok: false,
+            error: "invalid_input",
+            issues: [{ field: "intentState", code: "body_invalid" }],
+          };
+        if (wanted.intentState !== seen)
+          return { ok: false, error: "intent_state_changed" };
         const result = await credit.credit(adminId, row.workspaceId, {
-          type: wanted.type,
+          type,
           amountMicroUsd: wanted.amountMicroUsd,
           note,
-          requestId: reviewRequestId(provider, eventId),
+          requestId: reviewRequestId(provider, eventId, type),
         });
         if (!result.ok) return result;
         entryId = result.entryId;

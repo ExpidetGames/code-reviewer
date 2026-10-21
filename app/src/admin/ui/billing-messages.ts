@@ -54,6 +54,10 @@ const FAILURE_COPY: Record<string, string> = {
     "Stripe cannot be asked about this payment: billing has no Stripe adapter that can look a payment up, or it is not set up.",
   payment_check_unavailable:
     "Stripe could not be asked, or refused the question. Try again in a moment.",
+  review_credit_type_mismatch:
+    "This row calls for another kind of entry than the one asked for (a credit for a payment, a correction for a refund or a dispute). Reload the page.",
+  intent_state_changed:
+    "The top-up of this row changed since you loaded the page (a payment may have been applied). Reload the page, look at the balance and the top-up, then decide again.",
   api_key_missing: "Save the Stripe API key first.",
   api_key_unreadable:
     "The saved API key cannot be read. Enter it again and save.",

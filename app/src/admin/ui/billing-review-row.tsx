@@ -103,7 +103,14 @@ export function BillingReviewRow({
       const result = await api.resolve({
         ...target,
         note,
-        credit: { type: suggestion.type, amountMicroUsd: micro },
+        credit: {
+          type: suggestion.type,
+          amountMicroUsd: micro,
+          // The state of the top-up as this page showed it: the server refuses the credit if it has moved since.
+          ...(review.intent === null
+            ? {}
+            : { intentState: review.intent.state }),
+        },
       });
       if (!result.ok)
         return {

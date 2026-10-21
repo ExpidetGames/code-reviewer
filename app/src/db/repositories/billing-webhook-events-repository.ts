@@ -126,6 +126,13 @@ export type BillingWebhookEventsRepository = {
   ): Promise<boolean>;
 };
 
+/** The review state to write: what `otherwise` says, except that a review an operator closed stays closed. */
+function keepClosed(otherwise: "open" | null) {
+  return sql<
+    "open" | "resolved" | null
+  >`CASE WHEN review_state = 'resolved' THEN 'resolved' ELSE ${sql.lit(otherwise)} END`;
+}
+
 function normalize(time: string | null): string | null {
   return time === null ? null : formatTimestamp(new Date(time));
 }
@@ -211,13 +218,12 @@ export function createBillingWebhookEventsRepository(
         .updateTable("billing_webhook_events")
         .set({
           outcome: "processing",
-          review_state: null,
+          // An open review is started over; a closed one stays closed with its resolution (who, when, why and the journal entry
+          // of a credit are an operator's work that a redelivery must not wipe, and a credit already written must not look
+          // undone).
+          review_state: keepClosed(null),
           workspace_id: null,
           intent_id: null,
-          resolved_at: null,
-          resolved_by: null,
-          resolution_note: null,
-          resolution_entry_id: null,
           received_at: normalize(receivedAt) ?? receivedAt,
         })
         .where("provider", "=", provider)
@@ -240,7 +246,7 @@ export function createBillingWebhookEventsRepository(
           outcome,
           subject,
           occurred_at: normalize(occurredAt),
-          review_state: review === true ? "open" : null,
+          review_state: keepClosed(review === true ? "open" : null),
           workspace_id: attribution?.workspaceId ?? null,
           intent_id: attribution?.intentId ?? null,
         })

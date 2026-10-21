@@ -222,7 +222,11 @@ describe("the billing review rows", () => {
       provider: "stripe",
       eventId: "evt_refused",
       note: "Paid 12.50 after a coupon",
-      credit: { type: "credit", amountMicroUsd: 12_500_000 },
+      credit: {
+        type: "credit",
+        amountMicroUsd: 12_500_000,
+        intentState: "pending",
+      },
     });
     expect(
       await screen.findByText(
@@ -257,6 +261,27 @@ describe("the billing review rows", () => {
     expect(api.resolve.mock.calls[0]?.[0]).toMatchObject({
       credit: { type: "correction", amountMicroUsd: -5_000_000 },
     });
+    // The row names no top-up, so there is no state to send.
+    expect(api.resolve.mock.calls[0]?.[0].credit).not.toHaveProperty(
+      "intentState",
+    );
+  });
+
+  // #603-T22
+  it("tell the admin in words that the top-up changed since the page was loaded", async () => {
+    const user = userEvent.setup();
+    const api = renderPage(list([REFUSED]));
+    api.resolve.mockResolvedValueOnce(failed("intent_state_changed"));
+
+    const row = within(rowOf("evt_refused"));
+    await user.type(row.getByLabelText("Note"), "n");
+    await user.click(
+      row.getByRole("button", { name: "Credit the workspace and close" }),
+    );
+
+    expect(
+      await row.findByText(/top-up of this row changed since you loaded/),
+    ).toBeTruthy();
   });
 
   // #603-T13

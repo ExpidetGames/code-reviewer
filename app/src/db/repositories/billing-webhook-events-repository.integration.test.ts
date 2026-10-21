@@ -246,14 +246,8 @@ function suite(engine: BillingEngine) {
       });
 
       // #603-T02
-      it("starts a redelivered event over without the resolution of the earlier review", async () => {
+      it("starts a redelivered event over while its review is still open", async () => {
         const { events } = await withReviews();
-        await events.resolveReview("stripe", "evt_b", {
-          resolvedBy: "user-1",
-          note: "nothing to do",
-          entryId: null,
-          at: "2026-10-21T12:00:00.000Z",
-        });
 
         const again = await events.claim(
           "stripe",
@@ -263,6 +257,69 @@ function suite(engine: BillingEngine) {
 
         expect(again).toEqual({ claimed: true });
         expect(await events.getReview("stripe", "evt_b")).toBeUndefined();
+        expect(await events.countReviews("open")).toBe(2);
+      });
+
+      // #603-T23
+      it("keeps the resolution of a closed review when the event is delivered again, and does not open it again", async () => {
+        const { events } = await withReviews();
+        const resolution = {
+          resolvedBy: "user-1",
+          note: "nothing to do",
+          entryId: "entry-1",
+          at: "2026-10-21T12:00:00.000Z",
+        };
+        await events.resolveReview("stripe", "evt_b", resolution);
+
+        const again = await events.claim(
+          "stripe",
+          "evt_b",
+          "2026-10-21T13:00:00.000Z",
+        );
+        expect(again).toEqual({ claimed: true });
+        expect(await events.getReview("stripe", "evt_b")).toMatchObject({
+          reviewState: "resolved",
+          resolution,
+        });
+        await events.finish(
+          "stripe",
+          "evt_b",
+          "intent_unresolved",
+          { subject: "refund:re_b", occurredAt: null },
+          true,
+        );
+
+        expect(await events.getReview("stripe", "evt_b")).toMatchObject({
+          outcome: "intent_unresolved",
+          reviewState: "resolved",
+          resolution,
+        });
+        expect(await events.countReviews("open")).toBe(2);
+        expect(await events.countReviews("resolved")).toBe(1);
+      });
+
+      // #603-T23
+      it("keeps the resolution of a closed review when the event is delivered again and ends without a review", async () => {
+        const { events } = await withReviews();
+        const resolution = {
+          resolvedBy: "user-1",
+          note: "credited by hand",
+          entryId: "entry-1",
+          at: "2026-10-21T12:00:00.000Z",
+        };
+        await events.resolveReview("stripe", "evt_b", resolution);
+        await events.claim("stripe", "evt_b", "2026-10-21T13:00:00.000Z");
+
+        await events.finish("stripe", "evt_b", "applied", {
+          subject: "refund:re_b",
+          occurredAt: null,
+        });
+
+        expect(await events.getReview("stripe", "evt_b")).toMatchObject({
+          outcome: "applied",
+          resolution,
+        });
+        expect(await events.countReviews("open")).toBe(2);
       });
     },
   );
