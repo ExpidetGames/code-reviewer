@@ -66,15 +66,44 @@ describe("the guards of the admin portal", () => {
     expect(readFileSync(page!.file, "utf8")).toMatch(/\brequireAdmin\(\)/);
   });
 
-  // #491-T08
-  it("has no billing page or billing data route until the billing admin page is built again on these guards", () => {
+  // #504-T11
+  it("guard the billing page and its data routes like every other part of the portal", () => {
     const billing = discoverRoutes().filter(({ route }) =>
-      /billing/i.test(concretePath(route)),
+      /^\/(api\/)?instance-portal\/billing/.test(concretePath(route)),
     );
 
-    // #497: the provider-facing webhook is the one billing route so far. It is public by design (the signature is its
-    // credential, src/auth/access.ts) and not part of the portal; every page and portal data route is still to come.
-    expect(billing.map(({ route }) => concretePath(route))).toEqual([
+    expect(billing.map(({ route }) => route).sort()).toEqual([
+      "/api/instance-portal/billing",
+      "/api/instance-portal/billing/check",
+      "/api/instance-portal/billing/webhook-endpoint",
+      "/api/instance-portal/billing/workspaces",
+      "/api/instance-portal/billing/workspaces/[id]",
+      "/api/instance-portal/billing/workspaces/[id]/credit",
+      "/instance-portal/billing",
+    ]);
+    for (const { route, file } of billing) {
+      expect(isInternalPortalPath(concretePath(route))).toBe(true);
+      const source = readFileSync(file, "utf8");
+      if (/page\.tsx?$/.test(file))
+        expect(source, route).toMatch(/\brequireAdmin\(\)/);
+      else {
+        expect(source, route).toMatch(/\bcreateBillingRouteHandlers\(/);
+        expect(source, route).toMatch(/\baccess:\s*lookupAdmin\b/);
+      }
+    }
+  });
+
+  // #504-T01
+  it("keeps the provider-facing webhook the only billing route outside the portal, and public by design", () => {
+    const outside = discoverRoutes().filter(
+      ({ route }) =>
+        /billing/i.test(concretePath(route)) &&
+        !isInternalPortalPath(concretePath(route)),
+    );
+
+    // The signature checked by the active adapter is its credential (src/auth/access.ts); every page and data route of the
+    // billing admin is below the portal and guarded above.
+    expect(outside.map(({ route }) => concretePath(route))).toEqual([
       "/api/billing/webhook",
     ]);
   });
@@ -167,7 +196,7 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreate(Admin|Github|Approval|Catalog|ModelPrice|ModelsDev)RouteHandlers\(/.test(
+          /\bcreate(Admin|Github|Approval|Billing|Catalog|ModelPrice|ModelsDev)RouteHandlers\(/.test(
             source,
           ) && /\baccess:\s*lookupAdmin\b/.test(source)
         );
