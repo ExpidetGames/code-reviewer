@@ -49,8 +49,12 @@ export function toTopUpIntent(
 export type IntentChange = { intent: TopUpIntent; changed: boolean };
 
 export type BillingTopUpIntentsRepository = {
-  /** Writes a `pending` intent. The amount is a whole micro-USD amount from 10 to 500 USD. */
+  /**
+   * Writes a `pending` intent. The amount is a whole micro-USD amount from 10 to 500 USD. `id` is the id the caller chose
+   * (the top-up form makes one per attempt, so a repeated click is the same intent); another intent holding it throws.
+   */
   create(input: {
+    id?: string;
     adapter: string;
     amountMicroUsd: number;
   }): Promise<TopUpIntent>;
@@ -202,7 +206,7 @@ export function createBillingTopUpIntentsRepository(
   }
 
   return {
-    async create({ adapter, amountMicroUsd }) {
+    async create({ id, adapter, amountMicroUsd }) {
       if (!isAdapterId(adapter))
         throw new TopUpIntentError("adapter_invalid", "not an adapter id");
       if (
@@ -218,7 +222,7 @@ export function createBillingTopUpIntentsRepository(
       const row = await db
         .insertInto("billing_topup_intents")
         .values({
-          id: newId(),
+          id: id ?? newId(),
           workspace_id: workspaceId,
           adapter,
           amount_micro_usd: amountMicroUsd,

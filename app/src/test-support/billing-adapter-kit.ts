@@ -83,7 +83,10 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
     // #497-T14
     it("starts a top-up only as a redirect or as none", async () => {
       const started = await adapter.createTopUpCheckout({
-        customer: null,
+        // An adapter that needs the buyer's profile needs the customer made from it.
+        customer: adapter.capabilities.requiresBillingProfile
+          ? "cus_kit"
+          : null,
         intentId: "intent-kit",
         amount: toUsd(25_000_000),
         returnUrl: "https://app.example.test/billing",

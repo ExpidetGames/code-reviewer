@@ -49,6 +49,30 @@ function suite(engine: BillingEngine) {
       ]);
     });
 
+    // #501-T06
+    it("writes an intent under the id the caller chose, once: a second with that id is refused and nothing changes", async () => {
+      const { db, workspaceId, otherWorkspaceId } = await engine.create();
+      const intents = createBillingTopUpIntentsRepository(db, workspaceId);
+      const others = createBillingTopUpIntentsRepository(db, otherWorkspaceId);
+      const id = "6f1f4a2e-0c52-4b8e-9a43-0d0f6f1d2a11";
+
+      const first = await intents.create({
+        id,
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+
+      expect(first.id).toBe(id);
+      await expect(
+        intents.create({ id, adapter: "fake", amountMicroUsd: 30 * USD }),
+      ).rejects.toThrow();
+      await expect(
+        others.create({ id, adapter: "fake", amountMicroUsd: 30 * USD }),
+      ).rejects.toThrow();
+      expect(await intents.get(id)).toEqual(first);
+      expect(await others.get(id)).toBeUndefined();
+    });
+
     // #497-T03
     it("refuses an amount outside 10 to 500 USD, a fraction and an adapter id that is not one", async () => {
       const { db, workspaceId } = await engine.create();
