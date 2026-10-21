@@ -63,6 +63,11 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
       finish = true,
       /** Runs while the job runs: a Dispatcher acknowledging it (#498 measures a job when it ends, so it is hosted by then). */
       whileRunning?: (jobId: string) => Promise<void>,
+      /** How the claim ends; the default is a delivered result. */
+      outcome: Parameters<typeof fixture.queue.complete>[2] = {
+        ok: true,
+        result: {},
+      },
     ) {
       pr += 1;
       const job = await fixture.enqueueNew({
@@ -73,10 +78,11 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
       await whileRunning?.(job.id);
       fixture.clock.advance(seconds * SECOND);
       if (finish)
-        await fixture.queue.complete(job.id, claimed?.leaseToken as string, {
-          ok: true,
-          result: {},
-        });
+        await fixture.queue.complete(
+          job.id,
+          claimed?.leaseToken as string,
+          outcome,
+        );
       return job.id;
     }
     return { fixture, recorder, runs, finishedJob };
@@ -117,27 +123,29 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
       t.fixture.db,
       t.fixture.clock.now,
     );
-    const id = await t.finishedJob(90, true, async (jobId) => {
-      const at = t.fixture.clock.now();
-      await dispatches.create(jobId, at);
-      const row = await dispatches.get(jobId);
-      await dispatches.claimSend(jobId, row?.nextDispatchAt ?? "", at);
-      await dispatches.record(
-        jobId,
-        decideOutcome({ kind: "accepted" }, 0, at),
-        at,
-      );
-    });
-    // #498: the settlement of the job already measured it (a hosted job whose VM was never reported is billed by its claim).
-    const before = await t.runs.list(id);
+    // The run fails with a code that is clearly ours: settlement prices it free and does not measure it, so any row for the job
+    // would be the recorder's.
+    const id = await t.finishedJob(
+      90,
+      true,
+      async (jobId) => {
+        const at = t.fixture.clock.now();
+        await dispatches.create(jobId, at);
+        const row = await dispatches.get(jobId);
+        await dispatches.claimSend(jobId, row?.nextDispatchAt ?? "", at);
+        await dispatches.record(
+          jobId,
+          decideOutcome({ kind: "accepted" }, 0, at),
+          at,
+        );
+      },
+      { ok: false, errorCode: "runner_error", result: null },
+    );
 
     await t.recorder.recordFor([id]);
 
     // The recorder adds nothing for a job a Dispatcher started: that is the VM's.
-    expect(await t.runs.list(id)).toStrictEqual(before);
-    expect(before.map((row) => row.endSource)).toStrictEqual([
-      "claim_wall_clock",
-    ]);
+    expect(await t.runs.list(id)).toStrictEqual([]);
   });
 
   // #493-T10
