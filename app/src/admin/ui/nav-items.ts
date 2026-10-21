@@ -8,6 +8,8 @@ export type AdminNavItem = {
   href: string;
   label: string;
   exact: boolean;
+  /** Shows the number of open billing review rows next to the label (#603). */
+  showsReviewCount?: boolean;
   /** Sub-pages of this section, rendered nested under its link (for example GitHub App under Integrations). */
   children?: AdminNavItem[];
 };
@@ -50,8 +52,22 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/mail", label: "Mail", exact: false },
       // The operator's own LLM key (#276).
       { href: "/admin/llm", label: "LLM keys", exact: false },
-      // The switch of billing, the payment adapter, the rates and the manual credit (#504).
-      { href: "/admin/billing", label: "Billing", exact: false },
+      // The switch of billing, the payment adapter, the rates and the manual credit (#504). The index owns only its own path;
+      // the payment reviews (#603) are its nested child, with the number of open rows on both.
+      {
+        href: "/admin/billing",
+        label: "Billing",
+        exact: true,
+        showsReviewCount: true,
+        children: [
+          {
+            href: "/admin/billing/reviews",
+            label: "Payment reviews",
+            exact: false,
+            showsReviewCount: true,
+          },
+        ],
+      },
       // The models.dev catalog: what is new, what is enabled, what each costs us (#554).
       { href: "/admin/catalog", label: "Catalog", exact: false },
     ],

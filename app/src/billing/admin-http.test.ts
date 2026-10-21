@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdminAccess } from "../admin/access.ts";
 import type { BillingCreditService } from "./admin-credit-service.ts";
 import { createBillingRouteHandlers } from "./admin-http.ts";
+import type { BillingReviewService } from "./admin-review-service.ts";
 import type { BillingAdminService } from "./admin-service.ts";
 
 class NotFoundSignal extends Error {}
@@ -29,6 +30,7 @@ function handlersFor(access: AdminAccess) {
   const reached: string[] = [];
   const service = untouchable<BillingAdminService>(reached);
   const credit = untouchable<BillingCreditService>(reached);
+  const reviews = untouchable<BillingReviewService>(reached);
   const notFound = vi.fn((): never => {
     throw new NotFoundSignal("not found");
   });
@@ -37,6 +39,7 @@ function handlersFor(access: AdminAccess) {
     notFound,
     service,
     credit,
+    reviews,
   });
   return { handlers, notFound, reached };
 }
@@ -90,6 +93,26 @@ const CALLS = [
           requestId: "r-1",
         }),
         "ws-1",
+      ),
+  ],
+  // #603-T03
+  ["reviews", (h: Handlers) => h.reviews(new Request("https://x.test/api"))],
+  [
+    "resolveReview",
+    (h: Handlers) =>
+      h.resolveReview(
+        post("/reviews/resolve", {
+          provider: "stripe",
+          eventId: "evt_1",
+          note: "done",
+        }),
+      ),
+  ],
+  [
+    "checkReview",
+    (h: Handlers) =>
+      h.checkReview(
+        post("/reviews/check", { provider: "stripe", eventId: "evt_1" }),
       ),
   ],
 ] as const;
@@ -146,6 +169,7 @@ describe("the handlers of the billing data routes check the caller themselves", 
       },
       service: { view } as unknown as BillingAdminService,
       credit: untouchable<BillingCreditService>(),
+      reviews: untouchable<BillingReviewService>(),
     });
 
     const response = await handlers.get(new Request("https://x.test/api"));

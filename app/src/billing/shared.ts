@@ -154,6 +154,19 @@ export function getBillingReviewService(): BillingReviewService {
   });
 }
 
+/**
+ * How many billing review rows are open, for the badge of the admin menu and the line of the overview (#603). A database that
+ * cannot answer must not break every page of the portal, so it counts as none (the list itself says what is wrong).
+ */
+export async function countOpenBillingReviews(): Promise<number> {
+  try {
+    return await getBillingReviewService().openCount();
+  } catch {
+    console.error("[billing] BILLING_REVIEW_COUNT_UNAVAILABLE");
+    return 0;
+  }
+}
+
 /** The claims of these jobs ended: records the wall clock of those that ran on a runner, where billing is on. Never throws, never delays the call. */
 export function recordWallClocks(jobIds: readonly string[]): void {
   if (jobIds.length === 0) return;
