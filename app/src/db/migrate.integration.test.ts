@@ -112,9 +112,9 @@ describe("the migrations of both epics", () => {
       "20261021120000_add_billing_balances_reserved_index",
       "20261021130000_create_billing_profiles",
       "20261021150000_create_billing_start_credit_grants",
-      "20261021190000_widen_refusal_notice_codes_for_limits",
-      "20261021190100_create_billing_workspace_settings",
-      "20261021190200_add_limit_query_indexes",
+      "20261021210000_widen_refusal_notice_codes_for_limits",
+      "20261021210100_create_billing_workspace_settings",
+      "20261021210200_add_limit_query_indexes",
     ]);
   });
 

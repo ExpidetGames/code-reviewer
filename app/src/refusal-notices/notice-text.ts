@@ -26,7 +26,7 @@ import {
  * The refusals that get a notice. The others (`entitlements_invalid`, `llm_not_configured`, `billing_rates_incomplete`: the
  * operator's side, and `billing_limits_unreadable`) do not. `insufficient_balance` and `balance_negative` (#498) are the
  * balance's, `monthly_limit_reached` and `reviews_paused` (#499) the limits': keep the check on `refusal_notices.code`
- * (migrations `20261021090000_widen_refusal_notice_codes` and `20261021190000_widen_refusal_notice_codes_for_limits`) in step
+ * (migrations `20261021090000_widen_refusal_notice_codes` and `20261021210000_widen_refusal_notice_codes_for_limits`) in step
  * with this list.
  */
 export const NOTICE_CODES = [

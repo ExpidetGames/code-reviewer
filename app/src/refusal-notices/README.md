@@ -111,7 +111,7 @@ workspace settings", without one "An Owner or Admin of this workspace can change
 while." and "Please try again later.": **it never names the number of reviews, the window it counts over, or that it is a limit at all**, and it points to no
 page, because nobody in the workspace can lift it (`noticeLinkKind`). Neither text holds a digit or an amount. `billing_limits_unreadable` has no notice:
 it is the operator's side. The check of `refusal_notices.code` took the two codes with migration
-`20261021190000_widen_refusal_notice_codes_for_limits`.
+`20261021210000_widen_refusal_notice_codes_for_limits`.
 
 ## Not covered
 

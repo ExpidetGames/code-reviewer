@@ -5,6 +5,7 @@
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { BILLING_ENGINES } from "../../test-support/billing-engines.ts";
+import { databaseDriver } from "../driver.ts";
 import { insertUser } from "../../test-support/users.ts";
 
 const T = "2026-10-21T08:00:00.000Z";
@@ -114,6 +115,26 @@ for (const engine of BILLING_ENGINES) {
             "billing_journal_entries_type_created",
           ]),
         );
+      });
+
+      // #499-T14
+      it("lets the month sum read the amount from the index alone", async () => {
+        const { db } = await engine.create();
+        const definition =
+          databaseDriver(db) === "postgres"
+            ? await sql<{
+                definition: string;
+              }>`select indexdef as definition from pg_indexes where indexname = 'billing_journal_entries_type_created'`
+                .execute(db)
+                .then((result) => result.rows[0]?.definition ?? "")
+            : await sql<{
+                name: string;
+              }>`select name from pragma_index_info('billing_journal_entries_type_created')`
+                .execute(db)
+                .then((result) => result.rows.map((row) => row.name).join(","));
+
+        expect(definition).toContain("amount_micro_usd");
+        expect(definition).toContain("created_at");
       });
     },
   );

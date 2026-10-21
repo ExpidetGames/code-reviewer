@@ -397,8 +397,8 @@ and `onRefused` hears of it for the pull request notice.
   keeps the quotas as the claim refuses everything then anyway). The suspension, unreadable entitlements and the cost limits are unchanged. The plan and usage page shows no run rows then
   (`PlanView.runs` is `null`, `src/usage/README.md`). The operator API's limits are not touched (ADR 0006, section 6, no. 3 is open).
 - **Indexes.** `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the brake (the earlier `(workspace_id, review_kind, reserved_at)` cannot serve a range on `reserved_at`
-  without the kind) and `billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum (migration `20261021190200_add_limit_query_indexes`). The settings table
-  is `billing_workspace_settings` (`20261021190100_create_billing_workspace_settings`); the widened check of the notice codes is `20261021190000_widen_refusal_notice_codes_for_limits`.
+  without the kind) and `billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum (migration `20261021210200_add_limit_query_indexes`). The settings table
+  is `billing_workspace_settings` (`20261021210100_create_billing_workspace_settings`); the widened check of the notice codes is `20261021210000_widen_refusal_notice_codes_for_limits`.
 
 ## The switch
 
