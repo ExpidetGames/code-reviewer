@@ -283,6 +283,60 @@ function suite(engine: BillingEngine) {
       ).rejects.toThrow();
     });
 
+    // #501-T18
+    it("fails the pending intents without a page that are old enough, in this workspace only, and leaves the others", async () => {
+      const { db, workspaceId, otherWorkspaceId } = await engine.create();
+      const at = (minutes: number) => () =>
+        new Date(Date.UTC(2026, 9, 21, 10, minutes));
+      const old = createBillingTopUpIntentsRepository(db, workspaceId, at(0));
+      const others = createBillingTopUpIntentsRepository(
+        db,
+        otherWorkspaceId,
+        at(0),
+      );
+      const stale = await old.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      const paged = await old.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await old.attachRefs(paged.id, { checkoutRef: "cs_1" });
+      const paid = await old.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      await old.markPaid(paid.id, {
+        paymentRef: "pi_1",
+        creditedMicroUsd: 25 * USD,
+      });
+      const foreign = await others.create({
+        adapter: "fake",
+        amountMicroUsd: 25 * USD,
+      });
+      const fresh = await createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        at(25),
+      ).create({ adapter: "fake", amountMicroUsd: 25 * USD });
+      const sweeper = createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        at(30),
+      );
+
+      expect(await sweeper.failPendingWithoutPage(30 * 60_000)).toBe(1);
+      expect(await sweeper.failPendingWithoutPage(30 * 60_000)).toBe(0);
+
+      const state = async (id: string) => (await old.get(id))!.state;
+      expect(await state(stale.id)).toBe("failed");
+      expect(await state(paged.id)).toBe("pending");
+      expect(await state(paid.id)).toBe("paid");
+      expect(await state(fresh.id)).toBe("pending");
+      expect((await others.get(foreign.id))!.state).toBe("pending");
+    });
+
     // #497-T03
     it("expires a pending intent only, and a payment can still pay an expired one", async () => {
       const { db, workspaceId } = await engine.create();

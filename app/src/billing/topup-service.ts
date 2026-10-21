@@ -84,6 +84,12 @@ export type TopUpService = {
 };
 
 const MICRO_USD_PER_CENT = 10_000;
+/**
+ * How long an intent may wait for its page: the start that wrote it died (a crash, a lost database connection) before the
+ * provider was asked, or before the page was recorded. Well inside the 24 hours the provider remembers an idempotency
+ * key, so a repeat after that cannot make a page the first request also made.
+ */
+export const TOP_UP_PENDING_WITHOUT_PAGE_MS = 30 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The UI is English; a language of the interface will decide this when there is one. */
 export const BILLING_LOCALE = "en";
@@ -166,6 +172,8 @@ export function createTopUpService({
         actor.workspaceId,
         now,
       );
+      // Intents of this workspace that never got a page are over: failed (a payment that still arrives can pay them).
+      await intents.failPendingWithoutPage(TOP_UP_PENDING_WITHOUT_PAGE_MS);
       const waiting = (intent: TopUpIntent) =>
         intent.state === "pending" &&
         intent.adapter === adapter.id &&

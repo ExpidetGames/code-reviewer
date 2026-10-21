@@ -19,6 +19,7 @@ import { BILLING_TERMS_VERSION, type BillingProfileInput } from "./profile.ts";
 import { createStripeAdapter } from "./stripe-adapter.ts";
 import {
   TOP_UP_ERROR_CODES,
+  TOP_UP_PENDING_WITHOUT_PAGE_MS,
   createTopUpService,
   type TopUpResult,
 } from "./topup-service.ts";
@@ -711,6 +712,68 @@ function suite(engine: BillingEngine) {
       const intent = (await t.intents.get(INTENT_A))!;
       expect(intent.state).toBe("pending");
       expect(intent.checkoutRef).toBe(t.fake.checkoutSessions()[0]!.id);
+    });
+
+    // #501-T18
+    it("fails the pending intents that never got a page after the short window, and keeps the ones that have one", async () => {
+      const t = await start();
+      await t.profiles.save(PROFILE);
+      const start0 = new Date("2026-10-21T10:00:00.000Z");
+      const at = (minutes: number) =>
+        new Date(start0.getTime() + minutes * 60_000);
+      const intentsAt = (minutes: number) =>
+        createBillingTopUpIntentsRepository(t.db, t.workspaceId, () =>
+          at(minutes),
+        );
+      const amount = 25_000_000;
+      const stale = await intentsAt(0).create({
+        id: INTENT_B,
+        adapter: "stripe",
+        amountMicroUsd: amount,
+      });
+      const paged = await intentsAt(0).create({
+        adapter: "stripe",
+        amountMicroUsd: amount,
+      });
+      await intentsAt(0).attachRefs(paged.id, { checkoutRef: "cs_old_page" });
+      const young = await intentsAt(0).create({
+        adapter: "stripe",
+        amountMicroUsd: amount,
+      });
+      const minutes = TOP_UP_PENDING_WITHOUT_PAGE_MS / 60_000;
+      // The window is over for the first two, not for this one.
+      const later = await intentsAt(minutes - 1).create({
+        adapter: "stripe",
+        amountMicroUsd: amount,
+      });
+      const service = createTopUpService({
+        db: t.db,
+        adapter: t.adapter,
+        now: () => at(minutes + 1),
+        log: () => undefined,
+      });
+      const request = (intentId?: string) => ({
+        amountCents: 2500,
+        confirmBusiness: true,
+        intentId,
+        returnUrl: RETURN_URL,
+      });
+
+      // A repeat of the stale intent after the window is refused, not given a session.
+      expect(await service.start(t.actor(), request(INTENT_B))).toEqual({
+        ok: false,
+        error: "intent_conflict",
+      });
+      expect(t.fake.checkoutSessions()).toEqual([]);
+      expect(await service.start(t.actor(), request())).toMatchObject({
+        ok: true,
+      });
+
+      const state = async (id: string) => (await t.intents.get(id))!.state;
+      expect(await state(stale.id)).toBe("failed");
+      expect(await state(young.id)).toBe("failed");
+      expect(await state(paged.id)).toBe("pending");
+      expect(await state(later.id)).toBe("pending");
     });
 
     it("has stable codes", () => {

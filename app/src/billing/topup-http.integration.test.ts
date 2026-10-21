@@ -20,7 +20,15 @@ import { isBillingOn } from "./enabled.ts";
 import { manualAdapter } from "./manual-adapter.ts";
 import type { BillingProfileInput } from "./profile.ts";
 import { createStripeAdapter } from "./stripe-adapter.ts";
-import { TOP_UP_REQUESTS_MAX, createTopUpLimits } from "./topup-limits.ts";
+import {
+  TOP_UP_INSTANCE_LIMIT_KEY,
+  TOP_UP_INSTANCE_REQUESTS_MAX,
+  TOP_UP_REQUESTS_MAX,
+  TOP_UP_REQUESTS_WINDOW_MS,
+  createTopUpLimits,
+  topUpLimitKey,
+  type TopUpLimits,
+} from "./topup-limits.ts";
 import { createTopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
 import type { BillingAdapter } from "./adapter.ts";
@@ -39,7 +47,11 @@ const PROFILE: BillingProfileInput = {
 class NotFound extends Error {}
 
 async function start(
-  options: { billingOn?: boolean; adapter?: "stripe" | "manual" | "none" } = {},
+  options: {
+    billingOn?: boolean;
+    adapter?: "stripe" | "manual" | "none";
+    limits?: TopUpLimits;
+  } = {},
 ) {
   const { db } = await createTestDatabase();
   const workspaceId = await addWorkspace(db, "acme");
@@ -72,7 +84,7 @@ async function start(
         adapter: active,
         log: (line) => logs.push(line),
       }),
-    limits: createTopUpLimits(createRateLimitsRepository(db)),
+    limits: options.limits ?? createTopUpLimits(createRateLimitsRepository(db)),
     baseUrl: BASE_URL,
     log: { info: (line) => logs.push(line) },
   });
@@ -121,6 +133,7 @@ async function start(
     isOn,
     activeAdapter,
     logs,
+    rateLimits: createRateLimitsRepository(db),
   };
 }
 
@@ -401,6 +414,60 @@ describe("POST /api/w/:workspace/billing/top-ups", () => {
     expect(
       (await t.route.post(t.request(GOOD), "acme", t.as(admin))).status,
     ).toBe(200);
+  });
+
+  // #501-T17
+  it("limits the starts of the whole instance, says when to try again, and leaves the count of the person alone", async () => {
+    const t = await start();
+    const owner = await t.person("owner");
+    for (let i = 0; i < TOP_UP_INSTANCE_REQUESTS_MAX; i += 1)
+      await t.rateLimits.hit(
+        TOP_UP_INSTANCE_LIMIT_KEY,
+        TOP_UP_REQUESTS_WINDOW_MS,
+      );
+
+    const busy = await t.route.post(t.request(GOOD), "acme", t.as(owner));
+
+    expect(busy.status).toBe(503);
+    expect(await busy.json()).toEqual({ error: "top_ups_busy" });
+    expect(Number(busy.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await t.intents()).toEqual([]);
+    expect(t.fake.requests()).toEqual([]);
+    // The refused start did not use up the person's own allowance.
+    expect(
+      (
+        await t.rateLimits.hit(
+          topUpLimitKey(t.workspaceId, owner.user.id),
+          TOP_UP_REQUESTS_WINDOW_MS,
+        )
+      ).count,
+    ).toBe(1);
+    // Once the window of the instance is over, starts go through again.
+    await t.rateLimits.reset(TOP_UP_INSTANCE_LIMIT_KEY);
+    expect(
+      (await t.route.post(t.request(GOOD), "acme", t.as(owner))).status,
+    ).toBe(200);
+  });
+
+  // #501-T17
+  it("fails closed when the counters cannot be read: a code, no intent, no call to Stripe", async () => {
+    const t = await start({
+      limits: {
+        hit: () => Promise.reject(new Error("database is down: secret detail")),
+      },
+    });
+
+    const response = await t.route.post(
+      t.request(GOOD),
+      "acme",
+      t.as(await t.person("owner")),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "limits_unavailable" });
+    expect(await t.intents()).toEqual([]);
+    expect(t.fake.requests()).toEqual([]);
+    expect(t.logs.join("\n")).not.toContain("secret detail");
   });
 
   // #501-T09

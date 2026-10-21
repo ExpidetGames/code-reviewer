@@ -8,7 +8,8 @@
 //   2. adapter      none, or one with no checkout page (`manual`): the same 404
 //   3. same site    `Sec-Fetch-Site` / `Origin` (src/http/request-checks.ts)                      403 cross_site_request
 //   4. access       the session and the role (`manage_billing`: an Admin or an Owner)    401 / 404 / 403, access-response.ts
-//   5. limit        per person and workspace                                                      429 rate_limited
+//   5. limit        per person and workspace, and for the whole instance        429 rate_limited, 503 top_ups_busy,
+//                   fail closed when the counters cannot be read                                  503 limits_unavailable
 //   6. body         `application/json`, small, an object                                          415 / 413 / 422
 //   7. service      the checks of `topup-service.ts` and the page to go to           200 { intentId, url }, or a code
 //
@@ -17,7 +18,6 @@
 // the payment is on its way (#505), and the balance changes when the webhook arrives (#502). The log gets the workspace id and
 // a result code, never an amount, a name, a page or a person.
 import "server-only";
-import type { SignInPermission } from "../auth/sign-in-limit.ts";
 import {
   JSON_BODY_ERROR_STATUS,
   readJsonObject,
@@ -28,6 +28,7 @@ import type { WorkspaceAccess } from "../workspaces/access.ts";
 import { workspacePath } from "../workspaces/paths.ts";
 import type { BillingAdapter } from "./adapter.ts";
 import { guardBillingRoute, type BillingRouteGuard } from "./enabled.ts";
+import type { TopUpPermission } from "./topup-limits.ts";
 import type { TopUpErrorCode, TopUpService } from "./topup-service.ts";
 
 /** A top-up is an amount, a flag and an id: a few hundred bytes. */
@@ -35,11 +36,18 @@ export const TOP_UP_REQUEST_MAX_BYTES = 4 * 1024;
 
 const NO_STORE = { "cache-control": "no-store" };
 
-type RefusalCode = JsonBodyErrorCode | TopUpErrorCode | "rate_limited";
+type RefusalCode =
+  | JsonBodyErrorCode
+  | TopUpErrorCode
+  | "rate_limited"
+  | "top_ups_busy"
+  | "limits_unavailable";
 
 const STATUS: Record<RefusalCode, number> = {
   ...JSON_BODY_ERROR_STATUS,
   rate_limited: 429,
+  top_ups_busy: 503,
+  limits_unavailable: 503,
   forbidden: 403,
   amount_invalid: 422,
   amount_out_of_range: 422,
@@ -89,7 +97,7 @@ export type TopUpRouteDependencies = {
     hit(input: {
       workspaceId: string;
       userId: string;
-    }): Promise<SignInPermission>;
+    }): Promise<TopUpPermission>;
   };
   /** The configured public address of the app, never a request header. */
   baseUrl: string;
@@ -123,15 +131,26 @@ export function createTopUpRoute({
         if (isCrossSite(request)) return refusal("cross_site_request");
         return withAccess(async (access) => {
           const workspaceId = access.workspace.id;
-          const permission = await limits.hit({
-            workspaceId,
-            userId: access.user.id,
-          });
-          if (!permission.allowed) {
+          // Fail closed: counters that cannot be read are no licence to ask Stripe without a count.
+          let permission: TopUpPermission;
+          try {
+            permission = await limits.hit({
+              workspaceId,
+              userId: access.user.id,
+            });
+          } catch {
             log.info(
-              `[billing] TOPUP_STARTED workspace=${workspaceId} result=rate_limited`,
+              `[billing] TOPUP_STARTED workspace=${workspaceId} result=limits_unavailable`,
             );
-            return refusal("rate_limited", permission.retryAfterSeconds);
+            return refusal("limits_unavailable");
+          }
+          if (!permission.allowed) {
+            const code =
+              permission.scope === "instance" ? "top_ups_busy" : "rate_limited";
+            log.info(
+              `[billing] TOPUP_STARTED workspace=${workspaceId} result=${code}`,
+            );
+            return refusal(code, permission.retryAfterSeconds);
           }
           const body = await readJsonObject(request, TOP_UP_REQUEST_MAX_BYTES);
           if (!body.ok) return refusal(body.error);

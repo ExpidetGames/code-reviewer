@@ -84,6 +84,12 @@ export type BillingTopUpIntentsRepository = {
   /** `pending` to `failed`. Any other state stays as it is. */
   markFailed(id: string): Promise<IntentChange | undefined>;
   /**
+   * `pending` to `failed` for the intents of the workspace that were written `olderThanMs` ago or more and still have no
+   * checkout page (the start died between the intent and the provider). One statement; an intent that got its page in the
+   * meantime is not touched. Returns how many.
+   */
+  failPendingWithoutPage(olderThanMs: number): Promise<number>;
+  /**
    * `pending` to `failed` only while the intent has no checkout page, judged on the row under the lock: a page that was
    * recorded in the meantime (by the request that won) is not abandoned. Any other intent stays as it is.
    */
@@ -349,6 +355,20 @@ export function createBillingTopUpIntentsRepository(
           changed: true,
         };
       });
+    },
+
+    async failPendingWithoutPage(olderThanMs) {
+      const current = now();
+      const cutoff = formatTimestamp(new Date(current.getTime() - olderThanMs));
+      const result = await db
+        .updateTable("billing_topup_intents")
+        .set({ state: "failed", updated_at: formatTimestamp(current) })
+        .where("workspace_id", "=", workspaceId)
+        .where("state", "=", "pending")
+        .where("provider_checkout_ref", "is", null)
+        .where("created_at", "<=", cutoff)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows);
     },
 
     markFailedUnlessPage(id) {
