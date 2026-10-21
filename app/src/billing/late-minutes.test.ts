@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { lateMinutesTarget } from "./late-minutes.ts";
 
 describe("the minutes a late end settles at", () => {
-  // #498-T25
+  // #498-T24
   it("never goes above the backstop, however late the end arrives", () => {
     expect(lateMinutesTarget({ settled: 2, measured: 11, backstop: 2 })).toBe(
       2,
@@ -16,19 +16,19 @@ describe("the minutes a late end settles at", () => {
     );
   });
 
-  // #498-T25
+  // #498-T24
   it("keeps what was settled when it is already above the backstop", () => {
     expect(lateMinutesTarget({ settled: 6, measured: 11, backstop: 5 })).toBe(
       6,
     );
   });
 
-  // #498-T25
+  // #498-T24
   it("takes a measure below the settlement as it is, so a credit is allowed", () => {
     expect(lateMinutesTarget({ settled: 6, measured: 3, backstop: 6 })).toBe(3);
   });
 
-  // #498-T25
+  // #498-T24
   it("allows no increase when the backstop is not known", () => {
     expect(
       lateMinutesTarget({ settled: 2, measured: 11, backstop: null }),

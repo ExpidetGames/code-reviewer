@@ -462,7 +462,7 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
     },
   );
 
-  // #498-T24
+  // #498-T23
   run(
     "claims as with billing off when the stored billing setting is text that is no JSON, and settles nothing",
     async () => {

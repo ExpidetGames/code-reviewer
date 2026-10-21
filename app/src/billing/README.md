@@ -294,7 +294,7 @@ When the answer to the App's stop call arrives later (`dispatch/stop.ts`, after 
 minutes differ by more than one, **one** `correction` (key `late-minutes:<job id>`) moves the difference at the rate the run was charged at;
 otherwise the settlement stands. A stop that answers late is our error (#493), so the correction **never charges beyond the backstop** (the job's
 end plus 60 seconds, bounded by the VM's timeout, `lateMinutesTarget`): a measure above it counts as the backstop, and a measure below the settlement
-credits the customer (#498-T14, T25). A job that was never charged has nothing to correct.
+credits the customer (#498-T14, T24). A job that was never charged has nothing to correct.
 
 **Hosted jobs never measure zero minutes silently** (the gate of the review of #524, B-1). `settleEndedJobs` asks `measure`; a charged run with
 a claim and no VM row of it falls back to its claim wall clock: `claim_wall_clock` when a Dispatcher acknowledged the job (a VM was started and its
@@ -333,7 +333,7 @@ running" with the list. To keep the state from arising, the switch-on in `admin-
 rates) and `canSwitchBillingOnWithDispatcher` (a Dispatcher that does not report `vm_lifecycle` and claimed within a day,
 `dispatcher_lacks_vm_lifecycle`) inside the same `lockBillingSettings` transaction that writes `enabled`
 (`admin-billing.integration.test.ts`, #498-T19). Text in `billing_settings` that is no JSON reads as not set, on the claim
-path too (#498-T24).
+path too (#498-T23).
 
 There is no environment variable: billing is configured in the admin portal and in nothing else, so `.env.example` and
 the deployment files stay as they are for a self-hoster (`no-environment-variable.test.ts`).

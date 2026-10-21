@@ -181,7 +181,7 @@ describe.each(databases)("the late minutes of a job on %s", (name, open) => {
     expect(await t.journal.verify()).toMatchObject({ consistent: true });
   });
 
-  // #498-T25
+  // #498-T24
   it("adds no charge when the answer to the stop call arrives late: a late stop is our error", async () => {
     const t = await setup();
     const id = await t.settledJob();
