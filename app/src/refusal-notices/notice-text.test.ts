@@ -164,3 +164,82 @@ describe("the notice of a refusal for the balance", () => {
     expect(hasNoticeMarker(body, "head:fedcba98")).toBe(false);
   });
 });
+
+describe("the notice of a refusal for the monthly limit (#499)", () => {
+  const HEAD = "head:0123456789abcdef0123456789abcdef01234567";
+
+  // #499-T01
+  it("says that no review ran and that the monthly limit was reached, with no number, amount or name of ours", () => {
+    const text = visible(noticeBody("monthly_limit_reached", HEAD, null));
+
+    expect(text).toContain("No review ran for this change.");
+    expect(text).toContain("monthly spending limit of this workspace");
+    expect(text).toContain("Owner or Admin");
+    expect(text).not.toMatch(/\d/);
+    expect(text).not.toMatch(/[$€£%]/);
+    expect(text).not.toMatch(
+      /\b(price|cost|usd|eur|dollar|euro|token|model|gpt|claude|rate|factor|formula|minute|tier|balance|credit)\b/i,
+    );
+    expect(text).not.toMatch(/https?:\/\//);
+  });
+
+  // #499-T01
+  it("says who can change it, and links to the workspace settings when it is given a link", () => {
+    const plain = visible(noticeBody("monthly_limit_reached", HEAD, null));
+    const linked = visible(
+      noticeBody(
+        "monthly_limit_reached",
+        HEAD,
+        "https://app.example/w/acme/settings",
+      ),
+    );
+
+    expect(plain).toContain("can change it");
+    expect(linked).toContain(
+      `[${NOTICE_SETTINGS_LINK_TEXT}](https://app.example/w/acme/settings)`,
+    );
+    expect(linked).toContain("Owner or Admin");
+  });
+});
+
+describe("the notice of the hidden hourly brake (#499)", () => {
+  const HEAD = "head:0123456789abcdef0123456789abcdef01234567";
+
+  // #499-T06
+  it("says that reviews are paused for a while and never the number, the window or that it counts anything", () => {
+    const text = visible(noticeBody("hourly_review_limit", HEAD, null));
+
+    expect(text).toContain("No review ran for this change.");
+    expect(text).toContain(
+      "Reviews are paused for this workspace for a while.",
+    );
+    expect(text).toContain("try again later");
+    expect(text).not.toMatch(/\d/);
+    expect(text).not.toMatch(
+      /\b(hour|hours|hourly|minute|minutes|per|every|limit|limited|rolling|window|maximum|too many|brake|abuse|count)\b/i,
+    );
+    expect(text).not.toMatch(/[$€£%]/);
+  });
+
+  // #499-T06
+  it("points to no page, because nobody in the workspace can lift it, even when it is given a link", () => {
+    const text = visible(
+      noticeBody(
+        "hourly_review_limit",
+        HEAD,
+        "https://app.example/w/acme/settings",
+      ),
+    );
+
+    expect(text).not.toMatch(/https?:\/\//);
+    expect(text).not.toContain("](");
+  });
+
+  // #499-T06
+  it("keys the hidden marker on the head, like the balance", () => {
+    const body = noticeBody("hourly_review_limit", HEAD, null);
+
+    expect(hasNoticeMarker(body, HEAD)).toBe(true);
+    expect(hasNoticeMarker(body, "head:fedcba98")).toBe(false);
+  });
+});

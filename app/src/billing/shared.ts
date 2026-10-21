@@ -26,6 +26,11 @@ import { createStripeClient, STRIPE_API_BASE_URL } from "./stripe-client.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { isBillingOn } from "./enabled.ts";
 import { manualAdapter } from "./manual-adapter.ts";
+import {
+  createMonthlyLimitRoute,
+  type MonthlyLimitRoute,
+} from "./monthly-limit-http.ts";
+import { createMonthlyLimitService } from "./monthly-limit-service.ts";
 import { createTopUpLimits } from "./topup-limits.ts";
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
@@ -66,6 +71,15 @@ export function getTopUpRoute(): TopUpRoute {
     limits: createTopUpLimits(createRateLimitsRepository(db)),
     baseUrl: publicAddress(),
     log: console,
+  });
+}
+
+/** The handlers of `GET` and `PUT /api/w/:workspace/billing/monthly-limit`, wired to the running server. */
+export function getMonthlyLimitRoute(): MonthlyLimitRoute {
+  const db = getDatabase();
+  return createMonthlyLimitRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    service: createMonthlyLimitService({ db }),
   });
 }
 

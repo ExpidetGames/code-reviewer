@@ -119,7 +119,8 @@ describe("the guards of the admin portal", () => {
         concretePath(route).startsWith("/api/w/"),
     );
 
-    expect(routes.map(({ route }) => concretePath(route))).toEqual([
+    expect(routes.map(({ route }) => concretePath(route)).sort()).toEqual([
+      "/api/w/x/billing/monthly-limit",
       "/api/w/x/billing/top-ups",
     ]);
     for (const { route, file } of routes)

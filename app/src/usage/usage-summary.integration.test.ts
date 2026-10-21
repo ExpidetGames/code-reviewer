@@ -7,6 +7,7 @@ import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
+import { setBillingSwitch } from "../test-support/billing-switch.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import {
   createUsageSeeder,
@@ -350,5 +351,37 @@ describe("the plan view of a workspace", () => {
       "workspaceId",
     ])
       expect(text).not.toContain(forbidden);
+  });
+});
+
+describe("the plan view of a workspace while billing is on (#499)", () => {
+  // #499-T10
+  it("has no run counts when billing is on, keeps them when it is off, and keeps the cost limit either way", async () => {
+    const t = await setup();
+    await t.entitle(
+      entitlements({
+        limits: { diffRunsPerPeriod: 5, ownKeyCostLimitMicroUsd: 1_000_000 },
+      }),
+    );
+    await t.use({ state: "settled", costMicroUsd: 500_000 });
+
+    const off = await t.view();
+    await setBillingSwitch(t.db, true);
+    const on = await t.view();
+
+    expect(off).toMatchObject({
+      runs: { diff: { used: 1, limit: 5 } },
+      cost: { percentUsed: 50 },
+    });
+    expect(on).toMatchObject({ runs: null, cost: { percentUsed: 50 } });
+  });
+
+  // #499-T10
+  it("treats billing that is switched on but not ready as off, like the claim", async () => {
+    const t = await setup();
+    await t.entitle(entitlements({ limits: { diffRunsPerPeriod: 5 } }));
+    await setBillingSwitch(t.db, true, {});
+
+    expect(await t.view()).toMatchObject({ runs: { diff: { limit: 5 } } });
   });
 });

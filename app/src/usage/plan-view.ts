@@ -51,7 +51,11 @@ export type PlanView =
       suspended: boolean;
       /** ISO 8601 UTC: usage is counted from here. The app does not know when the period ends. */
       periodStart: string;
-      runs: Record<ProjectReviewKind, RunUsageView>;
+      /**
+       * The run counts against the plan's run limits. Null while billing is on: the quotas are not enforced then (ADR 0006,
+       * D5; #499), so the page shows none.
+       */
+      runs: Record<ProjectReviewKind, RunUsageView> | null;
       /** Present only when a cost limit applies to the key this workspace runs on. */
       cost: CostUsageView | null;
     };
@@ -69,6 +73,7 @@ export function costPercentUsed(usedMicroUsd: number, limitMicroUsd: number) {
 export function buildPlanView(
   entitlements: ResolvedEntitlements,
   usage: PlanUsage,
+  options: { runQuotas?: boolean } = {},
 ): PlanView {
   if (entitlements.kind === "unlimited") return { kind: "unlimited" };
   if (entitlements.kind === "invalid") return { kind: "unreadable" };
@@ -84,16 +89,19 @@ export function buildPlanView(
     managed,
     suspended: entitlements.suspended,
     periodStart: entitlements.periodStart,
-    runs: {
-      diff: {
-        used: usage.runs.diff,
-        limit: entitlements.limits.diffRunsPerPeriod,
-      },
-      dynamic: {
-        used: usage.runs.dynamic,
-        limit: entitlements.limits.dynamicRunsPerPeriod,
-      },
-    },
+    runs:
+      options.runQuotas === false
+        ? null
+        : {
+            diff: {
+              used: usage.runs.diff,
+              limit: entitlements.limits.diffRunsPerPeriod,
+            },
+            dynamic: {
+              used: usage.runs.dynamic,
+              limit: entitlements.limits.dynamicRunsPerPeriod,
+            },
+          },
     cost:
       costLimit === null
         ? null

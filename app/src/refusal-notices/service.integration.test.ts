@@ -3,8 +3,11 @@
 // The notice a pull request gets when a review is refused for a limit or a suspension (#281), end to end on the
 // claim: a real queue and database, the real GitHub App provider and client against the fake GitHub, and the
 // notice service wired as the running server does it. No model is involved anywhere.
-import { describe, expect, it } from "vitest";
+import { sql } from "kysely";
+import { describe, expect, it, vi } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
+import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createRefusalNoticesRepository } from "../db/repositories/refusal-notices-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import {
@@ -12,6 +15,7 @@ import {
   type RunnerApiHarness,
 } from "../test-support/runner-api-harness.ts";
 import {
+  TEST_BILLING_RATES,
   fundWorkspace,
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
@@ -694,6 +698,121 @@ describe("the refusal for the balance", () => {
 
     expect(await h.queue.get(job.id)).toMatchObject({
       errorCode: "billing_rates_incomplete",
+    });
+    expect(comments(h)).toEqual([]);
+  });
+});
+
+describe("the refusal for the monthly limit and the hidden brake (#499)", () => {
+  /** Billing is on, the workspace has plenty of credit, and the brake's number is a distinctive one. */
+  async function billed(
+    options: Parameters<typeof start>[0] = {},
+    rates: Parameters<typeof setBillingSwitch>[2] = {
+      ...TEST_BILLING_RATES,
+      hourlyReviewLimit: 37,
+    },
+  ) {
+    const h = await start(options);
+    await setBillingSwitch(h.db, true, rates);
+    await fundWorkspace(h.db, h.workspaceId, 1_000_000_000, h.clock.now);
+    return h;
+  }
+
+  // #499-T01
+  it("posts one comment per pull request head for the monthly limit, as the app, and none for the same head again", async () => {
+    const h = await billed();
+    await createBillingWorkspaceSettingsRepository(
+      h.db,
+      h.workspaceId,
+    ).setMonthlyLimit(1_000, null);
+
+    const job = await refuse(h);
+    await refuse(h, { triggerKind: "manual" });
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "monthly_limit_reached",
+      attempts: 0,
+    });
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]).toMatchObject({ login: "code-reviewer-test[bot]" });
+    expect(comments(h)[0]?.body).toContain("No review ran for this change.");
+    expect(comments(h)[0]?.body).toContain("monthly spending limit");
+    expect(comments(h)[0]?.body).toContain(`head:${sha("a")}`);
+    expect(
+      await h.db.selectFrom("usage_records").selectAll().execute(),
+    ).toEqual([]);
+  });
+
+  // #499-T01
+  it("posts again for a new push, and links to the workspace settings when the instance can name them", async () => {
+    const h = await billed({
+      settingsUrl: (slug) => `https://app.example/w/${slug}/settings`,
+    });
+    await createBillingWorkspaceSettingsRepository(
+      h.db,
+      h.workspaceId,
+    ).setMonthlyLimit(1_000, null);
+    await refuse(h);
+
+    await refuse(h, { headSha: sha("b") });
+
+    expect(comments(h)).toHaveLength(2);
+    expect(comments(h)[1]?.body).toContain(`head:${sha("b")}`);
+    expect(comments(h)[0]?.body).toMatch(
+      /\[the workspace settings\]\(https:\/\/app\.example\/w\/[a-z0-9-]+\/settings\)/,
+    );
+  });
+
+  // #499-T06
+  it("posts that reviews are paused for a while for the brake, and neither the notice nor any log line names the number or the window", async () => {
+    const h = await billed({
+      settingsUrl: (slug) => `https://app.example/w/${slug}/settings`,
+      planPageUrl: (slug) => `https://app.example/w/${slug}/settings/plan`,
+    });
+    // 37 reviews have started within the hour; the next push is refused.
+    for (let started = 0; started < 37; started += 1) {
+      h.clock.advance(1);
+      const old = await h.seedHistoricalJob({
+        command: "review",
+        prNumber: 1_000 + started,
+      });
+      await createUsageRecordsRepository(
+        h.db,
+        h.workspaceId,
+        h.clock.now,
+      ).reserve(old.id, "own");
+    }
+
+    const job = await refuse(h);
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "hourly_review_limit",
+    });
+    expect(comments(h)).toHaveLength(1);
+    const body = comments(h)[0]?.body ?? "";
+    expect(body).toContain(
+      "Reviews are paused for this workspace for a while.",
+    );
+    const visibleText = body.replace(/<!--[\s\S]*?-->/g, "");
+    expect(visibleText).not.toMatch(/37|60|\bhour|minute|\blimit/i);
+    expect(visibleText).not.toMatch(/https?:\/\//);
+    const lines = [...h.logLines(), ...h.notices.lines];
+    expect(lines.join("\n")).not.toMatch(/\b37\b|\bhour(s|ly)?\b|60 min/i);
+  });
+
+  // #499-T06
+  it("posts nothing for a claim that could not evaluate the limits: that is the operator's side", async () => {
+    const h = await billed();
+    await sql`alter table billing_workspace_settings rename to settings_gone`.execute(
+      h.db,
+    );
+
+    const job = await refuse(h);
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      errorCode: "billing_limits_unreadable",
     });
     expect(comments(h)).toEqual([]);
   });
