@@ -21,7 +21,7 @@
 //   POST /api/admin/billing/workspaces/<id>/credit           { "type": "credit" | "correction", "amountMicroUsd", "note",
 //                                                            "requestId" }   (required: it makes a retry one entry)
 //   GET  /api/admin/billing/reviews?state=&page=             the review rows (#603): "open" (default) or "resolved", newest first
-//   POST /api/admin/billing/reviews/resolve                  { "provider", "eventId", "note", "credit"?: { "type", "amountMicroUsd" } }
+//   POST /api/admin/billing/reviews/resolve                  { "provider", "eventId", "note", "credit"?: { "type"?, "amountMicroUsd", "intentState"? } }
 //                                                            closes a row; with "credit" the workspace of the row is credited
 //                                                            (or corrected) by hand first, once per row
 //   POST /api/admin/billing/reviews/check                    { "provider", "eventId" }: asks the provider about the row's top-up

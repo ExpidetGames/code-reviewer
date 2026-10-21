@@ -927,14 +927,21 @@ error log and the database. The logic is `admin-review-service.ts`, the handlers
   `resolution_entry_id` (migration `20261022020000`); a second close is `review_already_resolved` (409) and the first resolution stays.
   Closing without `credit` changes no money. The audit line is `billing_review_resolved provider=... event=... actor=<user id>
 entry=<id|none>`: never the note, which may name a customer. A row redelivered by the provider (`intent_unresolved` is the only outcome
-  that lets the same id be handled again) starts over without the earlier resolution.
-- **Crediting from the row** (`credit: { type: "credit" | "correction", amountMicroUsd }`) is the existing manual credit
+  that lets the same id be handled again) starts over while its review is open; a review an operator closed stays closed with its
+  resolution (who, when, why, the journal entry), whatever the redelivery ends in.
+- **Crediting from the row** (`credit: { type?, amountMicroUsd, intentState? }`) is the existing manual credit
   (`admin-credit-service.ts`, the manual adapter, the admin as the actor, the note as the journal note). The workspace is the one **the
   row names**, never one the caller sends (a body with another key is `invalid_input`; a row with no workspace is
-  `review_workspace_unknown`). The request id is derived from the row (`review-` and a hash of provider and event id), so the row credits
-  at most once: a repeat finds the same journal entry, a repeat with another amount is `request_conflict`, and a close that was lost after
+  `review_workspace_unknown`). **The row decides the type**: a `credit` (`top_up`) for a payment or an event about none, a `correction`
+  for a refund or a dispute; a `type` naming the other one is `review_credit_type_mismatch` (409), so the journal, which keys an entry by
+  workspace, type and request id, cannot get a second entry for one row by switching type. The request id is derived from the row
+  (`review-` and a hash of provider, event id and that type), so the row credits at most once: a repeat finds the same journal entry, a repeat with another amount is `request_conflict`, and a close that was lost after
   the credit is made by the retry with the same entry. Two admins at the same moment write one entry; the second sees
-  `review_already_resolved`. The page prefills a credit with the amount of our top-up when the row is a payment of a top-up that is not
+  `review_already_resolved`. **The state of the top-up the admin saw** travels with the credit (`intentState`, required when the row
+  names a top-up of its workspace); if the top-up is in another state by now (a webhook paid it, the admin checked it) the credit is
+  `intent_state_changed` (409) and nothing is written. A paid top-up of an `amount_conflict` row can still be credited when the admin
+  saw it paid. (The recheck reads the top-up just before the credit; a payment applied in the few milliseconds between is not
+  excluded, only a page that went stale is.) The page prefills a credit with the amount of our top-up when the row is a payment of a top-up that is not
   paid yet, and offers a signed correction with no amount for a refund or a dispute (the operator types what to take back).
 - **Check payment** (`POST /reviews/check` `{ provider, eventId }`) runs the check of a workspace owner (`topup-check.ts`) for the top-up
   of the row, as an Owner of the row's workspace, and answers the state of the top-up; the row stays open until the admin closes it
