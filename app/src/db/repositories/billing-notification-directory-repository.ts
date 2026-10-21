@@ -7,9 +7,7 @@
 // recipients and the balance. The rows themselves are made and changed through the scoped repository.
 import "server-only";
 import type { Kysely } from "kysely";
-import type {
-  BalanceNotificationKind,
-} from "../../billing/balance-state.ts";
+import type { BalanceNotificationKind } from "../../billing/balance-state.ts";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 

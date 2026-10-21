@@ -17,9 +17,12 @@ describe("the level of a balance", () => {
     [0, "empty"],
     [-1, "negative"],
     [-3_000_000, "negative"],
-  ] as const)("calls %i micro-USD %s against a threshold of 5 USD", (balance, level) => {
-    expect(balanceLevelOf(balance, FIVE)).toBe(level);
-  });
+  ] as const)(
+    "calls %i micro-USD %s against a threshold of 5 USD",
+    (balance, level) => {
+      expect(balanceLevelOf(balance, FIVE)).toBe(level);
+    },
+  );
 
   // #506-T01
   it("has no low state when the threshold is zero, only the empty one", () => {

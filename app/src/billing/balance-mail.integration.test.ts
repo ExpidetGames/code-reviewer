@@ -230,7 +230,11 @@ for (const engine of BILLING_ENGINES) {
       await t.deliver();
 
       for (const message of t.mail.outbox)
-        for (const body of [message.subject, message.text, message.html ?? ""]) {
+        for (const body of [
+          message.subject,
+          message.text,
+          message.html ?? "",
+        ]) {
           expect(body).not.toContain("777");
           expect(body).not.toMatch(
             /\b(rate|rates|factor|formula|model|provider|stripe|anthropic|brake|minute|minutes)\b/i,

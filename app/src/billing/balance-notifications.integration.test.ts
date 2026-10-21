@@ -177,7 +177,10 @@ for (const engine of BILLING_ENGINES) {
         const t = await start();
         await t.topUp(5 * USD);
         await t.charge(8 * USD);
-        expect(await states(t)).toEqual({ empty: "sent/due", low: "sent/none" });
+        expect(await states(t)).toEqual({
+          empty: "sent/due",
+          low: "sent/none",
+        });
 
         await t.topUp(2 * USD);
         expect(await states(t), "still below zero").toEqual({
@@ -258,9 +261,7 @@ for (const engine of BILLING_ENGINES) {
         const t = await start();
         await t.topUp(10 * USD);
 
-        await Promise.all(
-          Array.from({ length: 8 }, () => t.charge(1 * USD)),
-        );
+        await Promise.all(Array.from({ length: 8 }, () => t.charge(1 * USD)));
 
         expect(await states(t)).toEqual({ low: "sent/due" });
         expect(

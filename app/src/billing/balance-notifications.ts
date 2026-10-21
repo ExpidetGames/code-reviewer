@@ -25,8 +25,7 @@ export type BalanceMove = "down" | "up";
 
 /** What the decision did, for the callers that care and for the tests. */
 export type BalanceNoteResult =
-  | { state: "off" }
-  | { state: "noted"; mailDue: boolean };
+  { state: "off" } | { state: "noted"; mailDue: boolean };
 
 export async function noteBalanceMoved(
   trx: Kysely<Database>,
@@ -58,7 +57,7 @@ export async function noteBalanceMoved(
     }
     if (sent) continue;
     const mail = input.move === "down" && !mailDue;
-    if (await notifications.markSent(kind, mail ? "due" : "none") && mail)
+    if ((await notifications.markSent(kind, mail ? "due" : "none")) && mail)
       mailDue = true;
   }
   return { state: "noted", mailDue };
