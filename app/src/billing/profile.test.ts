@@ -130,6 +130,43 @@ describe("the billing profile input", () => {
     }
   });
 
+  // #501-T16
+  it("refuses format characters in a name or an address: a right-to-left override, a zero-width space, a soft hyphen, a byte order mark", () => {
+    for (const field of [
+      "legalName",
+      "addressLine1",
+      "addressLine2",
+      "postalCode",
+      "city",
+    ] as const)
+      for (const character of [
+        "\u202E",
+        "\u200B",
+        "\u00AD",
+        "\uFEFF",
+        "\u2066",
+      ])
+        expect(
+          issuesOf({ ...valid, [field]: `Ex${character}ample` }),
+          `${field} U+${character.codePointAt(0)!.toString(16)}`,
+        ).toEqual([{ field, code: "invalid_characters" }]);
+    // Ordinary letters of other scripts and punctuation stay.
+    expect(
+      validateBillingProfileInput({
+        ...valid,
+        legalName: "Müller & Söhne — Zürich GmbH",
+        city: "São Paulo",
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  // #501-T16
+  it("does not take a VAT ID that carries a format character", () => {
+    expect(issuesOf({ ...valid, vatId: "DE123\u200B456789" })).toEqual([
+      { field: "vatId", code: "vat_id_invalid" },
+    ]);
+  });
+
   it("refuses a body that is not an object, and lists every bad field", () => {
     for (const body of [null, "x", 5, [], undefined])
       expect(validateBillingProfileInput(body)).toMatchObject({ ok: false });

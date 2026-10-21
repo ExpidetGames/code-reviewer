@@ -377,8 +377,9 @@ function readText(raw: unknown, maxLength: number): TextResult {
   if (typeof raw !== "string") return { ok: false, code: "required" };
   const value = raw.trim();
   if (value.length > maxLength) return { ok: false, code: "too_long" };
-  // Control characters (a line break, a tab) and the Unicode line and paragraph separators have no place in a name.
-  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(value))
+  // Control characters (a line break, a tab), the Unicode line and paragraph separators and the format characters (a
+  // right-to-left override, a zero-width space, a byte order mark) have no place in a name: the text is printed on an invoice.
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value))
     return { ok: false, code: "invalid_characters" };
   return { ok: true, value };
 }
