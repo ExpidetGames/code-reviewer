@@ -969,6 +969,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "usage.voidEndedJobsWithIds",
+    run: (a) => a.usage.voidEndedJobsWithIds(),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
     name: "usage.get",
     run: (a, b) => a.usage.get(b.job.id),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),

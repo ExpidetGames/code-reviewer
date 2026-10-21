@@ -6,11 +6,17 @@
 import "server-only";
 import { BILLING_RATE_ERROR_CODES } from "./rates.ts";
 import { MANUAL_CREDIT_ERROR_CODES } from "./manual-credit.ts";
+import type { DISPATCHER_LACKS_VM_LIFECYCLE } from "./dispatcher-features.ts";
 import type { BillingMissingItem } from "./readiness.ts";
 
-/** What can keep an attempt to switch billing on from going through: the missing items, and a fresh check that failed. */
+/**
+ * What can keep an attempt to switch billing on from going through: the missing items, a fresh check that failed, and a
+ * Dispatcher that does not report its VMs (#498).
+ */
 export type BillingNotReadyItem =
-  BillingMissingItem | "connection_check_failed";
+  | BillingMissingItem
+  | "connection_check_failed"
+  | typeof DISPATCHER_LACKS_VM_LIFECYCLE;
 
 /** Why the connection check, or a call to Stripe on the admin's behalf, did not succeed. */
 export const BILLING_CHECK_ERROR_CODES = [

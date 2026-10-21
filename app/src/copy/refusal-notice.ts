@@ -29,3 +29,24 @@ export function noticeWhoCanActAt(linkText: string, url: string): string {
 
 /** The name of the plan page in the link. */
 export const NOTICE_PLAN_PAGE_LINK_TEXT = "the plan page";
+
+/**
+ * Why, for a workspace whose balance cannot hold a review (#498). No amount, no rate, no formula and no model is named: a
+ * member reads this, and what a review costs is the operator's business.
+ */
+export const NOTICE_INSUFFICIENT_BALANCE =
+  "This workspace has no credit left for reviews.";
+export const NOTICE_BALANCE_NEGATIVE =
+  "The balance of this workspace is below zero.";
+
+/** Who to turn to for a refusal for the balance, when there is no page to point to. */
+export const NOTICE_ADD_CREDIT_WHO =
+  "Add credit to continue: please contact an Owner or Admin of this workspace.";
+
+/** The same, with the page where an Owner or Admin finds it (the link text is the page's name). */
+export function noticeAddCreditAt(linkText: string, url: string): string {
+  return `Add credit to continue: an Owner or Admin of this workspace can do so on [${linkText}](${url}).`;
+}
+
+/** The name of the workspace settings in the link of a refusal for the balance. */
+export const NOTICE_SETTINGS_LINK_TEXT = "the workspace settings";

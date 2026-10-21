@@ -109,7 +109,8 @@ describe("the Dispatcher core", () => {
     const claim = recorded.calls.find((call) => call.url.endsWith("/claim"));
     expect(claim?.body).toStrictEqual({
       engines: ["pr-agent", "opencode"],
-      features: ["worker_credential"],
+      // #498: it also names `vm_lifecycle`, so the App knows its Dispatcher reports the VMs it creates (billable minutes).
+      features: ["worker_credential", "vm_lifecycle"],
       jobId,
       maxRunning: 4,
     });

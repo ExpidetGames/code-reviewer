@@ -29,6 +29,7 @@ import {
   type RunnerEngine,
 } from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
+import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import {
   newLeaseToken,
   newWorkerCredential,
@@ -51,10 +52,19 @@ import type { Database } from "../schema.ts";
 import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
 import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
+import {
+  RATES_INCOMPLETE_REFUSAL,
+  readClaimBilling,
+  reserveAtClaim,
+  type ClaimBilling,
+  type ReserveOutcome,
+} from "../../billing/claim-billing.ts";
+import { headNoticeKey } from "../../refusal-notices/notice-key.ts";
 import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
+import { settleEndedJobs } from "../../billing/settle-jobs.ts";
 import {
   settlementOfOutcome,
   settlementOfSupersededOutcome,
@@ -741,6 +751,8 @@ export function createRunnerJobsRepository(
               : {}),
           };
           const reviewKinds = reviewKindsForEngines(engines);
+          // #498: read at most once per claim, and only when a job passes the admission; a claim that finds no job reads nothing.
+          let billing: ClaimBilling | undefined;
           // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
           // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
           // connection (SQLite): two claims of one pool cannot both count below the cap and then both
@@ -760,7 +772,7 @@ export function createRunnerJobsRepository(
             // #277: the limits and the suspension of the job's workspace, decided in this transaction, before
             // the record is reserved: a refused job leaves no record, and two claims cannot both take the
             // last unit of a limit.
-            const { admission, hadRecord, ignoredCostLimit } =
+            const { admission, hadRecord, ignoredCostLimit, keyMode } =
               await admitClaimedJob(trx, row, () => current);
             if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
             if (!admission.allow) {
@@ -816,6 +828,47 @@ export function createRunnerJobsRepository(
                 triggerKind: row.trigger_kind,
                 errorCode: admission.errorCode,
                 ...detail,
+              });
+              continue;
+            }
+            // #498: while billing is on, the hold comes after the admission and before the record, in the same transaction:
+            // a refused job leaves neither a record nor an entry, and a job handed out has both. Billing off reads no
+            // billing table.
+            billing ??= await readClaimBilling(trx);
+            const held: ReserveOutcome =
+              billing.state === "off"
+                ? { ok: true }
+                : billing.state === "rates_incomplete"
+                  ? RATES_INCOMPLETE_REFUSAL
+                  : await reserveAtClaim(trx, {
+                      rates: billing.rates,
+                      job: {
+                        id: row.id,
+                        workspaceId: row.workspace_id,
+                        reviewKind: row.review_kind as ProjectReviewKind,
+                      },
+                      keyMode,
+                      now: () => current,
+                    });
+            if (!held.ok) {
+              await refuseClaimedJob(trx, row.id, held.code, current);
+              // A job claimed again after a lost lease had a record and a hold that counted: they end with the job.
+              if (hadRecord)
+                unknownCost.push(
+                  ...(await closeRecordsOfEndedJobs(
+                    trx,
+                    formatTimestamp(current),
+                  )),
+                );
+              const noticeKey = headNoticeKey(row.head_sha);
+              refusals.push({
+                jobId: row.id,
+                workspaceId: row.workspace_id,
+                repositoryId: row.repository_id,
+                prNumber: row.pr_number,
+                triggerKind: row.trigger_kind,
+                errorCode: held.code,
+                ...(noticeKey === undefined ? {} : { periodStart: noticeKey }),
               });
               continue;
             }
@@ -966,6 +1019,8 @@ export function createRunnerJobsRepository(
               finished.workspace_id,
               now,
             ).settle(finished.id, settlement);
+            // #498: the hold of the job is released and its price charged, in the transaction that ended it.
+            await settleEndedJobs(trx, [finished.id], now);
             // #361: no cost limit bounds a run without a cost; it is reported so it can be watched (once: when this
             // call settled the record, not when it was settled already).
             if (
@@ -1029,6 +1084,7 @@ export function createRunnerJobsRepository(
               stored.workspace_id,
               now,
             ).settle(stored.id, settlement);
+            await settleEndedJobs(trx, [stored.id], now);
             if (
               settled &&
               settlement.state === "settled" &&

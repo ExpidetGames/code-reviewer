@@ -501,6 +501,43 @@ describe("switching billing on", () => {
     );
   });
 
+  // #498-T19
+  it("refuses while a Dispatcher without vm_lifecycle claimed within a day, naming it, and switches on once it is gone", async () => {
+    const s = await start();
+    await s.saveRates();
+    const settings = createInstanceSettingsRepository(s.portal.db);
+    await settings.set(
+      "dispatcher_sightings",
+      { withoutVmLifecycleAt: new Date(Date.now() - 60_000).toISOString() },
+      null,
+    );
+
+    const refused = await s.put({ enabled: true });
+
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: "billing_not_ready",
+      missing: ["dispatcher_lacks_vm_lifecycle"],
+    });
+    expect((await s.view()).enabled).toBe(false);
+    expect(await isBillingOn(s.portal.db)).toBe(false);
+
+    await settings.set(
+      "dispatcher_sightings",
+      {
+        withoutVmLifecycleAt: new Date(
+          Date.now() - 25 * 60 * 60 * 1000,
+        ).toISOString(),
+      },
+      null,
+    );
+
+    const allowed = await s.put({ enabled: true });
+
+    expect(allowed.status).toBe(200);
+    expect(await isBillingOn(s.portal.db)).toBe(true);
+  });
+
   // #504-T03
   it("switches on with Stripe once the key was checked and the rates and the webhook secret are set", async () => {
     const s = await start();

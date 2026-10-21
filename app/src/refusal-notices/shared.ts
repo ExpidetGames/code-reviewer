@@ -12,6 +12,7 @@ import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { assembleRefusalNoticeService } from "./assemble.ts";
 import { createPlanPageUrlResolver } from "./plan-link.ts";
+import { workspaceSettingsUrl } from "./plan-page.ts";
 import { createRefusalBatcher } from "./refusal-batch.ts";
 import type { NoticeRefusal, RefusalNoticeService } from "./service.ts";
 
@@ -29,6 +30,9 @@ export function getRefusalNoticeService(): RefusalNoticeService {
       settings: createInstanceSettingsRepository(db),
       baseUrl: () => loadAuthConfig(process.env).baseUrl,
     }),
+    // #498: a refusal for the balance points to the settings of the workspace, always (the balance page comes with #505).
+    settingsUrl: (slug) =>
+      workspaceSettingsUrl(loadAuthConfig(process.env).baseUrl, slug),
     log: console,
   });
   return service;

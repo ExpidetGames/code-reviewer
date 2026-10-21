@@ -25,6 +25,7 @@ import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { getNativeCost } from "../native-cost/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
+import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
 import { APP_VERSION } from "./app-version.ts";
 import {
@@ -166,6 +167,9 @@ export function getRunnerApi(): RunnerApi {
       createJobVmRunsRepository(getDatabase(), workspaceId),
     runnerToken: () => configuredRunnerToken(process.env),
     appVersion: APP_VERSION,
+    // #498: which Dispatchers this app serves (billing is not switched on over one that reports no VMs).
+    noteClaimFeatures: (features) =>
+      noteDispatcherClaim(getDatabase(), features),
   });
 }
 

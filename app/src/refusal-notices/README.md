@@ -92,6 +92,16 @@ carries no token: an Owner or Admin who follows it finds "Manage plan" on the pl
 there (`src/plan-handoff/README.md`). A setting that cannot be read costs the notice only its link. The plan page
 (#282, `src/usage/README.md`) shows what the workspace may use and has used.
 
+## The balance (#498)
+
+A job the claim refuses because the balance cannot hold it (`insufficient_balance`, `balance_negative`) gets a notice too. The text is "No review
+ran for this change." and "This workspace has no credit left for reviews." (or "The balance of this workspace is below zero."), then "Add credit to
+continue": with a link to the workspace settings (`/w/<slug>/settings`, `settingsUrl`; the balance page of #505 will take it over) it says an Owner or
+Admin can do so there, without one it says to contact an Owner or Admin. It names no amount, rate, formula or model. It is **one per pull request head**,
+not per period: the row is recorded under `head:<commit id>` in the `period_start` column (`notice-key.ts`; a value that is no commit id gets no notice),
+so a new push after a top-up that was not enough is told again and the same head is told once. `billing_rates_incomplete` and `billing_hold_released`
+have no notice: they are the operator's side. The check of `refusal_notices.code` took the two codes with migration `20261021090000_widen_refusal_notice_codes`.
+
 ## Not covered
 
 - Other refusals (`llm_not_configured`, `entitlements_invalid`, a gate that is off) get no notice: out of scope of #281.

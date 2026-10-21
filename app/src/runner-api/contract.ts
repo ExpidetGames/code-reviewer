@@ -36,6 +36,9 @@ export const CLAIM_FEATURES = [
   // #553: the runner reads `dynamic.cost` and enforces it (the price book of the managed key, the token cap of an own key).
   // A job that carries a cost policy goes only to a caller that named it.
   "dynamic_cost_policy",
+  // #498: the caller is a Dispatcher that reports the VM it creates (`vm_lifecycle`, the App feature of the same name). The
+  // App records that it has seen a Dispatcher with and without it: billing is not switched on while one without it claims.
+  "vm_lifecycle",
 ] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 

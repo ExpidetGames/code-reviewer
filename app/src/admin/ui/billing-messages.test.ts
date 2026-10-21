@@ -52,6 +52,15 @@ describe("the copy for the billing codes", () => {
     },
   );
 
+  // #498-T19
+  it("names the Dispatcher without vm_lifecycle as what keeps billing from being switched on", () => {
+    const line = describeMissingItem("dispatcher_lacks_vm_lifecycle");
+
+    expect(line).not.toBe(GENERIC_FAILURE);
+    expect(line).toMatch(/Dispatcher/);
+    expect(line).not.toContain("dispatcher_lacks_vm_lifecycle");
+  });
+
   // #504-T09
   it("falls back to the generic sentence for a code it does not know, and says nothing of it", () => {
     expect(describeBillingFailure("something_new")).toBe(GENERIC_FAILURE);

@@ -21,6 +21,7 @@ export type RefusalNoticeAssembly = {
   db: Kysely<Database>;
   registry: Pick<IntegrationRegistry, "resolve">;
   planPageUrl: RefusalNoticeDeps["planPageUrl"];
+  settingsUrl?: RefusalNoticeDeps["settingsUrl"];
   log: RefusalNoticeDeps["log"];
   now?: () => Date;
 };
@@ -41,6 +42,9 @@ export function assembleRefusalNoticeService(
     dueNotices: (at, options) => listDueRefusalNotices(db, at, options),
     registry: assembly.registry,
     planPageUrl: assembly.planPageUrl,
+    ...(assembly.settingsUrl === undefined
+      ? {}
+      : { settingsUrl: assembly.settingsUrl }),
     now,
     log: assembly.log,
   });

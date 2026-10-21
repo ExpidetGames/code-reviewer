@@ -117,6 +117,8 @@ const MISSING_COPY: Record<string, string> = {
   connection_check_missing: "A passing connection check",
   connection_check_failed:
     "The connection check failed just now: check the API key",
+  dispatcher_lacks_vm_lifecycle:
+    "A Dispatcher of an earlier release claimed a job within the last day: update it first (it does not report its VMs, so its jobs would be billed by wall clock)",
 };
 
 /** One line of the list of what is missing before billing can be switched on. */

@@ -119,6 +119,7 @@ describe("every terminal code has an outcome class", () => {
 describe("the class of a run's end", () => {
   // The maintainer decided 2026-10-19 (#489, #523): free only when the failure is clearly our fault.
   // #523-T12
+  // #498-T10
   it.each([
     ["launch_failed", "free"],
     ["worker_exited", "free"],
@@ -129,6 +130,14 @@ describe("the class of a run's end", () => {
     ["dynamic_engine_unavailable", "free"],
     ["dynamic_isolation_self_check_failed", "free"],
     ["dynamic_accounting_failed", "free"],
+    // #498 (the review of #525): raised for missing job options, missing model prices or an invalid operator environment,
+    // before any model call: the operator's side. This test moved from `charged` with the spec.
+    ["dynamic_config_invalid", "free"],
+    // #498: a claim the balance or the unready billing refused. Nothing ran, so nothing is charged whatever the class.
+    ["insufficient_balance", "free"],
+    ["balance_negative", "free"],
+    ["billing_rates_incomplete", "free"],
+    ["billing_hold_released", "free"],
     ["runner_error", "free"],
     ["invalid_job", "free"],
     ["git_unavailable", "free"],
@@ -161,7 +170,6 @@ describe("the class of a run's end", () => {
   it.each([
     "dynamic_budget_exceeded",
     "dynamic_policy_violation",
-    "dynamic_config_invalid",
     "checkout_incomplete",
     "pr_not_found",
     "git_unprocessable",

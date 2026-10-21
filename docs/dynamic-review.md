@@ -904,6 +904,11 @@ the limit is one final call more. The result reports by how much the limit was p
 `usage.limitExceededBy` (USD, absent when it was not, `contracts/runner-api.v1.json`) and the job log
 says it, so the bound can be watched on real runs.
 
+_Billing (#498)._ While billing is on, the hold of a managed Dynamic job is the cost limit times A (`src/billing/README.md`, "Reserve, settle,
+release"), and the settlement charges the **real** cost, also when the run passed its limit by this excess: the balance may go below zero and the
+next claim of the workspace is then refused (`balance_negative`). Billing never shortens a run, never changes the final-call exemption and takes
+nothing from a run that ended without a review: it prices what the run reported.
+
 _Serial calls._ The engine's model calls are serial: one agent (`review`), the permission block denies
 every tool but `read`, `grep`, `glob` and `StructuredOutput` (so no subagent runs in parallel), and a
 step waits for its tool results. The ledger still holds the reservation of every call in flight; if
