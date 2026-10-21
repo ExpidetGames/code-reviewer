@@ -19,7 +19,7 @@
 //   GET  /api/admin/billing/workspaces?q=                    workspaces by name, for the manual credit
 //   GET  /api/admin/billing/workspaces/<id>                  a workspace's balance and its recent entries
 //   POST /api/admin/billing/workspaces/<id>/credit           { "type": "credit" | "correction", "amountMicroUsd", "note",
-//                                                            "requestId"? }
+//                                                            "requestId" }   (required: it makes a retry one entry)
 //
 // These routes configure billing, so they work while billing is off: only the instance admin reaches them. The routes of
 // billing itself (the webhook, checkout) answer the 404 of a missing path while it is off (`enabled.ts`).

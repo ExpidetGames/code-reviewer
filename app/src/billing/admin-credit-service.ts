@@ -132,7 +132,11 @@ export function createBillingCreditService({
       if (typeof amountMicroUsd !== "number")
         return issue("amountMicroUsd", "amount_invalid");
       if (typeof note !== "string") return issue("note", "note_required");
-      if (requestId !== undefined && typeof requestId !== "string")
+      // The id is what makes a retry one entry: the form sends one per submission, and a caller without one is refused rather
+      // than given a random one that would make every retry a second credit.
+      if (requestId === undefined)
+        return issue("requestId", "request_id_required");
+      if (typeof requestId !== "string")
         return issue("requestId", "request_id_invalid");
       try {
         const write = type === "credit" ? manual.grant : manual.correct;

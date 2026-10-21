@@ -246,8 +246,10 @@ and not an error.
 `/admin/billing` (data routes below `/api/admin/billing`; `src/admin/README.md` has the guards), instance admin only. Opening it
 changes nothing and calls nobody; a self-hoster who never opens it sees no change, no new route that answers and no outbound call.
 
-- **The switch.** `PUT { "enabled": true }` reads everything again in one transaction under `lockBillingSettings`
-  (`settings-store.ts`) and writes the switch only if `missingItemsOf` is empty; otherwise it is refused with `billing_not_ready`
+- **The switch.** `PUT { "enabled": true }` reads everything again, the stored credentials too, in one transaction under
+  `lockBillingSettings` (`settings-store.ts`; the service gets the secret store on that transaction, `secretsOn`) and writes the
+  switch only if `missingItemsOf` is empty. Saving or removing a credential and replacing the endpoint change the secret in the
+  transaction of the settings, so a removal cannot slip in between the check and the write of the switch; otherwise it is refused with `billing_not_ready`
   and `missing`, every missing item by its code (`factor_a_missing`, `minute_rate_diff_missing`, `minute_rate_dynamic_missing`,
   `diff_ai_reserve_missing`, `stripe_api_key_missing`, `stripe_webhook_secret_missing`, `connection_check_missing`,
   `connection_check_failed`). With Stripe the connection check is made once more just before, so a key that was revoked since the
@@ -261,7 +263,8 @@ changes nothing and calls nobody; a self-hoster who never opens it sees no chang
   write-only: the answers carry `configured`, `unreadable` or `not_configured` and the last four characters of a long value. The
   key must start with `sk_test_`, `rk_test_`, `sk_live_` or `rk_live_`; its environment is read from the prefix and shown. A
   credential is not removed while billing is on, and a new key must pass a check before it replaces the one that works. A key of
-  the other environment takes the stored webhook secret and endpoint id with it.
+  the other environment is refused while billing is on (`billing_disable_first`: it would take the webhook secret and the
+  endpoint with it and turn billing off without a word); with billing off it takes the stored webhook secret and endpoint id with it.
 - **The connection check** (`POST /check`) reads the account (`GET /v1/account`) and answers `{ ok, environment }` or a stable
   code (`stripe_key_rejected`, `stripe_rate_limited`, `stripe_unreachable`, `stripe_unavailable`, `api_key_missing`,
   `api_key_unreadable`). A pass is recorded.
@@ -269,7 +272,8 @@ changes nothing and calls nobody; a self-hoster who never opens it sees no chang
   request header) plus `/api/billing/webhook` with the events in `stripe-webhook-events.ts` and stores the returned secret. The
   address must pass `isPublicHttpsUrl` or nothing is called (`webhook_url_not_public`). One creation runs at a time (a lease of
   60 seconds in the setting `billing_destination_lock`: `webhook_endpoint_in_progress`), Stripe is asked first and an endpoint of
-  our address that exists is **adopted**, not duplicated, when its secret is stored. Stripe shows an endpoint's secret only in the
+  our address that exists is **adopted**, not duplicated, when it is enabled at Stripe, is told about every event of
+  `stripe-webhook-events.ts` (or `*`: otherwise `webhook_endpoint_unusable`) and its secret is stored. Stripe shows an endpoint's secret only in the
   answer to the create, so an endpoint of ours without a stored secret answers `webhook_endpoint_secret_unknown` (enter the
   secret, or `{ "recreate": true }` with billing off, which deletes ours and creates a new one). An endpoint whose `livemode` is
   not the key's environment is refused (`webhook_environment_mismatch`) and removed again; a secret that cannot be stored removes
@@ -281,7 +285,7 @@ changes nothing and calls nobody; a self-hoster who never opens it sees no chang
   they are set (ADR 0006 D3, D9, D10; `billingNumbersOf`). The numbers are stored here for the later issues that read them (the
   start credit grant #507, the notifications #506, the brake #499). They can be changed at any time, also while billing is on.
 - **Manual credit and correction** (`GET /workspaces?q=`, `GET /workspaces/<id>`, `POST /workspaces/<id>/credit`
-  `{ type: "credit" | "correction", amountMicroUsd, note, requestId }`): the admin searches a workspace by name, sees its balance
+  `{ type: "credit" | "correction", amountMicroUsd, note, requestId }`; the request id is required, `request_id_required`, so a retry is one entry): the admin searches a workspace by name, sees its balance
   and its ten newest entries, and writes a `top_up` (credit) or a signed `correction` through `createManualCreditService` with
   their user id as the actor and the required note. It works with either adapter and while billing is off.
 

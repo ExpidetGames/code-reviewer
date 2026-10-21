@@ -4,14 +4,18 @@
 // fake Stripe as the payment provider (#504): what an admin can save and read back, how the switch is judged, the connection
 // check and the webhook endpoint, the rates, the manual credit, that a person who is not an admin reaches nothing, and that no
 // credential is in an answer, a page or a log line.
+import type { Kysely, KyselyPlugin } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startStripeFake } from "../../../fakes/stripe/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
+import type { Database } from "../db/schema.ts";
 import { createAdminHarness } from "../test-support/admin-harness.ts";
+import { describeQuery } from "../test-support/query-hook.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { isBillingOn } from "./enabled.ts";
 import { STRIPE_WEBHOOK_EVENTS } from "./stripe-webhook-events.ts";
+import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
 const MEMBER = { email: "member@example.com", password: "k4Pq-v8Zm2Xw" };
 const PUBLIC_URL = "https://reviews.example.test";
@@ -27,6 +31,60 @@ const LIVE_PREFIX = ["sk", "live", ""].join("_");
 const MANUAL_SECRET = "whsec_ManualSecret0123456789abcdef";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- the shape is asserted field by field
+
+class NotFound extends Error {}
+
+/**
+ * The webhook route of billing (`POST /api/billing/webhook`) as the app wires it, over the given database, with the active
+ * adapter replaced by a spy: whether the spy is asked tells whether the request got past the switch.
+ */
+function webhookRoute(db: Kysely<Database>) {
+  const activeAdapter = vi.fn(() => Promise.resolve(undefined));
+  const handler = createBillingWebhookHandler({
+    db,
+    guard: {
+      isOn: () => isBillingOn(db),
+      notFound: () => {
+        throw new NotFound("not found");
+      },
+    },
+    activeAdapter,
+  });
+  return {
+    activeAdapter,
+    post: () =>
+      handler(new Request(WEBHOOK_URL, { method: "POST", body: "{}" })),
+  };
+}
+
+/** The tables the statements of a run touched. */
+function recordTables(tables: string[]): KyselyPlugin {
+  return {
+    transformQuery({ node }) {
+      const table = describeQuery(node).table;
+      if (table !== undefined) tables.push(table);
+      return node;
+    },
+    async transformResult({ result }) {
+      return result;
+    },
+  };
+}
+
+/** A Stripe client's `fetch` that changes the endpoints Stripe lists, the way another dashboard user could have. */
+function listingEndpointsAs(change: (endpoint: Json) => Json): typeof fetch {
+  return async (input, init) => {
+    const response = await fetch(input, init);
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.pathname !== "/v1/webhook_endpoints" || init?.method !== "GET")
+      return response;
+    const body = (await response.json()) as Json;
+    return Response.json(
+      { ...body, data: (body.data as Json[]).map(change) },
+      { status: response.status },
+    );
+  };
+}
 
 async function start(
   options: {
@@ -110,6 +168,10 @@ describe("billing that was never configured", () => {
   it("makes no outbound call and reads no billing table when the page is not opened, and the webhook route is a missing path", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const s = await start();
+    const tables: string[] = [];
+    const route = webhookRoute(s.portal.db.withPlugin(recordTables(tables)));
+
+    await expect(route.post()).rejects.toBeInstanceOf(NotFound);
 
     expect(await isBillingOn(s.portal.db)).toBe(false);
     expect(
@@ -117,6 +179,10 @@ describe("billing that was never configured", () => {
         "billing_settings",
       ),
     ).toBeUndefined();
+    // Past the switch the route would ask for the active adapter; it does not get that far.
+    expect(route.activeAdapter).not.toHaveBeenCalled();
+    // The one thing read is the switch, an instance setting: no billing table, no secret.
+    expect(tables).toEqual(["instance_settings"]);
     expect(spy).not.toHaveBeenCalled();
     expect(s.stripe.requests()).toEqual([]);
   });
@@ -513,6 +579,45 @@ describe("switching billing on", () => {
     expect(await isBillingOn(s.portal.db)).toBe(true);
   });
 
+  // #504-T20
+  it("refuses a key of the other environment while billing is on, and keeps the key, the webhook secret and the switch", async () => {
+    // The fake accepts one key; the client is made to send it for whatever key the app holds, so the new key passes the check.
+    let fakeKey = "";
+    const asFakeKey: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("authorization", `Bearer ${fakeKey}`);
+      return fetch(input, { ...init, headers });
+    };
+    const s = await start({ stripeFetch: asFakeKey });
+    fakeKey = s.stripe.apiKey;
+    await s.put({ adapter: "stripe" });
+    await s.saveRates();
+    await s.saveStripe({
+      apiKey: s.stripe.apiKey,
+      webhookSecret: MANUAL_SECRET,
+    });
+    await s.post("/check");
+    await s.put({ enabled: true });
+    expect((await s.view()).stripe.environment).toBe("test");
+
+    const response = await s.saveStripe({
+      apiKey: `${LIVE_PREFIX}ALiveKeyForTheTest0123456789`,
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "billing_disable_first" });
+    const v = await s.view();
+    expect(v.enabled).toBe(true);
+    expect(v.on).toBe(true);
+    expect(v.stripe.environment).toBe("test");
+    expect(v.stripe.webhookSecret.state).toBe("configured");
+    const key = await s.portal.secrets.use("stripe_api_key");
+    expect(key.ok && key.value.reveal()).toBe(s.stripe.apiKey);
+    const secret = await s.portal.secrets.use("stripe_webhook_secret");
+    expect(secret.ok && secret.value.reveal()).toBe(MANUAL_SECRET);
+    expect(await isBillingOn(s.portal.db)).toBe(true);
+  });
+
   // #504-T04
   it("lets the rates be changed later while billing is on", async () => {
     const s = await start();
@@ -537,16 +642,28 @@ describe("switching billing off", () => {
     const workspaceId = await s.workspace();
     await s.call(`/api/admin/billing/workspaces/${workspaceId}/credit`, {
       method: "POST",
-      body: { type: "credit", amountMicroUsd: 10_000_000, note: "gift" },
+      body: {
+        type: "credit",
+        amountMicroUsd: 10_000_000,
+        note: "gift",
+        requestId: "form-gift",
+      },
     });
     const journal = createBillingJournalRepository(s.portal.db, workspaceId);
     const before = await journal.entries({ limit: 50 });
+    const route = webhookRoute(s.portal.db);
+    // While billing is on the request gets past the switch, to the active adapter (the manual one has no webhook: still a 404).
+    await expect(route.post()).rejects.toBeInstanceOf(NotFound);
+    expect(route.activeAdapter).toHaveBeenCalledTimes(1);
 
     const response = await s.put({ enabled: false });
 
     expect(response.status).toBe(200);
     expect(await isBillingOn(s.portal.db)).toBe(false);
     expect((await s.view()).enabled).toBe(false);
+    // Inert again: the webhook route answers the missing path without asking for the adapter.
+    await expect(route.post()).rejects.toBeInstanceOf(NotFound);
+    expect(route.activeAdapter).toHaveBeenCalledTimes(1);
     expect(await journal.entries({ limit: 50 })).toEqual(before);
     expect((await journal.balance()).balanceMicroUsd).toBe(10_000_000);
     // The rates stay for the next time.
@@ -654,6 +771,93 @@ describe("the webhook endpoint at Stripe", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: "billing_disable_first" });
     expect(s.stripe.webhookEndpoints()).toHaveLength(1);
+  });
+
+  describe("adopting the endpoint that Stripe already has for the address", () => {
+    const withEndpoint = async (change: (endpoint: Json) => Json) => {
+      let tamper: (endpoint: Json) => Json = (endpoint) => endpoint;
+      const s = await start({
+        stripeFetch: listingEndpointsAs((endpoint) => tamper(endpoint)),
+      });
+      await s.saveStripe({ apiKey: s.stripe.apiKey });
+      await s.post("/webhook-endpoint");
+      tamper = change;
+      return { s, made: s.stripe.requests().length };
+    };
+    const fewer = STRIPE_WEBHOOK_EVENTS.slice(1);
+
+    // #504-T18
+    it.each([
+      ["switched off at Stripe", { status: "disabled" }],
+      [
+        "subscribed to fewer events than billing handles",
+        { enabled_events: fewer },
+      ],
+      ["subscribed to no event", { enabled_events: [] }],
+      ["subscribed to others only", { enabled_events: ["customer.created"] }],
+    ])(
+      "refuses an endpoint that is %s, and changes nothing",
+      async (_name, patch) => {
+        const { s } = await withEndpoint((endpoint) => ({
+          ...endpoint,
+          ...patch,
+        }));
+        const before = await s.view();
+
+        const response = await s.post("/webhook-endpoint");
+
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({
+          error: "webhook_endpoint_unusable",
+        });
+        expect(
+          s.stripe
+            .requests()
+            .slice(made)
+            .map((r) => r.method),
+        ).toEqual(["GET"]);
+        expect((await s.view()).stripe).toEqual(before.stripe);
+      },
+    );
+
+    // #504-T18
+    it.each([
+      ["every event", ["*"]],
+      [
+        "the handled events and more",
+        [...STRIPE_WEBHOOK_EVENTS, "customer.created"],
+      ],
+    ])(
+      "adopts an enabled endpoint that is subscribed to %s",
+      async (_name, events) => {
+        const { s } = await withEndpoint((endpoint) => ({
+          ...endpoint,
+          enabled_events: events,
+        }));
+
+        const response = await s.post("/webhook-endpoint");
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          created: false,
+        });
+      },
+    );
+
+    // #504-T18
+    it("lets the admin replace such an endpoint while billing is off", async () => {
+      const { s } = await withEndpoint((endpoint) => ({
+        ...endpoint,
+        status: "disabled",
+      }));
+
+      const response = await s.post("/webhook-endpoint", { recreate: true });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, created: true });
+      expect(s.stripe.webhookEndpoints()).toHaveLength(1);
+    });
   });
 
   // #504-T06
@@ -898,14 +1102,16 @@ describe("the rates and the numbers", () => {
 });
 
 describe("the manual credit and correction", () => {
+  let requests = 0;
+  /** The form always sends a request id; a test that wants none says `requestId: undefined`. */
   const credit = (
     s: Awaited<ReturnType<typeof start>>,
     workspaceId: string,
-    body: unknown,
+    body: Record<string, unknown>,
   ) =>
     s.call(`/api/admin/billing/workspaces/${workspaceId}/credit`, {
       method: "POST",
-      body,
+      body: { requestId: `form-${(requests += 1)}`, ...body },
     });
 
   // #504-T10
@@ -1063,6 +1269,52 @@ describe("the manual credit and correction", () => {
     expect((await journal.entries({ limit: 10 })).entries).toHaveLength(1);
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toEqual({ error: "request_conflict" });
+  });
+
+  // #504-T21
+  it("requires a request id and writes nothing without one, so a retry cannot double a credit", async () => {
+    const s = await start();
+    const workspaceId = await s.workspace();
+    const body = {
+      type: "credit",
+      amountMicroUsd: 5_000_000,
+      note: "once",
+      requestId: undefined,
+    };
+
+    const first = await credit(s, workspaceId, body);
+    const retry = await credit(s, workspaceId, body);
+
+    for (const response of [first, retry]) {
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: "invalid_input",
+        issues: [{ field: "requestId", code: "request_id_required" }],
+      });
+    }
+    const journal = createBillingJournalRepository(s.portal.db, workspaceId);
+    expect((await journal.entries({ limit: 10 })).entries).toEqual([]);
+  });
+
+  // #504-T21
+  it("makes one entry when the same request with its request id is retried", async () => {
+    const s = await start();
+    const workspaceId = await s.workspace();
+    const body = {
+      type: "credit",
+      amountMicroUsd: 5_000_000,
+      note: "once",
+      requestId: "form-token-retry",
+    };
+
+    const first = await credit(s, workspaceId, body);
+    const retry = await credit(s, workspaceId, body);
+
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200);
+    const journal = createBillingJournalRepository(s.portal.db, workspaceId);
+    expect((await journal.entries({ limit: 10 })).entries).toHaveLength(1);
+    expect((await journal.balance()).balanceMicroUsd).toBe(5_000_000);
   });
 
   // #504-T10
