@@ -407,6 +407,8 @@ describe("a job refused or handed back at claim (#553)", () => {
       "pull_request_unavailable",
       "claim_failed",
       "price_check_failed",
+      // #588-T32
+      "provider_pin_check_failed",
     ])
       expect(classifyOutcome(failed(code)), code).toBe("free");
   });

@@ -68,6 +68,7 @@ import {
 import type { CostPolicyJson } from "../native-cost/policy.ts";
 import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
+import type { ProviderPins } from "./provider-pins.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
 import {
@@ -131,6 +132,9 @@ export const CLAIM_RELEASE_REASONS = [
   "claim_failed",
   // #553: the price check of a managed native job failed itself (the database could not be read); not the model's fault.
   "price_check_failed",
+  // #588: the pin of a legacy selection could not be adopted (the settings could not be written, or the project changed meanwhile);
+  // the job is judged again. Not the model's fault.
+  "provider_pin_check_failed",
   // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
   "launch_failed",
   // #375: the Worker's container ended with an error before it reported a result (the Dispatcher's release call).
@@ -225,13 +229,7 @@ export type ClaimDeps = {
    * the claim pins the address it is about to send the key to, once. Answers the pin in force, or null when the project no
    * longer selects the provider. Only asked for such a selection.
    */
-  providerPins: {
-    adopt: (
-      job: Job,
-      provider: string,
-      address: string,
-    ) => Promise<string | null>;
-  };
+  providerPins: ProviderPins;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -491,8 +489,11 @@ type CostDecision =
       confirmation?: { id: number; hashVersion: number };
     }
   | { kind: "refused"; errorCode: string; detail: string }
-  /** The price check itself failed (the database could not be read): not the model's fault, so the job is given back. */
-  | { kind: "retry" };
+  /** The price check or the adoption of the pin failed itself (the database could not be read): not the model's fault, so the job is given back. */
+  | {
+      kind: "retry";
+      reason: "price_check_failed" | "provider_pin_check_failed";
+    };
 
 /**
  * #553: the cost policy of a native Dynamic job, or none. A job is native when its selection names a catalog model
@@ -513,7 +514,8 @@ async function costOf(
   const outcome = await native.policyFor(selection.keyMode, ref);
   if (!outcome.ok) {
     // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
-    if (outcome.reason === "check_failed") return { kind: "retry" };
+    if (outcome.reason === "check_failed")
+      return { kind: "retry", reason: "price_check_failed" };
     return {
       kind: "refused",
       errorCode: MANAGED_MODEL_UNAVAILABLE,
@@ -530,7 +532,8 @@ async function costOf(
     catalog ? selection.pinnedAddress : undefined,
   );
   if (!entry.ok) {
-    if (entry.code === "check_failed") return { kind: "retry" };
+    if (entry.code === "check_failed")
+      return { kind: "retry", reason: "price_check_failed" };
     return {
       kind: "refused",
       errorCode: entryRefusalCode(selection, entry.code),
@@ -549,9 +552,10 @@ async function costOf(
       );
     } catch {
       // No error text: it could carry whatever the failing layer held. The job is given back and judged again.
-      return { kind: "retry" };
+      return { kind: "retry", reason: "provider_pin_check_failed" };
     }
-    if (inForce === null) return { kind: "retry" };
+    if (inForce === null)
+      return { kind: "retry", reason: "provider_pin_check_failed" };
     if (inForce !== entry.entry.upstreamBaseUrl)
       return {
         kind: "refused",
@@ -651,7 +655,7 @@ export async function checkJob(
   if (cost.kind === "retry")
     return {
       kind: "retry",
-      reason: "price_check_failed",
+      reason: cost.reason,
       retryAfterSeconds: DEFAULT_RETRY_AFTER_SECONDS,
     };
   // The log names the entry and the kind of a job on the operator's key, never a model or a provider; the log of

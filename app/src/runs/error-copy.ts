@@ -105,6 +105,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The server could not prepare this run, even after several tries.",
   price_check_failed:
     "The server could not check the model for this run, even after several tries.",
+  provider_pin_check_failed:
+    "The server could not check the address of the model provider for this run, even after several tries.",
   launch_failed:
     "The worker for this run could not be started, even after several tries.",
   worker_exited:
