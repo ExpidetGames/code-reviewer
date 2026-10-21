@@ -69,9 +69,11 @@ export function BillingReviewsPage({
 
       {list.rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {list.state === "open"
-            ? "No payment needs a review."
-            : "No review has been closed yet."}
+          {list.total > 0
+            ? "There are no rows on this page."
+            : list.state === "open"
+              ? "No payment needs a review."
+              : "No review has been closed yet."}
         </p>
       ) : (
         <ul

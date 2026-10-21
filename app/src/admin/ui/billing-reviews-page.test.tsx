@@ -335,6 +335,29 @@ describe("the billing review rows", () => {
   });
 });
 
+describe("a credit from a row whose top-up is not paid", () => {
+  // #603-T19
+  it("warns that a payment Stripe delivers later is credited again, and says nothing for a paid top-up", () => {
+    renderPage(
+      list([
+        REFUSED,
+        {
+          ...REFUSED,
+          eventId: "evt_paid",
+          intent: { ...REFUSED.intent!, state: "paid" },
+        },
+      ]),
+    );
+
+    expect(
+      within(rowOf("evt_refused")).getByText(/use Check payment first/),
+    ).toBeTruthy();
+    expect(
+      within(rowOf("evt_paid")).queryByText(/use Check payment first/),
+    ).toBeNull();
+  });
+});
+
 describe("the resolved rows", () => {
   // #603-T02
   it("show how a row was closed, by whom, with which note and which journal entry, and offer no action", () => {
@@ -376,6 +399,13 @@ describe("the list", () => {
       screen.getByRole("link", { name: "Next page" }).getAttribute("href"),
     ).toBe("/admin/billing/reviews?state=resolved&page=3");
     expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+  });
+
+  // #603-T07
+  it("says that a page past the end is empty, not that nothing is open", () => {
+    renderPage(list([], { page: 5, total: 30, openTotal: 30 }));
+
+    expect(screen.getByText("There are no rows on this page.")).toBeTruthy();
   });
 
   // #603-T07

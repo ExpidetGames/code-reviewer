@@ -264,6 +264,15 @@ export function BillingReviewRow({
               <FieldError>{describeBillingIssue(noteIssue)}</FieldError>
             )}
           </Field>
+          {suggestion?.type === "credit" &&
+          review.intent !== null &&
+          review.intent.state !== "paid" ? (
+            <p className="text-sm text-muted-foreground">
+              The top-up is not paid in our records yet. If Stripe took the
+              payment, use Check payment first: a payment that Stripe delivers
+              later is credited again beside a credit written here.
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center gap-3">
             {suggestion === null ? null : (
               <Button
