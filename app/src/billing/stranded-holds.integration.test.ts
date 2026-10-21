@@ -23,7 +23,7 @@ import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-reposi
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import { createSecretStore } from "../secrets/store.ts";
-import { describeQuery } from "../test-support/query-hook.ts";
+import { afterQueryPlugin, describeQuery } from "../test-support/query-hook.ts";
 import {
   fundWorkspace,
   setBillingSwitch,
@@ -418,10 +418,11 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
 
   // #591-T12
   run(
-    "a release racing a settlement and another release leaves exactly one release, and the journal consistent",
+    "a release racing a settlement and another release leaves exactly one release, and either the release alone or the release and the charge, never a double",
     async () => {
       const fixture = await start();
       const job = await claim(fixture);
+      fixture.clock.advance(90 * SECOND);
       // The job ended without a settlement (billing was off), then billing came back on.
       await setBillingSwitch(fixture.db, false);
       await fixture.queue.complete(job.job.id, job.leaseToken, delivered);
@@ -437,20 +438,31 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
           ),
       ]);
 
+      // Whoever got the lock first decided: the release alone (the sweep won) or the release and the one charge (the
+      // settlement won). The staged tests (T24) force each order; here the two outcomes are the only ones there are.
       const entries = await entriesOf(fixture, job.job.id);
-      expect(entries.filter((e) => e.type === "release")).toHaveLength(1);
-      expect(
-        entries.filter((e) => e.type === "usage").length,
-      ).toBeLessThanOrEqual(1);
-      const verified = await journalOf(fixture).verify();
-      expect(verified).toMatchObject({
+      const charged = entries.find((e) => e.type === "usage");
+      expect(shape(entries)).toEqual(
+        charged === undefined
+          ? [
+              ["reservation", -OWN_KEY_DIFF_HOLD],
+              ["release", OWN_KEY_DIFF_HOLD],
+            ]
+          : [
+              ["reservation", -OWN_KEY_DIFF_HOLD],
+              ["release", OWN_KEY_DIFF_HOLD],
+              ["usage", charged.amountMicroUsd],
+            ],
+      );
+      expect(await journalOf(fixture).verify()).toMatchObject({
         consistent: true,
+        balanceMicroUsd: FUNDING + (charged?.amountMicroUsd ?? 0),
         reservedMicroUsd: 0,
       });
     },
   );
 
-  // #591-T13
+  // #591-T13 (the staged order of a release and a claim is T25)
   run(
     "a release racing the claims of other jobs of the workspace never loses a hold or a release",
     async () => {
@@ -656,6 +668,160 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
       });
       expect(plan).not.toContain("Seq Scan");
       expect(plan).toContain("billing_balances_reserved");
+    },
+  );
+  // The staged races need two connections that run in parallel: Postgres. SQLite has one connection per database, and its
+  // lock is the whole database, so there is no row lock to take or to forget.
+  const onPostgres = name === "Postgres" && open !== undefined ? it : it.skip;
+
+  /** True once another connection is blocked on a lock (or `done()` says the other side has finished without one). */
+  async function untilBlockedOrDone(
+    fixture: JobQueueFixture,
+    done: () => boolean,
+  ): Promise<"blocked" | "done"> {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (done()) return "done";
+      const { rows } = await sql<{
+        n: string;
+      }>`select count(*) as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`.execute(
+        fixture.db,
+      );
+      if (Number(rows[0]?.n) > 0) return "blocked";
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("The other connection neither blocked nor finished.");
+  }
+
+  /**
+   * Releases the hold of `jobId` and, after the release has read the reservation and before it writes anything, starts `other`
+   * on another connection. The release holds the lock of the workspace's balance row from its first statement, so `other`
+   * (a settlement, a claim) must wait for it; when it does not wait (the lock is gone) it finishes first, which `before`
+   * reports. The release then goes on, and `other` is awaited.
+   */
+  async function releaseWhile<T>(
+    fixture: JobQueueFixture,
+    jobId: string,
+    other: () => Promise<T>,
+  ) {
+    let started: Promise<T> | undefined;
+    let otherDone = false;
+    let before: "blocked" | "done" | undefined;
+    const plugin = afterQueryPlugin(async (query) => {
+      if (started !== undefined) return;
+      if (query.kind !== "select" || query.table !== "billing_journal_entries")
+        return;
+      started = other().finally(() => {
+        otherDone = true;
+      });
+      before = await untilBlockedOrDone(fixture, () => otherDone);
+    });
+    const released = await createBillingJournalRepository(
+      fixture.db.withPlugin(plugin),
+      fixture.workspaceId,
+      fixture.clock.now,
+    ).release(jobId);
+    if (started === undefined) throw new Error("The release read nothing.");
+    return { released, before, other: await started };
+  }
+
+  // #591-T24
+  onPostgres(
+    "a settlement that starts while a release is in flight waits for it, finds it and charges nothing",
+    async () => {
+      const fixture = await start();
+      const claimed = await claim(fixture);
+      fixture.clock.advance(90 * SECOND);
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(
+        claimed.job.id,
+        claimed.leaseToken,
+        delivered,
+      );
+      await setBillingSwitch(fixture.db, true);
+
+      const staged = await releaseWhile(fixture, claimed.job.id, () =>
+        fixture.db
+          .transaction()
+          .execute((trx) =>
+            settleEndedJobs(trx, [claimed.job.id], fixture.clock.now),
+          ),
+      );
+
+      // The settlement was blocked by the lock of the release, then found the release and priced nothing.
+      expect(staged.before).toBe("blocked");
+      expect(staged.released).toMatchObject({ ok: true, created: true });
+      expect(shape(await entriesOf(fixture, claimed.job.id))).toEqual([
+        ["reservation", -OWN_KEY_DIFF_HOLD],
+        ["release", OWN_KEY_DIFF_HOLD],
+      ]);
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+        balanceMicroUsd: FUNDING,
+        reservedMicroUsd: 0,
+      });
+    },
+  );
+
+  // #591-T25
+  onPostgres(
+    "a claim that starts while a release is in flight waits for it and is decided against the balance that includes it",
+    async () => {
+      // After the stranded hold the balance is 175,000, less than one hold; after its release it is 500,000.
+      const fixture = await start({ funding: 500_000 });
+      const stranded = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+      fixture.clock.advance(1);
+      const next = await fixture.enqueueNew({ prNumber: 900 });
+
+      const staged = await releaseWhile(fixture, stranded.id, () =>
+        fixture.queue.claimNext("runner-b", ENGINES),
+      );
+
+      expect(staged.before).toBe("blocked");
+      expect(staged.other?.job.id).toBe(next.id);
+      expect(
+        (await entriesOf(fixture, stranded.id)).map((e) => e.type),
+      ).toEqual(["reservation", "release"]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: 500_000 - OWN_KEY_DIFF_HOLD,
+        reservedMicroUsd: OWN_KEY_DIFF_HOLD,
+      });
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+      });
+    },
+  );
+
+  // #591-T26
+  onPostgres(
+    "does not count a hold that a racing writer released between the finding and the release",
+    async () => {
+      const fixture = await start();
+      const job = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+      let finderQueries = 0;
+      let racer: Promise<unknown> | undefined;
+      // The finder asks twice (raw statements); after its answer, another writer releases the same hold on its own connection.
+      const plugin = afterQueryPlugin(async (query) => {
+        if (query.kind !== "RawNode") return;
+        finderQueries += 1;
+        if (finderQueries !== 2) return;
+        racer = journalOf(fixture).release(job.id);
+        await racer;
+      });
+
+      const result = await releaseStrandedHolds(
+        fixture.db.withPlugin(plugin),
+        fixture.clock.now,
+      );
+
+      expect(finderQueries).toBe(2);
+      await expect(racer).resolves.toMatchObject({ ok: true, created: true });
+      // The racing writer released it; this run released nothing and says so.
+      expect(result).toEqual({ released: 0 });
+      expect(
+        (await entriesOf(fixture, job.id)).filter((e) => e.type === "release"),
+      ).toHaveLength(1);
     },
   );
 });
