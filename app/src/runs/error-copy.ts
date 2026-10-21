@@ -15,6 +15,12 @@
  */
 export const HISTORIC_ERROR_CODES = ["managed_tier_unavailable"] as const;
 
+/**
+ * Codes that are never shown to the customer, in the check run, on the run page or in any answer: the sentence says all
+ * there is to say. The code of the hidden hourly brake (#499) is one: it would tell a reader that a count exists.
+ */
+export const UNSHOWN_ERROR_CODES = ["reviews_paused"] as const;
+
 export const ERROR_COPY: Readonly<Record<string, string>> = {
   // The queue
   lease_expired:
@@ -50,6 +56,12 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "Billing is switched on for this instance but its prices are not all set, so this run did not start and no AI model was used. Ask whoever runs this instance.",
   billing_hold_released:
     "The credit held for this run was released before it could start, so it did not start and no AI model was used. It will run again on the next push or review request.",
+  monthly_limit_reached:
+    "The monthly spending limit of this workspace was reached, so this run did not start and no AI model was used. An Owner or Admin of the workspace can change the limit in the workspace settings.",
+  reviews_paused:
+    "Reviews are paused for this workspace for a while, so this run did not start and no AI model was used. It will run again on the next push or review request.",
+  billing_limits_unreadable:
+    "The spending limits of this workspace could not be checked, so this run did not start and no AI model was used. It will run again on the next push or review request. If this keeps happening, ask whoever runs this instance.",
   // A code of a job from before the catalog (#434): nothing ends a job with it any more (see HISTORIC_ERROR_CODES).
   managed_tier_unavailable:
     "The quality level chosen for this project was not available when this run was made, so it did not start and no AI model was used. Quality levels have since been replaced by review options, which a workspace Owner or Admin can choose in the review settings of the project.",
@@ -214,7 +226,9 @@ export function describeErrorCode(code: string): ErrorDescription {
   const shown = CODE_SHAPE.test(code) ? code : null;
   if (shown !== null && Object.hasOwn(ERROR_COPY, shown)) {
     return {
-      code: shown,
+      code: (UNSHOWN_ERROR_CODES as readonly string[]).includes(shown)
+        ? null
+        : shown,
       text: ERROR_COPY[shown] ?? UNKNOWN_ERROR_COPY,
       known: true,
     };

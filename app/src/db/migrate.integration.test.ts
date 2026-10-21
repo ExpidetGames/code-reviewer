@@ -115,6 +115,9 @@ describe("the migrations of both epics", () => {
       "20261021170000_add_billing_topup_intents_provider_amount",
       "20261021190000_add_billing_topup_intents_provider_currency",
       "20261021190100_add_billing_webhook_events_review_context",
+      "20261021210000_widen_refusal_notice_codes_for_limits",
+      "20261021210100_create_billing_workspace_settings",
+      "20261021210200_add_limit_query_indexes",
     ]);
   });
 
@@ -163,6 +166,7 @@ describe("starting the database", () => {
       "billing_start_credit_grants",
       "billing_topup_intents",
       "billing_webhook_events",
+      "billing_workspace_settings",
       "email_verification_tokens",
       "installation_link_requests",
       "instance_settings",

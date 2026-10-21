@@ -18,6 +18,7 @@ import {
   type BillingMissingItem,
 } from "./readiness.ts";
 import {
+  DEFAULT_HOURLY_REVIEW_LIMIT,
   billingNumbersOf,
   billingRatesOf,
   type BillingRates,
@@ -61,6 +62,8 @@ export type BillingSwitch = {
   missing: BillingMissingItem[];
   /** The complete rates (A, both B, the Diff AI reserve), or null when one is missing. Only read while the switch is on. */
   rates: BillingRates | null;
+  /** Started reviews of a workspace in a rolling hour that the hidden brake lets through (#499). Only read while the switch is on. */
+  hourlyReviewLimit: number;
 };
 
 /**
@@ -72,9 +75,15 @@ export async function readBillingSwitch(
   db: Kysely<Database>,
 ): Promise<BillingSwitch> {
   const stored = await readStoredBillingSettings(db);
-  if (stored === undefined) return { enabled: false, missing: [], rates: null };
+  const off = {
+    enabled: false,
+    missing: [],
+    rates: null,
+    hourlyReviewLimit: DEFAULT_HOURLY_REVIEW_LIMIT,
+  } satisfies BillingSwitch;
+  if (stored === undefined) return off;
   const settings = readBillingSettings(stored);
-  if (!settings.enabled) return { enabled: false, missing: [], rates: null };
+  if (!settings.enabled) return off;
   const usesStripe =
     (settings.adapter ?? DEFAULT_ADAPTER_ID) === STRIPE_ADAPTER_ID;
   const rows = createSecretsRepository(db);
@@ -89,6 +98,7 @@ export async function readBillingSwitch(
     enabled: true,
     missing: missingItemsOf({ settings, secrets }),
     rates: billingRatesOf(settings),
+    hourlyReviewLimit: billingNumbersOf(settings).hourlyReviewLimit,
   };
 }
 

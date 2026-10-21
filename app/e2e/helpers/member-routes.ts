@@ -86,8 +86,13 @@ export function addressesOf(
   route: MemberRoute,
   values: RouteValues,
 ): Array<{ path: string; refused: boolean }> {
+  // The billing routes of a workspace are for an Owner or an Admin (`manage_billing`, #499), and a missing path while billing is
+  // off: whoever reads here is a Member of a workspace on the operator's key, so every address answers a 4xx, scanned like any other.
   let results: Array<{ path: string; refused: boolean }> = [
-    { path: route.pattern, refused: false },
+    {
+      path: route.pattern,
+      refused: route.pattern.startsWith("/api/w/:workspace/billing/"),
+    },
   ];
   for (const param of route.params) {
     const name = param.replace("?", "");

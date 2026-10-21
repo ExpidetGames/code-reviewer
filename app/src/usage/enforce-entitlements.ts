@@ -75,6 +75,13 @@ const RUN_LIMIT_OF_KIND = {
 >;
 
 /**
+ * What the claim says about the circumstances of a decision. `runQuotas: false` is billing being on (ADR 0006, D5; #499): the run
+ * limits of the plan (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`) are not enforced then, whatever the entitlements hold. The
+ * suspension, unreadable entitlements and the cost limits are, as ever. Absent or true: everything is enforced, billing off.
+ */
+export type AdmissionOptions = { runQuotas?: boolean };
+
+/**
  * Whether deciding needs the usage of the workspace at all: only a limit that applies to this job reads it. A
  * workspace that is unlimited, suspended, unreadable or without a limit for this kind (and, for the cost limit,
  * without the operator's key) needs no count and no lock.
@@ -82,10 +89,15 @@ const RUN_LIMIT_OF_KIND = {
 export function readsUsage(
   entitlements: ResolvedEntitlements,
   reviewKind: ProjectReviewKind,
+  options: AdmissionOptions = {},
 ): boolean {
   if (entitlements.kind !== "limited" || entitlements.suspended) return false;
   const { limits } = entitlements;
-  if (limits[RUN_LIMIT_OF_KIND[reviewKind].limit] !== null) return true;
+  if (
+    options.runQuotas !== false &&
+    limits[RUN_LIMIT_OF_KIND[reviewKind].limit] !== null
+  )
+    return true;
   return limits[COST_LIMIT_OF_KEY_MODE[entitlements.keyMode].limit] !== null;
 }
 
@@ -133,7 +145,8 @@ function exhausted(detail: QuotaDetail, periodStart: string): Admission {
  *
  * 1. entitlements that cannot be read: refused (`entitlements_invalid`), never read as unlimited;
  * 2. a suspended workspace: `workspace_suspended`;
- * 3. the run limit of the job's kind: the runs of that kind in the period at or above it (0 allows none) refuse;
+ * 3. the run limit of the job's kind: the runs of that kind in the period at or above it (0 allows none) refuse; skipped
+ *    while billing is on (`options.runQuotas === false`, #499);
  * 4. the cost limit of the key the job runs on: `managedCostLimitMicroUsd` for the operator's key,
  *    `ownKeyCostLimitMicroUsd` for the workspace's own (#361). The key is the one the entitlements pick (the
  *    claim route resolves the access the same way), and the sum counts the settled records of that key mode in
@@ -146,6 +159,7 @@ export async function decideAdmission(
   entitlements: ResolvedEntitlements,
   reviewKind: ProjectReviewKind,
   usage: AdmissionUsage,
+  options: AdmissionOptions = {},
 ): Promise<Admission> {
   if (entitlements.kind === "unlimited") return { allow: true };
   if (entitlements.kind === "invalid")
@@ -161,6 +175,7 @@ export async function decideAdmission(
   const runs = RUN_LIMIT_OF_KIND[reviewKind];
   const runLimit = limits[runs.limit];
   if (
+    options.runQuotas !== false &&
     runLimit !== null &&
     (await usage.runsSince(reviewKind, periodStart)) >= runLimit
   )

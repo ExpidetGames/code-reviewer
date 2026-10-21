@@ -546,6 +546,17 @@ the memory has to outlive the workspace, or deleting a workspace and creating it
 key is what makes the grant race safe (`insert ... on conflict do nothing`). Instance level (`billing-start-credit-grants-repository.ts`),
 ids and a time only: no login, no name, no address. See `src/billing/README.md`, "The start credit".
 
+### The monthly limit, the hidden brake and their notices (#499)
+
+Three forward-only migrations, the same on SQLite and Postgres, none of which touches an existing row, so the release that is still running is not affected while
+they run. `20261021210000_widen_refusal_notice_codes_for_limits` replaces the check on `refusal_notices.code` (Postgres) or rebuilds the table with the wider check
+(SQLite, like #498) so it takes `monthly_limit_reached` and `reviews_paused`; its `down` deletes the notices of those two codes first.
+`20261021210100_create_billing_workspace_settings` adds `billing_workspace_settings`: `workspace_id` (primary key → `workspaces.id`, so at most one row per
+workspace; a workspace without a row has no limit), `monthly_limit_micro_usd` (`bigint` on Postgres, 64 bit `integer` on SQLite; null or positive, checked),
+`updated_by` (→ `users.id`, set null when the user is deleted) and `updated_at`. **Customer data, workspace scoped** (`billing-workspace-settings-repository.ts`,
+classified in `scoping.test.ts` and covered row by row in `scoped-isolation.integration.test.ts`); `updated_by` is an audit pointer that a user merge moves to the acting admin (`github-signin/merge.ts`). `20261021210200_add_limit_query_indexes` adds `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the hourly brake and
+`billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum, which also carries `amount_micro_usd` (`INCLUDE` on Postgres, a last key column on SQLite) so the sum is read from the index alone. The three versions sort after the migrations of the billing work that is open next to them (`20261021170000` to `20261021190100`), so the order is the same whichever lands first. See `src/billing/README.md`, "Limits at claim (#499)".
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):

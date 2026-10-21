@@ -245,6 +245,19 @@ describe("the check run of a job that did not finish", () => {
     expect(check.summary).toContain("`llm_auth`");
   });
 
+  // #499-T13
+  it("says that reviews are paused for a refused job of the hidden brake, with no code, number or window", () => {
+    const check = describeCheck(
+      subject({ status: "failed", errorCode: "reviews_paused" }),
+    );
+
+    expect(check.conclusion).toBe("neutral");
+    expect(check.summary).toContain("Reviews are paused for this workspace");
+    expect(check.summary).not.toContain("`");
+    expect(check.summary).not.toContain("reviews_paused");
+    expect(check.summary).not.toMatch(/\d|hour|brake|window/i);
+  });
+
   // #405-T06
   it("is neutral for a timeout and a lease that ran out", () => {
     for (const errorCode of ["timeout", "lease_expired"]) {

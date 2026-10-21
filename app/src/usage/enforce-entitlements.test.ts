@@ -430,3 +430,112 @@ describe("which entitlements need the usage of the workspace", () => {
     expect(isJobIndependentRefusal("quota_exhausted")).toBe(false);
   });
 });
+
+describe("the run quotas while billing is on (#499)", () => {
+  // #499-T08
+  it("does not refuse a job of a kind whose run limit is 0 when run quotas are not enforced", async () => {
+    const usage = usageOf({ diff: 5 });
+
+    const decision = await decideAdmission(
+      limited({ limits: { diffRunsPerPeriod: 0, dynamicRunsPerPeriod: 0 } }),
+      "diff",
+      usage,
+      { runQuotas: false },
+    );
+
+    expect(decision).toEqual({ allow: true });
+    expect(usage.asked).toEqual([]);
+  });
+
+  // #499-T08
+  it("still refuses a suspended workspace and unreadable entitlements when run quotas are not enforced", async () => {
+    const suspended = await decideAdmission(
+      limited({ suspended: true }),
+      "diff",
+      usageOf(),
+      { runQuotas: false },
+    );
+    const unreadable = await decideAdmission(
+      { kind: "invalid", code: ENTITLEMENTS_INVALID_CODE, source: "workspace" },
+      "diff",
+      usageOf(),
+      { runQuotas: false },
+    );
+
+    expect(suspended).toMatchObject({
+      allow: false,
+      errorCode: "workspace_suspended",
+    });
+    expect(unreadable).toMatchObject({
+      allow: false,
+      errorCode: ENTITLEMENTS_INVALID_CODE,
+    });
+  });
+
+  // #499-T11
+  it("still refuses at the cost limit of the key when run quotas are not enforced", async () => {
+    const own = await decideAdmission(
+      limited({
+        keyMode: "own",
+        limits: { diffRunsPerPeriod: 0, ownKeyCostLimitMicroUsd: 1_000 },
+      }),
+      "diff",
+      usageOf({ ownCost: 1_000 }),
+      { runQuotas: false },
+    );
+    const managed = await decideAdmission(
+      limited({
+        keyMode: "managed",
+        limits: { diffRunsPerPeriod: 0, managedCostLimitMicroUsd: 1_000 },
+      }),
+      "diff",
+      usageOf({ cost: 1_000 }),
+      { runQuotas: false },
+    );
+
+    expect(own).toMatchObject({
+      allow: false,
+      errorCode: "quota_exhausted",
+      detail: "own_key_cost",
+    });
+    expect(managed).toMatchObject({
+      allow: false,
+      errorCode: "quota_exhausted",
+      detail: "managed_cost",
+    });
+  });
+
+  // #499-T09
+  it("enforces the run limit as before when nothing is said about run quotas", async () => {
+    const decision = await decideAdmission(
+      limited({ limits: { diffRunsPerPeriod: 0 } }),
+      "diff",
+      usageOf(),
+    );
+
+    expect(decision).toMatchObject({
+      allow: false,
+      errorCode: "quota_exhausted",
+      detail: "diff_runs",
+    });
+  });
+
+  // #499-T08
+  it("reads no usage for a run limit when run quotas are not enforced, and only for the cost limit that applies", () => {
+    const entitlements = limited({
+      limits: { diffRunsPerPeriod: 3, ownKeyCostLimitMicroUsd: null },
+    });
+
+    expect(readsUsage(entitlements, "diff")).toBe(true);
+    expect(readsUsage(entitlements, "diff", { runQuotas: false })).toBe(false);
+    expect(
+      readsUsage(
+        limited({
+          limits: { diffRunsPerPeriod: 3, ownKeyCostLimitMicroUsd: 5 },
+        }),
+        "diff",
+        { runQuotas: false },
+      ),
+    ).toBe(true);
+  });
+});

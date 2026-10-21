@@ -25,8 +25,8 @@ import { IntegrationError } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { RepoRef } from "../integrations/types.ts";
 import {
-  isBalanceNoticeCode,
   isNoticeCode,
+  noticeLinkKind,
   noticeBody,
   noticeMarker,
   type NoticeCode,
@@ -97,8 +97,8 @@ export type RefusalNoticeDeps = {
     workspaceSlug: string,
   ) => string | null | Promise<string | null>;
   /**
-   * The link to the settings of a workspace, where an Owner or Admin adds credit (#498; until the balance page exists, #505):
-   * for a refusal for the balance. Absent: no link.
+   * The link to the settings of a workspace, where an Owner or Admin adds credit (#498; until the balance page exists, #505) or
+   * changes the monthly limit (#499): for a refusal for the balance or the monthly limit. Absent: no link.
    */
   settingsUrl?: (
     workspaceSlug: string,
@@ -154,9 +154,14 @@ export function createRefusalNoticeService(
     workspaceSlug: string,
   ): Promise<string | null> {
     try {
-      return isBalanceNoticeCode(code)
-        ? ((await deps.settingsUrl?.(workspaceSlug)) ?? null)
-        : await deps.planPageUrl(workspaceSlug);
+      switch (noticeLinkKind(code)) {
+        case "settings":
+          return (await deps.settingsUrl?.(workspaceSlug)) ?? null;
+        case "none":
+          return null;
+        case "plan":
+          return await deps.planPageUrl(workspaceSlug);
+      }
     } catch {
       return null;
     }

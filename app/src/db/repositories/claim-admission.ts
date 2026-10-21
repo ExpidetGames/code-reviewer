@@ -17,6 +17,7 @@ import {
   ignoresCostLimit,
   readsUsage,
   type Admission,
+  type AdmissionOptions,
   type AdmissionUsage,
 } from "../../usage/enforce-entitlements.ts";
 import { databaseDriver } from "../driver.ts";
@@ -59,6 +60,7 @@ export async function admitClaimedJob(
   trx: Kysely<Database>,
   job: Pick<Selectable<JobsTable>, "id" | "workspace_id" | "review_kind">,
   now: () => Date,
+  options: AdmissionOptions = {},
 ): Promise<ClaimAdmission> {
   const workspaceId = job.workspace_id;
   const records = createUsageRecordsRepository(trx, workspaceId, now);
@@ -79,7 +81,7 @@ export async function admitClaimedJob(
   const reviewKind = job.review_kind as ProjectReviewKind;
   // A limit that applies to this job is the only reason to count and to lock; a suspension needs neither.
   if (
-    readsUsage(entitlements, reviewKind) &&
+    readsUsage(entitlements, reviewKind, options) &&
     databaseDriver(trx) === "postgres"
   )
     await sql`select id from workspaces where id = ${workspaceId} for no key update`.execute(
@@ -101,7 +103,7 @@ export async function admitClaimedJob(
       records.sumSettledCostMicroUsd(since, keyMode),
   };
   return {
-    admission: await decideAdmission(entitlements, reviewKind, usage),
+    admission: await decideAdmission(entitlements, reviewKind, usage, options),
     hadRecord,
     ignoredCostLimit,
     keyMode,
