@@ -678,16 +678,24 @@ It is the easiest thing to farm, so it is tied to the **GitHub account**, not to
   it: deleting a workspace and creating it again for the same installation account finds the account granted. It holds ids and a
   time only: no login, no name, no address, no amount (the amount is the journal entry, which is what the customer sees). The
   account id is checked to be a plain positive number (a database check on both engines).
-- **Race safety.** The grant is one transaction (the claim's, or its own): look for the workspace's entry, read the amount, take the
-  first bound account nobody was granted (`insert ... on conflict do nothing` on the primary key: of two writers exactly one wins,
-  the other waits for the first to commit on Postgres and gets "already granted"), write the entry. Nothing is written when any
-  step fails, and every step is keyed, so a retry never grants twice.
+- **Race safety.** The grant is one transaction (the claim's, or its own): look for the workspace's entry, read the amount, read the
+  accounts of the installations, take the balance row's lock (the journal's rule for every writer: the lock first, then any write,
+  the grants table included), take the first bound account nobody was granted (`insert ... on conflict do nothing` on the primary
+  key: of two writers exactly one wins, the other waits for the first to commit on Postgres and gets "already granted"), write the
+  entry. Nothing is written when any step fails, and every step is keyed, so a retry never grants twice.
+- **It never fails the claim.** The grant runs inside a savepoint. An error of any kind (a database error, a row it cannot read)
+  rolls back to the savepoint, is logged as `BILLING_START_CREDIT_FAILED workspace=<id>` (never the error text), and the result is
+  `failed`: no grant, no entry, the claim goes on and the workspace is judged on its balance as usual; the next contact tries
+  again. It reads only the `config` of the rows with `type = 'github_app'` and a status other than `disconnected`, never the
+  credentials or the webhook secret, and an unreadable config or account id skips that row. A claim tries a workspace once, not
+  once per candidate job.
 - **Amount changes.** The amount is read when the grant is made. A grant is never edited (the journal is append-only), so a changed
   amount affects only grants not made yet. Raising it from 0 grants later contacts; accounts that met billing while it was 0 were not
   consumed (no row was written), so they are granted at the new amount on their next contact.
 - **Billing off.** `ensureStartCredit` reads the instance setting and nothing else: no billing table and no integration. The claim
   does not call it unless billing is on and ready. Nothing is granted while billing is off.
-- **Log.** `BILLING_START_CREDIT_GRANTED workspace=<id> amountMicroUsd=<n>` per grant; never an account id.
+- **Log.** `BILLING_START_CREDIT_GRANTED workspace=<id> amountMicroUsd=<n>` per grant, written after the transaction committed (a
+  claim that rolls back announces nothing); never an account id.
 
 ### Abuse protection of version 1, and the surface that is left
 

@@ -5,9 +5,9 @@
 // is the instance table `billing_start_credit_grants`; it has no foreign key to a workspace, so it survives the workspace.
 // On SQLite and, when TEST_DATABASE_URL is set, on Postgres. The races between two processes on one SQLite file are in
 // start-credit-processes.integration.test.ts.
-import type { Kysely } from "kysely";
+import type { Kysely, KyselyPlugin } from "kysely";
 import { sql } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, type MockInstance } from "vitest";
 import {
   createBillingJournalRepository,
   type JournalEntry,
@@ -17,6 +17,7 @@ import { databaseDriver } from "../db/driver.ts";
 import type { Database } from "../db/schema.ts";
 import type { IntegrationStatus } from "../integrations/types.ts";
 import {
+  fundWorkspace,
   setBillingSwitch,
   TEST_BILLING_RATES,
 } from "../test-support/billing-switch.ts";
@@ -31,7 +32,12 @@ import {
   defaultWorkspaceId,
 } from "../test-support/workspaces.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
-import { ensureStartCredit, START_CREDIT_REF_KEY } from "./start-credit.ts";
+import {
+  ensureStartCredit,
+  START_CREDIT_FAILED_LOG_CODE,
+  START_CREDIT_LOG_CODE,
+  START_CREDIT_REF_KEY,
+} from "./start-credit.ts";
 
 const NOW = new Date("2026-10-21T08:00:00.000Z");
 const TWO_USD = 2_000_000;
@@ -674,6 +680,395 @@ describe.each(databases)("the start credit on %s", (name, open) => {
       expect(
         await journalOf(fixture.db, fixture.workspaceId).verify(),
       ).toMatchObject({ consistent: true });
+    },
+  );
+
+  /** A claim fixture on billing that is on, with the one integration of the fixture bound to GitHub account 321. */
+  async function claimSetup(
+    options: {
+      rates?: Parameters<typeof setBillingSwitch>[2];
+      plugin?: KyselyPlugin;
+      refused?: string[];
+    } = {},
+  ) {
+    const database = await open?.();
+    if (database === undefined) throw new Error("No database.");
+    const fixture = await createJobQueueFixture({
+      database:
+        options.plugin === undefined
+          ? database
+          : database.withPlugin(options.plugin),
+      dynamicReview: true,
+      onRefused: (refusal) => {
+        options.refused?.push(refusal.errorCode);
+      },
+    });
+    await setBillingSwitch(fixture.db, true, options.rates);
+    await fixture.db
+      .updateTable("integrations")
+      .set({ config: JSON.stringify({ accountId: 321 }) })
+      .execute();
+    return fixture;
+  }
+
+  /** A statement that fails on every insert into the table (when the row matches `condition`), the way a broken database does. */
+  async function failInsertsInto(
+    db: Kysely<Database>,
+    table: string,
+    condition?: string,
+  ) {
+    if (name === "Postgres") {
+      await sql
+        .raw(
+          "create or replace function t507_fail() returns trigger as $$ begin raise exception 'injected failure'; end $$ language plpgsql",
+        )
+        .execute(db);
+      await sql
+        .raw(
+          `create trigger t507_fail before insert on ${table} for each row ${condition === undefined ? "" : `when (${condition})`} execute function t507_fail()`,
+        )
+        .execute(db);
+      return sql.raw(`drop trigger t507_fail on ${table}`);
+    }
+    await sql
+      .raw(
+        `create trigger t507_fail before insert on ${table} ${condition === undefined ? "" : `when ${condition}`} begin select raise(abort, 'injected failure'); end`,
+      )
+      .execute(db);
+    return sql.raw("drop trigger t507_fail");
+  }
+
+  const logged = (info: MockInstance<typeof console.info>, code: string) =>
+    info.mock.calls.filter((call) => String(call[0]).includes(code));
+
+  // #507-T11
+  run(
+    "does not stall the claim on an integration row of a type this code does not know",
+    async () => {
+      const refused: string[] = [];
+      const fixture = await claimSetup({ refused });
+      await fixture.db
+        .insertInto("integrations")
+        .values({
+          id: crypto.randomUUID(),
+          workspace_id: fixture.workspaceId,
+          type: "future_type",
+          display_name: "from a later version",
+          external_id: "future-1",
+          config: "{}",
+          credentials: null,
+          webhook_secret: null,
+          status: "active",
+          created_at: NOW.toISOString(),
+          updated_at: NOW.toISOString(),
+        })
+        .execute();
+      await fixture.enqueueNew({ prNumber: 1 });
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+      // The installation next to the poison row still earns the credit, which pays the hold.
+      expect(claimed).not.toBeNull();
+      expect(refused).toEqual([]);
+      expect(
+        await startCreditsOf(fixture.db, fixture.workspaceId),
+      ).toHaveLength(1);
+    },
+  );
+
+  // #507-T11
+  run(
+    "skips an installation whose config cannot be read and refuses the job for balance, as without an installation",
+    async () => {
+      const refused: string[] = [];
+      const fixture = await claimSetup({ refused });
+      await fixture.db
+        .updateTable("integrations")
+        .set({ config: "{not json" })
+        .execute();
+      await fixture.enqueueNew({ prNumber: 1 });
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+      expect(claimed).toBeNull();
+      expect(refused).toEqual(["insufficient_balance"]);
+      expect(await startCreditsOf(fixture.db, fixture.workspaceId)).toEqual([]);
+      expect(await grantRows(fixture.db)).toEqual([]);
+    },
+  );
+
+  // #507-T11
+  run(
+    "does not read the credentials of an installation, so a damaged secret cannot stop the grant",
+    async () => {
+      const { db, workspaceId } = await start();
+      await bind(db, workspaceId, { accountId: 11 });
+      await db
+        .updateTable("integrations")
+        .set({ credentials: "{not json", webhook_secret: null })
+        .execute();
+      const statements: string[] = [];
+      const plugged = db.withPlugin(
+        afterQueryPlugin(async (query) => {
+          statements.push(`${query.kind} ${String(query.table)}`);
+        }),
+      );
+
+      const result = await ensureStartCredit(plugged, workspaceId, () => NOW);
+
+      expect(result.status).toBe("granted");
+      expect(statements).toContain("select integrations");
+    },
+  );
+
+  // #507-T12
+  run(
+    "claims the job without the credit when the grant fails on the grants table, and says so",
+    async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const refused: string[] = [];
+        const fixture = await claimSetup({ refused });
+        await fundWorkspace(fixture.db, fixture.workspaceId, TWO_USD);
+        const undo = await failInsertsInto(
+          fixture.db,
+          "billing_start_credit_grants",
+        );
+        await fixture.enqueueNew({ prNumber: 1 });
+
+        const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+        // The claim is unaffected: judged on its balance, which pays the hold.
+        expect(claimed).not.toBeNull();
+        expect(refused).toEqual([]);
+        expect(await startCreditsOf(fixture.db, fixture.workspaceId)).toEqual(
+          [],
+        );
+        expect(await grantRows(fixture.db)).toEqual([]);
+        expect(logged(info, START_CREDIT_LOG_CODE)).toEqual([]);
+        const failures = warn.mock.calls.filter((call) =>
+          String(call[0]).includes(START_CREDIT_FAILED_LOG_CODE),
+        );
+        expect(failures).toHaveLength(1);
+        expect(String(failures[0]?.[0])).not.toContain("injected failure");
+
+        // The next contact tries again, and grants once the database works.
+        await undo.execute(fixture.db);
+        await fixture.enqueueNew({ prNumber: 2, headSha: sha("b") });
+        expect(
+          await fixture.queue.claimNext("runner-a", ENGINES),
+        ).not.toBeNull();
+        expect(
+          await startCreditsOf(fixture.db, fixture.workspaceId),
+        ).toHaveLength(1);
+      } finally {
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
+
+  // #507-T12
+  run(
+    "takes the grants row back with the failed grant when the entry cannot be written",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      try {
+        const fixture = await claimSetup();
+        const undo = await failInsertsInto(
+          fixture.db,
+          "billing_journal_entries",
+          "NEW.type = 'start_credit'",
+        );
+        await fixture.enqueueNew({ prNumber: 1 });
+
+        const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+        // No credit and no balance: refused as usual, and the account is not consumed.
+        expect(claimed).toBeNull();
+        expect(await grantRows(fixture.db)).toEqual([]);
+        expect(warn).toHaveBeenCalled();
+
+        await undo.execute(fixture.db);
+        await fixture.enqueueNew({ prNumber: 2, headSha: sha("b") });
+        expect(
+          await fixture.queue.claimNext("runner-a", ENGINES),
+        ).not.toBeNull();
+        expect(
+          (await grantRows(fixture.db)).map((row) => row.github_account_id),
+        ).toEqual(["321"]);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    },
+  );
+
+  // #507-T12
+  run(
+    "returns a failed result and writes nothing when the grant fails outside a claim",
+    async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const { db, workspaceId } = await start();
+        await bind(db, workspaceId, { accountId: 5 });
+        await failInsertsInto(db, "billing_start_credit_grants");
+
+        const result = await ensureStartCredit(db, workspaceId, () => NOW);
+
+        expect(result.status).toBe("failed");
+        expect(await startCreditsOf(db, workspaceId)).toEqual([]);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    },
+  );
+
+  // #507-T13
+  run(
+    "grants nothing while billing is on but not ready (a rate is missing), and the claim is refused for the rates",
+    async () => {
+      const refused: string[] = [];
+      const fixture = await claimSetup({
+        refused,
+        rates: { factorA: 50_000 },
+      });
+      await fixture.enqueueNew({ prNumber: 1 });
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+      expect(claimed).toBeNull();
+      expect(refused).toEqual(["billing_rates_incomplete"]);
+      const entries = await journalOf(fixture.db, fixture.workspaceId).entries({
+        limit: 20,
+      });
+      expect(entries.entries).toEqual([]);
+      expect(await grantRows(fixture.db)).toEqual([]);
+    },
+  );
+
+  // #507-T14
+  run(
+    "takes the balance lock before it touches the grants table, the journal's order for every writer",
+    async () => {
+      const { db, workspaceId } = await start();
+      await bind(db, workspaceId, { accountId: 77 });
+      const statements: string[] = [];
+      const plugged = db.withPlugin(
+        afterQueryPlugin(async (query) => {
+          statements.push(`${query.kind} ${String(query.table)}`);
+        }),
+      );
+
+      const result = await ensureStartCredit(plugged, workspaceId, () => NOW);
+
+      expect(result.status).toBe("granted");
+      const lock = statements.indexOf("select billing_balances");
+      const grant = statements.indexOf("insert billing_start_credit_grants");
+      expect(lock).toBeGreaterThanOrEqual(0);
+      expect(grant).toBeGreaterThan(lock);
+    },
+  );
+
+  // #507-T15
+  run(
+    "logs the grant once, after the claim committed, and not at all when the claim rolls back",
+    async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      try {
+        const fixture = await claimSetup();
+        const undo = await failInsertsInto(fixture.db, "usage_records");
+        await fixture.enqueueNew({ prNumber: 1 });
+
+        await expect(
+          fixture.queue.claimNext("runner-a", ENGINES),
+        ).rejects.toThrow();
+
+        // The whole claim rolled back, the grant with it, and nothing was announced.
+        expect(await grantRows(fixture.db)).toEqual([]);
+        expect(await startCreditsOf(fixture.db, fixture.workspaceId)).toEqual(
+          [],
+        );
+        expect(logged(info, START_CREDIT_LOG_CODE)).toEqual([]);
+
+        await undo.execute(fixture.db);
+        expect(
+          await fixture.queue.claimNext("runner-a", ENGINES),
+        ).not.toBeNull();
+        expect(logged(info, START_CREDIT_LOG_CODE)).toHaveLength(1);
+      } finally {
+        info.mockRestore();
+      }
+    },
+  );
+
+  // #507-T15
+  run(
+    "does not log a grant that a transaction of the caller rolls back",
+    async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      try {
+        const { db, workspaceId } = await start();
+        await bind(db, workspaceId, { accountId: 78 });
+
+        await expect(
+          db.transaction().execute(async (trx) => {
+            const result = await ensureStartCredit(trx, workspaceId, () => NOW);
+            expect(result.status).toBe("granted");
+            throw new Error("the caller's transaction fails");
+          }),
+        ).rejects.toThrow("the caller's transaction fails");
+
+        expect(logged(info, START_CREDIT_LOG_CODE)).toEqual([]);
+        expect(await grantRows(db)).toEqual([]);
+
+        // A call that owns its transaction logs after the commit.
+        await ensureStartCredit(db, workspaceId, () => NOW);
+        expect(logged(info, START_CREDIT_LOG_CODE)).toHaveLength(1);
+      } finally {
+        info.mockRestore();
+      }
+    },
+  );
+
+  // #507-T16
+  run(
+    "tries an account that was granted before once per claim, not once per candidate job",
+    async () => {
+      const statements: string[] = [];
+      const refused: string[] = [];
+      const fixture = await claimSetup({
+        refused,
+        plugin: afterQueryPlugin(async (query) => {
+          statements.push(`${query.kind} ${String(query.table)}`);
+        }),
+      });
+      const earlier = await addWorkspace(fixture.db, "earlier");
+      await fixture.db
+        .insertInto("billing_start_credit_grants")
+        .values({
+          github_account_id: "321",
+          workspace_id: earlier,
+          granted_at: NOW.toISOString(),
+        })
+        .execute();
+      await fixture.enqueueNew({ prNumber: 1 });
+      await fixture.enqueueNew({ prNumber: 2, headSha: sha("b") });
+      await fixture.enqueueNew({ prNumber: 3, headSha: sha("c") });
+      statements.length = 0;
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+      expect(claimed).toBeNull();
+      expect(refused).toEqual([
+        "insufficient_balance",
+        "insufficient_balance",
+        "insufficient_balance",
+      ]);
+      expect(
+        statements.filter((s) => s === "insert billing_start_credit_grants"),
+      ).toHaveLength(1);
     },
   );
 });

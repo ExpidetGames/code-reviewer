@@ -4,39 +4,36 @@
 // account id decides who can be granted.
 import { describe, expect, it } from "vitest";
 import { isGithubAccountId } from "../db/repositories/billing-start-credit-grants-repository.ts";
-import type { Integration } from "../integrations/types.ts";
 import { githubAccountsOf } from "./start-credit.ts";
 
-function installation(
-  config: Integration["config"],
-  status: Integration["status"] = "active",
-): Integration {
-  return {
-    id: "i",
-    workspaceId: "w",
-    type: "github_app",
-    displayName: "acme",
-    externalId: "1",
-    config,
-    credentials: null,
-    webhookSecret: null,
-    status,
-    createdAt: "2026-10-21T08:00:00.000Z",
-    updatedAt: "2026-10-21T08:00:00.000Z",
-  };
-}
+/** The config text of an installation, the way the table stores it. */
+const installation = (config: unknown) => JSON.stringify(config);
 
 describe("the GitHub accounts of a workspace", () => {
-  it("takes the numeric account id of every installation that is not disconnected, once", () => {
+  it("takes the numeric account id of every installation, once", () => {
     expect(
       githubAccountsOf([
         installation({ accountId: 42 }),
         installation({ accountId: 42 }),
-        installation({ accountId: 7 }, "disabled"),
-        installation({ accountId: 8 }, "disconnected"),
+        installation({ accountId: 7 }),
         installation({ accountId: "99" }),
       ]),
     ).toEqual(["42", "7", "99"]);
+  });
+
+  // #507-T11
+  it("skips a config that cannot be read instead of throwing", () => {
+    expect(
+      githubAccountsOf([
+        "{not json",
+        "",
+        "null",
+        "[1, 2]",
+        '"text"',
+        "42",
+        installation({ accountId: 5 }),
+      ]),
+    ).toEqual(["5"]);
   });
 
   it("ignores an installation that names no account id or a value that is no id", () => {
