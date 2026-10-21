@@ -89,7 +89,9 @@ provider** since #426 (below, "The keys of a workspace").
 ## Which key a job gets
 
 `resolve.ts` (`resolveWorkspaceLlmAccess`, pure) decides by **the key mode of the workspace's effective entitlements**
-(`src/workspaces/README.md`, "Entitlements"; `keyModeForJob`), and by nothing else:
+(`src/workspaces/README.md`, "Entitlements"; `keyModeForJob`), and by nothing else. **While billing is on, that key mode is
+the workspace's own choice** (below, "The key mode a workspace chooses"); the entitlement's key mode is not consulted then.
+The three cases are the same:
 
 1. **`own`, or no entitlements at all** (an instance that never configured any, which is every self-hoster): the
    workspace's own key **of the provider the job is for** (the default provider until a project can choose, #426),
@@ -125,6 +127,41 @@ key service, `accessFor`, `summaryFor`, `currentKeysFor`); it reads the effectiv
 `readEffectiveEntitlements` (`src/workspaces/effective-entitlements.ts`, the same function the claim's admission
 uses). `shared.ts` wires it to the running server. The claim of the runner API calls `accessFor(job.workspaceId)`, so a
 job never sees another workspace's key (`integration-tests/http/runner-api-llm-key.integration.test.ts`).
+
+### The key mode a workspace chooses while billing is on (#496)
+
+Two modes share one balance (ADR 0006, P3, D4): **our models** (`managed`: the operator's key, charged AI plus infrastructure) and
+**the workspace's own provider key** (`own`: infrastructure only). With billing off nothing changes: the entitlements decide, as
+described above, and a workspace without any is on its own key. With billing on:
+
+- **One setting.** `llm_key_mode` (`managed` or `own`) in the workspace's `app_settings`, next to its review defaults
+  (`key-mode-store.ts`). A workspace that has not chosen is `managed`, with or without entitlements and whatever their key mode
+  says (`DEFAULT_LLM_KEY_MODE`). A stored value that is neither reads as not chosen. Nothing migrates: a workspace keeps working as
+  before until billing is switched on, and then its choice, default `managed`, applies (the admin text of #504 says so).
+- **One pure function.** `effectiveKeyMode({ billingOn, workspaceChoice, entitlements })` (`src/workspaces/effective-key-mode.ts`):
+  billing off, the entitlement (none: the own key); billing on, the choice. The `keyMode` of an entitlements row or of
+  `default_entitlements` is **not consulted** while billing is on; the suspension, `modelAccess` and the cost limits **are** (the
+  cost limit that watches a run is the one of the key mode that applies). Entitlements that cannot be read are still `unreadable`
+  and fail closed, billing on or off.
+- **One reader.** `readEffectiveEntitlements` applies it (`applyWorkspaceKeyMode`: the entitlements with the key mode that
+  applies; a workspace without entitlements stays `unlimited` and carries the mode), so the claim's admission and the balance
+  check (`keyModeAtClaim`), this file's `accessFor` and `keyFor`, the model selection and the pages cannot read it differently. The
+  claim passes the switch it has read for the whole claim; every other caller reads it.
+- **Claim time only.** The mode is read when a job is claimed (the claim route, or the Worker's first fetch) and recorded in the
+  job's usage record; settlement and the price page read the record. A change never touches a review that runs. Because the
+  workspace can change at any time while billing is on, `currentKeysFor` masks the operator's keys in a result then whatever the
+  mode is now.
+- **Own without a key.** `own` with no stored key for the selected provider still ends `llm_not_configured`, reason `no_key`, and never
+  falls back to our key. The choice route does not let a workspace pick `own` while it has no key for any provider
+  (`own_key_missing`). There is no `own_key_requires_plan`.
+- **Who.** Everybody in the workspace reads the choice; an Owner and an Admin (`manage_llm_key`, the action of the LLM access
+  page) set it, with the audit line `[llm] KEY_MODE_CHANGED workspace=<id> user=<id> key_mode=<mode>`. The route is `GET` and `PUT
+/api/w/:workspace/llm-key-mode` (`key-mode-http.ts`, `key-mode-service.ts`; same site, `no-store`); billing off is the 404 of a
+  path that does not exist.
+- **The page.** While billing is on, **Settings → LLM access** starts with the choice (`ui/key-mode-card.tsx`): "Use our models" and
+  "Use my own provider key", one sentence each about what is charged (AI and infrastructure, or infrastructure only; no rate, no
+  formula), read-only for a Member. The key forms stay on the page whichever is chosen, so the key can be saved before switching;
+  the own option waits for a saved key. With billing off the page is the one described under "The workspace pages" below.
 
 ## Which provider, model and entry a job gets (#431)
 
@@ -211,7 +248,7 @@ provider_not_found`.
   model, record them as `own` (outside the cost limit), and not read the list of remembered keys of a job as keys. Nothing leaks, but the
   operator's rules are not applied until every instance is upgraded.
 - **Masking.** `currentKeysFor` returns the workspace's own key of every provider and, **while the workspace is
-  managed**, the operator's current key of **every** provider (not only the one the job runs on: a result must not
+  managed (or billing is on, #496)**, the operator's current key of **every** provider (not only the one the job runs on: a result must not
   show any of them); the key of the claim comes from `job_claimed_keys`.
 - **The usage record says the key that was used.** The claim reserves the record as `own` and `recordKeyMode` sets it
   from the key mode of the workspace's entitlements (`managed` for the operator's key), on both paths. The cost limit of #277 watches the
@@ -403,6 +440,7 @@ workspace's key and on the operator's);
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`, `workspace-keys.integration.test.ts` (one key per provider, with a test-only second provider: the keys apart, the name bound into the ciphertext, an old row), `workspace-keys-access.integration.test.ts` (which provider's key a job takes, the keys to mask), `operator-key.integration.test.ts` (one key per provider, with a test-only second provider),
 `operator-key-test.integration.test.ts` (the operator's Test button and its own counters),
 `operator-access.integration.test.ts` (whose key a workspace gets, over a real database; a provider without a key is `operator_key_missing`),
+`key-mode.integration.test.ts`, `key-mode-http.integration.test.ts` and `ui/key-mode-card.test.tsx` (the key mode a workspace chooses while billing is on, #496; with `../workspaces/effective-key-mode.test.ts`, `../jobs/claim-key-mode.integration.test.ts` and `integration-tests/http/runner-api-key-mode.integration.test.ts`; journey `e2e/billing/key-mode.e2e.ts`),
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-keys-route.integration.test.ts` (the per-provider routes and the alias beside them, the shared limit of the test button, no key in any answer, log or page), `integration-tests/http/llm-key-route.integration.test.ts` (the alias routes, the real route files: roles, isolation, the request,
 the test button, no key in any answer or log; and a managed workspace's settings: no form, the same note for every

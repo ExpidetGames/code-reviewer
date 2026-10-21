@@ -111,7 +111,8 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
 
 1. **The claim guard** may refuse it (below).
 2. **The model selection, then the key** (#432, ADR 0005, 2.8; `claim-selection.ts`, `src/llm/selection.ts`). The key mode
-   of the job's own workspace comes from its effective entitlements (`entitlementsFor`, `keyModeForJob`): `own` (also a
+   of the job's own workspace comes from its effective entitlements (`entitlementsFor`, `keyModeForJob`; while billing is on the
+   key mode in them is the workspace's own choice, #496): `own` (also a
    workspace without entitlements), `managed` or unreadable (the job ends `llm_not_configured`, reason
    `entitlements_invalid`, no usage key mode is written). The claim notes it in the usage record (`recordKeyMode`).
    Then the **provider, model and key mode's key source** are chosen _before_ any key is loaded, for the job's **pinned

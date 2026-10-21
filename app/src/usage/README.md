@@ -169,7 +169,7 @@ entitlements still stop it, and its record is then voided.
 - **Which runs a cost limit watches (#361).** Each limit watches one key mode, **decided by the record, not by the
   entitlements now**: the sum of a key mode counts the settled records whose own `key_mode` is that mode, and the
   claim checks the limit of the key mode the job will run on. That key mode is known at claim time: the key mode of the
-  entitlements picks the key (#276, `keyModeForJob`). The check uses the entitlements the claim itself read inside its
+  entitlements picks the key (#276, `keyModeForJob`); while billing is on it is the workspace's own choice, our models by default (#496). The check uses the entitlements the claim itself read inside its
   transaction, so its one-transaction check and reservation stay as they are. The claim route then resolves the access
   with a read of its own and corrects the record to the key the job really uses on both claim paths (`setKeyMode`), so a
   limit counts exactly the runs that spent that key. **Window:** if an operator switches the key mode between the two

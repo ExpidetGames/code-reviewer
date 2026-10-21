@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The LLM access of a workspace, put together over a database: the key service of the workspace, the operator's
-// key, the access a job of the workspace gets (src/llm/resolve.ts: the key mode of its entitlements decides whose
-// key it is) and what the pages may show. The same code serves the running server (shared.ts) and the tests,
+// key, the access a job of the workspace gets (src/llm/resolve.ts: the key mode of its entitlements, or the workspace's choice while
+// billing is on, decides whose key it is) and what the pages may show. The same code serves the running server (shared.ts) and the tests,
 // which build it over a test database and a chosen environment.
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
