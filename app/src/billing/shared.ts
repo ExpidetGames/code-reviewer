@@ -49,6 +49,8 @@ import {
   type WorkspaceBillingService,
 } from "./workspace-page.ts";
 import { getWorkspaceLlm } from "../llm/shared.ts";
+import type { BalanceBannerView } from "../workspace-billing/banner.ts";
+import type { WorkspaceRole } from "../workspaces/roles.ts";
 import { createCheckPaymentLimits, createTopUpLimits } from "./topup-limits.ts";
 import { createTopUpCheckService } from "./topup-check.ts";
 import {
@@ -58,6 +60,7 @@ import {
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { loadBalanceBanner } from "./balance-banner.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
@@ -118,6 +121,22 @@ export function getMonthlyLimitRoute(): MonthlyLimitRoute {
  */
 export function billingPageLinkedFor(): Promise<boolean> {
   return isBillingOn(getDatabase());
+}
+
+/**
+ * The balance banner of the pages of a workspace (#506): for an Owner and an Admin while billing is on and the balance is low, zero
+ * or below zero, else null. A database that cannot answer must not break every page of the workspace, so it is no banner.
+ */
+export async function balanceBannerFor(
+  workspace: { id: string; slug: string },
+  role: WorkspaceRole,
+): Promise<BalanceBannerView | null> {
+  try {
+    return await loadBalanceBanner({ db: getDatabase(), workspace, role });
+  } catch {
+    console.error("[billing] BALANCE_BANNER_UNAVAILABLE");
+    return null;
+  }
 }
 
 /** The data of the billing page of a workspace (#505), wired to the running server. */
