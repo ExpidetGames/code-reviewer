@@ -42,6 +42,14 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "This workspace has used up what its plan allows for the current period, so this run did not start and no AI model was used. Reviews start again when the period renews or the limit is raised.",
   entitlements_invalid:
     "The plan settings of this workspace could not be read, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan to check them.",
+  balance_negative:
+    "The balance of this workspace is below zero, so this run did not start and no AI model was used. Add credit to continue.",
+  insufficient_balance:
+    "The balance of this workspace is used up, so this run did not start and no AI model was used. Add credit to continue.",
+  billing_rates_incomplete:
+    "Billing is switched on for this instance but its prices are not all set, so this run did not start and no AI model was used. Ask whoever runs this instance.",
+  billing_hold_released:
+    "The credit held for this run was released before it could start, so it did not start and no AI model was used. It will run again on the next push or review request.",
   // A code of a job from before the catalog (#434): nothing ends a job with it any more (see HISTORIC_ERROR_CODES).
   managed_tier_unavailable:
     "The quality level chosen for this project was not available when this run was made, so it did not start and no AI model was used. Quality levels have since been replaced by review options, which a workspace Owner or Admin can choose in the review settings of the project.",

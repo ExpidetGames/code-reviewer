@@ -84,10 +84,16 @@ export const ERROR_CODE_CLASSES = {
   dynamic_review_disabled: "free",
   command_removed: "charged",
   dispatch_unavailable: "free",
-  // Refused at claim by the operator's switch or the workspace's limit.
+  // Refused at claim by the operator's switch (`workspace_suspended`) or by the limit of the plan the operator assigned
+  // (`quota_exhausted`). The job never ran, so it prices to nothing whatever its class; and no hold was taken.
   workspace_suspended: "charged",
   quota_exhausted: "charged",
   entitlements_invalid: "free",
+  // Refused at claim by billing (#498): a claim refusal is free. No hold was taken (or it is released with the job).
+  balance_negative: "free",
+  insufficient_balance: "free",
+  billing_rates_incomplete: "free",
+  billing_hold_released: "free",
   // The Dispatcher gave the job back.
   launch_failed: "free",
   worker_exited: "free",
@@ -154,7 +160,9 @@ export const ERROR_CODE_CLASSES = {
   dynamic_engine_unavailable: "free",
   dynamic_isolation_self_check_failed: "free",
   dynamic_accounting_failed: "free",
-  dynamic_config_invalid: "charged",
+  // Raised for missing job options, missing model prices or an invalid operator environment, before any model call: the
+  // operator's side (#498, the review of #525).
+  dynamic_config_invalid: "free",
   dynamic_policy_violation: AI_COST_FAILURE_CLASS,
   dynamic_budget_exceeded: AI_COST_FAILURE_CLASS,
   dynamic_model_features_unsupported: "charged",

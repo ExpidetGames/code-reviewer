@@ -149,6 +149,14 @@ export const JOB_ERROR_CODES = [
   "quota_exhausted",
   /** Failed at claim because the workspace's entitlements could not be read; never treated as unlimited (#277). */
   "entitlements_invalid",
+  /** Failed at claim because the workspace's balance is below zero: a refund or a final charge took it there (#498). */
+  "balance_negative",
+  /** Failed at claim because the workspace's balance is used up and nothing can be held for the run (#498). */
+  "insufficient_balance",
+  /** Failed at claim because billing is switched on while the rates it needs are not all set (#498). */
+  "billing_rates_incomplete",
+  /** Failed at claim because the hold of this job was released already: nothing is held, so it must not run (#498). */
+  "billing_hold_released",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 
