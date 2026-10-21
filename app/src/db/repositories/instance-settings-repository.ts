@@ -114,8 +114,15 @@ export type InstanceSettingValues = {
    * and inert (`isBillingOn`).
    */
   billing_settings: BillingSettings;
+  /**
+   * #504: the lease that serializes the creation of the Stripe webhook endpoint (src/billing/): one admin action at a time
+   * makes one. Taken with `claim`, released with `release`; a lease that ran out is taken over.
+   */
+  billing_destination_lock: { startedAt: string };
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
+/** The settings that are leases (`claim`, `release`), not values an admin sets. */
+export type LeaseSettingKey = "billing_destination_lock";
 /**
  * The keys `get` and `getWithMeta` read as stored. The default entitlements are not among them: their stored
  * JSON is not trusted and is read through `getDefaultEntitlements`, which checks it.
@@ -155,6 +162,24 @@ export type InstanceSettingsRepository = {
     value: InstanceSettingValues[K],
     updatedBy: string | null,
   ): Promise<void>;
+  /**
+   * Takes the setting as a lease: inserts it, or replaces it when its last write is older than `staleBefore`
+   * (ISO 8601 text). False when somebody else holds it. Release it with `release`.
+   */
+  claim<K extends LeaseSettingKey>(
+    key: K,
+    value: InstanceSettingValues[K],
+    updatedBy: string | null,
+    staleBefore: string,
+  ): Promise<boolean>;
+  /**
+   * Releases a lease taken with `claim`, only while it still holds `value`, the one this holder claimed with. A holder
+   * whose lease ran out and was taken over leaves the new holder's lease alone. False when it is not (or no longer) held.
+   */
+  release<K extends LeaseSettingKey>(
+    key: K,
+    value: InstanceSettingValues[K],
+  ): Promise<boolean>;
   /** Deletes the setting (it reads as never saved again); false when there was none. */
   remove(key: InstanceSettingKey): Promise<boolean>;
 };
@@ -320,6 +345,39 @@ export function createInstanceSettingsRepository(
             updatedBy: row.updated_by,
             updatedAt: row.updated_at,
           };
+    },
+
+    async claim(key, value, updatedBy, staleBefore) {
+      const row = {
+        key,
+        value: encodeJson(value),
+        updated_by: updatedBy,
+        updated_at: formatTimestamp(now()),
+      };
+      const claimed = await db
+        .insertInto("instance_settings")
+        .values(row)
+        .onConflict((conflict) =>
+          conflict
+            .column("key")
+            .doUpdateSet({
+              value: row.value,
+              updated_by: row.updated_by,
+              updated_at: row.updated_at,
+            })
+            .where("instance_settings.updated_at", "<", staleBefore),
+        )
+        .executeTakeFirst();
+      return Number(claimed.numInsertedOrUpdatedRows ?? 0) > 0;
+    },
+
+    async release(key, value) {
+      const result = await db
+        .deleteFrom("instance_settings")
+        .where("key", "=", key)
+        .where("value", "=", encodeJson(value))
+        .executeTakeFirst();
+      return Number(result.numDeletedRows) > 0;
     },
 
     async remove(key) {

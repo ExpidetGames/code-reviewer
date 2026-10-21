@@ -15,7 +15,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { AdminNav } from "./admin-nav.tsx";
-import { ADMIN_NAV_ITEMS, isCurrentSection } from "./nav-items.ts";
+import {
+  ADMIN_NAV_GROUPS,
+  ADMIN_NAV_ITEMS,
+  isCurrentSection,
+} from "./nav-items.ts";
 
 // The shim of the setup file (matchMedia always "desktop"); a narrow-screen test replaces it and
 // this puts it back.
@@ -75,6 +79,7 @@ describe("the sections of the portal", () => {
       "GitHub App",
       "Mail",
       "LLM keys",
+      "Billing",
       "Catalog",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
@@ -87,12 +92,18 @@ describe("the sections of the portal", () => {
     ).toEqual(["Instance"]);
   });
 
-  // #491-T08
-  it("has no Billing section until the new billing admin page exists", () => {
-    expect(ADMIN_NAV_ITEMS.map((item) => item.label)).not.toContain("Billing");
+  // #504-T11
+  it("has the Billing section in the group of the LLM keys, below /admin/billing", () => {
+    const group = ADMIN_NAV_GROUPS.find((entry) =>
+      entry.items.some((item) => item.href === "/admin/llm"),
+    );
+
+    expect(group?.items.map((item) => item.label)).toContain("Billing");
     expect(
-      ADMIN_NAV_ITEMS.filter((item) => /billing/i.test(item.href)),
-    ).toEqual([]);
+      ADMIN_NAV_ITEMS.filter((item) => /billing/i.test(item.href)).map(
+        (item) => item.href,
+      ),
+    ).toEqual(["/admin/billing"]);
   });
 
   // #185: the nested GitHub App page under Integrations (#182 lead note).
@@ -152,6 +163,7 @@ describe("the sections on a narrow screen", () => {
       "GitHub App",
       "Mail",
       "LLM keys",
+      "Billing",
       "Catalog",
     ]);
   });

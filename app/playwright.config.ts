@@ -87,6 +87,7 @@ export default defineConfig({
         /e2e\/admin\/mail\.e2e\.ts$/,
         /e2e\/admin\/github-integration\.e2e\.ts$/,
         /e2e\/admin\/catalog\.e2e\.ts$/,
+        /e2e\/admin\/billing\.e2e\.ts$/,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
@@ -201,6 +202,16 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
       testMatch: /e2e\/admin\/catalog\.e2e\.ts$/,
       dependencies: ["prepare"],
+    },
+    // The journey of the billing page in the admin portal (#504): it uses the app of the catalog admin journey (a single-tenant
+    // instance of its own), after that journey, because it switches billing on and off again and credits a workspace there.
+    {
+      name: "billing-admin",
+      // No retry: a second attempt would find the credentials saved and the journal written.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/admin\/billing\.e2e\.ts$/,
+      dependencies: ["catalog-admin"],
     },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and

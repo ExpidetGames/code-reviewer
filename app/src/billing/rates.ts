@@ -25,11 +25,29 @@ export const MINUTE_RATE_MAX_MICRO_USD = 10_000_000;
  */
 export const DIFF_AI_RESERVE_MAX_MICRO_USD = 50_000_000;
 
-/** Stable codes of a refused rate; the admin form translates them to copy (#504). */
+/**
+ * The numbers next to the rates that the admin page sets (#504, ADR 0006 D3, D9, D10). They are not prices, so they have a
+ * default where the decision record says so: the start credit is 2 USD (0 switches it off), a balance is low below 5 USD
+ * and the hourly brake lets 60 started reviews of a workspace through in a rolling hour. A start credit is a gift, so it
+ * is bounded well below the largest top-up.
+ */
+export const DEFAULT_START_CREDIT_MICRO_USD = 2_000_000;
+export const START_CREDIT_MAX_MICRO_USD = 100_000_000;
+export const DEFAULT_LOW_BALANCE_MICRO_USD = 5_000_000;
+/** As large as the largest top-up (500 USD): a threshold above what a workspace can buy at once warns forever. */
+export const LOW_BALANCE_MAX_MICRO_USD = 500_000_000;
+export const DEFAULT_HOURLY_REVIEW_LIMIT = 60;
+export const HOURLY_REVIEW_LIMIT_MIN = 1;
+export const HOURLY_REVIEW_LIMIT_MAX = 100_000;
+
+/** Stable codes of a refused rate or number; the admin form translates them to copy (#504). */
 export const BILLING_RATE_ERROR_CODES = [
   "factor_invalid",
   "rate_invalid",
   "reserve_invalid",
+  "start_credit_invalid",
+  "low_balance_invalid",
+  "hourly_limit_invalid",
 ] as const;
 export type BillingRateErrorCode = (typeof BILLING_RATE_ERROR_CODES)[number];
 
@@ -51,6 +69,12 @@ export type StoredBillingRates = {
   factorA?: number;
   minuteRateMicroUsd?: Partial<Record<ProjectReviewKind, number>>;
   diffAiReserveMicroUsd?: number;
+  /** Micro-USD granted to a new workspace; 0 disables the grant. Not stored: the default (`billingNumbersOf`). */
+  startCreditMicroUsd?: number;
+  /** Micro-USD below which a balance is low. */
+  lowBalanceMicroUsd?: number;
+  /** Started reviews of a workspace in a rolling hour that the hidden abuse brake lets through. */
+  hourlyReviewLimit?: number;
 };
 
 export type RatesPatchResult =
@@ -76,6 +100,12 @@ export const isMinuteRate = (value: unknown): value is number =>
   isWholeNumberIn(value, 0, MINUTE_RATE_MAX_MICRO_USD);
 export const isDiffAiReserve = (value: unknown): value is number =>
   isWholeNumberIn(value, 0, DIFF_AI_RESERVE_MAX_MICRO_USD);
+export const isStartCredit = (value: unknown): value is number =>
+  isWholeNumberIn(value, 0, START_CREDIT_MAX_MICRO_USD);
+export const isLowBalance = (value: unknown): value is number =>
+  isWholeNumberIn(value, 0, LOW_BALANCE_MAX_MICRO_USD);
+export const isHourlyReviewLimit = (value: unknown): value is number =>
+  isWholeNumberIn(value, HOURLY_REVIEW_LIMIT_MIN, HOURLY_REVIEW_LIMIT_MAX);
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -124,7 +154,51 @@ export function validateRatesPatch(input: unknown): RatesPatchResult {
       };
     value.diffAiReserveMicroUsd = input.diffAiReserveMicroUsd;
   }
+  if ("startCreditMicroUsd" in input) {
+    if (!isStartCredit(input.startCreditMicroUsd))
+      return {
+        ok: false,
+        code: "start_credit_invalid",
+        field: "startCreditMicroUsd",
+      };
+    value.startCreditMicroUsd = input.startCreditMicroUsd;
+  }
+  if ("lowBalanceMicroUsd" in input) {
+    if (!isLowBalance(input.lowBalanceMicroUsd))
+      return {
+        ok: false,
+        code: "low_balance_invalid",
+        field: "lowBalanceMicroUsd",
+      };
+    value.lowBalanceMicroUsd = input.lowBalanceMicroUsd;
+  }
+  if ("hourlyReviewLimit" in input) {
+    if (!isHourlyReviewLimit(input.hourlyReviewLimit))
+      return {
+        ok: false,
+        code: "hourly_limit_invalid",
+        field: "hourlyReviewLimit",
+      };
+    value.hourlyReviewLimit = input.hourlyReviewLimit;
+  }
   return { ok: true, value };
+}
+
+/** The numbers next to the rates as they are in force: the stored value, or the default where there is one. */
+export type BillingNumbers = {
+  startCreditMicroUsd: number;
+  lowBalanceMicroUsd: number;
+  hourlyReviewLimit: number;
+};
+
+export function billingNumbersOf(stored: StoredBillingRates): BillingNumbers {
+  return {
+    startCreditMicroUsd:
+      stored.startCreditMicroUsd ?? DEFAULT_START_CREDIT_MICRO_USD,
+    lowBalanceMicroUsd:
+      stored.lowBalanceMicroUsd ?? DEFAULT_LOW_BALANCE_MICRO_USD,
+    hourlyReviewLimit: stored.hourlyReviewLimit ?? DEFAULT_HOURLY_REVIEW_LIMIT,
+  };
 }
 
 /**

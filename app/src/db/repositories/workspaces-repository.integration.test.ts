@@ -224,3 +224,55 @@ describe("the members of a workspace", () => {
     });
   });
 });
+
+describe("the workspaces repository, count and search by name", () => {
+  async function seeded() {
+    const { db } = await createTestDatabase();
+    const repository = createWorkspacesRepository(db);
+    const names = ["Acme Corp", "acme labs", "Zeta 100%", "Under_score"];
+    for (const [index, name] of names.entries())
+      await repository.create({ name, slug: `w${index}`, createdBy: null });
+    return repository;
+  }
+
+  // #504-T13
+  it("counts the workspaces", async () => {
+    const repository = await seeded();
+
+    expect(await repository.count()).toBe(4);
+  });
+
+  // #504-T10
+  it("finds workspaces by a part of the name, whatever the case, in alphabetical order that ignores the case", async () => {
+    const repository = await seeded();
+
+    const found = await repository.search("ACME", 10);
+
+    expect(found.map((workspace) => workspace.name)).toEqual([
+      "Acme Corp",
+      "acme labs",
+    ]);
+  });
+
+  // #504-T10
+  it("takes % and _ as the characters they are, not as wildcards", async () => {
+    const repository = await seeded();
+
+    expect(
+      (await repository.search("100%", 10)).map((workspace) => workspace.name),
+    ).toEqual(["Zeta 100%"]);
+    expect(
+      (await repository.search("r_s", 10)).map((workspace) => workspace.name),
+    ).toEqual(["Under_score"]);
+    expect(await repository.search("%", 10)).toHaveLength(1);
+  });
+
+  // #504-T10
+  it("stops at the limit, and an empty search lists the first workspaces", async () => {
+    const repository = await seeded();
+
+    expect(await repository.search("", 2)).toHaveLength(2);
+    expect(await repository.search("acme", 1)).toHaveLength(1);
+    expect(await repository.search("nothing like this", 5)).toEqual([]);
+  });
+});

@@ -83,6 +83,7 @@ const PROTECTED_ROUTES = [
   // and does not exist for anybody else (src/admin/guard.integration.test.ts).
   "/instance-portal",
   "/instance-portal/approvals",
+  "/instance-portal/billing",
   "/instance-portal/catalog",
   "/instance-portal/integrations",
   "/instance-portal/integrations/github",
@@ -128,6 +129,12 @@ const PROTECTED_ROUTES = [
 const PROTECTED_DATA_ROUTES = [
   "/api/account/github/link",
   "/api/instance-portal/approvals/[id]",
+  "/api/instance-portal/billing",
+  "/api/instance-portal/billing/check",
+  "/api/instance-portal/billing/webhook-endpoint",
+  "/api/instance-portal/billing/workspaces",
+  "/api/instance-portal/billing/workspaces/[id]",
+  "/api/instance-portal/billing/workspaces/[id]/credit",
   "/api/instance-portal/catalog-fetch",
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
