@@ -4,7 +4,7 @@
 // claim: a real queue and database, the real GitHub App provider and client against the fake GitHub, and the
 // notice service wired as the running server does it. No model is involved anywhere.
 import { sql } from "kysely";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";

@@ -565,6 +565,25 @@ describe.each(databases)(
 
       // #499-T05
       run(
+        "runs a job claimed again after a lost lease although the number is reached, with the one record it has",
+        async () => {
+          const fixture = await start({ hourlyReviewLimit: 1 });
+          const job = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+          ).toBe(job.id);
+          fixture.clock.advance(3 * MINUTE);
+
+          const again = await fixture.queue.claimNext("runner-b", ENGINES);
+
+          // The lease ran out: the job is handed out again, and its own start is not counted against it.
+          expect(again?.job.id).toBe(job.id);
+          expect(await usageRecords(fixture)).toHaveLength(1);
+        },
+      );
+
+      // #499-T05
+      run(
         "lets exactly one of two claims at the same moment take the last start of the hour",
         async () => {
           const fixture = await start({ hourlyReviewLimit: 1 });

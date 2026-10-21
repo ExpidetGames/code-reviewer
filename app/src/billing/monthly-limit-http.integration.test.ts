@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { setBillingSwitch } from "../test-support/billing-switch.ts";
+import { insertUser } from "../test-support/users.ts";
 import { signedInMember } from "../test-support/session-lookup.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
@@ -391,5 +392,67 @@ describe("GET /api/w/:workspace/billing/monthly-limit", () => {
     );
 
     expect(await response.json()).toEqual({ monthlyLimitCents: null });
+  });
+});
+
+describe("the monthly limit service on its own", () => {
+  // #499-T04
+  it("refuses a Member itself, whoever called it, and stores and logs nothing", async () => {
+    const t = await start();
+    const logs: string[] = [];
+    const service = createMonthlyLimitService({
+      db: t.db,
+      log: (line) => logs.push(line),
+    });
+    const member = {
+      workspaceId: t.workspaceId,
+      userId: "u-member",
+      role: "member",
+    } as const;
+
+    expect(await service.set(member, { monthlyLimitCents: 5_000 })).toEqual({
+      ok: false,
+      error: "forbidden",
+    });
+    expect(await service.get(member)).toEqual({
+      ok: false,
+      error: "forbidden",
+    });
+    expect(await t.stored()).toBeUndefined();
+    expect(logs).toEqual([]);
+  });
+
+  // #499-T04
+  it("accepts an Admin and an Owner", async () => {
+    const t = await start();
+    const service = createMonthlyLimitService({ db: t.db, log: () => {} });
+
+    for (const role of ["admin", "owner"] as const) {
+      await insertUser(t.db, { id: `u-${role}` });
+      expect(
+        await service.set(
+          { workspaceId: t.workspaceId, userId: `u-${role}`, role },
+          { monthlyLimitCents: 5_000 },
+        ),
+      ).toEqual({ ok: true, monthlyLimitCents: 5_000 });
+    }
+  });
+
+  // #499-T04
+  it("reads a body that is no object as a missing limit", async () => {
+    const t = await start();
+    const service = createMonthlyLimitService({ db: t.db, log: () => {} });
+    const owner = {
+      workspaceId: t.workspaceId,
+      userId: "u-owner",
+      role: "owner",
+    } as const;
+
+    for (const body of [undefined, null, "5000", 5000, [5000]])
+      expect(await service.set(owner, body)).toEqual({
+        ok: false,
+        error: "limit_invalid",
+      });
+    expect(await t.stored()).toBeUndefined();
   });
 });
