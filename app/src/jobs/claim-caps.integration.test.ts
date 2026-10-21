@@ -13,6 +13,7 @@ import { noticeBody } from "../refusal-notices/notice-text.ts";
 import { toRunDetailView, toRunRowView } from "../runs/run-view.ts";
 import { CLAIM_CAPS_RETRY_MS } from "../billing/claim-caps.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -798,6 +799,121 @@ describe.each(databases)(
           expect(
             (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
           ).toBe(job.id);
+        },
+      );
+    });
+
+    describe("the start credit", () => {
+      const STARTER_RATES = {
+        ...TEST_BILLING_RATES,
+        startCreditMicroUsd: 2_000_000,
+      };
+
+      /** A workspace that meets billing for the first time: no balance, an installation of a GitHub account, a start credit set. */
+      async function newcomer(limits: {
+        hourlyReviewLimit: number;
+        monthlyLimitMicroUsd?: number;
+      }) {
+        const fixture = await start({ funding: 0 });
+        await setBillingSwitch(fixture.db, true, {
+          ...STARTER_RATES,
+          hourlyReviewLimit: limits.hourlyReviewLimit,
+        });
+        await createIntegrationsRepository(
+          fixture.db,
+          fixture.workspaceId,
+          fixture.clock.now,
+        ).create({
+          type: "github_app",
+          displayName: "starter",
+          externalId: "7777",
+          config: {
+            accountLogin: "starter",
+            accountType: "User",
+            accountId: 9001,
+          },
+        });
+        if (limits.monthlyLimitMicroUsd !== undefined)
+          await limitsOf(fixture).setMonthlyLimit(
+            limits.monthlyLimitMicroUsd,
+            null,
+          );
+        return fixture;
+      }
+
+      const startCredits = async (fixture: JobQueueFixture) =>
+        (await journalOf(fixture).entries({ limit: 50 })).entries.filter(
+          (entry) => entry.type === "start_credit",
+        );
+      const grants = (fixture: JobQueueFixture) =>
+        fixture.db
+          .selectFrom("billing_start_credit_grants")
+          .selectAll()
+          .execute();
+
+      // #499-T18
+      run(
+        "grants the start credit to a job the limits let through (the control of the next two cases)",
+        async () => {
+          const fixture = await newcomer({ hourlyReviewLimit: 60 });
+          const job = await enqueue(fixture);
+
+          expect(
+            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+          ).toBe(job.id);
+          expect(await startCredits(fixture)).toHaveLength(1);
+          expect(await grants(fixture)).toHaveLength(1);
+        },
+      );
+
+      // #499-T18
+      run(
+        "grants no start credit to a job the hidden brake refused: no entry, no journal change, no grant row",
+        async () => {
+          const fixture = await newcomer({ hourlyReviewLimit: 1 });
+          fixture.clock.advance(1);
+          const old = await fixture.seedHistoricalJob({
+            command: "review",
+            prNumber: 3_000,
+          });
+          await createUsageRecordsRepository(
+            fixture.db,
+            fixture.workspaceId,
+            fixture.clock.now,
+          ).reserve(old.id, "own");
+          const job = await enqueue(fixture);
+
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+          expect((await fixture.queue.get(job.id))?.errorCode).toBe(
+            "reviews_paused",
+          );
+          expect(
+            (await journalOf(fixture).entries({ limit: 50 })).entries,
+          ).toEqual([]);
+          expect(await grants(fixture)).toEqual([]);
+        },
+      );
+
+      // #499-T18
+      run(
+        "grants no start credit to a job the monthly limit refused: no entry, no journal change, no grant row",
+        async () => {
+          const fixture = await newcomer({
+            hourlyReviewLimit: 60,
+            monthlyLimitMicroUsd: 1,
+          });
+          const job = await enqueue(fixture);
+
+          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+          expect((await fixture.queue.get(job.id))?.errorCode).toBe(
+            "monthly_limit_reached",
+          );
+          expect(
+            (await journalOf(fixture).entries({ limit: 50 })).entries,
+          ).toEqual([]);
+          expect(await grants(fixture)).toEqual([]);
         },
       );
     });
