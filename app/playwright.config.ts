@@ -89,6 +89,7 @@ export default defineConfig({
         /e2e\/admin\/catalog\.e2e\.ts$/,
         /e2e\/admin\/billing\.e2e\.ts$/,
         /e2e\/admin\/billing-reviews\.e2e\.ts$/,
+        /e2e\/billing\//,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
@@ -224,6 +225,17 @@ export default defineConfig({
       testMatch: /e2e\/admin\/billing-reviews\.e2e\.ts$/,
       dependencies: ["billing-admin"],
     },
+    // The journey of the billing page of a workspace (#505): the same app, after the payment reviews, against the fake Stripe the
+    // run starts. The journey configures billing with the Stripe adapter through the admin routes, so it needs the rates, the
+    // webhook endpoint and the credentials to be its own; it adds credit, so it comes after the journeys that count the balance.
+    {
+      name: "billing-workspace",
+      // No retry: a second attempt would find the payments made and the profile saved.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing\/.*\.e2e\.ts$/,
+      dependencies: ["billing-reviews-admin"],
+    },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and
     // runs the real runner and the real PR-Agent against the fake GitHub, so it only needs the fake GitHub and
@@ -318,6 +330,19 @@ export default defineConfig({
         GITHUB_FAKE_SELF_LINKS: "true",
       },
       url: `${e2eEnv.githubUrl}/__fake/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    {
+      // The fake Stripe of the billing journey of a workspace (#505): the catalog admin app is pointed at it
+      // (STRIPE_API_BASE_URL with ALLOW_TEST_STRIPE_ENDPOINTS=true), and the journey pays, refunds and delivers events over its
+      // control API under /__fake/.
+      command: "node ../fakes/stripe/main.ts",
+      env: {
+        STRIPE_FAKE_PORT: String(e2eEnv.stripeFakePort),
+        STRIPE_FAKE_API_KEY: e2eEnv.stripeFakeApiKey,
+      },
+      url: `${e2eEnv.stripeFakeUrl}/__fake/health`,
       reuseExistingServer: false,
       timeout: 30_000,
     },
@@ -470,6 +495,10 @@ export default defineConfig({
         // This app fetches the catalog, from the fake models.dev of the journey (#554).
         MODELS_DEV_FETCH: "on",
         MODELS_DEV_URL: e2eEnv.modelsDevFakeUrl,
+        // The billing journeys of this app (#504, #505) talk to the fake Stripe: the app ignores the address without the flag, and
+        // accepts only a loopback one with it (src/stripe-endpoints.ts).
+        STRIPE_API_BASE_URL: e2eEnv.stripeFakeUrl,
+        ALLOW_TEST_STRIPE_ENDPOINTS: "true",
       },
       url: e2eEnv.catalogAdminAppUrl,
       reuseExistingServer: false,

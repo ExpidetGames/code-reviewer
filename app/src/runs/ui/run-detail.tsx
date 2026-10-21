@@ -34,6 +34,7 @@ import { CallTraceTables } from "./call-trace.tsx";
 import { CALL_TRACE_COPY } from "./call-trace-messages.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
 import { usageItems } from "./usage-facts.tsx";
+import { RunPriceText } from "../../workspace-billing/ui/run-price.tsx";
 
 export const NO_LOG_TEXT = "No log available.";
 export const LOG_SHORTENED_TEXT =
@@ -201,6 +202,12 @@ export function RunDetail({
   ];
   const usage = usageItems(run);
   summaryItems.push(...usage.model);
+  // What the review cost (#505): present only while billing is on and the review was billed.
+  if (run.price !== undefined)
+    summaryItems.push({
+      term: "Price",
+      description: <RunPriceText price={run.price} />,
+    });
   if (run.args !== "")
     summaryItems.push({
       term: "Question",

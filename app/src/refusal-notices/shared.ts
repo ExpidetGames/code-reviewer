@@ -6,13 +6,14 @@
 // timer, and never delays or changes the claim.
 import "server-only";
 import { loadAuthConfig } from "../auth/config.ts";
+import { isBillingOn } from "../billing/enabled.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { assembleRefusalNoticeService } from "./assemble.ts";
+import { createBillingAwareLinks } from "./billing-link.ts";
 import { createPlanPageUrlResolver } from "./plan-link.ts";
-import { workspaceSettingsUrl } from "./plan-page.ts";
 import { createRefusalBatcher } from "./refusal-batch.ts";
 import type { NoticeRefusal, RefusalNoticeService } from "./service.ts";
 
@@ -22,17 +23,23 @@ let service: RefusalNoticeService | undefined;
 export function getRefusalNoticeService(): RefusalNoticeService {
   if (service !== undefined) return service;
   const db = getDatabase();
+  const baseUrl = () => loadAuthConfig(process.env).baseUrl;
+  // While billing is on, the billing page of the workspace is where the notices lead (#505); otherwise nothing changes.
+  const links = createBillingAwareLinks({
+    isBillingOn: () => isBillingOn(db),
+    baseUrl,
+    // A link to the plan page exactly while the instance has a plan management page (#284).
+    plan: createPlanPageUrlResolver({
+      settings: createInstanceSettingsRepository(db),
+      baseUrl,
+    }),
+  });
   service = assembleRefusalNoticeService({
     db,
     registry: integrationRegistry,
-    // A link to the plan page exactly while the instance has a plan management page (#284).
-    planPageUrl: createPlanPageUrlResolver({
-      settings: createInstanceSettingsRepository(db),
-      baseUrl: () => loadAuthConfig(process.env).baseUrl,
-    }),
-    // #498: a refusal for the balance points to the settings of the workspace, always (the balance page comes with #505).
-    settingsUrl: (slug) =>
-      workspaceSettingsUrl(loadAuthConfig(process.env).baseUrl, slug),
+    planPageUrl: links.planPageUrl,
+    // #498: a refusal for the balance or the monthly limit points to the billing page while billing is on, else to the settings.
+    settingsUrl: links.settingsUrl,
     log: console,
   });
   return service;

@@ -21,6 +21,7 @@ export function AdvancedSettingsPageContent({
   instanceAccess = null,
   canResetDefaults,
   showPlan = false,
+  showBilling = false,
   removeApi,
   resetApi,
 }: {
@@ -47,6 +48,8 @@ export function AdvancedSettingsPageContent({
   canResetDefaults: boolean;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
+  /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
+  showBilling?: boolean;
   /** Only tests pass these. */
   removeApi?: LlmKeyApi;
   resetApi?: Pick<SettingsApi, "save">;
@@ -56,6 +59,7 @@ export function AdvancedSettingsPageContent({
       workspaceSlug={workspaceSlug}
       current="advanced"
       showPlan={showPlan}
+      showBilling={showBilling}
     >
       <div className="flex max-w-[64rem] flex-col gap-6">
         {canManageKey
