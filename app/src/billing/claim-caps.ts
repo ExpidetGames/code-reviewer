@@ -9,11 +9,12 @@
 //   review that was cancelled or replaced did start) and refuses `reviews_paused` once the instance's number is reached.
 //   The number is an instance setting (#504, default 60); nothing here, in a log or in a notice says what it is or how long
 //   the window is.
-// - The monthly limit is the customer's own, optional, null by default. A claim is refused `monthly_limit_reached` when the
+// - The monthly limit is the customer's own, optional, null by default. A claim is refused `monthly_limit_reached` once the
 //   charges of the current UTC calendar month (the `usage` entries of the journal, AI plus infrastructure, by the time the
-//   run was settled), plus the holds of the runs still in flight (`billing_balances.reserved_micro_usd`), plus the hold the new
-//   job would take pass the limit. A total exactly at the limit passes. It is a hard cap at the claim (maintainer decision on
-//   #499): a run that started is never cut short, and its final charge may still end above its hold.
+//   run was settled) have reached the limit: `charged >= limit` (maintainer decision on #499). Nothing else counts: not the
+//   holds of the runs in flight, not the hold the new job would take (the balance check of #498 is a separate matter). So a
+//   job starts while the charges are below the limit even when its own cost would take the month above it, and a run that
+//   started is never cut short.
 //
 // Exact: the claim runs under the instance gate lock (Postgres) or the write lock of the connection (SQLite), and the record of
 // a started review is written in the same transaction, so two claims never both take the last start of the hour.
@@ -32,10 +33,6 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import { createBillingWorkspaceSettingsRepository } from "../db/repositories/billing-workspace-settings-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import type { Database } from "../db/schema.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
-import type { KeyMode } from "../workspaces/entitlements.ts";
-import { holdOf } from "./claim-billing.ts";
-import type { BillingRates } from "./rates.ts";
 
 /** The rolling window of the hourly brake. Never shown to anybody. */
 const BRAKE_WINDOW_MS = 60 * 60 * 1000;
@@ -101,28 +98,12 @@ async function evaluate(
   if (limit === null) return { ok: true };
   if (!isPositiveWholeNumber(limit))
     throw new TypeError("the monthly limit is not a positive whole number");
-  const journal = createBillingJournalRepository(
+  const charged = await createBillingJournalRepository(
     trx,
     job.workspaceId,
     () => current,
-  );
-  const charged = await journal.chargedSince(utcMonthStart(current));
-  // The holds of the runs in flight count too (a hard cap at the claim). The cached `reserved` is exact here: every hold is
-  // written together with it, and the claim runs under the gate lock, so no other claim adds a hold meanwhile. A job claimed
-  // again after a lost lease holds its reservation already: that one is the hold it asks for, not a second one.
-  const { reservedMicroUsd } = await journal.balance();
-  const own = await journal.findByKey("reservation", job.id);
-  const ownOpen =
-    own !== undefined &&
-    (await journal.findByKey("release", job.id)) === undefined
-      ? -own.amountMicroUsd
-      : 0;
-  const hold = holdOf({
-    keyMode: input.keyMode,
-    reviewKind: job.reviewKind,
-    rates: input.rates,
-  });
-  return charged + (reservedMicroUsd - ownOpen) + hold > limit
+  ).chargedSince(utcMonthStart(current));
+  return charged >= limit
     ? { ok: false, code: "monthly_limit_reached" }
     : { ok: true };
 }
@@ -130,9 +111,7 @@ async function evaluate(
 export type CapInput = {
   /** The brake's number from the instance settings. */
   hourlyReviewLimit: number;
-  rates: BillingRates;
-  job: { id: string; workspaceId: string; reviewKind: ProjectReviewKind };
-  keyMode: KeyMode;
+  job: { id: string; workspaceId: string };
   now: () => Date;
 };
 

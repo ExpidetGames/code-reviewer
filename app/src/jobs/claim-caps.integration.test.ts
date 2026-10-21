@@ -213,14 +213,14 @@ describe.each(databases)(
     describe("the monthly total limit", () => {
       // #499-T01
       run(
-        "refuses a job when this month's charges plus the hold pass the limit, leaving no record and no entry",
+        "refuses a job once this month's charges have reached the limit, leaving no record and no entry",
         async () => {
           const refusals: ClaimRefusal[] = [];
           const fixture = await start({
             onRefused: (refusal) => refusals.push(refusal),
             monthlyLimitMicroUsd: 1_000_000,
           });
-          await charge(fixture, 700_000);
+          await charge(fixture, 1_200_000);
           const entriesBefore = (
             await journalOf(fixture).entries({ limit: 50 })
           ).entries.length;
@@ -251,131 +251,13 @@ describe.each(databases)(
       );
 
       // #499-T02
-      run(
-        "lets a job pass when the charges plus the hold are exactly the limit",
-        async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: 1_000_000,
-          });
-          await charge(fixture, 1_000_000 - DIFF_OWN_HOLD);
-          const job = await enqueue(fixture);
-
-          const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
-
-          expect(claimed?.job.id).toBe(job.id);
-          expect(await usageRecords(fixture)).toHaveLength(1);
-        },
-      );
-
-      // #499-T19
-      run(
-        "counts the holds of the runs in flight: the limit is a hard cap at the claim",
-        async () => {
-          const fixture = await start({ monthlyLimitMicroUsd: 600_000 });
-          const running = await enqueue(fixture);
-          expect(
-            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
-          ).toBe(running.id);
-          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
-            DIFF_OWN_HOLD,
-          );
-          const next = await enqueue(fixture);
-
-          // 0 charged + 325,000 held by the running review + 325,000 for this one pass 600,000.
-          expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
-
-          expect(await fixture.queue.get(next.id)).toMatchObject({
-            status: "failed",
-            errorCode: "monthly_limit_reached",
-          });
-          // The review that runs is never touched.
-          expect((await fixture.queue.get(running.id))?.status).toBe("running");
-          expect(await usageRecords(fixture)).toHaveLength(1);
-        },
-      );
-
-      // #499-T19
-      run(
-        "lets a job pass when the charges, the holds in flight and its hold are exactly the limit, and refuses one micro-USD less room",
-        async () => {
-          const exact = 300_000 + 2 * DIFF_OWN_HOLD;
-          const fixture = await start({ monthlyLimitMicroUsd: exact - 1 });
-          await charge(fixture, 300_000);
-          const running = await enqueue(fixture);
-          expect(
-            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
-          ).toBe(running.id);
-          const refused = await enqueue(fixture);
-
-          expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
-          expect((await fixture.queue.get(refused.id))?.errorCode).toBe(
-            "monthly_limit_reached",
-          );
-
-          await limitsOf(fixture).setMonthlyLimit(exact, null);
-          const passes = await enqueue(fixture);
-          expect(
-            (await fixture.queue.claimNext("runner-b", ENGINES))?.job.id,
-          ).toBe(passes.id);
-        },
-      );
-
-      // #499-T19
-      run(
-        "gives the room back when the running review ends: its hold is released and its charge counted instead",
-        async () => {
-          const fixture = await start({ monthlyLimitMicroUsd: 600_000 });
-          const running = await enqueue(fixture);
-          const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
-          const blocked = await enqueue(fixture);
-          expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
-          expect((await fixture.queue.get(blocked.id))?.errorCode).toBe(
-            "monthly_limit_reached",
-          );
-
-          await fixture.queue.complete(running.id, claimed?.leaseToken ?? "", {
-            ok: false,
-            errorCode: "timeout",
-          });
-          // The failed run was released free (no charge): the hold is gone and the room is back.
-          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
-          const later = await enqueue(fixture);
-          expect(
-            (await fixture.queue.claimNext("runner-b", ENGINES))?.job.id,
-          ).toBe(later.id);
-        },
-      );
-
-      // #499-T19
-      run(
-        "does not count the hold of the job that asks twice when it is claimed again after a lost lease",
-        async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: DIFF_OWN_HOLD,
-            hourlyReviewLimit: 100,
-          });
-          const job = await enqueue(fixture);
-          expect(
-            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
-          ).toBe(job.id);
-          fixture.clock.advance(60 * 60_000);
-
-          const again = await fixture.queue.claimNext("runner-b", ENGINES);
-
-          // Its own hold is held already (325,000): it counts once, and exactly the limit passes.
-          expect(again?.job.id).toBe(job.id);
-        },
-      );
-
-      // #499-T02
-      run("refuses by one micro-USD more than the limit", async () => {
-        const fixture = await start({
-          monthlyLimitMicroUsd: 1_000_000,
-        });
-        await charge(fixture, 1_000_000 - DIFF_OWN_HOLD + 1);
+      run("refuses a job when the charges are exactly the limit", async () => {
+        const fixture = await start({ monthlyLimitMicroUsd: 1_000_000 });
+        await charge(fixture, 1_000_000);
         const job = await enqueue(fixture);
 
         expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
         expect((await fixture.queue.get(job.id))?.errorCode).toBe(
           "monthly_limit_reached",
         );
@@ -383,13 +265,29 @@ describe.each(databases)(
 
       // #499-T02
       run(
+        "starts a job while the charges are one micro-USD below the limit, even when its hold would pass the limit",
+        async () => {
+          const fixture = await start({ monthlyLimitMicroUsd: 1_000_000 });
+          await charge(fixture, 1_000_000 - 1);
+          const job = await enqueue(fixture);
+
+          const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+          expect(claimed?.job.id).toBe(job.id);
+          expect(await usageRecords(fixture)).toHaveLength(1);
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
+            DIFF_OWN_HOLD,
+          );
+        },
+      );
+
+      // #499-T02
+      run(
         "starts the sum again at the first moment of a new UTC month",
         async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: 1_000_000,
-          });
+          const fixture = await start({ monthlyLimitMicroUsd: 1_000_000 });
           fixture.clock.set(new Date("2026-10-31T23:59:59.000Z"));
-          await charge(fixture, 900_000);
+          await charge(fixture, 1_000_000);
           const lastOfOctober = await enqueue(fixture);
           expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
           expect((await fixture.queue.get(lastOfOctober.id))?.errorCode).toBe(
@@ -404,13 +302,46 @@ describe.each(databases)(
         },
       );
 
-      // #499-T01
+      // #499-T19
       run(
-        "counts the hold of the job by its kind and key: a Dynamic job on the operator's key holds more than a small limit",
+        "ignores the holds of the runs in flight and the hold of the job: only settled charges count, and a running review is never touched",
         async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: DYNAMIC_MANAGED_HOLD - 1,
-          });
+          const fixture = await start({ monthlyLimitMicroUsd: 100_000 });
+          await charge(fixture, 99_000);
+          const running = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+          ).toBe(running.id);
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
+            DIFF_OWN_HOLD,
+          );
+          const second = await enqueue(fixture);
+
+          // 99,000 charged is below 100,000: starts, with a hold of 325,000 on top of the 325,000 in flight.
+          expect(
+            (await fixture.queue.claimNext("runner-b", ENGINES))?.job.id,
+          ).toBe(second.id);
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
+            2 * DIFF_OWN_HOLD,
+          );
+
+          // Once a settled charge reaches the limit the next claim is refused, and the two running reviews go on.
+          await charge(fixture, 1_000);
+          const third = await enqueue(fixture);
+          expect(await fixture.queue.claimNext("runner-c", ENGINES)).toBeNull();
+          expect((await fixture.queue.get(third.id))?.errorCode).toBe(
+            "monthly_limit_reached",
+          );
+          expect((await fixture.queue.get(running.id))?.status).toBe("running");
+          expect((await fixture.queue.get(second.id))?.status).toBe("running");
+        },
+      );
+
+      // #499-T19
+      run(
+        "does not count the hold of a job by its kind and key: a Dynamic job on the operator's key starts under a tiny limit",
+        async () => {
+          const fixture = await start({ monthlyLimitMicroUsd: 1 });
           await createWorkspaceEntitlementsRepository(
             fixture.db,
             fixture.workspaceId,
@@ -418,16 +349,12 @@ describe.each(databases)(
           ).put(entitlements("managed"), null);
           const dynamic = await enqueue(fixture, "dynamic");
 
-          expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
-          expect((await fixture.queue.get(dynamic.id))?.errorCode).toBe(
-            "monthly_limit_reached",
-          );
+          const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
 
-          await limitsOf(fixture).setMonthlyLimit(DYNAMIC_MANAGED_HOLD, null);
-          const again = await enqueue(fixture, "dynamic");
-          expect(
-            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
-          ).toBe(again.id);
+          expect(claimed?.job.id).toBe(dynamic.id);
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
+            DYNAMIC_MANAGED_HOLD,
+          );
         },
       );
 
@@ -458,9 +385,8 @@ describe.each(databases)(
       run(
         "is the limit of one workspace and leaves another alone",
         async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: 1_000,
-          });
+          const fixture = await start({ monthlyLimitMicroUsd: 1_000 });
+          await charge(fixture, 1_000);
           const refused = await enqueue(fixture);
           fixture.clock.advance(1000);
           const other = await addWorkspace(fixture.db, "other");
@@ -483,9 +409,7 @@ describe.each(databases)(
       run(
         "does not count the charges of another workspace against this one",
         async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: 1_000_000,
-          });
+          const fixture = await start({ monthlyLimitMicroUsd: 1_000_000 });
           const other = await addWorkspace(fixture.db, "other");
           await fundWorkspace(fixture.db, other, 10_000_000, fixture.clock.now);
           await charge(fixture, 5_000_000, other);
@@ -501,11 +425,9 @@ describe.each(databases)(
       run(
         "counts a charge made earlier in the month, also from an earlier day",
         async () => {
-          const fixture = await start({
-            monthlyLimitMicroUsd: 1_000_000,
-          });
+          const fixture = await start({ monthlyLimitMicroUsd: 1_000_000 });
           fixture.clock.set(new Date("2026-10-02T08:00:00.000Z"));
-          await charge(fixture, 900_000);
+          await charge(fixture, 1_000_000);
           fixture.clock.set(new Date("2026-10-28T08:00:00.000Z"));
           const job = await enqueue(fixture);
 
@@ -821,10 +743,9 @@ describe.each(databases)(
           monthlyLimitMicroUsd: 1,
         });
         const first = await enqueue(fixture);
-        // The monthly limit would refuse the first job as well, so give it room, then tighten it.
-        await limitsOf(fixture).setMonthlyLimit(1_000_000_000, null);
+        // Nothing is charged yet, so the first job starts; then the month's charges reach the limit as well.
         await fixture.queue.claimNext("runner-a", ENGINES);
-        await limitsOf(fixture).setMonthlyLimit(1, null);
+        await charge(fixture, 1);
         const second = await enqueue(fixture);
 
         expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
@@ -838,10 +759,13 @@ describe.each(databases)(
       run(
         "checks the monthly limit before the balance: a workspace over its limit with an empty balance is told about the limit",
         async () => {
+          // The charge takes the whole balance: the limit is reached and nothing is left.
           const fixture = await start({
             monthlyLimitMicroUsd: 1,
             funding: 1,
           });
+          await charge(fixture, 1);
+          expect((await journalOf(fixture).balance()).balanceMicroUsd).toBe(0);
           const job = await enqueue(fixture);
 
           expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
@@ -1004,6 +928,17 @@ describe.each(databases)(
             hourlyReviewLimit: 60,
             monthlyLimitMicroUsd: 1,
           });
+          // One micro-USD of credit, charged: the limit is reached and the balance is empty.
+          await fundWorkspace(
+            fixture.db,
+            fixture.workspaceId,
+            1,
+            fixture.clock.now,
+          );
+          await charge(fixture, 1);
+          const entriesBefore = (
+            await journalOf(fixture).entries({ limit: 50 })
+          ).entries;
           const job = await enqueue(fixture);
 
           expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
@@ -1013,7 +948,8 @@ describe.each(databases)(
           );
           expect(
             (await journalOf(fixture).entries({ limit: 50 })).entries,
-          ).toEqual([]);
+          ).toEqual(entriesBefore);
+          expect(await startCredits(fixture)).toEqual([]);
           expect(await grants(fixture)).toEqual([]);
         },
       );

@@ -856,13 +856,7 @@ export function createRunnerJobsRepository(
               billing.state === "on"
                 ? await checkClaimCaps(trx, {
                     hourlyReviewLimit: billing.hourlyReviewLimit,
-                    rates: billing.rates,
-                    job: {
-                      id: row.id,
-                      workspaceId: row.workspace_id,
-                      reviewKind: row.review_kind as ProjectReviewKind,
-                    },
-                    keyMode,
+                    job: { id: row.id, workspaceId: row.workspace_id },
                     now: () => current,
                   })
                 : { ok: true };
