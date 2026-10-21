@@ -415,7 +415,9 @@ test.describe("the billing journeys of a review", () => {
       .getByRole("alertdialog", { name: "Switch to Dynamic Review?" })
       .getByRole("button", { name: "Switch to Dynamic Review" })
       .click();
-    await expect(page.getByRole("status")).toContainText("Saved.");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
 
     const dynamicJob = await review(request, "dynamic", DYNAMIC_COST_USD);
     expect(dynamicJob.llm.apiKey).toBe(OPERATOR_KEY);
@@ -448,7 +450,9 @@ test.describe("the billing journeys of a review", () => {
       .getByRole("alertdialog", { name: "Switch to Diff Review?" })
       .getByRole("button", { name: "Switch to Diff Review" })
       .click();
-    await expect(page.getByRole("status")).toContainText("Saved.");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
   });
 
   // #508-T02
