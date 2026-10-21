@@ -9,7 +9,10 @@ import { createJobDispatchesRepository } from "../db/repositories/job-dispatches
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { decideOutcome } from "../dispatch/outcome.ts";
-import { setBillingSwitch } from "../test-support/billing-switch.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../test-support/billing-switch.ts";
 import { createJobQueueFixture } from "../test-support/jobs.ts";
 import {
   createPostgresTestDatabase,
@@ -41,6 +44,9 @@ describe.each(databases)("the wall clock of a job on %s", (name, open) => {
       ...(database === undefined ? {} : { database }),
     });
     await setBillingSwitch(fixture.db, options.billing);
+    // While billing is on the claim holds money (#498): the workspace has some.
+    if (options.billing)
+      await fundWorkspace(fixture.db, fixture.workspaceId, 100_000_000);
     const recorder = createWallClockRecorder({
       db: fixture.db,
       now: fixture.clock.now,

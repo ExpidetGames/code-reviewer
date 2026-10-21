@@ -4,12 +4,17 @@
 // claim: a real queue and database, the real GitHub App provider and client against the fake GitHub, and the
 // notice service wired as the running server does it. No model is involved anywhere.
 import { describe, expect, it } from "vitest";
+import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createRefusalNoticesRepository } from "../db/repositories/refusal-notices-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import {
   startRunnerApiHarness,
   type RunnerApiHarness,
 } from "../test-support/runner-api-harness.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../test-support/billing-switch.ts";
 import { sha } from "../test-support/jobs.ts";
 import type { EntitlementsData } from "../workspaces/entitlements.ts";
 import { MAX_ATTEMPTS, RETRY_WAIT_MS } from "./service.ts";
@@ -584,5 +589,112 @@ describe("two app instances", () => {
     ]);
 
     expect(comments(h)).toHaveLength(1);
+  });
+});
+
+describe("the refusal for the balance", () => {
+  /** Billing is on and the workspace has no credit: the claim cannot hold anything. */
+  async function billed(options: Parameters<typeof start>[0] = {}) {
+    const h = await start(options);
+    await setBillingSwitch(h.db, true);
+    return h;
+  }
+
+  // #498-T03
+  it("posts one comment per pull request head, as the app, and none for the same head again", async () => {
+    const h = await billed();
+
+    const job = await refuse(h);
+    await refuse(h, { triggerKind: "manual" });
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "insufficient_balance",
+      attempts: 0,
+    });
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]).toMatchObject({ login: "code-reviewer-test[bot]" });
+    expect(comments(h)[0]?.body).toContain("No review ran for this change.");
+    expect(comments(h)[0]?.body).toContain("Add credit to continue");
+    expect(comments(h)[0]?.body).toContain(`head:${sha("a")}`);
+    // Nothing a runner or a model needs exists, and the balance holds nothing.
+    expect(
+      await h.db.selectFrom("usage_records").selectAll().execute(),
+    ).toEqual([]);
+    expect(
+      await h.db.selectFrom("billing_journal_entries").selectAll().execute(),
+    ).toEqual([]);
+  });
+
+  // #498-T03
+  it("posts again for a new push, which is a new head", async () => {
+    const h = await billed();
+    await refuse(h);
+
+    await refuse(h, { headSha: sha("b") });
+
+    expect(comments(h)).toHaveLength(2);
+    expect(comments(h)[1]?.body).toContain(`head:${sha("b")}`);
+  });
+
+  // #498-T04
+  it("tells a workspace whose balance is below zero that it is", async () => {
+    const h = await billed();
+    await fundWorkspace(h.db, h.workspaceId, 1_000);
+    await createBillingJournalRepository(h.db, h.workspaceId).append({
+      type: "refund",
+      amountMicroUsd: -5_000,
+      provider: "manual",
+      providerRef: "refund-1",
+      refKey: "refund-1",
+    });
+
+    const job = await refuse(h);
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      errorCode: "balance_negative",
+    });
+    expect(comments(h)[0]?.body).toContain("below zero");
+  });
+
+  // #498-T03
+  it("links to the workspace settings when the instance can name them, and has no link otherwise", async () => {
+    const without = await billed();
+    await refuse(without);
+    expect(comments(without)[0]?.body).not.toMatch(/https?:\/\//);
+
+    const withLink = await billed({
+      settingsUrl: (slug) => `https://app.example/w/${slug}/settings`,
+    });
+    await refuse(withLink);
+    expect(comments(withLink)[0]?.body).toMatch(
+      /\[the workspace settings\]\(https:\/\/app\.example\/w\/[a-z0-9-]+\/settings\)/,
+    );
+  });
+
+  // #498-T03
+  it("posts nothing when billing is off, and the job runs", async () => {
+    const h = await start();
+    const job = await h.enqueueNew();
+
+    const claimed = await h.claim();
+    await h.notices.settled();
+
+    expect(claimed.status).toBe(200);
+    expect((await h.queue.get(job.id))?.status).toBe("running");
+    expect(comments(h)).toEqual([]);
+  });
+
+  // #498-T15
+  it("posts nothing for billing_rates_incomplete: the operator's side, not the customer's", async () => {
+    const h = await start();
+    await setBillingSwitch(h.db, true, null);
+
+    const job = await refuse(h);
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      errorCode: "billing_rates_incomplete",
+    });
+    expect(comments(h)).toEqual([]);
   });
 });

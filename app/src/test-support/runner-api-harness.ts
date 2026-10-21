@@ -157,6 +157,10 @@ export async function startRunnerApiHarness(
       planPageUrl?: (
         workspaceSlug: string,
       ) => string | null | Promise<string | null>;
+      /** The link to the settings of a workspace, for a refusal for the balance (#498); default none. */
+      settingsUrl?: (
+        workspaceSlug: string,
+      ) => string | null | Promise<string | null>;
       /** How long a request to GitHub may take. */
       githubRequestTimeoutMs?: number;
     };
@@ -250,6 +254,9 @@ export async function startRunnerApiHarness(
       db: fixture.db,
       registry,
       planPageUrl: noticeOptions?.planPageUrl ?? (() => null),
+      ...(noticeOptions?.settingsUrl === undefined
+        ? {}
+        : { settingsUrl: noticeOptions.settingsUrl }),
       now: fixture.clock.now,
       log: {
         info: (line) => noticeLines.push(line),
