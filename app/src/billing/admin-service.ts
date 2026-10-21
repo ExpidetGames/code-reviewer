@@ -28,6 +28,7 @@ import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { isBillingOn } from "./enabled.ts";
+import { readJournalCheck } from "./journal-check.ts";
 import { releaseStrandedHolds } from "./stranded-holds.ts";
 import { createOwnKeyCountRepository } from "../db/repositories/own-key-count-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
@@ -43,6 +44,7 @@ import type {
   BillingIssueCode,
   BillingNotReadyItem,
 } from "./admin-errors.ts";
+import { validateLegalUrl, type LegalUrls } from "./legal-urls.ts";
 import { isPublicHttpsUrl, normalizedAddress } from "./public-url.ts";
 import {
   billingNumbersOf,
@@ -122,6 +124,11 @@ export type BillingAdminService = {
   removeSecret(adminId: string, which: unknown): Promise<BillingResult>;
   /** Stores the rates and numbers the change states, with the codes of the rate validation. */
   saveRates(adminId: string, change: unknown): Promise<BillingResult>;
+  /**
+   * Stores the link to the terms and/or the privacy statement (#626): an https address of a public host. An empty text or null
+   * removes a link, a field that is left out stays. The terms link of a Stripe setup that is on stays (`billing_disable_first`).
+   */
+  saveLegal(adminId: string, change: unknown): Promise<BillingResult>;
   /** A harmless call to Stripe with the stored key; a pass is recorded. */
   checkConnection(adminId: string): Promise<ConnectionCheck>;
   /**
@@ -140,6 +147,7 @@ export type BillingAdminService = {
 const ENDPOINT_LEASE_MS = 60_000;
 
 const API_KEY_MAX_LENGTH = 512;
+const LEGAL_FIELDS = ["termsUrl", "privacyUrl"] as const;
 const WEBHOOK_SECRET = /^whsec_[A-Za-z0-9_-]{8,500}$/;
 
 const STRIPE_API_KEY = "stripe_api_key";
@@ -325,6 +333,11 @@ export function createBillingAdminService({
           webhookUrl,
           webhookUrlPublic: isPublicHttpsUrl(webhookUrl),
         },
+        journalCheck: await readJournalCheck(db),
+        legal: {
+          termsUrl: settings.legal?.termsUrl ?? null,
+          privacyUrl: settings.legal?.privacyUrl ?? null,
+        },
         rates: {
           factorA: settings.factorA ?? null,
           diffMinuteRateMicroUsd: settings.minuteRateMicroUsd?.diff ?? null,
@@ -482,6 +495,60 @@ export function createBillingAdminService({
       if (!checked.ok) return ratesFailure(checked.code, checked.field);
       const result = await rates.update(change, adminId);
       return result.ok ? { ok: true } : ratesFailure(result.code, result.field);
+    },
+
+    async saveLegal(adminId, change) {
+      if (!isRecord(change)) return bodyInvalid("legal");
+      const known: readonly string[] = LEGAL_FIELDS;
+      if (Object.keys(change).some((key) => !known.includes(key)))
+        return bodyInvalid("legal");
+      const issues: BillingIssue[] = [];
+      // A link that is set, or null for one that is removed; a field that is left out is not in here.
+      const given: Partial<
+        Record<(typeof LEGAL_FIELDS)[number], string | null>
+      > = {};
+      for (const field of LEGAL_FIELDS) {
+        if (!Object.hasOwn(change, field)) continue;
+        const value = change[field];
+        if (
+          value === null ||
+          (typeof value === "string" && value.trim() === "")
+        )
+          given[field] = null;
+        else {
+          const checked = validateLegalUrl(value);
+          if (checked.ok) given[field] = checked.url;
+          else issues.push({ field: `legal.${field}`, code: "url_invalid" });
+        }
+      }
+      if (issues.length > 0)
+        return { ok: false, error: "invalid_input", issues };
+      return store.change<BillingResult>(adminId, async (current) => {
+        const legal: LegalUrls = { ...current.legal };
+        for (const field of LEGAL_FIELDS) {
+          const value = given[field];
+          if (value === undefined) continue;
+          if (value === null) delete legal[field];
+          else legal[field] = value;
+        }
+        // Stripe is ready only with the terms link: taking it away while billing runs on Stripe would turn billing off without a word.
+        const usesStripe =
+          (current.adapter ?? DEFAULT_ADAPTER_ID) === STRIPE_ADAPTER_ID;
+        if (
+          current.enabled &&
+          usesStripe &&
+          current.legal?.termsUrl !== undefined &&
+          legal.termsUrl === undefined
+        )
+          return { refuse: { ok: false, error: "billing_disable_first" } };
+        const others: BillingSettings = { ...current };
+        delete others.legal;
+        return {
+          write:
+            Object.keys(legal).length === 0 ? others : { ...others, legal },
+          result: { ok: true },
+        };
+      });
     },
 
     async checkConnection(adminId) {

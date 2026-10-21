@@ -6,6 +6,7 @@
 // service (`rates-service.ts`) and, for the switch, the admin form (#504).
 import "server-only";
 import { isAdapterId } from "./adapter.ts";
+import { readLegalUrls, type LegalUrls } from "./legal-urls.ts";
 import {
   isDiffAiReserve,
   isFactorA,
@@ -37,6 +38,8 @@ export type BillingSettings = StoredBillingRates & {
   /** The adapter in use (`stripe` or `manual` today); not stored means `manual`. */
   adapter?: string;
   stripe?: StoredStripeState;
+  /** The links to the operator's terms and privacy statement (#626); the terms link is needed to run Stripe. */
+  legal?: LegalUrls;
 };
 
 /** Billing never configured: off, no rate set. */
@@ -95,10 +98,12 @@ function readStripeState(stored: unknown): StoredStripeState | undefined {
 export function readBillingSettings(stored: unknown): BillingSettings {
   if (!isRecord(stored)) return DEFAULT_BILLING_SETTINGS;
   const stripe = readStripeState(stored.stripe);
+  const legal = readLegalUrls(stored.legal);
   return {
     enabled: stored.enabled === true,
     ...(isAdapterId(stored.adapter) ? { adapter: stored.adapter } : {}),
     ...readRates(stored),
     ...(stripe === undefined ? {} : { stripe }),
+    ...(legal === undefined ? {} : { legal }),
   };
 }

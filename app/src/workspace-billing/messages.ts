@@ -54,6 +54,7 @@ export const BUSINESS_CONFIRMATION_LABEL =
 export const BUSINESS_CONFIRMED_TEXT =
   "You confirmed that this workspace buys for a business.";
 export const TERMS_LINK_TEXT = "Terms";
+export const PRIVACY_LINK_TEXT = "Privacy";
 export const PAY_BUTTON = "Continue to payment";
 export const PAY_BUTTON_LOADING = "Preparing the payment";
 export const PAYMENT_HINT =

@@ -108,8 +108,8 @@ Check these before you plan the go-live. Each is explained below.
   Dispatcher without it has claimed within a day. Without it hosted reviews would measure zero minutes and be free.
 - The instance has a **mail server** set up in the admin portal. Without it the low and empty balance mails are not sent
   (the banner and the pull request notice still work).
-- You have a Stripe account that is, or can be, enrolled in Managed Payments (section 3), and your terms are ready
-  ([the checklist](billing-terms-checklist.md)).
+- You have a Stripe account that is, or can be, enrolled in Managed Payments (section 3), and your terms are ready and
+  published at an address (section 5; [the checklist](billing-terms-checklist.md)).
 - You decided the rates (section 4). Do not copy the examples of this guide.
 
 ## 3. The Stripe account
@@ -178,10 +178,15 @@ On the **Billing** page:
    ours but the secret is not stored, the page asks you to enter the secret (Stripe shows it only when the endpoint is
    created) or to recreate the endpoint while billing is off.
 4. **Rates and numbers.** Section 4.
-5. **The switch.** Read the statement the page shows, then switch billing on. The app judges everything again in one
+5. **Terms and privacy links.** Enter the link to your terms (and, optionally, to your privacy statement) in the card
+   **Terms and privacy**. Each is an `https` address of a public website with no user name or password (at most 2,048
+   characters). The business confirmation at a workspace's first top-up links to them. With Stripe the terms link is
+   required: switching billing on without it is refused with `terms_url_missing`, and while billing is on with Stripe the
+   terms link cannot be removed (it can be changed). With the manual adapter both are optional.
+6. **The switch.** Read the statement the page shows, then switch billing on. The app judges everything again in one
    step. If something is missing it refuses and names each item (`factor_a_missing`, `minute_rate_diff_missing`,
    `minute_rate_dynamic_missing`, `diff_ai_reserve_missing`, `stripe_api_key_missing`, `stripe_webhook_secret_missing`,
-   `connection_check_missing`, `connection_check_failed`, `dispatcher_lacks_vm_lifecycle`).
+   `connection_check_missing`, `terms_url_missing`, `connection_check_failed`, `dispatcher_lacks_vm_lifecycle`).
 
 When billing is on:
 
@@ -225,12 +230,12 @@ order. The tracking issue is #510. Record a result and a date on each item there
 4. **Set the rates** in the admin portal (section 4). The rates come from the cost research (#492). Confirm the start
    credit.
 5. **Legal and tax.** The terms follow [the checklist](billing-terms-checklist.md) and are read by a lawyer. The privacy
-   text names the billing profile and Stripe. A tax advisor has confirmed VAT on prepaid credit. The app needs a terms
-   link for the business confirmation: it has none yet (see the checklist).
+   text names the billing profile and Stripe. A tax advisor has confirmed VAT on prepaid credit. The terms are published
+   at an address you enter on the billing page (section 5, step 5); the business confirmation links to it.
 6. **The live purchase test.** One small real top-up with a business email, one review charged, one refund through the
    Stripe dashboard, and the negative balance seen once. Check the Link receipt and the activity page.
-7. **Safety nets.** The journal check (`verify()`) should run on a schedule with an alert on any difference (it does not
-   yet, see section 8). Watch the unknown-cost line and the review rows. Switch billing off and on again on staging once.
+7. **Safety nets.** The journal check (`verify()`) runs daily while billing is on and shows its result on the billing page;
+   set an alert on the log code `BILLING_JOURNAL_INCONSISTENT` (section 8). Watch the unknown-cost line and the review rows. Switch billing off and on again on staging once.
 8. **Staged enablement.** Staging first, then production with one internal workspace, then everyone. Have a rollback plan
    (section 9). Look at the database read-only before and after.
 9. **Tell the workspaces first.** What changes for existing workspaces (a balance of zero plus the start credit, and the
@@ -335,14 +340,28 @@ Billing page when a legitimate burst trips it. Never tell a workspace the number
 | `[billing] BALANCE_MAIL_FAILED workspace=<id> kind=<kind> code=<code>`         | A mail did not go out (`not_configured` means no mail server).       |
 | `[billing] MONTHLY_LIMIT_CHANGED workspace=<id> user=<id> ...`                 | A workspace changed its monthly limit.                               |
 | `[billing] WALL_CLOCK_NOT_RECORDED`, `DISPATCHER_NOT_NOTED`                    | A measure of a job without a VM, or a note of a Dispatcher, failed. |
+| `[billing] BILLING_JOURNAL_INCONSISTENT workspace=<id> ...`, `BILLING_JOURNAL_CHECK_DONE ...` | The daily journal check found a workspace whose balance and journal differ, or finished a pass. |
 
 The logs name codes and ids only. They never hold a body, a header, a secret, an amount of a payment or a billing profile.
 
 ### Reading the books
 
-The journal and the balance cache can be compared with `verify()` of the journal repository. A difference is a bug: stop and
-look. There is no command or scheduled job for it yet (#510 item 7). Until there is one, do a read-only comparison in the
-database before and after each stage of the rollout:
+The journal and the balance cache are compared with `verify()` of the journal repository. A difference is a bug: stop and
+look. **The journal check runs by itself**, once a day while billing is on: a step of the cron sweep (`journal_check`) and the
+hourly timer of a server, a bounded part of the instance at a time (100 workspaces a step, 20 seconds a run), so a long
+journal never blocks a run. The billing page shows **Journal check: ok (date)** or **inconsistent (date)**. It reports
+only when a whole pass has finished; it is paused while billing is off. For each workspace that is not consistent
+(the balance differs from the journal, the reserved money differs, or a hold of an ended job was never released) the log
+has one line:
+
+```
+[billing] BILLING_JOURNAL_INCONSISTENT workspace=<id> balance_drift=<0|1> reserved_drift=<0|1> stranded_holds=<count>
+[billing] BILLING_JOURNAL_CHECK_DONE result=<ok|inconsistent> workspaces=<n> inconsistent=<n>
+```
+
+No amount, name or address is in it. Alert on the first. The comparison is read-only, so it never repairs anything: look at
+the workspace in the database. Besides it, do a read-only comparison in the database before and after each stage of the
+rollout:
 
 - the balance of each workspace against the sum of its entries;
 - the open rows of `billing_webhook_events` (`review_state = 'open'`);
@@ -368,9 +387,8 @@ More things to know:
 
 ## 10. Limits and open points
 
-- **Terms link.** The business confirmation names the terms in words. The app has no terms page or setting yet. Stripe's
-  business confirmation needs the link, so add it before go-live (see the checklist).
-- **Journal check on a schedule** is not built. See section 8.
+- **The journal check does not alert by itself.** It logs a stable code and shows its result on the billing page; the alert
+  on `BILLING_JOURNAL_INCONSISTENT` is yours to set up in your log tooling.
 - **Refund currency** under Adaptive Pricing (#604) and **invoices on Managed Payments** (#503) are not verified yet.
 - **Many reviews at once on a small balance** can take it far below zero. That is accepted; the brake limits it.
 - **No parking.** A refused review is not queued. The workspace tops up and pushes again.

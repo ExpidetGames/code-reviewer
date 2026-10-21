@@ -10,6 +10,8 @@
 //                                                              empty one keeps the stored one)
 //                                                            { "removeSecret": "apiKey" | "webhookSecret" }
 //                                                            { "rates": { factorA, minuteRateMicroUsd, ... } }  (integers)
+//                                                            { "legal": { "termsUrl"?, "privacyUrl"? } }  (https links; an empty
+//                                                              text or null removes one, a field left out stays; #626)
 //                                                            { "enabled": boolean }   (switching on checks everything)
 //   POST /api/admin/billing/check                            a harmless call to Stripe with the stored key; answers
 //                                                            { "ok": true, "environment" } or { "ok": false, "error": <code> }
@@ -83,6 +85,7 @@ const CHANGE_KEYS = [
   "stripe",
   "removeSecret",
   "rates",
+  "legal",
   "enabled",
 ] as const;
 
@@ -181,6 +184,8 @@ export function createBillingRouteHandlers({
             return service.removeSecret(who.id, fields.removeSecret);
           case "rates":
             return service.saveRates(who.id, fields.rates);
+          case "legal":
+            return service.saveLegal(who.id, fields.legal);
           default:
             return service.setEnabled(who.id, fields.enabled);
         }
