@@ -71,9 +71,7 @@ export type BillingJournalErrorCode =
  */
 export type ReserveRefusal = Extract<
   BillingJournalErrorCode,
-  | "insufficient_balance"
-  | "balance_negative"
-  | "reservation_released"
+  "insufficient_balance" | "balance_negative" | "reservation_released"
 >;
 
 export class BillingJournalError extends Error {
