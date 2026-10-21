@@ -13,12 +13,36 @@ import {
   boundedEnd,
   type VmEndSource,
 } from "../../billing/minutes.ts";
+import { maxVmMinutes } from "../../billing/hold.ts";
+import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { decodeBoolean, encodeBoolean, formatTimestamp } from "../codecs.ts";
 import type { Database, JobVmRunsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 
 /** The name a wall clock row has instead of a VM's. */
 export const WALL_CLOCK_NAME = "job_wall_clock";
+
+/**
+ * How many VMs are kept for one claim (the review of #524, N-1). A Dispatcher starts one VM per claim; the others are a
+ * repeat, a hygiene limit against a holder of the Dispatcher's secret filling the table.
+ */
+export const MAX_VMS_PER_CLAIM = 4;
+
+/** The ends that measure a job's time on a runner, not a VM: a VM's own end is better evidence when there is one. */
+const WALL_CLOCK_SOURCES: readonly VmEndSource[] = [
+  "job_wall_clock",
+  "claim_wall_clock",
+];
+
+const REVIEW_KINDS: readonly ProjectReviewKind[] = ["diff", "dynamic"];
+
+/** Whether a VM name is one of our own naming for this job (`cr-<kind>-<job id>-<random>`, launchers/sandbox.ts). */
+function isVmOfJob(name: string, jobId: string): boolean {
+  const lower = name.toLowerCase();
+  return REVIEW_KINDS.some((kind) =>
+    lower.startsWith(`cr-${kind}-${jobId.toLowerCase()}-`),
+  );
+}
 
 /** A row as the rest of the app sees it. Timestamps are ISO 8601 text in UTC. */
 export type StoredVmRun = {
@@ -68,7 +92,10 @@ export type JobVmRunsRepository = {
   ): Promise<"recorded" | "replayed" | "refused">;
   /**
    * The App's stop call was answered and named these VMs: they ended now (`at`, the App's clock, kept between the start
-   * and the VM's timeout). Replaces a backstop; never replaces another confirmation. Returns how many rows changed.
+   * and the VM's timeout). Replaces a backstop; never replaces another confirmation. A VM of our own naming for this job that
+   * has no row (its report never arrived) gets one now (#498, `app_stop_unreported`): from the claim of the job to `at`, at
+   * most the longest a VM lives; a name of another job, and a job that was given back (no claim), make none. Returns how
+   * many rows changed or were made.
    */
   confirmStopped(
     jobId: string,
@@ -76,11 +103,13 @@ export type JobVmRunsRepository = {
     at: Date,
   ): Promise<number>;
   /**
-   * A job that ended with no VM (a self-hosted runner, Compose): its time on a runner, from the claim to the end.
-   * `not_measurable`: it has not ended, or it never had a claim.
+   * A job that ended with no VM row: its time on a runner, from the claim to the end. `job_wall_clock` for a self-hosted runner
+   * or Compose (no VM exists); `claim_wall_clock` (#498) for a hosted job that ran and whose VM was never reported, so a
+   * job that ran is never priced at 0 minutes silently. `not_measurable`: it has not ended, or it never had a claim.
    */
   recordWallClock(
     jobId: string,
+    source?: Extract<VmEndSource, "job_wall_clock" | "claim_wall_clock">,
   ): Promise<"recorded" | "replayed" | "not_measurable">;
   /** Every row of the job, oldest start first. */
   list(jobId: string): Promise<StoredVmRun[]>;
@@ -127,7 +156,14 @@ export function createJobVmRunsRepository(
   function jobOf(executor: Kysely<Database>, jobId: string) {
     return executor
       .selectFrom("jobs")
-      .select(["id", "status", "claimed_at", "finished_at"])
+      .select([
+        "id",
+        "status",
+        "claimed_at",
+        "finished_at",
+        "attempts",
+        "review_kind",
+      ])
       .where("id", "=", jobId)
       .where("workspace_id", "=", workspaceId)
       .executeTakeFirst();
@@ -222,6 +258,11 @@ export function createJobVmRunsRepository(
       .where("workspace_id", "=", workspaceId)
       .where("claimed_at", "=", values.claimedAt)
       .execute();
+    // N-1: a claim has one VM; more than a few is a repeat or an abuse, answered like a repeat so a launch goes on.
+    if (sameClaim.length >= MAX_VMS_PER_CLAIM) return "replayed";
+    // N-3: this read and the insert below are not one statement, so two reports of different VMs of one claim that overlap on
+    // Postgres can both be `billable`. That is repaired, not prevented: `measure` is the authority, it picks the one run that
+    // counts (`setCounted`) every time it is asked, and nothing else reads the flag as a fact.
     const counts = sameClaim.length === 0;
     const minutes =
       values.end === undefined
@@ -292,6 +333,33 @@ export function createJobVmRunsRepository(
       return inTransaction(async (executor) => {
         const rows = await rowsOf(executor, jobId);
         let changed = 0;
+        // #498: a VM of this job that nobody reported. Its start is the claim (the VM was created after it), its end the stop.
+        const known = new Set(rows.map((row) => row.vm_name));
+        const job = await jobOf(executor, jobId);
+        if (job !== undefined && job.claimed_at !== null) {
+          const start = new Date(job.claimed_at);
+          const latest = new Date(
+            start.getTime() +
+              maxVmMinutes(job.review_kind as ProjectReviewKind) * 60 * 1000,
+          );
+          for (const name of vmNames) {
+            if (known.has(name) || !isVmOfJob(name, jobId)) continue;
+            known.add(name);
+            const end = new Date(
+              Math.min(latest.getTime(), Math.max(start.getTime(), at.getTime())),
+            );
+            const made = await insertRun(executor, {
+              jobId,
+              vmName: name,
+              attempt: job.attempts + 1,
+              claimedAt: job.claimed_at,
+              startedAt: start,
+              vmTimeoutSeconds: null,
+              end: { at: end, source: "app_stop_unreported" },
+            });
+            if (made === "recorded") changed += 1;
+          }
+        }
         for (const row of rows) {
           if (!vmNames.includes(row.vm_name)) continue;
           if (row.vm_timeout_seconds === null) continue;
@@ -308,7 +376,7 @@ export function createJobVmRunsRepository(
       });
     },
 
-    recordWallClock(jobId) {
+    recordWallClock(jobId, source = "job_wall_clock") {
       return inTransaction(async (executor) => {
         const job = await jobOf(executor, jobId);
         if (
@@ -324,7 +392,7 @@ export function createJobVmRunsRepository(
           claimedAt: job.claimed_at,
           startedAt: new Date(job.claimed_at),
           vmTimeoutSeconds: null,
-          end: { at: new Date(job.finished_at), source: "job_wall_clock" },
+          end: { at: new Date(job.finished_at), source },
         });
       });
     },
@@ -357,10 +425,16 @@ export function createJobVmRunsRepository(
           );
         }
         rows = await rowsOf(executor, jobId);
-        const counted =
+        // The run of the final claim that counts: a VM's own end first, a wall clock only when it is all there is.
+        const ofClaim =
           job.claimed_at === null
-            ? undefined
-            : rows.find((row) => row.claimed_at === job.claimed_at);
+            ? []
+            : rows.filter((row) => row.claimed_at === job.claimed_at);
+        const counted =
+          ofClaim.find(
+            (row) =>
+              !WALL_CLOCK_SOURCES.includes(row.end_source as VmEndSource),
+          ) ?? ofClaim[0];
         await setCounted(
           executor,
           jobId,

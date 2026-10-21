@@ -13,6 +13,7 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
+import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { tryDecodeJson } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
@@ -44,6 +45,34 @@ function errorReasonOf(resultText: string | null): string | null {
   if (typeof result !== "object" || result === null) return null;
   const reason = (result as { errorReason?: unknown }).errorReason;
   return typeof reason === "string" ? reason : null;
+}
+
+/**
+ * The started minutes of a job that ends charged. A run with a VM of its final claim measures it (#493). A run of that claim
+ * with none is never priced at 0 minutes silently (the gate of the review of #524): it ran, so its claim to its end is the
+ * measure, flagged `claim_wall_clock` when a Dispatcher acknowledged the job (a VM was started and its report was lost, or the
+ * Dispatcher is of an earlier release) and `job_wall_clock` for a runner with no VM at all. A job that was given back (it has
+ * no claim) measures 0.
+ */
+async function minutesOf(
+  trx: Kysely<Database>,
+  workspaceId: string,
+  jobId: string,
+  now: () => Date,
+): Promise<number> {
+  const runs = createJobVmRunsRepository(trx, workspaceId, now);
+  let measured = await runs.measure(jobId);
+  if (measured.state === "measured" && measured.run === null) {
+    const hosted =
+      (await createJobDispatchesRepository(trx, now).get(jobId))?.ackedAt !=
+      null;
+    const recorded = await runs.recordWallClock(
+      jobId,
+      hosted ? "claim_wall_clock" : "job_wall_clock",
+    );
+    if (recorded !== "not_measurable") measured = await runs.measure(jobId);
+  }
+  return measured.state === "measured" ? measured.minutes : 0;
 }
 
 /**
@@ -94,12 +123,6 @@ export async function settleEndedJobs(
       .executeTakeFirst();
     const keyMode: KeyMode = record?.key_mode === "managed" ? "managed" : "own";
     const reviewKind = job.review_kind as ProjectReviewKind;
-    const measured = await createJobVmRunsRepository(
-      trx,
-      job.workspace_id,
-      now,
-    ).measure(job.id);
-    const minutes = measured.state === "measured" ? measured.minutes : 0;
     const outcomeClass = classifyOutcome({
       status: job.status as EndedStatus,
       errorCode: job.error_code,
@@ -108,6 +131,12 @@ export async function settleEndedJobs(
       keyMode,
       aiCostKnown: record?.cost_micro_usd != null,
     });
+    // A run that is free is not measured: nothing is charged whatever it measures.
+    if (outcomeClass === "free") {
+      await journal.release(job.id);
+      continue;
+    }
+    const minutes = await minutesOf(trx, job.workspace_id, job.id, now);
     try {
       const price = priceRun({
         keyMode,

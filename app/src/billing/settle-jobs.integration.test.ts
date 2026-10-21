@@ -10,7 +10,9 @@ import {
   createBillingJournalRepository,
   type JournalEntry,
 } from "../db/repositories/billing-journal-repository.ts";
+import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
+import { decideOutcome } from "../dispatch/outcome.ts";
 import { createUsageFeedRepository } from "../db/repositories/usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -691,6 +693,105 @@ describe.each(databases)("the settlement of a hold on %s", (name, open) => {
         consistent: true,
         reservedMicroUsd: 0,
       });
+    },
+  );
+
+  /** A Dispatcher acknowledged the job: it is a hosted job, whose VM the App should have heard of. */
+  async function acknowledge(fixture: JobQueueFixture, jobId: string) {
+    const dispatches = createJobDispatchesRepository(
+      fixture.db,
+      fixture.clock.now,
+    );
+    const at = fixture.clock.now();
+    await dispatches.create(jobId, at);
+    const row = await dispatches.get(jobId);
+    await dispatches.claimSend(jobId, row?.nextDispatchAt ?? "", at);
+    await dispatches.record(jobId, decideOutcome({ kind: "accepted" }, 0, at), at);
+  }
+
+  // #498-B1 (the gate of the review of #524)
+  run(
+    "bills the claim wall clock of a hosted job that ran and whose VM was never reported, and flags it",
+    async () => {
+      const fixture = await start();
+      const { job, leaseToken } = await claim(fixture, { vmSeconds: null });
+      await acknowledge(fixture, job.id);
+      fixture.clock.advance(3 * 60 * SECOND);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(null));
+
+      const entries = await entriesOf(fixture, job.id);
+      expect(shape(entries)).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+        ["usage", -39_000],
+      ]);
+      expect(entries[2]).toMatchObject({ minutes: 3 });
+      expect(await vmRunsOf(fixture).list(job.id)).toEqual([
+        expect.objectContaining({
+          endSource: "claim_wall_clock",
+          billable: true,
+          billableMinutes: 3,
+        }),
+      ]);
+    },
+  );
+
+  // #498-B1
+  run(
+    "bills the wall clock of a job on a self-hosted runner as such, in the transaction that ends it",
+    async () => {
+      const fixture = await start();
+      const { job, leaseToken } = await claim(fixture, { vmSeconds: null });
+      fixture.clock.advance(3 * 60 * SECOND);
+
+      await fixture.queue.complete(job.id, leaseToken, delivered(null));
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+        ["usage", -39_000],
+      ]);
+      expect((await vmRunsOf(fixture).list(job.id))[0]).toMatchObject({
+        endSource: "job_wall_clock",
+      });
+    },
+  );
+
+  // #498-B1 (c: cancelled during the launch, the report is refused)
+  run(
+    "bills a started minute for a job that was cancelled during its launch, before any VM was reported",
+    async () => {
+      const fixture = await start();
+      const { job, leaseToken } = await claim(fixture, { vmSeconds: null });
+      await acknowledge(fixture, job.id);
+      fixture.clock.advance(10 * SECOND);
+
+      await fixture.queue.cancelClaimed(job.id, leaseToken, "project_deactivated");
+
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+        ["usage", -13_000],
+      ]);
+    },
+  );
+
+  // #498-B1
+  run(
+    "measures nothing for an outcome that is free, and so makes no wall clock row",
+    async () => {
+      const fixture = await start({ maxAttempts: 1 });
+      const { job, leaseToken } = await claim(fixture, { vmSeconds: null });
+      await acknowledge(fixture, job.id);
+
+      await fixture.queue.release(job.id, leaseToken, "launch_failed");
+
+      expect(await vmRunsOf(fixture).list(job.id)).toEqual([]);
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -325_000],
+        ["release", 325_000],
+      ]);
     },
   );
 });
