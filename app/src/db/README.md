@@ -552,7 +552,7 @@ they run. `20261021210000_widen_refusal_notice_codes_for_limits` replaces the ch
 workspace; a workspace without a row has no limit), `monthly_limit_micro_usd` (`bigint` on Postgres, 64 bit `integer` on SQLite; null or positive, checked),
 `updated_by` (→ `users.id`, set null when the user is deleted) and `updated_at`. **Customer data, workspace scoped** (`billing-workspace-settings-repository.ts`,
 classified in `scoping.test.ts` and covered row by row in `scoped-isolation.integration.test.ts`); `updated_by` is an audit pointer that a user merge moves to the acting admin (`github-signin/merge.ts`). `20261021210200_add_limit_query_indexes` adds `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the hourly brake and
-`billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum. See `src/billing/README.md`, "Limits at claim (#499)".
+`billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum, which also carries `amount_micro_usd` (`INCLUDE` on Postgres, a last key column on SQLite) so the sum is read from the index alone. The three versions sort after the migrations of the billing work that is open next to them (`20261021170000` to `20261021190100`), so the order is the same whichever lands first. See `src/billing/README.md`, "Limits at claim (#499)".
 
 ### A database that ran the removed billing migrations
 
