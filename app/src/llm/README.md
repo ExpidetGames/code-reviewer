@@ -250,11 +250,11 @@ provider_not_found`.
 - **Masking.** `currentKeysFor` returns the workspace's own key of every provider and, **while the workspace is
   managed (or billing is on, #496)**, the operator's current key of **every** provider (not only the one the job runs on: a result must not
   show any of them); the key of the claim comes from `job_claimed_keys`.
-- **The usage record says the key that was used.** The claim reserves the record as `own` and `recordKeyMode` sets it
-  from the key mode of the workspace's entitlements (`managed` for the operator's key), on both paths. The cost limit of #277 watches the
-  records whose key mode is `managed` for a workspace whose entitlements say `managed`; since the key mode of the
-  entitlements is also what picks the key, the two cannot disagree except in the moment an operator changes the mode
-  between the claim's admission and the key lookup, and then the record follows the key that is actually used.
+- **The usage record says the key that was used.** The claim reserves the record with the key mode it decided from the
+  effective entitlements (`managed` for the operator's key; while billing is on, the workspace's choice, #496) and the key
+  lookup of the claim and of the Worker's fetch follows that record (`claimedKeyMode`), so the record, the key and the
+  settlement of a run cannot disagree, whatever the workspace or the operator changes while it runs. The cost limit of #277
+  watches the records whose key mode is `managed` for a workspace whose entitlements say `managed`.
 - **The workspace pages.** For a workspace whose key mode is managed (`instanceAccessOf` in `access.ts`), **Settings →
   LLM access** shows no key form to anybody and says that access is provided by this instance (a Member sees the same
   note); when the operator has no usable key it says so and tells the person to contact the administrator of the
