@@ -61,7 +61,12 @@ const delivered: JobOutcome = {
   ok: true,
   result: {
     ok: true,
-    usage: { promptTokens: 100, completionTokens: 10, costUsd: 0.5, aiCalls: 1 },
+    usage: {
+      promptTokens: 100,
+      completionTokens: 10,
+      costUsd: 0.5,
+      aiCalls: 1,
+    },
   },
 };
 
@@ -148,36 +153,33 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
   );
 
   // #591-T02
-  run(
-    "flags a stranded hold in verify() until it is released",
-    async () => {
-      const fixture = await start();
-      const job = await endedWhileOff(fixture);
+  run("flags a stranded hold in verify() until it is released", async () => {
+    const fixture = await start();
+    const job = await endedWhileOff(fixture);
 
-      const flagged = await journalOf(fixture).verify();
-      // The cache and the journal agree; the hold is what is wrong.
-      expect(flagged).toMatchObject({
-        differenceMicroUsd: 0,
-        reservedDifferenceMicroUsd: 0,
-        strandedHoldCount: 1,
-        strandedHoldMicroUsd: OWN_KEY_DIFF_HOLD,
-        consistent: false,
-      });
-      expect(await findStrandedHolds(fixture.db, 10)).toEqual([
-        { workspaceId: fixture.workspaceId, jobId: job.id },
-      ]);
+    const flagged = await journalOf(fixture).verify();
+    // The cache and the journal agree; the hold is what is wrong.
+    expect(flagged).toMatchObject({
+      differenceMicroUsd: 0,
+      reservedDifferenceMicroUsd: 0,
+      strandedHoldCount: 1,
+      strandedHoldMicroUsd: OWN_KEY_DIFF_HOLD,
+      consistent: false,
+    });
+    expect(await findStrandedHolds(fixture.db, 10)).toEqual([
+      { workspaceId: fixture.workspaceId, jobId: job.id },
+    ]);
 
-      await setBillingSwitch(fixture.db, true);
-      await releaseStrandedHolds(fixture.db, fixture.clock.now);
+    await setBillingSwitch(fixture.db, true);
+    await releaseStrandedHolds(fixture.db, fixture.clock.now);
 
-      expect(await journalOf(fixture).verify()).toMatchObject({
-        strandedHoldCount: 0,
-        strandedHoldMicroUsd: 0,
-        consistent: true,
-      });
-      expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
-    },
-  );
+    expect(await journalOf(fixture).verify()).toMatchObject({
+      strandedHoldCount: 0,
+      strandedHoldMicroUsd: 0,
+      consistent: true,
+    });
+    expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
+  });
 
   // #591-T03
   run(
@@ -227,12 +229,12 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
       );
 
       expect(await journalOf(fixture).entries({ limit: 200 })).toEqual(before);
-      expect((await entriesOf(fixture, running.job.id)).map((e) => e.type)).toEqual(
-        ["reservation"],
-      );
-      expect((await entriesOf(fixture, settled.job.id)).map((e) => e.type)).toEqual(
-        ["reservation", "release", "usage"],
-      );
+      expect(
+        (await entriesOf(fixture, running.job.id)).map((e) => e.type),
+      ).toEqual(["reservation"]);
+      expect(
+        (await entriesOf(fixture, settled.job.id)).map((e) => e.type),
+      ).toEqual(["reservation", "release", "usage"]);
     },
   );
 
@@ -333,19 +335,16 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
   );
 
   // #591-T09
-  run(
-    "the sweep entry point releases while billing is on",
-    async () => {
-      const fixture = await start();
-      await endedWhileOff(fixture);
-      await setBillingSwitch(fixture.db, true);
+  run("the sweep entry point releases while billing is on", async () => {
+    const fixture = await start();
+    await endedWhileOff(fixture);
+    await setBillingSwitch(fixture.db, true);
 
-      expect(
-        await releaseStrandedHoldsWhileBillingOn(fixture.db, fixture.clock.now),
-      ).toEqual({ released: 1 });
-      expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
-    },
-  );
+    expect(
+      await releaseStrandedHoldsWhileBillingOn(fixture.db, fixture.clock.now),
+    ).toEqual({ released: 1 });
+    expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
+  });
 
   // #591-T10
   run(
@@ -386,32 +385,29 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
   );
 
   // #591-T11
-  run(
-    "a switch-on that is refused releases nothing",
-    async () => {
-      const fixture = await start();
-      const adminId = await insertUser(fixture.db, { id: "admin-591b" });
-      await endedWhileOff(fixture);
-      const service = createBillingAdminService({
-        db: fixture.db,
-        secretsOn: (executor) =>
-          createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
-        publicUrl: "https://reviews.example.test",
-        clientFor: () => {
-          throw new Error("no outbound call");
-        },
-        now: fixture.clock.now,
-        log: () => undefined,
-      });
-      // No rates are set (the helper wrote only the switch): the service refuses.
-      await setBillingSwitch(fixture.db, false, null);
+  run("a switch-on that is refused releases nothing", async () => {
+    const fixture = await start();
+    const adminId = await insertUser(fixture.db, { id: "admin-591b" });
+    await endedWhileOff(fixture);
+    const service = createBillingAdminService({
+      db: fixture.db,
+      secretsOn: (executor) =>
+        createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+      publicUrl: "https://reviews.example.test",
+      clientFor: () => {
+        throw new Error("no outbound call");
+      },
+      now: fixture.clock.now,
+      log: () => undefined,
+    });
+    // No rates are set (the helper wrote only the switch): the service refuses.
+    await setBillingSwitch(fixture.db, false, null);
 
-      const refused = await service.setEnabled(adminId, true);
+    const refused = await service.setEnabled(adminId, true);
 
-      expect(refused).toMatchObject({ ok: false, error: "billing_not_ready" });
-      expect(await findStrandedHolds(fixture.db, 10)).toHaveLength(1);
-    },
-  );
+    expect(refused).toMatchObject({ ok: false, error: "billing_not_ready" });
+    expect(await findStrandedHolds(fixture.db, 10)).toHaveLength(1);
+  });
 
   // #591-T12
   run(
@@ -436,9 +432,9 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
 
       const entries = await entriesOf(fixture, job.job.id);
       expect(entries.filter((e) => e.type === "release")).toHaveLength(1);
-      expect(entries.filter((e) => e.type === "usage").length).toBeLessThanOrEqual(
-        1,
-      );
+      expect(
+        entries.filter((e) => e.type === "usage").length,
+      ).toBeLessThanOrEqual(1);
       const verified = await journalOf(fixture).verify();
       expect(verified).toMatchObject({
         consistent: true,

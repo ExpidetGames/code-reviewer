@@ -732,9 +732,7 @@ export function createBillingJournalRepository(
                 and l.type = 'release'
                 and l.ref_key = r.ref_key
             )
-        ) as stranded`.execute(
-        db,
-      );
+        ) as stranded`.execute(db);
       const expectedBalanceMicroUsd = Number(rows[0]?.balance ?? 0);
       const expectedReservedMicroUsd = Number(rows[0]?.reserved ?? 0);
       const cached = {
