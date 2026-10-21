@@ -103,12 +103,16 @@ const SCOPED = [
  *   is known; it only reads, an intent is found only for the adapter that created it, and every answer names its
  *   workspace, which is where everything that follows goes (the scoped intents repository and the journal of that
  *   workspace);
+ * - billing-holds-sweep: the reservations of ended jobs that nobody released (#591), for the sweep and the switch-on that
+ *   serve the whole instance; it only reads, driven by the workspaces that have something reserved, and every answer names
+ *   its workspace, which is where the release goes (the journal repository of that workspace);
  * - billing-webhook-events: the record of provider events by `(provider, event id)` (#497): an id, an outcome and the
  *   order of the states of a refund or dispute. No payload, no amount and no workspace, so it is not customer data.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "billing-holds-sweep.ts",
   "billing-topup-intent-directory-repository.ts",
   "billing-webhook-events-repository.ts",
   "catalog-repository.ts",

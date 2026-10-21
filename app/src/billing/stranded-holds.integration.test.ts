@@ -1,0 +1,481 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The holds of jobs that ended while billing was off (#591; ADR 0006, 2.6; follow-up of #498). A job that took its hold
+// while billing was on and ended after the switch was turned off keeps its `reservation` with no `release`: nothing runs
+// while billing is off. The decision (the maintainer confirms it on #591): such a run is RELEASED, never charged; billing off
+// means no charge. The reconciliation runs when billing is switched on (inside the transaction that writes `enabled`) and as a
+// step of the sweep while billing is on, and `verify()` flags what is left. On SQLite and, when TEST_DATABASE_URL is set,
+// on Postgres.
+import type { KyselyPlugin } from "kysely";
+import { describe, expect, it } from "vitest";
+import {
+  createBillingJournalRepository,
+  type JournalEntry,
+} from "../db/repositories/billing-journal-repository.ts";
+import { findStrandedHolds } from "../db/repositories/billing-holds-sweep.ts";
+import type { Kysely } from "kysely";
+import type { Database } from "../db/schema.ts";
+import type { JobOutcome } from "../jobs/job-types.ts";
+import { createSecretStore } from "../secrets/store.ts";
+import { describeQuery } from "../test-support/query-hook.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../test-support/billing-switch.ts";
+import {
+  createJobQueueFixture,
+  sha,
+  type JobQueueFixture,
+} from "../test-support/jobs.ts";
+import {
+  createPostgresTestDatabase,
+  hasPostgres,
+} from "../test-support/postgres-test-database.ts";
+import { SETUP_TEST_SECRET } from "../test-support/setup-harness.ts";
+import { insertUser } from "../test-support/users.ts";
+import { createBillingAdminService } from "./admin-service.ts";
+import { settleEndedJobs } from "./settle-jobs.ts";
+import {
+  releaseStrandedHolds,
+  releaseStrandedHoldsWhileBillingOn,
+} from "./stranded-holds.ts";
+
+const ENGINES = ["pr-agent", "opencode"] as const;
+const FUNDING = 100_000_000;
+/** The hold of a Diff job on the workspace's own key: 25 minutes x 13,000 (hold.test.ts). */
+const OWN_KEY_DIFF_HOLD = 325_000;
+
+const databases: Array<
+  [string, (() => Promise<Kysely<Database>>) | undefined]
+> = [
+  ["SQLite", undefined],
+  [
+    "Postgres",
+    hasPostgres()
+      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
+      : undefined,
+  ],
+];
+
+const delivered: JobOutcome = {
+  ok: true,
+  result: {
+    ok: true,
+    usage: { promptTokens: 100, completionTokens: 10, costUsd: 0.5, aiCalls: 1 },
+  },
+};
+
+describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
+  const run = name === "Postgres" && open === undefined ? it.skip : it;
+
+  async function start(options: { funding?: number } = {}) {
+    const database = await open?.();
+    const fixture = await createJobQueueFixture({
+      ...(database === undefined ? {} : { database }),
+      dynamicReview: true,
+    });
+    await setBillingSwitch(fixture.db, true);
+    await fundWorkspace(
+      fixture.db,
+      fixture.workspaceId,
+      options.funding ?? FUNDING,
+    );
+    return fixture;
+  }
+
+  const journalOf = (fixture: JobQueueFixture) =>
+    createBillingJournalRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    );
+
+  let pr = 100;
+  async function claim(fixture: JobQueueFixture) {
+    pr += 1;
+    fixture.clock.advance(1);
+    const job = await fixture.enqueueNew({ prNumber: pr });
+    const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+    if (claimed === null || claimed.job.id !== job.id)
+      throw new Error("The job was not claimed.");
+    return { job: claimed.job, leaseToken: claimed.leaseToken };
+  }
+
+  /** A job that took its hold with billing on and ended with billing off, which is then switched on again. */
+  async function endedWhileOff(fixture: JobQueueFixture) {
+    const claimed = await claim(fixture);
+    await setBillingSwitch(fixture.db, false);
+    await fixture.queue.complete(claimed.job.id, claimed.leaseToken, delivered);
+    return claimed.job;
+  }
+
+  async function entriesOf(fixture: JobQueueFixture, jobId: string) {
+    const { entries } = await journalOf(fixture).entries({ limit: 200 });
+    return entries.filter((entry) => entry.jobId === jobId).reverse();
+  }
+  const shape = (entries: JournalEntry[]) =>
+    entries.map((entry) => [entry.type, entry.amountMicroUsd]);
+
+  // #591-T01
+  run(
+    "releases the hold of a job that ended while billing was off, charges nothing, and the balance equals the sum of the entries",
+    async () => {
+      const fixture = await start();
+      const job = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+      // Before: the hold is still reserved, and the journal does not know.
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: FUNDING - OWN_KEY_DIFF_HOLD,
+        reservedMicroUsd: OWN_KEY_DIFF_HOLD,
+      });
+
+      const result = await releaseStrandedHolds(fixture.db, fixture.clock.now);
+
+      expect(result).toEqual({ released: 1 });
+      expect(shape(await entriesOf(fixture, job.id))).toEqual([
+        ["reservation", -OWN_KEY_DIFF_HOLD],
+        ["release", OWN_KEY_DIFF_HOLD],
+      ]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: FUNDING,
+        reservedMicroUsd: 0,
+      });
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        consistent: true,
+        strandedHoldCount: 0,
+      });
+    },
+  );
+
+  // #591-T02
+  run(
+    "flags a stranded hold in verify() until it is released",
+    async () => {
+      const fixture = await start();
+      const job = await endedWhileOff(fixture);
+
+      const flagged = await journalOf(fixture).verify();
+      // The cache and the journal agree; the hold is what is wrong.
+      expect(flagged).toMatchObject({
+        differenceMicroUsd: 0,
+        reservedDifferenceMicroUsd: 0,
+        strandedHoldCount: 1,
+        strandedHoldMicroUsd: OWN_KEY_DIFF_HOLD,
+        consistent: false,
+      });
+      expect(await findStrandedHolds(fixture.db, 10)).toEqual([
+        { workspaceId: fixture.workspaceId, jobId: job.id },
+      ]);
+
+      await setBillingSwitch(fixture.db, true);
+      await releaseStrandedHolds(fixture.db, fixture.clock.now);
+
+      expect(await journalOf(fixture).verify()).toMatchObject({
+        strandedHoldCount: 0,
+        strandedHoldMicroUsd: 0,
+        consistent: true,
+      });
+      expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
+    },
+  );
+
+  // #591-T03
+  run(
+    "is idempotent: a second run releases nothing and writes nothing",
+    async () => {
+      const fixture = await start();
+      const job = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+
+      expect(await releaseStrandedHolds(fixture.db, fixture.clock.now)).toEqual(
+        { released: 1 },
+      );
+      const after = await journalOf(fixture).entries({ limit: 200 });
+      expect(await releaseStrandedHolds(fixture.db, fixture.clock.now)).toEqual(
+        { released: 0 },
+      );
+
+      expect(await journalOf(fixture).entries({ limit: 200 })).toEqual(after);
+      expect(await entriesOf(fixture, job.id)).toHaveLength(2);
+    },
+  );
+
+  // #591-T04
+  run(
+    "leaves the hold of a running job, of a requeued job and of a settled job alone",
+    async () => {
+      const fixture = await start();
+      const running = await claim(fixture);
+      // A job that ended with billing on is settled in its own transaction.
+      const settled = await claim(fixture);
+      await fixture.queue.complete(
+        settled.job.id,
+        settled.leaseToken,
+        delivered,
+      );
+      // A job that was given back keeps its hold (a requeue never releases) and is not final.
+      const requeued = await claim(fixture);
+      await fixture.queue.release(
+        requeued.job.id,
+        requeued.leaseToken,
+        "worker_exited",
+      );
+      const before = await journalOf(fixture).entries({ limit: 200 });
+
+      expect(await releaseStrandedHolds(fixture.db, fixture.clock.now)).toEqual(
+        { released: 0 },
+      );
+
+      expect(await journalOf(fixture).entries({ limit: 200 })).toEqual(before);
+      expect((await entriesOf(fixture, running.job.id)).map((e) => e.type)).toEqual(
+        ["reservation"],
+      );
+      expect((await entriesOf(fixture, settled.job.id)).map((e) => e.type)).toEqual(
+        ["reservation", "release", "usage"],
+      );
+    },
+  );
+
+  // #591-T05
+  run(
+    "releases a job that ended while billing was off even when it carried a result, and never writes a usage",
+    async () => {
+      const fixture = await start();
+      const job = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+
+      await releaseStrandedHolds(fixture.db, fixture.clock.now);
+
+      const types = (await entriesOf(fixture, job.id)).map((e) => e.type);
+      expect(types).not.toContain("usage");
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        status: "succeeded",
+      });
+    },
+  );
+
+  // #591-T06
+  run(
+    "releases the holds of several workspaces and several jobs of one workspace",
+    async () => {
+      const fixture = await start();
+      const first = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+      const second = await claim(fixture);
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(second.job.id, second.leaseToken, delivered);
+      await setBillingSwitch(fixture.db, true);
+
+      expect(await releaseStrandedHolds(fixture.db, fixture.clock.now)).toEqual(
+        { released: 2 },
+      );
+
+      for (const job of [first, second.job])
+        expect((await entriesOf(fixture, job.id)).map((e) => e.type)).toEqual([
+          "reservation",
+          "release",
+        ]);
+      expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
+    },
+  );
+
+  // #591-T07
+  run(
+    "does the work in batches of the limit it is given, and the next run takes the rest",
+    async () => {
+      const fixture = await start();
+      await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+      const second = await claim(fixture);
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(second.job.id, second.leaseToken, delivered);
+      await setBillingSwitch(fixture.db, true);
+
+      expect(
+        await releaseStrandedHolds(fixture.db, fixture.clock.now, { limit: 1 }),
+      ).toEqual({ released: 1 });
+      expect(await findStrandedHolds(fixture.db, 10)).toHaveLength(1);
+      expect(await releaseStrandedHolds(fixture.db, fixture.clock.now)).toEqual(
+        { released: 1 },
+      );
+    },
+  );
+
+  // #591-T08
+  run(
+    "the sweep entry point does nothing while billing is off, and reads no billing table",
+    async () => {
+      const fixture = await start();
+      await endedWhileOff(fixture);
+      const tables: string[] = [];
+      const spy: KyselyPlugin = {
+        transformQuery({ node }) {
+          const table = describeQuery(node).table;
+          if (table !== undefined) tables.push(table);
+          return node;
+        },
+        async transformResult({ result }) {
+          return result;
+        },
+      };
+
+      const result = await releaseStrandedHoldsWhileBillingOn(
+        fixture.db.withPlugin(spy),
+        fixture.clock.now,
+      );
+
+      expect(result).toEqual({ released: 0 });
+      expect(tables.filter((table) => table.startsWith("billing_"))).toEqual(
+        [],
+      );
+      expect(await findStrandedHolds(fixture.db, 10)).toHaveLength(1);
+    },
+  );
+
+  // #591-T09
+  run(
+    "the sweep entry point releases while billing is on",
+    async () => {
+      const fixture = await start();
+      await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+
+      expect(
+        await releaseStrandedHoldsWhileBillingOn(fixture.db, fixture.clock.now),
+      ).toEqual({ released: 1 });
+      expect(await findStrandedHolds(fixture.db, 10)).toEqual([]);
+    },
+  );
+
+  // #591-T10
+  run(
+    "switching billing on releases the stranded holds in the transaction that writes enabled",
+    async () => {
+      const fixture = await start();
+      const adminId = await insertUser(fixture.db, { id: "admin-591" });
+      const job = await endedWhileOff(fixture);
+      const service = createBillingAdminService({
+        db: fixture.db,
+        secretsOn: (executor) =>
+          createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+        publicUrl: "https://reviews.example.test",
+        clientFor: () => {
+          throw new Error("no outbound call");
+        },
+        now: fixture.clock.now,
+        log: () => undefined,
+      });
+      await service.saveRates(adminId, {
+        factorA: 50_000,
+        minuteRateMicroUsd: { diff: 13_000, dynamic: 16_000 },
+        diffAiReserveMicroUsd: 150_000,
+      });
+      expect((await journalOf(fixture).verify()).strandedHoldCount).toBe(1);
+
+      expect(await service.setEnabled(adminId, true)).toEqual({ ok: true });
+
+      expect((await entriesOf(fixture, job.id)).map((e) => e.type)).toEqual([
+        "reservation",
+        "release",
+      ]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: FUNDING,
+        reservedMicroUsd: 0,
+      });
+    },
+  );
+
+  // #591-T11
+  run(
+    "a switch-on that is refused releases nothing",
+    async () => {
+      const fixture = await start();
+      const adminId = await insertUser(fixture.db, { id: "admin-591b" });
+      await endedWhileOff(fixture);
+      const service = createBillingAdminService({
+        db: fixture.db,
+        secretsOn: (executor) =>
+          createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+        publicUrl: "https://reviews.example.test",
+        clientFor: () => {
+          throw new Error("no outbound call");
+        },
+        now: fixture.clock.now,
+        log: () => undefined,
+      });
+      // No rates are set (the helper wrote only the switch): the service refuses.
+      await setBillingSwitch(fixture.db, false, null);
+
+      const refused = await service.setEnabled(adminId, true);
+
+      expect(refused).toMatchObject({ ok: false, error: "billing_not_ready" });
+      expect(await findStrandedHolds(fixture.db, 10)).toHaveLength(1);
+    },
+  );
+
+  // #591-T12
+  run(
+    "a release racing a settlement and another release leaves exactly one release, and the journal consistent",
+    async () => {
+      const fixture = await start();
+      const job = await claim(fixture);
+      // The job ended without a settlement (billing was off), then billing came back on.
+      await setBillingSwitch(fixture.db, false);
+      await fixture.queue.complete(job.job.id, job.leaseToken, delivered);
+      await setBillingSwitch(fixture.db, true);
+
+      await Promise.all([
+        releaseStrandedHolds(fixture.db, fixture.clock.now),
+        releaseStrandedHolds(fixture.db, fixture.clock.now),
+        fixture.db
+          .transaction()
+          .execute((trx) =>
+            settleEndedJobs(trx, [job.job.id], fixture.clock.now),
+          ),
+      ]);
+
+      const entries = await entriesOf(fixture, job.job.id);
+      expect(entries.filter((e) => e.type === "release")).toHaveLength(1);
+      expect(entries.filter((e) => e.type === "usage").length).toBeLessThanOrEqual(
+        1,
+      );
+      const verified = await journalOf(fixture).verify();
+      expect(verified).toMatchObject({
+        consistent: true,
+        reservedMicroUsd: 0,
+      });
+    },
+  );
+
+  // #591-T13
+  run(
+    "a release racing the claims of other jobs of the workspace never loses a hold or a release",
+    async () => {
+      const fixture = await start();
+      const stranded = await endedWhileOff(fixture);
+      await setBillingSwitch(fixture.db, true);
+      const jobs = await Promise.all(
+        [1, 2, 3].map((n) =>
+          fixture.enqueueNew({ prNumber: 700 + n, headSha: sha(String(n)) }),
+        ),
+      );
+
+      const [, ...claims] = await Promise.all([
+        releaseStrandedHolds(fixture.db, fixture.clock.now),
+        fixture.queue.claimNext("runner-a", ENGINES),
+        fixture.queue.claimNext("runner-b", ENGINES),
+        fixture.queue.claimNext("runner-c", ENGINES),
+      ]);
+
+      expect(claims.every((claimed) => claimed !== null)).toBe(true);
+      expect(
+        (await entriesOf(fixture, stranded.id)).map((e) => e.type),
+      ).toEqual(["reservation", "release"]);
+      const verified = await journalOf(fixture).verify();
+      expect(verified).toMatchObject({ consistent: true });
+      // Only the three new holds are reserved.
+      expect(verified.reservedMicroUsd).toBe(3 * OWN_KEY_DIFF_HOLD);
+      expect(jobs).toHaveLength(3);
+    },
+  );
+});
