@@ -43,7 +43,12 @@ import {
   type DynamicModelCheck,
 } from "./dynamic-check.ts";
 import { isNativeProvider, nativeDynamicChoice } from "./native-choice.ts";
-import type { NativeCatalogReader } from "../native-providers/catalog.ts";
+import type { NativeSelectionSource } from "../native-providers/catalog.ts";
+import {
+  pinAfterSave,
+  providerAddressView,
+  type ProviderAddressView,
+} from "./provider-pin.ts";
 import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
@@ -150,7 +155,15 @@ export type ProjectDynamicView = {
    * The project-only fields this project sets. The catalog entries are not here: they are `catalogSelection` of the
    * project view, and only for a workspace on the operator's key (#430).
    */
-  overrides: Omit<ProjectDynamicOverrides, ProjectCatalogField>;
+  overrides: Omit<
+    ProjectDynamicOverrides,
+    ProjectCatalogField | "dynamicProviderAddress"
+  >;
+  /**
+   * The address pinned for the project's catalog provider and what the catalog trusts for it now (#588); `null` when the
+   * project selects no catalog provider, and for a workspace on the operator's key.
+   */
+  providerAddress: ProviderAddressView | null;
   /** The kind, Dynamic model and skill a review would use. */
   effective: {
     reviewKind: ProjectReviewKind;
@@ -231,6 +244,16 @@ export type ReviewSettingsService = {
    */
   resetProjectSettings(repositoryId: string): Promise<ProjectSettingsView>;
   /**
+   * The claim of a job on a selection made before pins existed (#588): pins `address`, the one the claim is about to send the key
+   * to, unless the project has a pin already. Answers the pin in force, so a claim that lost a race to another pin holds to that
+   * one; null when the project no longer selects `provider` (a raced settings change).
+   */
+  adoptProviderAddress(
+    repositoryId: string,
+    provider: string,
+    address: string,
+  ): Promise<string | null>;
+  /**
    * The settings a review of the repository's project uses (project over global over built-in), or
    * undefined when the repository has no project row. It also answers for a row that is switched off
    * (one that only holds saved settings), so it is **not** a gate: the claim, the webhook intake and
@@ -304,6 +327,9 @@ function dynamicModelFieldsOf(
   if (layer.dynamicModel !== undefined) kept.dynamicModel = layer.dynamicModel;
   if (layer.dynamicProvider !== undefined)
     kept.dynamicProvider = layer.dynamicProvider;
+  // The pin belongs to the provider it was made for and travels with it (#588).
+  if (layer.dynamicProviderAddress !== undefined)
+    kept.dynamicProviderAddress = layer.dynamicProviderAddress;
   return kept;
 }
 
@@ -315,6 +341,15 @@ function catalogFieldsOf(layer: ProjectDynamicOverrides): ProjectSettings {
     if (typeof entry === "string") kept[field] = entry;
   }
   return kept;
+}
+
+/** The pin is the server's: the view shows it as `providerAddress`, never as an override a client could send back. */
+function withoutServerFields<T extends { dynamicProviderAddress?: unknown }>(
+  layer: T,
+): Omit<T, "dynamicProviderAddress"> {
+  const copy = { ...layer };
+  delete copy.dynamicProviderAddress;
+  return copy;
 }
 
 function withoutCatalogFields<
@@ -437,6 +472,8 @@ function mergeProjectSettings(
   current: ProjectSettings,
   patch: ProjectSettingsPatch,
   providers: ProviderLookup,
+  /** The address the catalog trusts for the provider the project has after the save, when it is a catalog provider (#588). */
+  trusted: { provider: string; address: string } | undefined,
 ): ProjectSettings {
   const hasDiffFields = Object.keys(patch.review).length > 0;
   const hasProjectFields = Object.keys(patch.dynamic).length > 0;
@@ -463,6 +500,22 @@ function mergeProjectSettings(
   // A `null` provider or catalog entry is an explicit "follow the default again" (#430).
   if (dynamic.dynamicProvider !== undefined && dynamic.dynamicProvider !== null)
     next.dynamicProvider = dynamic.dynamicProvider;
+  // #588: the address of the catalog provider, written when it is selected or confirmed and kept otherwise.
+  const pin = pinAfterSave({
+    nextProvider: next.dynamicProvider,
+    storedProvider: storedDynamic.dynamicProvider,
+    storedPin: storedDynamic.dynamicProviderAddress,
+    native:
+      next.dynamicProvider !== undefined &&
+      isNativeProvider(next.dynamicProvider),
+    // Read before the transaction for the provider the request implied; a provider that changed meanwhile has no address here.
+    trusted:
+      trusted !== undefined && trusted.provider === next.dynamicProvider
+        ? trusted.address
+        : undefined,
+    confirm: patch.confirmProviderAddress === true,
+  });
+  if (pin !== undefined) next.dynamicProviderAddress = pin;
   for (const field of PROJECT_CATALOG_FIELDS) {
     const entry = dynamic[field];
     if (typeof entry === "string") next[field] = entry;
@@ -539,7 +592,7 @@ export function createReviewSettingsService(deps: {
    * model listed. Only read for a workspace on its own key and a Dynamic provider outside the registry. Default: an empty
    * catalog, so such a choice is refused.
    */
-  nativeCatalog?: Pick<NativeCatalogReader, "checkSelection">;
+  nativeCatalog?: NativeSelectionSource;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
@@ -620,7 +673,8 @@ export function createReviewSettingsService(deps: {
     });
     const view: ProjectDynamicView = {
       // The catalog entries are shown as the catalog view of the project, and only to a workspace that uses them.
-      overrides: withoutCatalogFields(overrides),
+      overrides: withoutServerFields(withoutCatalogFields(overrides)),
+      providerAddress: null,
       effective: {
         reviewKind: effective.reviewKind,
         dynamicModel: effective.dynamicModel,
@@ -706,7 +760,10 @@ export function createReviewSettingsService(deps: {
       projectId: project?.id ?? null,
       active: project?.active ?? false,
       inherited: managed ? withoutModelFields(inherited) : inherited,
-      dynamic: dynamicView(project, managed),
+      dynamic: {
+        ...dynamicView(project, managed),
+        providerAddress: await providerAddressOf(project, managed),
+      },
       catalogChoices: managed ? await catalogChoices(catalog, selection) : null,
       catalogSelection: managed ? selection : null,
     };
@@ -785,6 +842,53 @@ export function createReviewSettingsService(deps: {
             choice.model ?? "",
           );
     if (!found.ok) refuse("MODEL_NOT_IN_CATALOG");
+  }
+
+  /**
+   * The address the catalog trusts for the catalog provider a save leaves the project with (#588), read before the write. A
+   * person who confirms the address needs one: the project must select a catalog provider that the catalog still offers.
+   */
+  async function trustedAddressFor(
+    choice: { provider: string } | null,
+    confirm: boolean,
+  ): Promise<{ provider: string; address: string } | undefined> {
+    const address =
+      choice === null || deps.nativeCatalog === undefined
+        ? undefined
+        : await deps.nativeCatalog.addressOf(choice.provider);
+    if (choice !== null && address !== undefined)
+      return { provider: choice.provider, address };
+    if (confirm)
+      throw new ReviewSettingsError(
+        "REVIEW_SETTINGS_INVALID",
+        "Some settings are not valid.",
+        [
+          {
+            field: "confirmProviderAddress",
+            code: "PROVIDER_ADDRESS_NOT_PINNABLE",
+          },
+        ],
+      );
+    return undefined;
+  }
+
+  /** What the settings page shows of the pinned address; null when the project selects no catalog provider or the workspace is managed. */
+  async function providerAddressOf(
+    project: StoredProject | undefined,
+    managed: boolean,
+  ): Promise<ProviderAddressView | null> {
+    if (managed) return null;
+    const stored = parseDynamic(project?.settings);
+    if (
+      stored.dynamicProvider === undefined ||
+      !isNativeProvider(stored.dynamicProvider)
+    )
+      return null;
+    const current =
+      deps.nativeCatalog === undefined
+        ? undefined
+        : await deps.nativeCatalog.addressOf(stored.dynamicProvider);
+    return providerAddressView(stored.dynamicProviderAddress, current);
   }
 
   /**
@@ -881,6 +985,10 @@ export function createReviewSettingsService(deps: {
         (await projects.get(repositoryId))?.settings,
       );
       if (!managed) await refuseUnfitNativeChoice(patch.dynamic, storedDynamic);
+      const trusted = await trustedAddressFor(
+        managed ? null : nativeDynamicChoice(patch.dynamic, storedDynamic),
+        patch.confirmProviderAddress === true,
+      );
       const toCheck = dynamicModelToCheck(
         patch.dynamic,
         storedDynamic,
@@ -905,7 +1013,12 @@ export function createReviewSettingsService(deps: {
       const project = await projects.updateSettingsWith(
         repositoryId,
         (current) => {
-          const merged = mergeProjectSettings(current, patch, providers);
+          const merged = mergeProjectSettings(
+            current,
+            patch,
+            providers,
+            trusted,
+          );
           // Own key mode only: a managed workspace selects an entry, not a provider and a model. A pairing the project
           // already had is not blamed again, as for a change of the workspace default.
           if (
@@ -945,6 +1058,30 @@ export function createReviewSettingsService(deps: {
       );
       if (project === undefined) throw notFound();
       return { ...(await projectView(repositoryId, project)), warnings };
+    },
+
+    async adoptProviderAddress(repositoryId, provider, address) {
+      let inForce: string | null = null;
+      const project = await projects.updateSettingsWith(
+        repositoryId,
+        (current) => {
+          const stored = parseDynamic(current);
+          if (
+            stored.dynamicProvider !== provider ||
+            !isNativeProvider(provider)
+          ) {
+            inForce = null;
+            return current;
+          }
+          if (stored.dynamicProviderAddress !== undefined) {
+            inForce = stored.dynamicProviderAddress;
+            return current;
+          }
+          inForce = address;
+          return { ...current, dynamicProviderAddress: address };
+        },
+      );
+      return project === undefined ? null : inForce;
     },
 
     async resetProjectSettings(repositoryId) {

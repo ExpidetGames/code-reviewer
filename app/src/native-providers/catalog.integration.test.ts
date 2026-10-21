@@ -340,6 +340,37 @@ describe.each(MODELS_DEV_ENGINES)(
       );
     });
 
+    describe("the address a selection is pinned to", () => {
+      // #588-T01
+      it_(
+        "is the address the catalog trusts for an offered provider",
+        async () => {
+          const { reader } = await setup();
+
+          expect(await reader.addressOf("deepseek")).toBe(
+            "https://api.deepseek.example",
+          );
+          expect(await reader.addressOf("fireworks_ai")).toBe(
+            "https://api.fireworks-ai.example",
+          );
+        },
+      );
+
+      // #588-T02
+      it_("is none for a provider that is not offered", async () => {
+        const { reader } = await setup();
+
+        for (const slug of [
+          "google",
+          "amazon_bedrock",
+          "openrouter",
+          "xai",
+          "nope",
+        ])
+          expect(await reader.addressOf(slug)).toBeUndefined();
+      });
+    });
+
     describe("a model a claim has to serve", () => {
       function entries(db: Awaited<ReturnType<typeof setup>>["db"]) {
         return createNativeCostService({

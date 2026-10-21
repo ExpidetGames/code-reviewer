@@ -99,3 +99,63 @@ describe("a catalog provider in the settings of a project", () => {
     ).toEqual({});
   });
 });
+
+describe("the address a project pins for its catalog provider (#588)", () => {
+  // #588-T03
+  it("is written by the server and never by a request: the field is unknown to a save", () => {
+    expect(
+      validateProjectSettingsPatch({
+        dynamicProvider: "deepseek",
+        dynamicProviderAddress: "https://attacker.example",
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [{ field: "dynamicProviderAddress", code: "UNKNOWN_FIELD" }],
+    });
+  });
+
+  // #588-T04
+  it("is confirmed anew by a request that says so, and only by `true`", () => {
+    expect(
+      validateProjectSettingsPatch({ confirmProviderAddress: true }),
+    ).toEqual({
+      ok: true,
+      value: { review: {}, dynamic: {}, confirmProviderAddress: true },
+    });
+    for (const value of [false, "true", 1, null])
+      expect(
+        validateProjectSettingsPatch({ confirmProviderAddress: value }),
+      ).toEqual({
+        ok: false,
+        issues: [{ field: "confirmProviderAddress", code: "INVALID_TYPE" }],
+      });
+  });
+
+  // #588-T05
+  it("is read from a stored project as a plain https address, and dropped when it is anything else", () => {
+    expect(
+      parseStoredProjectDynamicOverrides({
+        dynamicProvider: "deepseek",
+        dynamicModel: "deepseek-v4-pro",
+        dynamicProviderAddress: "https://api.deepseek.example/v1",
+      }),
+    ).toEqual({
+      dynamicProvider: "deepseek",
+      dynamicModel: "deepseek-v4-pro",
+      dynamicProviderAddress: "https://api.deepseek.example/v1",
+    });
+    for (const dynamicProviderAddress of [
+      "http://api.deepseek.example",
+      "api.deepseek.example",
+      42,
+      null,
+      `https://${"a".repeat(2100)}.example`,
+    ])
+      expect(
+        parseStoredProjectDynamicOverrides({
+          dynamicProvider: "deepseek",
+          dynamicProviderAddress,
+        }),
+      ).toEqual({ dynamicProvider: "deepseek" });
+  });
+});

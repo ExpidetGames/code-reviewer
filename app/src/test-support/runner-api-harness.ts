@@ -68,7 +68,7 @@ import { startGithubAppHarness } from "./github-app-harness.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
 import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
-import type { NativeCatalogReader } from "../native-providers/catalog.ts";
+import type { NativeSelectionSource } from "../native-providers/catalog.ts";
 
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
@@ -132,7 +132,7 @@ export async function startRunnerApiHarness(
      * #555: the catalog of providers and models a project may pick for Dynamic Review (the save of the settings). The claim
      * serves the model from `nativeCost.entryFor`, never from this reader.
      */
-    nativeCatalog?: Pick<NativeCatalogReader, "checkSelection">;
+    nativeCatalog?: NativeSelectionSource;
     /**
      * #432: the providers of the app, for a test that brings a second one (`createFakeAdapter`). The key services, the
      * claim and the selection all use it. Default: the registry of the app.

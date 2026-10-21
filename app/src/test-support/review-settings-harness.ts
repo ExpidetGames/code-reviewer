@@ -24,7 +24,7 @@ import {
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 import type { ProviderLookup } from "../review-settings/validate.ts";
-import type { NativeCatalogReader } from "../native-providers/catalog.ts";
+import type { NativeSelectionSource } from "../native-providers/catalog.ts";
 
 export const TEST_MODEL = "deepseek/deepseek-v3.2";
 
@@ -70,7 +70,7 @@ export async function setupReviewSettings(
     /** #430: a registry with a second provider; default the registry of the app. */
     providers?: ProviderLookup;
     /** #555: the catalog a Dynamic provider outside the registry is checked against; default none. */
-    nativeCatalog?: Pick<NativeCatalogReader, "checkSelection">;
+    nativeCatalog?: NativeSelectionSource;
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;

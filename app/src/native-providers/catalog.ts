@@ -68,7 +68,18 @@ export type NativeCatalogReader = {
   models(slug: string): Promise<NativeModelView[] | undefined>;
   /** Whether a project may save this provider and model: only a listed model of an offered provider. */
   checkSelection(slug: string, modelId: string): Promise<NativeChoice>;
+  /**
+   * The address the catalog trusts for an offered provider, in the one spelling the claim and the runner accept, or undefined
+   * when the provider is not offered (#588). A selection pins it when it is made; a claim and the key test hold to the pin.
+   */
+  addressOf(slug: string): Promise<string | undefined>;
 };
+
+/** What the settings save needs of the catalog: the model check and the address a selection pins (#588). */
+export type NativeSelectionSource = Pick<
+  NativeCatalogReader,
+  "checkSelection" | "addressOf"
+>;
 
 export type NativeCatalogDependencies = {
   models: Pick<
@@ -164,6 +175,11 @@ export function createNativeCatalogReader({
         .filter((model) => model.unlistedAt === null)
         .map(viewOf)
         .sort(byId);
+    },
+
+    async addressOf(slug) {
+      // `offered` has checked that the address is trusted and canonical.
+      return (await offeredProvider(slug))?.url.trustedUrl ?? undefined;
     },
 
     async checkSelection(slug, modelId) {
