@@ -23,7 +23,10 @@ import {
 } from "../llm/selection.ts";
 import type { CatalogService } from "../model-catalog/service.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
-import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
+import {
+  noLimits,
+  type ResolvedEntitlements,
+} from "../workspaces/entitlements.ts";
 import type { JobOptions } from "./job-options.ts";
 
 /** What the claim asks the catalog: one entry by id, and the instance defaults. Both are read for a managed job only. */
@@ -144,14 +147,21 @@ export async function selectModel(
       layers: layersOf(options, kind),
     };
   else {
-    // `keyModeForJob` answers `managed` for limited entitlements only.
-    if (entitlements.kind !== "limited") return failedClosed();
+    // `keyModeForJob` answers `managed` for limited entitlements, and for a workspace without entitlements that chose our models
+    // while billing is on (#496): it has no list of entries, so it may use every released one.
+    const subject =
+      entitlements.kind === "unlimited"
+        ? noLimits("managed")
+        : entitlements.kind === "limited"
+          ? entitlements
+          : undefined;
+    if (subject === undefined) return failedClosed();
     const projectEntryId = options.selection?.entryId ?? null;
     input = {
       keyMode,
       kind,
       runnerProviders,
-      entitlements,
+      entitlements: subject,
       projectEntryId,
       ...(await managedEntries(deps, kind, projectEntryId)),
     };

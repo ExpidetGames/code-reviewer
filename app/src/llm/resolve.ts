@@ -84,11 +84,14 @@ export type ResolveLlmInput =
   /** The entitlements of the workspace cannot be read. */
   | { keyMode: "unreadable"; defaults: Defaults };
 
-/** Whose key a job of a workspace with these entitlements uses; `unreadable` when that cannot be known. */
+/**
+ * Whose key a job of a workspace with these entitlements uses; `unreadable` when that cannot be known. The entitlements are the
+ * effective ones (`readEffectiveEntitlements`): while billing is on their key mode is the workspace's choice (#496).
+ */
 export function keyModeForJob(
   entitlements: ResolvedEntitlements,
 ): KeyMode | "unreadable" {
-  if (entitlements.kind === "unlimited") return "own";
+  if (entitlements.kind === "unlimited") return entitlements.keyMode ?? "own";
   if (entitlements.kind === "invalid") return "unreadable";
   return entitlements.keyMode;
 }

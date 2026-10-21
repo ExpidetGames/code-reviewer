@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { isBillingOn } from "../billing/enabled.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
@@ -258,6 +259,11 @@ describe.each(databases)("the claim with billing on %s", (name, open) => {
           diffAiReserveMicroUsd: 150_000,
         },
       });
+      // Billing on: a workspace that has not chosen is on our models (#496); this one chose its own key.
+      await createLlmKeyModeStore(fixture.db, fixture.workspaceId).set(
+        "own",
+        null,
+      );
       const job = await enqueue(fixture);
 
       const claimed = await fixture.queue.claimNext("runner-a", ENGINES);

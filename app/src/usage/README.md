@@ -60,9 +60,10 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
     `ownKeyCostLimitMicroUsd` of the period it started in.
 - **Reserve.** `claimNext` inserts the record in the transaction of the claim, so a job a runner holds always has
   one. A job claimed again after a lost lease keeps its record (`job_id` is unique): it never counts twice.
-  The claim does not know the key yet, so the record starts as `own`; the claim route corrects it with `setKeyMode`
-  when the LLM access is resolved (`own` for the workspace's key, `managed` for the operator's). Only a `reserved`
-  record can be corrected.
+  The record is reserved with the key mode the claim decided in that transaction (#496: the entitlements', or the workspace's
+  own choice while billing is on); the claim route, the Worker's fetch and the settlement read it from the record and never
+  decide it again, so a choice made after the claim does not reach the run. A job claimed again after a lost lease keeps its one
+  record and takes the key mode of the new claim (`setKeyMode`, only on a `reserved` record).
 - **Settle.** `complete` settles the record from the result, in the transaction that ends the job:
   a reported usage settles it with its cost (possibly null: an unknown cost is `settled`, never `void`, and never
   zero) and tokens, whatever the outcome; a run that succeeded without any usage is settled with everything
@@ -169,12 +170,10 @@ entitlements still stop it, and its record is then voided.
 - **Which runs a cost limit watches (#361).** Each limit watches one key mode, **decided by the record, not by the
   entitlements now**: the sum of a key mode counts the settled records whose own `key_mode` is that mode, and the
   claim checks the limit of the key mode the job will run on. That key mode is known at claim time: the key mode of the
-  entitlements picks the key (#276, `keyModeForJob`). The check uses the entitlements the claim itself read inside its
-  transaction, so its one-transaction check and reservation stay as they are. The claim route then resolves the access
-  with a read of its own and corrects the record to the key the job really uses on both claim paths (`setKeyMode`), so a
-  limit counts exactly the runs that spent that key. **Window:** if an operator switches the key mode between the two
-  reads, that one job is admitted against the limit of the other key; its record is still counted under the key it used,
-  so the sums stay right, and with a soft cap this is accepted.
+  entitlements picks the key (#276, `keyModeForJob`); while billing is on it is the workspace's own choice, our models by default (#496). The check uses the entitlements the claim itself read inside its
+  transaction, and reserves the record with that key mode in the same transaction; the key the job is given follows the
+  record (#496), so a limit counts exactly the runs that spent that key and there is no window between the admission and
+  the key.
   A workspace switched between `own` and `managed` in the middle of a period keeps the records of each mode
   under the limit of that mode: the own-key records stay under `ownKeyCostLimitMicroUsd` while it is `managed`, and
   come back into play if it is switched back. A key mode `managed` whose operator key is missing is not a quota matter

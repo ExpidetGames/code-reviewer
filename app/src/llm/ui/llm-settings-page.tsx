@@ -10,6 +10,7 @@ import type { LlmKeyApi } from "./api.ts";
 import {
   LlmAccessSection,
   type CatalogProvidersData,
+  type KeyChoice,
 } from "./llm-access-section.tsx";
 
 export function LlmSettingsPageContent({
@@ -18,6 +19,7 @@ export function LlmSettingsPageContent({
   keyStatuses,
   catalog,
   summary,
+  keyChoice,
   showPlan = false,
   showBilling = false,
   api,
@@ -30,6 +32,8 @@ export function LlmSettingsPageContent({
   /** The providers of the catalog (#555); absent for a workspace on the instance's access. */
   catalog?: CatalogProvidersData;
   summary: WorkspaceLlmSummary;
+  /** Billing is on (#496): what the workspace chose, and whether it has a key of its own. Left out, there is no choice to make. */
+  keyChoice?: KeyChoice;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
   /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
@@ -51,6 +55,7 @@ export function LlmSettingsPageContent({
           keyStatuses={keyStatuses}
           {...(catalog === undefined ? {} : { catalog })}
           summary={summary}
+          {...(keyChoice === undefined ? {} : { keyChoice })}
           {...(api === undefined ? {} : { api })}
         />
       </div>

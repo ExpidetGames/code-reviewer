@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The LLM access of a workspace, put together over a database: the key service of the workspace, the operator's
-// key, the access a job of the workspace gets (src/llm/resolve.ts: the key mode of its entitlements decides whose
-// key it is) and what the pages may show. The same code serves the running server (shared.ts) and the tests,
+// key, the access a job of the workspace gets (src/llm/resolve.ts: the key mode of its entitlements, or the workspace's choice while
+// billing is on, decides whose key it is) and what the pages may show. The same code serves the running server (shared.ts) and the tests,
 // which build it over a test database and a chosen environment.
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { createWorkspaceSecretStore } from "../secrets/workspace-store.ts";
+import { isBillingOn } from "../billing/enabled.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import {
   type LlmAccessResult,
@@ -212,10 +213,17 @@ export function createWorkspaceLlm({
         const own = await service.keyFor(provider);
         if (own.state === "key") keys.push(own.apiKey);
       }
-      const mode = keyModeForJob(
-        await readEffectiveEntitlements(db, workspaceId, now),
-      );
-      if (mode !== "managed") return keys;
+      // While billing is on the workspace can change its key mode at any moment, and a review that started on our key is not
+      // stopped by it (#496): its result must still be masked with the operator's key. The switch is read once; the key mode of
+      // the entitlements only matters while it is off.
+      const billing = { on: await isBillingOn(db) };
+      if (
+        !billing.on &&
+        keyModeForJob(
+          await readEffectiveEntitlements(db, workspaceId, now, billing),
+        ) !== "managed"
+      )
+        return keys;
       const operators = operatorKey();
       for (const id of providers.ids) {
         const operator = await operators.forJob(id);
