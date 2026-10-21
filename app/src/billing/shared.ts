@@ -277,13 +277,24 @@ export function recordWallClocks(jobIds: readonly string[]): void {
 export function deliverBalanceMails(): void {
   runAfterResponse(async () => {
     try {
-      await deliverDueBalanceMails({
-        db: getDatabase(),
-        mail: getMailSender(),
-        baseUrl: publicAddress(),
-      });
+      await deliverDueBalanceMailsNow();
     } catch {
       console.error("[billing] BALANCE_MAIL_FAILED code=unavailable");
     }
+  });
+}
+
+/**
+ * The same delivery, awaited, for the timers that have no response to run after: the cron sweep and the hourly timer of a server
+ * (#506), which mail what a settlement without a hook of its own (a sweep, a superseded job) left due. Billing off: a no-op.
+ */
+export function deliverDueBalanceMailsNow(): Promise<{
+  delivered: number;
+  failed: number;
+}> {
+  return deliverDueBalanceMails({
+    db: getDatabase(),
+    mail: getMailSender(),
+    baseUrl: publicAddress(),
   });
 }

@@ -13,6 +13,7 @@ import {
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
 import { createFakeMail } from "../test-support/fake-mail.ts";
+import { afterQueryPlugin } from "../test-support/query-hook.ts";
 import { insertUser } from "../test-support/users.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
 
@@ -110,6 +111,40 @@ for (const engine of BILLING_ENGINES) {
       await Promise.all([t.deliver(), t.deliver(), t.deliver()]);
 
       expect(t.mail.outbox).toHaveLength(2);
+    });
+
+    // #506-T15
+    it("sends one mail to each recipient when two deliveries both saw the crossing as due before either claimed it", async () => {
+      const t = await start();
+      await t.topUp(10 * USD);
+      await t.charge(6 * USD);
+      // Each delivery is held after its read of the due crossings until the other has read them too, so both hold the same
+      // candidate and only the guard of the claim (`delivery = 'due'`) decides which of them sends.
+      let arrived = 0;
+      let release: () => void = () => undefined;
+      const both = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const rendezvous = afterQueryPlugin(async (query) => {
+        if (query.kind !== "select" || query.table !== "billing_notifications")
+          return;
+        arrived += 1;
+        if (arrived >= 2) release();
+        await Promise.race([both, new Promise((r) => setTimeout(r, 2_000))]);
+      });
+      const run = () =>
+        deliverDueBalanceMails({
+          db: t.db.withPlugin(rendezvous),
+          mail: t.mail,
+          baseUrl: BASE_URL,
+          log: (line) => t.logged.push(line),
+        });
+
+      const results = await Promise.all([run(), run()]);
+
+      expect(arrived).toBe(2);
+      expect(t.mail.outbox).toHaveLength(2);
+      expect(results.map((result) => result.delivered).sort()).toEqual([0, 1]);
     });
 
     // #506-T03
