@@ -21,7 +21,9 @@ import { describe, expect, it } from "vitest";
 const SCOPED = [
   "app-settings-repository.ts",
   "billing-journal-repository.ts",
+  "billing-profiles-repository.ts",
   "billing-topup-intents-repository.ts",
+  "billing-workspace-settings-repository.ts",
   "installation-link-requests-repository.ts",
   "integrations-repository.ts",
   "invitations-repository.ts",
@@ -82,6 +84,8 @@ const SCOPED = [
  *   lists, the answer names its own workspace, and the one statement that uses a token up and the check of the member's
  *   role both run on the workspace the token was made for. Making a token goes through the scoped plan handoff tokens
  *   repository; the clean-up deletes expired rows of every workspace and reads nothing;
+ * - own-key-count: how many workspaces hold a stored own LLM key (#504), for the instance admin who is about to switch billing
+ *   on; it counts across workspaces, takes no argument, and returns one number, no row and no name;
  * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
  *   only by the runner API when that job is completed (the job and its workspace are known there); it never
  *   lists, and a key is only ever looked up by the id of a job the caller holds;
@@ -101,12 +105,22 @@ const SCOPED = [
  *   is known; it only reads, an intent is found only for the adapter that created it, and every answer names its
  *   workspace, which is where everything that follows goes (the scoped intents repository and the journal of that
  *   workspace);
+ * - billing-holds-sweep: the reservations of ended jobs that nobody released (#591), for the sweep and the switch-on that
+ *   serve the whole instance; it only reads, driven by the workspaces that have something reserved, and every answer names
+ *   its workspace, which is where the release goes (the journal repository of that workspace);
+ * - billing-start-credit-grants: which GitHub accounts were granted the start credit (#507). The credit is tied to the
+ *   account of an installation, which no workspace owns, so it is asked across workspaces and the row outlives the
+ *   workspace. A numeric account id, a workspace id and a time; no name, login or address, so it is not customer data;
  * - billing-webhook-events: the record of provider events by `(provider, event id)` (#497): an id, an outcome and the
- *   order of the states of a refund or dispute. No payload, no amount and no workspace, so it is not customer data.
+ *   order of the states of a refund or dispute, and for an event under review the ids of our own top-up and workspace it belongs to and
+ *   what an operator recorded when closing it (#603: their id, time and note, and the journal entry). No payload, no amount and no
+ *   buyer, so it is not customer data.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "billing-holds-sweep.ts",
+  "billing-start-credit-grants-repository.ts",
   "billing-topup-intent-directory-repository.ts",
   "billing-webhook-events-repository.ts",
   "catalog-repository.ts",
@@ -124,6 +138,7 @@ const INSTANCE_LEVEL = [
   "model-enablements-repository.ts",
   "model-price-confirmations-repository.ts",
   "models-dev-repository.ts",
+  "own-key-count-repository.ts",
   "plan-handoff-redeem-repository.ts",
   "rate-limits-repository.ts",
   "refusal-notices-sweep.ts",

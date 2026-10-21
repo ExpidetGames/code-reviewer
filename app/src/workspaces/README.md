@@ -237,7 +237,11 @@ is bound to a workspace by an Owner or Admin (`manage_connections`) through "Con
 rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
 (`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
 in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). "Manage plan"
-(`manage_plan`, an Admin or an Owner) hands the person over to the operator-configured plan page (`src/plan-handoff/`). The workspace
+(`manage_plan`, an Admin or an Owner) hands the person over to the operator-configured plan page (`src/plan-handoff/`). The billing profile and the top-up of
+the prepaid balance (`manage_billing`, an Admin or an Owner) are in `src/billing/`; so is the optional monthly total limit of the workspace
+(`GET` and `PUT /api/w/:workspace/billing/monthly-limit`, the same role, #499), which refuses a review at the claim when the month's charges plus its hold
+would pass it. While billing is on the per-period run quotas of the entitlements (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`) are not enforced and the plan
+page shows none (`src/usage/README.md`); with billing off they apply as before. The workspace
 pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the variables are the
 instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
 "LLM not configured" tells a Member to ask an Admin or an Owner of the workspace (`src/llm/ui/`).

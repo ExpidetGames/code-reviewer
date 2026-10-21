@@ -37,11 +37,30 @@ export function toUsd(value: number): Usd {
   return value as Usd;
 }
 
+declare const providerAmountBrand: unique symbol;
+
 /**
  * An amount as the provider reports it: a positive whole number in ITS unit (a minor unit of the buyer's currency, tax
- * included). Only meaningful next to the `paymentAmount` in the same unit; it is never added to a ledger amount.
+ * included). Only meaningful next to the amount of the whole payment in the same unit; it is never added to a ledger
+ * amount. Branded like `Usd`, so a micro-USD value cannot be passed as a provider's amount (or the reverse) unseen:
+ * `toProviderAmount` is the way in.
  */
-export type ProviderAmount = number;
+export type ProviderAmount = number & { readonly [providerAmountBrand]: true };
+
+/** A provider's amount from a number: a positive safe integer or `amount_out_of_range`. */
+export function toProviderAmount(value: number): ProviderAmount {
+  if (!Number.isSafeInteger(value) || value <= 0)
+    throw new BillingAdapterError(
+      "amount_out_of_range",
+      "a provider amount is a positive whole number",
+    );
+  return value as ProviderAmount;
+}
+
+/** A currency as a provider names it in an event: three lower case letters (an ISO 4217 code). */
+export function isProviderCurrency(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z]{3}$/.test(value);
+}
 
 /** An opaque id at the provider (a payment, a checkout session, a refund, a dispute, a customer). No data. */
 export type ProviderRef = string;
@@ -58,6 +77,18 @@ export const BILLING_ADAPTER_ERROR_CODES = [
   "adapter_id_duplicate",
   /** An adapter handed over an event that breaks the rules of a normalized event. */
   "event_invalid",
+  /** A top-up at a provider that needs the buyer's customer object was started without one. */
+  "customer_missing",
+  /** The provider is not set up (no usable credential): nothing was sent. */
+  "provider_not_configured",
+  /** The provider did not answer in time, could not be reached, failed or is limiting the app: the request may be tried again. */
+  "provider_unavailable",
+  /** The provider refused the request, or answered with something the app cannot read: trying again will not help. */
+  "provider_rejected",
+  /** The provider did not accept the buyer's VAT ID. */
+  "vat_id_rejected",
+  /** The provider is still working on the very same request (a second click while the first runs): nothing is wrong. */
+  "request_in_progress",
 ] as const;
 export type BillingAdapterErrorCode =
   (typeof BILLING_ADAPTER_ERROR_CODES)[number];
@@ -110,6 +141,8 @@ export type BillingCapabilities = {
   currencies: readonly BillingCurrency[];
   /** The provider may refund or concede a dispute by itself within this window, whatever our policy is. */
   providerMayRefund: { windowDays: number } | null;
+  /** A top-up goes through the provider's checkout page. False: there is none and the operator adds credit by hand. */
+  checkout: boolean;
   /** A top-up needs the workspace's billing profile first. */
   requiresBillingProfile: boolean;
   /** Who issues receipts and invoices. */
@@ -135,12 +168,15 @@ export interface BillingAdapter {
   readonly id: string;
   readonly capabilities: BillingCapabilities;
   /**
-   * Makes sure the provider knows the buyer, from the billing profile; idempotent. `null` when the provider has no
-   * such object (the `manual` adapter).
+   * Makes sure the provider knows the buyer, from the billing profile: creates the customer, or brings the one the
+   * application holds (`customer`, the id it stored from an earlier call, or null) up to date; idempotent. A customer the
+   * provider no longer knows is made again. Returns the id to store. `null` when the provider has no such object (the
+   * `manual` adapter).
    */
   ensureCustomer(input: {
     workspace: WorkspaceRef;
     profile: BillingProfile;
+    customer: ProviderRef | null;
   }): Promise<ProviderRef | null>;
   /**
    * Starts a top-up for an intent the application wrote FIRST (the intent id is the idempotency key at the provider and
@@ -157,6 +193,15 @@ export interface BillingAdapter {
     session: ProviderRef | null;
     payment: ProviderRef | null;
   }>;
+  /**
+   * Asks the provider about the page of a top-up that has one already (`createTopUpCheckout` returned its `session`): the
+   * address while the buyer can still use it, or `closed` (paid, expired, or unknown to the provider). Never makes a page,
+   * so a repeat of a start after the provider forgot its idempotency key cannot make a second one for the same intent.
+   * Absent when the adapter has no checkout.
+   */
+  resumeTopUpCheckout?(input: {
+    checkout: ProviderRef;
+  }): Promise<{ kind: "open"; url: string } | { kind: "closed" }>;
   /**
    * Checks the signature of a webhook over the exact bytes of its body and parses it into ONE normalized event. A body
    * is data until its signature is verified. `rawBody` is the bytes as received, not decoded text: a signature is a MAC
@@ -177,7 +222,7 @@ export interface BillingAdapter {
   }): Promise<WebhookResult>;
   /**
    * Asks the provider what became of a top-up and returns it as a normalized payment event (`payment.succeeded`,
-   * `payment.failed` or `payment.expired`), or null when the provider knows nothing of it (yet) or the object is gone
+   * `payment.refused`, `payment.failed` or `payment.expired`), or null when the provider knows nothing of it (yet) or the object is gone
    * (a `resource_missing` is normal, never an error). It is the one outbound call of the adapter, made in a user's
    * request (#502's "Check payment"), never in the webhook; the event goes through `applyBillingEvent` like a webhook's,
    * so a lost webhook, a late one and a click are idempotent together. Absent when the provider cannot be asked (the
@@ -193,7 +238,13 @@ export interface BillingAdapter {
 /** What a lookup of a top-up may answer. */
 export type TopUpLookupEvent = Extract<
   BillingEvent,
-  { type: "payment.succeeded" | "payment.failed" | "payment.expired" }
+  {
+    type:
+      | "payment.succeeded"
+      | "payment.refused"
+      | "payment.failed"
+      | "payment.expired";
+  }
 >;
 
 export type WebhookResult =
@@ -263,6 +314,30 @@ export type BillingEvent =
       gross: Usd;
       /** Zero is a real tax (a buyer who owes none); null is "the provider does not say". */
       tax: Usd | null;
+      /**
+       * What the buyer was charged, gross, in the PROVIDER's unit (the unit its refunds and disputes use: cents of the
+       * currency the buyer paid in). The application pins it on the intent when it credits, so a refund or dispute event
+       * that carries only its own `amount` (Stripe's does) is related to the whole payment without asking the provider.
+       * Absent when the provider does not say.
+       */
+      providerAmount?: ProviderAmount;
+      /**
+       * The currency of `providerAmount` (lower case ISO 4217), pinned with it. A refund or dispute names its own currency,
+       * and an amount in another currency than the charge is no share of it (`amount_rejected`). Absent when the provider
+       * does not say (then its refunds and disputes carry no currency either).
+       */
+      providerCurrency?: string;
+    })
+  | (EventBase & {
+      /**
+       * A payment the adapter reads as paid and refuses to turn into credit because it contradicts what we asked for
+       * (another currency, the other environment, a reference that disagrees with itself, an amount that is no amount).
+       * Nothing is credited; the event is recorded `amount_rejected` for review: a buyer may have paid and got nothing.
+       */
+      type: "payment.refused";
+      payment: ProviderRef | null;
+      /** Our intent id when the session names one: lets the review say whose payment it is, nothing more. */
+      intentId?: string | null;
     })
   | (EventBase & {
       type: "payment.failed";
@@ -282,8 +357,14 @@ export type BillingEvent =
       refund: ProviderRef;
       /** THIS refund, gross, in the provider's unit (the same as `paymentAmount`): positive whole number. */
       amount: ProviderAmount;
-      /** The whole payment it refunds, gross, in the same unit. */
-      paymentAmount: ProviderAmount;
+      /**
+       * The whole payment it refunds, gross, in the same unit, when the provider's event says (Stripe's refund does not:
+       * the application then takes the amount it pinned from the payment, `providerAmount`). When both exist and differ,
+       * the event is `amount_conflict`.
+       */
+      paymentAmount?: ProviderAmount;
+      /** The currency of `amount` (lower case): it must be the one the payment was pinned in. Absent: the provider does not say. */
+      currency?: string;
       initiatedBy: RefundInitiator;
       status: RefundStatus;
     })
@@ -293,13 +374,17 @@ export type BillingEvent =
       dispute: ProviderRef;
       /** The disputed amount, gross, in the provider's unit (the same as `paymentAmount`). */
       amount: ProviderAmount;
-      paymentAmount: ProviderAmount;
+      /** As for a refund: absent when the provider's event does not carry it. */
+      paymentAmount?: ProviderAmount;
+      /** As for a refund. */
+      currency?: string;
       status: DisputeStatus;
     })
   | (EventBase & { type: "ignored" });
 
 export const BILLING_EVENT_TYPES = [
   "payment.succeeded",
+  "payment.refused",
   "payment.failed",
   "payment.expired",
   "refund.updated",
@@ -359,7 +444,7 @@ function isTaxAmount(value: unknown): value is Usd {
   return value === 0 || isUsdAmount(value);
 }
 
-function isProviderAmount(value: unknown): value is ProviderAmount {
+export function isProviderAmount(value: unknown): value is ProviderAmount {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
@@ -470,6 +555,15 @@ function requireProviderAmount(value: unknown, what: string): void {
     refuseEvent(`${what} is not a positive integer`);
 }
 
+function requireOptionalProviderAmount(value: unknown, what: string): void {
+  if (value !== undefined) requireProviderAmount(value, what);
+}
+
+function requireOptionalCurrency(value: unknown, what: string): void {
+  if (value !== undefined && !isProviderCurrency(value))
+    refuseEvent(`${what} is not a lower case currency code`);
+}
+
 /**
  * Throws `event_invalid` when an adapter hands over something that is not a normalized event: an adapter is code, but
  * what it reads is a provider's data, and nothing past this function trusts an amount, a reference or a status that did
@@ -498,6 +592,13 @@ export function validateBillingEvent(event: BillingEvent): void {
       requireAmount(event.gross, "the gross amount");
       if (event.tax !== null && !isTaxAmount(event.tax))
         refuseEvent("the tax is not a non-negative integer");
+      requireOptionalProviderAmount(event.providerAmount, "the payment amount");
+      requireOptionalCurrency(event.providerCurrency, "the payment currency");
+      return;
+    case "payment.refused":
+      requireOptionalRef(event.payment, "the payment");
+      if (event.intentId !== undefined)
+        requireOptionalRef(event.intentId, "the intent id");
       return;
     case "payment.failed":
     case "payment.expired":
@@ -509,7 +610,8 @@ export function validateBillingEvent(event: BillingEvent): void {
       requireRef(event.payment, "the payment");
       requireRef(event.refund, "the refund");
       requireProviderAmount(event.amount, "the refund amount");
-      requireProviderAmount(event.paymentAmount, "the payment amount");
+      requireOptionalProviderAmount(event.paymentAmount, "the payment amount");
+      requireOptionalCurrency(event.currency, "the refund currency");
       if (!REFUND_INITIATORS.includes(event.initiatedBy))
         refuseEvent("unknown refund initiator");
       if (!REFUND_STATUSES.includes(event.status))
@@ -519,7 +621,8 @@ export function validateBillingEvent(event: BillingEvent): void {
       requireRef(event.payment, "the payment");
       requireRef(event.dispute, "the dispute");
       requireProviderAmount(event.amount, "the dispute amount");
-      requireProviderAmount(event.paymentAmount, "the payment amount");
+      requireOptionalProviderAmount(event.paymentAmount, "the payment amount");
+      requireOptionalCurrency(event.currency, "the dispute currency");
       if (!DISPUTE_STATUSES.includes(event.status))
         refuseEvent("unknown dispute status");
       return;

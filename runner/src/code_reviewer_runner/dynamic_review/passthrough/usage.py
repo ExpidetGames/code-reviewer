@@ -27,6 +27,12 @@ from typing import Any, Final, Protocol, cast
 
 from code_reviewer_runner.dynamic_review.passthrough.call_usage import CallUsage
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
+from code_reviewer_runner.dynamic_review.passthrough.finish_reason import (
+    chat_finish,
+    google_finish,
+    messages_finish,
+    responses_finish,
+)
 from code_reviewer_runner.dynamic_review.passthrough.sse import SseFramer, read_event
 from code_reviewer_runner.dynamic_review.passthrough.usage_normalize import (
     STANDARD_OPENAI_TIERS,
@@ -45,6 +51,8 @@ class TapResult:
     errored: bool
     # The answer reached its own end (a stream: its last event) and not just a closed connection.
     terminated: bool
+    # Why the answer ended, as the call trace names it (`finish_reason.py`); None if it never said.
+    finish_reason: str | None = None
 
 
 class UsageTap(Protocol):
@@ -150,6 +158,7 @@ class _Reading:
         self.errored = False
         self.terminated = False
         self.finished = False
+        self.finish_reason: str | None = None
         # The usage that is there is the final one (the answer's own end has stated it).
         self.usage_final = whole
         self._statements = 0
@@ -178,6 +187,8 @@ class _Reading:
     def _chat(self, document: dict[str, Any]) -> None:
         choices = document.get("choices")
         self.finished = self.finished or _chat_finished(choices)
+        for choice in _entries(choices)[:1]:
+            self._finish(chat_finish(choice.get("finish_reason")))
         raw = document.get("usage")
         if raw is not None:
             # One statement, at or after the finish: an earlier one is a part of the count.
@@ -199,6 +210,8 @@ class _Reading:
         candidates = document.get("candidates")
         if _several(candidates):
             self.unknown.add("candidates")
+        for candidate in _entries(candidates)[:1]:
+            self._finish(google_finish(candidate.get("finishReason")))
         if raw is not None:
             self._state(raw, replace=True)
         if _finished(candidates):
@@ -215,6 +228,7 @@ class _Reading:
             if raw is not None:
                 self._state(raw, replace=True)
             self._service_tier(document)
+            self._finish(responses_finish(document))
             return
         # Only the event that ends the response carries its usage (`response.created` has none, and
         # a usage in any other event is not read), and a response ends once.
@@ -231,12 +245,14 @@ class _Reading:
         if raw is not None:
             self._state(raw, replace=True)
         self._service_tier(response)
+        self._finish(responses_finish(response))
         self.terminated = True
         self.usage_final = isinstance(raw, dict)
 
     def _messages(self, name: str | None, document: dict[str, Any]) -> None:
         if self.whole:
             self._state(document.get("usage"), replace=False)
+            self._finish(messages_finish(document.get("stop_reason")))
             return
         kind = document.get("type") or name
         if kind in _IDLE:
@@ -260,6 +276,8 @@ class _Reading:
             # start did, and the output counts only once a delta has stated it.
             usage = document.get("usage")
             self._state(usage, replace=False)
+            delta = _object(document.get("delta"))
+            self._finish(messages_finish(delta.get("stop_reason") if delta else None))
             # The output of `message_start` is a placeholder: only a delta states the real one.
             if isinstance(usage, dict) and usage.get("output_tokens") is not None:  # pyright: ignore[reportUnknownMemberType]
                 self._output_stated = True
@@ -267,6 +285,11 @@ class _Reading:
             self._stopped = True
             self.terminated = True
             self.usage_final = self._output_stated
+
+    def _finish(self, reason: str | None) -> None:
+        """The reason the answer ended with; a later statement of one replaces an earlier."""
+        if reason is not None:
+            self.finish_reason = reason
 
     def _service_tier(self, holder: dict[str, Any]) -> None:
         if holder.get("service_tier") not in STANDARD_OPENAI_TIERS:
@@ -317,7 +340,12 @@ def _result(reading: _Reading) -> TapResult:
     terminated = reading.terminated and not reading.errored
     if usage is not None:
         usage = replace(usage, complete=terminated and reading.usage_final)
-    return TapResult(usage=usage, errored=reading.errored, terminated=terminated)
+    return TapResult(
+        usage=usage,
+        errored=reading.errored,
+        terminated=terminated,
+        finish_reason=reading.finish_reason,
+    )
 
 
 class _StreamTap:

@@ -29,7 +29,11 @@ describe("the model decisions migration", () => {
   // #549-T04
   it("sorts after every migration before it and adds empty tables without touching an existing row", async () => {
     const names = Object.keys(await migrationProvider.getMigrations()).sort();
-    expect(names.at(-1)).toBe(SPLIT);
+    // Later migrations sort after it (#498 added one): none that was merged before it sorts after it.
+    expect(names.filter((name) => name <= SPLIT).at(-1)).toBe(SPLIT);
+    expect(names.filter((name) => name < SPLIT).at(-1)).toBe(
+      "20261019200000_create_models_dev_catalog",
+    );
 
     const directory = await createTestDirectory();
     const db = openDatabase({

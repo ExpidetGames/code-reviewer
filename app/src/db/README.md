@@ -425,6 +425,16 @@ models.dev catalog, not owned by a workspace, and **a confirmation is never chan
   unreadable (never as "no confirmation"), and a new confirmation repairs it. Triggers refuse an update, a delete and (Postgres) a truncate, like the billing journal.
   `confirmed_by` and `changed_by` have no foreign key: the history stays as written when a user is deleted.
 
+### Billing at the claim (#498)
+
+Two migrations, both only widen a check, so an app of the previous release on the same database keeps working and no row changes:
+`20261021090000_widen_refusal_notice_codes` (`refusal_notices.code` takes `insufficient_balance` and `balance_negative`) and
+`20261021090100_widen_job_vm_runs_end_source` (`job_vm_runs.end_source` takes `app_stop_unreported` and `claim_wall_clock`). Postgres replaces the
+constraint; SQLite cannot change a check in place, so the table is rebuilt (a new one with the wider check gets every row, the old one is dropped with
+its indexes, the new one takes its name and its indexes back). Nothing references either table. The instance setting `dispatcher_sightings`
+(`{ withVmLifecycleAt, withoutVmLifecycleAt }`) needs no migration. **Retention:** `job_vm_runs` has non-cascading foreign keys to `jobs` and
+`workspaces`; whoever adds retention or workspace deletion must delete its rows first (the review of #524, N-5).
+
 ### Billing journal and balances
 
 Migration `20261019150000_create_billing_journal` (#495; epic #489, ADR 0006, 2.7). It adds two empty tables and touches no
@@ -459,7 +469,7 @@ existing row, so an app of the previous release on the same database is unaffect
   `integer` on SQLite, which is 64 bit already, so the "text and integer columns only" convention holds there, and
   `bigint` on Postgres. Postgres returns a `bigint` as text, so the repository converts every amount with `Number`
   (exact up to 2^53).
-- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` and `reserveUpTo` take
+- **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` (an old hold) and `charge` (the price of a job, #605) take
   the balance row's lock (Postgres `FOR UPDATE`; SQLite's `begin immediate` already serializes writers), answer a
   repeated job from the entry they wrote, and `settle` and `release` take the same lock before they read what the job
   has, so a settlement never charges a job a concurrent release voided. `append` takes it too, before it writes: every
@@ -482,7 +492,9 @@ tables and touches no existing row:
   for, a check `> 0`; `state`, a check of `pending`/`paid`/`failed`/`expired`; `provider_checkout_ref` and
   `provider_payment_ref`, opaque provider ids, null until known; `credited_micro_usd`, what the payment credited (net), 0
   until paid, and `refunded_micro_usd` and `disputed_micro_usd`, the running totals of what refunds and disputes took
-  back of it, with a check that neither is negative and that together they never exceed the credit; `created_at`,
+  back of it, with a check that neither is negative and that together they never exceed the credit; `provider_amount` and
+  `provider_currency`, what the buyer was charged (gross, in the provider's unit) and in which lower case ISO 4217 currency,
+  pinned when the payment is credited and null before (added by #502: `20261021170000` and `20261021190000`); `created_at`,
   `updated_at`). Unique per adapter on each
   of the two refs (NULLs do not collide), so one payment or checkout belongs to one intent. Written before any checkout
   exists; the only way a payment reaches a workspace. **Workspace scoped**
@@ -491,10 +503,22 @@ tables and touches no existing row:
 - `billing_webhook_events` (primary key `(provider, event_id)`; `outcome`; `subject` and `occurred_at`, which order the
   states of one refund or dispute, or name the payment of a payment event; `received_at`; `review_state`, `open` for an
   event an operator must review (a payment nobody could credit, a refund that could not be debited, a signed event that
-  is no event) and `resolved` once it was, null otherwise). The first idempotency layer: an id, an outcome and an order, **no
+  is no event) and `resolved` once it was, null otherwise; `workspace_id` and `intent_id`, two ids of our own, when the event
+  could be attributed to one of our intents, else null (#502)). The first idempotency layer: an id, an outcome and an order, **no
   payload, no amount, no name**, so it is instance level (`billing-webhook-events-repository.ts`). Not pruned yet.
 
 The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
+
+### The billing profile
+
+Migration `20261021130000_create_billing_profiles` (#501; epic #489, ADR 0006, 2.13). One new, empty table, no existing row
+touched: `billing_profiles` (primary key `workspace_id` → `workspaces.id`, so at most one profile per workspace; `legal_name`,
+`country` (ISO 3166-1 alpha-2), `address_line1`, `address_line2`, `postal_code`, `city`, `vat_id` (normalized, a light format
+check only); `confirmed_at`, `confirmed_by` (→ `users.id`, set null when the user goes) and `terms_version`, the business
+confirmation of the first top-up, with a check that the time and the version are set together; `customer_adapter` and
+`customer_ref`, the payment provider's customer made from the profile, both or neither; `created_at`, `updated_at`, the time of
+the last edit of the content). **Customer data, workspace scoped** (`billing-profiles-repository.ts`; classified in
+`scoping.test.ts`, with rows in `scoped-isolation.integration.test.ts`); never logged. See `src/billing/README.md`.
 
 ### The newest jobs of the instance
 
@@ -503,6 +527,35 @@ id)` and touches no column and no row, so the release that is still running is n
 of the instance admin (`job-directory-repository.ts`) lists the newest jobs of every workspace in that order; without the
 index each call sorts every job of the instance. `job-directory-repository.integration.test.ts` reads the query plan on
 SQLite.
+
+### The balances that hold something
+
+Migration `20261021120000_add_billing_balances_reserved_index` (#591). It adds the partial index `billing_balances_reserved` on
+`billing_balances (workspace_id) where reserved_micro_usd > 0` (the same on both engines) and touches no column and no row. The sweep
+of stranded holds asks which workspaces have money reserved in every run; the index makes that read grow with the holds that are open,
+not with the number of workspaces (`billing-holds-sweep.ts`; `stranded-holds.integration.test.ts` checks on Postgres that the read
+needs no sequential scan, `add-billing-balances-reserved-index.integration.test.ts` that the migration adds the index and keeps the rows).
+
+### The memory of the start credit
+
+Migration `20261021150000_create_billing_start_credit_grants` (#507; ADR 0006, 2.16). It adds one empty table and touches no row, so the
+release that is still running is not affected while it runs. `billing_start_credit_grants`: `github_account_id` (`text`, the primary
+key: the numeric id of the GitHub account of an installation, checked to be a plain positive number on both engines), `workspace_id`
+(`text`, the workspace that got the credit) and `granted_at` (ISO 8601 text in UTC). **`workspace_id` has no foreign key on purpose**:
+the memory has to outlive the workspace, or deleting a workspace and creating it again would grant the account twice. The primary
+key is what makes the grant race safe (`insert ... on conflict do nothing`). Instance level (`billing-start-credit-grants-repository.ts`),
+ids and a time only: no login, no name, no address. See `src/billing/README.md`, "The start credit".
+
+### The monthly limit, the hidden brake and their notices (#499)
+
+Three forward-only migrations, the same on SQLite and Postgres, none of which touches an existing row, so the release that is still running is not affected while
+they run. `20261021210000_widen_refusal_notice_codes_for_limits` replaces the check on `refusal_notices.code` (Postgres) or rebuilds the table with the wider check
+(SQLite, like #498) so it takes `monthly_limit_reached` and `reviews_paused`; its `down` deletes the notices of those two codes first.
+`20261021210100_create_billing_workspace_settings` adds `billing_workspace_settings`: `workspace_id` (primary key → `workspaces.id`, so at most one row per
+workspace; a workspace without a row has no limit), `monthly_limit_micro_usd` (`bigint` on Postgres, 64 bit `integer` on SQLite; null or positive, checked),
+`updated_by` (→ `users.id`, set null when the user is deleted) and `updated_at`. **Customer data, workspace scoped** (`billing-workspace-settings-repository.ts`,
+classified in `scoping.test.ts` and covered row by row in `scoped-isolation.integration.test.ts`); `updated_by` is an audit pointer that a user merge moves to the acting admin (`github-signin/merge.ts`). `20261021210200_add_limit_query_indexes` adds `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the hourly brake and
+`billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum, which also carries `amount_micro_usd` (`INCLUDE` on Postgres, a last key column on SQLite) so the sum is read from the index alone. The three versions sort after the migrations of the billing work that is open next to them (`20261021170000` to `20261021190100`), so the order is the same whichever lands first. See `src/billing/README.md`, "Limits at claim (#499)".
 
 ### A database that ran the removed billing migrations
 

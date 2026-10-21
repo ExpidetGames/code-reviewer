@@ -10,6 +10,7 @@
 import "server-only";
 import type { StoredModel, StoredProvider } from "../models-dev/catalog.ts";
 import { buildJobModelEntry } from "../models-dev/job-entry.ts";
+import { CACHE_WRITING_FAMILY } from "../models-dev/wire.ts";
 import type { EffectivePrice } from "./effective-price.ts";
 import type { ModelOverride } from "./overrides.ts";
 import { hashVersionOf } from "./price-hash.ts";
@@ -17,6 +18,7 @@ import {
   priceBookToJson,
   type PriceBook,
   type PriceBookJson,
+  type PriceLevel,
 } from "./price-book.ts";
 
 export const MANAGED_UNAVAILABLE_REASONS = [
@@ -36,6 +38,14 @@ export const MANAGED_UNAVAILABLE_REASONS = [
   "model_not_enabled",
   /** The price is not confirmed: never confirmed, changed since, or not priced. */
   "price_unconfirmed",
+  /**
+   * The confirmed book states no cache read at some level (#553). A provider reads from its cache by itself, so a run would
+   * meet a read it has no price for, and the managed key never runs on a guess. The admin states the price in a correction
+   * (the input price is the upper bound).
+   */
+  "cache_read_unpriced",
+  /** The Messages family states a cache read and no cache write: its engine writes the cache, and a write has no price (#553). */
+  "cache_write_unpriced",
   /** The check itself failed (the database could not be read): a refusal, never a pass. `service.availability` only. */
   "check_failed",
 ] as const;
@@ -82,7 +92,9 @@ export type ManagedAvailabilityJson =
 export function managedRefusalCode(
   reason: ManagedUnavailableReason,
 ): ManagedRefusalCode {
-  return reason === "price_unconfirmed"
+  return reason === "price_unconfirmed" ||
+    reason === "cache_read_unpriced" ||
+    reason === "cache_write_unpriced"
     ? "catalog_price_unconfirmed"
     : "catalog_model_unavailable";
 }
@@ -112,6 +124,36 @@ export type ManagedAvailabilityInput = {
   price: EffectivePrice;
   now: Date;
 };
+
+/** Every level of a book: the base, the older 200k level and the tiers. */
+function levelsOf(book: PriceBook): PriceLevel[] {
+  return [
+    book,
+    ...(book.contextOver200k === null ? [] : [book.contextOver200k]),
+    ...book.tiers,
+  ];
+}
+
+/**
+ * What is missing from the cache prices of a confirmed book (#553). Every level must state a cache read, whatever the
+ * model: a read without a price would have to be guessed (priced as input, an upper bound the member would pay), and the
+ * managed key never runs on a guess; the admin sets the read explicitly in a correction. A model of the Messages family
+ * (the engine writes the cache itself) that states a cache read must state the write of the 5-minute lifetime too.
+ */
+export function cachePriceGap(
+  book: PriceBook,
+  family: string,
+): "cache_read_unpriced" | "cache_write_unpriced" | null {
+  const levels = levelsOf(book);
+  if (levels.some((level) => level.cacheRead === null))
+    return "cache_read_unpriced";
+  if (
+    family === CACHE_WRITING_FAMILY &&
+    levels.some((level) => level.cacheWrite5m === null)
+  )
+    return "cache_write_unpriced";
+  return null;
+}
 
 const no = (reason: ManagedUnavailableReason): ManagedAvailability => ({
   selectable: false,
@@ -144,6 +186,8 @@ export function managedAvailability(
   if (!input.enabled) return no("model_not_enabled");
   if (price.status !== "confirmed" || price.confirmation === null)
     return no("price_unconfirmed");
+  const gap = cachePriceGap(price.book, entry.entry.family);
+  if (gap !== null) return no(gap);
   return {
     selectable: true,
     book: price.book,

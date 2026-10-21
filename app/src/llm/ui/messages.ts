@@ -48,6 +48,8 @@ const TEST_FAILURE_COPY: Record<string, string> = {
     "The provider could not be reached, or did not answer in time. Try again in a moment.",
   llm_provider_error:
     "The provider answered with an error. The key may be fine; try again later.",
+  llm_provider_address_changed:
+    "The address of this provider changed after a project selected it, so the key was not sent anywhere. An Owner or Admin can check the provider and confirm the new address in the review settings of the project.",
 };
 
 export function describeKeyTestFailure(code: string): string {

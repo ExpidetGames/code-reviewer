@@ -1,0 +1,13 @@
+{
+  "id": "we_FakeTemplate",
+  "object": "webhook_endpoint",
+  "api_version": null,
+  "application": null,
+  "created": 1700000000,
+  "description": null,
+  "enabled_events": [],
+  "livemode": false,
+  "metadata": {},
+  "status": "enabled",
+  "url": "https://example.test/webhook"
+}

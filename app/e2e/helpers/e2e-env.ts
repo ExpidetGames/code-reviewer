@@ -32,6 +32,9 @@ const catalogAppPort = Number(process.env.E2E_CATALOG_PORT) || appPort + 7;
 // the catalog app unless E2E_CATALOG_ADMIN_PORT says otherwise.
 const catalogAdminAppPort =
   Number(process.env.E2E_CATALOG_ADMIN_PORT) || appPort + 8;
+// The fake Stripe of the billing journey of a workspace (#505): the catalog admin app sends its Stripe API calls to it, so the port has to be
+// known when the app starts. The port after the catalog admin app unless E2E_STRIPE_PORT says otherwise.
+const stripeFakePort = Number(process.env.E2E_STRIPE_PORT) || appPort + 9;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -111,6 +114,11 @@ export const e2eEnv = {
   /** The SQLite file of the catalog admin app (#554), fresh for every run. */
   catalogAdminDatabasePath: "test-results/e2e-catalog-admin-data/app.db",
   catalogAdminAppUrl: `http://127.0.0.1:${catalogAdminAppPort}`,
+  stripeFakePort,
+  /** The fake Stripe (`fakes/stripe`): the address of the catalog admin app's Stripe API calls (`STRIPE_API_BASE_URL`, test stack only). */
+  stripeFakeUrl: `http://127.0.0.1:${stripeFakePort}`,
+  /** The API key the fake Stripe accepts; a dummy, and the one the journey saves in the admin portal. */
+  stripeFakeApiKey: "sk_test_E2eFakeStripeKey0123456789abcdef",
   modelsDevFakePort,
   /** The fake models.dev of the catalog admin app (`MODELS_DEV_URL`). */
   modelsDevFakeUrl: `http://127.0.0.1:${modelsDevFakePort}/api.json`,

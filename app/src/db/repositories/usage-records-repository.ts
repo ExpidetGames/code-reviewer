@@ -91,6 +91,17 @@ export type UsageRecordsRepository = {
    * never counts twice. A job of another workspace, or none, gets no record.
    */
   reserve(jobId: string, keyMode: UsageKeyMode): Promise<void>;
+  /**
+   * Marks the record of a job that a claim with billing on handed out: its money is `open` (#605). A record that has a state
+   * keeps it, so a job claimed again after a lost lease is not opened twice and a settled one is never reopened. Called by the
+   * claim only while billing is on; with billing off nothing writes the column.
+   */
+  openBilling(jobId: string): Promise<void>;
+  /**
+   * Ends the billing of a job: `open` becomes `settled`. Returns whether this call did it, so of two settlements racing for one
+   * job exactly one goes on to charge (the row lock of the update decides; the other finds it `settled`).
+   */
+  closeBilling(jobId: string): Promise<boolean>;
   /** Corrects the key mode of a record that is still `reserved`; any other record is left as it is. */
   setKeyMode(jobId: string, keyMode: UsageKeyMode): Promise<void>;
   /**
@@ -118,6 +129,11 @@ export type UsageRecordsRepository = {
    */
   voidEndedJobs(): Promise<void>;
   /**
+   * `voidEndedJobs` that says whose record it voided (#498: the caller settles their holds in the same transaction).
+   * The ids are those of this workspace's jobs only.
+   */
+  voidEndedJobsWithIds(): Promise<string[]>;
+  /**
    * #397: marks the `reserved` records of these jobs of this workspace as superseded runs (reason `superseded`): the
    * run was replaced by a newer push and is draining. It stays `reserved` until its Worker reports or the drain ends,
    * but it no longer counts as a run of the quota, and `voidEndedJobs` leaves it alone.
@@ -126,6 +142,16 @@ export type UsageRecordsRepository = {
   get(jobId: string): Promise<UsageRecord | undefined>;
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
+  /**
+   * How many reviews this workspace started after `since` (exclusive): every record reserved later, whatever became of it,
+   * `void` and superseded ones included, because the claim that reserved it did start the review (#499, the hourly brake).
+   * `exceptJobId` leaves out the record of the job that asks, so a job claimed again after a lost lease is not counted against
+   * itself.
+   */
+  startedSince(
+    since: string,
+    options?: { exceptJobId?: string },
+  ): Promise<number>;
   /**
    * The cost of the settled records of the runs on `keyMode` reserved at or after `since` (the period of the run,
    * as in `countByKind`); an unknown cost adds nothing. A record counts under the key mode it was settled with,
@@ -187,6 +213,31 @@ export function createUsageRecordsRepository(
       .executeTakeFirst();
   }
 
+  async function voidEnded(): Promise<string[]> {
+    const voided = await db
+      .updateTable("usage_records")
+      .set({ state: "void" })
+      .where("workspace_id", "=", workspaceId)
+      // A run that was superseded while it ran keeps its record until it reports (#397).
+      .where("settled_reason", "is", null)
+      // A literal, not a bound value, so the planner can use the partial index of the reserved records.
+      .where("state", "=", sql.lit("reserved"))
+      // Driven by the few reserved records, each probing its job by primary key.
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom("jobs")
+            .select("jobs.id")
+            .whereRef("jobs.id", "=", "usage_records.job_id")
+            .where("jobs.workspace_id", "=", workspaceId)
+            .where("jobs.status", "in", ENDED_JOB_STATUSES),
+        ),
+      )
+      .returning("job_id")
+      .execute();
+    return voided.map((row) => row.job_id);
+  }
+
   return {
     async reserve(jobId, keyMode) {
       const job = await jobOf(jobId);
@@ -204,6 +255,28 @@ export function createUsageRecordsRepository(
         })
         .onConflict((conflict) => conflict.column("job_id").doNothing())
         .execute();
+    },
+
+    async openBilling(jobId) {
+      await db
+        .updateTable("usage_records")
+        .set({ billing_state: "open" })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("billing_state", "is", null)
+        .execute();
+    },
+
+    async closeBilling(jobId) {
+      const closed = await db
+        .updateTable("usage_records")
+        .set({ billing_state: "settled" })
+        .where("job_id", "=", jobId)
+        .where("workspace_id", "=", workspaceId)
+        .where("billing_state", "=", "open")
+        .returning("job_id")
+        .executeTakeFirst();
+      return closed !== undefined;
     },
 
     async setKeyMode(jobId, keyMode) {
@@ -288,28 +361,11 @@ export function createUsageRecordsRepository(
         .execute();
     },
 
-    async voidEndedJobs() {
-      await db
-        .updateTable("usage_records")
-        .set({ state: "void" })
-        .where("workspace_id", "=", workspaceId)
-        // A run that was superseded while it ran keeps its record until it reports (#397).
-        .where("settled_reason", "is", null)
-        // A literal, not a bound value, so the planner can use the partial index of the reserved records.
-        .where("state", "=", sql.lit("reserved"))
-        // Driven by the few reserved records, each probing its job by primary key.
-        .where((eb) =>
-          eb.exists(
-            eb
-              .selectFrom("jobs")
-              .select("jobs.id")
-              .whereRef("jobs.id", "=", "usage_records.job_id")
-              .where("jobs.workspace_id", "=", workspaceId)
-              .where("jobs.status", "in", ENDED_JOB_STATUSES),
-          ),
-        )
-        .execute();
+    voidEndedJobs: async () => {
+      await voidEnded();
     },
+
+    voidEndedJobsWithIds: voidEnded,
 
     async get(jobId) {
       const row = await db
@@ -341,6 +397,17 @@ export function createUsageRecordsRepository(
       for (const row of rows)
         counts[row.review_kind as ProjectReviewKind] = Number(row.runs);
       return counts;
+    },
+
+    async startedSince(since, options = {}) {
+      let query = db
+        .selectFrom("usage_records")
+        .select((eb) => eb.fn.countAll().as("started"))
+        .where("workspace_id", "=", workspaceId)
+        .where("reserved_at", ">", since);
+      if (options.exceptJobId !== undefined)
+        query = query.where("job_id", "<>", options.exceptJobId);
+      return Number((await query.executeTakeFirstOrThrow()).started);
     },
 
     async sumSettledCostMicroUsd(since, keyMode) {

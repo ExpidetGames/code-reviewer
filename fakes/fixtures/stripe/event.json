@@ -1,0 +1,11 @@
+{
+  "id": "evt_FakeTemplate",
+  "object": "event",
+  "api_version": "2025-03-31.basil",
+  "created": 1700000000,
+  "data": { "object": {} },
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "type": "charge.refunded"
+}

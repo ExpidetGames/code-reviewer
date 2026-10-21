@@ -2,7 +2,12 @@
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { createInstanceSettingsRepository } from "@/db/repositories/instance-settings-repository";
 import { getDatabase } from "@/db/startup";
+import { isBillingOn } from "@/billing/enabled";
+import { nativeFormDataFor } from "@/native-providers/form-data";
+import { getNativeCatalog } from "@/native-providers/shared";
+import { ownKeyTokenCapOf } from "@/native-cost/token-cap";
 import { isDynamicReviewEnabled } from "@/jobs/dynamic-review-gate";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
@@ -67,9 +72,27 @@ async function ProjectSettingsContent({
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
   const llm = getWorkspaceLlm();
   // The key statuses are read only for a workspace on its own key; a managed one is handed no provider id.
-  const [llmSummary, keyedProviders] = await Promise.all([
+  const [llmSummary, keyedProviders, nativeCatalog] = await Promise.all([
     llm.summaryFor(workspaceId),
     keyedProvidersFor(data.model, llm.keyServiceFor(workspaceId)),
+    // The catalog providers and models of Dynamic Review on the workspace's own key (#555); nothing for a managed one.
+    nativeFormDataFor(
+      {
+        managed: data.model.managed,
+        currentProvider: data.model.dynamic?.effective.dynamicProvider,
+      },
+      {
+        catalog: getNativeCatalog(),
+        keys: llm.keyServiceFor(workspaceId),
+        billingOn: () => isBillingOn(getDatabase()),
+        tokenCap: async () =>
+          ownKeyTokenCapOf(
+            await createInstanceSettingsRepository(getDatabase()).get(
+              "own_key_max_total_tokens",
+            ),
+          ),
+      },
+    ),
   ]);
   const llmNotice = llmAccessAttention({
     workspaceSlug,
@@ -82,6 +105,8 @@ async function ProjectSettingsContent({
       audience={configAudienceOf(user)}
       llmNotice={llmNotice}
       {...(keyedProviders === undefined ? {} : { keyedProviders })}
+      {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
+      canConfirmProviderAddress={canManageLlmKey}
       data={data}
     />
   );

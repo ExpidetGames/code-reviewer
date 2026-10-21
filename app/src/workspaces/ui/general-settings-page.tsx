@@ -47,6 +47,7 @@ export function GeneralSettingsPageContent({
   canManagePlan = false,
   planError,
   showPlan = false,
+  showBilling = false,
   audience = "member",
   tenancy,
   memberCount,
@@ -66,6 +67,8 @@ export function GeneralSettingsPageContent({
   planError?: PlanHandoffErrorCode;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
+  /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
+  showBilling?: boolean;
   audience?: ConfigAudience;
   tenancy: "single" | "multi";
   memberCount: number;
@@ -88,6 +91,7 @@ export function GeneralSettingsPageContent({
       workspaceSlug={workspaceSlug}
       current=""
       showPlan={showPlan}
+      showBilling={showBilling}
     >
       <LegacyLlmHashRedirect workspaceSlug={workspaceSlug} />
       <NeedsAttention notices={notices} />

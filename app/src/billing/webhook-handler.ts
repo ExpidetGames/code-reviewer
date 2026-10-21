@@ -14,6 +14,8 @@
 //   3. apply      `applyBillingEvent`: one transaction, the whole event or nothing   200 and the outcome code (also for
 //                 a signed event that is no normalized event, `event_invalid`, and for a paid-but-not-credited
 //                 outcome: both are recorded for review and logged at error level, since a retry changes nothing)
+//   *  retry      a refund or dispute whose payment is not credited yet               503, empty body: the provider
+//                 delivers it again after the credit; nothing was claimed
 //   *  failure    anything that throws                                              500, empty body
 //
 // The answer never carries anything of the request, and the log lines name a code only: no body, no header, no signature,
@@ -30,7 +32,7 @@ import {
   type BillingWebhookRejectionCode,
   type WebhookResult,
 } from "./adapter.ts";
-import { applyBillingEvent } from "./apply-event.ts";
+import { applyBillingEvent, BillingEventRetryError } from "./apply-event.ts";
 import { guardBillingRoute, type BillingRouteGuard } from "./enabled.ts";
 
 /** A signed event is a few kilobytes; 256 KiB is far above any and far below anything that costs memory. */
@@ -55,6 +57,8 @@ export const BILLING_WEBHOOK_LOG_CODES = [
   "billing_webhook_event_invalid",
   /** Money moved or was claimed to move and the ledger did not change: a buyer may have paid for nothing (error). */
   "billing_webhook_needs_review",
+  /** A refund or dispute whose payment is not credited yet: answered 503 so the provider delivers it again (error). */
+  "billing_webhook_credit_pending",
 ] as const;
 
 export type BillingWebhookLogger = {
@@ -130,6 +134,10 @@ export function createBillingWebhookHandler(
       else logger.info(`billing_webhook_applied outcome=${result.outcome}`);
       return Response.json({ outcome: result.outcome });
     } catch (error) {
+      if (error instanceof BillingEventRetryError) {
+        logger.error(`billing_webhook_${error.code}`);
+        return empty(503);
+      }
       logger.error(
         `billing_webhook_failed code=${error instanceof BillingAdapterError ? error.code : "unexpected_error"}`,
       );

@@ -16,3 +16,22 @@ export function planPagePath(workspaceSlug: string): string {
 export function planPageUrl(baseUrl: string, workspaceSlug: string): string {
   return new URL(planPagePath(workspaceSlug), baseUrl).toString();
 }
+
+/** The address of the settings of a workspace (`/w/<slug>/settings`); the configured address of the app, never a request. */
+export function workspaceSettingsUrl(
+  baseUrl: string,
+  workspaceSlug: string,
+): string {
+  return new URL(
+    `/w/${encodeURIComponent(workspaceSlug)}/settings`,
+    baseUrl,
+  ).toString();
+}
+
+/** The address of the billing page of a workspace (`/w/<slug>/settings/billing`, #505); the configured address of the app, never a request. */
+export function billingPageUrl(baseUrl: string, workspaceSlug: string): string {
+  return new URL(
+    `/w/${encodeURIComponent(workspaceSlug)}/settings/billing`,
+    baseUrl,
+  ).toString();
+}

@@ -31,6 +31,11 @@ export type DynamicFormValues = {
   draft: string | null;
   /** What a finished review does on its pull request besides the check run (#405). */
   reviewVerdict: ReviewVerdictMode;
+  /**
+   * The person ticked "confirm the new address" of the catalog provider (#588): the save pins the address the catalog trusts now.
+   * An action, not a setting: it is never stored and starts unticked.
+   */
+  confirmProviderAddress: boolean;
 };
 
 export function initialDynamicValues(
@@ -47,6 +52,7 @@ export function initialDynamicValues(
     skillText: view.effective.reviewSkill,
     draft: null,
     reviewVerdict: view.effective.reviewVerdict,
+    confirmProviderAddress: false,
   };
 }
 
@@ -96,7 +102,20 @@ export function setDynamicProvider(
 ): FormState {
   if (state.dynamic === undefined) return state;
   if (dynamicProvider === state.dynamic.dynamicProvider) return state;
-  return withDynamic(state, { dynamicProvider, dynamicModel: "" });
+  // A provider chosen instead is pinned by its own selection; the confirmation was for the one it replaces (#588).
+  return withDynamic(state, {
+    dynamicProvider,
+    dynamicModel: "",
+    confirmProviderAddress: false,
+  });
+}
+
+/** Ticks or unticks the confirmation of the address the catalog trusts now for the project's catalog provider (#588). */
+export function setConfirmProviderAddress(
+  state: FormState,
+  confirmProviderAddress: boolean,
+): FormState {
+  return withDynamic(state, { confirmProviderAddress });
 }
 
 /** Chooses the catalog entry of one kind (`null` takes the choice back); the other kind keeps its choice. */

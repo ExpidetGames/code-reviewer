@@ -23,6 +23,7 @@ import {
   type ReasonDescription,
 } from "./error-copy.ts";
 import { runDurationMs } from "./run-duration.ts";
+import type { RunPriceView } from "../workspace-billing/view.ts";
 
 /** The most characters of a log the detail page shows (the runner's own limit). */
 export const MAX_LOG_CHARS = 8192;
@@ -50,6 +51,11 @@ export type RunRowView = {
   durationMs: number | null;
   /** One sentence for a run that did not succeed, or null. */
   problem: string | null;
+  /**
+   * What the review cost (#505): the final AI and infrastructure price, or "not charged". Present only while billing is on and the
+   * review was billed; absent otherwise (billing off, a review still open, a review claimed with billing off).
+   */
+  price?: RunPriceView;
 };
 
 /**

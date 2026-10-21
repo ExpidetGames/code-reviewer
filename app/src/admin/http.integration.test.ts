@@ -155,6 +155,24 @@ describe("changing a setting", () => {
     });
   });
 
+  // #553-T11
+  it("changes the token cap of an own key and refuses a value out of bounds", async () => {
+    const portal = await startPortal();
+
+    const changed = await put(portal, { ownKeyTokenCap: 3_000_000 });
+    const refused = await put(portal, { ownKeyTokenCap: 10 });
+
+    expect(await changed.json()).toMatchObject({
+      ok: true,
+      settings: { ownKeyTokenCap: { value: 3_000_000 } },
+    });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toMatchObject({
+      error: "invalid_input",
+      issues: [{ field: "ownKeyTokenCap", code: "number_out_of_range" }],
+    });
+  });
+
   // #202 (gate control)
   it("switches Dynamic Review on and off for the instance and shows who did it", async () => {
     const portal = await startPortal();

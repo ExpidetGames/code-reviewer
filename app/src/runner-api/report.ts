@@ -19,6 +19,7 @@ import {
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import { maskModelInText } from "../llm/access.ts";
 import { maskProvidersInText } from "../llm/provider-mask.ts";
+import { withoutUnaccountedManagedSuccess } from "./managed-cost-guard.ts";
 import { redactResult } from "./redact.ts";
 import type { JobEndedEvent } from "../dispatch/job-ended.ts";
 import type { RunnerApiLogger } from "./logger.ts";
@@ -42,7 +43,7 @@ export type ReportDeps = {
    * The LLM key each job was handed with its claim, which may differ from the current one, and the model of a managed
    * entry it was handed (#280, #432). Read from the database.
    */
-  claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf">;
+  claimedKeys: Pick<ClaimedKeys, "keysOf" | "modelsOf" | "wasNative">;
   /**
    * Whether the job ran on the operator's key (its usage record says so), and every model id of every catalog entry,
    * whatever its status (#280, #432). The remembered model of the job is not enough: its row may be unreadable, the
@@ -227,11 +228,18 @@ export async function finishJob(
   const remembered = await deps.claimedKeys.modelsOf(jobId);
   const managed = await deps.managedModels(job);
   const models = [...new Set([...remembered, ...managed.models])];
+  const onManagedKey = managed.managed || remembered.length > 0;
   const stored = redactResult(
     withoutManagedModel(
-      reported,
+      // #553: a managed Dynamic run never settles with an unknown cost; a success that reports none is stored as the failure.
+      withoutUnaccountedManagedSuccess(reported, {
+        managed: onManagedKey,
+        // #553, #578: native is what the claim handed out, not what the switch says by now.
+        native: onManagedKey && (await deps.claimedKeys.wasNative(jobId)),
+        reviewKind: job.reviewKind,
+      }),
       models,
-      managed.managed || remembered.length > 0,
+      onManagedKey,
     ),
     [
       ...(await deps.knownSecrets(job.workspaceId)),

@@ -30,6 +30,7 @@ import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
+import { RunPriceText } from "../../workspace-billing/ui/run-price.tsx";
 import { formatDuration } from "../run-duration.ts";
 import { isSettled } from "../run-status.ts";
 import type { RunRowView, RunsSnapshot } from "../run-view.ts";
@@ -75,9 +76,12 @@ function DurationLine({ run }: { run: RunRowView }) {
 function RunTableRow({
   run,
   workspaceSlug,
+  showPrice,
 }: {
   run: RunRowView;
   workspaceSlug: string;
+  /** The list has a Price column (billing is on and some run has a price). */
+  showPrice: boolean;
 }) {
   return (
     <TableRow data-run-id={run.id}>
@@ -135,6 +139,11 @@ function RunTableRow({
       <TableCell className="align-top whitespace-normal">
         <DurationLine run={run} />
       </TableCell>
+      {showPrice ? (
+        <TableCell className="align-top whitespace-normal text-xs">
+          {run.price === undefined ? null : <RunPriceText price={run.price} />}
+        </TableCell>
+      ) : null}
     </TableRow>
   );
 }
@@ -216,6 +225,8 @@ export function RunsList({
   });
   const filtered =
     filter.repositoryId !== undefined || filter.status !== undefined;
+  // The Price column exists only while some run has a price (billing is on, #505): without billing the table is as it was.
+  const showPrice = data.runs.some((run) => run.price !== undefined);
   return (
     <>
       {/* The one polite region of the list; it stays in the DOM so an update result is announced. */}
@@ -230,12 +241,25 @@ export function RunsList({
         <Table aria-label="Runs" className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[32%]">Project</TableHead>
+              <TableHead className={showPrice ? "w-[24%]" : "w-[32%]"}>
+                Project
+              </TableHead>
               <TableHead className="w-[8%]">PR</TableHead>
-              <TableHead className="w-[18%]">Command</TableHead>
-              <TableHead className="w-[18%]">Status</TableHead>
-              <TableHead className="w-[14%]">Time</TableHead>
-              <TableHead className="w-[10%]">Duration</TableHead>
+              <TableHead className={showPrice ? "w-[16%]" : "w-[18%]"}>
+                Command
+              </TableHead>
+              <TableHead className={showPrice ? "w-[16%]" : "w-[18%]"}>
+                Status
+              </TableHead>
+              <TableHead className={showPrice ? "w-[13%]" : "w-[14%]"}>
+                Time
+              </TableHead>
+              <TableHead className={showPrice ? "w-[9%]" : "w-[10%]"}>
+                Duration
+              </TableHead>
+              {showPrice ? (
+                <TableHead className="w-[14%]">Price</TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -244,6 +268,7 @@ export function RunsList({
                 key={run.id}
                 run={run}
                 workspaceSlug={workspaceSlug}
+                showPrice={showPrice}
               />
             ))}
           </TableBody>

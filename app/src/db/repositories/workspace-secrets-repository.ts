@@ -30,6 +30,8 @@ export type WorkspaceSecretsRepository = {
   put(secret: Omit<WorkspaceSecretRow, "updatedAt">): Promise<void>;
   /** Removes the secret; false when there was none. */
   remove(name: string): Promise<boolean>;
+  /** The names of the secrets this workspace holds, sorted; never a value. */
+  names(): Promise<string[]>;
 };
 
 function toRow(row: WorkspaceSecretsTable): WorkspaceSecretRow {
@@ -88,6 +90,16 @@ export function createWorkspaceSecretsRepository(
           }),
         )
         .execute();
+    },
+
+    async names() {
+      const rows = await db
+        .selectFrom("workspace_secrets")
+        .select("name")
+        .where("workspace_id", "=", workspaceId)
+        .orderBy("name")
+        .execute();
+      return rows.map((row) => row.name);
     },
 
     async remove(name) {

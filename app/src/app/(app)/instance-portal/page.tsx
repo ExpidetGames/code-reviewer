@@ -5,6 +5,7 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
+import { countOpenBillingReviews } from "@/billing/shared";
 import { getIntegrationsPageData } from "@/github-config/shared";
 import { Overview } from "@/admin/ui/overview";
 import { PageHeader } from "@/components/page-header";
@@ -13,9 +14,10 @@ export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminPage() {
   await requireAdmin();
-  const [settings, github] = await Promise.all([
+  const [settings, github, billingReviewCount] = await Promise.all([
     getAdminService().readSettings(),
     getIntegrationsPageData(),
+    countOpenBillingReviews(),
   ]);
   return (
     <>
@@ -24,6 +26,7 @@ export default async function AdminPage() {
         settings={settings}
         github={github.view}
         emailConflictCount={github.conflicts.length}
+        billingReviewCount={billingReviewCount}
       />
     </>
   );

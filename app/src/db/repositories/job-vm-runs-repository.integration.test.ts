@@ -476,4 +476,127 @@ describe.each(databases)("the VM runs of a job on %s", (name, open) => {
       });
     },
   );
+
+  // #498-B1 (the review of #524): the stop answer proves a VM that nobody reported.
+  run(
+    "creates the row of a VM the stop answer names when its report never arrived, from the claim to the stop",
+    async () => {
+      const t = await start();
+      const job = await t.enqueueNew();
+      const claimed = await t.queue.claimNext("pool-a");
+      const claimedAt = new Date(claimed?.job.claimedAt as string);
+      t.clock.advance(2 * MINUTE + 10 * SECOND);
+      await t.queue.complete(job.id, claimed?.leaseToken as string, {
+        ok: true,
+        result: {},
+      });
+      const vm = `cr-diff-${job.id}-ab12cd34`;
+
+      const changed = await t.runs.confirmStopped(job.id, [vm], t.clock.now());
+
+      expect(changed).toBe(1);
+      expect(await t.runs.list(job.id)).toStrictEqual([
+        expect.objectContaining({
+          vmName: vm,
+          startedAt: claimedAt.toISOString(),
+          endedAt: t.clock.now().toISOString(),
+          endSource: "app_stop_unreported",
+          billable: true,
+          billableMinutes: 3,
+        }),
+      ]);
+      expect(await t.runs.measure(job.id)).toMatchObject({
+        state: "measured",
+        minutes: 3,
+        run: { vmName: vm },
+      });
+    },
+  );
+
+  // #498-B1
+  run(
+    "makes no row for a name that is not a VM of the job, and none for the VM of a claim that was given back",
+    async () => {
+      const t = await start();
+      const job = await t.enqueueNew();
+      const claimed = await t.queue.claimNext("pool-a");
+
+      expect(
+        await t.runs.confirmStopped(
+          job.id,
+          ["cr-diff-someone-else-ab12", `cr-diff-${job.id}`, `x-${job.id}-ab`],
+          t.clock.now(),
+        ),
+      ).toBe(0);
+      await t.queue.release(
+        job.id,
+        claimed?.leaseToken as string,
+        "worker_exited",
+        {
+          retryAt: t.clock.now(),
+        },
+      );
+      expect(
+        await t.runs.confirmStopped(
+          job.id,
+          [`cr-diff-${job.id}-ab12cd34`],
+          t.clock.now(),
+        ),
+      ).toBe(0);
+      expect(await t.runs.list(job.id)).toStrictEqual([]);
+    },
+  );
+
+  // #498-B1 / N-1
+  run("keeps at most four VMs for one claim", async () => {
+    const t = await start();
+    const job = await t.enqueueNew();
+    const claimed = await t.queue.claimNext("pool-a");
+
+    const answers: string[] = [];
+    for (let index = 0; index < 6; index += 1)
+      answers.push(
+        await t.runs.recordStart({
+          jobId: job.id,
+          vmName: `cr-diff-${job.id}-vm${String(index)}`,
+          claimedAt: claimed?.job.claimedAt as string,
+          attempt: 1,
+          startedAt: t.clock.now(),
+          vmTimeoutSeconds: VM_TIMEOUT,
+        }),
+      );
+
+    expect((await t.runs.list(job.id)).length).toBe(4);
+    expect(answers.slice(0, 4)).toStrictEqual(Array(4).fill("recorded"));
+    // The rest are answered like a repeat: nothing is stored and the Dispatcher's launch goes on.
+    expect(answers.slice(4)).toStrictEqual(["replayed", "replayed"]);
+  });
+
+  // #498-B1
+  run(
+    "falls back to the claim wall clock for a hosted job that ran with no VM row, flagged by its source",
+    async () => {
+      const t = await start();
+      const job = await t.enqueueNew();
+      const claimed = await t.queue.claimNext("pool-a");
+      t.clock.advance(3 * MINUTE + SECOND);
+      await t.queue.complete(job.id, claimed?.leaseToken as string, {
+        ok: true,
+        result: {},
+      });
+
+      expect(await t.runs.recordWallClock(job.id, "claim_wall_clock")).toBe(
+        "recorded",
+      );
+      expect(await t.runs.recordWallClock(job.id, "claim_wall_clock")).toBe(
+        "replayed",
+      );
+
+      expect(await t.runs.measure(job.id)).toMatchObject({
+        state: "measured",
+        minutes: 4,
+        run: { endSource: "claim_wall_clock", billable: true },
+      });
+    },
+  );
 });

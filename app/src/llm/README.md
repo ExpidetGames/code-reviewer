@@ -258,6 +258,12 @@ additional authenticated data, a ciphertext moved to another provider's name, or
 - **Who.** `manage_llm_key` (Admin and Owner) sets, tests and removes it; every member reads the state.
 - **The rules for a key** are the legacy variable's (`checkLlmApiKey`): surrounding whitespace is ignored,
   whitespace or control characters inside and more than 4096 characters are refused (`api_key_invalid`).
+- **Test key of a catalog provider and the pin (#588).** The test of a catalog provider is held to the addresses the workspace's
+  projects pinned for it (`review-settings/pinned-addresses.ts`): when any pin of a project that uses the provider (switched on, Dynamic) is not the address the
+  catalog trusts now, nothing is sent and the answer is `llm_provider_address_changed`, as the claim's is `provider_address_changed`. The
+  route asks that first (`LlmKeyTestService.preflight`), before a stored key is decrypted. With no pin the test goes to the trusted
+  address, which is the first sight. `pinnedAddresses` of the service is required; the server's wiring is `createWiredLlmKeyTester`
+  (`key-tester.ts`), which a test runs over its own database.
 - **Test key.** A key typed into the field is checked as it is and forgotten; with an empty field the stored one is
   checked. The address is the provider's own, redirects are not followed, the time is limited, and the provider's
   words only appear as a cleaned first line (the key removed in every spelling, long opaque tokens blanked). Limited
@@ -270,6 +276,29 @@ additional authenticated data, a ciphertext moved to another provider's name, or
   the instance's `LLM_MODEL` (default `anthropic/claude-haiku-5.5`; a wrong name is ignored with a warning and the
   default is used). **That built-in model name is visible to every member** in the model setting of the review
   defaults, as intended: a model name is no secret (decided with #144).
+
+### Catalog providers (#555)
+
+Besides the two providers of the registry, a workspace on its own key can store a key for **any provider of the models.dev
+catalog** that the pinned engine can drive with a static key (`contracts/opencode-providers.v1.json`, #548) and run a Dynamic
+Review on one of its tool-calling models. These providers are **data, not code**: they are not in the registry (its `ids`, the
+cards of the two providers, the operator's keys and the masking by name are unchanged). `src/native-providers/` is the one place
+that knows them (its README): `lookup.ts` lets the key service and the claim find a catalog provider by its **slug** (the hyphen
+of the models.dev id is an underscore), `catalog.ts` reads what the catalog offers.
+
+- **The slot** is `llm_api_key.<slug>` in the encrypted store of the workspace (`NativeKeySecretName`), bound to the slug. Same
+  storage, write-only rule, last four characters, `key_binding_mismatch`, rate limit across providers as for any provider; the store
+  accepts any slug, so there is no migration. `nativeStatuses()` lists the catalog providers the workspace holds a slot for.
+- **The key routes** are the same (`/llm-keys/:provider`). Reading and removing a key work for any supported slug; saving and
+  testing need a provider the catalog **offers** (not blocked by a changed address, not unlisted, with a model): otherwise 404
+  `provider_not_found`, nothing stored. The test button uses the generic adapter's model-list read at the **trusted** address
+  through the connect guard; "not verified" (`{ok: true, verified: false}`) is an answer, not an error.
+- **Own mode only.** A workspace on the operator's key (`managed`) gets none of it: the page shows the note, the models route
+  answers the 404 of a path that does not exist, the form is given no catalog data, and `keyFor` for the managed branch uses the
+  registry only (a catalog provider has no operator key).
+- **Masking.** The keys of the catalog providers are in `currentKeysFor`, so a result that repeats one is masked like any other.
+- **Selection.** A Dynamic job on the own key whose provider is a catalog provider is a `catalog` selection (`selection.ts`,
+  `nativeModels`); see `src/runner-api/README.md` for the claim.
 
 ## The variables
 

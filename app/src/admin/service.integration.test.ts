@@ -420,6 +420,52 @@ describe("changing the limits", () => {
   );
 });
 
+describe("the token cap of an own key", () => {
+  // #553-T11
+  it("reads as four million tokens while nothing was saved", async () => {
+    const { service } = await startService();
+
+    expect((await service.readSettings()).ownKeyTokenCap).toEqual({
+      value: 4_000_000,
+      updatedBy: null,
+      updatedAt: null,
+    });
+  });
+
+  // #553-T11
+  it("stores a new cap with the admin and the time, and reads it back", async () => {
+    const { service, setTime, settings } = await startService();
+    setTime("2026-10-20T12:00:00.000Z");
+
+    const result = await service.changeOwnKeyTokenCap("admin-1", 2_500_000);
+
+    expect(result).toEqual({ ok: true });
+    expect(await settings.get("own_key_max_total_tokens")).toBe(2_500_000);
+    expect((await service.readSettings()).ownKeyTokenCap).toEqual({
+      value: 2_500_000,
+      updatedBy: { id: "admin-1", email: "admin-1@example.test" },
+      updatedAt: "2026-10-20T12:00:00.000Z",
+    });
+  });
+
+  // #553-T11
+  it.each([0, -1, 1.5, 99_999, 100_000_001, Number.NaN, "4000000", null])(
+    "refuses %j and keeps what was stored",
+    async (value) => {
+      const { service, settings } = await startService();
+
+      const result = await service.changeOwnKeyTokenCap("admin-1", value);
+
+      expect(result).toEqual({
+        ok: false,
+        error: "invalid_input",
+        issues: [{ field: "ownKeyTokenCap", code: "number_out_of_range" }],
+      });
+      expect(await settings.get("own_key_max_total_tokens")).toBeUndefined();
+    },
+  );
+});
+
 describe("changing the Dynamic Review gate", () => {
   // #202 (gate control)
   it("reads off while nothing was saved", async () => {

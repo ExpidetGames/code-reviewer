@@ -16,25 +16,27 @@ publishes as one persistent summary comment. The decisions are in epic
 
 ## What exists, and what does not
 
-| Part | State |
-|---|---|
-| Project setting `review_kind` (Diff or Dynamic), editable skill, default model `deepseek/deepseek-v4.1-flash` | Shipped (#194, #200) |
-| Rollout gate `dynamic_review` (instance setting, default off), admin control | Shipped (#195, #202) |
-| Job tag, capability matching, `no_capable_runner`, `dynamic_review_disabled` | Shipped (#195) |
-| Sanitised read-only checkout of the pull request head | Shipped (#196) |
-| Fixed review core and the editable skill | Shipped (#198) |
-| Engine seam: trusted config, hard limits, per-job model proxy, adapter, process-group cleanup | Shipped (#197 part 1, #202 process-group reuse) |
-| Summary comment, findings state, reconciliation | Shipped (#199) |
-| Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup | Shipped (#197 parts 2a and 2b, #244) |
-| The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform. On another platform such as arm64 the image still builds, without an engine, and its runner serves Diff jobs only (#264); an arm64 engine needs its own pinned digests) | Shipped (#202, #264) |
-| Startup self-check that advertises `opencode` only when everything holds, with a stable logged reason otherwise | Shipped (#202) |
-| Deployment: `compose.dynamic.yml` (Docker Compose, opt-in override file) and the `runner-dynamic` service of `compose.coolify.yml` (Coolify, built and started with the rest, **untested on a real Coolify**) | Shipped (#202, #264) |
-| Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
-| Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
-| Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
-| Recovery when a run wrote the summary and then ended failed | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
-| A short failure note in the summary comment when a run fails (not `lease_lost`, not a refused token) | Shipped (#299) |
-| Hosted activation | Needs the hosted egress gate (#82) |
+| Part                                                                                                                                                                                                                                                                                                                                                                         | State                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Project setting `review_kind` (Diff or Dynamic), editable skill, default model `deepseek/deepseek-v4.1-flash`                                                                                                                                                                                                                                                                | Shipped (#194, #200)                                                                                                                  |
+| Rollout gate `dynamic_review` (instance setting, default off), admin control                                                                                                                                                                                                                                                                                                 | Shipped (#195, #202)                                                                                                                  |
+| Job tag, capability matching, `no_capable_runner`, `dynamic_review_disabled`                                                                                                                                                                                                                                                                                                 | Shipped (#195)                                                                                                                        |
+| Sanitised read-only checkout of the pull request head                                                                                                                                                                                                                                                                                                                        | Shipped (#196)                                                                                                                        |
+| Fixed review core and the editable skill                                                                                                                                                                                                                                                                                                                                     | Shipped (#198)                                                                                                                        |
+| Engine seam: trusted config, hard limits, per-job model proxy, adapter, process-group cleanup                                                                                                                                                                                                                                                                                | Shipped (#197 part 1, #202 process-group reuse)                                                                                       |
+| Summary comment, findings state, reconciliation                                                                                                                                                                                                                                                                                                                              | Shipped (#199)                                                                                                                        |
+| Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup                                                                                                                                                                                                | Shipped (#197 parts 2a and 2b, #244)                                                                                                  |
+| The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform. On another platform such as arm64 the image still builds, without an engine, and its runner serves Diff jobs only (#264); an arm64 engine needs its own pinned digests) | Shipped (#202, #264)                                                                                                                  |
+| Startup self-check that advertises `opencode` only when everything holds, with a stable logged reason otherwise                                                                                                                                                                                                                                                              | Shipped (#202)                                                                                                                        |
+| Deployment: `compose.dynamic.yml` (Docker Compose, opt-in override file) and the `runner-dynamic` service of `compose.coolify.yml` (Coolify, built and started with the rest, **untested on a real Coolify**)                                                                                                                                                                | Shipped (#202, #264)                                                                                                                  |
+| Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md`                                                                                                                                                                       | Shipped (#202)                                                                                                                        |
+| Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time                                                                                                                                                                                                                                                                              | **Manual step, not done** (needs a real deployment target, see "Capacity")                                                            |
+| Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253)                                                       | Shipped (#251, #252, #253)                                                                                                            |
+| Recovery when a run wrote the summary and then ended failed                                                                                                                                                                                                                                                                                                                  | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
+| A short failure note in the summary comment when a run fails (not `lease_lost`, not a refused token)                                                                                                                                                                                                                                                                         | Shipped (#299)                                                                                                                        |
+| Finalization above the wire for native providers: the review as plain JSON text, one repair, wrap-up by message, the final call after a refusal, the tool-result audit on the adapter side (`DynamicEngine(plain_final=True)`)                                                                                                                                               | Shipped (#552), see "Finalization above the wire"                                                                                     |
+| The wiring of the native path: the claim carries the model entry and the cost policy, the runner starts the passthrough proxy and the plain-final engine with them, behind the app's switch `NATIVE_OPENCODE_PROVIDERS` (default off)                                                                                                                                        | Shipped (#578), see "The native path of a job"                                                                                        |
+| Hosted activation                                                                                                                                                                                                                                                                                                                                                            | Needs the hosted egress gate (#82)                                                                                                    |
 
 ## How a Dynamic job reaches an engine
 
@@ -120,14 +122,14 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   before it drops `NET_ADMIN`. It asks the kernel by installing and removing a throw-away
   `table inet` with a `reject` rule (it matches no process).
 
-  | | Full ruleset | Fallback ruleset |
-  |---|---|---|
-  | Chosen when | the kernel accepts `table inet` and `reject` (every ordinary Linux host, Docker host and Coolify host) | `inet` or `reject` is refused. Some VM kernels, for example the ones of hosted sandbox VMs, only support the nf_tables `ip` family |
-  | nft table | `table inet code_reviewer_engine_<uid>` | `table ip code_reviewer_engine_<uid>` |
-  | Last rule for the engine user | `reject with icmpx type admin-prohibited`: refused at once | `drop`: no answer, a connection attempt times out |
-  | IPv4 | proxy port and engine port on `127.0.0.1`, the engine's replies, nothing else | the same three accepts, nothing else |
-  | IPv6 | covered by the same table (every packet of the user is rejected) | **not covered by an `ip` table**: switched off, and proven off (below) |
-  | Startup log line | `egress rules: full (inet)` | `egress rules: fallback (ip, ipv6 disabled)` |
+  |                               | Full ruleset                                                                                           | Fallback ruleset                                                                                                                   |
+  | ----------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+  | Chosen when                   | the kernel accepts `table inet` and `reject` (every ordinary Linux host, Docker host and Coolify host) | `inet` or `reject` is refused. Some VM kernels, for example the ones of hosted sandbox VMs, only support the nf_tables `ip` family |
+  | nft table                     | `table inet code_reviewer_engine_<uid>`                                                                | `table ip code_reviewer_engine_<uid>`                                                                                              |
+  | Last rule for the engine user | `reject with icmpx type admin-prohibited`: refused at once                                             | `drop`: no answer, a connection attempt times out                                                                                  |
+  | IPv4                          | proxy port and engine port on `127.0.0.1`, the engine's replies, nothing else                          | the same three accepts, nothing else                                                                                               |
+  | IPv6                          | covered by the same table (every packet of the user is rejected)                                       | **not covered by an `ip` table**: switched off, and proven off (below)                                                             |
+  | Startup log line              | `egress rules: full (inet)`                                                                            | `egress rules: fallback (ip, ipv6 disabled)`                                                                                       |
 
   The policy is the same in both: the engine user reaches the job's model proxy and its own server
   port on loopback and nothing else; a refused attempt and a dropped one are both "not reached".
@@ -159,6 +161,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   its own harness variable (`CR_PRIVILEGED_EGRESS_MODE`) that only the test files read. The tests of
   the rules run for both rulesets, and the full ruleset's assertion of an immediate refusal is kept
   as it was; the fallback accepts a refusal or a timeout there.
+
 - **Cleanup.** At the end of a job, on SIGTERM (the job loop's way to end a job on lease loss,
   shutdown and timeout) and in the watchdog, the supervisor kills the engine's process group and then
   every process of the engine user, also helpers that left the group with `setsid()`, removes the
@@ -183,8 +186,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   every Dynamic job fails with `dynamic_isolation_self_check_failed` while Diff jobs keep running.
   The fixed slot ports are checked at startup against the kernel's ephemeral port range
   (`/proc/sys/net/ipv4/ip_local_port_range`); a port inside it, or a range that cannot be read,
-  means the rules are not installed and every Dynamic job fails closed. Keep the defaults (10180,
-  10181) or other ports below the range.
+  means the rules are not installed and every Dynamic job fails closed. Keep the defaults (10180, 10181) or other ports below the range.
   Only PID 1 (`tini`) keeps them. Do not run the container with `seccomp=unconfined`.
 - **Read-only root filesystem (#249).** `compose.dynamic.yml` runs the container with
   `read_only: true`: nothing in the image can be written, not even by root with `DAC_OVERRIDE`, so
@@ -224,13 +226,13 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
 PR-Agent-only runner and is the last stage, so a plain `docker build -f runner/Dockerfile .` gives
 it. The `dynamic` target adds:
 
-| Part | Where | How it is pinned |
-|---|---|---|
-| Stock OpenCode v1.19.0 (about 186 MB, 60 MB compressed), unmodified | `/usr/local/bin/opencode`, owned by root, mode 0755 | `runner/opencode-pin.json`: release asset, source commit, size and SHA-256 of the archive and of the executable. The build downloads through `runner/scripts/fetch_opencode.py`, which accepts only the pinned bytes and checks that the executable reports the pinned version |
-| ripgrep 14.1.1 (static musl release) | `/usr/local/bin/rg`, owned by root, mode 0755 | `runner/ripgrep-pin.json`, same checks (`runner/scripts/fetch_ripgrep.py`). The engine's grep and glob need it; without one the stock engine would download it at run time, which the runner never allows |
-| `nft` | Debian's signed `nftables` package | Not pinned, by decision: `apt` installs the version Debian's repository has at build time (like `tini`), so it does not follow the base image digest and two builds on different days can differ. An exact `nftables=<version>` would not be reproducible either, because the Debian mirrors drop superseded versions and the build would break at the next point release. The package is signed, root-owned and has no setuid file (the smoke test measures that). It installs the engine user's network rules once, at container start |
-| The engine user `engine` (uid and gid 10101, no home, no login shell, no other group) | `/etc/passwd` of the image | Fixed numeric ids, distinct from the Diff job user 10001 |
-| Both pin files | `/opt/code-reviewer/pins/`, owned by root | The runner's self-check compares the installed files with them |
+| Part                                                                                  | Where                                               | How it is pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stock OpenCode v1.19.0 (about 186 MB, 60 MB compressed), unmodified                   | `/usr/local/bin/opencode`, owned by root, mode 0755 | `runner/opencode-pin.json`: release asset, source commit, size and SHA-256 of the archive and of the executable. The build downloads through `runner/scripts/fetch_opencode.py`, which accepts only the pinned bytes and checks that the executable reports the pinned version                                                                                                                                                                                                                                                           |
+| ripgrep 14.1.1 (static musl release)                                                  | `/usr/local/bin/rg`, owned by root, mode 0755       | `runner/ripgrep-pin.json`, same checks (`runner/scripts/fetch_ripgrep.py`). The engine's grep and glob need it; without one the stock engine would download it at run time, which the runner never allows                                                                                                                                                                                                                                                                                                                                |
+| `nft`                                                                                 | Debian's signed `nftables` package                  | Not pinned, by decision: `apt` installs the version Debian's repository has at build time (like `tini`), so it does not follow the base image digest and two builds on different days can differ. An exact `nftables=<version>` would not be reproducible either, because the Debian mirrors drop superseded versions and the build would break at the next point release. The package is signed, root-owned and has no setuid file (the smoke test measures that). It installs the engine user's network rules once, at container start |
+| The engine user `engine` (uid and gid 10101, no home, no login shell, no other group) | `/etc/passwd` of the image                          | Fixed numeric ids, distinct from the Diff job user 10001                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Both pin files                                                                        | `/opt/code-reviewer/pins/`, owned by root           | The runner's self-check compares the installed files with them                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 **Why a separate image and not one image.** The engine adds about 186 MB, and `nft`, `rg`, a second
 user and a deployment shape that needs root and eight capabilities are things a Diff-only
@@ -255,22 +257,22 @@ When the Dynamic runner starts it first installs the engine user's static networ
 only then does it send `opencode` in the claim. Every failure is "not advertised": the runner logs a
 stable reason (never a value) and keeps serving Diff jobs.
 
-| Reason (in the log) | What did not hold |
-|---|---|
-| `not_a_dynamic_runner` | No engine user is configured: this is the default runner (information, not a warning) |
-| `not_root_supervisor` | The process is not root; `compose.dynamic.yml` sets `user: "0:0"` |
-| `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
-| `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel (a kernel with only the `ip` family gets the fallback ruleset instead, #345), no `nft`, or a slot port inside the kernel's ephemeral range |
-| `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
-| `root_filesystem_writable` | Only the entry modes `worker-once` and `probe` (#324) ask for it: the root filesystem is not read-only, so this is no container made from the hardened container spec. The legacy loop does not check it |
-| `ipv6_not_disabled` | Only with the fallback ruleset (#345): IPv6 is not proven off for the engine user (a `disable_ipv6` setting is not `1`, an IPv6 address or a usable route exists, `::1` can be bound, or the engine user's IPv6 attempt did not end in a "no IPv6" error). Set `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` on the container |
-| `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64) |
-| `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
-| `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable. This is also what an image **built on arm64** reports: the build installs no engine where there is no pin (#264), so the image builds and the runner serves Diff jobs only |
-| `engine_binary_untrusted`, `ripgrep_untrusted` | The file, or a directory above it up to `/`, is not owned by root, is a link (directories) or can be written by group or others |
-| `engine_binary_checksum_mismatch`, `ripgrep_checksum_mismatch` | Size or SHA-256 differ from the pin |
-| `engine_version_mismatch` | Run offline as the engine user, the engine does not report the pinned version |
-| `network_probe_failed` | A probe run as the engine user could not reach the slot's proxy port, or could reach something else (another loopback service, another address, UDP). Also: a stranger holds the proxy port |
+| Reason (in the log)                                            | What did not hold                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `not_a_dynamic_runner`                                         | No engine user is configured: this is the default runner (information, not a warning)                                                                                                                                                                                                                                                                         |
+| `not_root_supervisor`                                          | The process is not root; `compose.dynamic.yml` sets `user: "0:0"`                                                                                                                                                                                                                                                                                             |
+| `engine_user_invalid`                                          | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image                                                                                                                                                                                                |
+| `network_rules_not_installed`                                  | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel (a kernel with only the `ip` family gets the fallback ruleset instead, #345), no `nft`, or a slot port inside the kernel's ephemeral range                                                                                                         |
+| `capabilities_not_dropped`                                     | The process still holds `NET_ADMIN` or `SETPCAP`                                                                                                                                                                                                                                                                                                              |
+| `root_filesystem_writable`                                     | Only the entry modes `worker-once` and `probe` (#324) ask for it: the root filesystem is not read-only, so this is no container made from the hardened container spec. The legacy loop does not check it                                                                                                                                                      |
+| `ipv6_not_disabled`                                            | Only with the fallback ruleset (#345): IPv6 is not proven off for the engine user (a `disable_ipv6` setting is not `1`, an IPv6 address or a usable route exists, `::1` can be bound, or the engine user's IPv6 attempt did not end in a "no IPv6" error). Set `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` on the container |
+| `pin_unreadable`                                               | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64)                                                                                                                                                                                                 |
+| `pin_untrusted`                                                | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others                                                                                                                                                                                                                                           |
+| `engine_binary_missing`, `ripgrep_missing`                     | The file (or a directory above it) is absent, the file is a link, or not executable. This is also what an image **built on arm64** reports: the build installs no engine where there is no pin (#264), so the image builds and the runner serves Diff jobs only                                                                                               |
+| `engine_binary_untrusted`, `ripgrep_untrusted`                 | The file, or a directory above it up to `/`, is not owned by root, is a link (directories) or can be written by group or others                                                                                                                                                                                                                               |
+| `engine_binary_checksum_mismatch`, `ripgrep_checksum_mismatch` | Size or SHA-256 differ from the pin                                                                                                                                                                                                                                                                                                                           |
+| `engine_version_mismatch`                                      | Run offline as the engine user, the engine does not report the pinned version                                                                                                                                                                                                                                                                                 |
+| `network_probe_failed`                                         | A probe run as the engine user could not reach the slot's proxy port, or could reach something else (another loopback service, another address, UDP). Also: a stranger holds the proxy port                                                                                                                                                                   |
 
 The full log line is `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only
 (dynamic_isolation_self_check_failed: <reason>)`; a passing check logs `Dynamic Review: opencode is
@@ -343,13 +345,13 @@ the name, refuses it when **one** address is not public (loopback, private, link
 documentation and special-purpose ranges, NAT64, 6to4; an IPv4-mapped address by its IPv4) and connects to an address
 it checked, never to the name again. A redirect is a status: it is not followed and ends the run.
 
-*Address rules.* They are those of `app/src/billing/public-url.ts` (the edges of every range are in
+_Address rules._ They are those of `app/src/billing/public-url.ts` (the edges of every range are in
 `test_passthrough_destination.py`), with one deliberate difference: the app judges NAT64 `64:ff9b::/96` and 6to4
 `2002::/16` by the IPv4 address inside them, this guard refuses them whatever it is. A provider is not behind either,
 and a translator routes to whatever its prefix says, so the check of the embedded address would only be a way to be
 wrong. Everything the app refuses is refused here too.
 
-*Waits.* Every wait is bounded by the budget of the call (the smaller of 120 s and the time the job has left; a call
+_Waits._ Every wait is bounded by the budget of the call (the smaller of 120 s and the time the job has left; a call
 with none makes no lookup and no connection): the name lookup runs in a thread that is given up on (`getaddrinfo` has
 no timeout; at most one call is in flight, so a hanging resolver costs one idle thread), each connection attempt gets
 what is left of the budget after the attempts before it, the TLS handshake what is left after the connection, then
@@ -364,18 +366,18 @@ has shown (realistic guard, #540/#542), the final-call exemption and "never with
 engine's retries (429, 5xx, a stream cut, an error event inside a 200 stream) are calls of their own. How a call is
 settled:
 
-| What happened | Settled as |
-|---|---|
-| a complete answer with usage and a price | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops) |
-| the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (all of: the status line came within 15 s of the request, the content type is not `text/event-stream`, and the bounded body, read whole, states no usage object), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`) |
-| 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body | **unknown**: booked at its **worst case**, not at its expected cost (`settle_unknown`), counted in `unknown_calls`, and for a managed key the run ends (`dynamic_accounting_failed`) |
-| a complete answer without a readable usage (none stated, a bad value, a stream that stopped before its usage event) or a price | the call is unknown, and the run ends for every key (the own-key relaxation is #553) |
-| a usage that lists a field nobody can price (`unknown_fields`: an unknown field that holds something, `server_tool_use`, audio, a `service_tier` other than the standard one, a second choice) or that cannot be priced from the book | **unknown** as above, for a managed key (`unknown_cost_ends_run`); the names of the fields (never a value) are logged |
+| What happened                                                                                                                                                                                                                                                                                                      | Settled as                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a complete answer with usage and a price                                                                                                                                                                                                                                                                           | the provider's usage and the price (`settle_call`; a usage above the reservation is **booked first**, then the run stops)                                                                                                                                                                      |
+| the provider refused with a 4xx (not 408), a 429, or a **500, 502, 503 or 529 that is only a status** (all of: the status line came within 15 s of the request, the content type is not `text/event-stream`, and the bounded body, read whole, states no usage object), a redirect, a connection that never opened | unbilled: the reservation is released (`settle_unbilled`)                                                                                                                                                                                                                                      |
+| 408, 504, 524, a status below 200, any other status, a 500/502/503/529 that fails one of the three conditions, every error **after** the first byte of a stream or body (a cut stream, an error event in a 200), a timeout after the request went out, an encoded body                                             | **unknown**: counted in `unknown_calls`. Managed key: booked at its **worst case** (`settle_unknown`) and the run ends (`dynamic_accounting_failed`). Own key: booked at what it was **expected to cost** and its expected tokens, and the run goes on (see "The cost policy of a native job") |
+| a complete answer without a readable usage (none stated, a bad value, a stream that stopped before its usage event)                                                                                                                                                                                                | the call is unknown, and the run ends for **every** key: with no tokens to count, the token cap cannot apply                                                                                                                                                                                   |
+| a usage that lists a field nobody can price (`unknown_fields`: an unknown field that holds something, `server_tool_use`, audio, a `service_tier` other than the standard one, a second choice) or that cannot be priced from the book                                                                              | managed key: **unknown** as above and the run ends. Own key: the tokens the provider stated are booked against the cap, the cost of the call is unknown, the run goes on and `price_risk` (a count, with the names of the fields, never a value) is logged                                     |
 
 The worst case of a call is the bytes of its request, each as a token at the dearest input price (the byte count bounds
 the tokens), plus the whole output cap at the output price (`BudgetLedger.worst_case_cost`). An engine that can make
 a call's usage unreadable must not make the call free, so a call that may have been billed and was not read ends a
-managed run. *Why a 500/502/503/529 status is not such a call:* it arrives as a status line before any byte of an
+managed run (an own key goes on, see "The cost policy of a native job"). _Why a 500/502/503/529 status is not such a call:_ it arrives as a status line before any byte of an
 answer, so the provider failed the request before it generated anything, and the providers do not bill that (a
 transient overload is the commonest event of a long run, and the engine retries it as a call of its own). It is
 trusted only while it looks like that: a status line that took more than 15 s, an event-stream content type, or a body
@@ -383,8 +385,8 @@ that states a usage (JSON with a `usage`/`usageMetadata` object anywhere, or, fo
 `usage`; a body longer than the bound or cut counts too) means the provider may have been generating. A timeout
 status (408, 504, 524) and anything after the first byte of a stream or body say the provider may have been generating,
 so they stay unknown. The assumption is unproven for real providers and is item L13 of the live checklist. The hook
-for #553 is `PassthroughProxy(unknown_cost_ends_run=)`, on by default and set by nothing yet. The whole-run cost stays
-unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
+of the cost policy is `PassthroughProxy(unknown_cost_ends_run=)`, set from the claim's `dynamic.cost` (`cost_policy.py`, below). The
+whole-run cost stays unknown after any unknown call (`usage.cost_usd` is `None`), never a partial sum.
 
 **A hang-up does not hide a cost.** When the engine disconnects mid-stream, the call to the provider is **not**
 cancelled at once: the proxy stops forwarding but keeps reading the stream into the tap to the end of the answer (bounded by the
@@ -401,7 +403,7 @@ an SSE stream is a document: it is read whole up to `max_response_bytes` (256 Ki
 streaming request that way, and one that does is cut at 256 KiB and ends the run). Response headers of a successful
 answer are filtered to a few (`content-type`, `retry-after`, `retry-after-ms`, `x-should-retry`, the request id).
 
-*What the engine is told about an error, and why redaction is not used on content.* If the proxy cut the key out of
+_What the engine is told about an error, and why redaction is not used on content._ If the proxy cut the key out of
 what the provider answers, an engine that writes guesses of the key into its output would see the cut where a guess is
 right: the proxy would be an oracle, one character run at a time. So **a successful answer is never changed**.
 Redaction (`redact.py`: the key and any run of eight or more characters of it) is used only on what no model writes:
@@ -415,7 +417,7 @@ to confirm. For a non-2xx answer the provider's body is read locally (to tell a 
 and to see whether it states a usage) and **not passed on at all**: the engine gets the status, a code and a sentence
 of the proxy's own, and the plain-number `retry-after` and `retry-after-ms`, nothing else.
 
-*An exception after the request was sent.* Whatever breaks while an answer is relayed (a bug, an unreadable shape) the
+_An exception after the request was sent._ Whatever breaks while an answer is relayed (a bug, an unreadable shape) the
 call may have been billed: it is booked as unknown (once: the ledger settles a reservation a single time, so an error
 handler after the normal path books nothing twice), the engine's connection is dropped, and the run ends with
 `dynamic_accounting_failed` and not with a generic `runner_error`. Neither code is retried by the app (only
@@ -491,9 +493,9 @@ many tokens) is not believed and not booked: the call is unknown. A call the boo
 charge is stated, since there is nothing to hold it against. The worst case of an unknown call (`worst_case_cost`) is
 priced from the book too (N8): every byte of the request as a token of the dearest kind of input (plain, a cache read,
 either write), every output token at the dearer of output and reasoning, at the dearest tier the request can reach
-(a tier may be cheaper than the level below it, so the base counts as well). Until the claim carries the confirmed book (#553) the
-proxy reads its per-job `UnitCosts` as a one-level book (a price finer than a micro-USD is rounded up, never down;
-`cache_write_1h_usd_per_mtok` is new). Every shape of the book is table-tested against an independent calculator
+(a tier may be cheaper than the level below it, so the base counts as well). A native job prices from the book its claim carries (#553, below); until the
+wiring runs a job that way, the proxy reads a per-job `UnitCosts` as a one-level book (a price finer than a micro-USD is rounded up,
+never down; `cache_write_1h_usd_per_mtok` is new). Every shape of the book is table-tested against an independent calculator
 (`runner/tests/usage_calc.py`).
 
 What a real answer may still show differently is **unconfirmed** and marked in the code (`UNCONFIRMED`) and as item L14
@@ -506,13 +508,218 @@ engine's own "500 `UnknownError` with no call upstream" for a model its config d
 5xx) do not end the run by themselves (a 408/504/524 is an unknown call, see the ledger); the code is kept in `PassthroughProxy.last_upstream_error` for the adapter to name when the
 engine gives up. Everything else ends the run with its code, the text of the provider in none of it.
 
-**Not in this change** (follow-ups): reading a job's entry from the claim and starting the engine with the native
-config (#564 has the entry reader; `build_native_engine_config`, which asserts the provider block against the entry, and
-`target_from_entry` are the two joints; wiring and the claim contract test T13 come as a separate step), the audit of
-tool results in a request (it is chat-shaped; the adapter still counts the tool calls the engine reports), how a final
-call is told to answer without rewriting the request (#552), the live capture that replaces the assumed usage shapes
-(L14) and the cost policy for an own key (#553: how a managed and an own key treat `unknown_fields`, `price_drift` and a
-call without usage; reading the confirmed price book from the claim).
+**Not in this change** (follow-ups): the audit of tool results in a request (it is chat-shaped; since #552 the adapter counts
+them from the engine's own event stream), how a final call is told to answer without rewriting the request (done in #552, see
+"Finalization above the wire") and the live capture that replaces the assumed usage shapes (L14). Reading a job's entry from
+the claim and starting the engine with the native config is the wiring of #578, see "The native path of a job".
+
+### The native path of a job (#578)
+
+`dynamic_review/native_job.py` joins the pieces above for one job; `runner.py` keeps its own flow (the same checks before, the
+same conclusion after, `_conclude_dynamic_job`). A job is **native** when its claim carries `dynamic.modelEntry` (the
+`JobModelEntry` of `contracts/job-model-entry.v1.json`) next to `dynamic.cost`; the runner has no switch of its own, it follows
+the claim. Both are read strictly (`job.py`): an entry without a cost policy, an entry whose model is not `dynamic.model`, or
+whose provider is not the provider of `llm.provider` (the underscore of a slug is the hyphen of the id; the key goes to the
+entry's address, so the two must agree) is a refused job. A cost policy without an entry is refused as before (#553). A job with
+neither is a job of today and runs through `ModelProxy` exactly as before.
+
+**Where the key goes.** The key of a provider the runner's registry has (`llm_providers.py`: `anthropic`, `openrouter`) is that
+provider's own, and the legacy path always sent it to the registry's `default_api_base`. The native path reads the address from the
+entry, so it is pinned: `entry.upstreamBaseUrl` must equal the registry's address (a trailing slash aside, nothing else), else the
+job is refused before any key is used, in `parse_job` (`invalid_job`, "dynamic.modelEntry.upstreamBaseUrl is not the address of the
+provider") and again in `build_native_job` (`dynamic_config_invalid`, before an upstream is made). The app refuses the same case
+at the claim (`entryFor`: `upstream_not_registry`, `reason=entry_upstream_not_registry` in the log; `managed_model_unavailable` on
+the operator's key, `dynamic_model_features_unsupported` on an own key), against the addresses of its own registry
+(`app/src/native-cost/registry-addresses.ts`).
+
+A provider the registry has no entry for (the BYOK providers of #555, any provider of the models.dev catalog the pinned engine can
+drive with a static key) has no address in the code. Its key goes to the address the app's catalog **trusts** for it (#548) and
+to none a workspace could type: the claim carries that address in the entry, and the app refuses to build an entry from a
+provider that is not trusted (`url_changed`, `rejected`) or whose stored address is not a plain public https address in one exact
+spelling (`upstream_invalid`). The runner re-checks what it can see (`passthrough/destination.py`, `key_destination`, in
+`parse_job` and again in `build_native_job`): the entry is of the provider the key is for, the address is a plain public https
+address (port 443, no credentials, no query, a public name or IP, a plain path) **in exactly that spelling**, so the string the app
+judged is the string it connects to; the job then carries no `llm.baseUrl`, `llm.requireParameters` or `llm.fallbackModels`. Every
+connection resolves the name, judges every address, connects to the one it judged and follows no redirect. App and runner are held
+to the same verdicts by `contracts/key-destination-vectors.json`. The runner cannot tell a trusted public name from another public
+name; that is the catalog's trust record, and the residual risk is #548's trust on first use
+(`app/src/native-cost/README.md`, "Where the key goes").
+
+**The address a selection is pinned to (#588; needs a security review).** The catalog's address is trusted on first sight, with no
+committed list per provider. But the address a workspace's project saw when it selected the catalog provider is written once into
+that project's settings (`dynamicProviderAddress`, set by the server, never by a request) and stays fixed: every later claim sends
+the key to exactly that address, and if the catalog trusts another address by then (an admin confirmed a change, #548) the job is
+refused before any key is loaded (`provider_address_changed`, free, with a notice on the Runs page for an Owner or Admin to confirm
+the new address in the review settings of the project; only the roles that manage the workspace's LLM key may write or move a pin). The runner needs nothing new: the entry it receives carries the pinned
+address, which the app has just checked equals the trusted one, so its verdicts are the shared vectors' as before. The two registry
+providers (`anthropic`, `openrouter`) get no such pin: their address is a constant in the code of the app and of the runner, which
+is stronger than a per-selection copy and cannot go stale.
+
+1. `build_native_job`, before anything is prepared: `target_from_entry`, the production `HttpsUpstream` on the entry's address
+   (an address the guard refuses ends the job `dynamic_config_invalid` before the engine exists, naming neither the address nor
+   the reason), a fresh capability, and the ledger and the proxy from the claim's policy (`build_native_run`, with the window
+   and the output bound from the entry, `reasoning` from the entry, the operator's `RUNNER_DYNAMIC_MAX_COST_USD` and the
+   deadline). The capability descriptor of the legacy path (`RUNNER_DYNAMIC_CAPABILITIES`) is not read.
+2. `run_native_engine`, inside the preparation: the loopback server on the slot's port, the engine configuration
+   (`native_provider_config` for the entry, `build_native_engine_config`: one provider, one model, the capability as its key,
+   no real key and no upstream address), `DynamicEngine(plain_final=True, ...)`, and, when the run ends, the server is stopped
+   (a superseded run drains first).
+3. The usage is booked by the proxy's parsers into the ledger; the result carries `ledger.usage(...)` as for any Dynamic run.
+   The cost policy decides what an unknown cost does (managed: the run ends `dynamic_accounting_failed`; own key: the token cap
+   binds and `costUsd` is null).
+4. **One finalization line** is added to the log of the result (and to the facts of a failure that got that far):
+   `finalization first=<ok|problem> repaired=<true|false> second=<none|ok|problem> wrap_up=<cost_limit|time_limit|token_limit|none>
+final_call=<normal|exempt> final_tokens=<in>/<out>/<cache read> repair_tokens=<in>/<out>/<cache read> finish=<finish of the
+call that wrote the review> prev_prompt_tokens=<prompt of the call before>`. The finish is the one the provider's answer states
+   (the usage tap reads it: Chat `finish_reason`, Messages `stop_reason`, Responses `status` and `incomplete_details.reason`, Google
+   `finishReason`), in the four words of the call trace (`stop`, `tool_calls`, `length`, `content_filter`; any other is `other`).
+   Stable names and numbers only
+   (`finalization_log.py`); the tokens come from the call trace and are `-` when the trace was cut or is missing. A run whose log
+   has no such line did not take the native path.
+
+Nothing about the engine changed for this: no step limit, no steering, no `cache_control` set by us (caching comes from the
+engine), the cost limit is the only brake and the final-call exemption makes a run end with a review.
+
+**The switch.** In the app, the environment variable `NATIVE_OPENCODE_PROVIDERS` (`1`, `true` or `on`; anything else, or unset, is
+off; `app/src/native-cost/switch.ts`). Off, `catalogRefOf` names no registry provider, so every claim is the claim of today. On, a
+**Dynamic** job on `openrouter` or `anthropic` takes the native path: the claim checks the price (managed key) or reads the
+catalog's price and the token cap (own key), builds the entry of the chosen model from the stored catalog and sends both. A
+Diff job is never native. A managed model that is not enabled with a confirmed price ends `managed_model_unavailable`; a model
+the catalog does not have ends `managed_model_unavailable` (managed), `dynamic_model_features_unsupported` (own key, a registry
+provider) or `llm_model_unavailable` / `llm_provider_unsupported` (own key, a catalog provider, #555), before any key or token exists. The variable is read at every claim, so turning it off again takes effect on the next claim; a runner or
+Worker image that does not know `dynamic.modelEntry` must not be in the fleet while it is on (the cost policy already needs the
+claim feature `dynamic_cost_policy`, which gates both).
+
+### The cost policy of a native job (#553)
+
+Whose key pays decides what an unknown cost means. The claim hands the runner `dynamic.cost` (`contracts/runner-api.v1.json`,
+`DynamicCostPolicy`; `passthrough/cost_policy.py` reads it as strictly as the app writes it), only to a runner that named the claim
+feature `dynamic_cost_policy`, and only for a **native** job (`app/src/native-cost/README.md` says which selection is one). A job
+without it is a job of today; a job with it that would reach the legacy wire is refused (`dynamic_config_invalid`).
+
+|                                                                                                        | managed key (we pay)                                                                                                  | own key (the user pays the provider)                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| model                                                                                                  | refused at claim (`managed_model_unavailable`) unless enabled with a **confirmed** price, before any key, token or VM | free choice                                                                                                                                                                                                                                |
+| price source                                                                                           | the confirmed book of the claim, nothing else: never the engine's `cost`, never models.dev                            | the confirmed book, else the catalog's price, else none                                                                                                                                                                                    |
+| an unknown cost (a call whose usage was not read, one the book cannot price, a field nobody can price) | worst case booked, the run ends `dynamic_accounting_failed` (free)                                                    | the run goes on; the call books its tokens (or its expected cost and tokens when its usage was not read)                                                                                                                                   |
+| bound                                                                                                  | the dollar limit of #540                                                                                              | the dollar limit of #540 while every call is priced, with `maxTotalTokens` (instance setting, default 4,000,000: prompt, cache and completion tokens in all) as a ceiling over it; with no price or an unknown call, the cap and the clock |
+| result                                                                                                 | `costUsd` known; the app refuses a native managed success with a null cost (stored as `dynamic_accounting_failed`)    | `costUsd: null` when any call is unpriced; billing charges minutes only                                                                                                                                                                    |
+| a call with no usage at all                                                                            | fails the run                                                                                                         | fails the run (the cap cannot count it)                                                                                                                                                                                                    |
+
+`build_native_run(policy, limits, ..., target, upstream, ...)` (`native_run.py`) makes the ledger and the proxy of one policy, so the
+two cannot disagree about whose key it is; `build_native_ledger(policy, limits, window_tokens, output_tokens, reasoning)` makes the ledger: no book means no dollar is counted
+(`priced=False`), the output of a call is held to `min(limit.output, 32000)` (what the engine really sends, spike #546), and a model
+the catalog marks `reasoning` reserves at least `REASONING_OUTPUT_FLOOR_TOKENS` (8,192) of output for every call and the p95 of its
+own completions after that, since its thinking is output nobody can predict (#548: the flag changes the request, so it changes the
+reservation). The whole 32,000-token cap is not reserved: at 15 USD per million tokens that alone would make the first call of a
+1 USD run the final call. The token cap binds like the cost limit, and above the wire it is answered the same way: a normal call is
+admitted
+only while the tokens used, the tokens held for calls in flight and this call's expected tokens fit; a call that settles over the cap
+is delivered and ends the agent phase; the run is wrapped up first when a further call and a final one would not fit, with the
+reason `token_limit` (`stoppedEarly`), which the summary and the check run say in words. Above the wire (#552) the cap's refusal is a
+`RefusedForFinal` with `refusal_reason` `token_limit`, `wrap_up_due` announces the answer before it, `arm_final` and `begin_recovery`
+consult the cap, a marked call skips it, and an unknown call that takes the tokens over the cap (or its worst case over the cost limit)
+ends the agent phase without ending the review. The unit costs a reservation is made with
+are the book's base level (an expectation: what a call costs is always the book applied to its usage, so a model with tiers can
+settle above its reservation, which the final-call exemption already bounds).
+
+The book of a claim is read with `strict_cache_read` (`price_book.py`): a cache read without a read price is **not** priced as input
+(N4 of the review of PR #569). "Selectable" on the managed key includes complete cache prices (`availability()`: every level states a
+cache read; the Messages family also a 5-minute write); if a read slips past, the call is unpriced and the run ends
+`dynamic_accounting_failed`, which is free. The token cap books a call at the largest of its counts, its stated total and reasoning
+on top of the completion, and an unknown call at the estimate of its input plus the whole output allowance. `cache_control.ttl` stays out of the request schema: the pinned engine never sends one, and a 1-hour write is a price the
+book states but nothing asks for.
+
+## Finalization above the wire (native providers, #552)
+
+The legacy path finishes a review through the engine's `StructuredOutput` tool with a forced `tool_choice` and lets
+the proxy rewrite the last request (`wrap_up.py`). A passthrough proxy cannot do that, and many models reject a forced
+choice. On the native path the finish is decided **in the adapter**, the same for every model, and the engine runs with
+`read` / `grep` / `glob`, tool choice `auto`, no `format`, no `StructuredOutput` and no `response_format`. Switch:
+`DynamicEngine(plain_final=True, engine_config=<build_native_engine_config>, provider_id=...)`; the default is the legacy
+path, unchanged until #556 deletes it. (A claim's model entry builds those arguments since #578, see "The native path of a job".)
+
+**The answer** is the visible text of the _last_ assistant message and nothing else: not reasoning, not a tool result, not
+`info.structured`, not an earlier message (`final_json.extract_final_json`). It is accepted when the whole text is one JSON
+object, or one Markdown fence (` ```json `, any case, `\n` or `\r\n`) around the whole text. Text around the object, two
+objects, trailing commas, single quotes, comments, a cut-off tail and `NaN` are **not guessed into an answer**: each is a
+named `Problem` class. A nesting that exhausts the parser (`RecursionError`) is `invalid_json` with a fixed text. The object
+then goes through the existing envelope check (`parse_dynamic_findings`; the runner sets `schemaVersion` and `reviewedSha`
+itself, #530) and the job's finding bound (more findings than the job allows is repairable). Hostile pull request text cannot
+change the rule: it is code, and the schema decides.
+
+**One repair.** An answer that is not the review gets exactly one more user message in the same session
+(`final_messages.repair_message`): the `<runner-wrap-up>` tag, the class of the problem, field names of the validator, never
+what the model or the pull request wrote. That includes a field name the model chose: an unknown field is named "an unknown
+field". Findings that are all invalid are an answer that is not the review, repaired like an invalid envelope. A second
+failure ends the run with the codes of today (`dynamic_policy_violation` for an invalid envelope, `llm_output_invalid`
+otherwise). The engine's own error (`info.error`) is not an answer and is not repaired. The run never shows the engine's error
+text: only its name, when it is one of the names the pinned engine has (otherwise `other`), and the stable code the ledger recorded (`ledger.failure`), or the proxy's
+`last_upstream_error` for a provider that failed (`provider_error=`). That code is the last call's: a call that went through
+clears it.
+
+**Wrap-up by message, not by rewrite.** While a turn runs, the adapter's watch asks the ledger whether the answer is due
+(`wrap_up_due`, read only: the cost arithmetic of the wrap-up, and for the clock 1.4 times the reserve) and, once, adds a
+user message to the running turn (`POST /session/{id}/prompt_async`, the "finish now, answer as JSON" text). The tools, the
+tool choice and the system prompt are untouched, so the provider's cache prefix and the binding of thinking blocks stay valid.
+The announcement is best effort: an engine that cannot take it, or does not answer within its timeout (10 s), leaves the model
+unasked, which is not a failure of the run (the guard's refusal follows if the model keeps calling tools). The reason is kept
+as `stoppedEarly` (`cost_limit` / `time_limit`) only where the adapter acts: for an announcement the engine took while the turn
+ran, and for a refusal it answers with the final call; not for a refusal nobody acts on (a stray retry after a review) and not
+for an announcement the engine took only after the turn had ended. The end of a turn waits for a running announcement, so none
+can reach the engine after the abort and the mark, and when one was taken and no refusal followed, the adapter aborts the
+session and waits for the proxy to be idle before it reads the review, so nothing of that turn is left running (an
+announcement the engine takes while the model call that writes the review is in flight can still make it take one more step
+inside the same turn; that call is accounted like any other). If the final call cannot be marked the run ends with the cause
+in the ledger's words: a failure it recorded, a model call of the aborted turn still running after 30 s
+(`dynamic_engine_unavailable`), the deadline, or both marks used (`dynamic_budget_exceeded`).
+
+**A run never ends without a review because of the cost guard** (#540, #542). A model that ignores the message meets the
+ledger's refusal of its next call. With `enable_final_above_wire()` (called by the engine) that refusal is a
+`RefusedForFinal`, which is **not** the run's failure but a counted signal (`refusals`; the adapter takes the count when a
+turn starts and reacts only to an increase, so a refusal between two turns is nobody's): the turn ends, the adapter aborts
+the session, waits (bounded by the deadline) until the proxy and the ledger have nothing in flight, **marks the next call as
+final** (`arm_final`) and sends one "answer now" message. The ledger admits that call under the final-call exemption of #542
+although the limit is passed, and the passthrough proxy relays it as it relays any call (one call in flight, the closed
+schema, nothing rewritten, the body byte for byte). The message of the final call and of the repair carries a random token of its own
+(`<runner-wrap-up id="…">`; the announcement carries none). The mark belongs to the request that holds that exact text, holds
+the token once in the whole body **and in its last user message** (the proxy reads the parsed body, `passthrough/last_user.py`;
+the system prompt, a tool result, assistant text or an earlier message holding it does not count), and is no larger than the
+history the run had plus the message, where the tool results the audit saw since the last call are frozen when the mark is
+armed (see the ledger's "The mark"); any other request is a normal call that must fit, and the mark stays. A marked call that the provider turns away unbilled (429, 5xx) gives its mark back, at most twice per
+mark. A call booked at its worst case because its usage was never seen (an own key goes on after one) that passes the limit
+ends the agent phase like a call that settled over it, and the final call is still admitted. If the turn ends with the mark unused (the engine made no call: the session was still winding down), the message goes
+out once more, and only once. A second mark exists only for the one repair (no third). A refusal after the final call is a
+tool call when the audit saw the model ask for a tool in that turn (class `tool_call`), and otherwise its own class
+(`final_call_refused`: the engine asked the model again, e.g. a retry, and the guard refused); either is followed by the one
+repair, not by a silent failure. A valid review in the last message wins over a refusal of the same turn. The clock works the
+same way: once less than the wrap-up reserve is left (150 s of 600 s, one provider call) a normal call is refused for the
+answer, and the final call is admitted inside it. The reserve is measured when a call is admitted, not when it ends: a normal
+call admitted just before it can still run into it, and only the deadline itself is never passed.
+
+**The bound** is #542's: the cost limit, plus the excess of the last normal call, plus the final call, plus the one repair.
+The ledger also admits no call at all after a recorded failure on this path.
+
+**The tool-result audit** moved to the adapter for this path (the passthrough proxy counts none of it). The adapter reads
+the engine's own event stream (`GET /event`, `engine_events.py`) and `tool_part_audit.py` counts every tool call at first
+sight, and every result once per call id when its part is complete: 64 KiB per result and 4 MiB cumulative (`add_result_bytes`),
+the files read, and the call trace. The reader is bounded and fails closed: opening the stream has a 10 s timeout of its own;
+one event (the sum of its `data:` lines) is at most 8 MiB; the audit holds at most 10,000 tool parts (call ids of at most 256
+characters) and the ledger at most 100,000 distinct files (paths of at most 4,096 characters); a stream that stays open and
+says nothing for 35 s is dead (the pinned engine beats every 10 s with `server.heartbeat`; a version bump must keep that
+beat); stopping the reader shuts the socket down, so a reader waiting on a quiet stream is released at once; and what the reader
+records while it is being stopped is still the run's result. A stream that does not connect, ends while the run goes on, or
+holds an event it cannot read or hold is the run's failure (`dynamic_engine_unavailable` / `dynamic_accounting_failed`); a
+bound is `dynamic_budget_exceeded`. This audit is **detective**: an event arrives when a tool has finished and the next request
+may already be on its way; the proxy's request byte bound (4 MiB per request, so no history can carry more) and the ledger's
+refusal of every call after a recorded failure are what bound a hostile or mistaken engine regardless. An engine that
+reports nothing is bounded by the request byte bound alone. (A count the proxy makes itself from the history the engine
+resends, which an engine cannot forge, is the follow-up that replaces the detective audit for these bounds.)
+
+_Not changed:_ the legacy path (`ModelProxy`, `StructuredOutput`, `required`, the steering, `wrap_up.py`, `recovery`) is
+untouched and still runs the providers of today; #556 deletes it. The prompt core is unchanged (it already says "one JSON
+object and nothing else"); the adapter adds one fixed runner line at the end of the first user message, outside every
+untrusted block, that carries the job's finding bound (`final_messages.final_answer_line`).
 
 ## The model
 
@@ -556,12 +763,12 @@ claim; an older runner never receives the field, see `contracts/README.md`).
 
 **Precedence, from the runner's side** (`capabilities_for_job` in `proxy.py`):
 
-| Job descriptor | `RUNNER_DYNAMIC_CAPABILITIES` | Result |
-|---|---|---|
-| absent | unset or empty | the built-in description, for exactly the default model `deepseek/deepseek-v4.1-flash`; any other model fails with `dynamic_model_features_unsupported` (today's behavior) |
-| absent | set | the operator's value, as before |
-| present | unset or empty | the job's. A model whose metadata had no unit prices fails with `dynamic_config_invalid` (the default model keeps its built-in prices) |
-| present | set | **the intersection: the operator's value is a ceiling.** Both must support the features, the smaller output limit wins, the smaller window wins when the operator names one, the higher unit price wins. The job can narrow what the operator allows and never widen it |
+| Job descriptor | `RUNNER_DYNAMIC_CAPABILITIES` | Result                                                                                                                                                                                                                                                                  |
+| -------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| absent         | unset or empty                | the built-in description, for exactly the default model `deepseek/deepseek-v4.1-flash`; any other model fails with `dynamic_model_features_unsupported` (today's behavior)                                                                                              |
+| absent         | set                           | the operator's value, as before                                                                                                                                                                                                                                         |
+| present        | unset or empty                | the job's. A model whose metadata had no unit prices fails with `dynamic_config_invalid` (the default model keeps its built-in prices)                                                                                                                                  |
+| present        | set                           | **the intersection: the operator's value is a ceiling.** Both must support the features, the smaller output limit wins, the smaller window wins when the operator names one, the higher unit price wins. The job can narrow what the operator allows and never widen it |
 
 The built-in description is a fallback, never a ceiling. An operator value that is set but unusable
 fails the run whatever the job says. The runner fails closed on prices: no unit prices from the job,
@@ -589,8 +796,14 @@ parameters on every request (#270), which ends the run with `dynamic_model_featu
 override** for the operator who wants one, in JSON:
 
 ```json
-{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 32768,
- "context_window_tokens": 1048576, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}
+{
+  "tool_choice_required": true,
+  "structured_output": true,
+  "max_output_tokens": 32768,
+  "context_window_tokens": 1048576,
+  "input_usd_per_mtok": 0.5,
+  "output_usd_per_mtok": 2
+}
 ```
 
 `input_usd_per_mtok` and `output_usd_per_mtok` are what a million input and output tokens cost in
@@ -623,15 +836,15 @@ so those counts say little about what a run costs, and a count tight enough to p
 stopped normal reviews of a medium repository. The tokens, calls, tool calls and files are still
 counted and shown in the Run; they just stop nothing.
 
-| Limit | Value | Kind |
-|---|---|---|
-| Cost of one run | 1.00 USD; `RUNNER_DYNAMIC_MAX_COST_USD` sets it (a plain decimal number above 0, up to the ceiling of 20 USD in the code; anything else fails the job with `dynamic_config_invalid`) | budget |
-| Wall clock | 600 s (lower when `RUNNER_JOB_TIMEOUT_SECONDS` is lower) | technical: the lease and the runner's capacity depend on it |
-| One tool result | 64 KiB | technical |
-| All tool results together | 4 MiB | technical |
-| Untrusted input to the engine | 2 MiB | technical |
-| One model request, one answer, one stream | 4 MiB, 256 KiB, 1 MiB | technical |
-| Findings | 30 | output size: the summary comment, GitHub's comment limit and the persisted review state are bounded by it (the project setting is 1 to 30) |
+| Limit                                     | Value                                                                                                                                                                                | Kind                                                                                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cost of one run                           | 1.00 USD; `RUNNER_DYNAMIC_MAX_COST_USD` sets it (a plain decimal number above 0, up to the ceiling of 20 USD in the code; anything else fails the job with `dynamic_config_invalid`) | budget                                                                                                                                     |
+| Wall clock                                | 600 s (lower when `RUNNER_JOB_TIMEOUT_SECONDS` is lower)                                                                                                                             | technical: the lease and the runner's capacity depend on it                                                                                |
+| One tool result                           | 64 KiB                                                                                                                                                                               | technical                                                                                                                                  |
+| All tool results together                 | 4 MiB                                                                                                                                                                                | technical                                                                                                                                  |
+| Untrusted input to the engine             | 2 MiB                                                                                                                                                                                | technical                                                                                                                                  |
+| One model request, one answer, one stream | 4 MiB, 256 KiB, 1 MiB                                                                                                                                                                | technical                                                                                                                                  |
+| Findings                                  | 30                                                                                                                                                                                   | output size: the summary comment, GitHub's comment limit and the persisted review state are bounded by it (the project setting is 1 to 30) |
 
 Removed in #290: 30 model calls, 120,000 total tokens, 200 tool calls and 100 distinct files. If one
 of the technical limits blocks a normal review of a medium repository, report it with evidence
@@ -649,7 +862,7 @@ its reservation (it may still have been billed), so many provider retries can us
 without spending. With OpenRouter's bring-your-own-key routing `usage.cost` may exclude the upstream
 provider's charge. Repository and pull request input never set any of this.
 
-*The expected cost of a call.* Before #540 the guard priced the whole prompt at the uncached input
+_The expected cost of a call._ Before #540 the guard priced the whole prompt at the uncached input
 price, reserved the full output allowance and, for the final call, 128 KiB of extra history: about
 16 times what a Sonnet 5 tool loop cost per call, so a 55-call run that cost 0.70 USD was wrapped up
 at about 0.55 USD of a 1.00 USD limit. Now:
@@ -701,7 +914,12 @@ the limit is one final call more. The result reports by how much the limit was p
 `usage.limitExceededBy` (USD, absent when it was not, `contracts/runner-api.v1.json`) and the job log
 says it, so the bound can be watched on real runs.
 
-*Serial calls.* The engine's model calls are serial: one agent (`review`), the permission block denies
+_Billing (#498, #605)._ While billing is on, nothing is held for a Dynamic job: it starts whenever the balance of its workspace is above zero (`src/billing/README.md`,
+"Start, settle"), and the settlement charges the **real** cost, also when the run passed its limit by this excess: the balance may go below zero and the
+next claim of the workspace is then refused (`balance_negative`). Billing never shortens a run, never changes the final-call exemption and takes
+nothing from a run that ended without a review: it prices what the run reported.
+
+_Serial calls._ The engine's model calls are serial: one agent (`review`), the permission block denies
 every tool but `read`, `grep`, `glob` and `StructuredOutput` (so no subagent runs in parallel), and a
 step waits for its tool results. The ledger still holds the reservation of every call in flight; if
 requests ever overlapped, the bound above would be the sum of the excesses over the calls in flight,
@@ -743,7 +961,7 @@ model is given one last call in which it can only return its answer, and the rev
 published.
 
 - **When.** The ledger decides, per model request, from its own cost and clock (never from the
-  content of the request): the request becomes the *final call* when a further normal call could
+  content of the request): the request becomes the _final call_ when a further normal call could
   not be followed by a final one inside the cost limit (what is spent, what is held for calls in
   flight, this call, and a final call after it, with the margin above, #540), or when less wall clock is left than one provider call needs (150 s of the 600 s; a
   quarter of a shorter deadline). The final call is admitted whenever the spend is within the cost limit,
@@ -752,9 +970,9 @@ published.
   before it is forwarded: every tool except the engine's `StructuredOutput` return tool is removed,
   `tool_choice` is forced to `required` (with one tool this forces that tool; `required` is the
   capability every Dynamic model must have, and `provider.require_parameters` still holds), and a
-  runner-written instruction is appended as the last message: *the limit set for this review is used
+  runner-written instruction is appended as the last message: _the limit set for this review is used
   up, do not call any more tools, return the complete review now with the findings you have so
-  far*. The rest of the request is as the engine sent it. A request that does not offer the return
+  far_. The rest of the request is as the engine sent it. A request that does not offer the return
   tool (a title call, for example) is never rewritten and keeps the plain rule.
 - **One final call.** After it is granted every other request is refused with
   `dynamic_budget_exceeded`. If the final call fails, the run ends with the stable code of that
@@ -861,9 +1079,9 @@ sent on every request and forwarded by the proxy (both checked against the real 
     the runner's own parser (`dynamic_findings`) accepts;
   - otherwise the proxy asks again, with the same final request, the model's reply as an assistant
     message (text only, escaped) and a `<runner-wrap-up>` message naming the concrete problem (`the
-    reply did not call the StructuredOutput tool`, `the arguments ... are not valid JSON (Expecting
-    ',' delimiter at position 120)`, `the review is not valid: priority must be one of P0, P1, P2,
-    P3`; field names and parser positions, never a value);
+reply did not call the StructuredOutput tool`, `the arguments ... are not valid JSON (Expecting
+',' delimiter at position 120)`, `the review is not valid: priority must be one of P0, P1, P2,
+P3`; field names and parser positions, never a value);
   - at most `FINAL_ATTEMPTS` (3) requests per final call, each reserved and settled like any model
     call, and only while the clock and the cost limit have room (`try_reserve_final_retry`); no room
     means the last reply is what the engine gets;
@@ -878,7 +1096,7 @@ sent on every request and forwarded by the proxy (both checked against the real 
   duration of both message calls (`engine message call: 257.3 s, 12.1 s`). A failure says
   `the engine returned no structured answer (after one recovery; the first turn: finish=length)` or
   `(the first turn: ...; no recovery was possible)` or `(the first turn: ...; the engine's own
-  error, not recovered)`. A failure of the recovery call itself (the provider refused it, the final
+error, not recovered)`. A failure of the recovery call itself (the provider refused it, the final
   call answered with a stray tool call, the deadline) keeps its own code and ends with
   `(during the recovery; the first turn: finish=..., error=...)`. The note holds only a finish reason and an error
   name that are plain identifiers; engine text is never copied.
@@ -944,7 +1162,7 @@ re-check with every engine pin), because of a defect found against the real pinn
   message with a summary and a synthetic "continue" message that carries no format
   (`session/prompt.ts` and `session/compaction.ts` at the pinned commit). The model then answers in
   prose and the run ends without a typed answer (`dynamic_policy_violation: the findings are not
-  valid JSON`). A run cannot finish after a compaction.
+valid JSON`). A run cannot finish after a compaction.
 - The same lost format would defeat any later "answer now" step.
 - What the model sees after a compaction also changes in trust: the review task (the pull request
   title, body and the diff, which are untrusted input) is replaced by a summary the model wrote, in
@@ -1033,18 +1251,18 @@ without publishing:
 
 ## Errors an operator sees
 
-| Code | Meaning | What to check |
-|---|---|---|
-| `dynamic_review_disabled` | The instance gate is off | Turn the gate on (below) when the rollout is ready |
-| `no_capable_runner` | No runner advertised `opencode` within the timeout | Is a Dynamic runner running, and did its self-check pass? (`docker compose logs runner-dynamic`) |
-| `dynamic_engine_unavailable` | The runner (on hosted: the Worker) got a Dynamic job but its startup self-check did not pass, so it has no engine; nothing was run | Self-hosted, a capable runner should be the only one to get a Dynamic job: read the runner's log for the failed property and report a job that reached another. Hosted: the Dispatcher runs no probe, so this is how a container that cannot be hardened shows. Run the deploy canary on the live deployment, read the reason, and redeploy through the pipeline (`docs/deployment-vercel.md`, section 5.3) |
-| `dynamic_isolation_self_check_failed` | The startup self-check did not prove user, export and network | The runner logs the failed property, never a value |
-| `dynamic_model_features_unsupported` | The model's metadata (or the operator's description) says it lacks tool choice or structured output, or no provider supports the parameters | The model (OpenRouter's page lists the supported parameters); `RUNNER_DYNAMIC_CAPABILITIES` if you set one, since it is a ceiling |
-| `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
-| `dynamic_config_invalid` | Model, skill or limits of the job are unusable; or no description of the model has unit costs (the provider's metadata stated none and the operator named none); or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`) |
-| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD` |
-| `llm_output_invalid` | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn and the recovery ended (the engine's `finish=stop` covers prose, silence and a broken tool call alike; `last model calls: ...` tells which; `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES` |
-| `llm_context_length_exceeded` | The provider said the request is larger than the model's context | The model's context window (its metadata, or `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`); a smaller pull request |
+| Code                                                                               | Meaning                                                                                                                                                                                                                                                                                                                               | What to check                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dynamic_review_disabled`                                                          | The instance gate is off                                                                                                                                                                                                                                                                                                              | Turn the gate on (below) when the rollout is ready                                                                                                                                                                                                                                                                                                                                                          |
+| `no_capable_runner`                                                                | No runner advertised `opencode` within the timeout                                                                                                                                                                                                                                                                                    | Is a Dynamic runner running, and did its self-check pass? (`docker compose logs runner-dynamic`)                                                                                                                                                                                                                                                                                                            |
+| `dynamic_engine_unavailable`                                                       | The runner (on hosted: the Worker) got a Dynamic job but its startup self-check did not pass, so it has no engine; nothing was run                                                                                                                                                                                                    | Self-hosted, a capable runner should be the only one to get a Dynamic job: read the runner's log for the failed property and report a job that reached another. Hosted: the Dispatcher runs no probe, so this is how a container that cannot be hardened shows. Run the deploy canary on the live deployment, read the reason, and redeploy through the pipeline (`docs/deployment-vercel.md`, section 5.3) |
+| `dynamic_isolation_self_check_failed`                                              | The startup self-check did not prove user, export and network                                                                                                                                                                                                                                                                         | The runner logs the failed property, never a value                                                                                                                                                                                                                                                                                                                                                          |
+| `dynamic_model_features_unsupported`                                               | The model's metadata (or the operator's description) says it lacks tool choice or structured output, or no provider supports the parameters                                                                                                                                                                                           | The model (OpenRouter's page lists the supported parameters); `RUNNER_DYNAMIC_CAPABILITIES` if you set one, since it is a ceiling                                                                                                                                                                                                                                                                           |
+| `lease_lost`                                                                       | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written                                                                                                                                                            | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again                                                                                                                                                                                                                                                                                              |
+| `dynamic_config_invalid`                                                           | Model, skill or limits of the job are unusable; or no description of the model has unit costs (the provider's metadata stated none and the operator named none); or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling                                                                                                   | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`)                                                                                                                                                                                                                                                                                                    |
+| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost                                                                                                                                                                                                                                               | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD`                                                                                                                                                                                                                                                                                                                                                                |
+| `llm_output_invalid`                                                               | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn and the recovery ended (the engine's `finish=stop` covers prose, silence and a broken tool call alike; `last model calls: ...` tells which; `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES`                                                                                                                                                                                                                                                                                                   |
+| `llm_context_length_exceeded`                                                      | The provider said the request is larger than the model's context                                                                                                                                                                                                                                                                      | The model's context window (its metadata, or `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`); a smaller pull request                                                                                                                                                                                                                                                                              |
 
 Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not
 carried across kinds (lead decision of 2026-10-13, see #199). Cancelling a run kills its engine's
@@ -1060,14 +1278,14 @@ not published to GHCR):
 docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
 ```
 
-| Setting | Default | Why |
-|---|---|---|
-| `RUNNER_DYNAMIC_CONCURRENCY` | 1 | One Dynamic job at a time until the memory matrix below exists |
-| `RUNNER_DYNAMIC_MEMORY_LIMIT` | `2g` | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal) |
-| `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m` | The soft reservation under the limit |
-| `RUNNER_DYNAMIC_IMAGE` | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one |
-| `RUNNER_DYNAMIC_MAX_COST_USD` | empty | The most one run may cost, in USD; empty is 1.00; up to 20 (see "Hard limits") |
-| `RUNNER_DYNAMIC_CAPABILITIES` | empty | Optional ceiling and override of the model description (see "The model"). Empty: the description the app sends with the job applies, or, without one, the one built into the runner for the default model only |
+| Setting                             | Default                              | Why                                                                                                                                                                                                            |
+| ----------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RUNNER_DYNAMIC_CONCURRENCY`        | 1                                    | One Dynamic job at a time until the memory matrix below exists                                                                                                                                                 |
+| `RUNNER_DYNAMIC_MEMORY_LIMIT`       | `2g`                                 | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal)                                                                                             |
+| `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m`                              | The soft reservation under the limit                                                                                                                                                                           |
+| `RUNNER_DYNAMIC_IMAGE`              | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one                                                                                                                                                 |
+| `RUNNER_DYNAMIC_MAX_COST_USD`       | empty                                | The most one run may cost, in USD; empty is 1.00; up to 20 (see "Hard limits")                                                                                                                                 |
+| `RUNNER_DYNAMIC_CAPABILITIES`       | empty                                | Optional ceiling and override of the model description (see "The model"). Empty: the description the app sends with the job applies, or, without one, the one built into the runner for the default model only |
 
 The container runs the supervisor as root with only the capabilities of "The engine boundary", sets
 `no-new-privileges`, bounds its process count (512) and has no swap, so a memory peak shows up as an
@@ -1103,7 +1321,7 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    are upgraded.
 2. **Describe the model** only if you want to narrow what the app reads from the provider's metadata
    ("The model"): `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true, "structured_output": true,
-   "max_output_tokens": 32768, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}` is a ceiling for every
+"max_output_tokens": 32768, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}` is a ceiling for every
    Dynamic job of this runner. Nothing is needed for the default model or for any tool-capable OpenRouter
    model whose metadata states its window and prices. Review the memory settings of the table above.
 3. **Deploy the Dynamic runner:**
@@ -1113,11 +1331,11 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    (the app, the Diff runner) stay up: only the new service is missing.
 4. **Verify the self-check.** `docker compose logs runner-dynamic | grep "Dynamic Review"` must show
    `Dynamic Review: opencode is advertised, the startup self-check passed`. If it shows `opencode is
-   not advertised` the reason is in the same line: see the table in "The startup self-check". Fix it
+not advertised` the reason is in the same line: see the table in "The startup self-check". Fix it
    and recreate the container. Do not go on while it is not advertised. The Diff runner and the Diff
    jobs of this runner are unaffected either way.
-5. **Turn the gate on.** As instance admin open **Admin, Setup, Instance, Dynamic Review**, tick *Allow
-   Dynamic Review on this instance*, confirm that step 1 is done and save. The control is server side
+5. **Turn the gate on.** As instance admin open **Admin, Setup, Instance, Dynamic Review**, tick _Allow
+   Dynamic Review on this instance_, confirm that step 1 is done and save. The control is server side
    and admin only; it uses the instance settings setter (lock, then cancellation), never raw SQL.
    Nothing changes for existing projects: all are Diff until step 6.
 6. **Choose one project to try it on:** set its review kind to Dynamic on its settings page. Open a
@@ -1186,7 +1404,7 @@ version, the cgroup version and the image digest with the result.
 4. Inject an OOM kill and an engine kill (`docker kill --signal=SIGKILL` of the engine's process, or a
    deliberately small `RUNNER_DYNAMIC_MEMORY_LIMIT`) and check that the previous comment is preserved,
    no process of the engine user and no job directory survives (`docker exec <runner-dynamic> ps -eo
-   user,pid,cmd`, `ls /tmp`).
+user,pid,cmd`, `ls /tmp`).
 5. Write the measured peaks, the host and the recommended concurrency per GiB into this page. Until
    then no recommendation beyond the defaults exists. The byte-to-token calibration of the token cap
    (#235) uses the same runs.
@@ -1204,7 +1422,7 @@ by the defaults.
   purpose, #199). A run can edit the comment and then fail (the watchdog or `SIGTERM` fires after the
   write, the lease is lost, the completion report is lost): the comment says head A while the app has
   no succeeded review of A. The claim therefore carries `base.attemptedShas`: the heads of the
-  pull request's earlier jobs of the same kind that *ran* and did not succeed (`failed`, or at least
+  pull request's earlier jobs of the same kind that _ran_ and did not succeed (`failed`, or at least
   one lost attempt; a job cancelled or superseded while still waiting never ran and is not counted, while a
   superseded job that did run counts, #397),
   created after the last succeeded job and before the claimed one (newest first, at most 20, the key
@@ -1213,9 +1431,9 @@ by the defaults.
   makes it the previous review again. A head the app never attempted (foreign, tampered, newer) is
   still refused.
 - **The attempted-heads list is bounded, so a truncated claim recovers with a full review (#257).**
-  After more than 20 distinct heads that ran and failed *without* a success in between, an older head
+  After more than 20 distinct heads that ran and failed _without_ a success in between, an older head
   of the summary comment can fall out of the list. The app then also sends `base.attemptedShasTruncated:
-  true` (left out otherwise), and a state head the job cannot account for on the **bot-owned** summary
+true` (left out otherwise), and a state head the job cannot account for on the **bot-owned** summary
   (author and exact identity marker, and a valid state) no longer ends in `review_not_published`: the
   run is a full review (the checkout is full whatever `comparison` the claim declares), the old state
   is dropped (nothing of it is carried over as active or resolved, nothing is resolved by inference)
@@ -1228,7 +1446,7 @@ by the defaults.
   truncated stay fail-closed. Residual risk: on a truncated claim a late result of an older run can no
   longer be told from a lost head and may overwrite a newer review; the next push reviews again.
   Since #260 the run asks for its lease right before it writes (see "How a Dynamic job reaches an
-  engine"), so only a run that loses the lease *after* that check and before its write lands (a few
+  engine"), so only a run that loses the lease _after_ that check and before its write lands (a few
   requests of GitHub) can still overwrite; the check is not a lock and the write is not fenced by the
   app. The check also makes a run on a plain (not truncated) claim publish nothing as a zombie.
   A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).

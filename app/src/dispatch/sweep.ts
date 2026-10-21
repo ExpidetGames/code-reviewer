@@ -18,7 +18,9 @@
 //  6. `checks`: the check runs and review verdicts of jobs whose GitHub state is behind (#405): jobs the steps above
 //     ended or requeued, jobs no request named, syncs whose retry is due. At most one batch, within a time budget.
 //  7. `cleanup`: the hourly cleanup a long-lived server runs on a timer, once when the hour has changed.
-//  8. `models_dev`: the daily fetch of the models.dev catalog (#548), when the last one is more than a day old. Last, so
+//  8. `billing_holds`: while billing is on, releases the holds of jobs that ended while it was off (#591), once more than the
+//     switch-on did. A job that ended in the moment billing was switched on is not seen by the switch-on; this finds it.
+//  9. `models_dev`: the daily fetch of the models.dev catalog (#548), when the last one is more than a day old. Last, so
 //     that a slow answer from the internet never delays the steps that move jobs. A fetch that fails records its own
 //     failure (`models_dev_fetch_state`) and is not a failed step; a step fails only when the fetch itself threw.
 //
@@ -56,6 +58,7 @@ export const SWEEP_STEPS = [
   "notices",
   "checks",
   "cleanup",
+  "billing_holds",
   "models_dev",
 ] as const;
 export type SweepStep = (typeof SWEEP_STEPS)[number];
@@ -77,6 +80,8 @@ export type SweepReport = {
   /** How many jobs had their check run or review verdict synced with GitHub (#405). */
   checksSynced: number;
   cleanedUp: boolean;
+  /** How many holds of ended jobs were released (#591); 0 while billing is off. */
+  holdsReleased: number;
   /** What the daily models.dev fetch did (#548); null when this sweep has no fetch. */
   modelsDev: RefreshOutcome["status"] | null;
   /** The steps that failed in this run. */
@@ -102,6 +107,8 @@ export type SweepDependencies = {
   checks?: {
     reconcileDue(options?: { budgetMs?: number }): Promise<{ synced: number }>;
   };
+  /** #591: releases the holds of ended jobs while billing is on (the step reads only the switch while it is off). Left out, none is. */
+  billingHolds?: { releaseStranded(): Promise<{ released: number }> };
   /** #548: the daily fetch of the models.dev catalog. Left out, none is made. */
   modelsDev?: {
     refreshIfDue(options?: { deadlineMs?: number }): Promise<RefreshOutcome>;
@@ -125,6 +132,7 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       noticesTried: 0,
       checksSynced: 0,
       cleanedUp: false,
+      holdsReleased: 0,
       modelsDev: null,
       failedSteps: [],
     };
@@ -185,6 +193,11 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       await deps.meta.set(CLEANUP_HOUR_KEY, String(hour));
       report.cleanedUp = true;
     });
+    const billingHolds = deps.billingHolds;
+    if (billingHolds !== undefined)
+      await step("billing_holds", async () => {
+        report.holdsReleased = (await billingHolds.releaseStranded()).released;
+      });
     const modelsDev = deps.modelsDev;
     if (modelsDev !== undefined)
       await step("models_dev", async () => {

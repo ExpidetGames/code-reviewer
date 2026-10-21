@@ -25,6 +25,12 @@ export type BillingTopUpIntentDirectory = {
    * writers. Call it inside the transaction that applies the event.
    */
   lockById(id: string): Promise<TopUpIntent | undefined>;
+  /**
+   * True when an intent of the adapter is still `pending` with no payment recorded and was written at or after `since`: a
+   * payment nobody has told us of yet could be its payment. What a refund or dispute of a payment we cannot place is
+   * judged by: it may be the one of that top-up, whose credit is still on its way (#502). One indexed read, no lock.
+   */
+  hasPendingWithoutPayment(adapter: string, since: string): Promise<boolean>;
 };
 
 export function createBillingTopUpIntentDirectory(
@@ -49,6 +55,19 @@ export function createBillingTopUpIntentDirectory(
     findByPayment: (adapter, ref) => one("provider_payment_ref", adapter, ref),
     findByCheckout: (adapter, ref) =>
       one("provider_checkout_ref", adapter, ref),
+
+    async hasPendingWithoutPayment(adapter, since) {
+      const row = await db
+        .selectFrom("billing_topup_intents")
+        .select("id")
+        .where("adapter", "=", adapter)
+        .where("state", "=", "pending")
+        .where("provider_payment_ref", "is", null)
+        .where("created_at", ">=", since)
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
+    },
 
     async lockById(id) {
       let query = db

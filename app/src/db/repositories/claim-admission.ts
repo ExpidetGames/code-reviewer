@@ -17,6 +17,7 @@ import {
   ignoresCostLimit,
   readsUsage,
   type Admission,
+  type AdmissionOptions,
   type AdmissionUsage,
 } from "../../usage/enforce-entitlements.ts";
 import { databaseDriver } from "../driver.ts";
@@ -24,6 +25,8 @@ import type { Database, JobsTable } from "../schema.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { readEffectiveEntitlements } from "../../workspaces/effective-entitlements.ts";
+import { keyModeAtClaim } from "../../billing/claim-key-mode.ts";
+import type { KeyMode } from "../../workspaces/entitlements.ts";
 
 /** What the claim did to a job it refused; handed to `onRefused` once the transaction has committed. */
 export type ClaimRefusal = {
@@ -49,12 +52,15 @@ export type ClaimAdmission = {
   hadRecord: boolean;
   /** The entitlements hold a cost limit next to the own key, which nothing reads (#277). */
   ignoredCostLimit: boolean;
+  /** Whose key the job runs on, as far as the claim knows it: what the hold of #498 depends on (`keyModeAtClaim`). */
+  keyMode: KeyMode;
 };
 
 export async function admitClaimedJob(
   trx: Kysely<Database>,
   job: Pick<Selectable<JobsTable>, "id" | "workspace_id" | "review_kind">,
   now: () => Date,
+  options: AdmissionOptions = {},
 ): Promise<ClaimAdmission> {
   const workspaceId = job.workspace_id;
   const records = createUsageRecordsRepository(trx, workspaceId, now);
@@ -62,14 +68,20 @@ export async function admitClaimedJob(
   const hadRecord = own !== undefined;
 
   const entitlements = await readEffectiveEntitlements(trx, workspaceId, now);
+  const keyMode = keyModeAtClaim(entitlements);
   if (entitlements.kind === "unlimited")
-    return { admission: { allow: true }, hadRecord, ignoredCostLimit: false };
+    return {
+      admission: { allow: true },
+      hadRecord,
+      ignoredCostLimit: false,
+      keyMode,
+    };
   const ignoredCostLimit = ignoresCostLimit(entitlements);
 
   const reviewKind = job.review_kind as ProjectReviewKind;
   // A limit that applies to this job is the only reason to count and to lock; a suspension needs neither.
   if (
-    readsUsage(entitlements, reviewKind) &&
+    readsUsage(entitlements, reviewKind, options) &&
     databaseDriver(trx) === "postgres"
   )
     await sql`select id from workspaces where id = ${workspaceId} for no key update`.execute(
@@ -91,8 +103,9 @@ export async function admitClaimedJob(
       records.sumSettledCostMicroUsd(since, keyMode),
   };
   return {
-    admission: await decideAdmission(entitlements, reviewKind, usage),
+    admission: await decideAdmission(entitlements, reviewKind, usage, options),
     hadRecord,
     ignoredCostLimit,
+    keyMode,
   };
 }

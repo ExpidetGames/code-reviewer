@@ -22,7 +22,9 @@ import { createCatalogFixture } from "./review-settings-harness.ts";
 import type { CatalogEntry } from "../model-catalog/entries.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
+import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
+import type { ClaimDeps } from "../runner-api/claim.ts";
 import {
   createWorkerApi,
   type WorkerApiDeps,
@@ -60,12 +62,18 @@ import type {
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { catalogSelectionFrom } from "../review-settings/catalog-selection.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
+import type { Selection } from "../llm/selection.ts";
 import { entryAllowed } from "../workspaces/entitlements.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
 import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
+import type { NativeSelectionSource } from "../native-providers/catalog.ts";
+import {
+  createProviderPins,
+  type ProviderPins,
+} from "../runner-api/provider-pins.ts";
 
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
@@ -121,8 +129,19 @@ export async function startRunnerApiHarness(
     currentKeysFor?: (workspaceId: string) => Promise<readonly string[]>;
     /** Replaces how the claim loads the key of a selection (for example to answer with the operator's key, or to count the loads). */
     loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
+    /** #588: told each time the claim loads a key (the selection it loads for), before the real load; a refusal must not reach it. */
+    onKeyLoad?: (workspaceId: string, selection: Selection) => void;
+    /** #588: where a claim adopts the address of a legacy selection; default: the settings of the job's workspace, as on the running server. */
+    providerPins?: ProviderPins;
     /** #279: where a Dynamic claim reads the model metadata from. Left out, the claim reads none. */
     modelCapabilities?: ModelCapabilityChecker;
+    /** #553: the cost policy of a native job (`ClaimDeps.nativeCost`). Left out, no job is native, as on the running server today. */
+    nativeCost?: ClaimDeps["nativeCost"];
+    /**
+     * #555: the catalog of providers and models a project may pick for Dynamic Review (the save of the settings). The claim
+     * serves the model from `nativeCost.entryFor`, never from this reader.
+     */
+    nativeCatalog?: NativeSelectionSource;
     /**
      * #432: the providers of the app, for a test that brings a second one (`createFakeAdapter`). The key services, the
      * claim and the selection all use it. Default: the registry of the app.
@@ -146,6 +165,10 @@ export async function startRunnerApiHarness(
       deliver?: "claim" | "manual";
       /** The link to the plan page of a workspace; default none. */
       planPageUrl?: (
+        workspaceSlug: string,
+      ) => string | null | Promise<string | null>;
+      /** The link to the settings of a workspace, for a refusal for the balance (#498); default none. */
+      settingsUrl?: (
         workspaceSlug: string,
       ) => string | null | Promise<string | null>;
       /** How long a request to GitHub may take. */
@@ -241,6 +264,9 @@ export async function startRunnerApiHarness(
       db: fixture.db,
       registry,
       planPageUrl: noticeOptions?.planPageUrl ?? (() => null),
+      ...(noticeOptions?.settingsUrl === undefined
+        ? {}
+        : { settingsUrl: noticeOptions.settingsUrl }),
       now: fixture.clock.now,
       log: {
         info: (line) => noticeLines.push(line),
@@ -317,6 +343,9 @@ export async function startRunnerApiHarness(
       entryAllowed(await settingsEntitlements(), { id }),
     ),
     providers: options.providers ?? llmProviderDescriptors,
+    ...(options.nativeCatalog === undefined
+      ? {}
+      : { nativeCatalog: options.nativeCatalog }),
   });
   // One app instance: its own collaborators, over the SAME database, queue and fakes. The LLM access is put
   // together as the running server does it: the key of the job's own workspace. A second instance (`anotherInstance`) shares nothing but
@@ -378,7 +407,10 @@ export async function startRunnerApiHarness(
       keyFor:
         options.loadLlm !== undefined
           ? (workspaceId) => options.loadLlm!(workspaceId)
-          : (workspaceId, selection) => llm.keyFor(workspaceId, selection),
+          : (workspaceId, selection) => {
+              options.onKeyLoad?.(workspaceId, selection);
+              return llm.keyFor(workspaceId, selection);
+            },
       recordSelection: (job, selection) =>
         createUsageRecordsRepository(
           fixture.db,
@@ -417,6 +449,11 @@ export async function startRunnerApiHarness(
       ...(options.modelCapabilities === undefined
         ? {}
         : { modelCapabilities: options.modelCapabilities }),
+      ...(options.nativeCost === undefined
+        ? {}
+        : { nativeCost: options.nativeCost }),
+      providerPins:
+        options.providerPins ?? createProviderPins(() => reviewSettings),
       claimedKeys,
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
@@ -435,6 +472,8 @@ export async function startRunnerApiHarness(
         createJobVmRunsRepository(fixture.db, workspaceId, fixture.clock.now),
       runnerToken: () => configuredRunnerToken(env),
       appVersion: TEST_APP_VERSION,
+      noteClaimFeatures: (features) =>
+        noteDispatcherClaim(fixture.db, features, fixture.clock.now()),
     });
     // #320: the Worker API over the same collaborators (it has no dispatcher credential).
     const workerApi = createWorkerApi(apiDeps);
@@ -740,8 +779,13 @@ export async function startRunnerApiHarness(
   };
 
   /** Claims as a Dispatcher and fetches the job as its Worker: the credential and the job details. */
-  async function startedWorker(features?: string, llmProviders?: string) {
-    const claim = await claimedSplit();
+  async function startedWorker(
+    features?: string,
+    llmProviders?: string,
+    /** How the Dispatcher claims, for example `{ engines: ["opencode"] }` to be handed a Dynamic job. */
+    request?: RequestOptions & { engines?: string[] },
+  ) {
+    const claim = await claimedSplit(request);
     const response = await worker.details(
       claim.job.id,
       claim.job.credential,

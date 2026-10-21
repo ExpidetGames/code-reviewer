@@ -109,6 +109,10 @@ function projectOnlyChanges(
       if (check({ [field]: wanted })) body[field] = wanted;
     }
 
+  // #588: the person ticked the confirmation of the catalog provider's new address; the server pins what the catalog trusts now.
+  if (!model.managed && values.confirmProviderAddress)
+    body.confirmProviderAddress = true;
+
   // The default mode put back (or chosen again) clears the override; any other mode is the new override (#405).
   if (values.reviewVerdict !== view.effective.reviewVerdict) {
     const wanted =

@@ -95,16 +95,18 @@ export async function readRoutes(
     if (route.kind === "page") {
       pages++;
       const marker = markerOf(route, slug);
+      // A page that does not exist (the billing page while billing is off, #505) answers like the page of a missing path: Next.js
+      // streams its 404 UI inside a 200 when the page's data sits behind the layout's Suspense, so only a data route is held to a 4xx.
       const html = await readAs(page, path, {
-        ...(marker === undefined ? {} : { marker }),
-        status: refused ? "refused" : "ok",
+        ...(marker === undefined || refused ? {} : { marker }),
+        status: refused ? "any" : "ok",
       });
       surfaces.push(...html.surfaces);
       for (const payload of PAYLOADS) {
         const read = await readAs(page, path, {
           headers: payload.headers,
-          status: payload.status,
-          ...(path.startsWith("/w/") && payload.status === "ok"
+          status: refused ? "any" : payload.status,
+          ...(path.startsWith("/w/") && payload.status === "ok" && !refused
             ? { marker: slug }
             : {}),
           label: `${path} (${payload.name})`,

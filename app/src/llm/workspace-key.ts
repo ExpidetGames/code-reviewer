@@ -17,6 +17,12 @@
 // - Who may do this is decided before the service is reached (`manage_llm_key`, an Admin or an Owner); the service
 //   does not see roles.
 import { checkLlmApiKey, type LlmProvider } from "./config.ts";
+import {
+  NATIVE_KEY_SECRET_PREFIX,
+  withNativeProviders,
+  type KeyProvider,
+  type KeyProviderLookup,
+} from "../native-providers/lookup.ts";
 import { llmProviderDescriptors } from "./providers/index.ts";
 import type { LlmProviderDescriptor } from "./providers/types.ts";
 import type { WorkspaceSecretName } from "../secrets/names.ts";
@@ -90,6 +96,11 @@ export type WorkspaceLlmKeyService = {
   status(provider: string): Promise<WorkspaceLlmKeyStatus>;
   /** The state of the key of every registered provider, in the order of the registry. */
   statusAll(): Promise<ProviderKeyStatus[]>;
+  /**
+   * The state of the key of each catalog provider (#555) the workspace holds a key slot for, by slug. A provider without
+   * a slot is not listed: there are a couple of hundred of them and the page lists those from the catalog.
+   */
+  nativeStatuses(): Promise<ProviderKeyStatus[]>;
   /** Saves the key of `input.provider`; the keys of the other providers are not touched. */
   save(
     input: SaveLlmKeyInput,
@@ -103,15 +114,21 @@ export type WorkspaceLlmKeyService = {
   keyFor(provider: string): Promise<WorkspaceKeyForJob>;
 };
 
-/** What the service and the assembly read of the registry: the providers the app supports, or a test's own. */
-export type ProviderLookup = {
+/**
+ * What the service and the assembly read of the registry: the providers the app supports, or a test's own. The default
+ * also knows the catalog providers (#555), which `ids` does not list.
+ */
+export type ProviderLookup = KeyProviderLookup;
+
+/** The registry as the operator's key needs it: the full descriptor, for the name of the operator slot. */
+export type OperatorProviderLookup = {
   readonly ids: readonly string[];
   find(raw: unknown): LlmProviderDescriptor | undefined;
 };
 
 export function createWorkspaceLlmKeyService({
   store,
-  providers = llmProviderDescriptors,
+  providers = withNativeProviders(llmProviderDescriptors),
 }: {
   store: WorkspaceSecretStore;
   providers?: ProviderLookup;
@@ -119,7 +136,7 @@ export function createWorkspaceLlmKeyService({
   // The slot of a provider: the name its adapter gave its workspace key. Registered names are validated when the
   // registry is built (they cannot collide), so the closed list of names is the registry's own list. A registry
   // of a test may have providers the types do not know, hence the two casts.
-  const slotOfDescriptor = (descriptor: LlmProviderDescriptor) => ({
+  const slotOfDescriptor = (descriptor: KeyProvider) => ({
     id: descriptor.id as LlmProvider,
     name: descriptor.secretNames.workspace as WorkspaceSecretName,
   });
@@ -179,6 +196,23 @@ export function createWorkspaceLlmKeyService({
         providers.ids.map(async (id) => ({
           provider: id,
           status: await status(id),
+        })),
+      );
+    },
+
+    async nativeStatuses() {
+      const registered = new Set(providers.ids);
+      const prefix = NATIVE_KEY_SECRET_PREFIX;
+      const slugs = (await store.names())
+        .filter((name) => name.startsWith(prefix))
+        .map((name) => name.slice(prefix.length))
+        .filter((slug) => !registered.has(slug))
+        // Only a slot the lookup still names: a row left by a provider that left the supported file is not listed.
+        .filter((slug) => slotOf(slug) !== undefined);
+      return Promise.all(
+        slugs.map(async (slug) => ({
+          provider: slug,
+          status: await status(slug),
         })),
       );
     },

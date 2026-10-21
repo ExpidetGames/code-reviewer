@@ -146,13 +146,19 @@ def test_a_whole_answer_with_an_unknown_usage_field_is_an_unknown_call(
 
 # #551-T06
 @pytest.mark.parametrize("family", FAMILIES)
-def test_for_an_own_key_the_unknown_call_is_booked_and_the_run_goes_on(family: WireFamily) -> None:
-    # The relaxation itself is #553; the proxy only does not end the run when told not to.
-    r = rig(family, streamed(family, 1, usage_fault="unknown_field"), unknown_cost_ends_run=False)
-    body = r.body()
-    r.post(body)
-    assert_unknown_call(r, len(body))
+def test_for_an_own_key_a_usage_it_cannot_price_is_booked_by_its_tokens_and_the_run_goes_on(
+    family: WireFamily,
+) -> None:
+    # #553: the relaxation. The tokens the provider stated are booked, the call's cost is unknown
+    # (not a worst case and not zero), and the run goes on. The cost policy tests cover each key.
+    scripted = streamed(family, 1, usage_fault="unknown_field")
+    r = rig(family, scripted, unknown_cost_ends_run=False)
+    r.post(r.body())
     assert r.ledger.failure is None
+    usage = r.ledger.usage(MODEL)
+    assert usage.cost_usd is None and usage.ai_calls == 1
+    assert usage.prompt_tokens > 0 and usage.completion_tokens > 0
+    assert spent(r.ledger) == 0 and r.ledger.unknown_calls == 0
 
 
 # #551-T06
@@ -273,14 +279,19 @@ def test_a_price_book_without_the_price_of_a_write_the_call_made_is_an_unknown_c
 
 
 # #551-R569-S3
-def test_for_an_own_key_a_call_the_book_cannot_price_is_booked_and_the_run_goes_on() -> None:
+def test_for_an_own_key_a_call_the_book_cannot_price_is_booked_by_tokens_and_the_run_goes_on() -> (
+    None
+):
+    # #553: the tokens the provider stated count against the cap; the cost of the call is unknown.
     family = WireFamily.ANTHROPIC_MESSAGES
     level = PriceLevel(input=3_000_000, output=15_000_000, cache_read=300_000)
     r = rig(family, streamed(family, 1), prices=PriceBook(base=level), unknown_cost_ends_run=False)
-    body = r.body()
-    r.post(body)
-    assert_unknown_call(r, len(body))
+    r.post(r.body())
     assert r.ledger.failure is None
+    usage = r.ledger.usage(MODEL)
+    assert usage.cost_usd is None and usage.ai_calls == 1
+    assert usage.prompt_tokens > 0 and usage.completion_tokens > 0
+    assert spent(r.ledger) == 0 and r.ledger.unknown_calls == 0
 
 
 # #551-R569-S4

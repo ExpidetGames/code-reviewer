@@ -29,7 +29,12 @@ import {
 import { isCrossSite } from "../http/request-checks.ts";
 import type { WorkspaceAccess } from "../workspaces/access.ts";
 import { can } from "../workspaces/permissions.ts";
-import { checkLlmApiKey, type LlmProvider } from "./config.ts";
+import type { NativeCatalogReader } from "../native-providers/catalog.ts";
+import {
+  withNativeProviders,
+  type KeyProviderLookup,
+} from "../native-providers/lookup.ts";
+import { checkLlmApiKey } from "./config.ts";
 import { llmProviderDescriptors } from "./providers/index.ts";
 import type { LlmKeyTestService } from "./key-test.ts";
 import type {
@@ -96,6 +101,14 @@ export type LlmKeyRouteDependencies = {
   /** The key service of THE WORKSPACE OF THE REQUEST (made from `access.workspace.id`). */
   keys: WorkspaceLlmKeyService;
   tester: LlmKeyTestService;
+  /**
+   * The catalog of providers (#555). With it, the address may name a catalog provider: reading and removing a key work for
+   * any supported one, saving and testing need one that is offered (not blocked, not unlisted). Without it only the registry's
+   * providers have a key here, as before.
+   */
+  catalog?: Pick<NativeCatalogReader, "providerAvailable">;
+  /** The providers an address may name; the registry (and the catalog providers when `catalog` is given) by default. */
+  providers?: KeyProviderLookup;
 };
 
 /**
@@ -125,29 +138,37 @@ export type LlmKeyRouteHandlers = {
   ): Promise<Response>;
 };
 
-function providerOf(raw: unknown): LlmProvider | undefined {
-  if (typeof raw !== "string") return undefined;
-  return llmProviderDescriptors.find(raw)?.id;
-}
-
-/** The provider of the address: the registry's id exactly, with no trimming and no case folding (as `slotOf` does). */
-function providerOfPath(raw: string): LlmProvider | undefined {
-  const found = providerOf(raw);
-  return found === raw ? found : undefined;
-}
-
 /** A body that names a provider must name the one of the address. */
 function bodyNamesAnotherProvider(
   body: Record<string, unknown>,
-  provider: LlmProvider,
+  provider: string,
+  lookup: KeyProviderLookup,
 ): boolean {
-  return body.provider !== undefined && providerOf(body.provider) !== provider;
+  return (
+    body.provider !== undefined && lookup.find(body.provider)?.id !== provider
+  );
 }
 
 export function createLlmKeyRouteHandlers({
   keys,
   tester,
+  catalog,
+  providers = catalog === undefined
+    ? llmProviderDescriptors
+    : withNativeProviders(llmProviderDescriptors),
 }: LlmKeyRouteDependencies): LlmKeyRouteHandlers {
+  /** The provider of the address: the lookup's id exactly, with no trimming and no case folding (as `slotOf` does). */
+  const providerOfPath = (raw: string): string | undefined => {
+    const found = providers.find(raw)?.id;
+    return found === raw ? found : undefined;
+  };
+  /**
+   * A catalog provider may carry a new key, or be tested, only while it is offered; a blocked one answers like an unknown one.
+   * The registry's providers are always available.
+   */
+  const available = async (provider: string): Promise<boolean> =>
+    llmProviderDescriptors.ids.some((id) => id === provider) ||
+    (catalog !== undefined && (await catalog.providerAvailable(provider)));
   // The second line behind the route's own action check: the handler asks the matrix as well.
   const mayManage = (access: WorkspaceAccess) =>
     can(access.role, "manage_llm_key");
@@ -166,10 +187,11 @@ export function createLlmKeyRouteHandlers({
     async put(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
       const provider = providerOfPath(raw);
-      if (provider === undefined) return refusal("provider_not_found");
+      if (provider === undefined || !(await available(provider)))
+        return refusal("provider_not_found");
       const body = await readJsonObject(request, LLM_KEY_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
-      if (bodyNamesAnotherProvider(body.value, provider))
+      if (bodyNamesAnotherProvider(body.value, provider, providers))
         return invalid([{ field: "provider", code: "provider_invalid" }]);
       const result = await keys.save(
         { provider, apiKey: body.value.apiKey },
@@ -194,11 +216,20 @@ export function createLlmKeyRouteHandlers({
     async test(request, access, raw) {
       if (!mayManage(access)) return refusal("forbidden");
       const provider = providerOfPath(raw);
-      if (provider === undefined) return refusal("provider_not_found");
+      if (provider === undefined || !(await available(provider)))
+        return refusal("provider_not_found");
       const body = await readJsonObject(request, LLM_KEY_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
-      if (bodyNamesAnotherProvider(body.value, provider))
+      if (bodyNamesAnotherProvider(body.value, provider, providers))
         return invalid([{ field: "provider", code: "provider_invalid" }]);
+
+      // #588: a provider whose address moved after a project selected it is refused before any key is read, the stored one
+      // included: the key is decrypted only for a test that can be made.
+      const moved = await tester.preflight({
+        workspaceId: access.workspace.id,
+        provider,
+      });
+      if (moved !== null) return done(moved);
 
       // A key typed into the field is checked as it is (and forgotten); with an empty field the stored key of
       // this provider is.

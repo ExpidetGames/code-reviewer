@@ -17,6 +17,11 @@ export const REVIEW_SETTINGS_ERROR_CODES = [
   "REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED",
   /** There is no such repository (unknown, or no longer listed by the platform and without a project). 404. */
   "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
+  /**
+   * The save would write or move the address pinned for a catalog provider (#588) and the person may not manage the workspace's
+   * LLM key; an Owner or Admin confirms it. Nothing was stored. 403.
+   */
+  "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
 ] as const;
 export type ReviewSettingsErrorCode =
   (typeof REVIEW_SETTINGS_ERROR_CODES)[number];
@@ -25,6 +30,7 @@ export const REVIEW_SETTINGS_ERROR_STATUS: Record<
   ReviewSettingsErrorCode,
   400 | 403 | 404 | 413 | 415
 > = {
+  PROVIDER_ADDRESS_CONFIRM_FORBIDDEN: 403,
   REVIEW_SETTINGS_INVALID: 400,
   REVIEW_SETTINGS_REQUEST_INVALID: 400,
   REVIEW_SETTINGS_CROSS_SITE_REQUEST: 403,

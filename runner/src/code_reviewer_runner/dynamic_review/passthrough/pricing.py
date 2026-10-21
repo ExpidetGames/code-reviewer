@@ -18,8 +18,9 @@ and a prompt whose size two tiers of one size price differently.
   level's own prices: a price the tier leaves out is not the base price.
 - **Reasoning** tokens are part of the completion and cost the level's reasoning price, or its
   output price when it states none.
-- A **cache read** without a read price costs the input price (never less than it is); a **cache
-  write** without a price of its kind has no cost.
+- A **cache read** without a read price costs the input price (never less than it is), except in the
+  book of a claim (`strict_cache_read`, #553), where the call has no cost; a **cache write**
+  without a price of its kind has no cost.
 - A **call the book cannot price** has no cost (None), whether the provider states a charge or not:
   the proxy books its worst case and counts it as unknown (review of PR #569, S3).
 - A **charge the provider states** (OpenRouter's `usage.cost`) is held against what the book
@@ -60,14 +61,17 @@ class PricedCall:
     drift: bool = False
 
 
-def _book_cost(usage: CallUsage, level: PriceLevel) -> int | None:
+def _book_cost(usage: CallUsage, level: PriceLevel, *, strict_cache_read: bool) -> int | None:
     """The price of the call at one level in 10^-12 USD, or None when it has no price there."""
     read, w5, w1 = usage.cache_read, usage.cache_write_5m, usage.cache_write_1h
     plain_input = usage.prompt_tokens - read - w5 - w1
     plain_output = usage.completion_tokens - usage.reasoning_tokens
     if min(plain_input, plain_output) < 0:
         return None  # counts that cannot be true
-    # A read without its own price is priced as input, which is never less than a read costs.
+    # A read without its own price is priced as input, which is never less than a read costs; the
+    # book of a claim does not guess (#553): the call has no cost.
+    if read and level.cache_read is None and strict_cache_read:
+        return None
     total = plain_input * level.input + read * (
         level.input if level.cache_read is None else level.cache_read
     )
@@ -93,7 +97,7 @@ def book_price(usage: CallUsage, book: PriceBook) -> Decimal | None:
     level = book.level_for(usage.prompt_tokens)
     if level is None:
         return None
-    pico = _book_cost(usage, level)
+    pico = _book_cost(usage, level, strict_cache_read=book.strict_cache_read)
     return None if pico is None else _usd(pico)
 
 

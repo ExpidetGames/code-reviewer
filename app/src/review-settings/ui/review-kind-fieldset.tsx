@@ -6,6 +6,7 @@
 // operator's key, its catalog choice). The card never implies that
 // Dynamic Review works while the instance has not enabled it (#195 gate): the option says so and
 // choosing it shows what happens to the runs. Switching is confirmed by the form when it is saved.
+import Link from "next/link";
 import { useId, type ReactNode } from "react";
 import { Alert, alertVariants } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
@@ -15,6 +16,7 @@ import {
   RadioGroupItem,
 } from "../../components/ui/radio-group.tsx";
 import { cn } from "../../lib/utils.ts";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { ProviderSelect, type ProviderOption } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import type { ProjectDynamicView } from "../service.ts";
@@ -67,6 +69,9 @@ export function ReviewKindFieldset({
   kindError,
   handlers,
   choice,
+  nativeModelField,
+  addressNote,
+  nativeProvidersHint = false,
   workspaceSlug,
   providers,
   datalistId,
@@ -78,6 +83,15 @@ export function ReviewKindFieldset({
    * and model fields.
    */
   choice?: ReactNode;
+  /**
+   * The model picker of a catalog provider (#555): it takes the place of the model field while the chosen Dynamic provider is
+   * one of the models.dev catalog, whose models are a list to pick from and not a name to type.
+   */
+  nativeModelField?: ReactNode;
+  /** The address pinned for the chosen catalog provider, read-only, with the action that confirms a new one (#588). */
+  addressNote?: ReactNode;
+  /** The form offers the catalog providers the workspace holds a key for: say where to add the key of another. */
+  nativeProvidersHint?: boolean;
   workspaceSlug: string;
   /** The registered providers, with whether a key is stored for each. */
   providers: readonly ProviderOption[];
@@ -227,20 +241,38 @@ export function ReviewKindFieldset({
                 error={errors.dynamicProvider}
                 onChange={handlers.setProvider}
               />
-              <SettingsTextField
-                name="dynamicModel"
-                label="Dynamic Review model"
-                hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${defaultModel}.`}
-                error={errors.dynamicModel}
-                origin={modelOrigin}
-                value={values.dynamicModel}
-                onChange={handlers.setModel}
-                list={datalistId}
-                suggestions={{
-                  label: SUGGESTED_MODEL_PICK.dynamicModel,
-                  models: suggestedModels,
-                }}
-              />
+              {nativeProvidersHint ? (
+                <p className="text-sm text-muted-foreground">
+                  The providers you have a key for are listed. Add the key of
+                  another provider on the{" "}
+                  <Link
+                    href={workspacePath(workspaceSlug, "/settings/llm")}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    LLM access
+                  </Link>{" "}
+                  page.
+                </p>
+              ) : null}
+              {nativeModelField !== undefined ? (
+                nativeModelField
+              ) : (
+                <SettingsTextField
+                  name="dynamicModel"
+                  label="Dynamic Review model"
+                  hint={`The model the agent uses. Type the name of any model your provider serves; the default is ${defaultModel}.`}
+                  error={errors.dynamicModel}
+                  origin={modelOrigin}
+                  value={values.dynamicModel}
+                  onChange={handlers.setModel}
+                  list={datalistId}
+                  suggestions={{
+                    label: SUGGESTED_MODEL_PICK.dynamicModel,
+                    models: suggestedModels,
+                  }}
+                />
+              )}
+              {addressNote}
             </>
           )}
           <SkillEditor

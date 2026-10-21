@@ -31,6 +31,7 @@ import {
 type Outcome =
   | { kind: "saved"; changed: boolean }
   | { kind: "tested" }
+  | { kind: "unverified" }
   | { kind: "test_failed"; text: string; detail: string | null }
   | {
       kind: "failed";
@@ -109,7 +110,9 @@ export function LlmAccessForm({
     }
     setOutcome(
       result.data.ok
-        ? { kind: "tested" }
+        ? result.data.verified === false
+          ? { kind: "unverified" }
+          : { kind: "tested" }
         : {
             kind: "test_failed",
             text: describeKeyTestFailure(result.data.error),
@@ -200,6 +203,12 @@ export function LlmAccessForm({
         ) : null}
         {outcome?.kind === "tested" ? (
           <p className="text-sm text-success">The provider accepted the key.</p>
+        ) : null}
+        {outcome?.kind === "unverified" ? (
+          <p className="text-sm text-muted-foreground">
+            This provider has no way to check a key, so it could not be
+            verified. If the key is wrong, reviews on this provider fail.
+          </p>
         ) : null}
       </div>
       {outcome?.kind === "failed" ? (

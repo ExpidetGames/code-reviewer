@@ -22,9 +22,12 @@ import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
+import { getNativeCost } from "../native-cost/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
+import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
+import { createProviderPins } from "./provider-pins.ts";
 import { APP_VERSION } from "./app-version.ts";
 import {
   createWorkerApi,
@@ -68,6 +71,7 @@ function sharedDeps(): WorkerApiDeps {
     logger: { info: (line) => console.info(line) },
   });
   const llm = getWorkspaceLlm();
+  const nativeCost = getNativeCost();
   return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
@@ -135,6 +139,11 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
+    // #553: the cost policy and the entry of a native job. A provider outside the registry (#555) is always native, there is no
+    // legacy wire for it; the two registry providers are native only while the switch of the native path is on (#578).
+    nativeCost,
+    // #588: a selection of a catalog provider made before pins existed is pinned by its first claim, in the job's own workspace.
+    providerPins: createProviderPins(reviewSettingsServiceFor),
     claimedKeys: getClaimedKeys(),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,
@@ -161,6 +170,9 @@ export function getRunnerApi(): RunnerApi {
       createJobVmRunsRepository(getDatabase(), workspaceId),
     runnerToken: () => configuredRunnerToken(process.env),
     appVersion: APP_VERSION,
+    // #498: which Dispatchers this app serves (billing is not switched on over one that reports no VMs).
+    noteClaimFeatures: (features) =>
+      noteDispatcherClaim(getDatabase(), features),
   });
 }
 

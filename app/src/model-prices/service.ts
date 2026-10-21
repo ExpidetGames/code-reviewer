@@ -39,6 +39,7 @@ import {
   parsePriceBookJson,
   priceBookToJson,
   type PriceBook,
+  type PriceBookJson,
 } from "./price-book.ts";
 
 export type ModelPriceRefusal = {
@@ -108,6 +109,17 @@ export type ModelPriceService = {
     providerId: string,
     modelId: string,
   ): Promise<ManagedAvailabilityJson>;
+  /**
+   * The price a run on the workspace's **own** key is priced from (#553), in the JSON form of the book: nobody but the user
+   * pays, so no confirmation is needed. It is the confirmed book when the price is confirmed, else the price the catalog
+   * states today (models.dev with the override file), else `null` for a model nobody priced or one the catalog does not
+   * have. Never throws: a database that cannot be read is `null` too, and an unpriced run is bound by its token cap, so a
+   * failed read costs a run its price and not its safety.
+   */
+  catalogPrice(
+    providerId: string,
+    modelId: string,
+  ): Promise<PriceBookJson | null>;
 };
 
 export type ModelPriceServiceDependencies = {
@@ -476,6 +488,29 @@ export function createModelPriceService(
           `model prices: PRICE_CORRECTED by=${actorId} model=${modelIds.providerId}/${modelIds.modelId} old=${priceText(result.before?.book ?? null)} new=${priceText(result.written.book)} reason=${JSON.stringify(reason)}`,
         );
       return changed(modelIds.providerId, modelIds.modelId);
+    },
+
+    async catalogPrice(providerId, modelId) {
+      try {
+        const [model, confirmation] = await Promise.all([
+          models.getModel(providerId, modelId),
+          confirmations.latest(providerId, modelId),
+        ]);
+        if (model === undefined) return null;
+        const price = effectivePrice({
+          cost: model.cost,
+          reasoning: model.reasoning,
+          override: overrideOf(providerId, modelId),
+          confirmation: isUnreadable(confirmation)
+            ? null
+            : (confirmation ?? null),
+        });
+        const book =
+          price.status === "confirmed" ? price.book : price.reference.book;
+        return book === null ? null : priceBookToJson(book);
+      } catch {
+        return null;
+      }
     },
 
     async availability(providerId, modelId) {

@@ -3,6 +3,10 @@
 import { describe, expect, it } from "vitest";
 import { JOB_ERROR_CODES } from "../jobs/job-types.ts";
 import {
+  CLAIM_FAILURE_CODES,
+  CLAIM_RELEASE_REASONS,
+} from "../runner-api/claim.ts";
+import {
   RUNNER_CHECKOUT_REASONS,
   RUNNER_ERROR_CODES,
 } from "../runner-api/contract.ts";
@@ -97,6 +101,8 @@ describe("every terminal code has an outcome class", () => {
     const known = new Set<string>([
       ...JOB_ERROR_CODES,
       ...RUNNER_ERROR_CODES,
+      ...CLAIM_FAILURE_CODES,
+      ...CLAIM_RELEASE_REASONS,
       LAUNCH_FAILED_CODE,
       WORKER_EXITED_CODE,
     ]);
@@ -113,6 +119,7 @@ describe("every terminal code has an outcome class", () => {
 describe("the class of a run's end", () => {
   // The maintainer decided 2026-10-19 (#489, #523): free only when the failure is clearly our fault.
   // #523-T12
+  // #498-T10
   it.each([
     ["launch_failed", "free"],
     ["worker_exited", "free"],
@@ -123,6 +130,17 @@ describe("the class of a run's end", () => {
     ["dynamic_engine_unavailable", "free"],
     ["dynamic_isolation_self_check_failed", "free"],
     ["dynamic_accounting_failed", "free"],
+    // #498 (the review of #525): raised for missing job options, missing model prices or an invalid operator environment,
+    // before any model call: the operator's side. This test moved from `charged` with the spec.
+    ["dynamic_config_invalid", "free"],
+    // #498: a claim the balance or the unready billing refused. Nothing ran, so nothing is charged whatever the class.
+    ["insufficient_balance", "free"],
+    ["balance_negative", "free"],
+    ["billing_rates_incomplete", "free"],
+    ["billing_hold_released", "free"],
+    ["monthly_limit_reached", "free"],
+    ["reviews_paused", "free"],
+    ["billing_limits_unreadable", "free"],
     ["runner_error", "free"],
     ["invalid_job", "free"],
     ["git_unavailable", "free"],
@@ -155,7 +173,6 @@ describe("the class of a run's end", () => {
   it.each([
     "dynamic_budget_exceeded",
     "dynamic_policy_violation",
-    "dynamic_config_invalid",
     "checkout_incomplete",
     "pr_not_found",
     "git_unprocessable",
@@ -361,6 +378,72 @@ describe("the class of a run's end", () => {
     expect(
       classifyOutcome(failed("command_failed", { errorReason: "transport" })),
     ).toBe("charged");
+  });
+});
+
+describe("a job refused or handed back at claim (#553)", () => {
+  // #577-L5
+  it("has a class for every code of the claim, and a claim that refused a job bills nothing", () => {
+    for (const code of [...CLAIM_FAILURE_CODES, ...CLAIM_RELEASE_REASONS])
+      expect(Object.keys(ERROR_CODE_CLASSES), code).toContain(code);
+    // Nothing ran: the model was not asked and no VM was kept. The codes that name the customer's side of the line
+    // (a closed pull request, a missing one, the Dynamic settings) keep the class they were given in #523.
+    for (const code of [
+      "managed_model_unavailable",
+      "llm_not_configured",
+      "llm_provider_unsupported",
+      // #588-T32
+      "provider_address_changed",
+      "job_llm_options_invalid",
+      "job_args_invalid",
+      "job_env_invalid",
+      "git_connection_disabled",
+      "git_connection_gone",
+      "git_connection_suspended",
+      "git_scope_refused",
+      "git_app_auth_failed",
+      "git_access_failed",
+      "git_access_unavailable",
+      "pull_request_unavailable",
+      "claim_failed",
+      "price_check_failed",
+      // #588-T32
+      "provider_pin_check_failed",
+    ])
+      expect(classifyOutcome(failed(code)), code).toBe("free");
+  });
+
+  // #577-L5
+  it("is free on the own key too: it is the claim's refusal, not the model's", () => {
+    expect(
+      classifyOutcome(failed("managed_model_unavailable", { keyMode: "own" })),
+    ).toBe("free");
+  });
+});
+
+describe("the cost policy of a native job (#553)", () => {
+  // #553-T08
+  it("charges the minutes only for an own-key Dynamic run that delivered a review at its token cap or without a price", () => {
+    for (const end of [
+      { status: "succeeded", errorCode: null },
+      failed("dynamic_budget_exceeded"),
+    ] satisfies Array<Pick<RunEnd, "status" | "errorCode">>)
+      expect(
+        classifyOutcome({ ...end, keyMode: "own", aiCostKnown: false }),
+      ).toBe("minutes_only");
+  });
+
+  // #553-T03
+  it("treats a managed run that could not account for its cost as our fault, whatever else is known", () => {
+    for (const aiCostKnown of [true, false, undefined])
+      expect(
+        classifyOutcome(
+          failed("dynamic_accounting_failed", {
+            keyMode: "managed",
+            ...(aiCostKnown === undefined ? {} : { aiCostKnown }),
+          }),
+        ),
+      ).toBe("free");
   });
 });
 

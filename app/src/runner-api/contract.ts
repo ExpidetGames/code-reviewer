@@ -6,6 +6,8 @@
 // with the file, and real answers and the request checks are validated against it).
 import type { ReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
+import type { CostPolicyJson } from "../native-cost/policy.ts";
+import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import {
   RUNNER_ENGINES,
@@ -31,6 +33,12 @@ export const CLAIM_FEATURES = [
   // #396: the runner stops gracefully when a heartbeat answers `job.superseded`. A running job is superseded by a
   // newer push only when its holder named it (#397); a Worker names it in its job details request.
   "supersede",
+  // #553: the runner reads `dynamic.cost` and enforces it (the price book of the managed key, the token cap of an own key).
+  // A job that carries a cost policy goes only to a caller that named it.
+  "dynamic_cost_policy",
+  // #498: the caller is a Dispatcher that reports the VM it creates (`vm_lifecycle`, the App feature of the same name). The
+  // App records that it has seen a Dispatcher with and without it: billing is not switched on while one without it claims.
+  "vm_lifecycle",
 ] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 
@@ -293,6 +301,17 @@ export type DynamicReviewOptions = {
    * contract and would refuse the key.
    */
   capabilities?: DynamicModelCapabilities;
+  /**
+   * #553: whose key pays and what bounds the cost of a native job (`DynamicCostPolicy` in the contract): the confirmed price
+   * book of the managed key, the token cap of an own key. Optional and sent only to a runner that advertised the
+   * `dynamic_cost_policy` feature; a job without it is a job of today.
+   */
+  cost?: CostPolicyJson;
+  /**
+   * #578: the provider and the one model of a native job (`JobModelEntry`, contracts/job-model-entry.v1.json): the entry the
+   * runner turns into the provider block of the engine's configuration. No key. Sent exactly when `cost` is.
+   */
+  modelEntry?: JobModelEntry;
 };
 
 /** `DynamicModelCapabilities` in the contract. Prices are exact decimal text, US dollars per million tokens. */
@@ -485,7 +504,12 @@ export type RunnerCallTrace = {
 };
 
 /** The reasons a Dynamic Review stops early: its cost limit or its time limit. */
-export const STOPPED_EARLY_REASONS = ["cost_limit", "time_limit"] as const;
+export const STOPPED_EARLY_REASONS = [
+  "cost_limit",
+  "time_limit",
+  // #553: an own key whose price is not known is bound by tokens.
+  "token_limit",
+] as const;
 export type StoppedEarly = (typeof STOPPED_EARLY_REASONS)[number];
 
 /** The priorities of a Dynamic Review's findings, highest first (#195); `P0` is the one that blocks (#405). */

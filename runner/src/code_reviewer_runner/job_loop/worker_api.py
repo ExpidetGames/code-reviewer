@@ -49,7 +49,7 @@ _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 MAX_HEARTBEAT_INTERVAL_SECONDS = 60
 # What this Worker understands beyond the plain job (`features` of the details request): an app
 # sends an optional job field only to a Worker that names it.
-WORKER_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede")
+WORKER_FEATURES: tuple[str, ...] = ("dynamic_capabilities", "supersede", "dynamic_cost_policy")
 # The feature of `GET /api/runners/v1/version` that says the Worker API exists.
 FEATURE_WORKER_API = "worker_api"
 

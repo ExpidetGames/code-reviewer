@@ -50,7 +50,7 @@ import {
   type LlmProvider,
 } from "../llm/config.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
-import type { Selection } from "../llm/selection.ts";
+import { MANAGED_MODEL_UNAVAILABLE, type Selection } from "../llm/selection.ts";
 import type { UsageKeyMode } from "../usage/usage-records.ts";
 import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
 import type {
@@ -61,7 +61,14 @@ import {
   clampMaxTokens,
   UNKNOWN_WINDOW_MAX_TOKENS,
 } from "../model-catalog/token-budget.ts";
+import {
+  PROVIDER_ADDRESS_CHANGED,
+  type NativeCostService,
+} from "../native-cost/service.ts";
+import type { CostPolicyJson } from "../native-cost/policy.ts";
+import type { JobModelEntry } from "../models-dev/job-entry.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
+import type { ProviderPins } from "./provider-pins.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
 import {
@@ -111,6 +118,11 @@ export const CLAIM_FAILURE_CODES = [
   "managed_model_unavailable",
   // #432: the provider an own project selected is one the app does not know or the runner did not advertise.
   "llm_provider_unsupported",
+  // #555: an own job names a catalog model the catalog no longer serves (its row is gone). Never a move to another model.
+  "llm_model_unavailable",
+  // #588: an own job names a catalog provider whose trusted address is no longer the one the project pinned when it selected it.
+  // The key is not sent anywhere; an Owner or Admin confirms the new address in the settings of the project. Free.
+  "provider_address_changed",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -118,6 +130,11 @@ export const CLAIM_RELEASE_REASONS = [
   "git_access_unavailable",
   "pull_request_unavailable",
   "claim_failed",
+  // #553: the price check of a managed native job failed itself (the database could not be read); not the model's fault.
+  "price_check_failed",
+  // #588: the pin of a legacy selection could not be adopted (the settings could not be written, or the project changed meanwhile);
+  // the job is judged again. Not the model's fault.
+  "provider_pin_check_failed",
   // #320: the Dispatcher could not start the Worker (reported with the Worker API's result call).
   "launch_failed",
   // #375: the Worker's container ended with an error before it reported a result (the Dispatcher's release call).
@@ -192,13 +209,27 @@ export type ClaimDeps = {
    * Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked,
    * and the model of a catalog entry (#280, #432), so it can be masked in the result even if the operator changes the entry.
    */
-  claimedKeys: Pick<ClaimedKeys, "remember" | "rememberModel">;
+  claimedKeys: Pick<
+    ClaimedKeys,
+    "remember" | "rememberModel" | "rememberNative"
+  >;
   /**
    * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
    * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
    * carries no capabilities, as before.
    */
   modelCapabilities?: ModelCapabilityChecker;
+  /**
+   * #553: the cost policy of a native job (a job whose selection names a catalog model, src/native-cost/). Left out, no job
+   * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
+   */
+  nativeCost?: Pick<NativeCostService, "refOf" | "policyFor" | "entryFor">;
+  /**
+   * #588: where the address a selection of a catalog provider was pinned to is adopted for a selection made before pins existed:
+   * the claim pins the address it is about to send the key to, once. Answers the pin in force, or null when the project no
+   * longer selects the provider. Only asked for such a selection.
+   */
+  providerPins: ProviderPins;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -211,7 +242,12 @@ export type Refusal =
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
 type Prepared =
-  | { kind: "ready"; response: ClaimResponse; entryModel: string | null }
+  | {
+      kind: "ready";
+      response: ClaimResponse;
+      entryModel: string | null;
+      native: boolean;
+    }
   /** #320: the claim of a Dispatcher: the credential and no input. */
   | { kind: "split"; response: SplitClaimResponse }
   | Refusal;
@@ -228,6 +264,10 @@ export type Checked = {
   llmOptions: { maxTokens?: number };
   /** The Dynamic options of a Dynamic job; null for a Diff job. */
   dynamic: DynamicReviewOptions | null;
+  /** #553: the cost policy of a native Dynamic job (`dynamic.cost`); null for every other job. */
+  cost: CostPolicyJson | null;
+  /** #578: the entry of the model of a native Dynamic job (`dynamic.modelEntry`); null exactly when `cost` is. */
+  modelEntry: JobModelEntry | null;
   integration: Integration;
   repo: RepoRef;
   prUrl: string;
@@ -241,6 +281,8 @@ export type Built = {
   tokenExpiresAt: string | null;
   /** The model of the catalog entry the job runs on, or null for an own job; remembered for masking (#280, #432). */
   entryModel: string | null;
+  /** #578: the input carries a native model entry (`dynamic.modelEntry`); remembered for the report. */
+  native: boolean;
 };
 
 function refuse(errorCode: string, detail?: string): Refusal {
@@ -437,6 +479,135 @@ export type CheckOptions = {
   runnerProviders: readonly string[] | null;
 };
 
+type CostDecision =
+  | {
+      kind: "decided";
+      policy: CostPolicyJson | null;
+      /** #578: the entry of the model of a native job; absent exactly when `policy` is null. */
+      entry?: JobModelEntry;
+      /** Which confirmation priced a managed run, for the log. */
+      confirmation?: { id: number; hashVersion: number };
+    }
+  | { kind: "refused"; errorCode: string; detail: string }
+  /** The price check or the adoption of the pin failed itself (the database could not be read): not the model's fault, so the job is given back. */
+  | {
+      kind: "retry";
+      reason: "price_check_failed" | "provider_pin_check_failed";
+    };
+
+/**
+ * #553: the cost policy of a native Dynamic job, or none. A job is native when its selection names a catalog model
+ * (`nativeCost.refOf`); a Diff job and a job without `nativeCost` are not, and nothing is asked for them. The managed key is
+ * refused with `managed_model_unavailable` (the log carries the opaque entry id, the kind and the stable code, never a
+ * provider, a model or a price); the own key always gets a policy.
+ */
+async function costOf(
+  deps: ClaimDeps,
+  job: Job,
+  selection: Selection,
+): Promise<CostDecision> {
+  const native = deps.nativeCost;
+  if (native === undefined || job.reviewKind !== "dynamic")
+    return { kind: "decided", policy: null };
+  const ref = native.refOf(selection);
+  if (ref === null) return { kind: "decided", policy: null };
+  const outcome = await native.policyFor(selection.keyMode, ref);
+  if (!outcome.ok) {
+    // #549: `check_failed` is the one reason that may pass, because it says the check failed and not the model.
+    if (outcome.reason === "check_failed")
+      return { kind: "retry", reason: "price_check_failed" };
+    return {
+      kind: "refused",
+      errorCode: MANAGED_MODEL_UNAVAILABLE,
+      detail: `${whose(selection)}kind=${selection.kind} reason=${outcome.code}:${outcome.reason}`,
+    };
+  }
+  // #578: what the runner is told about the model. The price is judged first, so a managed model with no confirmed price
+  // keeps the refusal it always had. A model the catalog cannot describe (or whose provider's address is not trusted) is
+  // refused like an unavailable one: on the operator's key, which we pay, as `managed_model_unavailable` (free); on the
+  // workspace's own key as a model Dynamic Review cannot use. No key exists yet in either case.
+  const catalog = selection.keyMode === "own" && selection.catalog === true;
+  const entry = await native.entryFor(
+    ref,
+    catalog ? selection.pinnedAddress : undefined,
+  );
+  if (!entry.ok) {
+    if (entry.code === "check_failed")
+      return { kind: "retry", reason: "price_check_failed" };
+    return {
+      kind: "refused",
+      errorCode: entryRefusalCode(selection, entry.code),
+      detail: `${whose(selection)}kind=${selection.kind} reason=entry_${entry.code}`,
+    };
+  }
+  // #588: a selection made before pins existed is pinned now, to the address this claim is about to send the key to. If another
+  // pin got there first, the job holds to that one, as every other claim does.
+  if (catalog && entry.unpinned === true) {
+    let inForce: string | null;
+    try {
+      inForce = await deps.providerPins.adopt(
+        job,
+        selection.provider,
+        entry.entry.upstreamBaseUrl,
+      );
+    } catch {
+      // No error text: it could carry whatever the failing layer held. The job is given back and judged again.
+      return { kind: "retry", reason: "provider_pin_check_failed" };
+    }
+    if (inForce === null)
+      return { kind: "retry", reason: "provider_pin_check_failed" };
+    if (inForce !== entry.entry.upstreamBaseUrl)
+      return {
+        kind: "refused",
+        errorCode: entryRefusalCode(selection, "provider_address_changed"),
+        detail: `${whose(selection)}kind=${selection.kind} reason=entry_provider_address_changed`,
+      };
+  }
+  // #555 (decision of 2026-10-19 on #548): a model models.dev stopped listing keeps being served from its last known row.
+  if (entry.unlisted === true)
+    deps.logger.info(
+      `[runner-api] job=${job.id} selection model no longer listed by the catalog; the last known row serves`,
+    );
+  return {
+    kind: "decided",
+    policy: outcome.policy,
+    entry: entry.entry,
+    ...(outcome.confirmation === null
+      ? {}
+      : { confirmation: outcome.confirmation }),
+  };
+}
+
+/**
+ * The code a job ends with when its entry cannot be built. The operator's key: `managed_model_unavailable` (free). The own key of a
+ * catalog provider (#555) names what the member can act on: a model the catalog does not describe (its row is gone, or makes no
+ * entry) is `llm_model_unavailable`, and a provider that cannot carry a key (not supported, blocked by `url_changed` or a refused
+ * address, an address that is not the plain public https one, `upstream_not_registry`) is `llm_provider_unsupported`. The own key
+ * of a registry provider keeps `dynamic_model_features_unsupported` (#578).
+ */
+function entryRefusalCode(
+  selection: Selection,
+  code: Extract<
+    Awaited<ReturnType<NativeCostService["entryFor"]>>,
+    { ok: false }
+  >["code"],
+): string {
+  if (selection.keyMode === "managed") return MANAGED_MODEL_UNAVAILABLE;
+  if (selection.catalog !== true) return "dynamic_model_features_unsupported";
+  // #588: the catalog's address moved since the workspace selected the provider; the key stays where it is.
+  if (code === "provider_address_changed") return PROVIDER_ADDRESS_CHANGED;
+  return code === "model_not_in_catalog" ||
+    code === "entry_invalid" ||
+    code === "model_not_of_provider"
+    ? "llm_model_unavailable"
+    : "llm_provider_unsupported";
+}
+
+/** The opaque id of the catalog entry for the log of a job on the operator's key; nothing for an own key. */
+function whose(selection: Selection): string {
+  return selection.keyMode === "managed" ? `entry=${selection.entry.id} ` : "";
+}
+
 /**
  * Steps 1 to 3 of the module comment: the guard, the selection and the key it names, the options of the job and the
  * pull request. Nothing here creates or reveals a credential of the job.
@@ -465,7 +636,9 @@ export async function checkJob(
   // (#276, #432). Any failure ends the job closed: no move to another entry, provider or the instance's model. The key
   // follows only a selection that succeeded.
   const options = await deps.jobOptions.optionsFor(job);
-  const selected = await selectModel(deps, job, {
+  // A catalog model needs the native path: its entry from the catalog and its cost policy (the token cap) come from `nativeCost`.
+  const nativeModels = deps.nativeCost !== undefined;
+  const selected = await selectModel({ ...deps, nativeModels }, job, {
     options,
     entitlements,
     runnerProviders:
@@ -474,11 +647,27 @@ export async function checkJob(
   if (!selected.ok) return refuse(selected.errorCode, selected.detail);
   const { selection } = selected;
   await deps.recordSelection(job, selection);
+
+  // #553: the cost of a native Dynamic job. On the operator's key, which we pay, a model whose price is not confirmed ends
+  // the job here, before any key, token or VM exists; the own key is never refused for a price.
+  const cost = await costOf(deps, job, selection);
+  if (cost.kind === "refused") return refuse(cost.errorCode, cost.detail);
+  if (cost.kind === "retry")
+    return {
+      kind: "retry",
+      reason: cost.reason,
+      retryAfterSeconds: DEFAULT_RETRY_AFTER_SECONDS,
+    };
   // The log names the entry and the kind of a job on the operator's key, never a model or a provider; the log of
-  // a job on the workspace's own key names no model either.
+  // a job on the workspace's own key names no model either. A managed native job also names the confirmation that priced it
+  // (its id and the version of its hash), so a price in dispute can be traced.
   deps.logger.info(
     selection.keyMode === "managed"
-      ? `[runner-api] job=${job.id} selection entry=${selection.entry.id} kind=${selection.kind} origin=${selection.entry.origin}`
+      ? `[runner-api] job=${job.id} selection entry=${selection.entry.id} kind=${selection.kind} origin=${selection.entry.origin}${
+          cost.confirmation === undefined
+            ? ""
+            : ` confirmation=${String(cost.confirmation.id)} hash=${String(cost.confirmation.hashVersion)}`
+        }`
       : `[runner-api] job=${job.id} selection kind=${selection.kind} key=own`,
   );
 
@@ -583,6 +772,8 @@ export async function checkJob(
     options,
     llmOptions,
     dynamic,
+    cost: cost.policy,
+    modelEntry: cost.entry ?? null,
     integration,
     repo,
     prUrl,
@@ -609,9 +800,15 @@ export async function buildJobInput(
     options,
     llmOptions,
     dynamic,
+    cost,
+    modelEntry,
     integration,
     repo,
   } = checked;
+  // #553: a cost policy goes only to a caller that enforces one. A runner that did not read it would run without the bound
+  // (the price book of the managed key, the token cap of an own key), so the job ends here, before any credential exists.
+  if (cost !== null && !features.includes("dynamic_cost_policy"))
+    return refuse("dynamic_engine_unavailable");
   const managed = selection.keyMode === "managed";
   const provider = deps.registry.resolve(integration.type);
 
@@ -619,7 +816,11 @@ export async function buildJobInput(
   // local refusal above, and still before the git credentials are created. A job on the operator's key (#280, #432) reads
   // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read serves
   // both (a Dynamic job's model is the entry's). The metadata is read from the selection's provider.
-  const modelToRead = dynamic !== null || managed ? selection.model : null;
+  // A native job (#578) reads none: its entry states the window, the output bound and the flags of the model.
+  const modelToRead =
+    (dynamic !== null || managed) && modelEntry === null
+      ? selection.model
+      : null;
   // The claim of a job on the operator's key asks as a claim (an outage costs one wait, not one per claim) and names the
   // entry in the log line instead of the model.
   const metadata =
@@ -713,8 +914,12 @@ export async function buildJobInput(
           prUrl: checked.prUrl,
           command,
           reviewKind: "dynamic",
-          dynamic:
-            capabilities === undefined ? dynamic : { ...dynamic, capabilities },
+          dynamic: {
+            ...dynamic,
+            ...(capabilities === undefined ? {} : { capabilities }),
+            ...(cost === null ? {} : { cost }),
+            ...(modelEntry === null ? {} : { modelEntry }),
+          },
           base: claimBaseOf(
             repo.fullName,
             checked.baseRef,
@@ -741,6 +946,7 @@ export async function buildJobInput(
     input,
     tokenExpiresAt: git.expiresAt,
     entryModel: managed ? selection.model : null,
+    native: modelEntry !== null,
   };
 }
 
@@ -792,6 +998,7 @@ async function prepare(
   return {
     kind: "ready",
     entryModel: built.entryModel,
+    native: built.native,
     response: {
       version: RUNNER_API_VERSION,
       job: {
@@ -985,6 +1192,7 @@ export async function handleClaim(
           claimed.job.id,
           prepared.entryModel,
         );
+      await deps.claimedKeys.rememberNative(claimed.job.id, prepared.native);
       deps.logger.info(
         `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
       );

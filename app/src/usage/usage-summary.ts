@@ -7,6 +7,7 @@
 // leaves out, is `plan-view.ts`.
 import "server-only";
 import type { Kysely } from "kysely";
+import { isBillingOn } from "../billing/enabled.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
@@ -36,7 +37,9 @@ export async function readPlanView(
 
   const records = createUsageRecordsRepository(db, workspaceId, now);
   const since = entitlements.periodStart;
-  const runs = await records.countByKind(since);
+  // While billing is on the run quotas are not enforced and not shown (ADR 0006, D5; #499): no count is read for them.
+  const runQuotas = !(await isBillingOn(db));
+  const runs = runQuotas ? await records.countByKind(since) : NO_USAGE.runs;
   // The claim watches the cost of the runs on the key the workspace runs on, and only while that key's cost limit
   // is set (#361: the operator's key has its own limit, the workspace's key another).
   const { keyMode, limits } = entitlements;
@@ -44,19 +47,24 @@ export async function readPlanView(
     keyMode === "managed"
       ? limits.managedCostLimitMicroUsd
       : limits.ownKeyCostLimitMicroUsd;
+  const options = { runQuotas };
   if (costLimit === null)
-    return buildPlanView(entitlements, { ...NO_USAGE, runs });
+    return buildPlanView(entitlements, { ...NO_USAGE, runs }, options);
   const [costMicroUsd, groups] = await Promise.all([
     records.sumSettledCostMicroUsd(since, keyMode),
     records.summarize({ from: since, to: END_OF_TIME }),
   ]);
-  return buildPlanView(entitlements, {
-    runs,
-    costMicroUsd,
-    unknownCostCount: groups
-      .filter((group) => group.keyMode === keyMode)
-      .reduce((total, group) => total + group.unknownCostCount, 0),
-  });
+  return buildPlanView(
+    entitlements,
+    {
+      runs,
+      costMicroUsd,
+      unknownCostCount: groups
+        .filter((group) => group.keyMode === keyMode)
+        .reduce((total, group) => total + group.unknownCostCount, 0),
+    },
+    options,
+  );
 }
 
 /**

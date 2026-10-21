@@ -51,6 +51,18 @@ describe("the sentences for error codes", () => {
     }
   });
 
+  // #499-T13
+  it("gives the code of the hidden brake a sentence and shows no code, no number and no window", () => {
+    const described = describeErrorCode("reviews_paused");
+
+    expect(described.known).toBe(true);
+    expect(described.code).toBeNull();
+    expect(described.text).toMatch(/^Reviews are paused for this workspace/);
+    expect(described.text).not.toMatch(
+      /\d|hour|brake|limit|window|reviews_paused/i,
+    );
+  });
+
   // #434-X1: the code no part of the system produces any more, kept for the runs that ended with it.
   it("keeps the sentence of the removed tier code for old runs, points at the review options that replaced the levels, and the claim cannot end a job with it", () => {
     const code = "managed_tier_unavailable";
@@ -88,6 +100,20 @@ describe("the sentences for error codes", () => {
     expect(text).toMatch(/no AI model was used/);
     expect(text).toMatch(/model settings/);
     expect(text).not.toMatch(/openrouter/i);
+  });
+
+  // #588-T31
+  it("tells a person that the address of the provider changed, that the key was not sent and who can confirm it", () => {
+    expect(CLAIM_FAILURE_CODES).toContain("provider_address_changed");
+    const { text, known } = describeErrorCode("provider_address_changed");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/Owner or Admin/);
+    expect(text).toMatch(/confirm/);
+    expect(text).toMatch(/review settings of the project/);
+    expect(text).toMatch(/key was not sent/);
+    expect(text).toMatch(/no AI model was used/);
+    expect(text).not.toMatch(/https?:/);
   });
 
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.

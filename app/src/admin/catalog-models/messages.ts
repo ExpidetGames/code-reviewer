@@ -131,6 +131,10 @@ export const MANAGED_REASON_COPY: Record<ManagedUnavailableReason, string> = {
   model_retired: "The override file retired this model.",
   model_not_enabled: "The model is not enabled.",
   price_unconfirmed: "The price is not confirmed.",
+  cache_read_unpriced:
+    "The confirmed price states no cache read price. State it in a correction (the input price is its upper bound).",
+  cache_write_unpriced:
+    "The confirmed price states a cache read price and no cache write price. State it in a correction.",
   check_failed: "The check failed. Try again.",
 };
 

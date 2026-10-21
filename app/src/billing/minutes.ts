@@ -10,11 +10,16 @@ import "server-only";
  * How an end was learned. `app_stop_confirmed`: the answer of the Dispatcher to the App's stop call named the VM (the
  * App's own clock). `timeout_backstop`: nobody confirmed a teardown, so the end is the bounded guess of `backstopEnd`.
  * `job_wall_clock`: no VM exists (a self-hosted runner, Compose); the measure is the job's time on a runner.
+ * `app_stop_unreported` (#498): the answer to the stop call named a VM nobody had reported (the report was lost, or the
+ * Dispatcher is of an earlier release); the row is made then, from the claim to the stop. `claim_wall_clock` (#498): a hosted
+ * job that ran has no VM row at all; its claim to its end is the measure, flagged so an audit sees that a VM was not measured.
  */
 export const VM_END_SOURCES = [
   "app_stop_confirmed",
   "timeout_backstop",
   "job_wall_clock",
+  "app_stop_unreported",
+  "claim_wall_clock",
 ] as const;
 export type VmEndSource = (typeof VM_END_SOURCES)[number];
 
