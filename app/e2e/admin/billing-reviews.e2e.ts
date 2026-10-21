@@ -33,9 +33,12 @@ test.describe("the payment reviews in the admin portal", () => {
     await page.goto("/admin");
     await expect(page.getByText("2 payments need a review.")).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Billing, 2 open payment reviews" }),
+      page.getByRole("link", { name: /^Billing\s*, 2 open payment reviews$/ }),
     ).toBeVisible();
-    await page.getByRole("link", { name: "Payment reviews" }).first().click();
+    await page
+      .getByRole("link", { name: /^Payment reviews/ })
+      .first()
+      .click();
     await expect(page).toHaveURL(/\/admin\/billing\/reviews$/);
     await expect(
       page.getByRole("heading", { name: "Payment reviews", level: 1 }),
@@ -110,7 +113,7 @@ test.describe("the payment reviews in the admin portal", () => {
 
     // The count is gone from the menu, and the credit is in the journal of the workspace.
     await expect(
-      page.getByRole("link", { name: /^Billing, \d+ open/ }),
+      page.getByRole("link", { name: /^Billing\s*, \d+ open/ }),
     ).toHaveCount(0);
     await page.goto("/admin/billing");
     await page.getByLabel("Search workspaces", { exact: true }).fill("default");

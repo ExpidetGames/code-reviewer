@@ -24,6 +24,8 @@ export function reviewsHref(state: "open" | "resolved", page = 1): string {
   return query === "" ? BASE : `${BASE}?${query}`;
 }
 
+// No prefetch: Next.js answers a prefetch of a portal page from its prerender, which knows nothing of the address's query, so a
+// prefetched `?state=resolved` would show the first page of the open rows (found by the journey, #603-T18).
 const LINK_CLASS =
   "rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
@@ -52,6 +54,7 @@ export function BillingReviewsPage({
 
       <nav aria-label="State of the rows" className="flex items-center gap-4">
         <Link
+          prefetch={false}
           href={reviewsHref("open")}
           aria-current={list.state === "open" ? "page" : undefined}
           className={`${LINK_CLASS} ${list.state === "open" ? "underline" : ""}`}
@@ -59,6 +62,7 @@ export function BillingReviewsPage({
           Open ({list.openTotal})
         </Link>
         <Link
+          prefetch={false}
           href={reviewsHref("resolved")}
           aria-current={list.state === "resolved" ? "page" : undefined}
           className={`${LINK_CLASS} ${list.state === "resolved" ? "underline" : ""}`}
@@ -99,6 +103,7 @@ export function BillingReviewsPage({
         >
           {list.page > 1 ? (
             <Link
+              prefetch={false}
               href={reviewsHref(list.state, list.page - 1)}
               className={LINK_CLASS}
             >
@@ -112,6 +117,7 @@ export function BillingReviewsPage({
           </span>
           {list.page < pages ? (
             <Link
+              prefetch={false}
               href={reviewsHref(list.state, list.page + 1)}
               className={LINK_CLASS}
             >
