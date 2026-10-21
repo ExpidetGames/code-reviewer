@@ -718,6 +718,25 @@ describe("the refusal for the monthly limit and the hidden brake (#499)", () => 
     return h;
   }
 
+  /** A review of this month that ended and was charged `micro`: the limit is reached when the charges equal it. */
+  async function chargeMonth(
+    h: Awaited<ReturnType<typeof start>>,
+    micro: number,
+  ) {
+    const journal = createBillingJournalRepository(
+      h.db,
+      h.workspaceId,
+      h.clock.now,
+    );
+    await journal.reserve(micro, "charged-job");
+    await journal.settle("charged-job", {
+      aiMicroUsd: micro,
+      infraMicroUsd: 0,
+      minutes: 1,
+      reviewKind: "diff",
+    });
+  }
+
   // #499-T01
   it("posts one comment per pull request head for the monthly limit, as the app, and none for the same head again", async () => {
     const h = await billed();
@@ -725,6 +744,7 @@ describe("the refusal for the monthly limit and the hidden brake (#499)", () => 
       h.db,
       h.workspaceId,
     ).setMonthlyLimit(1_000, null);
+    await chargeMonth(h, 1_000);
 
     const job = await refuse(h);
     await refuse(h, { triggerKind: "manual" });
@@ -753,6 +773,7 @@ describe("the refusal for the monthly limit and the hidden brake (#499)", () => 
       h.db,
       h.workspaceId,
     ).setMonthlyLimit(1_000, null);
+    await chargeMonth(h, 1_000);
     await refuse(h);
 
     await refuse(h, { headSha: sha("b") });
