@@ -900,6 +900,11 @@ export interface BillingTopupIntentsTable {
   /** What refunds took back of it, and what disputes did; together never above the credit (a check). */
   refunded_micro_usd: Generated<number>;
   disputed_micro_usd: Generated<number>;
+  /**
+   * What the buyer was charged, gross, in the provider's unit (cents of the currency paid in), pinned when the payment is
+   * credited; null before that, for an intent paid before the column existed and for a provider that does not say (#502).
+   */
+  provider_amount: number | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
   updated_at: string;

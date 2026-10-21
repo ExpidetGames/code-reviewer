@@ -80,6 +80,8 @@ function orderOf(event: BillingEvent): {
   // A payment has no states to order; its reference is what a review of the event names.
   if (event.type === "payment.succeeded")
     return { subject: `payment:${event.payment}`, occurredAt: null };
+  if (event.type === "payment.refused" && event.payment !== null)
+    return { subject: `payment:${event.payment}`, occurredAt: null };
   if (event.type === "refund.updated")
     return { subject: `refund:${event.refund}`, occurredAt: event.occurredAt };
   if (event.type === "dispute.updated")
@@ -183,6 +185,9 @@ async function paymentSucceeded(
     context.now,
   ).markPaid(intent.id, {
     creditedMicroUsd: event.creditable,
+    ...(event.providerAmount === undefined
+      ? {}
+      : { providerAmount: event.providerAmount }),
     paymentRef: event.payment,
     ...(event.checkout === null ? {} : { checkoutRef: event.checkout }),
   });
@@ -255,11 +260,24 @@ async function paymentReversal(
   );
 
   if (takesMoney) {
+    // The total of the payment: the one the event carries, or else the one pinned when the payment was credited (a Stripe
+    // refund names only its own amount). Both, when they differ, are a provider that contradicts itself.
+    const pinned = intent.providerAmount;
+    if (
+      event.paymentAmount !== undefined &&
+      pinned !== null &&
+      event.paymentAmount !== pinned
+    )
+      return { outcome: "amount_conflict", workspaceId };
+    const paymentAmount = event.paymentAmount ?? pinned;
+    if (paymentAmount === null || paymentAmount === undefined)
+      return { outcome: "amount_rejected", workspaceId };
+
     // The net share of what the payment credited, never more than the payment gave: the provider's amounts are gross.
     const net = netShareMicroUsd({
       credited: intent.creditedMicroUsd,
       amount: event.amount,
-      paymentAmount: event.paymentAmount,
+      paymentAmount,
     });
     if (net === undefined) return { outcome: "amount_rejected", workspaceId };
 
@@ -338,6 +356,9 @@ function handle(context: Context, event: BillingEvent): Promise<Handled> {
   switch (event.type) {
     case "ignored":
       return Promise.resolve({ outcome: "ignored_type", workspaceId: null });
+    case "payment.refused":
+      // The adapter read a payment that contradicts what we asked for: nothing is credited, an operator looks.
+      return Promise.resolve({ outcome: "amount_rejected", workspaceId: null });
     case "payment.succeeded":
       return paymentSucceeded(context, event);
     case "payment.failed":
@@ -353,6 +374,7 @@ function handle(context: Context, event: BillingEvent): Promise<Handled> {
 function movesMoney(event: BillingEvent): boolean {
   return (
     event.type === "payment.succeeded" ||
+    event.type === "payment.refused" ||
     event.type === "refund.updated" ||
     event.type === "dispute.updated"
   );

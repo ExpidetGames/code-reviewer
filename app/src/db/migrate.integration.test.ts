@@ -111,6 +111,7 @@ describe("the migrations of both epics", () => {
       "20261021090100_widen_job_vm_runs_end_source",
       "20261021120000_add_billing_balances_reserved_index",
       "20261021130000_create_billing_profiles",
+      "20261021170000_add_billing_topup_intents_provider_amount",
     ]);
   });
 

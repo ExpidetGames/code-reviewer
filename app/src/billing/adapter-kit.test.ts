@@ -14,7 +14,7 @@ import {
   signFakeBody,
   type FakeWireEvent,
 } from "../test-support/fake-billing-adapter.ts";
-import { toUsd } from "./adapter.ts";
+import { toProviderAmount, toUsd } from "./adapter.ts";
 import { manualAdapter } from "./manual-adapter.ts";
 import { createStripeClient } from "./stripe-client.ts";
 import { createStripeAdapter } from "./stripe-adapter.ts";
@@ -104,8 +104,8 @@ const fake: AdapterKitSubject = {
           occurredAt: T,
           payment: "pi_1",
           refund: "re_1",
-          amount: 5 * USD,
-          paymentAmount: 29_750_000,
+          amount: toProviderAmount(5 * USD),
+          paymentAmount: toProviderAmount(29_750_000),
           initiatedBy: "provider",
           status: "approved",
         },
@@ -128,8 +128,8 @@ const fake: AdapterKitSubject = {
           occurredAt: T,
           payment: "pi_1",
           dispute: "dp_1",
-          amount: 29_750_000,
-          paymentAmount: 29_750_000,
+          amount: toProviderAmount(29_750_000),
+          paymentAmount: toProviderAmount(29_750_000),
           status: "lost",
         },
       },
