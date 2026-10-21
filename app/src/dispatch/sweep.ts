@@ -23,7 +23,11 @@
 //  9. `balance_mails`: mails the balance crossings that are due (#506): a settlement of this sweep (an expired lease, a stranded
 //     hold) or of a superseded job has no response to send after, so the mail would wait for the next claim or webhook. While
 //     billing is off it reads the switch and does nothing. It never throws; a step that fails is named like any other.
-// 10. `models_dev`: the daily fetch of the models.dev catalog (#548), when the last one is more than a day old. Last, so
+// 10. `journal_check`: while billing is on, the daily check of the billing journal (#626): `verify()` of every workspace's journal, a
+//     bounded step of the pass per run (src/billing/journal-check.ts). The result is kept in an instance setting, which the admin
+//     billing page shows, and an inconsistency is logged by a stable code. Once a day it does real work; in the other runs it reads one
+//     instance setting, and while billing is off nothing but the switch.
+// 11. `models_dev`: the daily fetch of the models.dev catalog (#548), when the last one is more than a day old. Last, so
 //     that a slow answer from the internet never delays the steps that move jobs. A fetch that fails records its own
 //     failure (`models_dev_fetch_state`) and is not a failed step; a step fails only when the fetch itself threw.
 //
@@ -63,6 +67,7 @@ export const SWEEP_STEPS = [
   "cleanup",
   "billing_holds",
   "balance_mails",
+  "journal_check",
   "models_dev",
 ] as const;
 export type SweepStep = (typeof SWEEP_STEPS)[number];
@@ -88,6 +93,8 @@ export type SweepReport = {
   holdsReleased: number;
   /** How many balance mails were sent (#506); 0 while billing is off. */
   balanceMailsSent: number;
+  /** How many workspaces had their journal checked in this run (#626); 0 while billing is off and between two daily passes. */
+  journalChecked: number;
   /** What the daily models.dev fetch did (#548); null when this sweep has no fetch. */
   modelsDev: RefreshOutcome["status"] | null;
   /** The steps that failed in this run. */
@@ -119,6 +126,8 @@ export type SweepDependencies = {
   balanceMails?: {
     deliverDue(): Promise<{ delivered: number; failed: number }>;
   };
+  /** #626: the daily check of the billing journal (reads only the switch while billing is off). Left out, none is made. */
+  journalCheck?: { run(): Promise<{ checked: number }> };
   /** #548: the daily fetch of the models.dev catalog. Left out, none is made. */
   modelsDev?: {
     refreshIfDue(options?: { deadlineMs?: number }): Promise<RefreshOutcome>;
@@ -144,6 +153,7 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       cleanedUp: false,
       holdsReleased: 0,
       balanceMailsSent: 0,
+      journalChecked: 0,
       modelsDev: null,
       failedSteps: [],
     };
@@ -213,6 +223,11 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
     if (balanceMails !== undefined)
       await step("balance_mails", async () => {
         report.balanceMailsSent = (await balanceMails.deliverDue()).delivered;
+      });
+    const journalCheck = deps.journalCheck;
+    if (journalCheck !== undefined)
+      await step("journal_check", async () => {
+        report.journalChecked = (await journalCheck.run()).checked;
       });
     const modelsDev = deps.modelsDev;
     if (modelsDev !== undefined)

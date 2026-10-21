@@ -51,6 +51,12 @@ const VIEW: BillingView = {
     webhookUrlPublic: true,
   },
   legal: { termsUrl: null, privacyUrl: null },
+  journalCheck: {
+    state: "never",
+    checkedAt: null,
+    workspaces: 0,
+    inconsistentWorkspaces: 0,
+  },
   rates: {
     factorA: null,
     diffMinuteRateMicroUsd: null,
@@ -756,6 +762,99 @@ describe("the links to the terms and the privacy statement", () => {
     render(<BillingPage billing={STRIPE_VIEW} notice={NOTICE} api={api()} />);
 
     expect(screen.getByText("The link to your terms")).toBeTruthy();
+  });
+});
+
+describe("the check of the journal", () => {
+  const checked = (
+    journalCheck: BillingView["journalCheck"],
+    on = true,
+  ): BillingView => ({ ...RATED, enabled: on, on, journalCheck });
+
+  // #626-T17
+  it("says that no check has run yet, and that it runs daily while billing is on", () => {
+    render(<BillingPage billing={RATED} notice={NOTICE} api={api()} />);
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(within(status).getByText(/Journal check: not run yet/)).toBeTruthy();
+    expect(
+      within(status).getByText(/once a day while billing is on/),
+    ).toBeTruthy();
+  });
+
+  // #626-T17
+  it("shows an ok result with the date", () => {
+    render(
+      <BillingPage
+        billing={checked({
+          state: "ok",
+          checkedAt: "2026-10-21T03:00:12.000Z",
+          workspaces: 12,
+          inconsistentWorkspaces: 0,
+        })}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(
+      within(status).getByText("Journal check: ok (2026-10-21 03:00 UTC)"),
+    ).toBeTruthy();
+    expect(within(status).getByText(/12 workspaces/)).toBeTruthy();
+    expect(within(status).queryByRole("alert")).toBeNull();
+  });
+
+  // #626-T17
+  it("shows an inconsistent result with the date, how many workspaces and where to look", () => {
+    render(
+      <BillingPage
+        billing={checked({
+          state: "inconsistent",
+          checkedAt: "2026-10-21T03:00:12.000Z",
+          workspaces: 12,
+          inconsistentWorkspaces: 2,
+        })}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(
+      within(status).getByText(
+        "Journal check: inconsistent (2026-10-21 03:00 UTC)",
+      ),
+    ).toBeTruthy();
+    expect(within(status).getByText(/2 of 12 workspaces/)).toBeTruthy();
+    expect(
+      within(status).getByText(/BILLING_JOURNAL_INCONSISTENT/),
+    ).toBeTruthy();
+  });
+
+  // #626-T17
+  it("says the check is paused while billing is off, and still shows the last result", () => {
+    render(
+      <BillingPage
+        billing={checked(
+          {
+            state: "ok",
+            checkedAt: "2026-10-21T03:00:12.000Z",
+            workspaces: 12,
+            inconsistentWorkspaces: 0,
+          },
+          false,
+        )}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Journal check" });
+    expect(within(status).getByText(/Journal check: ok/)).toBeTruthy();
+    expect(
+      within(status).getByText(/paused while billing is off/),
+    ).toBeTruthy();
   });
 });
 

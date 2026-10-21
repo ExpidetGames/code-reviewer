@@ -28,6 +28,7 @@ import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { isBillingOn } from "./enabled.ts";
+import { readJournalCheck } from "./journal-check.ts";
 import { releaseStrandedHolds } from "./stranded-holds.ts";
 import { createOwnKeyCountRepository } from "../db/repositories/own-key-count-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
@@ -332,6 +333,7 @@ export function createBillingAdminService({
           webhookUrl,
           webhookUrlPublic: isPublicHttpsUrl(webhookUrl),
         },
+        journalCheck: await readJournalCheck(db),
         legal: {
           termsUrl: settings.legal?.termsUrl ?? null,
           privacyUrl: settings.legal?.privacyUrl ?? null,
@@ -497,7 +499,8 @@ export function createBillingAdminService({
 
     async saveLegal(adminId, change) {
       if (!isRecord(change)) return bodyInvalid("legal");
-      if (Object.keys(change).some((key) => !LEGAL_FIELDS.includes(key)))
+      const known: readonly string[] = LEGAL_FIELDS;
+      if (Object.keys(change).some((key) => !known.includes(key)))
         return bodyInvalid("legal");
       const issues: BillingIssue[] = [];
       // A link that is set, or null for one that is removed; a field that is left out is not in here.
@@ -520,7 +523,7 @@ export function createBillingAdminService({
       }
       if (issues.length > 0)
         return { ok: false, error: "invalid_input", issues };
-      return store.change<BillingResult>(adminId, (current) => {
+      return store.change<BillingResult>(adminId, async (current) => {
         const legal: LegalUrls = { ...current.legal };
         for (const field of LEGAL_FIELDS) {
           const value = given[field];
@@ -538,12 +541,13 @@ export function createBillingAdminService({
           legal.termsUrl === undefined
         )
           return { refuse: { ok: false, error: "billing_disable_first" } };
-        const { legal: _old, ...others } = current;
-        return Promise.resolve({
+        const others: BillingSettings = { ...current };
+        delete others.legal;
+        return {
           write:
             Object.keys(legal).length === 0 ? others : { ...others, legal },
           result: { ok: true },
-        });
+        };
       });
     },
 

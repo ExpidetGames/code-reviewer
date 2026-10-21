@@ -7,6 +7,7 @@
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import { browserBillingApi, type BillingApi } from "./billing-api.ts";
 import { BillingCreditCard } from "./billing-credit-card.tsx";
+import { BillingJournalCheckCard } from "./billing-journal-check-card.tsx";
 import { BillingLegalCard } from "./billing-legal-card.tsx";
 import { BillingPaymentCard } from "./billing-payment-card.tsx";
 import { BillingRatesCard } from "./billing-rates-card.tsx";
@@ -36,6 +37,7 @@ export function BillingPage({
         this page.
       </HelpDisclosure>
       <BillingSwitchCard billing={billing} notice={notice} api={api} />
+      <BillingJournalCheckCard billing={billing} />
       <BillingPaymentCard billing={billing} api={api} />
       <BillingRatesCard billing={billing} api={api} />
       <BillingLegalCard billing={billing} api={api} />

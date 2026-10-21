@@ -4,11 +4,15 @@
 // Dispatcher: lease expiry without any polling runner, the resends, the give-up with `dispatch_unavailable`,
 // the pool cap, the revival of a stopped dispatch and the hourly cleanup. On SQLite and, when
 // TEST_DATABASE_URL is set, on Postgres (CI).
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it as vitestIt, vi } from "vitest";
 import type { Database } from "../db/schema.ts";
 import { createAppMetaRepository } from "../db/repositories/app-meta-repository.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
+import {
+  readJournalCheck,
+  runJournalCheckWhileBillingOn,
+} from "../billing/journal-check.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput, EnqueueResult } from "../jobs/job-types.ts";
 import { createRunnerQueue } from "../jobs/runner-queue.ts";
@@ -17,6 +21,10 @@ import {
   createFakeDispatchReceiver,
   ignored,
 } from "../test-support/fake-dispatch-receiver.ts";
+import {
+  fundWorkspace,
+  setBillingSwitch,
+} from "../test-support/billing-switch.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
 import {
   createPostgresTestDatabase,
@@ -116,6 +124,17 @@ async function setupOn(
     ...(options.poll === true ? {} : { dispatch: service }),
     meta: createAppMetaRepository(fixture.db, fixture.clock.now),
     cleanup,
+    // #626: the daily check of the billing journal, the real one.
+    journalCheck: {
+      run: () =>
+        runJournalCheckWhileBillingOn(fixture.db, {
+          now: fixture.clock.now,
+          log: {
+            info: (line) => sweepLogs.push(line),
+            error: (line) => sweepLogs.push(line),
+          },
+        }),
+    },
     settings: {
       giveUpMs: options.poll === true ? null : HOUR,
       maxRunning: null,
@@ -590,6 +609,52 @@ describe.each(databases)("the dispatch sweep on %s", (name, open) => {
       // The cause is never repeated.
       expect(t.sweepLogs.join("\n")).not.toContain("the database said no");
       expect((await t.job(job.id)).status).toBe("queued");
+    });
+  });
+
+  describe("the check of the billing journal (#626)", () => {
+    // #626-T15
+    it("does nothing while billing is off, and nothing is recorded", async () => {
+      const t = await setup();
+      await fundWorkspace(t.fixture.db, t.fixture.workspaceId, 5_000_000);
+
+      const report = await t.sweep.run();
+
+      expect(report.journalChecked).toBe(0);
+      expect(report.failedSteps).toEqual([]);
+      expect(await readJournalCheck(t.fixture.db)).toMatchObject({
+        state: "never",
+      });
+    });
+
+    // #626-T15
+    it("checks the journal while billing is on, shows an inconsistency on the admin overview's data, and checks again only a day later", async () => {
+      const t = await setup();
+      await setBillingSwitch(t.fixture.db, true);
+      await fundWorkspace(t.fixture.db, t.fixture.workspaceId, 5_000_000);
+      await sql`update billing_balances set balance_micro_usd = balance_micro_usd + 3 where workspace_id = ${t.fixture.workspaceId}`.execute(
+        t.fixture.db,
+      );
+
+      const first = await t.sweep.run();
+      t.advance(MINUTE);
+      const second = await t.sweep.run();
+      t.advance(24 * HOUR);
+      const third = await t.sweep.run();
+
+      expect(first.journalChecked).toBe(1);
+      expect(second.journalChecked).toBe(0);
+      expect(third.journalChecked).toBe(1);
+      expect(await readJournalCheck(t.fixture.db)).toMatchObject({
+        state: "inconsistent",
+        workspaces: 1,
+        inconsistentWorkspaces: 1,
+      });
+      expect(
+        t.sweepLogs.filter((line) =>
+          line.includes("BILLING_JOURNAL_INCONSISTENT"),
+        ),
+      ).toHaveLength(2);
     });
   });
 });

@@ -31,6 +31,16 @@ export type BillingMissingItemView =
   | "connection_check_missing"
   | "terms_url_missing";
 
+/** The result of the scheduled check of the journal (#626): the last finished pass. `never`: none has finished yet. */
+export type JournalCheckView = {
+  state: "never" | "ok" | "inconsistent";
+  /** When the pass finished (ISO 8601 UTC), or null. */
+  checkedAt: string | null;
+  /** How many workspaces it checked, and how many of them were not consistent. */
+  workspaces: number;
+  inconsistentWorkspaces: number;
+};
+
 export type BillingView = {
   /** The switch as it is stored. */
   enabled: boolean;
@@ -58,6 +68,8 @@ export type BillingView = {
     termsUrl: string | null;
     privacyUrl: string | null;
   };
+  /** What the daily check of the journal found the last time it ran to the end (#626). */
+  journalCheck: JournalCheckView;
   rates: {
     /** Parts per 10,000 (12,000 is 1.2), or null while not set. */
     factorA: number | null;

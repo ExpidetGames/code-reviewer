@@ -4,7 +4,7 @@
 // fake Stripe as the payment provider (#504): what an admin can save and read back, how the switch is judged, the connection
 // check and the webhook endpoint, the rates, the manual credit, that a person who is not an admin reaches nothing, and that no
 // credential is in an answer, a page or a log line.
-import type { Kysely, KyselyPlugin } from "kysely";
+import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startStripeFake } from "../../../fakes/stripe/server.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -14,6 +14,7 @@ import { createAdminHarness } from "../test-support/admin-harness.ts";
 import { describeQuery } from "../test-support/query-hook.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { isBillingOn } from "./enabled.ts";
+import { runJournalCheckWhileBillingOn } from "./journal-check.ts";
 import { STRIPE_MANAGED_PAYMENTS_API_VERSION } from "./stripe-client.ts";
 import { STRIPE_WEBHOOK_EVENTS } from "./stripe-webhook-events.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
@@ -228,7 +229,60 @@ describe("billing that was never configured", () => {
       "minute_rate_dynamic_missing",
       "diff_ai_reserve_missing",
     ]);
+    // #626-T17
+    expect(v.journalCheck).toEqual({
+      state: "never",
+      checkedAt: null,
+      workspaces: 0,
+      inconsistentWorkspaces: 0,
+    });
     expect(s.stripe.requests()).toEqual([]);
+  });
+});
+
+describe("the check of the journal on the page's data", () => {
+  // #626-T17
+  it("shows the result of the scheduled check: ok, then inconsistent when the cache and the journal are apart", async () => {
+    const s = await start();
+    await s.saveRates();
+    await s.put({ enabled: true });
+    const id = await s.workspace("Acme");
+    await createBillingJournalRepository(s.portal.db, id).append({
+      type: "top_up",
+      amountMicroUsd: 5_000_000,
+      provider: "manual",
+      providerRef: "ref-626",
+      refKey: "ref-626",
+    });
+    const time = new Date("2026-10-21T03:00:00.000Z");
+
+    await runJournalCheckWhileBillingOn(s.portal.db, {
+      now: () => time,
+      log: { info: () => undefined, error: () => undefined },
+    });
+    const ok = (await s.view()).journalCheck;
+    await sql`update billing_balances set balance_micro_usd = 1 where workspace_id = ${id}`.execute(
+      s.portal.db,
+    );
+    const later = new Date(time.getTime() + 25 * 60 * 60 * 1000);
+    await runJournalCheckWhileBillingOn(s.portal.db, {
+      now: () => later,
+      log: { info: () => undefined, error: () => undefined },
+    });
+    const broken = (await s.view()).journalCheck;
+
+    expect(ok).toEqual({
+      state: "ok",
+      checkedAt: "2026-10-21T03:00:00.000Z",
+      workspaces: 1,
+      inconsistentWorkspaces: 0,
+    });
+    expect(broken).toEqual({
+      state: "inconsistent",
+      checkedAt: "2026-10-22T04:00:00.000Z",
+      workspaces: 1,
+      inconsistentWorkspaces: 1,
+    });
   });
 });
 
