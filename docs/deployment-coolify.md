@@ -341,6 +341,14 @@ What to know:
   webhooks and the runner API keep working, so reviews do not stop. The steps are in
   [updating an installation from before accounts](#updating-an-installation-from-before-accounts).
 
+### Billing (optional)
+
+Billing is off by default and needs nothing from this guide: no variable, no new port, no change to the Compose files. If you
+never switch it on, nothing changes. If you want a prepaid balance for your workspaces, the switch is in the admin portal, menu
+**Billing**. Read [`billing-self-hosting.md`](billing-self-hosting.md) (the `manual` adapter, what changes when it is on) or, if you
+take payments with Stripe, [`billing.md`](billing.md). The Stripe webhook needs the address in `BETTER_AUTH_URL` to be reachable
+from the internet over https, and a rate limit on `POST /api/billing/webhook` in the proxy in front of the server is recommended.
+
 ## 8. Storage and backups
 
 **Where the data is.** `compose.coolify.yml` declares two named volumes. Coolify shows them under

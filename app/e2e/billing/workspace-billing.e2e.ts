@@ -102,6 +102,13 @@ test.describe("the billing page of a workspace", () => {
     await expect(
       page.getByText("Confirm that you are buying for a business to continue."),
     ).toBeVisible();
+    // The confirmation links to the operator's terms and privacy statement (#626; the helper sets them with the admin routes).
+    await expect(
+      page.getByRole("link", { name: "Terms", exact: true }),
+    ).toHaveAttribute("href", "https://example.com/terms");
+    await expect(
+      page.getByRole("link", { name: "Privacy", exact: true }),
+    ).toHaveAttribute("href", "https://example.com/privacy");
     await page.getByRole("checkbox", { name: /buying for a business/ }).click();
     const session = await payAt(page);
 

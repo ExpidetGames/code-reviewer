@@ -54,6 +54,7 @@ export const BUSINESS_CONFIRMATION_LABEL =
 export const BUSINESS_CONFIRMED_TEXT =
   "You confirmed that this workspace buys for a business.";
 export const TERMS_LINK_TEXT = "Terms";
+export const PRIVACY_LINK_TEXT = "Privacy";
 export const PAY_BUTTON = "Continue to payment";
 export const PAY_BUTTON_LOADING = "Preparing the payment";
 export const PAYMENT_HINT =
@@ -190,3 +191,21 @@ export function describeProfileIssue(issue: RequestIssue): string {
       : undefined) ?? GENERIC_FAILURE
   );
 }
+
+/** The banner on the workspace pages for an Owner and an Admin while the balance is low, zero or below zero (#506). */
+export const BANNER_COPY = {
+  low: {
+    title: "Your balance is low",
+    body: "Reviews keep starting while there is credit. Add credit so they do not stop.",
+  },
+  empty: {
+    title: "No credit left",
+    body: "New reviews are not started until credit is added.",
+  },
+  negative: {
+    title: "The balance is below zero",
+    body: "New reviews are not started until the balance is above zero again.",
+  },
+} as const;
+export const BANNER_BALANCE_LABEL = "Balance";
+export const BANNER_LINK_TEXT = "Go to billing";

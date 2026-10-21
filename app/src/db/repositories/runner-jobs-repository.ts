@@ -55,6 +55,7 @@ import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import {
   RATES_INCOMPLETE_REFUSAL,
   admitAtClaim,
+  noteRefusalForBalance,
   readClaimBilling,
   type AdmitOutcome,
   type ClaimBilling,
@@ -792,6 +793,8 @@ export function createRunnerJobsRepository(
             const { admission, hadRecord, ignoredCostLimit, keyMode } =
               await admitClaimedJob(trx, row, () => current, {
                 runQuotas: billing.state !== "on",
+                // #496: the key mode follows the workspace's choice while billing is on.
+                billingOn: billing.state === "on",
               });
             if (ignoredCostLimit) ignoredCostLimits.add(row.workspace_id);
             if (!admission.allow) {
@@ -943,6 +946,15 @@ export function createRunnerJobsRepository(
                     });
             if (!held.ok) {
               await refuseClaimedJob(trx, row.id, held.code, current);
+              // #506: a refusal for the balance tells the workspace that it is empty, once (the mail goes out after the commit).
+              if (
+                held.code === "insufficient_balance" ||
+                held.code === "balance_negative"
+              )
+                await noteRefusalForBalance(trx, {
+                  workspaceId: row.workspace_id,
+                  now: () => current,
+                });
               // A job claimed again after a lost lease had a record and a hold that counted: they end with the job.
               if (hadRecord)
                 unknownCost.push(
@@ -963,15 +975,16 @@ export function createRunnerJobsRepository(
               });
               continue;
             }
-            // The record is reserved in the transaction of the claim, so a job handed out always counts. The
-            // key mode is the workspace's own until the claim route has resolved the access (`setKeyMode`); a
-            // job claimed again keeps the record it has.
+            // The record is reserved in the transaction of the claim, so a job handed out always counts. It carries the key
+            // mode this claim decided (#496): the Worker's fetch, a retry and the settlement read it from here and never
+            // decide again. A job claimed again after a lost lease keeps its one record, and takes the mode of the new claim.
             const records = createUsageRecordsRepository(
               trx,
               row.workspace_id,
               () => current,
             );
-            await records.reserve(row.id, "own");
+            await records.reserve(row.id, keyMode);
+            if (hadRecord) await records.setKeyMode(row.id, keyMode);
             // #605: the money of this job is settled when it ends, and only a job claimed with billing on is.
             if (billing.state === "on") await records.openBilling(row.id);
             return {

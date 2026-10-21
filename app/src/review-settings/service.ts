@@ -46,7 +46,7 @@ import { isNativeProvider, nativeDynamicChoice } from "./native-choice.ts";
 import type { NativeSelectionSource } from "../native-providers/catalog.ts";
 import {
   pinAfterSave,
-  pinMoveNeedsRight,
+  pinMoveReason,
   providerAddressView,
   type ProviderAddressView,
 } from "./provider-pin.ts";
@@ -929,21 +929,25 @@ export function createReviewSettingsService(deps: {
     const next = parseDynamic(after);
     const sameStored = stored.dynamicProvider === read.storedProvider;
     const sameNext = next.dynamicProvider === read.nextProvider;
-    if (
-      pinMoveNeedsRight({
-        storedPin: stored.dynamicProviderAddress,
-        newPin: next.dynamicProviderAddress,
-        trustedForStored: sameStored ? read.trustedForStored : undefined,
-        otherPins: sameNext
-          ? read.otherPins
-          : next.dynamicProviderAddress === undefined
-            ? []
-            : [""],
-      })
-    )
+    const reason = pinMoveReason({
+      storedPin: stored.dynamicProviderAddress,
+      newPin: next.dynamicProviderAddress,
+      trustedForStored: sameStored ? read.trustedForStored : undefined,
+      otherPins: sameNext
+        ? read.otherPins
+        : next.dynamicProviderAddress === undefined
+          ? []
+          : [""],
+    });
+    if (reason === "pin_not_trusted")
       throw new ReviewSettingsError(
         "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
         "Only an Owner or Admin may confirm the address of a provider.",
+      );
+    if (reason === "other_project_pin")
+      throw new ReviewSettingsError(
+        "PROVIDER_ADDRESS_OTHER_PROJECT_PIN",
+        "Another project of the workspace holds a different address for this provider; only an Owner or Admin may set one.",
       );
   }
 

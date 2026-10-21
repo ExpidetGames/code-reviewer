@@ -14,6 +14,7 @@ const STRIPE = {
   checkedAt: "2026-10-20T10:00:00.000Z",
   checkedEnvironment: "test",
 } as const;
+const LEGAL = { termsUrl: "https://example.com/terms" } as const;
 const BOTH = { apiKey: true, webhookSecret: true };
 
 describe("what is missing before billing can be on", () => {
@@ -71,11 +72,12 @@ describe("what is missing before billing can be on", () => {
       "stripe_api_key_missing",
       "stripe_webhook_secret_missing",
       "connection_check_missing",
+      "terms_url_missing",
     ]);
   });
 
   // #504-T03
-  it("is nothing for Stripe with the rates, both credentials and a passing check", () => {
+  it("is nothing for Stripe with the rates, both credentials, a passing check and the terms link", () => {
     expect(
       missingItemsOf({
         settings: {
@@ -83,6 +85,7 @@ describe("what is missing before billing can be on", () => {
           adapter: "stripe",
           ...RATES,
           stripe: STRIPE,
+          legal: LEGAL,
         },
         secrets: BOTH,
       }),
@@ -109,10 +112,38 @@ describe("what is missing before billing can be on", () => {
           adapter: "stripe",
           ...RATES,
           stripe: STRIPE,
+          legal: LEGAL,
         },
         secrets,
       }),
     ).toEqual([item]);
+  });
+
+  // #626-T03
+  it("names the terms link alone when it is the only thing missing for Stripe", () => {
+    expect(
+      missingItemsOf({
+        settings: {
+          enabled: false,
+          adapter: "stripe",
+          ...RATES,
+          stripe: STRIPE,
+          // The privacy link is optional.
+          legal: { privacyUrl: "https://example.com/privacy" },
+        },
+        secrets: BOTH,
+      }),
+    ).toEqual(["terms_url_missing"]);
+  });
+
+  // #626-T03
+  it("does not ask the manual adapter for the terms link", () => {
+    expect(
+      missingItemsOf({
+        settings: { enabled: false, adapter: "manual", ...RATES },
+        secrets: BOTH,
+      }),
+    ).toEqual([]);
   });
 
   // #504-T03
@@ -125,6 +156,7 @@ describe("what is missing before billing can be on", () => {
       "stripe_api_key_missing",
       "stripe_webhook_secret_missing",
       "connection_check_missing",
+      "terms_url_missing",
     ]);
   });
 });

@@ -4,6 +4,7 @@
 // (cleanup.ts). Called from `src/instrumentation.ts`. Other environments (the dev server, tests) run no
 // timer. A failing run is logged by its code and tried again at the next hour; it never stops the app.
 import "server-only";
+import { runJournalCheckWhileBillingOn } from "../billing/journal-check.ts";
 import { releaseStrandedHoldsWhileBillingOn } from "../billing/stranded-holds.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
@@ -17,6 +18,10 @@ type StartOptions = {
   run?: () => Promise<CleanupResult>;
   /** #591: releases the holds of jobs that ended while billing was off, while billing is on. Not given: see `startCleanup`. */
   releaseHolds?: () => Promise<{ released: number }>;
+  /** #506: mails the balance crossings that are due, which a settlement without a hook of its own left. Not given: see `startCleanup`. */
+  deliverBalanceMails?: () => Promise<unknown>;
+  /** #626: the daily check of the billing journal, while billing is on (it does a bounded step per call). Not given: see `startCleanup`. */
+  checkJournal?: () => Promise<unknown>;
   /** Calls `callback` every `intervalMs`; returns a function that cancels it. */
   setTimer?: (callback: () => void, intervalMs: number) => () => void;
   log?: Pick<Console, "info" | "error">;
@@ -33,14 +38,29 @@ function releaseHoldsOfEndedJobs(): Promise<{ released: number }> {
   return releaseStrandedHoldsWhileBillingOn(getDatabase(), () => new Date());
 }
 
+function checkJournalOfServer(): Promise<unknown> {
+  return runJournalCheckWhileBillingOn(getDatabase());
+}
+
+async function deliverBalanceMailsOfServer(): Promise<unknown> {
+  // Loaded when it runs: the delivery brings the whole billing wiring, which the timer does not need until then.
+  return (await import("../billing/shared.ts")).deliverDueBalanceMailsNow();
+}
+
 /**
  * Runs the cleanup now and again at every interval, and then the release of the holds of ended jobs (#591: with billing on,
  * a job that ended in the moment billing was switched on is not seen by the switch-on). The real cleanup comes with the real
- * release; a `run` that is handed in (a test) comes without it unless a `releaseHolds` is handed in too.
+ * release, the delivery of the due balance mails (#506) and the check of the billing journal (#626: a bounded step of a daily pass,
+ * while billing is on); a `run` that is handed in (a test) comes without them unless a `releaseHolds`, a `deliverBalanceMails` or a
+ * `checkJournal` is handed in too.
  */
 export function startCleanup({
   run,
   releaseHolds = run === undefined ? releaseHoldsOfEndedJobs : undefined,
+  deliverBalanceMails = run === undefined
+    ? deliverBalanceMailsOfServer
+    : undefined,
+  checkJournal = run === undefined ? checkJournalOfServer : undefined,
   setTimer = defaultSetTimer,
   log = console,
 }: StartOptions = {}): CleanupTimer {
@@ -71,14 +91,30 @@ export function startCleanup({
         "[maintenance] CLEANUP_FAILED: old rows could not be removed; trying again at the next hour.",
       );
     }
-    if (releaseHolds === undefined) return;
-    try {
-      await releaseHolds();
-    } catch {
-      log.error(
-        "[maintenance] BILLING_HOLDS_SWEEP_FAILED: the holds of ended jobs could not be released; trying again at the next hour.",
-      );
-    }
+    if (releaseHolds !== undefined)
+      try {
+        await releaseHolds();
+      } catch {
+        log.error(
+          "[maintenance] BILLING_HOLDS_SWEEP_FAILED: the holds of ended jobs could not be released; trying again at the next hour.",
+        );
+      }
+    if (deliverBalanceMails !== undefined)
+      try {
+        await deliverBalanceMails();
+      } catch {
+        log.error(
+          "[maintenance] BALANCE_MAILS_SWEEP_FAILED: the due balance mails could not be sent; trying again at the next hour.",
+        );
+      }
+    if (checkJournal !== undefined)
+      try {
+        await checkJournal();
+      } catch {
+        log.error(
+          "[maintenance] BILLING_JOURNAL_CHECK_FAILED: the billing journal could not be checked; trying again at the next hour.",
+        );
+      }
   };
   void once();
   return { stop: setTimer(() => void once(), CLEANUP_INTERVAL_MS) };

@@ -22,7 +22,10 @@ import type {
   ProviderKeyStatus,
   WorkspaceLlmKeyStatus,
 } from "../workspace-key.ts";
+import type { KeyMode } from "../../workspaces/entitlements.ts";
 import type { LlmKeyApi } from "./api.ts";
+import type { LlmKeyModeApi } from "./key-mode-api.ts";
+import { KeyModeCard } from "./key-mode-card.tsx";
 import { LlmAccessForm } from "./llm-access-form.tsx";
 
 /**
@@ -89,13 +92,22 @@ export type CatalogProvidersData = {
   keyStatuses: readonly ProviderKeyStatus[];
 };
 
+/**
+ * The choice of the key mode (#496), given only while billing is on: what applies now, and whether a key of the workspace's own is
+ * stored. With it the page offers the choice and keeps the key forms whichever key is chosen; without it (billing off) the page is
+ * what it always was.
+ */
+export type KeyChoice = { keyMode: KeyMode; hasOwnKey: boolean };
+
 export function LlmAccessSection({
   workspaceSlug,
   canManage,
   keyStatuses,
   catalog,
   summary,
+  keyChoice,
   api,
+  keyModeApi,
 }: {
   workspaceSlug: string;
   /** An Admin or an Owner of the workspace (`manage_llm_key`). */
@@ -108,12 +120,25 @@ export function LlmAccessSection({
    */
   catalog?: CatalogProvidersData;
   summary: WorkspaceLlmSummary;
-  /** Only tests pass this. */
+  /** Billing is on (#496): the workspace chooses whose key its reviews use. */
+  keyChoice?: KeyChoice;
+  /** Only tests pass these. */
   api?: LlmKeyApi;
+  keyModeApi?: LlmKeyModeApi;
 }) {
   const instanceAccess = instanceAccessOf(summary);
-  if (instanceAccess !== null)
+  if (instanceAccess !== null && keyChoice === undefined)
     return <InstanceAccessCard access={instanceAccess} />;
+  const choiceCard =
+    keyChoice === undefined ? null : (
+      <KeyModeCard
+        workspaceSlug={workspaceSlug}
+        canManage={canManage}
+        keyMode={keyChoice.keyMode}
+        hasOwnKey={keyChoice.hasOwnKey}
+        {...(keyModeApi === undefined ? {} : { api: keyModeApi })}
+      />
+    );
 
   const catalogCard =
     catalog === undefined || catalog.providers.length === 0 ? null : (
@@ -131,6 +156,7 @@ export function LlmAccessSection({
     const unreadable = keyStatuses[0]?.status.state === "unreadable";
     return (
       <div className="flex flex-col gap-6">
+        {choiceCard}
         <Card role="region" aria-labelledby="llm-key-heading">
           <CardHeader>
             <CardTitle>
@@ -170,6 +196,7 @@ export function LlmAccessSection({
 
   return (
     <div className="flex flex-col gap-6">
+      {choiceCard}
       {keyStatuses.map(({ provider, status }) => {
         const label = llmProviderDescriptors.labelOf(provider);
         const headingId = `llm-key-heading-${provider}`;

@@ -14,7 +14,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `runner/` | Worker that runs PR-Agent: Python, uv |
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
 | `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port) plus the Dynamic runner, see "Deploy on Coolify" |
-| `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/deployment-vercel.md`](docs/deployment-vercel.md) (the hosted deployment on Vercel), [`docs/dispatcher.md`](docs/dispatcher.md) (the Dispatcher and Worker vocabulary and interfaces), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
+| `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/deployment-vercel.md`](docs/deployment-vercel.md) (the hosted deployment on Vercel), [`docs/dispatcher.md`](docs/dispatcher.md) (the Dispatcher and Worker vocabulary and interfaces), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App), [`docs/billing.md`](docs/billing.md) (billing for the operator of a hosted instance), [`docs/billing-self-hosting.md`](docs/billing-self-hosting.md) (billing for self-hosters), [`docs/billing-terms-checklist.md`](docs/billing-terms-checklist.md) (the points for the terms) |
 | `dispatcher/` | The Dispatcher of the hosted deployment (TypeScript on Hono) and the golden snapshot pipeline, see [`dispatcher/README.md`](dispatcher/README.md) |
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `fakes/` | Fake servers and fixtures used by the tests |
@@ -84,6 +84,10 @@ instance: tenancy, sign-up rule, the ways to sign in and the limits, with who ch
 Credentials (the GitHub App, the mail server password) are stored encrypted with a key derived from `APP_SECRET`. **A lost admin password** without
 a mail server: `docker compose exec app admin reset-password <email>` prints a single-use link valid for 30
 minutes. Details: `app/src/admin/README.md`.
+
+**Billing** is off unless the instance admin switches it on in the admin portal (menu Billing); a self-hoster who never does sees no
+change. When it is on, workspaces pay for reviews from a prepaid balance in US dollars: [docs/billing-self-hosting.md](docs/billing-self-hosting.md)
+for self-hosters, [docs/billing.md](docs/billing.md) for a hosted instance that takes payments with Stripe.
 
 **Signing up.** `/sign-up` creates an account with an email address and a password when the sign-up rule
 lets the address in. With a mail server (set up in the admin portal under Mail: SMTP host, port, STARTTLS or TLS, login, sender; the password is stored encrypted and never shown; a test mail button tells why it fails) every email and

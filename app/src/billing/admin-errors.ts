@@ -130,6 +130,8 @@ export const BILLING_ISSUE_CODES = [
   "adapter_invalid",
   "api_key_invalid",
   "webhook_secret_invalid",
+  /** A link to the terms or the privacy statement is not an https address of a public host (#626). */
+  "url_invalid",
   "body_invalid",
   "type_invalid",
   "request_id_required",

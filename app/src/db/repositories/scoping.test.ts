@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 const SCOPED = [
   "app-settings-repository.ts",
   "billing-journal-repository.ts",
+  "billing-notifications-repository.ts",
   "billing-profiles-repository.ts",
   "billing-topup-intents-repository.ts",
   "billing-workspace-settings-repository.ts",
@@ -108,9 +109,17 @@ const SCOPED = [
  * - billing-holds-sweep: the reservations of ended jobs that nobody released (#591), for the sweep and the switch-on that
  *   serve the whole instance; it only reads, driven by the workspaces that have something reserved, and every answer names
  *   its workspace, which is where the release goes (the journal repository of that workspace);
+ * - billing-journal-directory: the ids of the workspaces that have a billing journal, page by page (#626), for the scheduled check
+ *   of the journal that serves the whole instance; it only reads and returns workspace ids and nothing else, and the check of
+ *   each one goes through the journal repository of that workspace;
  * - billing-start-credit-grants: which GitHub accounts were granted the start credit (#507). The credit is tied to the
  *   account of an installation, which no workspace owns, so it is asked across workspaces and the row outlives the
  *   workspace. A numeric account id, a workspace id and a time; no name, login or address, so it is not customer data;
+ * - billing-notification-directory: the mails of balance crossings that are due (#506), for the one process that sends them
+ *   after a response. It is told that something is due and not for which workspace; it claims due rows (one guarded statement
+ *   for each, which only one of several senders can win) and records how a delivery ended, and every answer names its
+ *   workspace, which is where the sender looks up the recipients. The rows are made and changed through the scoped
+ *   billing notifications repository, in the transaction that moved the balance;
  * - billing-webhook-events: the record of provider events by `(provider, event id)` (#497): an id, an outcome and the
  *   order of the states of a refund or dispute, and for an event under review the ids of our own top-up and workspace it belongs to and
  *   what an operator recorded when closing it (#603: their id, time and note, and the journal entry). No payload, no amount and no
@@ -120,6 +129,8 @@ const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
   "billing-holds-sweep.ts",
+  "billing-journal-directory-repository.ts",
+  "billing-notification-directory-repository.ts",
   "billing-start-credit-grants-repository.ts",
   "billing-topup-intent-directory-repository.ts",
   "billing-webhook-events-repository.ts",

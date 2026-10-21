@@ -32,6 +32,7 @@ import {
   PAY_BUTTON_LOADING,
   PAYMENT_HINT,
   PRESET_LABEL,
+  PRIVACY_LINK_TEXT,
   TERMS_LINK_TEXT,
   TOP_UP_EXPLAINER,
   TOP_UP_HEADING,
@@ -49,13 +50,16 @@ export function TopUpCard({
   api,
   navigate,
   termsHref,
+  privacyHref,
 }: {
   view: WorkspaceBillingView;
   api: WorkspaceBillingApi;
   /** Goes to the payment page. Tests pass a stand-in; the page leaves the app. */
   navigate: (url: string) => void;
-  /** The operator's terms, when the instance has a page for them. */
+  /** The operator's terms, when the instance has set a link to them. */
   termsHref: string | null;
+  /** The operator's privacy statement, when the instance has set a link to it. */
+  privacyHref: string | null;
 }) {
   const ids = useId();
   const { pending, outcome, run } = useAction();
@@ -213,15 +217,21 @@ export function TopUpCard({
               >
                 {BUSINESS_CONFIRMATION_LABEL}
               </FieldLabel>
-              {termsHref === null ? null : (
-                <a
-                  href={termsHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-primary underline-offset-4 hover:underline"
-                >
-                  {TERMS_LINK_TEXT}
-                </a>
+              {[
+                [termsHref, TERMS_LINK_TEXT],
+                [privacyHref, PRIVACY_LINK_TEXT],
+              ].map(([href, text]) =>
+                href === null ? null : (
+                  <a
+                    key={text}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary underline-offset-4 hover:underline"
+                  >
+                    {text}
+                  </a>
+                ),
               )}
             </Field>
           ) : null}

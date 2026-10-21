@@ -66,7 +66,11 @@ export type EntitlementsEntry = EntitlementsData | InvalidEntitlements;
 export const ENTITLEMENTS_INVALID_CODE = "entitlements_invalid";
 
 export type ResolvedEntitlements =
-  | { kind: "unlimited" }
+  /**
+   * No entitlements: no limit, not suspended. `keyMode` is set only by the workspace's own choice while billing is on
+   * (`applyWorkspaceKeyMode`, src/workspaces/effective-key-mode.ts); absent, the key is the workspace's own.
+   */
+  | { kind: "unlimited"; keyMode?: KeyMode }
   | ({ kind: "limited"; source: EntitlementsSource } & EntitlementsData)
   | {
       kind: "invalid";
@@ -106,6 +110,31 @@ function limited(
                 : [...entry.modelAccess.catalogEntries],
           },
         }),
+  };
+}
+
+/**
+ * What a workspace without entitlements looks like to the code that wants a limited entry (the model selection of a managed
+ * job, #496): no limit, not suspended, every released catalog entry (no `modelAccess`). Billing on gives such a workspace the
+ * managed key mode, and the selection reads its model access from this shape.
+ */
+export function noLimits(
+  keyMode: KeyMode,
+): Extract<ResolvedEntitlements, { kind: "limited" }> {
+  return {
+    kind: "limited",
+    source: "default",
+    planLabel: "",
+    keyMode,
+    limits: {
+      diffRunsPerPeriod: null,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: null,
+      ownKeyCostLimitMicroUsd: null,
+    },
+    periodStart: new Date(0).toISOString(),
+    suspended: false,
+    suspensionCode: null,
   };
 }
 
