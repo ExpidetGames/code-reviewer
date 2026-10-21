@@ -41,6 +41,10 @@ import { createCatalogService } from "../model-catalog/service.ts";
 import { createBillingCreditService } from "../billing/admin-credit-service.ts";
 import { createBillingRouteHandlers } from "../billing/admin-http.ts";
 import { createBillingAdminService } from "../billing/admin-service.ts";
+import {
+  createBillingReviewService,
+  type ReviewCheck,
+} from "../billing/admin-review-service.ts";
 import { createStripeClient } from "../billing/stripe-client.ts";
 import type { StripeFake } from "../../../fakes/stripe/server.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
@@ -87,6 +91,8 @@ export type AdminHarnessOptions = {
   billingPublicUrl?: string;
   /** The key sent to Stripe is kept off a fake that expects another: the client of the fake is made over this fetch. */
   stripeFetch?: typeof fetch;
+  /** What "Check payment" of a billing review row asks (#603). Default: no adapter that can look a payment up. */
+  reviewCheck?: ReviewCheck | undefined;
 };
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
@@ -303,6 +309,10 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     log: (line) => billingLog.push(line),
   });
   const billingCreditLog: string[] = [];
+  const billingCredit = createBillingCreditService({
+    db,
+    logger: { info: (line) => billingCreditLog.push(line) },
+  });
   const billingRoutes = createBillingRouteHandlers({
     access: async () =>
       adminAccessOf(await lookupSession(auth, current.headers, setup.gates)),
@@ -310,9 +320,12 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       throw new NotFoundSignal();
     },
     service: billingService,
-    credit: createBillingCreditService({
+    credit: billingCredit,
+    reviews: createBillingReviewService({
       db,
-      logger: { info: (line) => billingCreditLog.push(line) },
+      credit: billingCredit,
+      check: options.reviewCheck,
+      log: (line) => billingCreditLog.push(line),
     }),
   });
   // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
@@ -610,6 +623,12 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           return await billingRoutes.webhookEndpoint(request);
         if (rest === "/workspaces" && method === "GET")
           return await billingRoutes.searchWorkspaces(request);
+        if (rest === "/reviews" && method === "GET")
+          return await billingRoutes.reviews(request);
+        if (rest === "/reviews/resolve" && method === "POST")
+          return await billingRoutes.resolveReview(request);
+        if (rest === "/reviews/check" && method === "POST")
+          return await billingRoutes.checkReview(request);
         const workspace = /^\/workspaces\/([^/]+)(\/credit)?$/.exec(rest);
         if (workspace !== null) {
           const id = decodeURIComponent(workspace[1] ?? "");

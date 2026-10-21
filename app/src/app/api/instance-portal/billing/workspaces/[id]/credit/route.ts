@@ -10,6 +10,7 @@ import { createBillingRouteHandlers } from "@/billing/admin-http";
 import {
   getBillingAdminService,
   getBillingCreditService,
+  getBillingReviewService,
 } from "@/billing/shared";
 
 export async function POST(
@@ -25,5 +26,6 @@ export async function POST(
     notFound,
     service: getBillingAdminService(),
     credit: getBillingCreditService(),
+    reviews: getBillingReviewService(),
   }).credit(request, id);
 }

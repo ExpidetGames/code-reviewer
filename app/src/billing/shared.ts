@@ -17,6 +17,10 @@ import {
   type BillingCreditService,
 } from "./admin-credit-service.ts";
 import {
+  createBillingReviewService,
+  type BillingReviewService,
+} from "./admin-review-service.ts";
+import {
   createBillingAdminService,
   type BillingAdminService,
 } from "./admin-service.ts";
@@ -128,6 +132,26 @@ export function getBillingAdminService(): BillingAdminService {
 /** The manual credit of the admin portal on the running server (#504). */
 export function getBillingCreditService(): BillingCreditService {
   return createBillingCreditService({ db: getDatabase() });
+}
+
+/**
+ * The billing review rows of the admin portal on the running server (#603). "Check payment" over the adapter billing runs on is
+ * the one a workspace owner makes (`getTopUpCheckRoute`), asked for by the instance admin.
+ */
+export function getBillingReviewService(): BillingReviewService {
+  const db = getDatabase();
+  const activeAdapter = createActiveAdapterResolver(
+    db,
+    getBillingAdapterRegistry(),
+  );
+  return createBillingReviewService({
+    db,
+    credit: getBillingCreditService(),
+    check: {
+      adapter: activeAdapter,
+      serviceFor: (adapter) => createTopUpCheckService({ db, adapter }),
+    },
+  });
 }
 
 /** The claims of these jobs ended: records the wall clock of those that ran on a runner, where billing is on. Never throws, never delays the call. */
