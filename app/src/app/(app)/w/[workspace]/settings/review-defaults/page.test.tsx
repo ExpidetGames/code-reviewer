@@ -27,6 +27,9 @@ vi.mock("@/review-settings/shared", () => ({
   reviewSettingsServiceFor: () => ({}),
 }));
 vi.mock("@/usage/shared", () => ({ planPageLinkedFor: async () => false }));
+vi.mock("@/billing/shared", () => ({
+  billingPageLinkedFor: async () => false,
+}));
 vi.mock("@/review-settings/ui/global-settings-page", () => ({
   loadGlobalSettingsPage: async () => ({ model: { managed: state.managed } }),
   GlobalSettingsPageContent: () => null,

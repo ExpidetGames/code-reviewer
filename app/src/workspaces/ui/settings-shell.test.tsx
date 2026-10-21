@@ -49,3 +49,60 @@ describe("the settings navigation", () => {
     expect(settingsSectionHref("acme", "plan")).toBe("/w/acme/settings/plan");
   });
 });
+
+describe("the settings navigation while billing is on (#505)", () => {
+  function billingLinks(options: {
+    showPlan?: boolean;
+    showBilling?: boolean;
+  }) {
+    render(
+      <SettingsNav
+        workspaceSlug="acme"
+        current=""
+        {...(options.showPlan === undefined
+          ? {}
+          : { showPlan: options.showPlan })}
+        {...(options.showBilling === undefined
+          ? {}
+          : { showBilling: options.showBilling })}
+      />,
+    );
+    return within(screen.getByRole("navigation", { name: "Settings sections" }))
+      .getAllByRole("link")
+      .map((link) => link.textContent ?? "");
+  }
+
+  // #505-T11
+  it("has no Billing entry while billing is off", () => {
+    expect(billingLinks({ showPlan: true })).toEqual([
+      "General",
+      "Review defaults",
+      "LLM access",
+      "Plan",
+      "Advanced",
+    ]);
+  });
+
+  // #505-T11
+  it("lists Billing instead of Plan before Advanced while billing is on", () => {
+    expect(billingLinks({ showPlan: true, showBilling: true })).toEqual([
+      "General",
+      "Review defaults",
+      "LLM access",
+      "Billing",
+      "Advanced",
+    ]);
+  });
+
+  // #505-T01
+  it("lists Billing for a workspace that has no entitlements too", () => {
+    expect(billingLinks({ showBilling: true })).toContain("Billing");
+  });
+
+  // #505-T01
+  it("links Billing to the address the top-up returns to and the notices point to", () => {
+    expect(settingsSectionHref("acme", "billing")).toBe(
+      "/w/acme/settings/billing",
+    );
+  });
+});

@@ -30,7 +30,8 @@ import {
   stripeEnvironmentFromSecrets,
   stripeWebhookSecretFromSecrets,
 } from "./stripe-credentials.ts";
-import { createStripeClient, STRIPE_API_BASE_URL } from "./stripe-client.ts";
+import { createStripeClient } from "./stripe-client.ts";
+import { stripeApiBaseUrl } from "../stripe-endpoints.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { isBillingOn } from "./enabled.ts";
 import { manualAdapter } from "./manual-adapter.ts";
@@ -39,6 +40,15 @@ import {
   type MonthlyLimitRoute,
 } from "./monthly-limit-http.ts";
 import { createMonthlyLimitService } from "./monthly-limit-service.ts";
+import { createJournalRoute, type JournalRoute } from "./journal-http.ts";
+import { createProfileRoute, type ProfileRoute } from "./profile-http.ts";
+import { createBillingProfileService } from "./profile-service.ts";
+import { workspaceKeyModeOf } from "./workspace-key-mode.ts";
+import {
+  createWorkspaceBillingService,
+  type WorkspaceBillingService,
+} from "./workspace-page.ts";
+import { getWorkspaceLlm } from "../llm/shared.ts";
 import { createCheckPaymentLimits, createTopUpLimits } from "./topup-limits.ts";
 import { createTopUpCheckService } from "./topup-check.ts";
 import {
@@ -65,7 +75,7 @@ export function getBillingAdapterRegistry() {
     createStripeAdapter({
       client: stripeClientFromSecrets({
         secrets: getSecretStore,
-        baseUrl: STRIPE_API_BASE_URL,
+        baseUrl: stripeApiBaseUrl(),
       }),
       webhookSecret: stripeWebhookSecretFromSecrets({
         secrets: getSecretStore,
@@ -97,6 +107,47 @@ export function getMonthlyLimitRoute(): MonthlyLimitRoute {
   return createMonthlyLimitRoute({
     guard: { isOn: () => isBillingOn(db), notFound },
     service: createMonthlyLimitService({ db }),
+  });
+}
+
+/**
+ * Whether the settings navigation of a workspace lists the Billing page: billing is on (#505). The switch is the one instance
+ * setting; with billing off nothing else is read.
+ */
+export function billingPageLinkedFor(): Promise<boolean> {
+  return isBillingOn(getDatabase());
+}
+
+/** The data of the billing page of a workspace (#505), wired to the running server. */
+export function getWorkspaceBillingService(): WorkspaceBillingService {
+  const db = getDatabase();
+  const activeAdapter = createActiveAdapterResolver(
+    db,
+    getBillingAdapterRegistry(),
+  );
+  return createWorkspaceBillingService({
+    db,
+    activeAdapter,
+    keyMode: async (workspaceId) =>
+      workspaceKeyModeOf(await getWorkspaceLlm().summaryFor(workspaceId)),
+  });
+}
+
+/** The handler of `GET /api/w/:workspace/billing/journal`, wired to the running server. */
+export function getJournalRoute(): JournalRoute {
+  const db = getDatabase();
+  return createJournalRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    service: getWorkspaceBillingService(),
+  });
+}
+
+/** The handlers of `GET` and `PUT /api/w/:workspace/billing/profile`, wired to the running server. */
+export function getProfileRoute(): ProfileRoute {
+  const db = getDatabase();
+  return createProfileRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    service: createBillingProfileService({ db }),
   });
 }
 
@@ -137,7 +188,7 @@ export function getBillingAdminService(): BillingAdminService {
     clientFor: (apiKey, environment) =>
       createStripeClient({
         apiKey,
-        baseUrl: STRIPE_API_BASE_URL,
+        baseUrl: stripeApiBaseUrl(),
         environment,
       }),
   });

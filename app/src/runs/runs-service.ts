@@ -7,6 +7,7 @@
 import "server-only";
 import type { RunsRepository } from "../db/repositories/runs-repository.ts";
 import type { LastRun, LastRunSource } from "../projects/ui/list-view.ts";
+import type { RunPriceView } from "../workspace-billing/view.ts";
 import { isRunStatus } from "./run-status.ts";
 import {
   toRunDetailView,
@@ -51,6 +52,15 @@ export function parseRunsFilter(input: RunsFilterInput): ParsedRunsFilter {
   return { ok: true, filter };
 }
 
+/** The run with its price when it has one; a run without one stays exactly as it was. */
+function withPrice<T extends { id: string }>(
+  run: T,
+  prices: ReadonlyMap<string, RunPriceView> | undefined,
+): T & { price?: RunPriceView } {
+  const price = prices?.get(run.id);
+  return price === undefined ? run : { ...run, price };
+}
+
 export type RunsService = {
   list(filter: RunsFilter): Promise<RunsSnapshot>;
   /** undefined for an id that is not a run id or that nobody has. */
@@ -62,6 +72,11 @@ export function createRunsService(deps: {
   now?: () => Date;
   /** Takes secrets out of a log before it is shown. */
   redact?: (text: string) => string;
+  /**
+   * The price of each of these runs that has one (#505). Absent while billing is off: no run then carries a price, and nothing of
+   * billing is read.
+   */
+  prices?: (jobIds: readonly string[]) => Promise<Map<string, RunPriceView>>;
 }): RunsService {
   const now = deps.now ?? (() => new Date());
   return {
@@ -71,10 +86,11 @@ export function createRunsService(deps: {
         ...filter,
         limit: RUNS_LIST_LIMIT,
       });
+      const prices = await deps.prices?.(runs.map(({ job }) => job.id));
       return {
         generatedAt: answeredAt.toISOString(),
         runs: runs.map(({ job, project }) =>
-          toRunRowView(job, project, answeredAt),
+          withPrice(toRunRowView(job, project, answeredAt), prices),
         ),
         limited: hasMore,
       };
@@ -85,14 +101,18 @@ export function createRunsService(deps: {
       const answeredAt = now();
       const stored = await deps.runs.get(id);
       if (stored === undefined) return undefined;
+      const prices = await deps.prices?.([stored.job.id]);
       return {
         generatedAt: answeredAt.toISOString(),
-        run: toRunDetailView(
-          stored.job,
-          stored.project,
-          answeredAt,
-          deps.redact,
-          stored.onManagedKey,
+        run: withPrice(
+          toRunDetailView(
+            stored.job,
+            stored.project,
+            answeredAt,
+            deps.redact,
+            stored.onManagedKey,
+          ),
+          prices,
         ),
       };
     },

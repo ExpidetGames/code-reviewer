@@ -19,6 +19,7 @@ export function LlmSettingsPageContent({
   catalog,
   summary,
   showPlan = false,
+  showBilling = false,
   api,
 }: {
   workspaceSlug: string;
@@ -31,6 +32,8 @@ export function LlmSettingsPageContent({
   summary: WorkspaceLlmSummary;
   /** The workspace has entitlements (#282): the settings navigation lists the Plan page. */
   showPlan?: boolean;
+  /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
+  showBilling?: boolean;
   /** Only tests pass this. */
   api?: LlmKeyApi;
 }) {
@@ -39,6 +42,7 @@ export function LlmSettingsPageContent({
       workspaceSlug={workspaceSlug}
       current="llm"
       showPlan={showPlan}
+      showBilling={showBilling}
     >
       <div className="max-w-[44rem]">
         <LlmAccessSection

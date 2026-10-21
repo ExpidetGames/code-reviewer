@@ -240,6 +240,7 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
 | `ALLOW_TEST_LLM_ENDPOINTS`, `LLM_API_BASE_URL` | not used | For the test stack with a fake LLM only (the "test key" button). Never set them in a real deployment. |
+| `ALLOW_TEST_STRIPE_ENDPOINTS`, `STRIPE_API_BASE_URL` | not used | For the test stack with a fake Stripe only. The address is ignored without the flag and only a loopback http address is accepted. Never set them in a real deployment; billing is configured in the admin portal. |
 | `ALLOW_TEST_DISPATCH_TIMING`, `TEST_DISPATCH_INLINE_RETRY_DELAYS_MS` | not used | For the test lane that starts its own Dispatcher only (longer pauses between the repeats of a wake-up). Never set them in a real deployment. |
 | `RUNNER_API_URL` | fixed | The Compose file sets it to `http://app:3000`, the app over the Docker network. It is not a setting. |
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | not used | How long running reviews may finish after a stop. The Compose file leaves the runner's 60 seconds and gives the runner `stop_grace_period: 90s` for it ([section 9](#stopping-the-runner)); the two belong together. |

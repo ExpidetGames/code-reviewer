@@ -122,6 +122,7 @@ const PROTECTED_ROUTES = [
   "/w/[workspace]/runs/[id]",
   "/w/[workspace]/settings",
   "/w/[workspace]/settings/advanced",
+  "/w/[workspace]/settings/billing",
   "/w/[workspace]/settings/llm",
   "/w/[workspace]/settings/plan",
   "/w/[workspace]/settings/review-defaults",
@@ -167,7 +168,9 @@ const PROTECTED_DATA_ROUTES = [
   "/api/invitations/accept",
   // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/api/w/[workspace]",
+  "/api/w/[workspace]/billing/journal",
   "/api/w/[workspace]/billing/monthly-limit",
+  "/api/w/[workspace]/billing/profile",
   "/api/w/[workspace]/billing/top-ups",
   "/api/w/[workspace]/billing/top-ups/[id]/check",
   "/api/w/[workspace]/github/connect",

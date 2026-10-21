@@ -162,8 +162,10 @@ describe("POST /api/w/:workspace/billing/top-ups", () => {
       .requests()
       .find((r) => r.path === "/v1/checkout/sessions");
     expect(sent?.form).toMatchObject({
-      success_url: "https://app.example.test/w/acme/billing?topup=success",
-      cancel_url: "https://app.example.test/w/acme/billing?topup=cancelled",
+      success_url:
+        "https://app.example.test/w/acme/settings/billing?topup=success",
+      cancel_url:
+        "https://app.example.test/w/acme/settings/billing?topup=cancelled",
     });
   });
 
