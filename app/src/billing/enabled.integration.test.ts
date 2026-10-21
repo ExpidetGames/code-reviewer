@@ -92,7 +92,14 @@ describe("whether billing is on", () => {
       checkedAt: "2026-10-20T10:00:00.000Z",
       checkedEnvironment: "test",
     };
-    const stored = { enabled: true, adapter: "stripe", ...RATES, stripe };
+    const legal = { termsUrl: "https://example.com/terms" };
+    const stored = {
+      enabled: true,
+      adapter: "stripe",
+      ...RATES,
+      stripe,
+      legal,
+    };
     const row = (name: string) => ({
       name,
       ciphertext: "c",
@@ -114,6 +121,22 @@ describe("whether billing is on", () => {
       null,
     );
     expect(await isBillingOn(db), "no passing check").toBe(false);
+    // #626-T05
+    await settings.set(
+      "billing_settings",
+      {
+        ...stored,
+        legal: { privacyUrl: "https://example.com/privacy" },
+      } as never,
+      null,
+    );
+    expect(await isBillingOn(db), "no terms link").toBe(false);
+    await settings.set(
+      "billing_settings",
+      { ...stored, legal: { termsUrl: "http://example.com/terms" } } as never,
+      null,
+    );
+    expect(await isBillingOn(db), "a terms link that is not https").toBe(false);
   });
 
   // #504-T04

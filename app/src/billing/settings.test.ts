@@ -156,3 +156,35 @@ describe("the adapter, the numbers and the state of the Stripe check in the stor
     });
   });
 });
+
+describe("the stored links to the terms and privacy statement", () => {
+  // #626-T02
+  it("reads the links next to the switch", () => {
+    expect(
+      readBillingSettings({
+        enabled: false,
+        legal: {
+          termsUrl: "https://example.com/terms",
+          privacyUrl: "https://example.com/privacy",
+        },
+      }),
+    ).toStrictEqual({
+      enabled: false,
+      legal: {
+        termsUrl: "https://example.com/terms",
+        privacyUrl: "https://example.com/privacy",
+      },
+    });
+  });
+
+  // #626-T02
+  it.each([
+    ["a string", "https://example.com/terms"],
+    ["an http link", { termsUrl: "http://example.com/terms" }],
+    ["a link with credentials", { termsUrl: "https://a:b@example.com/t" }],
+  ])("reads %s as no link", (_name, legal) => {
+    expect(readBillingSettings({ enabled: true, legal })).toStrictEqual({
+      enabled: true,
+    });
+  });
+});

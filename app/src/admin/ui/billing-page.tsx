@@ -2,11 +2,12 @@
 
 "use client";
 // The billing page of the admin portal (#504, ADR 0006, 2.14): the switch with the statement of what it does, the payment
-// adapter and the Stripe credentials, the rates and numbers, and the manual credit. Billing is off until the admin switches it
+// adapter and the Stripe credentials, the rates and numbers, the links to the terms and the privacy statement, and the manual credit. Billing is off until the admin switches it
 // on; opening this page changes nothing and calls nobody. Instance admin only.
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import { browserBillingApi, type BillingApi } from "./billing-api.ts";
 import { BillingCreditCard } from "./billing-credit-card.tsx";
+import { BillingLegalCard } from "./billing-legal-card.tsx";
 import { BillingPaymentCard } from "./billing-payment-card.tsx";
 import { BillingRatesCard } from "./billing-rates-card.tsx";
 import { BillingSecretRemoval } from "./billing-secret-removal.tsx";
@@ -37,6 +38,7 @@ export function BillingPage({
       <BillingSwitchCard billing={billing} notice={notice} api={api} />
       <BillingPaymentCard billing={billing} api={api} />
       <BillingRatesCard billing={billing} api={api} />
+      <BillingLegalCard billing={billing} api={api} />
       <BillingCreditCard api={api} />
       <BillingSecretRemoval billing={billing} api={api} />
     </div>

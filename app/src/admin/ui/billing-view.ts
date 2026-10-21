@@ -28,7 +28,8 @@ export type BillingMissingItemView =
   | "diff_ai_reserve_missing"
   | "stripe_api_key_missing"
   | "stripe_webhook_secret_missing"
-  | "connection_check_missing";
+  | "connection_check_missing"
+  | "terms_url_missing";
 
 export type BillingView = {
   /** The switch as it is stored. */
@@ -51,6 +52,11 @@ export type BillingView = {
     webhookUrl: string;
     /** Whether Stripe can reach that address (https, not a private or local one). */
     webhookUrlPublic: boolean;
+  };
+  /** The links to the operator's terms and privacy statement (#626); null while not set. The terms link is needed to run Stripe. */
+  legal: {
+    termsUrl: string | null;
+    privacyUrl: string | null;
   };
   rates: {
     /** Parts per 10,000 (12,000 is 1.2), or null while not set. */
