@@ -132,6 +132,16 @@ export type UsageRecordsRepository = {
   /** Records that count (`reserved` and `settled`, never `void`) reserved at or after `since`, per review kind. */
   countByKind(since: string): Promise<Record<ProjectReviewKind, number>>;
   /**
+   * How many reviews this workspace started after `since` (exclusive): every record reserved later, whatever became of it,
+   * `void` and superseded ones included, because the claim that reserved it did start the review (#499, the hourly brake).
+   * `exceptJobId` leaves out the record of the job that asks, so a job claimed again after a lost lease is not counted against
+   * itself.
+   */
+  startedSince(
+    since: string,
+    options?: { exceptJobId?: string },
+  ): Promise<number>;
+  /**
    * The cost of the settled records of the runs on `keyMode` reserved at or after `since` (the period of the run,
    * as in `countByKind`); an unknown cost adds nothing. A record counts under the key mode it was settled with,
    * whatever the entitlements say now (#361).
@@ -354,6 +364,17 @@ export function createUsageRecordsRepository(
       for (const row of rows)
         counts[row.review_kind as ProjectReviewKind] = Number(row.runs);
       return counts;
+    },
+
+    async startedSince(since, options = {}) {
+      let query = db
+        .selectFrom("usage_records")
+        .select((eb) => eb.fn.countAll().as("started"))
+        .where("workspace_id", "=", workspaceId)
+        .where("reserved_at", ">", since);
+      if (options.exceptJobId !== undefined)
+        query = query.where("job_id", "<>", options.exceptJobId);
+      return Number((await query.executeTakeFirstOrThrow()).started);
     },
 
     async sumSettledCostMicroUsd(since, keyMode) {

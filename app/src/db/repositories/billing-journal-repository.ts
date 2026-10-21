@@ -184,6 +184,12 @@ export type BillingJournalRepository = {
   ): Promise<JournalEntry | undefined>;
   /** The cached balance; a workspace without a row has 0 and 0. */
   balance(): Promise<JournalBalance>;
+  /**
+   * What this workspace was charged since `since` (ISO 8601, inclusive): the sum of its `usage` entries, AI plus
+   * infrastructure, as a positive amount (#499, the monthly total limit). Top-ups, holds, releases and corrections are not
+   * charges. Reads the journal and takes no lock: the claim that asks holds the gate lock of the queue.
+   */
+  chargedSince(since: string): Promise<number>;
   /** The entries, newest first, `limit` at a time, after the cursor of the previous page. */
   entries(options: {
     cursor?: JournalCursor | undefined;
@@ -682,6 +688,18 @@ export function createBillingJournalRepository(
     findByKey: (type, refKey) => findEntry(db, type, refKey),
 
     balance: readBalance,
+
+    async chargedSince(since) {
+      const row = await db
+        .selectFrom("billing_journal_entries")
+        .select((eb) => eb.fn.sum("amount_micro_usd").as("total"))
+        .where("workspace_id", "=", workspaceId)
+        .where("type", "=", "usage")
+        .where("created_at", ">=", since)
+        .executeTakeFirst();
+      // A usage entry is a debit: the amount is negative. Postgres hands a sum back as text.
+      return -Number(row?.total ?? 0) || 0;
+    },
 
     async entries({ cursor, limit }) {
       let query = db
