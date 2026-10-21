@@ -14,12 +14,11 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import type { Database } from "../db/schema.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
-import { readStoredBillingSettings } from "./enabled.ts";
+import { readBillingSwitch } from "./enabled.ts";
 import { DYNAMIC_COST_LIMIT_MICRO_USD, maxVmMinutes } from "./hold.ts";
 import { reserveFor } from "./pricing.ts";
-import { BILLING_RATES_INCOMPLETE, billingRatesOf } from "./rates.ts";
+import { BILLING_RATES_INCOMPLETE } from "./rates.ts";
 import type { BillingRates } from "./rates.ts";
-import { readBillingSettings } from "./settings.ts";
 
 /** What the claim has to do about billing for the jobs it hands out. */
 export type ClaimBilling =
@@ -29,21 +28,20 @@ export type ClaimBilling =
   | { state: "on"; rates: BillingRates };
 
 /**
- * Whether billing is on for the claims of this moment, and with which rates. THE seam of #504: today the switch is
- * `billing_settings.enabled` and the rates are complete; when the admin page makes a switch that is set but no longer ready
- * (`readBillingSwitch`), that state is `rates_incomplete` here too, with no change to the claim.
+ * Whether billing is on for the claims of this moment, and with which rates. A switch that is set but whose adapter is not
+ * ready (`readBillingSwitch`: a credential or a rate gone since it was set, which the admin page does not allow but a damaged
+ * database can show) is `rates_incomplete`, not off: a job does not run for free and does not hold money while
+ * `isBillingOn` is false. The refusal reuses the stable code `billing_rates_incomplete` (a new job error code would widen the
+ * jobs table check and the refusal notices for a state an operator has to repair anyway); the Runs page says so.
  */
 export async function readClaimBilling(
   db: Kysely<Database>,
 ): Promise<ClaimBilling> {
-  const stored = await readStoredBillingSettings(db);
-  if (stored === undefined) return { state: "off" };
-  const settings = readBillingSettings(stored);
-  if (!settings.enabled) return { state: "off" };
-  const rates = billingRatesOf(settings);
-  return rates === null
-    ? { state: "rates_incomplete" }
-    : { state: "on", rates };
+  const { enabled, missing, rates } = await readBillingSwitch(db);
+  if (!enabled) return { state: "off" };
+  if (missing.length > 0 || rates === null)
+    return { state: "rates_incomplete" };
+  return { state: "on", rates };
 }
 
 /** The codes a claim is refused with because of billing; each is a `JobErrorCode`. */

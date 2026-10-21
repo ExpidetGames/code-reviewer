@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The billing switch written straight into a test database, for tests of code that runs only while billing is on. Switching
-// it on also sets made-up rates, because the claim refuses a job while billing is on and a rate is missing (#498); none of
-// these numbers is a real one.
+// The billing switch written straight into a test database, for tests of code that runs only while billing is on. Billing is
+// on only when the adapter is ready (#504) and the claim refuses a job while a rate is missing (#498), so switching it on
+// also sets made-up rates of the manual adapter, which is ready with nothing but the rates. None of these numbers is a real
+// one; no rate of an operator is in the repository.
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";

@@ -36,3 +36,30 @@ describe("billing and the environment", () => {
       );
   });
 });
+
+describe("billing and the environment, the admin page", () => {
+  // #504-T15
+  it("keeps .env.example free of anything about billing or Stripe", () => {
+    const example = readFileSync(join(ROOT, ".env.example"), "utf8");
+
+    expect(example).not.toMatch(/STRIPE|BILLING/i);
+  });
+
+  // #504-T15
+  it("reads no environment variable in the billing module, but the public address the auth configuration holds", () => {
+    const sources = readdirSync(import.meta.dirname).filter(
+      (name) => /\.tsx?$/.test(name) && !/\.test\./.test(name),
+    );
+
+    const readers = sources.filter((file) =>
+      /process\.env\b/.test(
+        readFileSync(join(import.meta.dirname, file), "utf8")
+          .replace(/^\s*\/\/.*$/gm, "")
+          // The one use: the configuration of the app, which holds BETTER_AUTH_URL, the address Stripe posts to.
+          .replace("loadAuthConfig(process.env)", ""),
+      ),
+    );
+
+    expect(readers).toEqual([]);
+  });
+});

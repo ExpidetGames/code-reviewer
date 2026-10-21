@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { isBillingOn } from "../../billing/enabled.ts";
+import { isBillingOn, readBillingSwitch } from "../../billing/enabled.ts";
 import { createInstanceSettingsRepository } from "../repositories/instance-settings-repository.ts";
 import {
   createPostgresTestDatabase,
@@ -499,16 +499,18 @@ describe.each(engines)("the migrations on $name", ({ open }) => {
     const db = await open();
     await migrateToLatest(db);
     await createRemovedSchema(db, false);
-    // A setting of the old shape that said on: without the reset, the first billing route of a later issue would
-    // find billing on, with no adapter and no rates.
+    // A setting of the old shape that said on: the switch still reads as set (the old shape has no rates, so the adapter is
+    // not ready and billing is not on, #504); the reset takes the switch itself away.
     await sql`insert into instance_settings (key, value, updated_by, updated_at)
       values ('billing_settings', '{"enabled":true,"environment":"sandbox","clientToken":"t","graceDays":7}', null, ${T})`.execute(
       db,
     );
-    expect(await isBillingOn(db)).toBe(true);
+    expect((await readBillingSwitch(db)).enabled).toBe(true);
+    expect(await isBillingOn(db)).toBe(false);
 
     await runDocumentedReset(db);
 
+    expect((await readBillingSwitch(db)).enabled).toBe(false);
     expect(await isBillingOn(db)).toBe(false);
   });
 

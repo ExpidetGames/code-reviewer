@@ -8,9 +8,12 @@
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
+import { isBillingOn } from "../billing/enabled.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
+  TEST_BILLING_RATES,
   fundWorkspace,
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
@@ -390,6 +393,35 @@ describe.each(databases)("the hold at claim on %s", (name, open) => {
         errorCode: "billing_rates_incomplete",
       });
       expect(await usageRecords(fixture)).toEqual([]);
+    },
+  );
+
+  // #498-T18
+  run(
+    "refuses the job with billing_rates_incomplete and holds nothing while the switch is set and the Stripe adapter is not ready",
+    async () => {
+      const fixture = await start();
+      await createInstanceSettingsRepository(fixture.db).set(
+        "billing_settings",
+        { enabled: true, adapter: "stripe", ...TEST_BILLING_RATES },
+        null,
+      );
+      expect(await isBillingOn(fixture.db), "billing is not on").toBe(false);
+      await fundWorkspace(fixture.db, fixture.workspaceId, 1_000_000);
+      const job = await enqueue(fixture);
+
+      const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+
+      expect(claimed).toBeNull();
+      expect(await fixture.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "billing_rates_incomplete",
+      });
+      expect(await usageRecords(fixture)).toEqual([]);
+      expect(await journalOf(fixture).balance()).toEqual({
+        balanceMicroUsd: 1_000_000,
+        reservedMicroUsd: 0,
+      });
     },
   );
 

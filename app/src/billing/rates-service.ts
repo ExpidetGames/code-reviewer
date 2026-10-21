@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The rates of billing as an instance setting (ADR 0006, D2/D3, #494): the one place that writes A, B and the Diff AI
-// reserve into `billing_settings`, so what is stored always passed `validateRatesPatch`, and what is read is checked
-// again (`readBillingSettings`: a damaged field reads as not set). A write is a read-modify-write under an advisory
-// lock, so it keeps the switch and the other fields as they are. Server-only; the admin form is #504, the claim and the
-// settlement are #498.
+// The rates of billing as an instance setting (ADR 0006, D2/D3, #494): the one place that writes A, B, the Diff AI
+// reserve and the numbers next to them (the start credit, the low-balance threshold, the hourly brake; #504) into
+// `billing_settings`, so what is stored always passed `validateRatesPatch`, and what is read is checked again
+// (`readBillingSettings`: a damaged field reads as not set). A write is a read-modify-write under an advisory lock
+// (`settings-store.ts`), so it keeps the switch, the adapter and the other fields as they are. Server-only; the admin form
+// calls it (#504), the claim and the settlement are #498.
 //
 // This is not a second reader of the switch (`src/billing/enabled.ts` is the one): nothing here decides on `enabled`,
 // it only carries it through a write unchanged, and it reads with `getWithMeta`.
 import "server-only";
 import type { Kysely } from "kysely";
-import { lockBillingSettings } from "../db/billing-settings-lock.ts";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
   billingRatesOf,
@@ -19,7 +18,8 @@ import {
   type BillingRateErrorCode,
   type BillingRates,
 } from "./rates.ts";
-import { readBillingSettings, type BillingSettings } from "./settings.ts";
+import type { BillingSettings } from "./settings.ts";
+import { createBillingSettingsStore } from "./settings-store.ts";
 
 export type UpdateRatesResult =
   | { ok: true; settings: BillingSettings }
@@ -37,42 +37,21 @@ export type BillingRatesService = {
   update(change: unknown, updatedBy: string | null): Promise<UpdateRatesResult>;
 };
 
-/** The error `decodeJson` throws for stored text that is no JSON (its cause is the parser's `SyntaxError`). */
-function isUndecodableText(error: unknown): boolean {
-  return error instanceof Error && error.cause instanceof SyntaxError;
-}
-
-async function readStored(db: Kysely<Database>): Promise<BillingSettings> {
-  try {
-    const stored =
-      await createInstanceSettingsRepository(db).getWithMeta(
-        "billing_settings",
-      );
-    return readBillingSettings(stored?.value);
-  } catch (error) {
-    // Text that is no JSON at all is damaged data like any other: not set. Anything else (a lost connection, a busy
-    // database) is not a statement about the rates and goes on, so a caller can retry or fail as infrastructure.
-    if (!isUndecodableText(error)) throw error;
-    return readBillingSettings(undefined);
-  }
-}
-
 export function createBillingRatesService(
   db: Kysely<Database>,
 ): BillingRatesService {
+  const store = createBillingSettingsStore(db);
   return {
-    settings: () => readStored(db),
+    settings: async () => (await store.read()).settings,
 
     async rates() {
-      return billingRatesOf(await readStored(db));
+      return billingRatesOf((await store.read()).settings);
     },
 
     async update(change, updatedBy) {
       const checked = validateRatesPatch(change);
       if (!checked.ok) return checked;
-      const write = async (trx: Kysely<Database>) => {
-        await lockBillingSettings(trx);
-        const current = await readStored(trx);
+      return store.change<UpdateRatesResult>(updatedBy, async (current) => {
         const next: BillingSettings = {
           ...current,
           ...checked.value,
@@ -83,17 +62,11 @@ export function createBillingRatesService(
         };
         if (Object.keys(next.minuteRateMicroUsd ?? {}).length === 0)
           delete next.minuteRateMicroUsd;
-        await createInstanceSettingsRepository(trx).set(
-          "billing_settings",
-          next,
-          updatedBy,
-        );
-        return next;
-      };
-      const settings = db.isTransaction
-        ? await write(db)
-        : await db.transaction().execute(write);
-      return { ok: true, settings };
+        return Promise.resolve({
+          write: next,
+          result: { ok: true, settings: next },
+        });
+      });
     },
   };
 }
