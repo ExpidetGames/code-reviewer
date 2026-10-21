@@ -7,11 +7,11 @@
 // 2026-10-19 (#489, #523): a run is free only when the failure is clearly our fault, and charged in full otherwise. The
 // minutes-only class is left for a run whose AI cost is unknown. No database, no clock.
 import "server-only";
-import type { JobErrorCode } from "../jobs/job-types.ts";
 import type {
-  RunnerCheckoutReason,
-  RunnerErrorCode,
-} from "../runner-api/contract.ts";
+  KnownCheckoutReason,
+  KnownRunnerErrorCode,
+} from "../contracts/runner-api.ts";
+import type { JobErrorCode } from "../jobs/job-types.ts";
 import type { SettledReason } from "../usage/usage-records.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
 
@@ -170,7 +170,7 @@ export const ERROR_CODE_CLASSES = {
   // Replaced by a newer push; it reported what it used. In full.
   superseded: "charged",
 } as const satisfies Record<
-  JobErrorCode | RunnerErrorCode | ReleaseReason | ClaimCode,
+  JobErrorCode | KnownRunnerErrorCode | ReleaseReason | ClaimCode,
   OutcomeClass
 >;
 export type ClassifiedCode = keyof typeof ERROR_CODE_CLASSES;
@@ -210,7 +210,7 @@ export const CHECKOUT_REASON_CLASSES = {
   budget_exposed: "charged",
   diff_too_large: "charged",
   input_too_large: "charged",
-} as const satisfies Record<RunnerCheckoutReason, OutcomeClass>;
+} as const satisfies Record<KnownCheckoutReason, OutcomeClass>;
 
 /**
  * The finer names the loop of a runner gives for a process it had to end (`NO_RESULT_ERROR_REASONS`): the model may have
