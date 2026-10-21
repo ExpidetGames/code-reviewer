@@ -53,11 +53,17 @@ export type BillingSettingsStore = {
   read(): Promise<StoredSettings>;
   /**
    * Runs `change` on the current settings under the lock. A `write` is stored (by `updatedBy`) and its `result` returned; a
-   * `refuse` writes nothing and is returned as it is. A callback that must wait for nobody: no outbound call inside.
+   * `refuse` writes nothing and is returned as it is. A callback that must wait for nobody: no outbound call inside. It gets
+   * the transaction as its second argument: whatever must hold together with the settings (the credentials a switch-on
+   * judges, a credential that is removed) is read and written through it, in the same lock and the same transaction, and
+   * is rolled back with a refusal.
    */
   change<R>(
     updatedBy: string | null,
-    change: (current: BillingSettings) => Promise<SettingsChange<R>>,
+    change: (
+      current: BillingSettings,
+      executor: Kysely<Database>,
+    ) => Promise<SettingsChange<R>>,
   ): Promise<R>;
 };
 
@@ -71,7 +77,7 @@ export function createBillingSettingsStore(
       const run = async (trx: Kysely<Database>) => {
         await lockBillingSettings(trx);
         const { settings } = await readStoredSettings(trx);
-        const outcome = await change(settings);
+        const outcome = await change(settings, trx);
         if ("refuse" in outcome) return outcome.refuse;
         await createInstanceSettingsRepository(trx).set(
           "billing_settings",

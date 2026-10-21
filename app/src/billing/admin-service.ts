@@ -10,18 +10,19 @@
 //   key from its prefix.
 // - Everything is checked before anything is written: a refused change leaves the settings and the secrets as they were.
 // - The switch is one transaction under the lock of the billing settings: the rates, the adapter and the credentials that make
-//   billing ready are read again in it, so a rate write or a removed credential cannot slip in between the check and the
-//   write. Switching on also makes the connection check itself, so a key that was rotated or revoked since the button was
+//   billing ready are read again in it (the secret store on that transaction), and a credential is saved or removed in the same
+//   kind of transaction, so a rate write or a removed credential cannot slip in between the check and the write. Switching on also makes the connection check itself, so a key that was rotated or revoked since the button was
 //   pressed cannot be switched on. Switching off is always allowed and writes nothing else: the journal is not touched.
 // - A connection check that passes is recorded in the setting (when and for which environment); that record is what the
 //   switch reader asks (`isBillingOn`), because it may not call Stripe. A new API key clears it; a check that fails never
 //   clears it (a click during a Stripe outage must not turn billing off).
 // - While billing is on, the adapter and the credentials stay (`billing_disable_first`): a removed credential would turn
-//   billing off without a word. A new API key is checked against Stripe before it replaces the old one.
+//   billing off without a word. A new API key is checked against Stripe before it replaces the old one, and it must be one of
+//   the same environment (the other one would take the webhook secret and the endpoint with it).
 // - The webhook endpoint is created at most once at a time (a short lease), and Stripe is asked first: an endpoint of this
-//   app's address that exists is adopted, never duplicated. Stripe shows the signing secret only when it creates the
-//   endpoint, so adopting is possible when the secret is stored; otherwise the admin enters the secret or recreates the
-//   endpoint (billing off). The environment of the endpoint (its `livemode`) must be the one of the API key.
+//   app's address that exists is adopted, never duplicated, if it is enabled and sends every event billing handles. Stripe
+//   shows the signing secret only when it creates the endpoint, so adopting is possible when the secret is stored; otherwise
+//   the admin enters the secret or recreates the endpoint (billing off). The environment of the endpoint (its `livemode`) must be the one of the API key.
 import "server-only";
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
@@ -61,6 +62,7 @@ import {
   type StripeClient,
   type StripeEnvironment,
 } from "./stripe-client.ts";
+import type { StripeWebhookEndpoint } from "./stripe-schemas.ts";
 import {
   BILLING_WEBHOOK_PATH,
   STRIPE_WEBHOOK_EVENTS,
@@ -68,7 +70,11 @@ import {
 
 export type BillingAdminServiceOptions = {
   db: Kysely<Database>;
-  secrets: SecretStore;
+  /**
+   * The secret store on an executor: the database for a plain look, the transaction of a change of the settings for a
+   * credential that must be read or written together with them.
+   */
+  secretsOn: (executor: Kysely<Database>) => SecretStore;
   /** A client of Stripe for this key and environment. May throw a `StripeClientError` (a key of the wrong environment). */
   clientFor: (apiKey: string, environment: StripeEnvironment) => StripeClient;
   /** The public address of this app (`BETTER_AUTH_URL`): where Stripe is told to post its events. Never from a request. */
@@ -87,6 +93,7 @@ export type BillingFailure =
   | { ok: false; error: "webhook_environment_mismatch" }
   | { ok: false; error: "webhook_url_not_public" }
   | { ok: false; error: "webhook_endpoint_secret_unknown" }
+  | { ok: false; error: "webhook_endpoint_unusable" }
   | { ok: false; error: "webhook_endpoint_in_progress" }
   | { ok: false; error: "webhook_secret_not_stored" }
   | { ok: false; error: "webhook_secret_not_returned" }
@@ -159,6 +166,10 @@ function checkErrorOf(error: unknown): BillingCheckErrorCode {
   }
 }
 
+async function mustSave(saving: Promise<{ ok: boolean }>): Promise<void> {
+  if (!(await saving).ok) throw new Error("BILLING_SECRET_NOT_SAVED");
+}
+
 const bodyInvalid = (field: string): BillingFailure => ({
   ok: false,
   error: "invalid_input",
@@ -171,12 +182,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function createBillingAdminService({
   db,
-  secrets,
+  secretsOn,
   clientFor,
   publicUrl,
   now = () => new Date(),
   log = (line) => console.info(line),
 }: BillingAdminServiceOptions): BillingAdminService {
+  const secrets = secretsOn(db);
   const store = createBillingSettingsStore(db);
   const rates = createBillingRatesService(db);
   const instanceSettings = createInstanceSettingsRepository(db, now);
@@ -253,13 +265,13 @@ export function createBillingAdminService({
 
   const CHECK_FIELDS = ["checkedAt", "checkedEnvironment"] as const;
 
-  async function storedSecrets(): Promise<{
+  async function storedSecrets(on: SecretStore = secrets): Promise<{
     apiKey: SecretStatus;
     webhookSecret: SecretStatus;
   }> {
     const [apiKey, webhookSecret] = await Promise.all([
-      secrets.status(STRIPE_API_KEY),
-      secrets.status(STRIPE_WEBHOOK_SECRET),
+      on.status(STRIPE_API_KEY),
+      on.status(STRIPE_WEBHOOK_SECRET),
     ]);
     return { apiKey, webhookSecret };
   }
@@ -380,30 +392,32 @@ export function createBillingAdminService({
         if (!check.ok) return check;
         checkedEnvironment = check.environment;
       }
-      // The environment the stored key belongs to, if it can be read: another one makes the stored webhook secret and
-      // endpoint foreign to the new key.
-      let previousEnvironment: StripeEnvironment | null = null;
-      if (newKey !== undefined) {
-        const kept = await secrets.use(STRIPE_API_KEY);
-        if (kept.ok)
-          previousEnvironment = stripeKeyEnvironment(kept.value.reveal());
-      }
-      const environmentChanges =
-        newKey !== undefined &&
-        previousEnvironment !== null &&
-        previousEnvironment !== stripeKeyEnvironment(newKey);
 
-      const outcome = await store.change<BillingResult>(adminId, (latest) => {
+      // The settings and the secrets change in one transaction under the lock: a switch-on that is judged in between sees
+      // both or neither, and a refusal leaves the secrets alone as well.
+      return store.change<BillingResult>(adminId, async (latest, executor) => {
+        const inLock = secretsOn(executor);
+        // The environment the stored key belongs to, if it can be read: another one makes the stored webhook secret and
+        // endpoint foreign to the new key.
+        let previousEnvironment: StripeEnvironment | null = null;
+        if (newKey !== undefined) {
+          const kept = await inLock.use(STRIPE_API_KEY);
+          if (kept.ok)
+            previousEnvironment = stripeKeyEnvironment(kept.value.reveal());
+        }
+        const environmentChanges =
+          newKey !== undefined &&
+          previousEnvironment !== null &&
+          previousEnvironment !== stripeKeyEnvironment(newKey);
         // The switch may have been turned on since the first read: the credentials stay while it is on, except for a new key
-        // that was checked above.
+        // of the same environment that was checked above. A key of the other one would take the webhook secret and the
+        // endpoint with it and turn billing off without a word.
         if (
           latest.enabled &&
           newKey !== undefined &&
-          checkedEnvironment === undefined
+          (checkedEnvironment === undefined || environmentChanges)
         )
-          return Promise.resolve({
-            refuse: { ok: false, error: "billing_disable_first" },
-          });
+          return { refuse: { ok: false, error: "billing_disable_first" } };
         let next = latest;
         if (newKey !== undefined) {
           next = withoutStripeFields(
@@ -422,41 +436,35 @@ export function createBillingAdminService({
               },
             };
         }
-        return Promise.resolve({ write: next, result: { ok: true } });
+        const writer = { updatedBy: adminId, showLastFour: true };
+        if (environmentChanges && newSecret === undefined)
+          await inLock.remove(STRIPE_WEBHOOK_SECRET);
+        // Both are checked above (not empty, far below the longest a secret may be); a failure here is not a refusal of the
+        // input but a fault, and ending the transaction with it undoes the removal and the first save.
+        if (newKey !== undefined)
+          await mustSave(inLock.save(STRIPE_API_KEY, newKey, writer));
+        if (newSecret !== undefined)
+          await mustSave(inLock.save(STRIPE_WEBHOOK_SECRET, newSecret, writer));
+        return { write: next, result: { ok: true } };
       });
-      if (!outcome.ok) return outcome;
-
-      // The secrets go in after the guarded write: a refused write leaves them alone. A process that ends in between leaves
-      // the setting without its record of a check, which is the safe side.
-      const writer = { updatedBy: adminId, showLastFour: true };
-      if (environmentChanges && newSecret === undefined)
-        await secrets.remove(STRIPE_WEBHOOK_SECRET);
-      if (newKey !== undefined)
-        await secrets.save(STRIPE_API_KEY, newKey, writer);
-      if (newSecret !== undefined)
-        await secrets.save(STRIPE_WEBHOOK_SECRET, newSecret, writer);
-      return { ok: true };
     },
 
     async removeSecret(adminId, which) {
       if (which !== "apiKey" && which !== "webhookSecret")
         return bodyInvalid("removeSecret");
-      const outcome = await store.change<BillingResult>(adminId, (current) =>
-        Promise.resolve(
-          current.enabled
-            ? { refuse: { ok: false, error: "billing_disable_first" } }
-            : {
-                write: withoutStripeFields(
-                  current,
-                  which === "apiKey" ? CHECK_FIELDS : ["webhookEndpointId"],
-                ),
-                result: { ok: true },
-              },
-        ),
-      );
-      if (!outcome.ok) return outcome;
-      await secrets.remove(SECRET_OF[which]);
-      return { ok: true };
+      // The credential goes in the transaction that judges the switch: a switch-on that is waiting for the lock finds it gone.
+      return store.change<BillingResult>(adminId, async (current, executor) => {
+        if (current.enabled)
+          return { refuse: { ok: false, error: "billing_disable_first" } };
+        await secretsOn(executor).remove(SECRET_OF[which]);
+        return {
+          write: withoutStripeFields(
+            current,
+            which === "apiKey" ? CHECK_FIELDS : ["webhookEndpointId"],
+          ),
+          result: { ok: true },
+        };
+      });
     },
 
     async saveRates(adminId, change) {
@@ -531,26 +539,28 @@ export function createBillingAdminService({
           else freshCheckFailed = true;
         }
       }
-      const stored = await storedSecrets();
-      const outcome = await store.change<BillingResult>(adminId, (current) => {
-        const missing: BillingNotReadyItem[] = missingItemsOf({
-          settings: current,
-          secrets: {
-            apiKey: usable(stored.apiKey),
-            webhookSecret: usable(stored.webhookSecret),
-          },
-        });
-        if (freshCheckFailed) missing.push("connection_check_failed");
-        // Exactly what was checked, in the transaction that writes the switch: a rate or a credential cannot go in between.
-        if (missing.length > 0)
-          return Promise.resolve({
-            refuse: { ok: false, error: "billing_not_ready", missing },
+      const outcome = await store.change<BillingResult>(
+        adminId,
+        async (current, executor) => {
+          // The credentials are read here, in the lock, in the transaction that writes the switch: a removal that waited for the
+          // lock has been made, one that comes after finds billing on and is refused.
+          const stored = await storedSecrets(secretsOn(executor));
+          const missing: BillingNotReadyItem[] = missingItemsOf({
+            settings: current,
+            secrets: {
+              apiKey: usable(stored.apiKey),
+              webhookSecret: usable(stored.webhookSecret),
+            },
           });
-        return Promise.resolve({
-          write: { ...current, enabled: true },
-          result: { ok: true },
-        });
-      });
+          if (freshCheckFailed) missing.push("connection_check_failed");
+          // Exactly what was checked, in the transaction that writes the switch: a rate or a credential cannot go in between.
+          if (missing.length > 0)
+            return {
+              refuse: { ok: false, error: "billing_not_ready", missing },
+            };
+          return { write: { ...current, enabled: true }, result: { ok: true } };
+        },
+      );
       if (outcome.ok) log("[billing] BILLING_SWITCHED enabled=true");
       return outcome;
     },
@@ -570,23 +580,23 @@ export function createBillingAdminService({
         ({ url }) => normalizedAddress(url) === webhookUrl,
       );
       if (recreate) {
-        // Touching the settings first makes a switch-on that checked the secret before now find billing changed, and a
-        // switch-on that wrote before now stops this: nothing is deleted behind a billing that is on.
-        const stopped = await store.change<boolean>(adminId, (current) =>
-          Promise.resolve(
-            current.enabled
-              ? { refuse: true }
-              : {
-                  write: withoutStripeFields(current, ["webhookEndpointId"]),
-                  result: false,
-                },
-          ),
+        // A switch-on that wrote before now stops this: nothing is deleted behind a billing that is on. The old secret goes in
+        // the same transaction, so a switch-on that comes after finds it gone; it signs nothing any more, and with the new one
+        // lost it must not look like a working one.
+        const stopped = await store.change<boolean>(
+          adminId,
+          async (current, executor) => {
+            if (current.enabled) return { refuse: true };
+            await secretsOn(executor).remove(STRIPE_WEBHOOK_SECRET);
+            return {
+              write: withoutStripeFields(current, ["webhookEndpointId"]),
+              result: false,
+            };
+          },
         );
         if (stopped) return { ok: false, error: "billing_disable_first" };
         for (const endpoint of ours)
           await client.deleteWebhookEndpoint(endpoint.id);
-        // The old secret signs nothing any more; with the new one lost it must not look like a working one.
-        await secrets.remove(STRIPE_WEBHOOK_SECRET);
       } else if (ours.length > 0) {
         const [only] = ours;
         // More than one cannot be told apart.
@@ -595,6 +605,10 @@ export function createBillingAdminService({
         const seen = environmentOf(only.livemode);
         if (seen !== null && seen !== environment)
           return { ok: false, error: "webhook_environment_mismatch" };
+        // An endpoint that is switched off, or that is not told about every event billing handles, would adopt silently and
+        // then never deliver the payment: it is replaced (billing off) or fixed at Stripe, never taken as it is.
+        if (!deliversWhatBillingHandles(only))
+          return { ok: false, error: "webhook_endpoint_unusable" };
         if (!usable(await secrets.status(STRIPE_WEBHOOK_SECRET)))
           return { ok: false, error: "webhook_endpoint_secret_unknown" };
         await rememberEndpoint(adminId, only.id);
@@ -645,6 +659,17 @@ export function createBillingAdminService({
       }),
     );
   }
+}
+
+/** Whether Stripe sends this endpoint every event type billing handles. */
+function deliversWhatBillingHandles(endpoint: StripeWebhookEndpoint): boolean {
+  if (endpoint.status !== "enabled") return false;
+  return (
+    endpoint.enabled_events.includes("*") ||
+    STRIPE_WEBHOOK_EVENTS.every((type) =>
+      endpoint.enabled_events.includes(type),
+    )
+  );
 }
 
 function ratesFailure(

@@ -9,7 +9,7 @@ import { notFound } from "next/navigation";
 import { loadAuthConfig } from "../auth/config.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
-import { getSecretStore } from "../secrets/shared.ts";
+import { getSecretStoreOn } from "../secrets/shared.ts";
 import { createAdapterRegistry } from "./adapter.ts";
 import {
   createBillingCreditService,
@@ -50,7 +50,7 @@ export function getBillingWebhookHandler(): (
 export function getBillingAdminService(): BillingAdminService {
   return createBillingAdminService({
     db: getDatabase(),
-    secrets: getSecretStore(),
+    secretsOn: getSecretStoreOn,
     publicUrl: loadAuthConfig(process.env).baseUrl,
     clientFor: (apiKey, environment) =>
       createStripeClient({

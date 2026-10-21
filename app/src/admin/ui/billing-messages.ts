@@ -32,6 +32,8 @@ const FAILURE_COPY: Record<string, string> = {
     "The address of this app (BETTER_AUTH_URL) is not a public https address, so Stripe could not deliver events to it. Set the public https address and restart, or enter the webhook secret of an endpoint you made yourself.",
   webhook_endpoint_secret_unknown:
     "Stripe has a webhook endpoint for this app already, and Stripe shows its secret only when it is created. Enter the secret by hand, or replace the endpoint.",
+  webhook_endpoint_unusable:
+    "Stripe has a webhook endpoint for this app, but it is switched off or not set to send every event billing needs, so it would not deliver a payment. Replace the endpoint here, or fix it in the Stripe dashboard.",
   webhook_endpoint_in_progress:
     "A webhook endpoint is being created right now. Wait a moment and reload.",
   webhook_secret_not_stored:
@@ -88,6 +90,8 @@ const ISSUE_COPY: Record<string, string> = {
   amount_invalid:
     "Enter an amount in US dollars. A credit is more than 0; a correction is not 0.",
   amount_out_of_range: "Enter at most 10,000 US dollars at once.",
+  request_id_required:
+    "The request could not be recognized. Reload the page and try again.",
   request_id_invalid:
     "The request could not be recognized. Reload the page and try again.",
 };

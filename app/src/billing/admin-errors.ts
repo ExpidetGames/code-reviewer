@@ -50,6 +50,8 @@ export const BILLING_ERROR_CODES = [
   "webhook_url_not_public",
   /** Stripe has an endpoint for this app's address whose secret is not known here: enter the secret, or recreate it. */
   "webhook_endpoint_secret_unknown",
+  /** Stripe has an endpoint for this app's address that is switched off or not told about every event billing handles. */
+  "webhook_endpoint_unusable",
   /** Another request is creating the webhook endpoint right now. */
   "webhook_endpoint_in_progress",
   /** Stripe created the endpoint but its secret could not be stored; the endpoint was removed again, try once more. */
@@ -75,6 +77,7 @@ export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   webhook_environment_mismatch: 422,
   webhook_url_not_public: 422,
   webhook_endpoint_secret_unknown: 409,
+  webhook_endpoint_unusable: 409,
   webhook_endpoint_in_progress: 409,
   webhook_secret_not_stored: 503,
   webhook_secret_not_returned: 502,
@@ -99,5 +102,6 @@ export const BILLING_ISSUE_CODES = [
   "webhook_secret_invalid",
   "body_invalid",
   "type_invalid",
+  "request_id_required",
 ] as const;
 export type BillingIssueCode = (typeof BILLING_ISSUE_CODES)[number];

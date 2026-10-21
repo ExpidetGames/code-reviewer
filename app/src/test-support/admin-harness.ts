@@ -286,7 +286,8 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   const billingLog: string[] = [];
   const billingService = createBillingAdminService({
     db,
-    secrets,
+    secretsOn: (executor) =>
+      createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
     publicUrl: options.billingPublicUrl ?? "https://reviews.example.test",
     clientFor: (apiKey, environment) =>
       createStripeClient({
