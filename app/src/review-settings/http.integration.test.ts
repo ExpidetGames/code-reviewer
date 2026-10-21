@@ -724,3 +724,97 @@ describe("the settings routes of a workspace on the operator's key", () => {
     expect(await response.text()).not.toMatch(/"model"|deepseek/);
   });
 });
+
+// The right to move the pin of a catalog provider's address (#588) comes from the route (`canManageLlmKey`, from the role). A
+// handler built without it must not grant it: the default is the fail-closed one (#614).
+describe("the right to confirm the address of a catalog provider, as the handlers get it", () => {
+  const TRUSTED = { address: "https://api.deepseek.example" };
+  const SELECT = {
+    reviewKind: "dynamic",
+    dynamicProvider: "deepseek",
+    dynamicModel: "deepseek-v4-pro",
+  };
+
+  async function pinnedThenMoved(canManageLlmKey?: boolean) {
+    const app = await setupReviewSettings(undefined, {
+      nativeCatalog: {
+        addressOf: () => Promise.resolve(TRUSTED.address),
+        checkSelection: (_slug, modelId) =>
+          Promise.resolve({
+            ok: true,
+            model: {
+              id: modelId,
+              name: modelId,
+              contextTokens: 128_000,
+              outputTokens: 8_000,
+              reasoning: false,
+              deprecated: false,
+              alpha: false,
+              price: null,
+            },
+          }),
+      },
+    });
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, SELECT);
+    TRUSTED.address = "https://api.deepseek-moved.example";
+    const handlers = createReviewSettingsRouteHandlers({
+      requireUser: async () => USER,
+      service: app.service,
+      ...(canManageLlmKey === undefined ? {} : { canManageLlmKey }),
+    });
+    const request = (method: string, body?: unknown) =>
+      new Request(
+        `${URL_BASE}/api/repositories/${app.first.id}/project/settings`,
+        {
+          method,
+          headers: { "content-type": "application/json" },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        },
+      );
+    const pin = async () =>
+      (
+        JSON.parse((await app.projectRows())[0]!.settings) as {
+          dynamicProviderAddress?: string;
+        }
+      ).dynamicProviderAddress;
+    return { app, handlers, request, pin };
+  }
+
+  // #614-T03
+  it("refuses a confirmation and a reset with 403 when the route passes no right, and stores nothing", async () => {
+    TRUSTED.address = "https://api.deepseek.example";
+    const t = await pinnedThenMoved();
+
+    const confirm = await t.handlers.putProject(
+      t.request("PUT", { settings: { confirmProviderAddress: true } }),
+      t.app.first.id,
+    );
+    const reset = await t.handlers.deleteProject(
+      t.request("DELETE"),
+      t.app.first.id,
+    );
+
+    for (const response of [confirm, reset]) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: "PROVIDER_ADDRESS_CONFIRM_FORBIDDEN",
+      });
+    }
+    expect(await t.pin()).toBe("https://api.deepseek.example");
+  });
+
+  // #614-T03
+  it("lets the same requests through when the route passes the right", async () => {
+    TRUSTED.address = "https://api.deepseek.example";
+    const t = await pinnedThenMoved(true);
+
+    const confirm = await t.handlers.putProject(
+      t.request("PUT", { settings: { confirmProviderAddress: true } }),
+      t.app.first.id,
+    );
+
+    expect(confirm.status).toBe(200);
+    expect(await t.pin()).toBe("https://api.deepseek-moved.example");
+  });
+});

@@ -550,7 +550,7 @@ committed list per provider. But the address a workspace's project saw when it s
 that project's settings (`dynamicProviderAddress`, set by the server, never by a request) and stays fixed: every later claim sends
 the key to exactly that address, and if the catalog trusts another address by then (an admin confirmed a change, #548) the job is
 refused before any key is loaded (`provider_address_changed`, free, with a notice on the Runs page for an Owner or Admin to confirm
-the new address in the review settings of the project; only the roles that manage the workspace's LLM key may write or move a pin). The runner needs nothing new: the entry it receives carries the pinned
+the new address in the review settings of the project; only the roles that manage the workspace's LLM key may write or move a pin; the "Test key" is held to the pins of every project of the workspace for the provider, whatever its kind or state). The limit is trust on first use: a Member can clear the pins while they equal the trusted address and pin again after the catalog moved it, which is a first sight at the moved address (#614; `app/src/native-cost/README.md`, "The limit of the pin"). The runner needs nothing new: the entry it receives carries the pinned
 address, which the app has just checked equals the trusted one, so its verdicts are the shared vectors' as before. The two registry
 providers (`anthropic`, `openrouter`) get no such pin: their address is a constant in the code of the app and of the runner, which
 is stronger than a per-selection copy and cannot go stale.

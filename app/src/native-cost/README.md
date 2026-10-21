@@ -131,6 +131,16 @@ runner (before the key is used):
   project's settings, so two claims cannot pin two addresses) and holds to it from then on. The "Test key" of a catalog provider
   holds to the same pins (`llm_provider_address_changed`, nothing sent). **The registry's two providers get no pin**: their address
   is a constant of the code, which is stronger and cannot go stale when a release changes it.
+- **The limit of the pin (#614).** The pin is trust on first use kept per project, not a committed address. Dropping a pin that is
+  still the address the catalog trusts needs no right (a Member may switch provider, reset or clear a project), so a Member can
+  clear every pin of a provider while the catalog address is the one they were made at, and pin again after the catalog moved it:
+  that pin is a first sight, taken at the moved address. What holds: a pin that the catalog no longer trusts cannot be dropped,
+  replaced or confirmed without the right to manage the workspace's LLM key, a pin another project of the workspace holds
+  differently cannot be written without it, and the "Test key" counts the pins of **every** project of the workspace for the
+  provider, also one on Diff Review or switched off (a Member cannot leave its pin out of the test by switching the project over).
+  What does not: an address the catalog moved while no project of the workspace held a pin for the provider. A dormant pin per
+  provider that outlives the projects, or a committed address, would close it; neither is built, as the registry's two providers
+  already have the committed one.
 
 ## What #555 added
 
