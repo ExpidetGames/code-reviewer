@@ -14,6 +14,8 @@ import { createModelCapabilityChecker } from "./model-capabilities.ts";
 import { llmProviderDescriptors } from "./providers/index.ts";
 import { createModelsDevRepository } from "../db/repositories/models-dev-repository.ts";
 import { createNativeKeyTester } from "../native-providers/key-test.ts";
+import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { createPinnedAddressReader } from "../review-settings/pinned-addresses.ts";
 
 // One checker for the process, so a supported answer is remembered across requests and workspaces: the
 // metadata is public and the same for everybody. The settings save (#269) and the claim of a Dynamic job
@@ -49,5 +51,10 @@ export function getLlmKeyTester(): LlmKeyTestService {
       models: createModelsDevRepository(db),
       legacyProviders: llmProviderDescriptors.ids,
     }),
+    // #588: the test is held to the address the workspace's projects pinned, as a claim is.
+    pinnedAddresses: (workspaceId, slug) =>
+      createPinnedAddressReader(createProjectsRepository(db, workspaceId))(
+        slug,
+      ),
   });
 }

@@ -117,6 +117,44 @@ describe("the key test of a catalog provider", () => {
   });
 
   // #555-T02 (the review round of #548: the key is sent from the app server, so the default transport judges the address)
+  describe("for a provider a project has pinned (#588)", () => {
+    // #588-T24
+    it("asks the trusted address when every pin of the workspace is that address", async () => {
+      const t = setup(provider(), () => new Response("{}", { status: 200 }));
+
+      expect(
+        await t.tester.test("deepseek", KEY, [
+          "https://api.deepseek.example",
+          "https://api.deepseek.example",
+        ]),
+      ).toBe("accepted");
+      expect(t.calls).toHaveLength(1);
+      expect(t.calls[0]?.url).toBe("https://api.deepseek.example/models");
+    });
+
+    // #588-T24
+    it("sends the key nowhere when a pin of the workspace is not the address the catalog trusts now", async () => {
+      for (const pins of [
+        ["https://api.deepseek-old.example"],
+        ["https://api.deepseek.example", "https://api.deepseek-old.example"],
+      ]) {
+        const t = setup(provider(), () => new Response("{}", { status: 200 }));
+
+        expect(await t.tester.test("deepseek", KEY, pins)).toBe(
+          "address_changed",
+        );
+        expect(t.fetchImpl).not.toHaveBeenCalled();
+      }
+    });
+
+    // #588-T24
+    it("keeps testing at the trusted address for a workspace with no pin: nothing was selected yet", async () => {
+      const t = setup(provider(), () => new Response("{}", { status: 200 }));
+
+      expect(await t.tester.test("deepseek", KEY, [])).toBe("accepted");
+    });
+  });
+
   describe("with the transport the running server uses", () => {
     type Lookup = (
       host: string,

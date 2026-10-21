@@ -15,10 +15,15 @@ const KEY = "sk-deepseek-typed-0123456789abcdef";
 
 async function setup(outcome: NativeKeyOutcome = "accepted") {
   const { db } = await createTestDatabase();
-  const asked: Array<{ slug: string; apiKey: string }> = [];
+  const asked: Array<{ slug: string; apiKey: string; pinned?: string[] }> = [];
+  const pinsAsked: Array<{ workspaceId: string; slug: string }> = [];
   const native: NativeKeyTester = {
-    test: (slug, apiKey) => {
-      asked.push({ slug, apiKey });
+    test: (slug, apiKey, pinned) => {
+      asked.push({
+        slug,
+        apiKey,
+        ...(pinned === undefined ? {} : { pinned: [...pinned] }),
+      });
       return Promise.resolve(outcome);
     },
   };
@@ -27,9 +32,13 @@ async function setup(outcome: NativeKeyOutcome = "accepted") {
     rateLimits: createRateLimitsRepository(db),
     baseUrlOf: () => "https://registry.example/api/v1",
     native,
+    pinnedAddresses: (workspaceId, slug) => {
+      pinsAsked.push({ workspaceId, slug });
+      return Promise.resolve(["https://api.deepseek.example"]);
+    },
     log: (line) => lines.push(line),
   });
-  return { service, asked, lines };
+  return { service, asked, lines, pinsAsked };
 }
 
 const test = (
@@ -43,7 +52,39 @@ describe("the key test of a catalog provider", () => {
     const { service, asked } = await setup("accepted");
 
     expect(await test(service)).toEqual({ ok: true });
-    expect(asked).toEqual([{ slug: "deepseek", apiKey: KEY }]);
+    expect(asked).toEqual([
+      {
+        slug: "deepseek",
+        apiKey: KEY,
+        pinned: ["https://api.deepseek.example"],
+      },
+    ]);
+  });
+
+  // #588-T25
+  it("holds the test to the address the workspace's projects pinned: it asks for the pins of this workspace and this provider", async () => {
+    const { service, pinsAsked } = await setup("accepted");
+
+    await test(service, "ws-b");
+
+    expect(pinsAsked).toEqual([{ workspaceId: "ws-b", slug: "deepseek" }]);
+  });
+
+  // #588-T25
+  it("is llm_provider_address_changed, without the key, when the catalog's address is not the pinned one", async () => {
+    const { service, lines } = await setup("address_changed");
+
+    const result = await test(service);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "llm_provider_address_changed",
+      detail: null,
+    });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+    expect(lines).toEqual([
+      "[llm] KEY_TEST_FAILED: llm_provider_address_changed",
+    ]);
   });
 
   // #555-T02

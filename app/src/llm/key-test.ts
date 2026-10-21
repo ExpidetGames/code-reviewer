@@ -97,6 +97,7 @@ export function createLlmKeyTestService({
   timeoutMs,
   adapters,
   native,
+  pinnedAddresses,
   now = () => new Date(),
   log = console.error,
 }: {
@@ -109,6 +110,14 @@ export function createLlmKeyTestService({
   adapters?: Adapters;
   /** The key test of a catalog provider (#555); left out, a provider outside the registry is a provider error. */
   native?: NativeKeyTester;
+  /**
+   * The addresses the workspace's projects pinned for a catalog provider (#588); the test of that provider is held to them as a
+   * claim is. Left out, none (a test of another behavior).
+   */
+  pinnedAddresses?: (
+    workspaceId: string,
+    slug: string,
+  ) => Promise<readonly string[]>;
   now?: () => Date;
   log?: (line: string) => void;
 }): LlmKeyTestService {
@@ -143,7 +152,12 @@ export function createLlmKeyTestService({
       const result =
         native !== undefined &&
         nativeProviderIdOf(provider, llmProviderDescriptors.ids) !== null
-          ? await testCatalogKey(native, provider, apiKey)
+          ? await testCatalogKey(
+              native,
+              provider,
+              apiKey,
+              (await pinnedAddresses?.(workspaceId, provider)) ?? [],
+            )
           : await checkLlmKey({
               baseUrl: baseUrlOf(provider as LlmProvider),
               apiKey,
@@ -163,8 +177,9 @@ async function testCatalogKey(
   native: NativeKeyTester,
   slug: string,
   apiKey: string,
+  pinned: readonly string[],
 ): Promise<LlmKeyTestResult> {
-  switch (await native.test(slug, apiKey)) {
+  switch (await native.test(slug, apiKey, pinned)) {
     case "accepted":
       return { ok: true };
     case "not_verified":
@@ -173,6 +188,8 @@ async function testCatalogKey(
       return { ok: false, error: "llm_key_rejected", detail: null };
     case "unreachable":
       return { ok: false, error: "llm_unreachable", detail: null };
+    case "address_changed":
+      return { ok: false, error: "llm_provider_address_changed", detail: null };
     case "provider_error":
     case "unavailable":
       return { ok: false, error: "llm_provider_error", detail: null };

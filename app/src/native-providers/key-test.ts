@@ -14,11 +14,23 @@ import {
 } from "../models-dev/generic-adapter.ts";
 import { nativeProviderIdOf } from "../native-cost/catalog-ref.ts";
 
-export type NativeKeyOutcome = GenericKeyOutcome | "unavailable";
+export type NativeKeyOutcome =
+  | GenericKeyOutcome
+  | "unavailable"
+  /** A project of the workspace pinned another address than the catalog trusts now (#588): nothing was sent. */
+  | "address_changed";
 
 export type NativeKeyTester = {
-  /** Asks the provider of this slug whether the key is accepted. `unavailable`: nothing was sent (not a usable provider). */
-  test(slug: string, apiKey: string): Promise<NativeKeyOutcome>;
+  /**
+   * Asks the provider of this slug whether the key is accepted. `unavailable`: nothing was sent (not a usable provider).
+   * `pinned` (#588) are the addresses the workspace's projects pinned for the provider; the key goes to the trusted address only
+   * when every one of them is that address, as a claim holds to it (`address_changed`: nothing was sent).
+   */
+  test(
+    slug: string,
+    apiKey: string,
+    pinned?: readonly string[],
+  ): Promise<NativeKeyOutcome>;
 };
 
 export function createNativeKeyTester({
@@ -36,7 +48,7 @@ export function createNativeKeyTester({
   timeoutMs?: number;
 }): NativeKeyTester {
   return {
-    async test(slug, apiKey) {
+    async test(slug, apiKey, pinned = []) {
       const providerId = nativeProviderIdOf(slug, legacyProviders);
       if (providerId === null) return "unavailable";
       const provider = await models.getProvider(providerId);
@@ -47,6 +59,10 @@ export function createNativeKeyTester({
         resolveAddresses === undefined ? {} : { resolveAddresses },
       );
       if (!built.ok) return "unavailable";
+      // #588: the rule of the claim. A pin that is not the address the catalog trusts now means the address moved after a project
+      // selected the provider; the key is not sent to the new address, and an Owner or Admin confirms it in the project settings.
+      if (pinned.some((address) => address !== provider.url.trustedUrl))
+        return "address_changed";
       const check = await built.adapter.testKey({
         apiKey,
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
