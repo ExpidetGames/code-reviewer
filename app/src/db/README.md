@@ -557,6 +557,13 @@ workspace; a workspace without a row has no limit), `monthly_limit_micro_usd` (`
 classified in `scoping.test.ts` and covered row by row in `scoped-isolation.integration.test.ts`); `updated_by` is an audit pointer that a user merge moves to the acting admin (`github-signin/merge.ts`). `20261021210200_add_limit_query_indexes` adds `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the hourly brake and
 `billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum, which also carries `amount_micro_usd` (`INCLUDE` on Postgres, a last key column on SQLite) so the sum is read from the index alone. The three versions sort after the migrations of the billing work that is open next to them (`20261021170000` to `20261021190100`), so the order is the same whichever lands first. See `src/billing/README.md`, "Limits at claim (#499)".
 
+### Balance notifications (#506)
+
+`20261022030000_create_billing_notifications` adds `billing_notifications`: `workspace_id` (→ `workspaces.id`) and `kind` (`low` or `empty`, checked) as the primary key, `state` (`armed` or
+`sent`, checked), `sent_at` (null for a crossing that was not mailed), `delivery` (`none`, `due`, `sending`, `delivered`, `failed`, checked) and `updated_at`; a partial index `billing_notifications_due (workspace_id, kind) where delivery = 'due'`
+finds the mails that wait. The table is new and empty and no existing row is touched. **Customer data, workspace scoped** (`billing-notifications-repository.ts`, classified in `scoping.test.ts`, covered row by row in `scoped-isolation.integration.test.ts`);
+the one instance-level reader, `billing-notification-directory-repository.ts`, only claims due mails and records how a delivery ended. Written in the transaction of every journal write, see `src/billing/README.md`, "Balance notifications (#506)".
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
