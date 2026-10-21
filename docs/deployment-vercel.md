@@ -585,7 +585,8 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
 ### 3.6 The billing webhook (only when billing is on)
 
 Billing is off by default and a deployment that never turns it on needs nothing here: `POST /api/billing/webhook` answers
-the 404 of a path that does not exist (#497, ADR 0006). When billing is on and the active adapter has a webhook (not
+the 404 of a path that does not exist (#497, ADR 0006). What billing is, the Stripe account steps, the rates, the go-live order and
+the day-to-day work are in [`billing.md`](billing.md); this section is only what the deployment must provide. When billing is on and the active adapter has a webhook (not
 `manual`, which has none), the payment provider calls this route, and three things must hold:
 
 - **Reachable without a login, from the internet.** The route is public (the signature is the authentication). Do not put
@@ -595,7 +596,7 @@ the 404 of a path that does not exist (#497, ADR 0006). When billing is on and t
   signature, applies the event in one database transaction and answers `200`. A cold function plus the database is the only
   cost.
 - **A bad signature is `401` with an empty body**, a body the adapter cannot read `400`, a failure `500` (the provider
-  redelivers). A signed event that is no event, and a payment that could not be credited (an unknown intent, an amount above what was asked), are answered `200` and not retried: watch the error log for `billing_webhook_event_invalid` and `billing_webhook_needs_review outcome=...`, and review the open rows of `billing_webhook_events` (`review_state = 'open'`). The logs name a code (`billing_webhook_rejected code=signature_invalid`) and never the body.
+  redelivers). A signed event that is no event, and a payment that could not be credited (an unknown intent, an amount above what was asked), are answered `200` and not retried: watch the error log for `billing_webhook_event_invalid` and `billing_webhook_needs_review outcome=...`, and review the open rows on the admin page **Payment reviews** (`/admin/billing/reviews`, [`billing.md`](billing.md#payment-reviews)). The logs name a code (`billing_webhook_rejected code=signature_invalid`) and never the body.
 
 **Stripe (#502).** The route is the one webhook endpoint of the instance; you do not create it by hand. In the admin portal, menu
 **Billing**, "Create webhook endpoint" registers `https://<the App's production domain>/api/billing/webhook` at Stripe (the
@@ -627,6 +628,10 @@ reaches `api.stripe.com` over TLS (port 443; a few calls per top-up, 10 seconds 
 Vercel nothing needs to be opened; on a network with an egress allow list add `api.stripe.com`. The credentials are the Stripe
 key and webhook secret of the admin portal's Billing page, never an environment variable. Nothing is sent while billing is off
 or when the active adapter is `manual`. The buyer's business name, address and VAT ID go to Stripe and nowhere else.
+
+**Before billing goes on in production.** The Dispatcher must be of a release that reports its VMs (`vm_lifecycle`), or the admin page
+refuses the switch. Put a rate limit on `POST /api/billing/webhook` at the Vercel firewall (a few dozen requests a minute per address
+is plenty). Do not switch billing off while top-ups are open ([`billing.md`](billing.md#9-switching-off-and-what-to-know-first)).
 
 
 ## 4. First deployment, step by step

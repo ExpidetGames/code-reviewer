@@ -153,7 +153,7 @@ shows; the API has no catalog route, decision C8 of ADR 0005, so a writer withou
 text; an id that no entry has is accepted and matches nothing). Anything else is `422 catalog_entry_invalid` (`field`:
 `modelAccess` for a value that is not the object or has another key, `modelAccess.catalogEntries` for the list) and
 nothing is stored. It has a meaning for `keyMode: "managed"` only: next to `"own"` it is accepted and kept, not read
-(a workspace on its own key chooses provider and model freely); a later billing design may refuse it for an `own` plan. Every answer states it (`{ "catalogEntries": null }` for an entry that never set it).
+(a workspace on its own key chooses provider and model freely); billing does not refuse it for an `own` key mode. Every answer states it (`{ "catalogEntries": null }` for an entry that never set it).
 
 **A write without `modelAccess` keeps the stored value**, as one without `periodStart` keeps the stored start, so a writer
 that does not know the field (a script, an older client) cannot clear what an operator granted in

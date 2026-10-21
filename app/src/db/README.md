@@ -528,9 +528,9 @@ of the instance admin (`job-directory-repository.ts`) lists the newest jobs of e
 index each call sorts every job of the instance. `job-directory-repository.integration.test.ts` reads the query plan on
 SQLite.
 
-### The balances that hold something
+### The balances that hold something (legacy)
 
-Migration `20261021120000_add_billing_balances_reserved_index` (#591). It adds the partial index `billing_balances_reserved` on
+Migration `20261021120000_add_billing_balances_reserved_index` (#591). Since #605 no claim holds money, so the index is empty on an instance that never took a hold; it stays for the holds an earlier release may have written. It adds the partial index `billing_balances_reserved` on
 `billing_balances (workspace_id) where reserved_micro_usd > 0` (the same on both engines) and touches no column and no row. The sweep
 of stranded holds asks which workspaces have money reserved in every run; the index makes that read grow with the holds that are open,
 not with the number of workspaces (`billing-holds-sweep.ts`; `stranded-holds.integration.test.ts` checks on Postgres that the read
@@ -556,6 +556,15 @@ workspace; a workspace without a row has no limit), `monthly_limit_micro_usd` (`
 `updated_by` (→ `users.id`, set null when the user is deleted) and `updated_at`. **Customer data, workspace scoped** (`billing-workspace-settings-repository.ts`,
 classified in `scoping.test.ts` and covered row by row in `scoped-isolation.integration.test.ts`); `updated_by` is an audit pointer that a user merge moves to the acting admin (`github-signin/merge.ts`). `20261021210200_add_limit_query_indexes` adds `usage_records_workspace_reserved_at (workspace_id, reserved_at)` for the hourly brake and
 `billing_journal_entries_type_created (workspace_id, type, created_at)` for the monthly sum, which also carries `amount_micro_usd` (`INCLUDE` on Postgres, a last key column on SQLite) so the sum is read from the index alone. The three versions sort after the migrations of the billing work that is open next to them (`20261021170000` to `20261021190100`), so the order is the same whichever lands first. See `src/billing/README.md`, "Limits at claim (#499)".
+
+### Which jobs are settled, and the resolution of a payment review (#605, #603)
+
+`20261022010000_add_usage_record_billing_state` (#605) adds `usage_records.billing_state`, nullable, checked to `open` or `settled`. With no hold at the claim the journal
+can no longer say which jobs were claimed with billing on, so the record does: `open` from a claim with billing on, `settled` after the one settlement, null for a job
+claimed with billing off (never charged). The column is nullable and no row changes, so a previous release on the same database keeps working. See `src/billing/README.md`,
+"Start, settle". `20261022020000_add_billing_webhook_events_resolution` (#603) adds four nullable text columns to `billing_webhook_events` (`resolved_at`, `resolved_by`,
+`resolution_note`, `resolution_entry_id`) and the partial index `billing_webhook_events_review_idx (review_state, received_at)` that serves the list and the count of payment
+reviews; no row changes, and the table stays instance level (the actor is an operator, the note is the operator's own text). See "Payment reviews" there.
 
 ### Balance notifications (#506)
 
@@ -613,7 +622,7 @@ file, and the migrator refuses to start (`previously executed migration ... is m
    - `billing_settings` of the old shape can say `enabled: true` (with an environment, a client token and grace days).
      The code still reads that as on, and the billing routes of a later issue would run on a database with no payment
      adapter and no rates. The row goes, and billing is off ("never configured") until someone switches it on.
-   - A `default_entitlements` row with `"source":"billing"` is the Free plan that billing wrote, not a choice of the
+   - A `default_entitlements` row with `"source":"billing"` is the default that the removed billing design wrote, not a choice of the
      operator. Left in place it would silently become the operator's default for every workspace without its own
      limits (its limits and `modelAccess` included). The rule: a default that carries the marker goes, and the instance
      has no default again until the operator saves one (operator API `PUT /api/operator/v1/entitlements/default`). A

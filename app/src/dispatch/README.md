@@ -183,10 +183,11 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
    rows of jobs that finished a week ago**) runs **once when the hour has changed**. The hour of the last
    successful run is kept in `app_meta` (`maintenance.sweep_cleanup_hour`), so every instance sees the same one; a run
    that failed is tried again by the next run. On a server (Docker, Coolify) the timer stays as it was.
-7. **`billing_holds`** (#591): while billing is on, the holds of jobs that ended while it was off are released
-   (`src/billing/README.md`, "Holds of jobs that ended while billing was off"), at most 500 a run. It reads only the
-   billing switch while billing is off. A failure is a failed step (`billing_holds`) and is tried again by the next run.
-8. **`balance_mails`** (#506): mails the balance crossings that are due (`src/billing/README.md`, "Balance notices"): a settlement
+7. **`billing_holds`** (#591, legacy since #605): while billing is on, the old holds of jobs that ended while it was off are
+   released (`src/billing/README.md`, "Old holds (legacy)"), at most 500 a run. No claim takes a hold any more, so on an
+   instance that never took one the step finds nothing. It reads only the billing switch while billing is off. A failure is a
+   failed step (`billing_holds`) and is tried again by the next run.
+8. **`balance_mails`** (#506): mails the balance crossings that are due (`src/billing/README.md`, "Balance notifications (#506)"): a settlement
    of this sweep or of a superseded job has no response to send after. It reads only the billing switch while billing is off and
    never throws; a failure is a failed step (`balance_mails`). The answer of the route counts the mails sent (`balanceMailsSent`).
 9. **`models_dev`** (#548): the daily read of the models.dev catalog (`src/models-dev/README.md`) when the last success is more
