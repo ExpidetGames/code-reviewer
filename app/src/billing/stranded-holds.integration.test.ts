@@ -6,13 +6,16 @@
 // means no charge. The reconciliation runs when billing is switched on (inside the transaction that writes `enabled`) and as a
 // step of the sweep while billing is on, and `verify()` flags what is left. On SQLite and, when TEST_DATABASE_URL is set,
 // on Postgres.
-import type { KyselyPlugin } from "kysely";
+import { sql, type KyselyPlugin } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
   createBillingJournalRepository,
   type JournalEntry,
 } from "../db/repositories/billing-journal-repository.ts";
-import { findStrandedHolds } from "../db/repositories/billing-holds-sweep.ts";
+import {
+  findStrandedHolds,
+  suspectWorkspacesQuery,
+} from "../db/repositories/billing-holds-sweep.ts";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import type { JobOutcome } from "../jobs/job-types.ts";
@@ -632,6 +635,27 @@ describe.each(databases)("the holds of ended jobs on %s", (name, open) => {
         ["reservation", -MANAGED_DIFF_HOLD],
         ["release", MANAGED_DIFF_HOLD],
       ]);
+    },
+  );
+  // #591-T23
+  const onlyPostgres = name === "Postgres" && open !== undefined ? it : it.skip;
+  onlyPostgres(
+    "asks which workspaces have a stranded hold without a sequential scan of the journal, the jobs or the balances",
+    async () => {
+      const fixture = await start();
+      await claim(fixture);
+      await endedWhileOff(fixture);
+      // With the sequential scan out of the way the planner uses an index wherever there is one, and a `Seq Scan` is left
+      // only on a table that has no index for the read: the plan for any size of data, not for this one.
+      const plan = await fixture.db.transaction().execute(async (trx) => {
+        await sql`set local enable_seqscan = off`.execute(trx);
+        const { rows } = await sql<
+          Record<string, string>
+        >`explain ${suspectWorkspacesQuery()}`.execute(trx);
+        return rows.map((row) => row["QUERY PLAN"]).join("\n");
+      });
+      expect(plan).not.toContain("Seq Scan");
+      expect(plan).toContain("billing_balances_reserved");
     },
   );
 });

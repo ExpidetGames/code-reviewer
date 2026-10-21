@@ -35,13 +35,12 @@ export const ENDED_JOB_STATUSES = [
 
 export type StrandedHold = { workspaceId: string; jobId: string };
 
-/** At most `limit` stranded holds, in a fixed order (workspace, then job), so a repeated run walks the same way. */
-export async function findStrandedHolds(
-  db: Kysely<Database>,
-  limit: number,
-): Promise<StrandedHold[]> {
-  // Literals, not bound values, where a partial index has to match (`state = 'reserved'`, `reserved_micro_usd > 0`).
-  const { rows: suspects } = await sql<{ workspace_id: string }>`
+/**
+ * Step 1: the workspaces whose reserved money is more than the holds that belong to a `reserved` record explain. Literals, not
+ * bound values, where a partial index has to match (`state = 'reserved'`, `reserved_micro_usd > 0`).
+ */
+export function suspectWorkspacesQuery() {
+  return sql<{ workspace_id: string }>`
     select b.workspace_id as workspace_id
     from billing_balances as b
     left join (
@@ -62,30 +61,37 @@ export async function findStrandedHolds(
     ) as accounted on accounted.workspace_id = b.workspace_id
     where b.reserved_micro_usd > 0
       and b.reserved_micro_usd > coalesce(accounted.held, 0)
-    order by b.workspace_id`.execute(db);
+    order by b.workspace_id`;
+}
+
+/** At most `limit` stranded holds, in a fixed order (workspace, then job), so a repeated run walks the same way. */
+export async function findStrandedHolds(
+  db: Kysely<Database>,
+  limit: number,
+): Promise<StrandedHold[]> {
+  const { rows: suspects } = await suspectWorkspacesQuery().execute(db);
   if (suspects.length === 0) return [];
+  // The workspaces are named on both sides of the anti join (the second `in` repeats the first on purpose): the planner then
+  // reads the releases of these workspaces by their index, not all of them.
+  const named = sql.join(suspects.map((row) => row.workspace_id));
   const { rows } = await sql<{ workspace_id: string; job_id: string }>`
-    with open_reservations as materialized (
-      select r.workspace_id as workspace_id, r.ref_key as job_id
-      from billing_journal_entries as r
-      where r.workspace_id in (${sql.join(suspects.map((row) => row.workspace_id))})
-        and r.type = 'reservation'
-        and not exists (
-          select 1 from billing_journal_entries as l
-          where l.workspace_id = r.workspace_id
-            and l.type = 'release'
-            and l.ref_key = r.ref_key
-        )
-    )
-    select o.workspace_id as workspace_id, o.job_id as job_id
-    from open_reservations as o
-    join jobs as j on j.id = o.job_id and j.workspace_id = o.workspace_id
-    where j.status in (${sql.join([...ENDED_JOB_STATUSES])})
+    select r.workspace_id as workspace_id, r.ref_key as job_id
+    from billing_journal_entries as r
+    left join billing_journal_entries as l
+      on l.workspace_id = r.workspace_id
+        and l.type = 'release'
+        and l.ref_key = r.ref_key
+        and l.workspace_id in (${named})
+    join jobs as j on j.id = r.ref_key and j.workspace_id = r.workspace_id
+    where r.workspace_id in (${named})
+      and r.type = 'reservation'
+      and l.id is null
+      and j.status in (${sql.join([...ENDED_JOB_STATUSES])})
       and not exists (
         select 1 from usage_records as u
         where u.job_id = j.id and u.state = 'reserved'
       )
-    order by o.workspace_id, o.job_id
+    order by r.workspace_id, r.ref_key
     limit ${limit}`.execute(db);
   return rows.map((row) => ({
     workspaceId: row.workspace_id,
