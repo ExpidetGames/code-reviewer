@@ -267,6 +267,106 @@ describe.each(databases)(
         },
       );
 
+      // #499-T19
+      run(
+        "counts the holds of the runs in flight: the limit is a hard cap at the claim",
+        async () => {
+          const fixture = await start({ monthlyLimitMicroUsd: 600_000 });
+          const running = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+          ).toBe(running.id);
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(
+            DIFF_OWN_HOLD,
+          );
+          const next = await enqueue(fixture);
+
+          // 0 charged + 325,000 held by the running review + 325,000 for this one pass 600,000.
+          expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
+
+          expect(await fixture.queue.get(next.id)).toMatchObject({
+            status: "failed",
+            errorCode: "monthly_limit_reached",
+          });
+          // The review that runs is never touched.
+          expect((await fixture.queue.get(running.id))?.status).toBe("running");
+          expect(await usageRecords(fixture)).toHaveLength(1);
+        },
+      );
+
+      // #499-T19
+      run(
+        "lets a job pass when the charges, the holds in flight and its hold are exactly the limit, and refuses one micro-USD less room",
+        async () => {
+          const exact = 300_000 + 2 * DIFF_OWN_HOLD;
+          const fixture = await start({ monthlyLimitMicroUsd: exact - 1 });
+          await charge(fixture, 300_000);
+          const running = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+          ).toBe(running.id);
+          const refused = await enqueue(fixture);
+
+          expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
+          expect((await fixture.queue.get(refused.id))?.errorCode).toBe(
+            "monthly_limit_reached",
+          );
+
+          await limitsOf(fixture).setMonthlyLimit(exact, null);
+          const passes = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-b", ENGINES))?.job.id,
+          ).toBe(passes.id);
+        },
+      );
+
+      // #499-T19
+      run(
+        "gives the room back when the running review ends: its hold is released and its charge counted instead",
+        async () => {
+          const fixture = await start({ monthlyLimitMicroUsd: 600_000 });
+          const running = await enqueue(fixture);
+          const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+          const blocked = await enqueue(fixture);
+          expect(await fixture.queue.claimNext("runner-b", ENGINES)).toBeNull();
+          expect((await fixture.queue.get(blocked.id))?.errorCode).toBe(
+            "monthly_limit_reached",
+          );
+
+          await fixture.queue.complete(running.id, claimed?.leaseToken ?? "", {
+            ok: false,
+            errorCode: "timeout",
+          });
+          // The failed run was released free (no charge): the hold is gone and the room is back.
+          expect((await journalOf(fixture).balance()).reservedMicroUsd).toBe(0);
+          const later = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-b", ENGINES))?.job.id,
+          ).toBe(later.id);
+        },
+      );
+
+      // #499-T19
+      run(
+        "does not count the hold of the job that asks twice when it is claimed again after a lost lease",
+        async () => {
+          const fixture = await start({
+            monthlyLimitMicroUsd: DIFF_OWN_HOLD,
+            hourlyReviewLimit: 100,
+          });
+          const job = await enqueue(fixture);
+          expect(
+            (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
+          ).toBe(job.id);
+          fixture.clock.advance(60 * 60_000);
+
+          const again = await fixture.queue.claimNext("runner-b", ENGINES);
+
+          // Its own hold is held already (325,000): it counts once, and exactly the limit passes.
+          expect(again?.job.id).toBe(job.id);
+        },
+      );
+
       // #499-T02
       run("refuses by one micro-USD more than the limit", async () => {
         const fixture = await start({
