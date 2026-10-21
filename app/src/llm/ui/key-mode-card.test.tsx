@@ -41,7 +41,14 @@ function card(
   api = fakeApi(),
 ) {
   render(
-    <KeyModeCard canManage keyMode="managed" hasOwnKey api={api} {...props} />,
+    <KeyModeCard
+      workspaceSlug="default"
+      canManage
+      keyMode="managed"
+      hasOwnKey
+      api={api}
+      {...props}
+    />,
   );
   return api;
 }
@@ -50,7 +57,13 @@ describe("the key mode card", () => {
   // #496-T09
   it("shows both choices with one sentence each about what is charged, and the one that applies", () => {
     const { container } = render(
-      <KeyModeCard canManage keyMode="managed" hasOwnKey api={fakeApi()} />,
+      <KeyModeCard
+        workspaceSlug="default"
+        canManage
+        keyMode="managed"
+        hasOwnKey
+        api={fakeApi()}
+      />,
     );
 
     const ours = screen.getByRole("radio", { name: /Use our models/ });

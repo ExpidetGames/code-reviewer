@@ -90,6 +90,7 @@ export default defineConfig({
         /e2e\/admin\/billing\.e2e\.ts$/,
         /e2e\/admin\/billing-reviews\.e2e\.ts$/,
         /e2e\/billing\//,
+        /e2e\/billing-journeys\//,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
@@ -233,8 +234,39 @@ export default defineConfig({
       // No retry: a second attempt would find the payments made and the profile saved.
       retries: 0,
       use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
-      testMatch: /e2e\/billing\/.*\.e2e\.ts$/,
+      testMatch: /e2e\/billing\/workspace-billing\.e2e\.ts$/,
       dependencies: ["billing-reviews-admin"],
+    },
+    // The journeys of the balance banner (#506) and of the key mode (#496): the same app, one after the other and after the billing page
+    // of a workspace, not next to it. Each puts billing on against the fake Stripe (the app keeps the signing secret of the last webhook
+    // endpoint made) and ends with billing off or a balance of its own, so run side by side on two workers they broke each other (the
+    // payment's webhook was answered 400, #623).
+    {
+      name: "billing-banner",
+      // No retry: a second attempt would find the balance set by the first.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing\/balance-banner\.e2e\.ts$/,
+      dependencies: ["billing-workspace"],
+    },
+    {
+      name: "billing-key-mode",
+      // No retry: a second attempt would find the key saved and the choice made.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing\/key-mode\.e2e\.ts$/,
+      dependencies: ["billing-banner"],
+    },
+    // The billing journeys that need a review to run (#508): the same app, after the billing page of a workspace and the key mode. A runner script
+    // hands out the jobs the pushes make and reports them, so the journeys count the balance, the prices and the notices; they leave
+    // the workspace with a bound installation, a project that is active and a journal of its own, so nothing comes after them.
+    {
+      name: "billing-journeys",
+      // No retry: a second attempt would find the credit granted, the payments made and the reviews run.
+      retries: 0,
+      use: { ...browser, baseURL: e2eEnv.catalogAdminAppUrl },
+      testMatch: /e2e\/billing-journeys\/.*\.e2e\.ts$/,
+      dependencies: ["billing-key-mode"],
     },
     // The update of an installation of the previous release (a database and an environment made like the
     // previous release's): the journey starts and restarts the app itself, with a database of its own, and
