@@ -69,7 +69,11 @@ no webhooks, so it does not replace it. The app's client (`app/src/billing/strip
   `tax_id_collection`, `invoice_creation`, `customer_update`, `payment_method_types`, `custom_text` and the other parameters
   Stripe's documentation lists as unsupported, or a line item without an eligible product `tax_code`. The Stripe sandbox
   itself refused only `payment_method_types` and `custom_text` (2026-10-20); the fake is stricter on purpose, because the
-  documentation is what the money depends on.
+  documentation is what the money depends on. Of the tax codes the sandbox took `txcd_10000000`, `txcd_10103000`,
+  `txcd_10103001` and `txcd_10105002` and refused `txcd_99999999`, `txcd_00000000`, `txcd_20030000` and a text that is no
+  code (2026-10-21): the fake takes the `txcd_10......` family and refuses the rest with the sandbox's message; which other
+  codes are eligible was not probed. The fake takes **any amount from one cent**, and any tax id value of a type it knows
+  (Stripe checks the shape per type); a test of the 10 USD floor or of a VAT ID format must not lean on it.
 - **Bad days** (`fake.faults`): `dropResponse` (the request ran, the answer is lost: `hang` or `reset`), `failWith` (a 5xx or
   any status), `rateLimit` (429 with `Retry-After`), `delay`, `respondWith` (a raw answer: an oversize body, a redirect).
 - **The buyer and Stripe.** `fake.buyer.pay(sessionId, { taxAmount, charged })` pays an open session (the session completes, a

@@ -1331,7 +1331,7 @@ const CASES: Case[] = [
   {
     name: "profiles.get",
     run: (a) => a.profiles.get(),
-    expectAnswer: (answer, a) =>
+    expectAnswer: (answer) =>
       expect(answer).toMatchObject({
         legalName: "Legal a GmbH",
         customerRef: "cus_a",

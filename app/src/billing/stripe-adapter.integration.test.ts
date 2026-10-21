@@ -6,7 +6,6 @@ import { BillingAdapterError, toUsd, type BillingProfile } from "./adapter.ts";
 import { createStripeAdapter } from "./stripe-adapter.ts";
 import { clientFor, startTestStripe } from "../test-support/stripe-fake.ts";
 
-const USD = 1_000_000;
 const WORKSPACE = { id: "workspace-1" };
 
 const PROFILE: BillingProfile = {

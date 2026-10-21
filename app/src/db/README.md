@@ -496,6 +496,17 @@ tables and touches no existing row:
 
 The amount column is `integer` on SQLite and `bigint` on Postgres, like the journal. See `src/billing/README.md`.
 
+### The billing profile
+
+Migration `20261021090000_create_billing_profiles` (#501; epic #489, ADR 0006, 2.13). One new, empty table, no existing row
+touched: `billing_profiles` (primary key `workspace_id` → `workspaces.id`, so at most one profile per workspace; `legal_name`,
+`country` (ISO 3166-1 alpha-2), `address_line1`, `address_line2`, `postal_code`, `city`, `vat_id` (normalized, a light format
+check only); `confirmed_at`, `confirmed_by` (→ `users.id`, set null when the user goes) and `terms_version`, the business
+confirmation of the first top-up, with a check that the time and the version are set together; `customer_adapter` and
+`customer_ref`, the payment provider's customer made from the profile, both or neither; `created_at`, `updated_at`, the time of
+the last edit of the content). **Customer data, workspace scoped** (`billing-profiles-repository.ts`; classified in
+`scoping.test.ts`, with rows in `scoped-isolation.integration.test.ts`); never logged. See `src/billing/README.md`.
+
 ### The newest jobs of the instance
 
 Migration `20261019183000_add_jobs_created_at_index` (#541). It adds the index `jobs_created_at_id` on `jobs (created_at,

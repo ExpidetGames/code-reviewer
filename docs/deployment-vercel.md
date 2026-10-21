@@ -599,6 +599,14 @@ the 404 of a path that does not exist (#497, ADR 0006). When billing is on and t
 
 Which events to register at the provider, and its signing secret, belong to its adapter (Stripe: #502).
 
+**Outbound from the App when billing runs on Stripe (#501).** A top-up is the one place the App calls out: the App function
+reaches `https://api.stripe.com` (port 443, a customer and a Checkout Session per top-up, 10 seconds at most per request, no
+redirect followed). On Vercel nothing needs to be opened; on a network with an egress allow list add `api.stripe.com`. The
+credentials are the Stripe key and webhook secret of the admin portal's Billing page, never an environment variable. Nothing is
+sent while billing is off or when the active adapter is `manual`. The customer's name, address and VAT ID go to Stripe and
+nowhere else.
+
+
 ## 4. First deployment, step by step
 
 Do the steps in this order (migrate, variables, first deployment, setup code, webhook, smoke test); each one has a check.
