@@ -6,7 +6,7 @@ epic #489): prepaid pay-as-you-go through Stripe Managed Payments, a provider-ne
 earlier subscription design (plans, plan versions, prices with a payment provider, an admin page for them) was deleted
 before it reached a release (#491); the model catalog, the providers and `modelAccess` of epic #420 are unaffected.
 
-What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: a hold at claim, the settlement when the job ends and the refusal when the balance cannot hold it (#498, "Reserve, settle, release" below), and the Stripe adapter with the billing profile and the top-up route (#501, below). Server-only: every
+What is here today is the part every later billing issue builds on, the price of a run (#494), the adapter seam with its event application and the `manual` adapter (#497), the Stripe client (#500), the admin page that switches billing on (#504, below) and the money flow of a job: a hold at claim, the settlement when the job ends and the refusal when the balance cannot hold it (#498, "Reserve, settle, release" below), and the Stripe adapter with the billing profile and the top-up route (#501, below), and the start credit with its abuse protection (#507, "The start credit" below). Server-only: every
 source file imports `"server-only"` (`server-only.test.ts`).
 
 | File                                                                                                                              | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -24,6 +24,7 @@ source file imports `"server-only"` (`server-only.test.ts`).
 | `claim-key-mode.ts`                                                                                                               | `keyModeAtClaim`: whose key a job runs on, as far as the claim knows. The seam of #496.                                                                                                                                                                                                                                                                                                                                                        |
 | `settle-jobs.ts`                                                                                                                  | `settleEndedJobs`: prices the jobs a transaction ended and writes a `release` and, unless free, a `usage` entry (#498).                                                                                                                                                                                                                                                                                                                        |
 | `stranded-holds.ts`                                                                                                               | `releaseStrandedHolds` (#591): releases the holds of ended jobs that have none released (a job that ended while billing was off), never charging; run by the switch-on and the sweep.                                                                                                                                                                                                                                                          |
+| `start-credit.ts`                                                                                                                 | `ensureStartCredit` / `ensureStartCreditWhileOn` (#507): the one function that grants the start credit, once per GitHub account ("The start credit" below).                                                                                                                                                                                                                                                                                    |
 | `late-minutes.ts`                                                                                                                 | `correctLateMinutes`: one `correction` when the real end of a VM arrives within a day and moves the minutes by more than one (#498).                                                                                                                                                                                                                                                                                                           |
 | `dispatcher-features.ts`                                                                                                          | Which Dispatchers the app has seen (with and without `vm_lifecycle`) and `canSwitchBillingOnWithDispatcher` (#498).                                                                                                                                                                                                                                                                                                                            |
 | `enabled.ts`, `readiness.ts`                                                                                                      | `isBillingOn(db)`: the one reader of the switch (on = the switch is set and the adapter is ready, `readiness.ts`); `readBillingSwitch(db)`: the same with what is missing. `guardBillingRoute`: the first line of every billing route.                                                                                                                                                                                                         |
@@ -738,6 +739,64 @@ two grants, unless the caller passes a `requestId` (a form token): then the same
 whole micro-USD amount, never zero, at most 10,000 USD at once, a note is required (at most 500 characters) and the
 workspace must exist (`MANUAL_CREDIT_ERROR_CODES`). The form is the billing page (#504, above); its routes check that the
 caller is an instance admin first and work whether billing is on or off.
+
+## The start credit
+
+The start credit (ADR 0006, 2.16, D11, P7; #507) replaces the Free plan: a new workspace can try our models before it pays. It is a
+`start_credit` journal entry of the amount the admin set on the billing page (`startCreditMicroUsd`, default 2 USD, **0 disables it**).
+It is the easiest thing to farm, so it is tied to the **GitHub account**, not to the workspace.
+
+- **When.** Lazily, by one idempotent function, `ensureStartCredit(db, workspaceId)`, the first time a workspace with a bound
+  installation meets billing **while billing is on**: the first claim of a job (inside the claim transaction, before the hold, so the
+  first job can use it; `runner-jobs-repository.ts` calls `ensureStartCreditWhileOn` once billing is `on`) and the first visit of the
+  workspace's billing page (that page does not exist yet: the issue that adds it, #501, calls `ensureStartCredit` before it reads the balance). There is no scheduler and no
+  hook on binding. Existing workspaces when billing is switched on get theirs through the same path, on their first contact.
+- **Who.** The numeric account id of the installation (`config.accountId`, #103) of an integration that is not `disconnected`. A
+  workspace without such an installation, or whose installation names no account id, gets nothing, and its claim is refused for
+  balance as usual (`insufficient_balance`). A workspace is granted **at most once** whatever the number of its installations
+  (the journal key `(workspace, start_credit, "start-credit")`), and an account at most once whatever the number of workspaces.
+- **The memory.** `billing_start_credit_grants` (instance level, `billing-start-credit-grants-repository.ts`): the numeric account id
+  (primary key), the id of the workspace that got the credit and the time. **No foreign key to a workspace**, so the row outlives
+  it: deleting a workspace and creating it again for the same installation account finds the account granted. It holds ids and a
+  time only: no login, no name, no address, no amount (the amount is the journal entry, which is what the customer sees). The
+  account id is checked to be a plain positive number (a database check on both engines).
+- **Race safety.** The grant is one transaction (the claim's, or its own): look for the workspace's entry, read the amount, read the
+  accounts of the installations, take the balance row's lock (the journal's rule for every writer: the lock first, then any write,
+  the grants table included), take the first bound account nobody was granted (`insert ... on conflict do nothing` on the primary
+  key: of two writers exactly one wins, the other waits for the first to commit on Postgres and gets "already granted"), write the
+  entry. Nothing is written when any step fails, and every step is keyed, so a retry never grants twice.
+- **It never fails the claim.** The grant runs inside a savepoint. An error of any kind (a database error, a row it cannot read)
+  rolls back to the savepoint, is logged as `BILLING_START_CREDIT_FAILED workspace=<id>` (never the error text), and the result is
+  `failed`: no grant, no entry, the claim goes on and the workspace is judged on its balance as usual; the next contact tries
+  again. It reads only the `config` of the rows with `type = 'github_app'` and a status other than `disconnected`, never the
+  credentials or the webhook secret, and an unreadable config or account id skips that row. A claim tries a workspace once, not
+  once per candidate job.
+- **Amount changes.** The amount is read when the grant is made. A grant is never edited (the journal is append-only), so a changed
+  amount affects only grants not made yet. Raising it from 0 grants later contacts; accounts that met billing while it was 0 were not
+  consumed (no row was written), so they are granted at the new amount on their next contact.
+- **Billing off.** `ensureStartCredit` reads the instance setting and nothing else: no billing table and no integration. The claim
+  does not call it unless billing is on and ready. Nothing is granted while billing is off.
+- **Log.** `BILLING_START_CREDIT_GRANTED workspace=<id> amountMicroUsd=<n>` per grant, written after the transaction committed (a
+  claim that rolls back announces nothing); never an account id.
+
+### Abuse protection of version 1, and the surface that is left
+
+What protects the credit: the memory above (one grant per GitHub account, kept past the workspace), the hourly brake (#499; its setting exists, the brake itself is not built yet), the holds
+that bound what a run can cost (a hold is at most the balance, a balance of zero is refused), and the sign-up rules of the instance
+(allowed organizations, invitation only, verified email as the operator configured them). Not in version 1, by ADR 0006 2.16:
+disposable-email lists, a first-top-up cap, a verified email as a condition.
+
+What is observed, so a follow-up can be sized:
+
+- **A new GitHub account is a new credit.** A farmer needs a GitHub account, an installation of the App on it and a workspace that
+  binds it. Each costs a few minutes and no money, and yields the start credit (2 USD by default) of real model cost and VM time.
+  The limit is the sign-up rule of the instance and GitHub's own abuse handling, not this code.
+- **Org accounts.** Any user can create organizations and install the App on each. Every one is a distinct account id.
+- **Transfer.** The credit stays with the workspace; it cannot be withdrawn or refunded (credit never expires and is never refunded),
+  so the loss of one grant is bounded by the amount.
+- **Sizing.** `select count(*), min(granted_at), max(granted_at) from billing_start_credit_grants` and the log line above give grants
+  per day; compare `start_credit` totals in `billing_journal_entries` with the `usage` of the same workspaces to see how much of the
+  credit is ever spent and by workspaces that never top up.
 
 ## Where billing is not allowed to reach
 
