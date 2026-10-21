@@ -11,8 +11,8 @@ export type FakeMail = MailSender & {
   configured: boolean;
   /** Every message handed to `send` while configured, oldest first. */
   outbox: MailMessage[];
-  /** The next `send` fails with `mail_failed` (once). */
-  failNext(): void;
+  /** The next `send` fails with `mail_failed`; the next `times` ones when given (default once). */
+  failNext(times?: number): void;
   /** The messages addressed to `address`. */
   to(address: string): MailMessage[];
   /** The first link in the text of the newest message to `address`; throws when there is none. */
@@ -22,7 +22,7 @@ export type FakeMail = MailSender & {
 };
 
 export function createFakeMail(configured = true): FakeMail {
-  let failing = false;
+  let failing = 0;
   const fake: FakeMail = {
     configured,
     outbox: [],
@@ -30,15 +30,15 @@ export function createFakeMail(configured = true): FakeMail {
     send(message): Promise<MailResult> {
       if (!fake.configured)
         return Promise.resolve({ ok: false, error: "not_configured" });
-      if (failing) {
-        failing = false;
+      if (failing > 0) {
+        failing -= 1;
         return Promise.resolve({ ok: false, error: "mail_failed" });
       }
       fake.outbox.push(message);
       return Promise.resolve({ ok: true });
     },
-    failNext() {
-      failing = true;
+    failNext(times = 1) {
+      failing = times;
     },
     to: (address) => fake.outbox.filter((message) => message.to === address),
     lastLink(address) {

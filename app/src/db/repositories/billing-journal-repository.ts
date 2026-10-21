@@ -35,6 +35,7 @@ import {
   type NewJournalEntry,
   type ReserveRefusal,
 } from "../../billing/journal.ts";
+import { noteBalanceMoved } from "../../billing/balance-notifications.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
@@ -414,7 +415,7 @@ export function createBillingJournalRepository(
   }
 
   /** The cache follows an entry that was just written: `balance += amount`, and the holds follow reservations and releases. */
-  async function applyToBalance(
+  async function applyToBalanceRow(
     trx: Kysely<Database>,
     entry: JournalEntry,
     timestamp: string,
@@ -452,6 +453,23 @@ export function createBillingJournalRepository(
       throw new Error(
         "The balance row of a workspace could be neither added to nor created.",
       );
+  }
+
+  /**
+   * The balance follows an entry, and then, under the lock of its row, whether the workspace is to be told is decided in the
+   * same transaction (#506; src/billing/balance-notifications.ts). Nothing is sent from here.
+   */
+  async function applyToBalance(
+    trx: Kysely<Database>,
+    entry: JournalEntry,
+    timestamp: string,
+  ): Promise<void> {
+    await applyToBalanceRow(trx, entry, timestamp);
+    await noteBalanceMoved(trx, {
+      workspaceId,
+      move: entry.amountMicroUsd < 0 ? "down" : "up",
+      now,
+    });
   }
 
   async function appendIn(

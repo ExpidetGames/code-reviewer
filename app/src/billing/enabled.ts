@@ -19,6 +19,7 @@ import {
 } from "./readiness.ts";
 import {
   DEFAULT_HOURLY_REVIEW_LIMIT,
+  DEFAULT_LOW_BALANCE_MICRO_USD,
   billingNumbersOf,
   billingRatesOf,
   type BillingRates,
@@ -64,6 +65,8 @@ export type BillingSwitch = {
   rates: BillingRates | null;
   /** Started reviews of a workspace in a rolling hour that the hidden brake lets through (#499). Only read while the switch is on. */
   hourlyReviewLimit: number;
+  /** Micro-USD below which a balance is low (#504, default 5): where the notifications of #506 begin. Only read while the switch is on. */
+  lowBalanceMicroUsd: number;
 };
 
 /**
@@ -80,6 +83,7 @@ export async function readBillingSwitch(
     missing: [],
     rates: null,
     hourlyReviewLimit: DEFAULT_HOURLY_REVIEW_LIMIT,
+    lowBalanceMicroUsd: DEFAULT_LOW_BALANCE_MICRO_USD,
   } satisfies BillingSwitch;
   if (stored === undefined) return off;
   const settings = readBillingSettings(stored);
@@ -99,6 +103,7 @@ export async function readBillingSwitch(
     missing: missingItemsOf({ settings, secrets }),
     rates: billingRatesOf(settings),
     hourlyReviewLimit: billingNumbersOf(settings).hourlyReviewLimit,
+    lowBalanceMicroUsd: billingNumbersOf(settings).lowBalanceMicroUsd,
   };
 }
 
