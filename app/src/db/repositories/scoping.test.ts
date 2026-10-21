@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 const SCOPED = [
   "app-settings-repository.ts",
   "billing-journal-repository.ts",
+  "billing-profiles-repository.ts",
   "billing-topup-intents-repository.ts",
   "installation-link-requests-repository.ts",
   "integrations-repository.ts",

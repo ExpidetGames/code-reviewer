@@ -83,7 +83,10 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
     // #497-T14
     it("starts a top-up only as a redirect or as none", async () => {
       const started = await adapter.createTopUpCheckout({
-        customer: null,
+        // An adapter that needs the buyer's profile needs the customer made from it.
+        customer: adapter.capabilities.requiresBillingProfile
+          ? "cus_kit"
+          : null,
         intentId: "intent-kit",
         amount: toUsd(25_000_000),
         returnUrl: "https://app.example.test/billing",
@@ -91,6 +94,10 @@ export function describeAdapterContract(subject: AdapterKitSubject): void {
       expect(["redirect", "none"]).toContain(started.checkout.kind);
       if (started.checkout.kind === "redirect")
         expect(started.checkout.url).toMatch(/^https:\/\//);
+      // #501-T10: the capability is what the route reads to answer the missing path for an adapter with no checkout.
+      expect(started.checkout.kind === "redirect").toBe(
+        adapter.capabilities.checkout,
+      );
     });
 
     // #497-T14

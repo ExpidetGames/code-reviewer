@@ -25,6 +25,7 @@ export const manualAdapter: BillingAdapter = {
     maxTopUp: TOP_UP_MAX_MICRO_USD,
     currencies: [BILLING_CURRENCY],
     providerMayRefund: null,
+    checkout: false,
     requiresBillingProfile: false,
     receiptsFrom: "app",
   },
