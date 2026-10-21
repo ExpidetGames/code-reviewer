@@ -293,6 +293,9 @@ function runningWhere(scope: RunningScope) {
     ]);
 }
 
+/** A start credit a claim granted: logged after the claim committed (#507). */
+type GrantedStartCredit = { workspaceId: string; amountMicroUsd: number };
+
 export function createRunnerJobsRepository(
   db: Kysely<Database>,
   options: RunnerJobsRepositoryOptions = {},
@@ -732,12 +735,7 @@ export function createRunnerJobsRepository(
     async claimNext(runnerId, engines = DEFAULT_ENGINES, claimOptions = {}) {
       const refusals: ClaimRefusal[] = [];
       const ignoredCostLimits = new Set<string>();
-      // #507: the grants of this claim, logged after its commit (a rolled-back claim announces nothing).
-      const grantedCredits: Array<{
-        workspaceId: string;
-        amountMicroUsd: number;
-      }> = [];
-      const startCreditTried = new Set<string>();
+      const grantedCredits: GrantedStartCredit[] = []; // #507: logged after the commit
       const claimed = await inAlertingTransaction(
         async (trx, unknownCost, endedClaims) => {
           const current = now();
@@ -763,6 +761,7 @@ export function createRunnerJobsRepository(
           const reviewKinds = reviewKindsForEngines(engines);
           // #498: read at most once per claim, and only when a job passes the admission; a claim that finds no job reads nothing.
           let billing: ClaimBilling | undefined;
+          const startCreditTried = new Set<string>();
           // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
           // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
           // connection (SQLite): two claims of one pool cannot both count below the cap and then both
