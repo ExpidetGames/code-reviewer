@@ -12,6 +12,10 @@ import { PLAN_NAV_LABEL, PLAN_PAGE_TITLE } from "../../copy/plan-usage.ts";
 import { PageHeader } from "../../components/page-header.tsx";
 import { cn } from "../../lib/utils.ts";
 import { workspacePath } from "../paths.ts";
+import {
+  BILLING_NAV_LABEL,
+  BILLING_PAGE_TITLE,
+} from "../../workspace-billing/messages.ts";
 
 export const SETTINGS_SECTIONS = [
   { segment: "", label: "General", title: "General" },
@@ -23,6 +27,8 @@ export const SETTINGS_SECTIONS = [
   { segment: "llm", label: "LLM access", title: "LLM access" },
   // Only listed while the workspace has entitlements (`showPlan`); the page itself exists for everybody.
   { segment: "plan", label: PLAN_NAV_LABEL, title: PLAN_PAGE_TITLE },
+  // Only listed while billing is on (`showBilling`), and then instead of the Plan page (#505).
+  { segment: "billing", label: BILLING_NAV_LABEL, title: BILLING_PAGE_TITLE },
   { segment: "advanced", label: "Advanced", title: "Advanced" },
 ] as const;
 
@@ -43,18 +49,23 @@ export function SettingsNav({
   workspaceSlug,
   current,
   showPlan = false,
+  showBilling = false,
 }: {
   workspaceSlug: string;
   current: SettingsSection;
   /** The workspace has entitlements (#282): the Plan page is listed. An unlimited workspace has no entry. */
   showPlan?: boolean;
+  /** Billing is on (#505): the Billing page is listed, and the Plan page is not (the Billing page takes its place). */
+  showBilling?: boolean;
 }) {
   return (
     <nav aria-label="Settings sections" className="border-b border-border">
       <ul className="flex flex-wrap items-center gap-1">
-        {SETTINGS_SECTIONS.filter(
-          (section) => showPlan || section.segment !== "plan",
-        ).map((section) => {
+        {SETTINGS_SECTIONS.filter((section) => {
+          if (section.segment === "plan") return showPlan && !showBilling;
+          if (section.segment === "billing") return showBilling;
+          return true;
+        }).map((section) => {
           const active = section.segment === current;
           return (
             <li key={section.segment || "general"}>
@@ -87,12 +98,15 @@ export function SettingsScreen({
   workspaceSlug,
   current,
   showPlan = false,
+  showBilling = false,
   children,
 }: {
   workspaceSlug: string;
   current: SettingsSection;
   /** The workspace has entitlements (#282), so the sub-nav lists the Plan page. */
   showPlan?: boolean;
+  /** Billing is on (#505), so the sub-nav lists the Billing page instead of the Plan page. */
+  showBilling?: boolean;
   children: ReactNode;
 }) {
   const section = SETTINGS_SECTIONS.find((item) => item.segment === current);
@@ -120,6 +134,7 @@ export function SettingsScreen({
           workspaceSlug={workspaceSlug}
           current={current}
           showPlan={showPlan}
+          showBilling={showBilling}
         />
         {children}
       </div>

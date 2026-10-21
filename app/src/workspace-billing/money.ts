@@ -65,3 +65,30 @@ export function parseTopUpCents(text: string): TopUpAmount {
     return { ok: false, error: "amount_out_of_range" };
   return { ok: true, cents };
 }
+
+/** An amount of the journal with its sign shown: `+$10.00` for credit, `-$1.63` for a charge. */
+export function formatSignedMoney(micro: number): string {
+  const text = formatMoney(micro);
+  return micro > 0 ? `+${text}` : text;
+}
+
+/** The smallest and the largest monthly limit, in cents: one US dollar to one million (the server judges them again). */
+export const MONTHLY_LIMIT_MIN_CENTS = 100;
+export const MONTHLY_LIMIT_MAX_CENTS = 100_000_000;
+
+export type LimitAmount =
+  | { ok: true; cents: number | null }
+  | { ok: false; error: "limit_invalid" | "limit_out_of_range" };
+
+/** A typed monthly limit in US dollars as whole cents; an empty field is no limit (`null`). */
+export function parseLimitCents(text: string): LimitAmount {
+  if (text.trim() === "") return { ok: true, cents: null };
+  const match = /^\$?(\d+)(?:\.(\d{1,2}))?$/.exec(text.trim());
+  if (match === null) return { ok: false, error: "limit_invalid" };
+  const [, whole = "", fraction = ""] = match;
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  if (!Number.isSafeInteger(cents)) return { ok: false, error: "limit_invalid" };
+  if (cents < MONTHLY_LIMIT_MIN_CENTS || cents > MONTHLY_LIMIT_MAX_CENTS)
+    return { ok: false, error: "limit_out_of_range" };
+  return { ok: true, cents };
+}

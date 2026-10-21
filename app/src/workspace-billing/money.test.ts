@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 import {
   formatMoney,
   formatPrice,
+  formatSignedMoney,
+  MONTHLY_LIMIT_MAX_CENTS,
+  MONTHLY_LIMIT_MIN_CENTS,
+  parseLimitCents,
   parseTopUpCents,
   TOP_UP_MAX_CENTS,
   TOP_UP_MIN_CENTS,
@@ -75,5 +79,52 @@ describe("a typed top-up amount", () => {
   // #505-T03
   it("states the range of ADR 0006", () => {
     expect([TOP_UP_MIN_CENTS, TOP_UP_MAX_CENTS]).toEqual([1_000, 50_000]);
+  });
+});
+
+describe("a signed amount of the journal", () => {
+  // #505-T01
+  it.each([
+    [10_000_000, "+$10.00"],
+    [-1_630_000, "-$1.63"],
+    [0, "$0.00"],
+  ])("writes %i micro-USD as %s", (micro, text) => {
+    expect(formatSignedMoney(micro)).toBe(text);
+  });
+});
+
+describe("a typed monthly limit", () => {
+  // #505-T09
+  it.each([
+    ["250", 25_000],
+    ["1", 100],
+    ["1000000", 100_000_000],
+    ["12.34", 1_234],
+    ["$40", 4_000],
+  ])("reads %j as %i cents", (text, cents) => {
+    expect(parseLimitCents(text)).toEqual({ ok: true, cents });
+  });
+
+  // #505-T09
+  it("reads an empty field as no limit", () => {
+    expect(parseLimitCents("")).toEqual({ ok: true, cents: null });
+    expect(parseLimitCents("   ")).toEqual({ ok: true, cents: null });
+  });
+
+  // #505-T09
+  it.each([
+    ["0.99", "limit_out_of_range"],
+    ["0", "limit_out_of_range"],
+    ["1000000.01", "limit_out_of_range"],
+    ["lots", "limit_invalid"],
+    ["-5", "limit_invalid"],
+    ["1.234", "limit_invalid"],
+  ])("refuses %j with %s", (text, error) => {
+    expect(parseLimitCents(text)).toEqual({ ok: false, error });
+  });
+
+  // #505-T09
+  it("states the bounds the server judges", () => {
+    expect([MONTHLY_LIMIT_MIN_CENTS, MONTHLY_LIMIT_MAX_CENTS]).toEqual([100, 100_000_000]);
   });
 });
