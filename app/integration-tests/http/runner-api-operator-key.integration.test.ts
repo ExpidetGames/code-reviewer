@@ -385,7 +385,8 @@ describe("the Worker API of a managed workspace", () => {
   });
 
   // #276-T02
-  it("records the key that is used at the fetch when the key mode changed after the claim", async () => {
+  // #496-T11
+  it("keeps the key mode of the claim at the fetch when the entitlements' key mode changed after the claim", async () => {
     const h = await start("managed");
     const job = await h.enqueueNew();
     const { job: claimed } = await h.claimedSplit();
@@ -400,8 +401,8 @@ describe("the Worker API of a managed workspace", () => {
       await h.worker.details(job.id, claimed.credential)
     ).json();
 
-    expect(details.job.input.llm.apiKey).toBe(WORKSPACE_KEY);
-    expect(await recordOf(h, job.id)).toMatchObject({ keyMode: "own" });
+    expect(details.job.input.llm.apiKey).toBe(OPERATOR_KEY);
+    expect(await recordOf(h, job.id)).toMatchObject({ keyMode: "managed" });
   });
 });
 

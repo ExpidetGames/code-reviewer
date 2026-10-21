@@ -20,7 +20,7 @@ import { integrationRegistry } from "../integrations/registry.ts";
 import { jobEnded, touched } from "../dispatch/maintenance-shared.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
-import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
+import { readEntitlements } from "../workspaces/effective-entitlements.ts";
 import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { getNativeCost } from "../native-cost/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
@@ -107,15 +107,12 @@ function sharedDeps(): WorkerApiDeps {
     // The key the selection of the claimed job names, of the job's own workspace: its own key of the selected provider, or
     // the operator's key of it, never another workspace's and never the other key (src/llm).
     keyFor: (workspaceId, selection) => llm.keyFor(workspaceId, selection),
-    // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276).
-    entitlementsFor: (workspaceId) =>
-      readEffectiveEntitlements(db, workspaceId),
-    // Whose key the job runs on, in its usage record; scoped to the job's own workspace.
-    recordKeyMode: (job, keyMode) =>
-      createUsageRecordsRepository(db, job.workspaceId).setKeyMode(
-        job.id,
-        keyMode,
-      ),
+    // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276), and its model access.
+    entitlementsFor: (workspaceId) => readEntitlements(db, workspaceId),
+    // Whose key the job runs on: what its claim decided, in its usage record (#496); scoped to the job's own workspace.
+    claimedKeyMode: async (job) =>
+      (await createUsageRecordsRepository(db, job.workspaceId).get(job.id))
+        ?.keyMode,
     // #432: the provider and the catalog entry of the job (id and name as they are now), in its usage record; never the model.
     recordSelection: (job, selection) =>
       createUsageRecordsRepository(db, job.workspaceId).setSelection(job.id, {

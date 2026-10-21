@@ -156,7 +156,11 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
   that a stored row carries never reach the answer.
 - **Reading them for one workspace.** `readEffectiveEntitlements(db, workspaceId)` in `effective-entitlements.ts`
   reads the workspace's row and, only without one, the default, and resolves them: the claim's admission (#277) and the
-  choice of the LLM key (#276) both go through it, so they cannot read the entitlements differently.
+  choice of the LLM key (#276) both go through it, so they cannot read the entitlements differently. **While billing is on**
+  it also puts the workspace's own choice of the key mode in place of the entitlement's `keyMode` (#496,
+  `effective-key-mode.ts`, `applyWorkspaceKeyMode`; the choice is `managed` until the workspace makes it, a workspace without
+  entitlements stays `unlimited` and carries the mode); the suspension, the model access and the cost limits are read as
+  ever, and entitlements that cannot be read stay unreadable. With billing off it reads exactly what it always read.
 - **Unreadable data fails closed.** The columns of a row and the JSON of the default are checked when they are
   read, with the rules of a write (`readEntitlements`). An entry that exists but cannot be read (damaged JSON,
   limits with a missing or bad value, an unknown key mode) is never "unlimited": the resolver answers
@@ -236,7 +240,9 @@ Deleting workspaces, transferring data, SSO and teams below the workspace are ou
 is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
 rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
 (`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
-in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). "Manage plan"
+in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one); the same action
+sets the workspace's key mode while billing is on, our models or its own key (`GET` and `PUT /api/w/:workspace/llm-key-mode`,
+#496, `src/llm/README.md`), and every member sees the choice. "Manage plan"
 (`manage_plan`, an Admin or an Owner) hands the person over to the operator-configured plan page (`src/plan-handoff/`). The billing profile and the top-up of
 the prepaid balance (`manage_billing`, an Admin or an Owner) are in `src/billing/`; so is the optional monthly total limit of the workspace
 (`GET` and `PUT /api/w/:workspace/billing/monthly-limit`, the same role, #499), which refuses a review at the claim when the month's charges plus its hold

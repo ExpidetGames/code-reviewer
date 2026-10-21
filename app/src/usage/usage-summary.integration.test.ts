@@ -3,6 +3,7 @@
 // The plan view of a workspace read from real entitlements and real usage records on SQLite (#282): which runs
 // count towards a limit, from when, and what the answer is allowed to hold. The page and the route on top are in
 // ui/plan-page.test.tsx and integration-tests/http/plan-route*.integration.test.ts.
+import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -364,6 +365,8 @@ describe("the plan view of a workspace while billing is on (#499)", () => {
       }),
     );
     await t.use({ state: "settled", costMicroUsd: 500_000 });
+    // Billing on: the key the workspace chose decides which cost limit watches it (#496).
+    await createLlmKeyModeStore(t.db, t.workspaceId).set("own", null);
 
     const off = await t.view();
     await setBillingSwitch(t.db, true);
