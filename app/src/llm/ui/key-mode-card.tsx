@@ -21,7 +21,7 @@ import {
   RadioGroupItem,
 } from "../../components/ui/radio-group.tsx";
 import type { KeyMode } from "../../workspaces/entitlements.ts";
-import type { LlmKeyModeApi } from "./key-mode-api.ts";
+import { browserLlmKeyModeApi, type LlmKeyModeApi } from "./key-mode-api.ts";
 import {
   CHOICE_SAVED,
   describeKeyModeFailure,
@@ -48,18 +48,21 @@ const OPTIONS = [
 }>;
 
 export function KeyModeCard({
+  workspaceSlug,
   canManage,
   keyMode,
   hasOwnKey,
-  api,
+  api = browserLlmKeyModeApi(workspaceSlug),
 }: {
+  workspaceSlug: string;
   /** An Admin or an Owner of the workspace (`manage_llm_key`). */
   canManage: boolean;
   /** What applies now: the choice of the workspace, our models until it chose. */
   keyMode: KeyMode;
   /** A key of the workspace's own is stored for some provider. */
   hasOwnKey: boolean;
-  api: LlmKeyModeApi;
+  /** Only tests pass this: a function cannot cross from the server component that renders the card, so the card makes its own. */
+  api?: LlmKeyModeApi;
 }) {
   const id = useId();
   const router = useRouter();
