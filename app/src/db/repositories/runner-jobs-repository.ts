@@ -55,6 +55,7 @@ import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import {
   RATES_INCOMPLETE_REFUSAL,
   admitAtClaim,
+  noteRefusalForBalance,
   readClaimBilling,
   type AdmitOutcome,
   type ClaimBilling,
@@ -945,6 +946,15 @@ export function createRunnerJobsRepository(
                     });
             if (!held.ok) {
               await refuseClaimedJob(trx, row.id, held.code, current);
+              // #506: a refusal for the balance tells the workspace that it is empty, once (the mail goes out after the commit).
+              if (
+                held.code === "insufficient_balance" ||
+                held.code === "balance_negative"
+              )
+                await noteRefusalForBalance(trx, {
+                  workspaceId: row.workspace_id,
+                  now: () => current,
+                });
               // A job claimed again after a lost lease had a record and a hold that counted: they end with the job.
               if (hadRecord)
                 unknownCost.push(

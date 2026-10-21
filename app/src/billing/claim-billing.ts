@@ -14,6 +14,7 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import type { Database } from "../db/schema.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
+import { noteBalanceMoved } from "./balance-notifications.ts";
 import { readBillingSwitch } from "./enabled.ts";
 import { BILLING_RATES_INCOMPLETE } from "./rates.ts";
 import type { BillingRates } from "./rates.ts";
@@ -105,4 +106,22 @@ export async function admitAtClaim(
   })
     ? { ok: false, code: "insufficient_balance" }
     : { ok: true };
+}
+
+/**
+ * A claim was refused for the balance (`insufficient_balance`, `balance_negative`), in the claim's transaction: the workspace
+ * is told that it is empty if it was not told yet (#506). The balance row's lock is taken first, as every journal writer does,
+ * so this and a settlement or a top-up of the workspace decide one after the other; a second refusal finds the state `sent` and
+ * changes nothing. Writes nothing while billing is off. The mail itself goes out after the commit (`balance-mail.ts`).
+ */
+export async function noteRefusalForBalance(
+  trx: Kysely<Database>,
+  input: { workspaceId: string; now: () => Date },
+): Promise<void> {
+  await createBillingJournalRepository(
+    trx,
+    input.workspaceId,
+    input.now,
+  ).lockBalance();
+  await noteBalanceMoved(trx, { ...input, move: "down" });
 }
