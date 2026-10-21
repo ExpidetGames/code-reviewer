@@ -371,6 +371,50 @@ const ENTRIES: Entry[] = [
     billing: true,
   },
   {
+    // #505-T02: the journal is read by every member of the workspace in the address and by nobody of another one.
+    name: "GET billing/journal",
+    route: "/api/w/[workspace]/billing/journal",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/billing/journal",
+    params: () => ({}),
+    file: "billing/journal/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
+    // #505-T02, T03: the billing details are read and kept by an Admin and an Owner, and by nobody of another workspace.
+    name: "GET billing/profile",
+    route: "/api/w/[workspace]/billing/profile",
+    method: "GET",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/profile",
+    params: () => ({}),
+    file: "billing/profile/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
+    name: "PUT billing/profile",
+    route: "/api/w/[workspace]/billing/profile",
+    method: "PUT",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/profile",
+    body: () => ({
+      legalName: "Acme GmbH",
+      country: "DE",
+      addressLine1: "Hauptstrasse 1",
+      addressLine2: null,
+      postalCode: "10115",
+      city: "Berlin",
+      vatId: null,
+    }),
+    params: () => ({}),
+    file: "billing/profile/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
     // #502-T15: "Check payment" is for an Admin and an Owner. The intent of the address is looked up in the workspace of the
     // address only (a foreign intent is `intent_not_found`, proven in src/billing/topup-check-http.integration.test.ts); here the
     // intent does not exist, so the answer at the right role is 404 `intent_not_found` and Stripe is never called.
