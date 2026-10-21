@@ -904,8 +904,8 @@ the limit is one final call more. The result reports by how much the limit was p
 `usage.limitExceededBy` (USD, absent when it was not, `contracts/runner-api.v1.json`) and the job log
 says it, so the bound can be watched on real runs.
 
-_Billing (#498)._ While billing is on, the hold of a managed Dynamic job is the cost limit times A (`src/billing/README.md`, "Reserve, settle,
-release"), and the settlement charges the **real** cost, also when the run passed its limit by this excess: the balance may go below zero and the
+_Billing (#498, #605)._ While billing is on, nothing is held for a Dynamic job: it starts whenever the balance of its workspace is above zero (`src/billing/README.md`,
+"Start, settle"), and the settlement charges the **real** cost, also when the run passed its limit by this excess: the balance may go below zero and the
 next claim of the workspace is then refused (`balance_negative`). Billing never shortens a run, never changes the final-call exemption and takes
 nothing from a run that ended without a review: it prices what the run reported.
 

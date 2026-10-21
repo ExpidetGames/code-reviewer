@@ -69,6 +69,7 @@ import { migration as addBillingWebhookEventsReviewContext } from "./20261021190
 import { migration as widenRefusalNoticeCodesForLimits } from "./20261021210000_widen_refusal_notice_codes_for_limits.ts";
 import { migration as createBillingWorkspaceSettings } from "./20261021210100_create_billing_workspace_settings.ts";
 import { migration as addLimitQueryIndexes } from "./20261021210200_add_limit_query_indexes.ts";
+import { migration as addUsageRecordBillingState } from "./20261022010000_add_usage_record_billing_state.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -147,6 +148,7 @@ const migrations: Record<string, Migration> = {
   "20261021210100_create_billing_workspace_settings":
     createBillingWorkspaceSettings,
   "20261021210200_add_limit_query_indexes": addLimitQueryIndexes,
+  "20261022010000_add_usage_record_billing_state": addUsageRecordBillingState,
 };
 
 export const migrationProvider: MigrationProvider = {

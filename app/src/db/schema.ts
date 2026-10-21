@@ -396,6 +396,11 @@ export interface UsageRecordsTable {
   settled_at: string | null;
   /** Why the record was settled without a report of its run (SETTLED_REASONS); null when the run reported. */
   settled_reason: string | null;
+  /**
+   * `open` from a claim made with billing on until its one settlement, then `settled` (BILLING_STATES, #605); null for a job
+   * claimed with billing off, which is never charged.
+   */
+  billing_state: string | null;
 }
 
 /** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */
