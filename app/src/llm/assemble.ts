@@ -8,6 +8,7 @@ import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { createWorkspaceSecretStore } from "../secrets/workspace-store.ts";
+import { isBillingOn } from "../billing/enabled.ts";
 import { readEffectiveEntitlements } from "../workspaces/effective-entitlements.ts";
 import {
   type LlmAccessResult,
@@ -215,7 +216,9 @@ export function createWorkspaceLlm({
       const mode = keyModeForJob(
         await readEffectiveEntitlements(db, workspaceId, now),
       );
-      if (mode !== "managed") return keys;
+      // While billing is on the workspace can change its key mode at any moment, and a review that started on our key is not
+      // stopped by it (#496): its result must still be masked with the operator's key.
+      if (mode !== "managed" && !(await isBillingOn(db))) return keys;
       const operators = operatorKey();
       for (const id of providers.ids) {
         const operator = await operators.forJob(id);

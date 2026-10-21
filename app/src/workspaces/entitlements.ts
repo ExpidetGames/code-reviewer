@@ -66,7 +66,11 @@ export type EntitlementsEntry = EntitlementsData | InvalidEntitlements;
 export const ENTITLEMENTS_INVALID_CODE = "entitlements_invalid";
 
 export type ResolvedEntitlements =
-  | { kind: "unlimited" }
+  /**
+   * No entitlements: no limit, not suspended. `keyMode` is set only by the workspace's own choice while billing is on
+   * (`applyWorkspaceKeyMode`, src/workspaces/effective-key-mode.ts); absent, the key is the workspace's own.
+   */
+  | { kind: "unlimited"; keyMode?: KeyMode }
   | ({ kind: "limited"; source: EntitlementsSource } & EntitlementsData)
   | {
       kind: "invalid";
