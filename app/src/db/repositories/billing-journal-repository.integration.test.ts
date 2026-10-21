@@ -720,6 +720,35 @@ for (const engine of ENGINES) {
       });
     });
 
+    // #505-T01
+    it("pages past the types it is told to leave out, with a cursor that still walks the whole journal", async () => {
+      const { repo } = await setup(engine);
+      await repo.append(topUp(20 * USD, "pi_a"));
+      await repo.reserve(3 * USD, "job-held");
+      await repo.release("job-held");
+      await repo.append(topUp(10 * USD, "pi_b"));
+      await repo.charge("job-paid", charge(1 * USD, 500_000));
+      await repo.reserve(2 * USD, "job-open");
+
+      const first = await repo.entries({
+        limit: 2,
+        excludeTypes: ["reservation", "release"],
+      });
+      expect(first.entries.map((entry) => entry.type)).toEqual([
+        "usage",
+        "top_up",
+      ]);
+      expect(first.next).toBeDefined();
+      const second = await repo.entries({
+        cursor: first.next,
+        limit: 2,
+        excludeTypes: ["reservation", "release"],
+      });
+      expect(second.entries.map((entry) => entry.refKey)).toEqual(["pi_a"]);
+      expect(second.next).toBeUndefined();
+      expect((await repo.entries({ limit: 20 })).entries).toHaveLength(6);
+    });
+
     // #495-T11
     it.each([1, 7, 2026])(
       "keeps the cache equal to the journal through a random sequence (seed %i)",
