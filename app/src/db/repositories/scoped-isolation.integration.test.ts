@@ -1247,6 +1247,12 @@ const CASES: Case[] = [
       ]);
     },
   },
+  // the balance lock (#507) writes nothing, and it locks the row of A's own workspace only
+  {
+    name: "billing.lockBalance",
+    run: (a) => a.billing.lockBalance(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
   {
     name: "billing.verify",
     run: (a) => a.billing.verify(),
