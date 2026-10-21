@@ -91,6 +91,29 @@ operator's and the workspace never sees them (`src/model-catalog/README.md`):
 - **A reset keeps the stored models.** `DELETE` on a project removes every override but the models saved on the
   workspace's own key (`model`, `fallbackModel`, Dynamic model), like a save does.
 
+## The address pinned for a catalog provider (#588)
+
+A project that selects a provider of the models.dev catalog (own key, #555) gets one more stored field, `dynamicProviderAddress`: the
+address the catalog trusted for that provider when it was selected. It is written by the server only (a request that names it is
+`UNKNOWN_FIELD`) and the claim sends the key to exactly that address (`src/native-cost/README.md`, "Where the key goes"). No table, no
+migration: it is one more key of `projects.settings`.
+
+- **When it is written** (`provider-pin.ts`, `pinAfterSave`): when the save leaves the project with a catalog provider that it did not have
+  (selecting, or changing the provider), and when the request carries `confirmProviderAddress: true`, the action behind "Confirm the new
+  address" on the settings page (`PROVIDER_ADDRESS_NOT_PINNABLE` when there is no catalog provider or the catalog trusts no address
+  for it). Every other save keeps the pin, whatever the catalog trusts now; a model change alone does not move it. Going back to a
+  provider of the registry removes it; a managed workspace's saves carry it through; a reset on the own key clears it.
+- **What the view says** (`ProjectDynamicView.providerAddress`): `pinned`, `current` (what the catalog trusts now) and a state:
+  `pinned`, `unpinned` (a selection from before pins; its first review pins it), `changed` (reviews are refused until confirmed) or
+  `unavailable` (the catalog trusts no address for the provider now). The form shows it as small read-only text, with the
+  confirmation checkbox only for `changed`.
+- **Legacy selections.** Not re-selected: that would stop reviews of running customers. The first claim pins
+  (`adoptProviderAddress`, a compare-and-set inside the settings write), at the address it is about to send the key to, which is
+  the trust the selection had until then.
+- **Who may confirm.** The save is the project settings save, which the permission matrix gives to every member
+  (`change_project_settings`); the notices ask an Owner or Admin because they run the workspace's key. Whether the confirmation should
+  need Admin is a decision for the maintainers (follow-up on #588).
+
 ## Provider and catalog entry per kind (#430)
 
 Additive fields of the same settings JSON (ADR 0005, 2.7): no table, no migration, every setting stored before them stays

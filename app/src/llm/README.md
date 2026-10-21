@@ -258,6 +258,10 @@ additional authenticated data, a ciphertext moved to another provider's name, or
 - **Who.** `manage_llm_key` (Admin and Owner) sets, tests and removes it; every member reads the state.
 - **The rules for a key** are the legacy variable's (`checkLlmApiKey`): surrounding whitespace is ignored,
   whitespace or control characters inside and more than 4096 characters are refused (`api_key_invalid`).
+- **Test key of a catalog provider and the pin (#588).** The test of a catalog provider is held to the addresses the workspace's
+  projects pinned for it (`review-settings/pinned-addresses.ts`): when any pin is not the address the catalog trusts now, nothing is
+  sent and the answer is `llm_provider_address_changed`, as the claim's is `provider_address_changed`. With no pin the test goes to the
+  trusted address, which is the first sight.
 - **Test key.** A key typed into the field is checked as it is and forgotten; with an empty field the stored one is
   checked. The address is the provider's own, redirects are not followed, the time is limited, and the provider's
   words only appear as a cleaned first line (the key removed in every spelling, long opaque tokens blanked). Limited

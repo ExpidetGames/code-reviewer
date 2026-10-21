@@ -545,6 +545,16 @@ to the same verdicts by `contracts/key-destination-vectors.json`. The runner can
 name; that is the catalog's trust record, and the residual risk is #548's trust on first use
 (`app/src/native-cost/README.md`, "Where the key goes").
 
+**The address a selection is pinned to (#588; needs a security review).** The catalog's address is trusted on first sight, with no
+committed list per provider. But the address a workspace's project saw when it selected the catalog provider is written once into
+that project's settings (`dynamicProviderAddress`, set by the server, never by a request) and stays fixed: every later claim sends
+the key to exactly that address, and if the catalog trusts another address by then (an admin confirmed a change, #548) the job is
+refused before any key is loaded (`provider_address_changed`, free, with a notice on the Runs page for an Owner or Admin to confirm
+the new address in the review settings of the project). The runner needs nothing new: the entry it receives carries the pinned
+address, which the app has just checked equals the trusted one, so its verdicts are the shared vectors' as before. The two registry
+providers (`anthropic`, `openrouter`) get no such pin: their address is a constant in the code of the app and of the runner, which
+is stronger than a per-selection copy and cannot go stale.
+
 1. `build_native_job`, before anything is prepared: `target_from_entry`, the production `HttpsUpstream` on the entry's address
    (an address the guard refuses ends the job `dynamic_config_invalid` before the engine exists, naming neither the address nor
    the reason), a fresh capability, and the ledger and the proxy from the claim's policy (`build_native_run`, with the window

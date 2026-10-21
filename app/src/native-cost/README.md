@@ -119,6 +119,17 @@ runner (before the key is used):
   The residual risk is the one #548 accepted: the first safe address models.dev states for a provider is trusted (except for the providers whose SDK address `contracts/opencode-providers.v1.json` records: that address is the trusted one from the start, and a different address models.dev states waits for an admin, `models-dev/plan.ts`). The picker, the key and the choice offer a provider only if the claim would build its entry (`native-providers/catalog.ts`, the canonical address). A committed
   address per provider (a pin like the registry's) would remove it at the cost of a hand-kept list; it is a follow-up for the
   security review, not part of this rule.
+- **The pin of a selection (#588).** What the first-sight trust cannot do is held by the selection: when a project selects a catalog
+  provider, the address the catalog trusts at that moment is written once into the project's settings (`dynamicProviderAddress`,
+  `review-settings/provider-pin.ts`; the server writes it, a request cannot). The claim carries it as `Selection.pinnedAddress` and
+  `entryFor(ref, pinned)` serves the entry only when the catalog still trusts exactly that address; otherwise the job ends
+  `provider_address_changed` (free, `entry_provider_address_changed` in the log, no address in it) before any key exists. Nothing
+  moves the pin but the person: selecting another provider pins the new provider's address, and the "Confirm the new address" action
+  of the settings page (`confirmProviderAddress: true`) pins what the catalog trusts now. A selection made before pins existed has
+  none; its first claim pins the address it is about to send the key to (`ClaimDeps.providerPins.adopt`, a compare-and-set on the
+  project's settings, so two claims cannot pin two addresses) and holds to it from then on. The "Test key" of a catalog provider
+  holds to the same pins (`llm_provider_address_changed`, nothing sent). **The registry's two providers get no pin**: their address
+  is a constant of the code, which is stronger and cannot go stale when a release changes it.
 
 ## What #555 added
 

@@ -33,7 +33,9 @@ per-job entry are `src/models-dev/` (#548); what a run costs and what bounds it 
   in its canonical spelling). Only the key of that provider is revealed (`key_binding_mismatch`/`no_key` otherwise:
   `llm_not_configured`).
 - **Where the key goes.** To the address the catalog trusts for the provider and to no other, re-checked by the runner:
-  `src/native-cost/README.md`, "Where the key goes". **This needs a security review.**
+  `src/native-cost/README.md`, "Where the key goes". **This needs a security review.** The project pins that address when it selects
+  the provider (#588) and the claim holds to the pin: `addressOf(slug)` of the reader is the address a selection pins, the key test
+  is held to the pins of the workspace, and a catalog address that moved after the selection is refused until the person confirms it.
 
 ## What a workspace is told
 
