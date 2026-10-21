@@ -181,7 +181,8 @@ describe("the customer made from the billing profile", () => {
 
     const next = await adapter.ensureCustomer({
       workspace: WORKSPACE,
-      profile: { ...PROFILE, legalName: "Example AG" },
+      // The same profile: Stripe still holds the answer to the first create, which names the customer that is gone.
+      profile: PROFILE,
       customer: id,
     });
 

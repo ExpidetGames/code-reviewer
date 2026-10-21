@@ -67,12 +67,20 @@ export function topUpCheckoutKey(intentId: string): string {
 /**
  * The Idempotency-Key of the creation of a customer: the workspace and the exact content it is created with. The same
  * profile asked for twice (two clicks at once, a retry after a lost answer) is one customer; a profile that changed in the
- * meantime is another request, not a conflict with the first. Stripe forgets a key after 24 hours; the stored customer id
- * is what makes it once for good.
+ * meantime is another request, not a conflict with the first. A customer made to replace one Stripe no longer knows names
+ * it (`replaces`), because Stripe would answer the same key with the customer that is gone. Stripe forgets a key after 24
+ * hours; the stored customer id is what makes it once for good.
  */
-function customerKey(workspaceId: string, content: unknown): string {
+function customerKey(
+  workspaceId: string,
+  content: unknown,
+  replaces: ProviderRef | null,
+): string {
   const digest = createHash("sha256")
-    .update(`${workspaceId}\n${JSON.stringify(content)}`, "utf8")
+    .update(
+      `${workspaceId}\n${replaces ?? ""}\n${JSON.stringify(content)}`,
+      "utf8",
+    )
     .digest("hex");
   return `customer:${digest}`;
 }
@@ -261,7 +269,7 @@ export function createStripeAdapter({
       if (id === null) {
         const created = await atStripe(() =>
           client.createCustomer(fields, {
-            idempotencyKey: customerKey(workspace.id, fields),
+            idempotencyKey: customerKey(workspace.id, fields, customer),
           }),
         );
         id = created.id;
