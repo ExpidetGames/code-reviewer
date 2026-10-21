@@ -302,7 +302,10 @@ describe("the Stripe adapter", () => {
     }
   });
 
-  it("has no webhook until #502 wires it, so the route answers the missing path", () => {
-    expect(stubbed().adapter.verifyAndParseWebhook).toBeUndefined();
+  // Changed with #502: the adapter had no webhook until this issue wired it (the old test pinned "undefined"); it has one now,
+  // and it can be asked about a top-up.
+  it("has a webhook and a lookup of a top-up (#502)", () => {
+    expect(stubbed().adapter.verifyAndParseWebhook).toBeTypeOf("function");
+    expect(stubbed().adapter.lookupTopUp).toBeTypeOf("function");
   });
 });

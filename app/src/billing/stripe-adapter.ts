@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The Stripe adapter (ADR 0006, 2.12 and 2.13; #501): the interface of `adapter.ts` over the Stripe client of #500, for
-// Stripe Managed Payments (Stripe is the seller of record and issues the buyer's invoice). It performs two actions at Stripe
-// and reads nothing from a webhook yet (`verifyAndParseWebhook` and the lookup are wired in #502):
+// Stripe Managed Payments (Stripe is the seller of record and issues the buyer's invoice). It performs two actions at Stripe,
+// reads what Stripe sends (`verifyAndParseWebhook`, #502) and can be asked what became of a top-up (`lookupTopUp`, #502):
 //
 //   - `ensureCustomer` makes the Stripe Customer from the workspace's billing profile, once, and brings it up to date at the
 //     next call. Managed Payments allows neither `tax_id_collection` nor `customer_update[name|address]`, so the application
@@ -19,6 +19,12 @@
 // client's input type has no field for them. Everything Stripe answers is data: an error becomes a stable code of the
 // adapter (`BillingAdapterError`) without a word of what Stripe said, and the profile, an amount or the address of a session
 // is never logged here (the adapter logs nothing).
+//
+// The webhook is verified with the secret the instance admin stored (`webhookSecret`, read when a request arrives) over the exact
+// bytes of the body, and only then read (`stripe-webhook-parse.ts`); an event of the other environment than the stored key's is
+// refused. It makes no outbound call and touches no database. "Check payment" (`lookupTopUp`) is the one call at Stripe that
+// serves a webhook's purpose, made in a user's request: it asks for the Checkout Session and answers the same normalized event
+// the webhook would have, so a lost webhook, a late one and a click are idempotent together.
 import "server-only";
 import { createHash } from "node:crypto";
 import {
@@ -30,10 +36,24 @@ import {
   type BillingAdapter,
   type BillingCapabilities,
   type BillingProfile,
+  type BillingWebhookRejectionCode,
   type ProviderRef,
+  type TopUpLookupEvent,
 } from "./adapter.ts";
 import { STRIPE_ADAPTER_ID } from "./readiness.ts";
-import { StripeClientError, type StripeClient } from "./stripe-client.ts";
+import {
+  StripeClientError,
+  type StripeClient,
+  type StripeEnvironment,
+} from "./stripe-client.ts";
+import {
+  paymentEventOfSession,
+  parseStripeWebhookEvent,
+} from "./stripe-webhook-parse.ts";
+import {
+  verifyStripeSignature,
+  type StripeSignatureErrorCode,
+} from "./stripe-webhook-verify.ts";
 
 export { STRIPE_ADAPTER_ID };
 
@@ -153,10 +173,34 @@ export type StripeAdapterDependencies = {
    * rejects when there is no usable key; the adapter answers `provider_not_configured`.
    */
   client: () => Promise<StripeClient>;
+  /**
+   * The signing secret of the webhook endpoint (`whsec_...`) the instance admin stored, or null when there is none. Read when a
+   * webhook arrives; without it, or without `environment`, every webhook is refused (`signature_invalid`).
+   */
+  webhookSecret?: () => Promise<string | null>;
+  /** The environment of the stored API key (`test` or `live`), or null when it cannot be told. */
+  environment?: () => Promise<StripeEnvironment | null>;
+  /** The clock of the events a lookup makes. Default: the real one. */
+  now?: () => Date;
+};
+
+const SIGNATURE_REJECTION: Record<
+  StripeSignatureErrorCode,
+  BillingWebhookRejectionCode
+> = {
+  secret_missing: "signature_invalid",
+  signature_missing: "signature_missing",
+  signature_malformed: "signature_invalid",
+  signature_mismatch: "signature_invalid",
+  timestamp_out_of_tolerance: "signature_expired",
+  tolerance_invalid: "signature_invalid",
 };
 
 export function createStripeAdapter({
   client: makeClient,
+  webhookSecret,
+  environment,
+  now = () => new Date(),
 }: StripeAdapterDependencies): BillingAdapter {
   async function clientOf(): Promise<StripeClient> {
     try {
@@ -300,6 +344,108 @@ export function createStripeAdapter({
       return { kind: "open", url: session.url };
     },
 
+    async verifyAndParseWebhook({ headers, rawBody, now: at }) {
+      // The secret and the environment are read now, not at startup: the admin may store or replace them at any time.
+      let secret: string | null = null;
+      let stored: StripeEnvironment | null = null;
+      try {
+        secret = (await webhookSecret?.()) ?? null;
+        stored = (await environment?.()) ?? null;
+      } catch {
+        // Unreadable is the same as absent: nothing is trusted that cannot be checked.
+      }
+      if (secret === null || stored === null)
+        return { ok: false, code: "signature_invalid" };
+      const verdict = verifyStripeSignature({
+        header: headers.get("stripe-signature"),
+        rawBody,
+        secret,
+        now: at,
+      });
+      if (!verdict.ok)
+        return { ok: false, code: SIGNATURE_REJECTION[verdict.code] };
+      // The signature covers these exact bytes; only now are they decoded (strictly: a byte that is not UTF-8 is no event).
+      let body: unknown;
+      try {
+        body = JSON.parse(
+          new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+            rawBody,
+          ),
+        );
+      } catch {
+        return { ok: false, code: "body_invalid" };
+      }
+      const parsed = parseStripeWebhookEvent(body, { environment: stored });
+      return parsed.ok
+        ? { ok: true, event: parsed.event }
+        : { ok: false, code: "body_invalid" };
+    },
+
+    async lookupTopUp({
+      intentId,
+      checkout,
+    }): Promise<TopUpLookupEvent | null> {
+      // Only the session of the top-up is asked for: a payment intent alone has no net amount to credit.
+      if (checkout === null) return null;
+      const stored = (await environment?.()) ?? null;
+      if (stored === null)
+        throw new BillingAdapterError(
+          "provider_not_configured",
+          "the payment provider is not set up",
+        );
+      const client = await clientOf();
+      let session;
+      try {
+        session = await client.getCheckoutSession(checkout);
+      } catch (error) {
+        // A session Stripe does not know (gone with the buyer's data, or of the other environment) is nothing to report.
+        if (error instanceof StripeClientError && error.code === "not_found")
+          return null;
+        if (error instanceof StripeClientError) throw adapterErrorOf(error);
+        throw error;
+      }
+      const at = now().toISOString();
+      const meta = (kind: string) => ({
+        eventId: `check-${session.id}-${kind}`,
+        occurredAt: at,
+      });
+      let event;
+      if (session.mode !== "payment") return null;
+      if (session.status === "expired")
+        event = paymentEventOfSession(
+          session,
+          meta("expired"),
+          stored,
+          "expired",
+        );
+      else if (
+        session.status === "complete" &&
+        session.payment_status === "paid"
+      )
+        event = paymentEventOfSession(session, meta("paid"), stored, "paid");
+      else if (
+        session.status === "complete" &&
+        session.payment_intent !== null &&
+        (await paymentFailed(client, session.payment_intent))
+      )
+        event = paymentEventOfSession(
+          session,
+          meta("failed"),
+          stored,
+          "failed",
+        );
+      else return null;
+      // Our own intent: the one the app asked about, whatever the session says. A session that names another is not it.
+      if (event.type === "ignored") return null;
+      if (
+        event.type !== "payment.refused" &&
+        event.intentId !== null &&
+        event.intentId !== intentId
+      )
+        return null;
+      return event;
+    },
+
     async createTopUpCheckout({ customer, intentId, amount, returnUrl }) {
       assertTopUpAmount(capabilities, amount);
       if (amount % MICRO_USD_PER_CENT !== 0)
@@ -359,4 +505,24 @@ export function createStripeAdapter({
       };
     },
   };
+}
+
+/** A delayed payment that Stripe gave up on leaves its payment intent without a payment method (or canceled). */
+async function paymentFailed(
+  client: StripeClient,
+  paymentIntent: string,
+): Promise<boolean> {
+  try {
+    const intent = await client.getPaymentIntent(paymentIntent);
+    return (
+      intent.status === "requires_payment_method" ||
+      intent.status === "canceled"
+    );
+  } catch (error) {
+    // A payment intent that is gone, or that Stripe will not show, is not a failure we can state.
+    if (error instanceof StripeClientError && error.code === "not_found")
+      return false;
+    if (error instanceof StripeClientError) throw adapterErrorOf(error);
+    throw error;
+  }
 }

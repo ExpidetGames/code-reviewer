@@ -21,12 +21,21 @@ import {
   type BillingAdminService,
 } from "./admin-service.ts";
 import { createStripeAdapter } from "./stripe-adapter.ts";
-import { stripeClientFromSecrets } from "./stripe-credentials.ts";
+import {
+  stripeClientFromSecrets,
+  stripeEnvironmentFromSecrets,
+  stripeWebhookSecretFromSecrets,
+} from "./stripe-credentials.ts";
 import { createStripeClient, STRIPE_API_BASE_URL } from "./stripe-client.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { isBillingOn } from "./enabled.ts";
 import { manualAdapter } from "./manual-adapter.ts";
-import { createTopUpLimits } from "./topup-limits.ts";
+import { createCheckPaymentLimits, createTopUpLimits } from "./topup-limits.ts";
+import { createTopUpCheckService } from "./topup-check.ts";
+import {
+  createTopUpCheckRoute,
+  type TopUpCheckRoute,
+} from "./topup-check-http.ts";
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
@@ -38,8 +47,8 @@ function publicAddress(): string {
 }
 
 /**
- * The adapters of this instance: the `manual` one, and Stripe, which reads its key from the secret store when a top-up needs it
- * (never at startup). The Stripe adapter has no webhook until #502.
+ * The adapters of this instance: the `manual` one, and Stripe, which reads its key and its webhook secret from the secret store
+ * when a top-up, a webhook or a check needs them (never at startup).
  */
 export function getBillingAdapterRegistry() {
   return createAdapterRegistry([
@@ -49,6 +58,10 @@ export function getBillingAdapterRegistry() {
         secrets: getSecretStore,
         baseUrl: STRIPE_API_BASE_URL,
       }),
+      webhookSecret: stripeWebhookSecretFromSecrets({
+        secrets: getSecretStore,
+      }),
+      environment: stripeEnvironmentFromSecrets({ secrets: getSecretStore }),
     }),
   ]);
 }
@@ -65,6 +78,18 @@ export function getTopUpRoute(): TopUpRoute {
     serviceFor: (adapter) => createTopUpService({ db, adapter }),
     limits: createTopUpLimits(createRateLimitsRepository(db)),
     baseUrl: publicAddress(),
+    log: console,
+  });
+}
+
+/** The handler of `POST /api/w/:workspace/billing/top-ups/:id/check` ("Check payment"), wired to the running server. */
+export function getTopUpCheckRoute(): TopUpCheckRoute {
+  const db = getDatabase();
+  return createTopUpCheckRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    activeAdapter: createActiveAdapterResolver(db, getBillingAdapterRegistry()),
+    serviceFor: (adapter) => createTopUpCheckService({ db, adapter }),
+    limits: createCheckPaymentLimits(createRateLimitsRepository(db)),
     log: console,
   });
 }
