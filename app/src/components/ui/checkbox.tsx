@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
+// Local adaptation for Code Reviewer: the 20px box of the design board (#633), filled in fg when
+// checked, with the base focus outline.
 
 "use client";
 
@@ -16,7 +18,7 @@ function Checkbox({
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        "peer size-4 shrink-0 rounded-[4px] border border-input shadow-xs transition-shadow outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:bg-input/30 dark:aria-invalid:ring-destructive/40 dark:data-[state=checked]:bg-primary",
+        "peer size-5 shrink-0 rounded-md border border-input bg-background transition-all disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-2 aria-invalid:border-destructive data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
         className,
       )}
       {...props}

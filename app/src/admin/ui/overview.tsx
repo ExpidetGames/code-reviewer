@@ -65,7 +65,7 @@ function SetupRow({
         <Link
           href={href}
           aria-label={`Configure ${title}`}
-          className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline"
         >
           Configure
         </Link>

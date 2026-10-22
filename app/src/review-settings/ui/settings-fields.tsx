@@ -90,7 +90,7 @@ export function Origin({ origin }: { origin: SettingsOrigin }) {
           onClick={origin.onReset}
           aria-label={origin.resetAriaLabel}
           className={cn(
-            "inline-flex min-h-8 cursor-pointer items-center rounded-sm px-1 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:min-h-11",
+            "inline-flex min-h-8 cursor-pointer items-center rounded-sm px-1 text-xs font-medium text-primary underline-offset-4 hover:underline pointer-coarse:min-h-11",
           )}
         >
           {origin.resetLabel}

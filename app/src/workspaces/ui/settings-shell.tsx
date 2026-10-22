@@ -77,7 +77,7 @@ export function SettingsNav({
                   "text-muted-foreground hover:text-foreground",
                   "aria-[current=page]:border-primary aria-[current=page]:text-foreground",
                   "pointer-coarse:min-h-11",
-                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                  "",
                 )}
               >
                 {section.label}

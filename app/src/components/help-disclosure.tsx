@@ -47,7 +47,7 @@ export function HelpDisclosure({
           type="button"
           aria-label={ariaLabel}
           aria-controls={contentId}
-          className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronRight
             aria-hidden="true"

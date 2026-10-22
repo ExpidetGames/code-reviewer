@@ -65,7 +65,7 @@ export function ProjectSections({
             }
             aria-current={current ? "page" : undefined}
             className={cn(
-              "inline-flex min-h-11 items-center border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground no-underline hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              "inline-flex min-h-11 items-center border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground no-underline hover:text-foreground",
               current && "border-primary text-foreground",
             )}
           >

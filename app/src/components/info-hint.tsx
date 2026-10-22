@@ -35,7 +35,7 @@ export function InfoHint({
             type="button"
             aria-label={label}
             aria-describedby={open ? descriptionId : undefined}
-            className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
             onFocus={() => setOpen(true)}
             onBlur={() => setOpen(false)}
             onKeyDown={(event) => {
