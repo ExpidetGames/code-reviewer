@@ -92,7 +92,7 @@ export function MonthlyLimitCard({
         {chargedMicroUsd === null ? null : (
           <p className="text-sm">
             Charged this month so far:{" "}
-            <span className="font-medium tabular-nums">
+            <span className="font-semibold tabular-nums">
               {formatMoney(chargedMicroUsd)}
             </span>
           </p>

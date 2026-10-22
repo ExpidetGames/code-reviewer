@@ -34,7 +34,7 @@ export function PendingInvitations({
           data-invitation={invitation.id}
           className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
         >
-          <span className="min-w-0 flex-1 truncate font-medium">
+          <span className="min-w-0 flex-1 truncate font-semibold">
             {invitation.workspaceName}
           </span>
           <Badge variant="neutral">{ROLE_LABEL[invitation.role]}</Badge>

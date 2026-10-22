@@ -136,7 +136,7 @@ export function CatalogProvidersCard({
             ) : (
               <ul
                 aria-label="Providers"
-                className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-md border border-border p-1"
+                className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-xl border border-border bg-background p-1"
               >
                 {shown.map((provider) => {
                   const keyed = keyedOf(statusOf.get(provider.id));
@@ -149,12 +149,12 @@ export function CatalogProvidersCard({
                         aria-pressed={provider.id === chosen}
                         onClick={() => setChosen(provider.id)}
                         className={cn(
-                          "flex min-h-11 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                          "flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-raised focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
                           provider.id === chosen && "bg-accent",
                         )}
                       >
                         <span className="flex flex-col">
-                          <span className="font-medium text-foreground">
+                          <span className="font-semibold text-foreground">
                             {provider.label}
                           </span>
                           <span className="text-xs text-muted-foreground">
@@ -174,7 +174,7 @@ export function CatalogProvidersCard({
             )}
             {selected === undefined ? null : (
               <div className="flex flex-col gap-3 border-t border-border pt-4">
-                <h3 className="text-base font-medium">{selected.label}</h3>
+                <h3 className="text-base font-semibold">{selected.label}</h3>
                 <LlmAccessForm
                   key={selected.id}
                   workspaceSlug={workspaceSlug}

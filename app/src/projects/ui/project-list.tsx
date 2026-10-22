@@ -41,7 +41,7 @@ function LastRunStatus({
         {formatUtc(run.at)}
       </time>{" "}
       <Link
-        className="text-primary underline-offset-4 hover:underline"
+        className=" text-foreground"
         href={workspacePath(
           workspaceSlug,
           `/runs?repository=${encodeURIComponent(repositoryId)}`,
@@ -110,7 +110,7 @@ export function ProjectList({
                   workspaceSlug,
                   `/projects/${encodeURIComponent(row.repositoryId)}`,
                 )}
-                className="block truncate font-medium text-foreground no-underline"
+                className="block truncate font-semibold text-foreground no-underline"
               >
                 {row.fullName}
               </Link>

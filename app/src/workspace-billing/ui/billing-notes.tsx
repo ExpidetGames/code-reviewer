@@ -28,7 +28,7 @@ export function BillingNotes({
   return (
     <div className="flex flex-col gap-4 text-sm text-muted-foreground">
       <section aria-label={KEY_HEADING} className="flex flex-col gap-1">
-        <h2 className="text-sm font-medium text-foreground">{KEY_HEADING}</h2>
+        <h2 className="text-sm font-semibold text-foreground">{KEY_HEADING}</h2>
         <p>{KEY_TEXT[keyMode]}</p>
         <p>
           <Link href={workspacePath(workspaceSlug, "/settings/llm")}>

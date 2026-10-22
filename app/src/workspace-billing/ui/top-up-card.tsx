@@ -227,7 +227,7 @@ export function TopUpCard({
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-primary underline-offset-4 hover:underline"
+                    className="text-sm text-foreground"
                   >
                     {text}
                   </a>

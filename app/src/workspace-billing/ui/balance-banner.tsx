@@ -32,7 +32,7 @@ export function BalanceBanner({ view }: { view: BalanceBannerView }) {
         <p>{copy.body}</p>
         <p>
           {BANNER_BALANCE_LABEL}:{" "}
-          <span className="font-medium tabular-nums">
+          <span className="font-semibold tabular-nums">
             {formatMoney(view.balanceMicroUsd)}
           </span>
           {" · "}

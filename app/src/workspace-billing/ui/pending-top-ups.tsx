@@ -52,7 +52,7 @@ function PendingRow({
   }
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2">
-      <span className="font-medium tabular-nums">
+      <span className="font-semibold tabular-nums">
         {formatMoney(item.amountMicroUsd)}
       </span>
       <span className="text-xs text-muted-foreground">

@@ -5,12 +5,12 @@
 // on the settings page, and the segmented navigation between the two pages. The trail starts at the
 // Projects list (the area root, epic #165 breadcrumb rule); the repository name is untrusted GitHub
 // text and is rendered as text, never as markup.
+import { PILL_LINK_CLASS } from "@/components/pill-link";
 import Link from "next/link";
 import { Badge } from "../../components/ui/badge.tsx";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
 import { Button } from "../../components/button.tsx";
 import { PageHeader } from "../../components/page-header.tsx";
-import { cn } from "../../lib/utils.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 import type { ProjectRowView } from "./list-view.ts";
 import { PROJECT_STATE_BADGE, PROJECT_STATE_LABEL } from "./messages.ts";
@@ -52,7 +52,7 @@ export function ProjectSections({
   active: ProjectSection;
 }) {
   return (
-    <nav aria-label="Project" className="flex gap-1 border-b border-border">
+    <nav aria-label="Project" className="flex flex-wrap gap-1">
       {SECTIONS.map((section) => {
         const current = section.value === active;
         return (
@@ -64,10 +64,7 @@ export function ProjectSections({
                 : projectReviewPath(workspaceSlug, repositoryId)
             }
             aria-current={current ? "page" : undefined}
-            className={cn(
-              "inline-flex min-h-11 items-center border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground no-underline hover:text-foreground",
-              current && "border-primary text-foreground",
-            )}
+            className={PILL_LINK_CLASS}
           >
             {section.label}
           </Link>

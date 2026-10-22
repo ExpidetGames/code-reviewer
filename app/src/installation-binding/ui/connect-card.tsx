@@ -96,7 +96,7 @@ export function ConnectCard({
                   className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-4"
                 >
                   <div className="flex min-w-0 flex-col">
-                    <span className="min-w-0 truncate font-medium text-foreground">
+                    <span className="min-w-0 truncate font-semibold text-foreground">
                       {entry.accountLogin}
                     </span>
                     <span className="text-sm text-muted-foreground">

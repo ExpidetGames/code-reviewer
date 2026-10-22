@@ -4,7 +4,8 @@
 // `no-underline` so a badge rendered as a link does not take the base link underline (#185 review).
 // The look is the design board's (#633): a pill with a line-strong outline, 12px semibold. The board has
 // no status colours, so the tones differ by fill and outline: success is outlined in fg, danger is
-// filled in fg, neutral sits on raised, warning on the todo pair, info on surface. A status is never
+// filled in fg, running is outlined in fg like success (its symbol tells them apart), neutral sits on
+// raised, warning on the todo pair, info on surface. A status is never
 // told by the fill alone: the label (and, where the caller adds one, an icon) is always in the badge.
 
 import * as React from "react";
@@ -27,6 +28,7 @@ const badgeVariants = cva(
         link: "border-transparent underline underline-offset-4",
         neutral: "border-transparent bg-raised text-muted-foreground",
         success: "border-success bg-success-soft text-success",
+        running: "border-foreground",
         warning: "border-warning bg-warning-soft text-warning",
         danger: "border-danger bg-danger text-background",
         info: "bg-info-soft text-info",

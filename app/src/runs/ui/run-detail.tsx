@@ -115,7 +115,7 @@ function LogPanel({ run }: { run: RunDetailView }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-foreground">Log</h3>
+        <h3 className="text-sm font-semibold text-foreground">Log</h3>
         {run.log.text !== "" ? <CopyLogButton text={run.log.text} /> : null}
       </div>
       {run.log.text === "" ? (
@@ -130,7 +130,7 @@ function LogPanel({ run }: { run: RunDetailView }) {
           <pre
             tabIndex={0}
             aria-label="Log of the run"
-            className="max-h-[28rem] overflow-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs break-words whitespace-pre-wrap"
+            className="max-h-[28rem] overflow-auto rounded-xl bg-raised p-4 font-mono text-xs leading-4 break-words whitespace-pre-wrap"
           >
             {run.log.text}
           </pre>

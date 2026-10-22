@@ -103,7 +103,7 @@ function CostUsage({ cost }: { cost: CostUsageView }) {
         aria-valuetext={text}
       />
       {cost.percentUsed >= 100 ? (
-        <p className="text-sm font-medium text-foreground">
+        <p className="text-sm font-semibold text-foreground">
           {PLAN_COST_REACHED}
         </p>
       ) : null}

@@ -104,7 +104,7 @@ export function ReviewVerdictFieldset({
                   aria-invalid={error !== undefined}
                   className="mt-0.5"
                 />
-                <span className="font-medium text-foreground">
+                <span className="font-semibold text-foreground">
                   {VERDICT_NAMES[mode]}
                   {mode === defaultMode ? " (default)" : ""}
                 </span>

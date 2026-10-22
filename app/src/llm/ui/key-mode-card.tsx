@@ -121,7 +121,7 @@ export function KeyModeCard({
                   htmlFor={`${id}-${mode}`}
                   className="flex flex-col items-start gap-0.5"
                 >
-                  <span className="font-medium">{label}</span>
+                  <span className="font-semibold">{label}</span>
                   <span className="text-sm font-normal text-muted-foreground">
                     {text}
                   </span>
