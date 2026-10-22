@@ -7,7 +7,8 @@
 // switch shows the new state, and it goes back by itself if the call fails.
 //
 // A switch that cannot be switched on explains itself through `aria-describedby` and a small hint
-// next to it, instead of a paragraph on every row (#173-T03).
+// next to it, instead of a paragraph on every row (#173-T03). A Member gets no hint per row: the project
+// list says once, under the table, that only Admins and Owners switch projects (#633).
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState } from "react";
 import { InfoHint } from "../../components/info-hint.tsx";
@@ -90,7 +91,12 @@ export function ProjectToggle({
             className="data-[size=default]:h-6 data-[size=default]:w-11"
           />
         </label>
-        {problem === null && blocked && blockedText !== null ? (
+        {/* The state as a word next to the switch (design board, #633); the switch itself already
+            tells assistive technology whether it is on. */}
+        <span aria-hidden="true" className="text-sm text-foreground">
+          {on ? "On" : "Off"}
+        </span>
+        {problem === null && blocked && canManage && blockedText !== null ? (
           <InfoHint label={`Why ${fullName} cannot be switched on`}>
             {blockedText}
           </InfoHint>

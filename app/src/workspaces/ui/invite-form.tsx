@@ -86,9 +86,17 @@ export function InviteForm({
       className="flex flex-col gap-4"
       aria-label="Invite a person"
     >
-      <fieldset disabled={pending} className="flex flex-col gap-4">
+      {/* One row on a wide screen (address, role, send), as on the design board (#633). */}
+      <fieldset
+        disabled={pending}
+        className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem_auto] md:items-end md:gap-3"
+      >
         {problem !== null ? (
-          <Alert variant="destructive" id={errorId}>
+          <Alert
+            variant="destructive"
+            id={errorId}
+            className="md:col-span-full"
+          >
             <AlertDescription>{problem}</AlertDescription>
           </Alert>
         ) : null}
@@ -106,7 +114,8 @@ export function InviteForm({
           />
         </Field>
         <Field>
-          <div className="flex items-center gap-1">
+          {/* As high as the other labels of the row: the 44px "?" target overflows it. */}
+          <div className="flex h-5 items-center gap-1">
             <FieldLabel htmlFor={roleId}>Role</FieldLabel>
             <InfoHint label="About the roles">
               <span className="flex flex-col gap-1">

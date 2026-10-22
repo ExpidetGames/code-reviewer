@@ -37,7 +37,10 @@ export function BalanceCard({ view }: { view: WorkspaceBillingView }) {
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
         <CardTitle>
-          <h2 id={id} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={id}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {BALANCE_HEADING}
           </h2>
         </CardTitle>

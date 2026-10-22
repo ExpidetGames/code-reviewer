@@ -94,7 +94,7 @@ export function CallTraceTables({
         </p>
       ) : null}
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">
+        <h3 className="text-sm font-semibold text-foreground">
           {CALL_TRACE_COPY.modelCallsTitle}
         </h3>
         {trace.modelCalls.length === 0 ? (
@@ -161,7 +161,7 @@ export function CallTraceTables({
         )}
       </section>
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">
+        <h3 className="text-sm font-semibold text-foreground">
           {CALL_TRACE_COPY.toolCallsTitle}
         </h3>
         {trace.toolCalls.length === 0 ? (

@@ -577,7 +577,7 @@ export function SettingsForm({
     model.mode === "project" ? "Save review settings" : "Save review defaults";
 
   return (
-    <div className="flex max-w-[44rem] flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <form
         ref={formRef}
         onSubmit={(event) => void submit(event)}

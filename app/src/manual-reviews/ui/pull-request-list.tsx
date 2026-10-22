@@ -31,7 +31,7 @@ export function PullRequestList({
     );
   return (
     <fieldset className="flex flex-col gap-1">
-      <legend className="text-sm font-medium">Pull request</legend>
+      <legend className="text-sm font-semibold">Pull request</legend>
       <ul className="m-0 flex list-none flex-col gap-1 p-0">
         {pullRequests.map((pr) => {
           const link = safeGithubUrl(pr.url);
@@ -50,7 +50,7 @@ export function PullRequestList({
                   className="size-4 accent-primary"
                 />
                 <span className="text-muted-foreground">#{pr.number}</span>{" "}
-                <span className="truncate font-medium text-foreground">
+                <span className="truncate font-semibold text-foreground">
                   {pr.title}
                 </span>{" "}
                 <span className="shrink-0 text-muted-foreground">
@@ -63,7 +63,7 @@ export function PullRequestList({
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="shrink-0 text-sm text-primary underline-offset-4 hover:underline no-underline"
+                  className="shrink-0 text-sm text-foreground"
                   aria-label={`Open pull request ${pr.number} on GitHub`}
                 >
                   GitHub

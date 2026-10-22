@@ -48,7 +48,7 @@ export function LlmSettingsPageContent({
       showPlan={showPlan}
       showBilling={showBilling}
     >
-      <div className="max-w-[44rem]">
+      <div>
         <LlmAccessSection
           workspaceSlug={workspaceSlug}
           canManage={canManage}
