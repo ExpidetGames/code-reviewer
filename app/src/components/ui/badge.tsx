@@ -12,6 +12,7 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { Slot } from "radix-ui";
+import { Check, TriangleAlert, X, type LucideIcon } from "lucide-react";
 
 const badgeVariants = cva(
   "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-line-strong px-3 py-1 text-xs leading-4 font-semibold whitespace-nowrap text-foreground no-underline transition-all aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3",
@@ -40,14 +41,32 @@ const badgeVariants = cva(
   },
 );
 
+// The symbol of a tone, as the design board pairs them (#633): a check for success, a cross for a
+// failure, a warning sign for a warning. Decorative: the label carries the meaning.
+const TONE_ICON: Partial<
+  Record<NonNullable<VariantProps<typeof badgeVariants>["variant"]>, LucideIcon>
+> = {
+  success: Check,
+  danger: X,
+  destructive: X,
+  warning: TriangleAlert,
+};
+
 function Badge({
   className,
   variant = "default",
   asChild = false,
+  icon = true,
+  children,
   ...props
 }: React.ComponentProps<"span"> &
-  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+  VariantProps<typeof badgeVariants> & {
+    asChild?: boolean;
+    /** Set to false when the caller brings a symbol of its own. */
+    icon?: boolean;
+  }) {
   const Comp = asChild ? Slot.Root : "span";
+  const Icon = icon && !asChild && variant ? TONE_ICON[variant] : undefined;
 
   return (
     <Comp
@@ -55,7 +74,10 @@ function Badge({
       data-variant={variant}
       className={cn(badgeVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {Icon ? <Icon aria-hidden="true" /> : null}
+      {children}
+    </Comp>
   );
 }
 

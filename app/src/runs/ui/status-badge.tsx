@@ -39,6 +39,7 @@ export function RunStatusBadge({
     // list badge, and the focusable "?" (`hint`) on the run detail.
     <Badge
       variant={STATUS_TONE[status]}
+      icon={false}
       data-status={status}
       title={presentation.description}
     >
