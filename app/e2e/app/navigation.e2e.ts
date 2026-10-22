@@ -61,6 +61,24 @@ test.describe("the app frame", () => {
     ).toBeVisible();
   });
 
+  // #633-T03
+  test("a signed in person who opens an address that does not exist gets the page that is not found and a way back", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+
+    const visit = await page.goto("/w/default/no-such-page");
+
+    expect(visit?.status()).toBe(404);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Page not found" }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Back to the start page" }).click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Projects" }),
+    ).toBeVisible();
+  });
+
   test.describe("on a narrow window", () => {
     test.use({ viewport: { width: 375, height: 812 } });
 
