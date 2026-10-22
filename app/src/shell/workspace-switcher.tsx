@@ -8,6 +8,7 @@
 // are ever passed in.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,12 +44,17 @@ export function WorkspaceSwitcher({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent px-3 py-1 text-foreground transition-all hover:bg-surface"
         >
-          <span className="text-xs text-muted-foreground">Workspace</span>
-          <span className="max-w-40 truncate text-sm font-medium text-foreground">
-            {current?.name ?? "Switch"}
+          <span className="flex min-w-0 flex-col items-start leading-4">
+            <span className="text-xs font-normal text-muted-foreground">
+              Workspace
+            </span>
+            <span className="max-w-40 truncate text-sm font-semibold">
+              {current?.name ?? "Switch"}
+            </span>
           </span>
+          <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">

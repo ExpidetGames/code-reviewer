@@ -27,8 +27,12 @@ import {
   SIDEBAR_LINK_CLASS,
 } from "./nav-items.ts";
 
-/** How much of the top the fixed sidebar leaves to the header (`min-h-14` + its bottom border). */
-export const SIDEBAR_TOP_CLASS = "top-14 h-[calc(100svh-3.5rem)]";
+/**
+ * The sidebar sits in the page column (the design board's side column) instead of fixed to the
+ * viewport: in the flow, as high as its links, and gone while collapsed (Ctrl/Cmd+B).
+ */
+export const SIDEBAR_TOP_CLASS =
+  "relative z-0 h-auto self-start group-data-[side=left]:border-r-0 group-data-[collapsible=offcanvas]:hidden";
 
 export function NavLinks({ pathname }: { pathname: string | null }) {
   const groups = navGroupsFor(pathname);

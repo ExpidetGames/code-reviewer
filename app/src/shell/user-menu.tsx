@@ -7,6 +7,7 @@
 // focus return, so the menu works without a mouse.
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
+import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,17 +42,18 @@ export function UserMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent p-1 pr-2 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent py-1 pr-3 pl-1 text-foreground transition-all hover:bg-surface"
         >
           <UserAvatar user={user} />
-          <span className="max-w-40 truncate text-sm font-medium text-foreground">
+          <span className="max-w-24 truncate text-sm font-semibold sm:max-w-40">
             {name}
           </span>
+          <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
-          <span className="block truncate font-medium text-foreground">
+          <span className="block truncate font-semibold text-foreground">
             {name}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
@@ -106,7 +108,7 @@ function SignOutMenuItem() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full appearance-none border-0 bg-transparent text-left font-medium text-foreground"
+        className="w-full appearance-none border-0 bg-transparent text-left text-foreground"
       >
         Sign out
       </button>
