@@ -96,7 +96,9 @@ test.describe("the mail page", () => {
     expect(route.status()).toBe(404);
     // The page decides at request time, behind a boundary, so it shows the page that is not found (the
     // status of the answer is already 200 by then); there is no form.
-    await expect(page.getByText("This page could not be found.")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Page not found" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Send me a link" }),
     ).toHaveCount(0);

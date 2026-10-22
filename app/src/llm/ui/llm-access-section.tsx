@@ -43,7 +43,7 @@ function InstanceAccessCard({
         <CardTitle>
           <h2
             id="llm-key-heading"
-            className="text-lg font-semibold tracking-tight"
+            className="text-lg leading-7 font-semibold tracking-normal"
           >
             LLM access
           </h2>
@@ -162,7 +162,7 @@ export function LlmAccessSection({
             <CardTitle>
               <h2
                 id="llm-key-heading"
-                className="text-lg font-semibold tracking-tight"
+                className="text-lg leading-7 font-semibold tracking-normal"
               >
                 Key
               </h2>
@@ -206,7 +206,7 @@ export function LlmAccessSection({
               <CardTitle>
                 <h2
                   id={headingId}
-                  className="text-lg font-semibold tracking-tight"
+                  className="text-lg leading-7 font-semibold tracking-normal"
                 >
                   {label}
                 </h2>

@@ -50,7 +50,7 @@ export function RenameForm({
       onSubmit={(event) => void submit(event)}
       aria-label="Workspace name"
       noValidate
-      className="flex max-w-[44rem] flex-col gap-4"
+      className="flex flex-col gap-4"
     >
       <Field data-invalid={problem !== null || undefined}>
         <FieldLabel htmlFor={id}>Name of the workspace</FieldLabel>

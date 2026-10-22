@@ -640,7 +640,9 @@ test.describe("the billing journeys of a review", () => {
     );
     // The page and the routes of billing are paths that do not exist.
     await page.goto(BILLING_PAGE);
-    await expect(page.getByText("This page could not be found.")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Page not found" }),
+    ).toBeVisible();
     for (const path of ["journal", "profile", "monthly-limit"])
       expect(
         (await page.request.get(`/api/w/default/billing/${path}`)).status(),

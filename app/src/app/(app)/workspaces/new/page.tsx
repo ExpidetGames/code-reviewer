@@ -29,7 +29,7 @@ export default async function NewWorkspacePage() {
         description="You become its Owner and can invite people."
       />
       <Card className="mt-6 max-w-xl">
-        <CardContent className="pt-6">
+        <CardContent>
           <CreateWorkspaceForm />
         </CardContent>
       </Card>

@@ -5,12 +5,12 @@
 // breadcrumb; the sub-pages show `Settings / <page>` (epic #165 breadcrumb rule). The current link
 // carries `aria-current="page"`, which the styling turns into an underline as well, so the location
 // is never shown by colour alone. One source (`SETTINGS_SECTIONS`) feeds the links and the headings.
+import { PILL_LINK_CLASS } from "@/components/pill-link";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
 import { PLAN_NAV_LABEL, PLAN_PAGE_TITLE } from "../../copy/plan-usage.ts";
 import { PageHeader } from "../../components/page-header.tsx";
-import { cn } from "../../lib/utils.ts";
 import { workspacePath } from "../paths.ts";
 import {
   BILLING_NAV_LABEL,
@@ -59,7 +59,7 @@ export function SettingsNav({
   showBilling?: boolean;
 }) {
   return (
-    <nav aria-label="Settings sections" className="border-b border-border">
+    <nav aria-label="Settings sections">
       <ul className="flex flex-wrap items-center gap-1">
         {SETTINGS_SECTIONS.filter((section) => {
           if (section.segment === "plan") return showPlan && !showBilling;
@@ -72,13 +72,7 @@ export function SettingsNav({
               <Link
                 href={settingsSectionHref(workspaceSlug, section.segment)}
                 aria-current={active ? "page" : undefined}
-                className={cn(
-                  "inline-flex min-h-9 items-center border-b-2 border-transparent px-3 text-sm font-medium no-underline",
-                  "text-muted-foreground hover:text-foreground",
-                  "aria-[current=page]:border-primary aria-[current=page]:text-foreground",
-                  "pointer-coarse:min-h-11",
-                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                )}
+                className={PILL_LINK_CLASS}
               >
                 {section.label}
               </Link>
@@ -129,7 +123,7 @@ export function SettingsScreen({
           )
         }
       />
-      <div className="flex flex-col gap-6 pt-6">
+      <div className="flex flex-col gap-6">
         <SettingsNav
           workspaceSlug={workspaceSlug}
           current={current}

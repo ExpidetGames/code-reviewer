@@ -228,7 +228,9 @@ test.describe("the billing page of a workspace", () => {
     );
     // Nothing of billing answers: the page and the routes are paths that do not exist.
     await page.goto("/w/default/settings/billing");
-    await expect(page.getByText("This page could not be found.")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Page not found" }),
+    ).toBeVisible();
     for (const path of ["journal", "profile", "monthly-limit"]) {
       const answer = await page.request.get(`/api/w/default/billing/${path}`);
       expect(answer.status(), path).toBe(404);

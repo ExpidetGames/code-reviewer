@@ -27,7 +27,7 @@ export function OwnKeyCostNote({
   return (
     <div
       data-testid="cost-note"
-      className="flex flex-col gap-1 rounded-md border border-border bg-muted p-3 text-sm"
+      className="flex flex-col gap-1 rounded-xl border border-border bg-background p-4 text-sm"
     >
       {price === null ? (
         <p>

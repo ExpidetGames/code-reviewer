@@ -20,7 +20,7 @@ import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
 import { PROJECT_STATE_BADGE, PROJECT_STATE_LABEL } from "./messages.ts";
-import { RUN_STATUS_PRESENTATION } from "../../runs/run-status.ts";
+import { RunStatusBadge } from "../../runs/ui/status-badge.tsx";
 import type { LastRun, ProjectListView, ProjectRowView } from "./list-view.ts";
 
 function LastRunStatus({
@@ -34,22 +34,25 @@ function LastRunStatus({
 }) {
   if (run === null)
     return <span className="text-muted-foreground">No run yet</span>;
+  // The design board's last run (#633): the status as the badge of the Runs page, the time and the
+  // link in small text below it.
   return (
-    <span>
-      {RUN_STATUS_PRESENTATION[run.status].label}{" "}
-      <time dateTime={run.at} className="text-muted-foreground">
-        {formatUtc(run.at)}
-      </time>{" "}
-      <Link
-        className="text-primary underline-offset-4 hover:underline"
-        href={workspacePath(
-          workspaceSlug,
-          `/runs?repository=${encodeURIComponent(repositoryId)}`,
-        )}
-      >
-        All runs
-      </Link>
-    </span>
+    <div className="flex flex-col items-start gap-1">
+      <RunStatusBadge status={run.status} />
+      <span className="text-xs text-muted-foreground">
+        <time dateTime={run.at}>{formatUtc(run.at)}</time>
+        {" · "}
+        <Link
+          className="text-muted-foreground"
+          href={workspacePath(
+            workspaceSlug,
+            `/runs?repository=${encodeURIComponent(repositoryId)}`,
+          )}
+        >
+          All runs
+        </Link>
+      </span>
+    </div>
   );
 }
 
@@ -89,78 +92,84 @@ export function ProjectList({
       />
     );
   return (
-    <Table aria-label="Repositories" className="table-fixed">
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[38%]">Name</TableHead>
-          <TableHead className="w-[16%]">Installation</TableHead>
-          <TableHead className="w-[12%]">Status</TableHead>
-          <TableHead className="w-[26%]">Last run</TableHead>
-          <TableHead className="w-[8%]">
-            <span className="sr-only">Review</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {view.rows.map((row) => (
-          <TableRow key={row.repositoryId}>
-            <TableCell className="min-w-0 align-top whitespace-normal">
-              <Link
-                href={workspacePath(
-                  workspaceSlug,
-                  `/projects/${encodeURIComponent(row.repositoryId)}`,
-                )}
-                className="block truncate font-medium text-foreground no-underline"
-              >
-                {row.fullName}
-              </Link>
-              {row.url !== null ? (
-                <a
-                  href={row.url}
-                  rel="noreferrer noopener"
-                  target="_blank"
-                  aria-label={`${row.fullName} on GitHub`}
-                  className="text-xs text-muted-foreground hover:text-foreground no-underline"
-                >
-                  On GitHub
-                </a>
-              ) : null}
-            </TableCell>
-            <TableCell className="align-top whitespace-normal break-words text-muted-foreground">
-              {row.installation}
-            </TableCell>
-            <TableCell className="align-top">
-              <Badge variant={PROJECT_STATE_BADGE[row.status]}>
-                {PROJECT_STATE_LABEL[row.status]}
-              </Badge>
-            </TableCell>
-            <TableCell className="align-top whitespace-normal">
-              <LastRunStatus
-                run={row.lastRun}
-                repositoryId={row.repositoryId}
-                workspaceSlug={workspaceSlug}
-              />
-              {row.status === "unavailable" && row.switchedOn ? (
-                <p className="text-xs text-muted-foreground">
-                  It was on and resumes if the repository comes back.
-                </p>
-              ) : null}
-            </TableCell>
-            <TableCell className="align-top">
-              <ProjectToggle
-                key={`${row.repositoryId}:${String(row.switchedOn)}`}
-                workspaceSlug={workspaceSlug}
-                canManage={canManage}
-                repositoryId={row.repositoryId}
-                fullName={row.fullName}
-                checked={row.switchedOn}
-                blockedReason={blockedReasonOf(row, activationBlocked)}
-                {...(api === undefined ? {} : { api })}
-              />
-            </TableCell>
+    <>
+      <Table aria-label="Repositories" className="table-fixed">
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[32%]">Name</TableHead>
+            <TableHead className="w-[16%]">Installation</TableHead>
+            <TableHead className="w-[12%]">Status</TableHead>
+            <TableHead className="w-[26%]">Last run</TableHead>
+            <TableHead className="w-[14%]">Review</TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {view.rows.map((row) => (
+            <TableRow key={row.repositoryId}>
+              <TableCell className="min-w-0 align-top whitespace-normal">
+                <Link
+                  href={workspacePath(
+                    workspaceSlug,
+                    `/projects/${encodeURIComponent(row.repositoryId)}`,
+                  )}
+                  className="block truncate font-semibold text-foreground no-underline"
+                >
+                  {row.fullName}
+                </Link>
+                {row.url !== null ? (
+                  <a
+                    href={row.url}
+                    rel="noreferrer noopener"
+                    target="_blank"
+                    aria-label={`${row.fullName} on GitHub`}
+                    className="text-xs text-muted-foreground hover:text-foreground no-underline"
+                  >
+                    On GitHub
+                  </a>
+                ) : null}
+              </TableCell>
+              <TableCell className="align-top whitespace-normal break-words text-muted-foreground">
+                {row.installation}
+              </TableCell>
+              <TableCell className="align-top">
+                <Badge variant={PROJECT_STATE_BADGE[row.status]}>
+                  {PROJECT_STATE_LABEL[row.status]}
+                </Badge>
+              </TableCell>
+              <TableCell className="align-top whitespace-normal">
+                <LastRunStatus
+                  run={row.lastRun}
+                  repositoryId={row.repositoryId}
+                  workspaceSlug={workspaceSlug}
+                />
+                {row.status === "unavailable" && row.switchedOn ? (
+                  <p className="text-xs text-muted-foreground">
+                    It was on and resumes if the repository comes back.
+                  </p>
+                ) : null}
+              </TableCell>
+              <TableCell className="align-top">
+                <ProjectToggle
+                  key={`${row.repositoryId}:${String(row.switchedOn)}`}
+                  workspaceSlug={workspaceSlug}
+                  canManage={canManage}
+                  repositoryId={row.repositoryId}
+                  fullName={row.fullName}
+                  checked={row.switchedOn}
+                  blockedReason={blockedReasonOf(row, activationBlocked)}
+                  {...(api === undefined ? {} : { api })}
+                />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {canManage ? null : (
+        <p className="mt-3 text-sm text-muted-foreground">
+          Members see the switches read only: Only Admins and Owners can switch
+          a project on or off.
+        </p>
+      )}
+    </>
   );
 }

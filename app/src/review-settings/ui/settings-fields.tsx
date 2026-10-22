@@ -90,7 +90,7 @@ export function Origin({ origin }: { origin: SettingsOrigin }) {
           onClick={origin.onReset}
           aria-label={origin.resetAriaLabel}
           className={cn(
-            "inline-flex min-h-8 cursor-pointer items-center rounded-sm px-1 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:min-h-11",
+            "inline-flex min-h-8 cursor-pointer items-center rounded-sm px-1 text-xs font-semibold text-foreground pointer-coarse:min-h-11",
           )}
         >
           {origin.resetLabel}
@@ -360,8 +360,11 @@ export function SettingsCard({
     <Card>
       <CardContent>
         <FieldSet disabled={disabled} className="gap-6">
-          <FieldLegend className="mb-0">
-            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+          {/* A legend takes no part in the fieldset's gap, so it brings its own space. */}
+          <FieldLegend className="mb-4">
+            <h2 className="text-lg leading-7 font-semibold tracking-normal">
+              {title}
+            </h2>
           </FieldLegend>
           {children}
         </FieldSet>

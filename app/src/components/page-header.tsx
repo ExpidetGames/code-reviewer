@@ -3,7 +3,16 @@
 // The heading block at the top of a page: the one `h1` of the page, an optional breadcrumb, an
 // optional one-line description the title cannot carry, and the page's primary actions on the right.
 // Apache-2.0 (our own composition); the primitives it uses live under `components/ui/`.
+//
+// The look is the design board's page header (#633): a 36px title with the one text gradient of the
+// design (hero-from to hero-to, clipped to the text), an 18px muted lead, the actions aligned to the
+// bottom of the title block.
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+/** The text gradient of the board's page titles, for the one h1 of a page (never a background). */
+export const TITLE_GRADIENT_CLASS =
+  "bg-linear-to-r from-hero-from to-hero-to bg-clip-text text-transparent";
 
 export function PageHeader({
   title,
@@ -22,22 +31,31 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-3 border-b border-border pb-6">
+    <header className="flex flex-col gap-3">
       {breadcrumb ? <div>{breadcrumb}</div> : null}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1
+              className={cn(
+                "pb-1 text-3xl leading-9 break-words sm:text-4xl sm:leading-10",
+                TITLE_GRADIENT_CLASS,
+              )}
+            >
               {title}
             </h1>
             {badge}
           </div>
           {description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="max-w-hero text-lg leading-7 text-muted-foreground">
+              {description}
+            </p>
           ) : null}
         </div>
         {actions ? (
-          <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {actions}
+          </div>
         ) : null}
       </div>
     </header>

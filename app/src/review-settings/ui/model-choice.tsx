@@ -152,7 +152,7 @@ export function ModelChoice({
                     aria-describedby={hintId}
                     className="mt-0.5"
                   />
-                  <span className="font-medium text-foreground">
+                  <span className="font-semibold text-foreground">
                     {choice.name}
                   </span>
                   {badge === null ? null : (
@@ -169,7 +169,7 @@ export function ModelChoice({
                   {choice.reason === "CATALOG_ENTRY_NOT_ALLOWED" ? (
                     <Link
                       href={planLink}
-                      className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                      className="text-sm font-semibold text-foreground"
                     >
                       {MODEL_CHOICE_MANAGE_PLAN}
                     </Link>

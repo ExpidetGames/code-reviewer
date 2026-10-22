@@ -91,7 +91,7 @@ function RunTableRow({
           // The project name alone repeats for every run of a repository; the PR number makes the
           // link name of a row unique in a screen reader's link list.
           aria-label={`${run.project} #${String(run.prNumber)}`}
-          className="block truncate font-medium text-foreground no-underline"
+          className="block truncate font-semibold text-foreground no-underline"
         >
           {run.project}
         </Link>
@@ -102,7 +102,7 @@ function RunTableRow({
             href={run.prUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary underline-offset-4 hover:underline no-underline"
+            className=" text-foreground"
           >
             #{run.prNumber}
           </a>

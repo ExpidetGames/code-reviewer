@@ -4,10 +4,12 @@
 // for, and reachable with Tab. shadcn has no equivalent; this is a thin Apache-2.0 wrapper over the
 // copied Collapsible, like the `InfoHint` over the Tooltip. The content stays in the DOM (forceMount)
 // and is hidden with the native `hidden` attribute, so a screen reader skips it while it is closed.
+// The look is the design board's disclosure (#633): a bordered box on the page ground, the question as
+// a 14px semibold row with the chevron at its end, the answer in muted text below it.
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
@@ -40,30 +42,33 @@ export function HelpDisclosure({
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className={cn("text-sm", className)}
+      className={cn(
+        "rounded-xl border border-border bg-background text-sm",
+        className,
+      )}
     >
       <CollapsibleTrigger asChild>
         <button
           type="button"
           aria-label={ariaLabel}
           aria-controls={contentId}
-          className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-3 text-left font-semibold text-foreground transition-all hover:bg-surface"
         >
-          <ChevronRight
+          {label}
+          <ChevronDown
             aria-hidden="true"
             className={cn(
               "size-4 shrink-0 transition-transform",
-              open && "rotate-90",
+              open && "rotate-180",
             )}
           />
-          {label}
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent
         forceMount
         hidden={!open}
         id={contentId}
-        className="pt-1 text-muted-foreground"
+        className="flex flex-col gap-2 px-4 pb-4 text-muted-foreground"
       >
         {children}
       </CollapsibleContent>

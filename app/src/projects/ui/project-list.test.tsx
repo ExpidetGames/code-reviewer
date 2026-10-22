@@ -36,6 +36,7 @@ function renderList(
   rows: ProjectRowView[],
   options: {
     canConnect?: boolean;
+    canManage?: boolean;
     activationBlocked?: string | null;
   } = {},
 ) {
@@ -45,6 +46,7 @@ function renderList(
       workspaceSlug="acme"
       view={view}
       canConnect={options.canConnect ?? true}
+      canManage={options.canManage ?? true}
       activationBlocked={options.activationBlocked ?? null}
     />,
   );
@@ -141,6 +143,42 @@ describe("the project list with repositories", () => {
     const [waiting, replaced] = repositoryRows();
     expect(waiting?.textContent).toContain("Waiting");
     expect(replaced?.textContent).toContain("Superseded");
+  });
+
+  // #633-T02
+  it("shows the status of the last run as the badge of the Runs page, with the state of the switch as a word", () => {
+    renderList([
+      row({
+        switchedOn: true,
+        status: "active",
+        lastRun: { status: "failed", at: "2026-10-10T12:34:56Z" },
+      }),
+    ]);
+
+    const item = repositoryRows()[0]!;
+    const badge = item.querySelector('[data-status="failed"]');
+    expect(badge?.textContent).toContain("Failed");
+    expect(within(item).getByText("On")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Review" })).toBeTruthy();
+  });
+
+  // #633-T02
+  it("tells a member under the table that only Admins and Owners switch projects", () => {
+    renderList([row()], { canManage: false });
+
+    expect(
+      screen.getByText(
+        /Members see the switches read only: Only Admins and Owners can switch a project on or off\./,
+      ),
+    ).toBeTruthy();
+    expect(within(repositoryRows()[0]!).getByText("Off")).toBeTruthy();
+  });
+
+  // #633-T02
+  it("has no member note for an Admin", () => {
+    renderList([row()]);
+
+    expect(screen.queryByText(/Members see the switches read only/)).toBeNull();
   });
 
   it("links the last run to the runs of that project", () => {
