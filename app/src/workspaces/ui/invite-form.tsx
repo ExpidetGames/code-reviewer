@@ -114,7 +114,8 @@ export function InviteForm({
           />
         </Field>
         <Field>
-          <div className="flex items-center gap-1">
+          {/* As high as the other labels of the row: the 44px "?" target overflows it. */}
+          <div className="flex h-5 items-center gap-1">
             <FieldLabel htmlFor={roleId}>Role</FieldLabel>
             <InfoHint label="About the roles">
               <span className="flex flex-col gap-1">
