@@ -36,7 +36,7 @@ export function ManagePlanCard({
         <CardTitle>
           <h2
             id="plan-heading"
-            className="text-lg font-semibold tracking-tight"
+            className="text-lg leading-7 font-semibold tracking-normal"
           >
             Plan
           </h2>

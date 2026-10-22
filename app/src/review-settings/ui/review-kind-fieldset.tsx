@@ -182,7 +182,7 @@ export function ReviewKindFieldset({
                   aria-invalid={errors.reviewKind !== undefined}
                   className="mt-0.5"
                 />
-                <span className="font-medium text-foreground">
+                <span className="font-semibold text-foreground">
                   {KIND_NAMES[kind]}
                 </span>
               </FieldLabel>
@@ -247,7 +247,7 @@ export function ReviewKindFieldset({
                   another provider on the{" "}
                   <Link
                     href={workspacePath(workspaceSlug, "/settings/llm")}
-                    className="font-medium underline underline-offset-4"
+                    className="font-semibold underline underline-offset-4"
                   >
                     LLM access
                   </Link>{" "}

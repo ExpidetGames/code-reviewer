@@ -127,7 +127,7 @@ export function ProjectSettingsPageContent({
         row={data.row}
         active="settings"
       />
-      <div className="flex flex-col gap-6 pt-6">
+      <div className="flex flex-col gap-6">
         <NeedsAttention notices={notices} />
         {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
             when it is shown again with fresh data the form must start from that data. */}

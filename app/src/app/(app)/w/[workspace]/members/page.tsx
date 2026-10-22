@@ -31,7 +31,7 @@ export default async function MembersPage({
       <PageHeader
         title="Members"
         description={`Who works in ${workspace.name}.`}
-        badge={<Badge variant="secondary">{ROLE_LABEL[role]}</Badge>}
+        badge={<Badge variant="outline">{ROLE_LABEL[role]}</Badge>}
       />
       <MembersContent
         workspaceId={workspace.id}

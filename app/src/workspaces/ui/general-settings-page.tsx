@@ -32,7 +32,7 @@ import { SettingsScreen } from "./settings-shell.tsx";
 function SectionTitle({ id, children }: { id: string; children: string }) {
   return (
     <CardTitle>
-      <h2 id={id} className="text-lg font-semibold tracking-tight">
+      <h2 id={id} className="text-lg leading-7 font-semibold tracking-normal">
         {children}
       </h2>
     </CardTitle>

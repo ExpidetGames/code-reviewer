@@ -77,7 +77,10 @@ export function InstallationsCard({
     <Card role="region" aria-labelledby={titleId}>
       <CardHeader>
         <CardTitle>
-          <h2 id={titleId} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={titleId}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             Installations
           </h2>
         </CardTitle>
@@ -90,16 +93,16 @@ export function InstallationsCard({
         ) : (
           <ul
             aria-label="Installations"
-            className="flex flex-col divide-y divide-border rounded-lg border border-border"
+            className="flex flex-col divide-y divide-border"
           >
             {connections.map((connection) => (
               <li
                 key={connection.id}
                 data-connection={connection.id}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-4"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-4 first:pt-0 last:pb-0"
               >
                 <div className="flex min-w-0 flex-col">
-                  <span className="min-w-0 truncate font-medium text-foreground">
+                  <span className="min-w-0 truncate font-semibold text-foreground">
                     {connection.accountLogin}
                   </span>
                   <span className="text-sm text-muted-foreground">
@@ -114,7 +117,8 @@ export function InstallationsCard({
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
-                          variant="secondary"
+                          variant="destructive"
+                          size="sm"
                           disabled={busy}
                           aria-label={`Disconnect ${connection.accountLogin}`}
                         >

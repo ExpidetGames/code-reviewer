@@ -8,6 +8,7 @@
 // admin, in the admin portal) and notes the installations nobody has linked.
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { RotateCw } from "lucide-react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
 import {
@@ -56,7 +57,8 @@ function SyncControl({ api }: { api: Pick<ProjectsApi, "sync"> }) {
 
   return (
     <div className="flex items-center gap-2">
-      <Button variant="primary" disabled={pending} onClick={() => void run()}>
+      <Button variant="secondary" disabled={pending} onClick={() => void run()}>
+        <RotateCw aria-hidden="true" />
         {pending ? "Syncing…" : "Sync from GitHub"}
       </Button>
       <StatusRegion className="min-w-0">

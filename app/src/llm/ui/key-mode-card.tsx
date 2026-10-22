@@ -89,7 +89,10 @@ export function KeyModeCard({
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
         <CardTitle>
-          <h2 id={id} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={id}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {KEY_MODE_HEADING}
           </h2>
         </CardTitle>
@@ -121,7 +124,7 @@ export function KeyModeCard({
                   htmlFor={`${id}-${mode}`}
                   className="flex flex-col items-start gap-0.5"
                 >
-                  <span className="font-medium">{label}</span>
+                  <span className="font-semibold">{label}</span>
                   <span className="text-sm font-normal text-muted-foreground">
                     {text}
                   </span>

@@ -68,7 +68,7 @@ export function RunsFilterToolbar({
       <div className="flex flex-col gap-1">
         <span
           id={projectLabelId}
-          className="text-xs font-medium text-muted-foreground"
+          className="text-xs font-semibold text-muted-foreground"
         >
           Project
         </span>
@@ -100,7 +100,7 @@ export function RunsFilterToolbar({
       <div className="flex flex-col gap-1">
         <span
           id={statusLabelId}
-          className="text-xs font-medium text-muted-foreground"
+          className="text-xs font-semibold text-muted-foreground"
         >
           Status
         </span>

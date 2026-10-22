@@ -128,7 +128,10 @@ export function StartReviewPanel({
     <Card role="region" aria-labelledby={headingId}>
       <CardHeader>
         <CardTitle>
-          <h2 id={headingId} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={headingId}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             Open pull requests
           </h2>
         </CardTitle>

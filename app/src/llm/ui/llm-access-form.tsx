@@ -135,7 +135,7 @@ export function LlmAccessForm({
       onSubmit={(event) => void save(event)}
       aria-label={`${label} LLM key`}
       noValidate
-      className="flex max-w-[44rem] flex-col gap-4"
+      className="flex flex-col gap-4"
     >
       {keyStatus.state === "unreadable" ? (
         // Server-determined and static: no `role="alert"` (the kit's default), which would interrupt a

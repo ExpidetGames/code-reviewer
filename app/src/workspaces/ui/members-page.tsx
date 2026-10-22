@@ -55,7 +55,7 @@ export async function loadMembersPage(
 function SectionTitle({ id, children }: { id: string; children: string }) {
   return (
     <CardTitle>
-      <h2 id={id} className="text-lg font-semibold tracking-tight">
+      <h2 id={id} className="text-lg leading-7 font-semibold tracking-normal">
         {children}
       </h2>
     </CardTitle>
@@ -78,7 +78,7 @@ export function MembersPageContent({
 }) {
   const withApi = api === undefined ? {} : { api };
   return (
-    <div className="flex max-w-[64rem] flex-col gap-6 pt-6">
+    <div className="flex flex-col gap-6">
       <Card role="region" aria-labelledby="members-heading">
         <CardHeader>
           <SectionTitle id="members-heading">Members</SectionTitle>

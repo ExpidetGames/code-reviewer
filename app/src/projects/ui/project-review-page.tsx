@@ -52,7 +52,7 @@ export function ProjectReviewPageContent({
         row={row}
         active="review"
       />
-      <div className="flex max-w-[44rem] flex-col gap-6 pt-6">
+      <div className="flex flex-col gap-6">
         {/* The workspace's LLM hint is a row of the page's one attention strip, not its own region:
             starting a review does not check the key, so the person reads why before the run fails. */}
         <NeedsAttention notices={llmNotice === null ? [] : [llmNotice]} />

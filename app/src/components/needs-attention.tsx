@@ -8,6 +8,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
+import { CircleX, TriangleAlert } from "lucide-react";
 import {
   AlertDescription,
   AlertTitle,
@@ -41,9 +42,17 @@ export function NeedsAttention({
   return (
     <section
       aria-labelledby={headingId}
-      className={cn("flex flex-col gap-3", className)}
+      // The board's attention card (#633): a surface card, or the todo pair when every notice is a
+      // warning; each row carries its symbol next to the words.
+      className={cn(
+        "flex flex-col gap-4 rounded-2xl border p-6",
+        notices.every((notice) => notice.severity === "warning")
+          ? "border-warning bg-warning-soft text-warning"
+          : "border-border bg-card text-foreground",
+        className,
+      )}
     >
-      <h2 id={headingId} className="text-sm font-medium text-muted-foreground">
+      <h2 id={headingId} className="text-lg leading-7 tracking-normal">
         Needs attention
       </h2>
       {rows.map((notice) => (
@@ -56,6 +65,11 @@ export function NeedsAttention({
             }),
           )}
         >
+          {notice.severity === "error" ? (
+            <CircleX aria-hidden="true" />
+          ) : (
+            <TriangleAlert aria-hidden="true" />
+          )}
           <AlertTitle>{notice.title}</AlertTitle>
           <AlertDescription>{notice.detail}</AlertDescription>
         </div>
@@ -69,7 +83,7 @@ export function NeedsAttention({
           <ul className="flex flex-col gap-1">
             {rest.map((notice) => (
               <li key={notice.id}>
-                <span className="font-medium">{notice.title}</span>
+                <span className="font-semibold">{notice.title}</span>
                 {" — "}
                 <span>{notice.detail}</span>
               </li>

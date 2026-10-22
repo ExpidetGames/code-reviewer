@@ -88,7 +88,7 @@ export function InvitationList({
               className="flex flex-wrap items-center gap-3 border-t border-border py-3 first:border-t-0"
             >
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium text-foreground">
+                <span className="truncate text-sm font-semibold text-foreground">
                   {invitation.email}
                 </span>
                 <span className="truncate text-sm text-muted-foreground">
@@ -105,7 +105,7 @@ export function InvitationList({
                 </span>
               </div>
               <div className="shrink-0">
-                <Badge variant="neutral">{ROLE_LABEL[invitation.role]}</Badge>
+                <Badge variant="outline">{ROLE_LABEL[invitation.role]}</Badge>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {allowed && canResend ? (

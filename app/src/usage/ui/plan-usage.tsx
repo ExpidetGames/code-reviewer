@@ -66,7 +66,10 @@ function Section({
     <Card role="region" aria-labelledby={headingId}>
       <CardHeader>
         <CardTitle>
-          <h2 id={headingId} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={headingId}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {title}
           </h2>
         </CardTitle>
@@ -103,7 +106,7 @@ function CostUsage({ cost }: { cost: CostUsageView }) {
         aria-valuetext={text}
       />
       {cost.percentUsed >= 100 ? (
-        <p className="text-sm font-medium text-foreground">
+        <p className="text-sm font-semibold text-foreground">
           {PLAN_COST_REACHED}
         </p>
       ) : null}
