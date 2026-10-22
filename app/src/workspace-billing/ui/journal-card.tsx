@@ -133,7 +133,10 @@ export function JournalCard({
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
         <CardTitle>
-          <h2 id={id} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={id}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {JOURNAL_HEADING}
           </h2>
         </CardTitle>

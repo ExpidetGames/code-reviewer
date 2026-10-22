@@ -50,13 +50,13 @@ export function DangerZone({
   const titleId = useId();
   return (
     <Card
-      className="border-destructive/40"
+      className="border-destructive bg-background"
       role="region"
       aria-labelledby={titleId}
     >
       <CardHeader>
-        <CardTitle className="text-destructive">
-          <h2 id={titleId} className="text-lg font-semibold tracking-tight">
+        <CardTitle>
+          <h2 id={titleId} className="text-lg leading-7 tracking-normal">
             {title}
           </h2>
         </CardTitle>

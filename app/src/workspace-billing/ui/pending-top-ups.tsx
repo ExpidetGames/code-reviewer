@@ -52,7 +52,7 @@ function PendingRow({
   }
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2">
-      <span className="font-medium tabular-nums">
+      <span className="font-semibold tabular-nums">
         {formatMoney(item.amountMicroUsd)}
       </span>
       <span className="text-xs text-muted-foreground">
@@ -88,7 +88,10 @@ export function PendingTopUps({
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
         <CardTitle>
-          <h2 id={id} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={id}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {PENDING_HEADING}
           </h2>
         </CardTitle>

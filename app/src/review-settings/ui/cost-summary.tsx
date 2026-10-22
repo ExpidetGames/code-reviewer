@@ -54,14 +54,14 @@ function whichText(which: "primary" | "fallback"): string {
 export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
   if (cost === null)
     return (
-      <div className="rounded-md border border-border bg-muted p-3 text-sm">
+      <div className="rounded-xl border border-border bg-background p-4 text-sm">
         <p className="text-muted-foreground">
           The estimated cost per review shows after the marked values are fixed.
         </p>
       </div>
     );
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-muted p-3 text-sm">
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4 text-sm">
       <p>
         <strong>Estimated cost per review</strong> (a large pull request; the
         limit is {LIMIT_TEXT}):

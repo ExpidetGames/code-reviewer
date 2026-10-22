@@ -27,7 +27,7 @@ export function reviewsHref(state: "open" | "resolved", page = 1): string {
 // No prefetch: Next.js answers a prefetch of a portal page from its prerender, which knows nothing of the address's query, so a
 // prefetched `?state=resolved` would show the first page of the open rows (found by the journey, #603-T18).
 const LINK_CLASS =
-  "rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+  "rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline";
 
 export function BillingReviewsPage({
   list,

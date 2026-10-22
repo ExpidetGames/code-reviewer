@@ -13,10 +13,12 @@ import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
 /** One soft tone per status; the meaning stays in the label, the tone is only a hint. */
 const STATUS_TONE: Record<
   JobStatus,
-  "info" | "success" | "danger" | "neutral"
+  "running" | "success" | "danger" | "neutral"
 > = {
-  queued: "info",
-  running: "info",
+  // The design board's run badges (#633): waiting on raised, running and succeeded outlined in fg,
+  // failed filled in fg, cancelled and superseded on raised.
+  queued: "neutral",
+  running: "running",
   succeeded: "success",
   failed: "danger",
   cancelled: "neutral",
@@ -37,6 +39,7 @@ export function RunStatusBadge({
     // list badge, and the focusable "?" (`hint`) on the run detail.
     <Badge
       variant={STATUS_TONE[status]}
+      icon={false}
       data-status={status}
       title={presentation.description}
     >

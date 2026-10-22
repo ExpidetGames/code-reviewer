@@ -21,7 +21,7 @@ export function UserAvatar({ user }: { user: ShellUser }) {
   if (url === null || failedUrl === url) {
     return (
       <span
-        className="inline-grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-accent text-xs font-bold text-accent-foreground"
+        className="inline-grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-raised text-xs font-semibold text-foreground"
         aria-hidden="true"
       >
         {initials(user)}
@@ -30,7 +30,7 @@ export function UserAvatar({ user }: { user: ShellUser }) {
   }
   return (
     <span
-      className="inline-grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-accent text-xs font-bold text-accent-foreground"
+      className="inline-grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-raised text-xs font-semibold text-foreground"
       aria-hidden="true"
     >
       {/* A plain img: the address comes from the GitHub profile and next/image would need every

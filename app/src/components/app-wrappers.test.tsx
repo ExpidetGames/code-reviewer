@@ -66,7 +66,7 @@ describe("the auth card", () => {
       .getByText("Form goes here.")
       .closest('[data-slot="card"]');
     expect(card?.className).toContain("custom-frame");
-    expect(card?.className).toContain("max-w-[34rem]");
+    expect(card?.className).toContain("max-w-md");
   });
 
   // #185: the first-run setup brings its own h1 per step, so the card renders no heading when it

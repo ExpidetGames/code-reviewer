@@ -39,7 +39,7 @@ export function NoAccessContent({
     <div className="flex flex-col gap-6">
       <PendingInvitations invitations={pending} {...withApi} />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           {multiTenant ? (
             <CreateWorkspaceForm {...withApi} />
           ) : (

@@ -153,7 +153,7 @@ export function CatalogModelPicker({
       {shown.length > 0 ? (
         <ul
           aria-label="Models"
-          className="flex max-h-80 flex-col gap-1 overflow-y-auto rounded-md border border-border p-1"
+          className="flex max-h-80 flex-col gap-1 overflow-y-auto rounded-xl border border-border bg-background p-1"
         >
           {shown.map((model) => (
             <li key={model.id}>
@@ -163,12 +163,12 @@ export function CatalogModelPicker({
                 aria-pressed={model.id === value}
                 onClick={() => onChange(model.id)}
                 className={cn(
-                  "flex min-h-11 w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50",
+                  "flex min-h-11 w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-raised focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50",
                   model.id === value && "bg-accent",
                 )}
               >
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">
+                  <span className="font-semibold text-foreground">
                     {model.name}
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">

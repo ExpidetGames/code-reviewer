@@ -71,7 +71,10 @@ function FactGroup({
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
         <CardTitle>
-          <h2 id={id} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={id}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {title}
           </h2>
         </CardTitle>
@@ -115,7 +118,7 @@ function LogPanel({ run }: { run: RunDetailView }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-foreground">Log</h3>
+        <h3 className="text-sm font-semibold text-foreground">Log</h3>
         {run.log.text !== "" ? <CopyLogButton text={run.log.text} /> : null}
       </div>
       {run.log.text === "" ? (
@@ -130,7 +133,7 @@ function LogPanel({ run }: { run: RunDetailView }) {
           <pre
             tabIndex={0}
             aria-label="Log of the run"
-            className="max-h-[28rem] overflow-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs break-words whitespace-pre-wrap"
+            className="max-h-[28rem] overflow-auto rounded-xl bg-raised p-4 font-mono text-xs leading-4 break-words whitespace-pre-wrap"
           >
             {run.log.text}
           </pre>
@@ -286,7 +289,7 @@ export function RunDetail({
     });
 
   return (
-    <div data-slot="run-detail" className="flex max-w-[64rem] flex-col gap-6">
+    <div data-slot="run-detail" className="flex flex-col gap-6">
       {/* The one polite region of the page; it stays in the DOM so an update result is announced. */}
       <StatusRegion label="Updating the run" className="text-warning">
         {failed
@@ -314,8 +317,11 @@ export function RunDetail({
           </p>
         ) : null}
       </div>
-      <FactGroup title="Summary" items={summaryItems} />
-      <FactGroup title="Timings" items={timingItems} />
+      {/* Summary and timings side by side on a wide screen, as on the design board (#633). */}
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        <FactGroup title="Summary" items={summaryItems} />
+        <FactGroup title="Timings" items={timingItems} />
+      </div>
       <FactGroup title="Diagnostics" items={diagnosticItems}>
         <LogPanel run={run} />
       </FactGroup>

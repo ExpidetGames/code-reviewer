@@ -74,7 +74,7 @@ export function ConnectionsPanel({
   }
 
   return (
-    <div className="flex max-w-[64rem] flex-col gap-6 pt-6">
+    <div className="flex flex-col gap-6">
       {data.notice !== null ? (
         <Alert variant={noticeVariant(data.notice.tone)} role="status">
           <AlertDescription>{data.notice.text}</AlertDescription>

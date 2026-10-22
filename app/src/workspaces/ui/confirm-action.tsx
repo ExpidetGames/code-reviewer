@@ -45,7 +45,7 @@ export function ConfirmAction({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
-          variant="secondary"
+          variant="destructive"
           size="sm"
           aria-label={actionName}
           disabled={disabled}

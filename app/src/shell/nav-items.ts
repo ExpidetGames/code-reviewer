@@ -29,12 +29,13 @@ export type NavItem = { href: string; label: string };
 export type NavGroup = { items: NavItem[] };
 
 /**
- * The class of a sidebar link, shared by the workspace and the admin sidebar: the token colour, an
- * underline only for the current page (`aria-current`), and a 44px row on a touch screen while the
- * kit's 32px (`h-8`) stays on a fine pointer (`components/README.md`, "Hit areas").
+ * The class of a sidebar link, shared by the workspace and the admin sidebar: the token colour (muted at
+ * rest; the current page, `aria-current`, sits on raised in fg, as on the design board, #633), and a
+ * 44px row on a touch screen while the kit's 36px (`h-9`) stays on a fine pointer
+ * (`components/README.md`, "Hit areas").
  */
 export const SIDEBAR_LINK_CLASS =
-  "text-sidebar-foreground no-underline aria-[current=page]:underline pointer-coarse:h-11";
+  "text-sidebar-foreground no-underline aria-[current=page]:text-foreground pointer-coarse:h-11";
 
 /** The groups of the workspace the page is in, or none for a page outside any workspace. */
 export function navGroupsFor(pathname: string | null): NavGroup[] {

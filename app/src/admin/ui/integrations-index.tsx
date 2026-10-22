@@ -147,7 +147,7 @@ export function IntegrationsIndex({
               <p className="text-sm text-muted-foreground">{card.summary}</p>
               <Link
                 href={card.href}
-                className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline no-underline"
               >
                 {card.actionLabel}
               </Link>

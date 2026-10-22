@@ -80,7 +80,7 @@ export function TopUpCard({
           <CardTitle>
             <h2
               id={`${ids}-heading`}
-              className="text-lg font-semibold tracking-tight"
+              className="text-lg leading-7 font-semibold tracking-normal"
             >
               {TOP_UP_HEADING}
             </h2>
@@ -145,7 +145,7 @@ export function TopUpCard({
         <CardTitle>
           <h2
             id={`${ids}-heading`}
-            className="text-lg font-semibold tracking-tight"
+            className="text-lg leading-7 font-semibold tracking-normal"
           >
             {TOP_UP_HEADING}
           </h2>
@@ -227,7 +227,7 @@ export function TopUpCard({
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-primary underline-offset-4 hover:underline"
+                    className="text-sm text-foreground"
                   >
                     {text}
                   </a>

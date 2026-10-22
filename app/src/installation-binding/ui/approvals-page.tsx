@@ -142,7 +142,7 @@ function WaitingTab({
       {pending.map((request) => (
         <li key={request.id} data-request={request.id} className={ROW_CLASS}>
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <span className="min-w-0 truncate font-medium text-foreground">
+            <span className="min-w-0 truncate font-semibold text-foreground">
               {request.accountLogin}
             </span>
             <span className="text-sm text-muted-foreground">
@@ -185,7 +185,7 @@ function DecidedTab({ decided }: { decided: InstallationLinkRequestView[] }) {
           className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 p-4"
         >
           <div className="flex min-w-0 flex-col">
-            <span className="truncate font-medium text-foreground">
+            <span className="truncate font-semibold text-foreground">
               {request.accountLogin}
             </span>
             <span className="text-sm text-muted-foreground">
@@ -233,7 +233,7 @@ function NotLinkedTab({ unclaimed }: { unclaimed: UnclaimedInstallation[] }) {
               key={installation.installationId}
               className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4"
             >
-              <span className="min-w-0 truncate font-medium text-foreground">
+              <span className="min-w-0 truncate font-semibold text-foreground">
                 {installation.accountLogin}
               </span>
               <span className="text-sm text-muted-foreground">

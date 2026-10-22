@@ -36,7 +36,11 @@ function ok(active: boolean) {
 
 function renderToggle(
   api: ProjectsApi,
-  props: { checked?: boolean; blockedReason?: string | null } = {},
+  props: {
+    checked?: boolean;
+    blockedReason?: string | null;
+    canManage?: boolean;
+  } = {},
 ) {
   return render(
     <ProjectToggle
@@ -45,6 +49,7 @@ function renderToggle(
       fullName="acme/widgets"
       checked={props.checked ?? false}
       blockedReason={props.blockedReason ?? null}
+      canManage={props.canManage ?? true}
       api={api}
     />,
   );
@@ -169,6 +174,20 @@ describe("switching a project", () => {
         name: "Why acme/widgets cannot be switched on",
       }),
     ).toBeTruthy();
+  });
+
+  // #633-T02
+  it("shows a Member the state as a word and no hint per row, but still describes the switch", () => {
+    renderToggle({ setActive: vi.fn(), sync: vi.fn() }, { canManage: false });
+
+    const toggle = screen.getByRole("switch") as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(screen.getByText("Off")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    const describedBy = toggle.getAttribute("aria-describedby");
+    expect(document.getElementById(describedBy!)?.textContent).toBe(
+      "Only Admins and Owners can switch a project on or off.",
+    );
   });
 
   // The lead decision on hit areas (epic #165): a control reaches at least 44x44px even when it

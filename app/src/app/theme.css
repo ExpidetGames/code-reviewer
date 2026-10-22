@@ -15,8 +15,11 @@
  * color mode, the page surface and type, the link color, the focus ring) follow in `@layer base`,
  * so a Tailwind utility on a component still wins over them.
  *
- * Start palette: the indigo accent and neutrals of the UI redesign plan, with contrast-checked
- * values (body text >= 4.5:1, non-text >= 3:1), checked by `app/src/ci/colors/tokens.test.ts`.
+ * The palette is the app design board (`docs/design/index.html`, #633), the look of the landing page:
+ * neutral only, flat grounds, one text gradient for page titles, no status colours (a status is told
+ * by fill, outline, icon and word). The board tokens (`page`, `surface`, `raised`, `fg`, `line`, ...)
+ * come first, the shadcn names point at them. Contrast-checked values (body text >= 4.5:1, non-text
+ * >= 3:1), checked by `app/src/ci/colors/tokens.test.ts`.
  */
 @layer theme, base, components, utilities;
 
@@ -35,165 +38,229 @@
 :root {
   --radius: 0.5rem;
   --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Backgrounds and text */
-  --background: #ffffff;
-  --foreground: #14161c;
-  --card: #ffffff;
-  --card-foreground: var(--foreground);
-  --popover: #ffffff;
-  --popover-foreground: var(--foreground);
+  /* The board tokens (docs/design/index.html, "Color"): neutral grounds, text and borders. `fg-muted`
+   * is the board's `muted` (supporting text); the name `muted` stays shadcn's subtle ground. `control`
+   * is the border of an input, a select or a checkbox: the board's line-strong is decorative (about
+   * 1.7:1), so controls take a darker step that meets the 3:1 floor. */
+  --page: #ffffff;
+  --surface: #f5f5f4;
+  --raised: #ebebea;
+  --raised-strong: #e2e2e1;
+  --warm: #faf8f2;
+  --fg: #0a0a0a;
+  --fg-muted: #5c5c5c;
+  --line: #e2e2e1;
+  --line-strong: #c9c9c7;
+  --hero-from: #000000;
+  --hero-to: #666666;
+  --todo: #8a5a00;
+  --todo-surface: #fdf6e3;
+  --control: #8c8c8a;
+  --overlay: rgb(255 255 255 / 0.8);
+  --shadow-color: rgb(0 0 0 / 0.05);
+  --shadow-frame-color: rgb(0 0 0 / 0.1);
 
-  /* Controls and accents */
-  --primary: #4a44cf;
-  --primary-foreground: #ffffff;
-  --primary-hover: #3f39b8;
-  --secondary: #f4f5f8;
-  --secondary-foreground: #14161c;
-  --muted: #f4f5f8;
-  --muted-foreground: #565d6b;
-  --accent: #ecebfb;
-  --accent-foreground: #37309e;
-  --destructive: #b3261e;
-  --destructive-foreground: #ffffff;
-  --border: #e3e5ec;
-  --input: #7d828f;
-  --ring: var(--primary);
+  /* The shadcn names, mapped onto the board tokens above */
+  --background: var(--page);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--page);
+  --popover-foreground: var(--fg);
+  --primary: var(--fg);
+  --primary-foreground: var(--page);
+  --primary-hover: var(--fg-muted);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--fg);
+  --muted: var(--raised);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--surface);
+  --accent-foreground: var(--fg);
+  --destructive: var(--fg);
+  --destructive-foreground: var(--page);
+  --border: var(--line);
+  --input: var(--control);
+  --ring: var(--fg);
 
-  /* Status, for run states and notices: the text color sits on the matching soft surface */
-  --success: #0f6b3a;
-  --success-foreground: #ffffff;
-  --success-soft: #e6f4ec;
-  --warning: #7a4a00;
-  --warning-foreground: #ffffff;
-  --warning-soft: #fbf0d8;
-  --danger: #b3261e;
-  --danger-soft: #fbeae8;
-  --info: var(--primary);
-  --info-foreground: var(--primary-foreground);
-  --info-soft: var(--accent);
+  /* Status: the board has no status colours. Success, failure and waiting differ by fill, outline
+   * and icon (the badge and alert variants); only the warning keeps the one tinted pair, todo. */
+  --success: var(--fg);
+  --success-foreground: var(--page);
+  --success-soft: var(--page);
+  --warning: var(--todo);
+  --warning-foreground: var(--todo-surface);
+  --warning-soft: var(--todo-surface);
+  --danger: var(--fg);
+  --danger-soft: var(--raised);
+  --info: var(--fg);
+  --info-foreground: var(--page);
+  --info-soft: var(--surface);
 
-  /* Modal scrims (shadcn Dialog/AlertDialog/Sheet overlays): a translucent surface token, so the
-   * components never need a `black`/`white` utility (the color guard forbids both). */
-  --overlay: rgb(0 0 0 / 0.5);
-
-  /* Charts (the sidebar and chart sets that shadcn blocks expect) */
-  --chart-1: #4a44cf;
-  --chart-2: #0f766e;
-  --chart-3: #b45309;
-  --chart-4: #be123c;
-  --chart-5: #475569;
-  --sidebar: var(--card);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
-  --sidebar-border: var(--border);
-  --sidebar-ring: var(--ring);
+  /* Charts (shadcn blocks expect the set; the app draws none): the neutral steps. */
+  --chart-1: var(--fg);
+  --chart-2: var(--fg-muted);
+  --chart-3: var(--control);
+  --chart-4: var(--line-strong);
+  --chart-5: var(--raised-strong);
+  --sidebar: var(--page);
+  --sidebar-foreground: var(--fg-muted);
+  --sidebar-primary: var(--fg);
+  --sidebar-primary-foreground: var(--page);
+  --sidebar-accent: var(--raised);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--fg);
 }
 
 /* The "system" state: no data-theme, so the operating system decides. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --background: #0b0c0f;
-    --foreground: #eceef3;
-    --card: #15171c;
-    --card-foreground: var(--foreground);
-    --popover: #15171c;
-    --popover-foreground: var(--foreground);
-    --primary: #8d87f5;
-    --primary-foreground: #12132a;
-    --primary-hover: #a29df8;
-    --secondary: #1d2027;
-    --secondary-foreground: #eceef3;
-    --muted: #1d2027;
-    --muted-foreground: #9ca3b0;
-    --accent: #23234a;
-    --accent-foreground: #c3bffb;
-    --destructive: #f2b8b5;
-    --destructive-foreground: #3a0a07;
-    --border: #2b2f38;
-    --input: #666e7d;
-    --ring: var(--primary);
-    --success: #6ed49a;
-    --success-foreground: #10281b;
-    --success-soft: #10281b;
-    --warning: #e5b34a;
-    --warning-foreground: #2b2310;
-    --warning-soft: #2b2310;
-    --danger: #f2a7a1;
-    --danger-soft: #33161a;
-    --info: var(--primary);
-    --info-foreground: var(--primary-foreground);
-    --info-soft: var(--accent);
-    --overlay: rgb(0 0 0 / 0.7);
-    --chart-1: #8d87f5;
-    --chart-2: #2dd4bf;
-    --chart-3: #fbbf24;
-    --chart-4: #fb7185;
-    --chart-5: #94a3b8;
-    --sidebar: var(--card);
-    --sidebar-foreground: var(--foreground);
-    --sidebar-primary: var(--primary);
-    --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-accent: var(--accent);
-    --sidebar-accent-foreground: var(--accent-foreground);
-    --sidebar-border: var(--border);
-    --sidebar-ring: var(--ring);
+    --page: #000000;
+    --surface: #181818;
+    --raised: #1f1f1f;
+    --raised-strong: #272727;
+    --warm: #131209;
+    --fg: #ffffff;
+    --fg-muted: #a3a3a3;
+    --line: #272727;
+    --line-strong: #313131;
+    --hero-from: #ffffff;
+    --hero-to: #9b9b9b;
+    --todo: #f2c66d;
+    --todo-surface: #131209;
+    --control: #6b6b6b;
+    --overlay: rgb(0 0 0 / 0.8);
+    --shadow-color: rgb(0 0 0 / 0.05);
+    --shadow-frame-color: rgb(0 0 0 / 0.1);
+
+    /* The shadcn names, mapped onto the board tokens above */
+    --background: var(--page);
+    --foreground: var(--fg);
+    --card: var(--surface);
+    --card-foreground: var(--fg);
+    --popover: var(--page);
+    --popover-foreground: var(--fg);
+    --primary: var(--fg);
+    --primary-foreground: var(--page);
+    --primary-hover: var(--fg-muted);
+    --secondary: var(--surface);
+    --secondary-foreground: var(--fg);
+    --muted: var(--raised);
+    --muted-foreground: var(--fg-muted);
+    --accent: var(--surface);
+    --accent-foreground: var(--fg);
+    --destructive: var(--fg);
+    --destructive-foreground: var(--page);
+    --border: var(--line);
+    --input: var(--control);
+    --ring: var(--fg);
+
+    /* Status: the board has no status colours. Success, failure and waiting differ by fill, outline
+     * and icon (the badge and alert variants); only the warning keeps the one tinted pair, todo. */
+    --success: var(--fg);
+    --success-foreground: var(--page);
+    --success-soft: var(--page);
+    --warning: var(--todo);
+    --warning-foreground: var(--todo-surface);
+    --warning-soft: var(--todo-surface);
+    --danger: var(--fg);
+    --danger-soft: var(--raised);
+    --info: var(--fg);
+    --info-foreground: var(--page);
+    --info-soft: var(--surface);
+
+    /* Charts (shadcn blocks expect the set; the app draws none): the neutral steps. */
+    --chart-1: var(--fg);
+    --chart-2: var(--fg-muted);
+    --chart-3: var(--control);
+    --chart-4: var(--line-strong);
+    --chart-5: var(--raised-strong);
+    --sidebar: var(--page);
+    --sidebar-foreground: var(--fg-muted);
+    --sidebar-primary: var(--fg);
+    --sidebar-primary-foreground: var(--page);
+    --sidebar-accent: var(--raised);
+    --sidebar-accent-foreground: var(--fg);
+    --sidebar-border: var(--line);
+    --sidebar-ring: var(--fg);
   }
 }
 
 /* The explicit choice: the toggle pins the mode regardless of the system setting. */
 :root[data-theme="dark"] {
-  --background: #0b0c0f;
-  --foreground: #eceef3;
-  --card: #15171c;
-  --card-foreground: var(--foreground);
-  --popover: #15171c;
-  --popover-foreground: var(--foreground);
-  --primary: #8d87f5;
-  --primary-foreground: #12132a;
-  --primary-hover: #a29df8;
-  --secondary: #1d2027;
-  --secondary-foreground: #eceef3;
-  --muted: #1d2027;
-  --muted-foreground: #9ca3b0;
-  --accent: #23234a;
-  --accent-foreground: #c3bffb;
-  --destructive: #f2b8b5;
-  --destructive-foreground: #3a0a07;
-  --border: #2b2f38;
-  --input: #666e7d;
-  --ring: var(--primary);
-  --success: #6ed49a;
-  --success-foreground: #10281b;
-  --success-soft: #10281b;
-  --warning: #e5b34a;
-  --warning-foreground: #2b2310;
-  --warning-soft: #2b2310;
-  --danger: #f2a7a1;
-  --danger-soft: #33161a;
-  --info: var(--primary);
-  --info-foreground: var(--primary-foreground);
-  --info-soft: var(--accent);
-  --overlay: rgb(0 0 0 / 0.7);
-  --chart-1: #8d87f5;
-  --chart-2: #2dd4bf;
-  --chart-3: #fbbf24;
-  --chart-4: #fb7185;
-  --chart-5: #94a3b8;
-  --sidebar: var(--card);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
-  --sidebar-border: var(--border);
-  --sidebar-ring: var(--ring);
+  --page: #000000;
+  --surface: #181818;
+  --raised: #1f1f1f;
+  --raised-strong: #272727;
+  --warm: #131209;
+  --fg: #ffffff;
+  --fg-muted: #a3a3a3;
+  --line: #272727;
+  --line-strong: #313131;
+  --hero-from: #ffffff;
+  --hero-to: #9b9b9b;
+  --todo: #f2c66d;
+  --todo-surface: #131209;
+  --control: #6b6b6b;
+  --overlay: rgb(0 0 0 / 0.8);
+  --shadow-color: rgb(0 0 0 / 0.05);
+  --shadow-frame-color: rgb(0 0 0 / 0.1);
+
+  /* The shadcn names, mapped onto the board tokens above */
+  --background: var(--page);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--page);
+  --popover-foreground: var(--fg);
+  --primary: var(--fg);
+  --primary-foreground: var(--page);
+  --primary-hover: var(--fg-muted);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--fg);
+  --muted: var(--raised);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--surface);
+  --accent-foreground: var(--fg);
+  --destructive: var(--fg);
+  --destructive-foreground: var(--page);
+  --border: var(--line);
+  --input: var(--control);
+  --ring: var(--fg);
+
+  /* Status: the board has no status colours. Success, failure and waiting differ by fill, outline
+   * and icon (the badge and alert variants); only the warning keeps the one tinted pair, todo. */
+  --success: var(--fg);
+  --success-foreground: var(--page);
+  --success-soft: var(--page);
+  --warning: var(--todo);
+  --warning-foreground: var(--todo-surface);
+  --warning-soft: var(--todo-surface);
+  --danger: var(--fg);
+  --danger-soft: var(--raised);
+  --info: var(--fg);
+  --info-foreground: var(--page);
+  --info-soft: var(--surface);
+
+  /* Charts (shadcn blocks expect the set; the app draws none): the neutral steps. */
+  --chart-1: var(--fg);
+  --chart-2: var(--fg-muted);
+  --chart-3: var(--control);
+  --chart-4: var(--line-strong);
+  --chart-5: var(--raised-strong);
+  --sidebar: var(--page);
+  --sidebar-foreground: var(--fg-muted);
+  --sidebar-primary: var(--fg);
+  --sidebar-primary-foreground: var(--page);
+  --sidebar-accent: var(--raised);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--fg);
 }
 
 /*
@@ -201,6 +268,27 @@
  * (`background-color: var(--primary)`), so the mode blocks above change every utility at once.
  */
 @theme inline {
+  /* The board tokens as utilities (`bg-surface`, `bg-raised`, `border-line-strong`, `text-fg-muted`, ...). */
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-raised-strong: var(--raised-strong);
+  --color-warm: var(--warm);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-hero-from: var(--hero-from);
+  --color-hero-to: var(--hero-to);
+  --color-todo: var(--todo);
+  --color-todo-surface: var(--todo-surface);
+  --color-control: var(--control);
+
+  /* The two shadows of the board: under the floating nav pill and under a dialog (shadow-frame). */
+  --shadow-nav:
+    0 10px 15px -3px var(--shadow-color), 0 4px 6px -4px var(--shadow-color);
+  --shadow-frame: 0 25px 50px -12px var(--shadow-frame-color);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -254,6 +342,18 @@
 }
 
 /*
+ * Motion and widths of the board: one easing curve and 700ms for every transition (a bare
+ * `transition` utility takes them), the page container (max-w-page, 1152px) and the hero cap.
+ */
+@theme {
+  --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+  --default-transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  --default-transition-duration: 700ms;
+  --container-page: 1152px;
+  --container-hero: 680px;
+}
+
+/*
  * The project's element-level base rules. Preflight (imported above) brings the reset — box-sizing,
  * zeroed margins, the font stacks, unstyled lists and links, inherited form fonts. What is left here
  * is what preflight does not decide: the color mode, the page surface and type, the link color and
@@ -273,29 +373,86 @@
     color-scheme: dark;
   }
 
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     color: var(--foreground);
     background: var(--background);
     font-family: var(--font-sans);
   }
 
+  /* Headings: semibold with tight tracking and balanced lines; nothing in the app is heavier. */
   h1,
   h2,
-  h3 {
+  h3,
+  h4 {
+    font-weight: 600;
+    letter-spacing: -0.025em;
     line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  p,
+  li,
+  dd {
+    text-wrap: pretty;
+  }
+
+  /* No italics anywhere in the interface. */
+  em,
+  i,
+  cite {
+    font-style: normal;
+  }
+
+  ::selection {
+    background: var(--fg);
+    color: var(--page);
   }
 
   a {
-    color: var(--primary);
+    color: inherit;
     /* A link in running text is underlined, so colour is never the only cue (WCAG 1.4.1). Kit
        buttons, sidebar/menu/breadcrumb links and standalone table/card links opt out with
        `no-underline`. */
     text-decoration: underline;
-    text-underline-offset: 2px;
+    /* The board draws the underline in line-strong; it is one step darker here (fg-muted), so the
+       underline that tells a link from the text around it is easy to see in both themes. */
+    text-decoration-color: var(--fg-muted);
+    text-underline-offset: 4px;
+    transition: text-decoration-color 700ms var(--ease-fluid);
+  }
+
+  a:hover {
+    text-decoration-color: var(--fg);
+  }
+
+  /* Inline code: Geist Mono on raised with a hairline, as the board marks commands and ids. */
+  :not(pre) > code {
+    padding: 0 4px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--raised);
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    overflow-wrap: anywhere;
   }
 
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+
+  /* Reduced motion: transitions shrink to 1ms. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 1ms !important;
+      animation-duration: 1ms !important;
+    }
   }
 }
