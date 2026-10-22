@@ -65,6 +65,33 @@ const TOKENS = [
   "sidebar-ring",
 ].map((name) => `--${name}`);
 
+// The app design board (docs/design/index.html, #633) is the source of the palette: its light `:root`
+// and its explicit dark block carry the tokens (`muted` there is the supporting text, `fg-muted` here).
+const board = readFileSync(
+  fileURLToPath(new URL("../../../../docs/design/index.html", import.meta.url)),
+  "utf8",
+);
+function boardBlock(selector: string): Record<string, string> {
+  const start = board.indexOf(`${selector}{`);
+  if (start === -1) throw new Error(`no board block for ${selector}`);
+  const body = board.slice(
+    start + selector.length + 1,
+    board.indexOf("}", start),
+  );
+  return Object.fromEntries(
+    [...body.matchAll(/(--[a-z-]+):(#[0-9a-f]{6})/gi)].map((m) => [
+      m[1]!,
+      m[2]!,
+    ]),
+  );
+}
+const boardLight = boardBlock(":root");
+const boardDark = boardBlock(':root[data-theme="dark"]');
+const BOARD_TOKENS = Object.keys(boardDark).map((name) => [
+  name,
+  name === "--muted" ? "--fg-muted" : name,
+]);
+
 // [foreground token, background token, minimum ratio] - text pairs 4.5, non-text 3.
 const CONTRAST_PAIRS: [string, string, number][] = [
   ["--foreground", "--background", 4.5],
@@ -82,6 +109,13 @@ const CONTRAST_PAIRS: [string, string, number][] = [
   ["--info", "--info-soft", 4.5],
   ["--input", "--background", 3],
   ["--ring", "--background", 3],
+  // #633: supporting text and the warning marker on every ground of the board.
+  ["--muted-foreground", "--card", 4.5],
+  ["--muted-foreground", "--muted", 4.5],
+  ["--muted-foreground", "--warm", 4.5],
+  ["--primary-foreground", "--primary-hover", 4.5],
+  ["--ring", "--card", 3],
+  ["--input", "--card", 3],
 ];
 
 describe("theme.css tokens", () => {
@@ -90,6 +124,21 @@ describe("theme.css tokens", () => {
     expect(TOKENS.filter((token) => !(token in light))).toEqual([]);
     expect(TOKENS.filter((token) => !(token in explicitDark))).toEqual([]);
   });
+
+  // #633-T01
+  it("reads the colour tokens of the design board", () => {
+    expect(BOARD_TOKENS.length).toBeGreaterThanOrEqual(13);
+  });
+
+  // #633-T01
+  it.each(BOARD_TOKENS)(
+    "carries the board token %s as %s in light and dark",
+    (boardName, appName) => {
+      expect(resolveToken(light, appName!)).toBe(boardLight[boardName!]);
+      expect(resolveToken(explicitDark, appName!)).toBe(boardDark[boardName!]);
+      expect(resolveToken(systemDark, appName!)).toBe(boardDark[boardName!]);
+    },
+  );
 
   // #166-T02
   it("gives the system state the same values as the explicit dark choice", () => {
