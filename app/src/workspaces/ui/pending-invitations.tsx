@@ -26,18 +26,18 @@ export function PendingInvitations({
   return (
     <ul
       aria-label="Invitations"
-      className="flex flex-col divide-y divide-border rounded-lg border"
+      className="flex flex-col divide-y divide-border"
     >
       {invitations.map((invitation) => (
         <li
           key={invitation.id}
           data-invitation={invitation.id}
-          className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4 first:pt-0 last:pb-0"
         >
           <span className="min-w-0 flex-1 truncate font-semibold">
             {invitation.workspaceName}
           </span>
-          <Badge variant="neutral">{ROLE_LABEL[invitation.role]}</Badge>
+          <Badge variant="outline">{ROLE_LABEL[invitation.role]}</Badge>
           <span className="text-sm whitespace-nowrap text-muted-foreground">
             Expires{" "}
             <time dateTime={invitation.expiresAt}>

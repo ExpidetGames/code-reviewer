@@ -105,7 +105,7 @@ export function InvitationList({
                 </span>
               </div>
               <div className="shrink-0">
-                <Badge variant="neutral">{ROLE_LABEL[invitation.role]}</Badge>
+                <Badge variant="outline">{ROLE_LABEL[invitation.role]}</Badge>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {allowed && canResend ? (

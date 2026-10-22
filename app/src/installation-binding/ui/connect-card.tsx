@@ -53,7 +53,10 @@ export function ConnectCard({
     <Card role="region" aria-labelledby={titleId}>
       <CardHeader>
         <CardTitle>
-          <h2 id={titleId} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={titleId}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             Connect
           </h2>
         </CardTitle>
@@ -88,12 +91,12 @@ export function ConnectCard({
           ) : (
             <ul
               aria-label="Installations you can link"
-              className="flex flex-col divide-y divide-border rounded-lg border border-border"
+              className="flex flex-col divide-y divide-border"
             >
               {choices.entries.map((entry) => (
                 <li
                   key={entry.installationId}
-                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-4"
+                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-4 first:pt-0 last:pb-0"
                 >
                   <div className="flex min-w-0 flex-col">
                     <span className="min-w-0 truncate font-semibold text-foreground">

@@ -419,13 +419,26 @@
        buttons, sidebar/menu/breadcrumb links and standalone table/card links opt out with
        `no-underline`. */
     text-decoration: underline;
-    text-decoration-color: var(--line-strong);
+    /* The board draws the underline in line-strong; it is one step darker here (fg-muted), so the
+       underline that tells a link from the text around it is easy to see in both themes. */
+    text-decoration-color: var(--fg-muted);
     text-underline-offset: 4px;
     transition: text-decoration-color 700ms var(--ease-fluid);
   }
 
   a:hover {
     text-decoration-color: var(--fg);
+  }
+
+  /* Inline code: Geist Mono on raised with a hairline, as the board marks commands and ids. */
+  :not(pre) > code {
+    padding: 0 4px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--raised);
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    overflow-wrap: anywhere;
   }
 
   :focus-visible {

@@ -102,7 +102,7 @@ export function GithubStatusCard({ view }: { view: GithubConfigView }) {
         <CardTitle>
           <h2
             id="github-status-heading"
-            className="text-lg font-semibold tracking-tight"
+            className="text-lg leading-7 font-semibold tracking-normal"
           >
             Status
           </h2>
@@ -194,7 +194,7 @@ function SignInCard({ view }: { view: GithubConfigView }) {
         <CardTitle>
           <h2
             id="github-signin-heading"
-            className="text-lg font-semibold tracking-tight"
+            className="text-lg leading-7 font-semibold tracking-normal"
           >
             Sign in with GitHub
           </h2>
@@ -284,7 +284,7 @@ export function GithubSection({
             <CardTitle>
               <h2
                 id="github-connect-heading"
-                className="text-lg font-semibold tracking-tight"
+                className="text-lg leading-7 font-semibold tracking-normal"
               >
                 Connect the App
               </h2>
@@ -307,7 +307,7 @@ export function GithubSection({
               <CardTitle>
                 <h2
                   id="github-private-heading"
-                  className="text-lg font-semibold tracking-tight"
+                  className="text-lg leading-7 font-semibold tracking-normal"
                 >
                   Where can this App be installed?
                 </h2>
@@ -331,7 +331,7 @@ export function GithubSection({
               <CardTitle>
                 <h2
                   id="github-conflicts-heading"
-                  className="text-lg font-semibold tracking-tight"
+                  className="text-lg leading-7 font-semibold tracking-normal"
                 >
                   Addresses that could not be updated
                 </h2>

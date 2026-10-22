@@ -98,7 +98,7 @@ export function ProfileCard({
         <CardTitle>
           <h2
             id={`${ids}-profile`}
-            className="text-lg font-semibold tracking-tight"
+            className="text-lg leading-7 font-semibold tracking-normal"
           >
             {PROFILE_HEADING}
           </h2>

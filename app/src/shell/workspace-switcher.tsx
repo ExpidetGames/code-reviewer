@@ -44,13 +44,13 @@ export function WorkspaceSwitcher({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent px-3 py-1 text-foreground transition-all hover:bg-surface"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent px-2 py-1 text-foreground transition-all hover:bg-surface sm:px-3"
         >
           <span className="flex min-w-0 flex-col items-start leading-4">
-            <span className="text-xs font-normal text-muted-foreground">
+            <span className="sr-only text-xs font-normal text-muted-foreground sm:not-sr-only">
               Workspace
             </span>
-            <span className="max-w-40 truncate text-sm font-semibold">
+            <span className="max-w-28 truncate text-sm font-semibold sm:max-w-40">
               {current?.name ?? "Switch"}
             </span>
           </span>

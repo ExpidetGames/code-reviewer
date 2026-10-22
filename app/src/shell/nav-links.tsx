@@ -122,5 +122,6 @@ export function CurrentWorkspaceSidebar() {
 export function WorkspaceSidebarTrigger() {
   const pathname = usePathname();
   if (navGroupsFor(pathname).length === 0) return null;
-  return <SidebarTrigger className="size-11" />;
+  // A drawer on a narrow screen; a wide one shows the side column (Ctrl/Cmd+B still folds it away).
+  return <SidebarTrigger className="size-11 md:hidden" />;
 }

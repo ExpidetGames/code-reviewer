@@ -91,7 +91,10 @@ export function CatalogProvidersCard({
     <Card role="region" aria-labelledby={headingId}>
       <CardHeader>
         <CardTitle>
-          <h2 id={headingId} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={headingId}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             Other providers
           </h2>
         </CardTitle>

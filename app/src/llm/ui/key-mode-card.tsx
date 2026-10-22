@@ -89,7 +89,10 @@ export function KeyModeCard({
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
         <CardTitle>
-          <h2 id={id} className="text-lg font-semibold tracking-tight">
+          <h2
+            id={id}
+            className="text-lg leading-7 font-semibold tracking-normal"
+          >
             {KEY_MODE_HEADING}
           </h2>
         </CardTitle>

@@ -360,8 +360,11 @@ export function SettingsCard({
     <Card>
       <CardContent>
         <FieldSet disabled={disabled} className="gap-6">
-          <FieldLegend className="mb-0">
-            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+          {/* A legend takes no part in the fieldset's gap, so it brings its own space. */}
+          <FieldLegend className="mb-4">
+            <h2 className="text-lg leading-7 font-semibold tracking-normal">
+              {title}
+            </h2>
           </FieldLegend>
           {children}
         </FieldSet>

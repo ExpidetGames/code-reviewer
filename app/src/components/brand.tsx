@@ -30,8 +30,17 @@ export function BrandMark({ className }: { className?: string }) {
   );
 }
 
-/** The mark and the name, as one inline group. */
-export function Brand({ className }: { className?: string }) {
+/**
+ * The mark and the name, as one inline group. `compact` keeps the name for assistive technology only
+ * on a narrow screen, so the floating nav fits a phone.
+ */
+export function Brand({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   return (
     <span
       className={cn(
@@ -40,7 +49,9 @@ export function Brand({ className }: { className?: string }) {
       )}
     >
       <BrandMark />
-      Code Reviewer
+      <span className={compact ? "sr-only sm:not-sr-only" : undefined}>
+        Code Reviewer
+      </span>
     </span>
   );
 }

@@ -86,9 +86,17 @@ export function InviteForm({
       className="flex flex-col gap-4"
       aria-label="Invite a person"
     >
-      <fieldset disabled={pending} className="flex flex-col gap-4">
+      {/* One row on a wide screen (address, role, send), as on the design board (#633). */}
+      <fieldset
+        disabled={pending}
+        className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem_auto] md:items-end md:gap-3"
+      >
         {problem !== null ? (
-          <Alert variant="destructive" id={errorId}>
+          <Alert
+            variant="destructive"
+            id={errorId}
+            className="md:col-span-full"
+          >
             <AlertDescription>{problem}</AlertDescription>
           </Alert>
         ) : null}

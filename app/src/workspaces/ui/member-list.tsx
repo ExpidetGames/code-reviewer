@@ -114,7 +114,7 @@ export function MemberList({
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Badge variant="neutral">{ROLE_LABEL[member.role]}</Badge>
+                  <Badge variant="outline">{ROLE_LABEL[member.role]}</Badge>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">

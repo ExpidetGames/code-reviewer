@@ -136,7 +136,7 @@ export function AccountPageContent({
   return (
     <>
       <PageHeader title="Account" description={`Signed in as ${name}.`} />
-      <div className="flex max-w-[44rem] flex-col gap-6 pt-6">
+      <div className="flex flex-col gap-6">
         {success !== null ? (
           <Alert variant="success" role="status">
             <AlertDescription>{success}</AlertDescription>

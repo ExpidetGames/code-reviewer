@@ -123,7 +123,7 @@ export function SettingsScreen({
           )
         }
       />
-      <div className="flex flex-col gap-6 pt-6">
+      <div className="flex flex-col gap-6">
         <SettingsNav
           workspaceSlug={workspaceSlug}
           current={current}

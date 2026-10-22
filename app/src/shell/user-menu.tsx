@@ -42,10 +42,10 @@ export function UserMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent py-1 pr-3 pl-1 text-foreground transition-all hover:bg-surface"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent py-1 pr-2 pl-1 text-foreground sm:pr-3 transition-all hover:bg-surface"
         >
           <UserAvatar user={user} />
-          <span className="max-w-24 truncate text-sm font-semibold sm:max-w-40">
+          <span className="sr-only max-w-40 truncate text-sm font-semibold sm:not-sr-only">
             {name}
           </span>
           <ChevronDown aria-hidden="true" className="size-4 shrink-0" />

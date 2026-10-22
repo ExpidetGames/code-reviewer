@@ -46,7 +46,7 @@ export function AppShell({
       {/* The floating glass nav of the design board (#633): a pill centred at the top, with the
           brand, the workspace switcher and the user menu. */}
       <header className="pointer-events-none sticky top-0 z-20 flex justify-center px-4 pt-6">
-        <div className="pointer-events-auto flex max-w-full min-w-0 items-center gap-1 rounded-full border border-border bg-background/70 p-2 shadow-nav backdrop-blur-xl">
+        <div className="pointer-events-auto flex max-w-full min-w-0 items-center gap-1 rounded-full border border-border bg-background/70 p-1 shadow-nav sm:p-2 backdrop-blur-xl">
           {/* Only where a sidebar exists: a page outside a workspace has none, and the admin portal
               brings its own trigger next to the admin sidebar. */}
           <Suspense fallback={null}>
@@ -54,9 +54,9 @@ export function AppShell({
           </Suspense>
           <Link
             href="/"
-            className="flex min-h-11 items-center rounded-full py-1 pr-3 pl-2 no-underline"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full px-2 no-underline sm:pr-3"
           >
-            <Brand />
+            <Brand compact />
           </Link>
           {workspaceSwitcher || userMenu ? (
             <span aria-hidden="true" className="h-6 w-px shrink-0 bg-border" />
