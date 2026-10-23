@@ -203,31 +203,18 @@ describe("the settings page of a project", () => {
     ).toBeTruthy();
   });
 
-  // #174-T03
-  it("offers a Review now action that leads to the review page of the same project", async () => {
+  // #655-T01
+  it("has no Review now button and no second way to start a review", async () => {
     const app = await openProject();
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
 
     renderReady(app, data);
 
-    const action = screen.getByRole("link", {
-      name: `Review ${data.row.fullName} now`,
-    });
-    expect(action.getAttribute("href")).toBe(
-      `/w/acme/projects/${app.first.id}/review`,
-    );
-    const sections = screen.getByRole("navigation", { name: "Project" });
-    expect(
-      within(sections)
-        .getByRole("link", { name: "Review now" })
-        .getAttribute("href"),
-    ).toBe(`/w/acme/projects/${app.first.id}/review`);
-    expect(
-      within(sections)
-        .getByRole("link", { name: "Settings" })
-        .getAttribute("aria-current"),
-    ).toBe("page");
+    expect(screen.queryByText("Review now")).toBeNull();
+    expect(screen.queryByRole("link", { name: /Review .* now/ })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Project" })).toBeNull();
+    expect(document.querySelector('a[href$="/review"]')).toBeNull();
   });
 
   // CR-34-T04

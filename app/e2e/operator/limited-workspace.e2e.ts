@@ -1186,7 +1186,6 @@ async function collectViews(
   if (repositoryId === undefined)
     throw new Error("The Projects page has no link to the project.");
   await read(`/w/${slug}/projects/${repositoryId}`);
-  await read(`/w/${slug}/projects/${repositoryId}/review`);
   await read(`/api/w/${slug}/repositories/${repositoryId}/project/settings`);
   await read(`/api/w/${slug}/repositories/${repositoryId}/pull-requests`);
   expect(projects, "the Projects page lists the repository").toContain(

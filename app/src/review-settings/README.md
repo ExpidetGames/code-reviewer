@@ -470,7 +470,7 @@ workspace name, the read-only instance, tenancy and member facts and the one "Ne
 `/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/plan` shows what the operator allows
 the workspace and what it has used (#282, listed only for a workspace with entitlements); `/w/:workspace/settings/advanced` holds the
 destructive actions (removing the key, resetting every default). A project has its own settings page
-(`/w/:workspace/projects/:repositoryId`) next to its "Review now" page (#174). The form
+(`/w/:workspace/projects/:repositoryId`). The form
 (`ui/settings-form.tsx`) shows the value in force and where it comes from (built-in, global, this project);
 changing a field sets it for the layer, "Reset to default" takes it back; a save sends only the fields that
 are set and replaces the layer. Since #174 it is three cards (Model, Review, When to review, from

@@ -294,4 +294,69 @@ test.describe("the project list and the settings pages", () => {
       expect(await overflow()).toBeLessThanOrEqual(0);
     });
   });
+
+  // #655: the Review column holds the switch and the play button side by side; at the widths of a
+  // small laptop and a tablet, in both colour schemes, they stay inside their cell and the table
+  // does not need a sideways scroll.
+  for (const width of [1024, 768]) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      test.describe(`at ${String(width)}px, ${colorScheme}`, () => {
+        test.use({ viewport: { width, height: 800 }, colorScheme });
+
+        test("the switch and the play button fit the Review column", async ({
+          page,
+        }, testInfo) => {
+          await signInThroughTheForm(page, account);
+          const row = page.getByRole("row").filter({ hasText: REPOSITORY });
+          await expect(row).toBeVisible();
+          const cell = row.getByRole("cell").last();
+          const play = cell.getByRole("button", {
+            name: `Start a review of ${REPOSITORY}`,
+          });
+          await expect(play).toBeVisible();
+          await expect(cell.getByRole("switch")).toBeVisible();
+
+          const [cellBox, playBox, switchBox] = await Promise.all([
+            cell.boundingBox(),
+            play.boundingBox(),
+            cell.getByRole("switch").boundingBox(),
+          ]);
+          expect(cellBox).not.toBeNull();
+          expect(playBox).not.toBeNull();
+          expect(switchBox).not.toBeNull();
+          const right = (box: typeof cellBox) =>
+            (box?.x ?? 0) + (box?.width ?? 0);
+          expect(right(playBox)).toBeLessThanOrEqual(right(cellBox));
+          expect(right(switchBox)).toBeLessThanOrEqual((playBox?.x ?? 0) + 1);
+          // One line: the two controls sit side by side.
+          expect(
+            Math.abs((playBox?.y ?? 0) - (switchBox?.y ?? 0)),
+          ).toBeLessThan(24);
+
+          // The page never scrolls sideways; the table itself fits at 1024px and scrolls inside its
+          // card (not the page) on a narrower window.
+          const sideways = await page.evaluate(() => ({
+            page:
+              document.documentElement.scrollWidth >
+              document.documentElement.clientWidth,
+            table: (() => {
+              const container = document.querySelector(
+                '[data-slot="table-container"]',
+              );
+              return container
+                ? container.scrollWidth > container.clientWidth
+                : false;
+            })(),
+          }));
+          expect(sideways.page).toBe(false);
+          expect(sideways.table).toBe(width < 1024);
+          await page.screenshot({
+            path: testInfo.outputPath(
+              `projects-${String(width)}-${colorScheme}.png`,
+            ),
+          });
+        });
+      });
+    }
+  }
 });
