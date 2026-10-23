@@ -39,6 +39,9 @@ export const CLAIM_FEATURES = [
   // #498: the caller is a Dispatcher that reports the VM it creates (`vm_lifecycle`, the App feature of the same name). The
   // App records that it has seen a Dispatcher with and without it: billing is not switched on while one without it claims.
   "vm_lifecycle",
+  // #666: the runner reads `llm.maxCostUsd` and enforces it next to the operator's own cost limit. A job that carries a
+  // project cost limit goes only to a caller that named it.
+  "cost_limit",
 ] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 
@@ -220,6 +223,8 @@ export const RUNNER_ERROR_CODES = [
   "dynamic_budget_exceeded",
   "dynamic_accounting_failed",
   "dynamic_model_features_unsupported",
+  // #666: a Diff Review that sent no further model request because its cost had reached the cost limit of the project.
+  "cost_limit_reached",
   "lease_lost",
   // #396: the run was replaced by a newer push; it stopped gracefully and reports what it used.
   "superseded",
@@ -371,6 +376,11 @@ export type RunnerJobInput = {
     apiKey: string;
     /** The token budget of the review; left out when neither the settings nor the instance set one. */
     maxTokens?: number;
+    /**
+     * #666: the cost limit of the project in US dollars (whole cents), left out when none is set. Sent only to a caller that
+     * advertised the `cost_limit` feature; a previous-release runner has a closed job contract and would refuse the key.
+     */
+    maxCostUsd?: number;
     /** Not sent by the app in the MVP (no fallback chain). The runner accepts it. */
     fallbackModels?: string[];
   };
@@ -506,6 +516,8 @@ export type RunnerCallTrace = {
 /** The reasons a Dynamic Review stops early: its cost limit or its time limit. */
 export const STOPPED_EARLY_REASONS = [
   "cost_limit",
+  // #666: the cost limit of the project, when it is the smaller of the two.
+  "project_cost_limit",
   "time_limit",
   // #553: an own key whose price is not known is bound by tokens.
   "token_limit",

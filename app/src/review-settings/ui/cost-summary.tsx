@@ -58,8 +58,11 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4 text-sm">
       <p>
-        <strong>Estimated cost per review</strong> (a large pull request; we
-        warn above {LIMIT_TEXT}):
+        <strong>Estimated cost per review</strong> (a large pull request;{" "}
+        {cost.customLimit
+          ? `the limit is ${LIMIT_TEXT}`
+          : `we warn above ${LIMIT_TEXT}`}
+        ):
       </p>
       <ul className="flex flex-col gap-1">
         <Estimate label="Model" estimate={cost.primary} />
@@ -87,8 +90,8 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
                 <span className="font-mono">
                   {modelOf(cost, warning.model)}
                 </span>{" "}
-                is above the warning level of {LIMIT_TEXT} per review. You can
-                still save it.
+                is above the {cost.customLimit ? "cost limit" : "warning level"}{" "}
+                of {LIMIT_TEXT} per review. You can still save it.
               </>
             ) : (
               <>

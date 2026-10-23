@@ -190,6 +190,18 @@ describe("the check run of a finished review", () => {
     expect(check.summary).toMatch(/incomplete/);
   });
 
+  // #666-T01
+  it("says that a review stopped at the cost limit of its project may be incomplete, and where to change it", () => {
+    const check = describeCheck(
+      subject({ status: "succeeded", stoppedEarly: "project_cost_limit" }),
+    );
+
+    expect(check.conclusion).toBe("success");
+    expect(check.summary).toMatch(/cost limit set for this project/);
+    expect(check.summary).toMatch(/incomplete/);
+    expect(check.summary).toMatch(/Limits in the project settings/);
+  });
+
   // #553-R07
   it("says that a review stopped at its token limit may be incomplete, and still succeeds", () => {
     const check = describeCheck(

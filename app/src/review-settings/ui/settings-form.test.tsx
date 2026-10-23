@@ -805,15 +805,18 @@ describe("the Limits section (#656)", () => {
 
     await openSection(user, "Limits");
     const input = screen.getByLabelText(
-      "Cost warning per review (USD)",
+      "Cost limit per review (USD)",
     ) as HTMLInputElement;
     expect(input.value).toBe("1.00");
     const field = input.closest("[data-field]") as HTMLElement;
     expect(field.textContent).toContain(
-      "We warn you when a review is estimated to cost more than this. Leave empty to use the workspace default ($2.50).",
+      "A review stops when it reaches this amount.",
     );
-    // The limit is not enforced yet (#666): nothing may say that reviews are capped.
-    expect(field.textContent).not.toMatch(/most|no limit|cap|never exceed/i);
+    expect(field.textContent).toContain(
+      "Leave empty to use the workspace default ($2.50).",
+    );
+    // No rate and no markup is named next to the limit.
+    expect(field.textContent).not.toMatch(/rate|markup|per minute/i);
 
     await user.clear(input);
     await user.click(
@@ -833,7 +836,7 @@ describe("the Limits section (#656)", () => {
 
     await openSection(user, "Limits");
     await user.type(
-      screen.getByLabelText("Cost warning per review (USD)"),
+      screen.getByLabelText("Cost limit per review (USD)"),
       "1.5",
     );
     await user.click(
@@ -843,8 +846,40 @@ describe("the Limits section (#656)", () => {
     expect(save).toHaveBeenCalledWith({ maxCostCents: 150 });
   });
 
-  // #656-T04
-  it("names the standard warning level when neither the workspace nor the project set one", async () => {
+  // #666-T06
+  it("says that a Diff Review is one request that is never cut short, and a Dynamic Review is not told that", async () => {
+    const user = userEvent.setup();
+    const diff = render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+    await openSection(user, "Limits");
+    const diffField = screen
+      .getByLabelText("Cost limit per review (USD)")
+      .closest("[data-field]") as HTMLElement;
+    expect(diffField.textContent).toContain("makes one request");
+    diff.unmount();
+
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    await openSection(user, "Limits");
+    const dynamicField = screen
+      .getByLabelText("Cost limit per review (USD)")
+      .closest("[data-field]") as HTMLElement;
+    expect(dynamicField.textContent).not.toContain("makes one request");
+  });
+
+  // #666-T06
+  it("says that no limit is set, and shows no amount, when neither the workspace nor the project set one", async () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
@@ -857,11 +892,14 @@ describe("the Limits section (#656)", () => {
     await openSection(user, "Limits");
 
     const field = screen
-      .getByLabelText("Cost warning per review (USD)")
+      .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
-    expect(field.textContent).toContain(
-      "Leave empty to use the workspace default ($0.10).",
-    );
+    expect(field.textContent).toContain("Leave empty for no limit of your own");
+    expect(field.textContent).not.toContain("$0.10");
+    expect(
+      (screen.getByLabelText("Cost limit per review (USD)") as HTMLInputElement)
+        .placeholder,
+    ).toBe("No limit");
   });
 
   // #656-T04
@@ -874,7 +912,7 @@ describe("the Limits section (#656)", () => {
 
     await openSection(user, "Limits");
     await user.type(
-      screen.getByLabelText("Cost warning per review (USD)"),
+      screen.getByLabelText("Cost limit per review (USD)"),
       "lots",
     );
     await user.click(
@@ -884,12 +922,12 @@ describe("the Limits section (#656)", () => {
     expect(save).not.toHaveBeenCalled();
     expect(
       screen
-        .getByLabelText("Cost warning per review (USD)")
+        .getByLabelText("Cost limit per review (USD)")
         .getAttribute("aria-invalid"),
     ).toBe("true");
     expect(
       screen
-        .getByLabelText("Cost warning per review (USD)")
+        .getByLabelText("Cost limit per review (USD)")
         .closest("[data-field]")?.textContent,
     ).toContain(
       "Enter an amount in dollars with up to two decimals, like 0.50 or 2.",
