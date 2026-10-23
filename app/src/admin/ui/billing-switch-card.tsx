@@ -110,8 +110,8 @@ export function BillingSwitchCard({
         <FieldDescription>
           Switching on needs the factor A, both rates and the AI reserve; with
           Stripe also the API key, the webhook secret, a passing connection
-          check and the link to your terms. Switching off is always possible and leaves every balance and
-          the journal as they are.
+          check and the link to your terms. Switching off is always possible and
+          leaves every balance and the journal as they are.
         </FieldDescription>
         <OutcomeNote outcome={outcome} describeMissing={describeMissingItem} />
       </CardContent>

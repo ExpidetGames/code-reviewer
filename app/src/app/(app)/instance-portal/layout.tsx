@@ -11,7 +11,10 @@ import { Suspense, type ReactNode } from "react";
 import { requireAdmin } from "@/admin/session";
 import { AdminNav } from "@/admin/ui/admin-nav";
 import { BillingIncompleteBanner } from "@/admin/ui/billing-incomplete-banner";
-import { countOpenBillingReviews, readIncompleteBilling } from "@/billing/shared";
+import {
+  countOpenBillingReviews,
+  readIncompleteBilling,
+} from "@/billing/shared";
 import { PageLoading } from "@/components/page-loading";
 import {
   SidebarProvider,

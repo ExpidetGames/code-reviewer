@@ -688,7 +688,6 @@ describe("the refusal for the balance", () => {
     expect((await h.queue.get(job.id))?.status).toBe("running");
     expect(comments(h)).toEqual([]);
   });
-
 });
 
 describe("the refusal for a billing setup that is not complete (#632)", () => {
