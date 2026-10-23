@@ -5,6 +5,8 @@
 // reach it. The words are in src/copy/refusal-notice.ts.
 import {
   NOTICE_ADD_CREDIT_WHO,
+  NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE,
+  NOTICE_BILLING_SETUP_INCOMPLETE,
   NOTICE_BALANCE_NEGATIVE,
   NOTICE_INSUFFICIENT_BALANCE,
   NOTICE_LEAD,
@@ -23,11 +25,13 @@ import {
 } from "../copy/refusal-notice.ts";
 
 /**
- * The refusals that get a notice. The others (`entitlements_invalid`, `llm_not_configured`, `billing_rates_incomplete`: the
- * operator's side, and `billing_limits_unreadable`) do not. `insufficient_balance` and `balance_negative` (#498) are the
- * balance's, `monthly_limit_reached` and `reviews_paused` (#499) the limits': keep the check on `refusal_notices.code`
- * (migrations `20261021090000_widen_refusal_notice_codes` and `20261021210000_widen_refusal_notice_codes_for_limits`) in step
- * with this list.
+ * The refusals that get a notice. The others (`entitlements_invalid`, `llm_not_configured`: the operator's side, and
+ * `billing_limits_unreadable`) do not. `insufficient_balance` and `balance_negative` (#498) are the balance's,
+ * `monthly_limit_reached` and `reviews_paused` (#499) the limits'. `billing_rates_incomplete` (#632) is the operator's side
+ * too, but it refuses every review of the instance, so it is never silent on the pull request. Keep the check on
+ * `refusal_notices.code` (migrations `20261021090000_widen_refusal_notice_codes`,
+ * `20261021210000_widen_refusal_notice_codes_for_limits` and `20261023090000_widen_refusal_notice_codes_for_billing_setup`)
+ * in step with this list.
  */
 export const NOTICE_CODES = [
   "quota_exhausted",
@@ -36,6 +40,7 @@ export const NOTICE_CODES = [
   "balance_negative",
   "monthly_limit_reached",
   "reviews_paused",
+  "billing_rates_incomplete",
 ] as const;
 export type NoticeCode = (typeof NOTICE_CODES)[number];
 
@@ -51,13 +56,15 @@ export function isBalanceNoticeCode(code: NoticeCode): boolean {
 
 /**
  * Which page a notice points to: the workspace settings for the balance and the monthly limit (a person of the workspace can
- * act there), the plan page for a quota or a suspension (the operator's), and none for the hidden brake (nobody in the workspace
- * can lift it).
+ * act there), the plan page for a quota or a suspension (the operator's), and none for the hidden brake and an incomplete
+ * billing setup (nobody in the workspace can lift them).
  */
 export function noticeLinkKind(code: NoticeCode): "settings" | "plan" | "none" {
   if (isBalanceNoticeCode(code) || code === "monthly_limit_reached")
     return "settings";
-  return code === "reviews_paused" ? "none" : "plan";
+  return code === "reviews_paused" || code === "billing_rates_incomplete"
+    ? "none"
+    : "plan";
 }
 
 export function isNoticeCode(code: string): code is NoticeCode {
@@ -87,10 +94,13 @@ const REASON_OF: Record<NoticeCode, string> = {
   balance_negative: NOTICE_BALANCE_NEGATIVE,
   monthly_limit_reached: NOTICE_MONTHLY_LIMIT_REACHED,
   reviews_paused: NOTICE_REVIEWS_PAUSED_FOR_A_WHILE,
+  billing_rates_incomplete: NOTICE_BILLING_SETUP_INCOMPLETE,
 };
 
 function whoCanAct(code: NoticeCode, link: string | null): string {
   if (code === "reviews_paused") return NOTICE_TRY_AGAIN_LATER;
+  if (code === "billing_rates_incomplete")
+    return NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE;
   if (code === "monthly_limit_reached")
     return link === null
       ? NOTICE_MONTHLY_LIMIT_WHO

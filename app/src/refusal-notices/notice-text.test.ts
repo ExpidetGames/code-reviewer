@@ -239,3 +239,41 @@ describe("the notice of the hidden hourly brake (#499)", () => {
     expect(hasNoticeMarker(body, "head:fedcba98")).toBe(false);
   });
 });
+
+describe("the notice of a billing setup that is not complete (#632)", () => {
+  const HEAD = "head:0123456789abcdef0123456789abcdef01234567";
+
+  // #632-T03
+  it("says that no review ran because the billing setup of the instance is not complete, and to ask whoever runs it", () => {
+    const text = visible(noticeBody("billing_rates_incomplete", HEAD, null));
+
+    expect(text).toContain("No review ran for this change.");
+    expect(text).toContain("billing setup of this instance is not complete");
+    expect(text).toContain("whoever runs this instance");
+    expect(text).not.toMatch(/\d/);
+    expect(text).not.toMatch(/[$€£%]/);
+    expect(text).not.toMatch(/\b(terms|price|rate|stripe|key)\b/i);
+  });
+
+  // #632-T03
+  it("points to no page, because nobody in the workspace can complete it, even when it is given a link", () => {
+    const text = visible(
+      noticeBody(
+        "billing_rates_incomplete",
+        HEAD,
+        "https://app.example/w/acme/settings",
+      ),
+    );
+
+    expect(text).not.toMatch(/https?:\/\//);
+    expect(text).not.toContain("](");
+  });
+
+  // #632-T03
+  it("keys the hidden marker on the head, so the same head is told once and a new push again", () => {
+    const body = noticeBody("billing_rates_incomplete", HEAD, null);
+
+    expect(hasNoticeMarker(body, HEAD)).toBe(true);
+    expect(hasNoticeMarker(body, "head:fedcba98")).toBe(false);
+  });
+});

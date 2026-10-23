@@ -689,17 +689,73 @@ describe("the refusal for the balance", () => {
     expect(comments(h)).toEqual([]);
   });
 
-  // #498-T15
-  it("posts nothing for billing_rates_incomplete: the operator's side, not the customer's", async () => {
-    const h = await start();
+});
+
+describe("the refusal for a billing setup that is not complete (#632)", () => {
+  /** Billing is switched on, but a rate is missing: the claim refuses every job with `billing_rates_incomplete`. */
+  async function incomplete(options: Parameters<typeof start>[0] = {}) {
+    const h = await start(options);
     await setBillingSwitch(h.db, true, null);
+    return h;
+  }
+
+  // #632-T03 (replaces #498-T15, which posted nothing: the refusal was silent on the pull request)
+  it("posts one comment per pull request head, as the app, with no link, and none for the same head again", async () => {
+    const h = await incomplete({
+      settingsUrl: (slug) => `https://app.example/w/${slug}/settings`,
+      planPageUrl: (slug) => `https://app.example/w/${slug}/settings/plan`,
+    });
 
     const job = await refuse(h);
+    await refuse(h, { triggerKind: "manual" });
 
     expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "billing_rates_incomplete",
+      attempts: 0,
+    });
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]).toMatchObject({ login: "code-reviewer-test[bot]" });
+    expect(comments(h)[0]?.body).toContain("No review ran for this change.");
+    expect(comments(h)[0]?.body).toContain(
+      "billing setup of this instance is not complete",
+    );
+    expect(comments(h)[0]?.body).toContain(`head:${sha("a")}`);
+    expect(comments(h)[0]?.body).not.toMatch(/https?:\/\//);
+  });
+
+  // #632-T03
+  it("posts again for a new push, which is a new head", async () => {
+    const h = await incomplete();
+    await refuse(h);
+
+    await refuse(h, { headSha: sha("b") });
+
+    expect(comments(h)).toHaveLength(2);
+    expect(comments(h)[1]?.body).toContain(`head:${sha("b")}`);
+  });
+
+  // #632-T04
+  it("posts the comment for a job a Dispatcher claimed by its id, as in a hosted deployment", async () => {
+    const h = await incomplete();
+    const job = await h.enqueueNew();
+
+    const claimed = await h.claim({
+      jobId: job.id,
+      engines: ["pr-agent"],
+      features: ["worker_credential", "vm_lifecycle"],
+    });
+    await h.notices.settled();
+
+    expect(claimed.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
       errorCode: "billing_rates_incomplete",
     });
-    expect(comments(h)).toEqual([]);
+    expect(comments(h)).toHaveLength(1);
+    expect(comments(h)[0]?.body).toContain(
+      "billing setup of this instance is not complete",
+    );
   });
 });
 
