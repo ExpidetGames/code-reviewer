@@ -408,6 +408,18 @@ const ENTRIES: Entry[] = [
     billing: true,
   },
   {
+    // #659-T03: the invoices are listed for an Admin and an Owner, of the workspace of the address only (its own Stripe customer).
+    name: "GET billing/invoices",
+    route: "/api/w/[workspace]/billing/invoices",
+    method: "GET",
+    minRole: MINIMUM_ROLE.manage_billing,
+    path: () => "/billing/invoices",
+    params: () => ({}),
+    file: "billing/invoices/route.ts",
+    takesNoIds: true,
+    billing: true,
+  },
+  {
     // #505-T02, T03: the billing details are read and kept by an Admin and an Owner, and by nobody of another workspace.
     name: "GET billing/profile",
     route: "/api/w/[workspace]/billing/profile",

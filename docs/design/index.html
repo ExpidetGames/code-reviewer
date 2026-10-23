@@ -1643,6 +1643,14 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="field"><label for="vat">VAT ID (optional)</label><input class="input err" id="vat" value="DE12345"><span class="ferr"><i class="ic ic-warn sm"></i>This does not look like a VAT ID of that country.</span></div></form>
 <div class="row"><button class="btn btn-s" type="button">Save billing details</button><span class="status">Billing details saved.</span></div></section>
 
+<section class="card"><h2>Invoices</h2>
+<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Invoices">
+<thead><tr><th>Date</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+<tbody>
+<tr><td>20 Oct 2026, 15:30 UTC<span class="sub">INV-0007</span></td><td class="num">$25.00</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Paid</span></td><td class="num"><a class="lnk" href="#">View <i class="ic ic-ext sm"></i></a> · <a class="lnk" href="#">Download PDF</a></td></tr>
+<tr><td>2 Oct 2026, 09:12 UTC<span class="sub">INV-0003</span></td><td class="num">$100.00</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Paid</span></td><td class="num"><a class="lnk" href="#">View <i class="ic ic-ext sm"></i></a> · <a class="lnk" href="#">Download PDF</a></td></tr>
+</tbody></table></div>
+<p class="hint">Owners and Admins only; Members do not see this card. Empty: No invoices yet. If Stripe cannot be reached: The invoices could not be loaded right now. Try again in a moment. [Try again]. The links open the invoice page and the PDF at the payment provider in a new tab. The card is absent when billing has no checkout (manual adapter).</p></section>
 <section class="card"><h2>Journal</h2>
 <div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Journal">
 <thead><tr><th>When</th><th>Entry</th><th class="num">Amount</th></tr></thead>

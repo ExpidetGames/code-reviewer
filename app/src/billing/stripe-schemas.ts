@@ -101,6 +101,26 @@ export const stripeChargeSchema = z.object({
 });
 export type StripeCharge = z.infer<typeof stripeChargeSchema>;
 
+/**
+ * An invoice of a customer, as the invoice list of the billing page reads it. Nothing personal is read (no address, no email,
+ * no line text); the two addresses are Stripe's hosted page and PDF of the invoice, untrusted until the adapter checks them.
+ */
+export const stripeInvoiceSchema = z.object({
+  id: text,
+  object: z.literal("invoice"),
+  /** `draft`, `open`, `paid`, `uncollectible` or `void`. */
+  status: text.nullable(),
+  /** The invoice's own number; null on a draft. */
+  number: text.nullish(),
+  total: z.number(),
+  currency: text,
+  customer: expandableId.nullable(),
+  hosted_invoice_url: text.nullish(),
+  invoice_pdf: text.nullish(),
+  created: z.number(),
+});
+export type StripeInvoice = z.infer<typeof stripeInvoiceSchema>;
+
 export const stripeRefundSchema = z.object({
   id: text,
   object: z.literal("refund"),
