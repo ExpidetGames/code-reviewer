@@ -11,6 +11,7 @@ export const STRIPE_FIXTURE_NAMES = [
   "customer",
   "dispute",
   "event",
+  "invoice",
   "payment-intent",
   "refund",
   "tax-id",

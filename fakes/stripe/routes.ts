@@ -186,8 +186,9 @@ function page(
   context: RouteContext,
   items: FakeObject[],
   path: string,
+  filters: { [key: string]: Spec } = {},
 ): { status: number; body: unknown } {
-  checkAll({ limit: "s", starting_after: "s" }, context.query);
+  checkAll({ limit: "s", starting_after: "s", ...filters }, context.query);
   const limit =
     context.query.limit === undefined
       ? 10
@@ -668,6 +669,39 @@ export function createRoutes(): Route[] {
       handler: ({ params, store }) => ({
         status: 200,
         body: store.getCharge(params[0] as string),
+      }),
+    },
+
+    {
+      method: "GET",
+      pattern: /^\/v1\/invoices$/,
+      handler: (context) => {
+        const { customer, status } = context.query;
+        // Like Stripe, a list of invoices is of one customer (or of the account), and a customer Stripe does not know (never
+        // made, deleted, or made under the key of the other environment) is a 400 "No such customer", not an empty list.
+        const ignoreFilter = context.store.invoiceCustomerFilterIgnored();
+        if (typeof customer === "string" && !ignoreFilter)
+          context.store.existingCustomer(customer, "customer", 400);
+        const all = [...context.store.maps.invoices.values()];
+        const matching = all.filter(
+          (invoice) =>
+            (customer === undefined ||
+              ignoreFilter ||
+              invoice.customer === customer) &&
+            (status === undefined || invoice.status === status),
+        );
+        return page(context, matching, "/v1/invoices", {
+          customer: "s",
+          status: "s",
+        });
+      },
+    },
+    {
+      method: "GET",
+      pattern: new RegExp(`^/v1/invoices/${ID}$`),
+      handler: ({ params, store }) => ({
+        status: 200,
+        body: store.getInvoice(params[0] as string),
       }),
     },
 
