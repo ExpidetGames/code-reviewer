@@ -5,7 +5,7 @@
 // rather than a workspace (which workspaces does this person belong to, in which role); the members of
 // one workspace are in workspace-members-repository.ts. See src/workspaces/README.md.
 import "server-only";
-import { sql, type Kysely } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
 import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
@@ -110,7 +110,7 @@ export function isDeleted(workspace: { deletedAt: string | null }): boolean {
 /** The rows that are workspaces, not tombstones: the condition of every query that reads `workspaces` for a customer or an operator. */
 export const NOT_DELETED = sql<boolean>`workspaces.deleted_at is null`;
 
-function toWorkspace(row: WorkspacesTable): Workspace {
+function toWorkspace(row: Selectable<WorkspacesTable>): Workspace {
   return {
     id: row.id,
     name: row.name,
@@ -147,7 +147,9 @@ export function createWorkspacesRepository(
       .where(NOT_DELETED);
   }
 
-  function toMembership(row: WorkspacesTable & { role: string }): Membership {
+  function toMembership(
+    row: Selectable<WorkspacesTable> & { role: string },
+  ): Membership {
     if (!isWorkspaceRole(row.role))
       throw new Error(`The database holds an unknown role "${row.role}".`);
     return { workspace: toWorkspace(row), role: row.role };
@@ -275,16 +277,15 @@ export function createWorkspacesRepository(
     },
 
     async create(input) {
-      const row: WorkspacesTable = {
+      const row = {
         id: newId(),
         name: input.name,
         slug: input.slug,
         created_by: input.createdBy,
         created_at: formatTimestamp(now()),
-        deleted_at: null,
       };
       await db.insertInto("workspaces").values(row).execute();
-      return toWorkspace(row);
+      return toWorkspace({ ...row, deleted_at: null });
     },
 
     async addMember(workspaceId, userId, role) {

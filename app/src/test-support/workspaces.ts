@@ -16,11 +16,18 @@ import type { Database } from "../db/schema.ts";
 export async function defaultWorkspaceId(
   db: Kysely<Database>,
 ): Promise<string> {
-  const workspaces = createWorkspacesRepository(db);
-  const existing = await workspaces.findDefault();
+  // Read without the repository: tests of a migration make the workspace on the schema of the release before, which has no
+  // `deleted_at` yet, and a test helper must not depend on the column.
+  const existing = await db
+    .selectFrom("workspaces")
+    .select("id")
+    .orderBy("created_at")
+    .orderBy("id")
+    .limit(1)
+    .executeTakeFirst();
   if (existing !== undefined) return existing.id;
   return (
-    await workspaces.create({
+    await createWorkspacesRepository(db).create({
       name: "Default workspace",
       slug: DEFAULT_WORKSPACE_SLUG,
       createdBy: null,

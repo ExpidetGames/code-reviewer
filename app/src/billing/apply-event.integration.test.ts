@@ -236,6 +236,7 @@ function suite(engine: BillingEngine) {
         expect(result).toEqual({
           outcome: "workspace_deleted",
           workspaceId: s.workspaceId,
+          intentId: s.intentId,
           needsReview: true,
         });
         expect(await entries(s)).toEqual([]);

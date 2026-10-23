@@ -9,6 +9,7 @@ import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
 import { openDatabase } from "../connection.ts";
 import { createTestDirectory } from "../../test-support/test-database.ts";
+import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const SPLIT = "20261016120000_create_plan_handoff_tokens";
 
@@ -52,7 +53,7 @@ async function rowsOfEveryTable(
       continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);
-    result[table.name] = rows;
+    result[table.name] = withoutColumnsAddedLater(table.name, rows);
   }
   return result;
 }

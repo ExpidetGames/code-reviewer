@@ -18,6 +18,7 @@ import { addWorkspace } from "../../test-support/workspaces.ts";
 import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
+import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const MIGRATION = "20261019170000_create_billing_topup_intents";
 const T = "2026-10-19T08:00:00.000Z";
@@ -238,9 +239,12 @@ describe("the migration", () => {
 
         await migrateToLatest(db);
 
-        expect(await db.selectFrom("workspaces").selectAll().execute()).toEqual(
-          before,
-        );
+        expect(
+          withoutColumnsAddedLater(
+            "workspaces",
+            await db.selectFrom("workspaces").selectAll().execute(),
+          ),
+        ).toEqual(before);
         expect(
           await db.selectFrom("billing_topup_intents").selectAll().execute(),
         ).toEqual([]);
