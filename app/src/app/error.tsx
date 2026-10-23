@@ -4,7 +4,7 @@
 // The app's own error page (#633): what a page shows when it fails while it renders. It never shows
 // the error itself (in production the message of a server error is a generic one anyway); "Try again"
 // fetches and renders the page once more, the link leads back to the start page.
-import { TriangleAlert } from "lucide-react";
+import { WarningIcon } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
 import { useEffect } from "react";
 import { Button } from "@/components/button";
@@ -24,7 +24,12 @@ export default function ErrorPage({
 
   return (
     <SystemPage
-      mark={<TriangleAlert className="size-12 text-muted-foreground" />}
+      mark={
+        <WarningIcon
+          aria-hidden="true"
+          className="size-12 text-muted-foreground"
+        />
+      }
       title={ERROR_COPY.title}
       description={ERROR_COPY.description}
     >

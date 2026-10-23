@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the status badge: every status has a label of its own and a symbol of its own, so no
-// status is told apart by color alone; the run detail can ask for the description behind the "?".
+// Pins down the status badge: every status has a label of its own and a symbol of its own (a Phosphor
+// icon, #636), so no status is told apart by color alone; the run detail can ask for the description
+// behind the "?".
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,8 +19,8 @@ describe("the status badge", () => {
     const shown = JOB_STATUSES.map((status) => {
       const { container, unmount } = render(<RunStatusBadge status={status} />);
       const badge = container.firstElementChild;
-      const symbol = badge?.querySelector("[aria-hidden='true']")?.textContent;
-      const label = badge?.textContent?.replace(symbol ?? "", "");
+      const symbol = badge?.querySelector("svg[aria-hidden='true']")?.innerHTML;
+      const label = badge?.textContent;
       unmount();
       return {
         status,
@@ -45,11 +46,28 @@ describe("the status badge", () => {
   it("hides the symbol from assistive technology so the text alone carries the meaning", () => {
     const { container } = render(<RunStatusBadge status="failed" />);
 
-    expect(
-      container.querySelector("[aria-hidden='true']")?.textContent,
-    ).not.toBe("");
+    expect(container.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(container.textContent).toContain("Failed");
   });
+
+  // #636-T02
+  it.each(JOB_STATUSES)(
+    "draws the symbol of %s as a Phosphor icon and labels the status in words",
+    (status) => {
+      const { label } = RUN_STATUS_PRESENTATION[status];
+      const { container } = render(<RunStatusBadge status={status} />);
+      const badge = container.firstElementChild;
+      const icon = badge?.querySelector("svg");
+
+      // Phosphor draws on a 256 unit grid and fills with currentColor; no emoji or text glyph is left.
+      expect(icon?.getAttribute("viewBox")).toBe("0 0 256 256");
+      expect(icon?.getAttribute("fill")).toBe("currentColor");
+      expect(icon?.getAttribute("aria-hidden")).toBe("true");
+      // The accessible label of the status is its word, read once: the icon adds no name of its own.
+      expect(badge?.textContent).toBe(label);
+      expect(screen.getByText(label)).toBe(badge);
+    },
+  );
 
   // The list keeps the description reachable with a non-interactive title, not a control per row.
   it("keeps the status description as a title without a second control", () => {
