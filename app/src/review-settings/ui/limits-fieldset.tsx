@@ -90,7 +90,8 @@ export function LimitsFieldset({
           inputMode="numeric"
         />
       ) : null}
-      {showTokenBudget ? <CostSummary cost={cost} /> : null}
+      {/* A workspace on the operator's key does not know the model, so there is no estimate for it to read. */}
+      {showTokenBudget && !model.managed ? <CostSummary cost={cost} /> : null}
     </SettingsCard>
   );
 }

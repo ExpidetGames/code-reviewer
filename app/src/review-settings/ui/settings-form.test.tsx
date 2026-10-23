@@ -581,7 +581,7 @@ describe("the settings form", () => {
     );
     await openSection(user, "Limits");
 
-    expect(screen.getByText(/above the limit of \$0\.10/)).toBeTruthy();
+    expect(screen.getByText(/above the warning level of \$0\.10/)).toBeTruthy();
     expect(
       (
         screen.getByRole("button", {
