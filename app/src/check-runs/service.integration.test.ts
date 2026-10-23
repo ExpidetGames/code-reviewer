@@ -10,6 +10,7 @@ import {
   HEAD,
   createCheckRunsHarness,
 } from "../test-support/check-runs-harness.ts";
+import { createJobCheckRunsRepository } from "../db/repositories/job-check-runs-repository.ts";
 import { sha } from "../test-support/jobs.ts";
 import { verdictMarker } from "./verdict.ts";
 
@@ -1717,11 +1718,109 @@ describe("what the tokens and the logs hold", () => {
         (keys: string[]) =>
           JSON.stringify(keys) === JSON.stringify(["checks", "metadata"]) ||
           JSON.stringify(keys) ===
-            JSON.stringify(["metadata", "pull_requests"]),
+            JSON.stringify(["metadata", "pull_requests"]) ||
+          // The one read of the review comment the run posted (#657).
+          JSON.stringify(keys) === JSON.stringify(["issues", "metadata"]),
       );
     }
     const logged = [...t.lines.info, ...t.lines.error].join("\n");
     for (const credential of t.fake.seenCredentials())
       expect(logged).not.toContain(credential);
+  });
+});
+
+describe("keeping the review comment a run posted (#657)", () => {
+  /** The review comment as the runner leaves it on the pull request: written by the app's bot, linked from the result. */
+  async function postReview(
+    t: Awaited<ReturnType<typeof createCheckRunsHarness>>,
+    body: string,
+  ) {
+    const comment = t.fake.addPullRequestComment(t.repo, 7, body);
+    return `https://github.test/${t.repo}/pull/7#issuecomment-${String(comment.id)}`;
+  }
+
+  // #657-T04
+  it("reads the comment once the run ended and keeps its body on the row", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    const commentUrl = await postReview(t, "## Review\n\n- A finding.");
+    await t.succeed(claimed.job, claimed.token, {
+      commentUrl,
+      findings: NO_BLOCKER,
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(
+      await createJobCheckRunsRepository(
+        t.fixture.db,
+        t.fixture.workspaceId,
+      ).reviewCommentOf(job.id),
+    ).toBe("## Review\n\n- A finding.");
+  });
+
+  // #657-T04
+  it("keeps nothing for a run without a link to a comment, and an empty text for a comment that is gone", async () => {
+    const t = await createCheckRunsHarness();
+    const checks = createJobCheckRunsRepository(
+      t.fixture.db,
+      t.fixture.workspaceId,
+    );
+    const noLink = await t.fixture.enqueueNew({ prNumber: 7 });
+    const first = await t.claim();
+    await t.succeed(first.job, first.token, { commentUrl: null });
+    await t.service.syncJob(noLink.id);
+    expect(await checks.reviewCommentOf(noLink.id)).toBeNull();
+
+    t.fixture.clock.advance(MINUTE);
+    const gone = await t.fixture.enqueueNew({ prNumber: 7, headSha: sha("b") });
+    const second = await t.claim();
+    await t.succeed(second.job, second.token, {
+      commentUrl: `https://github.test/${t.repo}/pull/7#issuecomment-424242`,
+    });
+    await t.service.syncJob(gone.id);
+    expect(await checks.reviewCommentOf(gone.id)).toBe("");
+  });
+
+  // #657-T04
+  it("never keeps a comment somebody else wrote, even when the result links to it", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    const stranger = t.fake.addPullRequestComment(
+      t.repo,
+      7,
+      "buy my coins",
+      "mallory",
+    );
+    await t.succeed(claimed.job, claimed.token, {
+      commentUrl: `https://github.test/${t.repo}/pull/7#issuecomment-${String(stranger.id)}`,
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(
+      await createJobCheckRunsRepository(
+        t.fixture.db,
+        t.fixture.workspaceId,
+      ).reviewCommentOf(job.id),
+    ).toBe("");
+  });
+
+  // #657-T04
+  it("does not fail the sync when the comment cannot be read: the check run is still completed and one stable code is logged", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    const commentUrl = await postReview(t, "a review");
+    await t.succeed(claimed.job, claimed.token, { commentUrl });
+    t.fake.fail({ pathIncludes: "/issues/comments/", status: 500 });
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns()[0]).toMatchObject({ status: "completed" });
+    expect(t.lines.error.join("\n")).toContain("REVIEW_COMMENT_UNREADABLE");
+    expect(t.lines.error.join("\n")).not.toContain("a review");
   });
 });
