@@ -13,7 +13,7 @@ const VALID = {
   user: "mailer",
   password: "correct horse battery staple",
   senderAddress: "reviewer@example.com",
-  senderName: "Code Reviewer",
+  senderName: "code-review.com",
 } as const;
 
 function issuesOf(input: unknown) {
@@ -29,7 +29,7 @@ describe("the mail server settings", () => {
       host: "  SMTP.Example.COM ",
       user: " mailer ",
       senderAddress: " reviewer@example.com ",
-      senderName: " Code Reviewer ",
+      senderName: " code-review.com ",
       allowSelfSigned: true,
     });
 
@@ -42,7 +42,7 @@ describe("the mail server settings", () => {
           security: "starttls",
           user: "mailer",
           senderAddress: "reviewer@example.com",
-          senderName: "Code Reviewer",
+          senderName: "code-review.com",
           allowSelfSigned: true,
           allowPlainTextLogin: false,
         },

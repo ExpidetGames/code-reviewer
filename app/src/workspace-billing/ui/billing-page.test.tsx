@@ -531,6 +531,35 @@ describe("a payment on its way", () => {
     expect(navigation.refresh).toHaveBeenCalled();
   });
 
+  // #653-T01
+  it("keeps the result of a successful check after the refreshed page no longer lists the payment", async () => {
+    const user = userEvent.setup();
+    const { api, rerender } = page({
+      ...OWNER_VIEW,
+      pendingTopUps: [PENDING],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Check payment" }));
+    await waitFor(() => expect(navigation.refresh).toHaveBeenCalled());
+    // The refresh brings the page back without the credited payment.
+    rerender(
+      <BillingPageContent
+        workspaceSlug="acme"
+        view={{ ...OWNER_VIEW, pendingTopUps: [] }}
+        returned={null}
+        termsHref={null}
+        privacyHref={null}
+        api={api}
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("The payment arrived and the credit is added."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check payment" })).toBeNull();
+  });
+
   // #505-T04
   it("says the payment is still open when the provider has not confirmed it", async () => {
     const user = userEvent.setup();

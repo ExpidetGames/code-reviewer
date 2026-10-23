@@ -199,7 +199,11 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]/runs/[id]",
 ] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
-const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
+const OUTSIDE_THE_PROXY = [
+  "/favicon.ico",
+  "/icon.svg",
+  "/apple-icon.png",
+] as const;
 
 async function createGuardedApp() {
   const harness = await createAuthHarness();

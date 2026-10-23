@@ -24,7 +24,32 @@ test.describe("start page", () => {
       page.getByRole("button", { name: "Sign in with GitHub" }),
     ).toBeVisible();
     await page.waitForLoadState("load");
-    await expect(page).toHaveTitle("Code Reviewer");
+    await expect(page).toHaveTitle("code-review.com");
     expect(consoleErrors).toEqual([]);
+  });
+
+  // #650-T03
+  test("the login page head links the code-review.com icon, and the icon files are served without a session", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/login");
+
+    const icon = page.locator('head link[rel="icon"][href^="/icon.svg"]');
+    await expect(icon).toHaveCount(1);
+    await expect(
+      page.locator(
+        'head link[rel="apple-touch-icon"][href^="/apple-icon.png"]',
+      ),
+    ).toHaveCount(1);
+    for (const [path, type] of [
+      [(await icon.getAttribute("href")) ?? "", "image/svg+xml"],
+      ["/favicon.ico", "image/x-icon"],
+      ["/apple-icon.png", "image/png"],
+    ] as const) {
+      const response = await request.get(path, { maxRedirects: 0 });
+      expect(response.status(), path).toBe(200);
+      expect(response.headers()["content-type"], path).toContain(type);
+    }
   });
 });

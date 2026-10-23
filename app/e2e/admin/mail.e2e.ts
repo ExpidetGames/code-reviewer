@@ -51,7 +51,7 @@ async function fillServer(
     .fill("code-reviewer@e2e.test");
   await mail
     .getByLabel("Sender name (optional)", { exact: true })
-    .fill("Code Reviewer");
+    .fill("code-review.com");
 }
 
 async function save(page: Page): Promise<void> {
@@ -143,7 +143,7 @@ test.describe("the mail page", () => {
 
     const message = await messageTo(
       e2eEnv.adminEmail,
-      "Test mail from Code Reviewer",
+      "Test mail from code-review.com",
     );
     expect(message.from).toBe("code-reviewer@e2e.test");
     expect(message.secure).toBe(true);

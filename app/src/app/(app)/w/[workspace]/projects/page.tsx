@@ -32,7 +32,7 @@ export default async function ProjectsPage({
     <>
       <PageHeader
         title="Projects"
-        description="The repositories Code Reviewer watches."
+        description="The repositories code-review.com watches."
         actions={
           // The synchronization of the workspace: it reads the workspace's own connections, for an Owner or
           // an Admin (the instance admin's synchronization of everything is a route of the admin portal).
