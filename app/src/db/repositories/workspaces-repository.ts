@@ -82,8 +82,8 @@ export const DEFAULT_WORKSPACE_SLUG = "default";
  * address anonymised; the address is also the mark of a tombstone, so that no schema change is needed to tell it from a
  * workspace (the id is random, a person cannot ask for this address).
  */
-export function deletedWorkspaceSlug(workspaceId: string): string {
-  return `deleted-${workspaceId}`;
+export function deletedWorkspaceSlug(id: string): string {
+  return `deleted-${id}`;
 }
 
 /** The rows that are workspaces, not tombstones. */
