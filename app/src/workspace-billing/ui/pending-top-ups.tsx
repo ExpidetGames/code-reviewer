@@ -29,27 +29,13 @@ import { useAction } from "./use-action.ts";
 
 function PendingRow({
   item,
-  api,
+  checking,
+  onCheck,
 }: {
   item: PendingTopUpView;
-  api: WorkspaceBillingApi;
+  checking: boolean;
+  onCheck: () => void;
 }) {
-  const { pending, outcome, run } = useAction();
-  function check() {
-    void run("check", async () => {
-      const result = await api.checkPayment(item.id);
-      if (!result.ok)
-        return {
-          kind: "failed",
-          text: describeBillingFailure(result.code),
-          issues: [],
-        };
-      return {
-        kind: "ok",
-        text: CHECK_RESULT[result.data.state] ?? CHECK_RESULT.pending ?? "",
-      };
-    });
-  }
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2">
       <span className="font-semibold tabular-nums">
@@ -63,14 +49,13 @@ function PendingRow({
         <Button
           variant="secondary"
           size="sm"
-          onClick={check}
-          loading={pending === "check"}
+          onClick={onCheck}
+          loading={checking}
           loadingLabel={CHECK_PAYMENT_LOADING}
         >
           {CHECK_PAYMENT_BUTTON}
         </Button>
       ) : null}
-      <StatusRegion>{outcome === null ? null : outcome.text}</StatusRegion>
     </li>
   );
 }
@@ -83,7 +68,25 @@ export function PendingTopUps({
   api: WorkspaceBillingApi;
 }) {
   const id = useId();
-  if (items.length === 0) return null;
+  // The result of a check lives here, not in the row (#653): a credited payment leaves the list with the refresh that follows the
+  // check, and its row with it, so the sentence would vanish before anyone read it. The card stays while it has a result to say.
+  const { pending, outcome, run } = useAction();
+  function check(item: PendingTopUpView) {
+    void run(`check:${item.id}`, async () => {
+      const result = await api.checkPayment(item.id);
+      if (!result.ok)
+        return {
+          kind: "failed",
+          text: describeBillingFailure(result.code),
+          issues: [],
+        };
+      return {
+        kind: "ok",
+        text: CHECK_RESULT[result.data.state] ?? CHECK_RESULT.pending ?? "",
+      };
+    });
+  }
+  if (items.length === 0 && outcome === null) return null;
   return (
     <Card role="region" aria-labelledby={id}>
       <CardHeader>
@@ -97,12 +100,22 @@ export function PendingTopUps({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        <p className="text-sm text-muted-foreground">{PENDING_EXPLAINER}</p>
-        <ul className="divide-y divide-border">
-          {items.map((item) => (
-            <PendingRow key={item.id} item={item} api={api} />
-          ))}
-        </ul>
+        {items.length > 0 ? (
+          <p className="text-sm text-muted-foreground">{PENDING_EXPLAINER}</p>
+        ) : null}
+        {items.length > 0 ? (
+          <ul className="divide-y divide-border">
+            {items.map((item) => (
+              <PendingRow
+                key={item.id}
+                item={item}
+                checking={pending === `check:${item.id}`}
+                onCheck={() => check(item)}
+              />
+            ))}
+          </ul>
+        ) : null}
+        <StatusRegion>{outcome === null ? null : outcome.text}</StatusRegion>
       </CardContent>
     </Card>
   );
