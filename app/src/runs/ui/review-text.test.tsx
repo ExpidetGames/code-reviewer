@@ -5,7 +5,7 @@
 // so no tag, script, link or hidden marker of it becomes markup or shows.
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ReviewText } from "./review-text.tsx";
+import { parseReviewText, readReviewText, ReviewText } from "./review-text.tsx";
 
 afterEach(cleanup);
 
@@ -96,5 +96,55 @@ describe("the text of a posted review", () => {
     expect(container.textContent).toContain("File · Issue");
     expect(container.textContent).toContain("a.ts · Missing check");
     expect(container.textContent).not.toContain("---");
+  });
+  // A review comes from outside and is read on every poll: hostile text must not cost seconds of CPU. Before the linear scan
+  // 65,536 characters of "<a<a<a" took ~1.9 s, of "<!--" ~1.6 s and of "<summary " ~0.5 s.
+  describe.each([
+    ["open tags that never close", "<a".repeat(32768)],
+    ["comment openers that never close", "<!--".repeat(16384)],
+    ["summary openers that never close", "<summary ".repeat(7282)],
+    ["summary openers with no end tag", "<summary >".repeat(6554)],
+    ["links that never close", "[a](".repeat(16384)],
+    ["brackets that never close", "[".repeat(65536)],
+    ["stars", "*".repeat(65536)],
+    ["a heading with a long run of hashes", `# x${"#".repeat(65530)}y`],
+    ["backticks that never close", "`".repeat(65536)],
+    ["a heading with a long run of spaces", `# x${" ".repeat(65530)}y`],
+  ])("with %s", (_name, text) => {
+    it("is read in linear time", () => {
+      const started = performance.now();
+      const blocks = parseReviewText(text.slice(0, 65536));
+      for (const block of blocks)
+        if (block.kind === "paragraph") block.text.length;
+      render(<ReviewText text={text.slice(0, 65536)} />);
+      expect(performance.now() - started).toBeLessThan(200);
+    });
+  });
+
+  it("reads the same text once and hands the same blocks to every later render", () => {
+    const text = "## Same\n\n- one\n- two";
+    const first = readReviewText(text);
+    expect(readReviewText(text)).toBe(first);
+    expect(readReviewText(`${text}\n\nmore`)).not.toBe(first);
+  });
+
+  it("reads a heading without its closing hashes and only up to six opening ones", () => {
+    expect(
+      parseReviewText("## Title ##\n####### seven\n#nospace\n### a # b ###"),
+    ).toEqual([
+      { kind: "heading", level: 3, text: "Title" },
+      { kind: "paragraph", text: "####### seven #nospace" },
+      { kind: "heading", level: 4, text: "a # b" },
+    ]);
+  });
+
+  it("keeps the words of unterminated markup and strips the terminated one", () => {
+    const blocks = parseReviewText(
+      "a <!-- gone --> b <!-- open\n<summary>Title</summary> c <b>bold</b> <i",
+    );
+    expect(blocks).toEqual([
+      { kind: "paragraph", text: "a  b <!-- open" },
+      { kind: "paragraph", text: "**Title** c bold <i" },
+    ]);
   });
 });

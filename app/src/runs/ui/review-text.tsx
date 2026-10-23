@@ -15,23 +15,85 @@ type Block =
   | { kind: "code"; text: string }
   | { kind: "rule" };
 
-const HTML_COMMENT = /<!--[\s\S]*?-->/g;
-const SUMMARY = /<summary[^>]*>([\s\S]*?)<\/summary>/gi;
 const LINE_BREAK = /<br\s*\/?>/gi;
 const BLOCK_CLOSE = /<\/(?:p|div|li|tr|h[1-6]|details|table)>/gi;
-const TAG = /<\/?[a-zA-Z][^>\n]*>/g;
+
+// The text is from outside and is read on every poll, so every step below walks it once (an `indexOf` that finds nothing is
+// remembered): no pattern here can be made to rescan the rest of the text from each of many openers.
+
+/** The text without the HTML comments (`<!-- ... -->`); a comment that never closes stays as text. */
+function dropComments(text: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const open = text.indexOf("<!--", from);
+    if (open === -1) break;
+    const close = text.indexOf("-->", open + 4);
+    if (close === -1) break;
+    out += text.slice(from, open);
+    from = close + 3;
+  }
+  return out + text.slice(from);
+}
+
+/** Each `<summary ...>words</summary>` as its words on a line of their own, in bold; one that never closes stays as it is. */
+function summariesToLines(text: string): string {
+  // Only A-Z are lowered, so the positions in `lower` are the positions in `text`.
+  const lower = text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+  let out = "";
+  let from = 0;
+  let search = 0;
+  for (;;) {
+    const open = lower.indexOf("<summary", search);
+    if (open === -1) break;
+    const tagEnd = text.indexOf(">", open + 8);
+    if (tagEnd === -1) break;
+    const close = lower.indexOf("</summary>", tagEnd + 1);
+    if (close === -1) break;
+    out += `${text.slice(from, open)}\n**${text.slice(tagEnd + 1, close).trim()}**\n`;
+    from = close + 10;
+    search = from;
+  }
+  return out + text.slice(from);
+}
+
+/** The text without its tags (`<b>`, `</p>`, `<a href=...>`); a `<` that opens no tag closed on its own line stays as text. */
+function dropTags(text: string): string {
+  let out = "";
+  let from = 0;
+  let search = 0;
+  for (;;) {
+    const open = text.indexOf("<", search);
+    if (open === -1) break;
+    const nameAt = text[open + 1] === "/" ? open + 2 : open + 1;
+    if (!/[a-zA-Z]/.test(text[nameAt] ?? "")) {
+      search = open + 1;
+      continue;
+    }
+    let end = nameAt + 1;
+    while (end < text.length && text[end] !== ">" && text[end] !== "\n")
+      end += 1;
+    if (text[end] === ">") {
+      out += text.slice(from, open);
+      from = end + 1;
+      search = from;
+    } else {
+      // No `>` before the end of this line: no `<` before `end` can close either, so none is tried again.
+      search = end;
+    }
+  }
+  return out + text.slice(from);
+}
 
 /** The text without HTML: comments and tags out, summaries and line breaks kept as lines. */
 function stripHtml(text: string): string {
-  return text
-    .replace(HTML_COMMENT, "")
-    .replace(SUMMARY, (_all, inner: string) => `\n**${inner.trim()}**\n`)
-    .replace(LINE_BREAK, "\n")
-    .replace(BLOCK_CLOSE, "\n")
-    .replace(TAG, "");
+  return dropTags(
+    summariesToLines(dropComments(text))
+      .replace(LINE_BREAK, "\n")
+      .replace(BLOCK_CLOSE, "\n"),
+  );
 }
 
-const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 const QUOTE = /^\s*>\s?(.*)$/;
@@ -39,6 +101,16 @@ const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const TABLE_SEPARATOR = /^\s*\|[\s:|-]+\|\s*$/;
 const FENCE = /^\s*(?:```|~~~)/;
+
+/** A heading line (`## Words ##`): its level and its words, without the closing hashes. Not a regular expression: a long run of spaces or hashes would make that quadratic. */
+function headingOf(line: string): { hashes: number; text: string } | null {
+  let hashes = 0;
+  while (line[hashes] === "#") hashes += 1;
+  if (hashes < 1 || hashes > 6 || !/\s/.test(line[hashes] ?? "")) return null;
+  let end = line.length;
+  while (end > hashes && line[end - 1] === "#") end -= 1;
+  return { hashes, text: line.slice(hashes, end).trim() };
+}
 
 /** A table row as one line: its cells side by side. */
 function rowText(line: string): string {
@@ -77,13 +149,13 @@ export function parseReviewText(source: string): Block[] {
       flush();
       continue;
     }
-    const heading = HEADING.exec(line);
+    const heading = headingOf(line);
     if (heading !== null) {
       flush();
       blocks.push({
         kind: "heading",
-        level: (heading[1] ?? "#").length <= 2 ? 3 : 4,
-        text: heading[2] ?? "",
+        level: heading.hashes <= 2 ? 3 : 4,
+        text: heading.text,
       });
       continue;
     }
@@ -125,27 +197,88 @@ export function parseReviewText(source: string): Block[] {
   return blocks;
 }
 
-const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]*\]\([^)\n]*\))/g;
-
-/** Inline Markdown as elements: code, bold, and a link as its words alone. */
+/** Inline Markdown as elements: code, bold, and a link as its words alone. One walk over each line (see `stripHtml`). */
 function inline(text: string): ReactNode[] {
-  return text.split(INLINE).map((part, index) => {
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2)
-      return (
-        <code key={index} className="font-mono text-[0.9em]">
-          {part.slice(1, -1)}
-        </code>
-      );
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4)
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    const link = /^\[([^\]\n]*)\]\([^)\n]*\)$/.exec(part);
-    if (link !== null) return <span key={index}>{link[1]}</span>;
-    return <span key={index}>{part}</span>;
+  const parts: ReactNode[] = [];
+  const plain = (words: string) => {
+    if (words !== "") parts.push(<span key={parts.length}>{words}</span>);
+  };
+  text.split("\n").forEach((line, lineIndex) => {
+    if (lineIndex > 0) plain("\n");
+    let from = 0;
+    let at = 0;
+    // A closer that is missing from here on is missing for every later opener too.
+    let noBacktick = false;
+    let noBracket = false;
+    let noParen = false;
+    while (at < line.length) {
+      const char = line[at];
+      if (char === "`" && !noBacktick) {
+        const close = line.indexOf("`", at + 1);
+        if (close === -1) noBacktick = true;
+        else if (close > at + 1) {
+          plain(line.slice(from, at));
+          parts.push(
+            <code key={parts.length} className="font-mono text-[0.9em]">
+              {line.slice(at + 1, close)}
+            </code>,
+          );
+          from = at = close + 1;
+          continue;
+        }
+      } else if (char === "*" && line[at + 1] === "*") {
+        const star = line.indexOf("*", at + 2);
+        if (star > at + 2 && line[star + 1] === "*") {
+          plain(line.slice(from, at));
+          parts.push(
+            <strong key={parts.length}>{line.slice(at + 2, star)}</strong>,
+          );
+          from = at = star + 2;
+          continue;
+        }
+      } else if (char === "[" && !noBracket && !noParen) {
+        const bracket = line.indexOf("]", at + 1);
+        if (bracket === -1) noBracket = true;
+        else if (line[bracket + 1] !== "(") {
+          // No `[` before this `]` can be a link either.
+          at = bracket;
+          continue;
+        } else {
+          const paren = line.indexOf(")", bracket + 2);
+          if (paren === -1) noParen = true;
+          else {
+            plain(line.slice(from, at));
+            parts.push(
+              <span key={parts.length}>{line.slice(at + 1, bracket)}</span>,
+            );
+            from = at = paren + 1;
+            continue;
+          }
+        }
+      }
+      at += 1;
+    }
+    plain(line.slice(from));
   });
+  return parts;
+}
+
+// The same review text is shown again on every poll: the last few readings are kept by their text.
+const READINGS = new Map<string, Block[]>();
+const READINGS_KEPT = 8;
+
+export function readReviewText(text: string): Block[] {
+  const known = READINGS.get(text);
+  if (known !== undefined) return known;
+  const blocks = parseReviewText(text);
+  if (READINGS.size >= READINGS_KEPT)
+    READINGS.delete(READINGS.keys().next().value as string);
+  READINGS.set(text, blocks);
+  return blocks;
 }
 
 export function ReviewText({ text }: { text: string }) {
-  const blocks = parseReviewText(text);
+  const blocks = readReviewText(text);
   return (
     <div
       data-slot="review-text"
