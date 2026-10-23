@@ -421,7 +421,9 @@ export function createProjectsRepository(
           id: newId(),
           repository_id: repositoryId,
           active: encodeBoolean(false),
-          settings: encodeJson(change(await newProjectSettings(trx, workspaceId))),
+          settings: encodeJson(
+            change(await newProjectSettings(trx, workspaceId)),
+          ),
           created_at: timestamp,
           updated_at: timestamp,
         })
