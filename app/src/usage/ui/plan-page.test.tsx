@@ -323,7 +323,7 @@ describe("the plan page, for people who do not see colours", () => {
       "Settings",
       "General",
       "Review defaults",
-      "LLM access",
+      "LLM",
       "Plan",
       "Advanced",
     ]);
