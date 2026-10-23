@@ -10,6 +10,7 @@ import {
   STRIPE_API_ADDRESS,
   STRIPE_API_BASE_URL_VARIABLE,
   stripeApiBaseUrlOf,
+  stripeLinkOriginOf,
 } from "./stripe-endpoints.ts";
 
 const STRIPE = "https://api.stripe.com";
@@ -72,5 +73,29 @@ describe("the address of the Stripe API", () => {
     expect(
       stripeApiBaseUrlOf({ ...allow, [STRIPE_API_BASE_URL_VARIABLE]: address }),
     ).toBe(STRIPE);
+  });
+});
+
+describe("the origin of the invoice links the app shows", () => {
+  // #659-T05
+  it("is the fake's origin only for the test stack with the flag and a loopback address", () => {
+    expect(
+      stripeLinkOriginOf({
+        ...allow,
+        [STRIPE_API_BASE_URL_VARIABLE]: "http://127.0.0.1:3426/",
+      }),
+    ).toBe("http://127.0.0.1:3426");
+  });
+
+  // #659-T05
+  it("is none in production, whatever else is set", () => {
+    expect(stripeLinkOriginOf({})).toBeUndefined();
+    for (const env of [
+      { [STRIPE_API_BASE_URL_VARIABLE]: "http://127.0.0.1:3426" },
+      { ...allow, [STRIPE_API_BASE_URL_VARIABLE]: "https://evil.example" },
+      { ...allow, [STRIPE_API_BASE_URL_VARIABLE]: "http://evil.example:80" },
+      { ...allow },
+    ])
+      expect(stripeLinkOriginOf(env)).toBeUndefined();
   });
 });

@@ -9,6 +9,7 @@ import { sessionUser } from "../test-support/session-lookup.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { createRunsRepository } from "../db/repositories/runs-repository.ts";
+import { createJobCheckRunsRepository } from "../db/repositories/job-check-runs-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createRunsRouteHandlers } from "./http.ts";
 import {
@@ -120,7 +121,7 @@ describe("the runs list", () => {
 
 describe("one run", () => {
   // CR-35-T04
-  it("holds the pull request, command, trigger, times, comment link, error code and log of a finished run", async () => {
+  it("holds the pull request, command, trigger, times, comment link and error code of a finished run, and not its log", async () => {
     const f = await createRunsFixture();
     const job = await f.finished(
       {
@@ -150,8 +151,9 @@ describe("one run", () => {
       errorCodeKnown: true,
       problem: "The AI provider took too long to answer.",
       durationMs: 50_000,
-      log: { text: "waited 60 s\nno answer", truncated: true },
     });
+    expect(snapshot?.run).not.toHaveProperty("log");
+    expect(JSON.stringify(snapshot)).not.toContain("no answer");
   });
 
   // CR-35-T04
@@ -190,12 +192,23 @@ describe("one run", () => {
     }
   });
 
-  it("redacts the log with the function it is given", async () => {
+  // #657-T04
+  it("shows the review comment the run posted, redacted with the function it is given, and carries no log and no call trace", async () => {
     const f = await createRunsFixture();
     const job = await f.finished({
       ok: true,
-      result: { ok: true, logTail: "used sk-or-v1-abcdefabcdefabcdef here" },
+      result: {
+        ok: true,
+        logTail: "the log of the runner",
+        usage: { aiCalls: 1 },
+      },
     });
+    const checks = createJobCheckRunsRepository(f.db, f.workspaceId);
+    await checks.take(job.id, { leaseMs: 60_000, maxAttempts: 5 });
+    await checks.recordReviewComment(
+      job.id,
+      "## Review\n\nused sk-or-v1-abcdefabcdefabcdef here",
+    );
     const { createRunsService } = await import("./runs-service.ts");
     const redacting = createRunsService({
       runs: f.runsRepository,
@@ -203,9 +216,26 @@ describe("one run", () => {
       redact: (text) => text.replace(/sk-or-[\w-]+/, "[redacted]"),
     });
 
-    expect((await redacting.get(job.id))?.run.log.text).toBe(
-      "used [redacted] here",
-    );
+    const snapshot = await redacting.get(job.id);
+
+    expect(snapshot?.run.reviewText).toBe("## Review\n\nused [redacted] here");
+    const json = JSON.stringify(snapshot);
+    expect(json).not.toContain("the log of the runner");
+    expect(snapshot?.run).not.toHaveProperty("log");
+    expect(snapshot?.run).not.toHaveProperty("callTrace");
+  });
+
+  // #657-T04
+  it("has no review text for a run whose comment was never kept or could not be read", async () => {
+    const f = await createRunsFixture();
+    const never = await f.finished({ ok: true, result: { ok: true } });
+    const unreadable = await f.finished({ ok: true, result: { ok: true } });
+    const checks = createJobCheckRunsRepository(f.db, f.workspaceId);
+    await checks.take(unreadable.id, { leaseMs: 60_000, maxAttempts: 5 });
+    await checks.recordReviewComment(unreadable.id, "");
+
+    expect((await f.runs.get(never.id))?.run.reviewText).toBeNull();
+    expect((await f.runs.get(unreadable.id))?.run.reviewText).toBeNull();
   });
 });
 
@@ -414,8 +444,8 @@ describe("the usage of a run on a managed quality level (#283)", () => {
     expect(JSON.stringify(detail)).not.toContain("0.0123");
   });
 
-  // #541-T10: the JSON route `GET /api/w/:workspace/runs/:id` answers the view, so the same holds there.
-  it("shows no cost and no cache count per call in the JSON of the run route", async () => {
+  // #657-T02: the JSON route `GET /api/w/:workspace/runs/:id` answers the view of a member: no call trace, so none of its numbers.
+  it("sends no call trace, and no cost or cache count of a call, in the JSON of the run route", async () => {
     const f = await createRunsFixture({ dynamicReview: true });
     const call = {
       index: 0,
@@ -472,21 +502,8 @@ describe("the usage of a run on a managed quality level (#283)", () => {
     const body = await response.text();
 
     expect(response.status).toBe(200);
-    expect(JSON.parse(body)).toMatchObject({
-      run: {
-        callTrace: {
-          modelCalls: [
-            {
-              promptTokens: 14_600,
-              cacheRead: null,
-              cacheWrite: null,
-              costUsd: null,
-              finishReason: "tool_calls",
-            },
-          ],
-        },
-      },
-    });
+    expect(JSON.parse(body).run).not.toHaveProperty("callTrace");
+    expect(body).not.toContain("modelCalls");
     expect(body).not.toMatch(/123457|765431|0\.0342|0\.0123/);
   });
 

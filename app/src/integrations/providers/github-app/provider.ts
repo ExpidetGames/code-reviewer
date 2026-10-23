@@ -24,6 +24,7 @@ import { parseGithubEvent } from "./events.ts";
 import {
   CHECK_TOKEN_PERMISSIONS,
   JOB_TOKEN_PERMISSIONS,
+  COMMENT_READ_TOKEN_PERMISSIONS,
   NOTICE_TOKEN_PERMISSIONS,
   VERDICT_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
@@ -275,6 +276,43 @@ export function createGithubAppProvider(
           notice.body,
         );
         return "posted";
+      } catch (error) {
+        throw toReadError(error);
+      }
+    },
+
+    async readReviewComment(integration, repo, commentId, signal) {
+      try {
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const comment = await (
+          await getClient()
+        ).getIssueComment(
+          integration.externalId,
+          { repositoryIds, permissions: COMMENT_READ_TOKEN_PERMISSIONS },
+          repo.fullName,
+          commentId,
+          signal,
+        );
+        if (comment === null) return null;
+        // Only the app's own comment counts: anybody can write a comment, and this one is shown as what the run posted.
+        const botLogin = `${(await getConfig()).slug}[bot]`;
+        return comment.authorLogin === botLogin
+          ? {
+              body: comment.body,
+              below:
+                comment.below === null
+                  ? null
+                  : {
+                      repoFullName: comment.below.repoFullName,
+                      number: comment.below.number,
+                    },
+            }
+          : null;
       } catch (error) {
         throw toReadError(error);
       }

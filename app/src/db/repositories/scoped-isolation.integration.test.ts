@@ -1153,6 +1153,16 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "jobChecks.recordReviewComment",
+    run: (a, b) => a.jobChecks.recordReviewComment(b.job.id, "hijacked"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.reviewCommentOf",
+    run: (a, b) => a.jobChecks.reviewCommentOf(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeNull(),
+  },
+  {
     name: "jobChecks.finish",
     run: (a, b) => a.jobChecks.finish(b.job.id, { settled: true }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),

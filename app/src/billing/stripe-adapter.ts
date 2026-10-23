@@ -33,10 +33,13 @@ import {
   TOP_UP_MAX_MICRO_USD,
   TOP_UP_MIN_MICRO_USD,
   assertTopUpAmount,
+  isProviderCurrency,
+  toProviderAmount,
   type BillingAdapter,
   type BillingCapabilities,
   type BillingProfile,
   type BillingWebhookRejectionCode,
+  type InvoiceSummary,
   type ProviderRef,
   type TopUpLookupEvent,
 } from "./adapter.ts";
@@ -182,6 +185,12 @@ export type StripeAdapterDependencies = {
   environment?: () => Promise<StripeEnvironment | null>;
   /** The clock of the events a lookup makes. Default: the real one. */
   now?: () => Date;
+  /**
+   * Test stack only: one more origin whose addresses an invoice may link to (the fake Stripe, plain http on loopback). Stripe's
+   * own hosts are always allowed, every other one never. The wiring derives it from `stripeApiBaseUrl()`, which is Stripe's
+   * address unless the test stack names a loopback fake (`stripe-endpoints.ts`), so production has none.
+   */
+  allowedLinkOrigin?: string;
 };
 
 const SIGNATURE_REJECTION: Record<
@@ -201,6 +210,7 @@ export function createStripeAdapter({
   webhookSecret,
   environment,
   now = () => new Date(),
+  allowedLinkOrigin,
 }: StripeAdapterDependencies): BillingAdapter {
   async function clientOf(): Promise<StripeClient> {
     try {
@@ -446,6 +456,51 @@ export function createStripeAdapter({
       return event;
     },
 
+    async listInvoices({ customer }) {
+      const client = await clientOf();
+      let found;
+      try {
+        found = await client.listInvoices(customer);
+      } catch (error) {
+        if (!(error instanceof StripeClientError)) throw error;
+        // Stripe has no such customer (stored under a key of the other environment, or deleted at Stripe): nothing to list, and
+        // a retry would only fail the same way.
+        if (error.stripeCode === "resource_missing")
+          throw new BillingAdapterError(
+            "customer_missing",
+            "the payment provider has no such customer",
+          );
+        throw adapterErrorOf(error);
+      }
+      const invoices: InvoiceSummary[] = [];
+      for (const invoice of found) {
+        // Stripe is asked for one customer; an answer for another one is never shown (a mistake of ours or Stripe's).
+        if (invoice.customer !== customer) continue;
+        const status = invoice.status;
+        if (
+          status !== "paid" &&
+          status !== "open" &&
+          status !== "void" &&
+          status !== "uncollectible"
+        )
+          continue;
+        if (!isProviderCurrency(invoice.currency)) continue;
+        if (!Number.isSafeInteger(invoice.total) || invoice.total <= 0)
+          continue;
+        invoices.push({
+          id: invoice.id,
+          number: invoice.number ?? null,
+          createdAt: new Date(invoice.created * 1000).toISOString(),
+          amount: toProviderAmount(invoice.total),
+          currency: invoice.currency,
+          status,
+          viewUrl: webAddressOf(invoice.hosted_invoice_url, allowedLinkOrigin),
+          downloadUrl: webAddressOf(invoice.invoice_pdf, allowedLinkOrigin),
+        });
+      }
+      return invoices;
+    },
+
     async createTopUpCheckout({ customer, intentId, amount, returnUrl }) {
       assertTopUpAmount(capabilities, amount);
       if (amount % MICRO_USD_PER_CENT !== 0)
@@ -505,6 +560,29 @@ export function createStripeAdapter({
       };
     },
   };
+}
+
+/**
+ * An address Stripe sent for an invoice, when it is an https address on Stripe's own hosts (`stripe.com` and its subdomains:
+ * invoice.stripe.com, pay.stripe.com), without a login in it; else null. The page links to it, so a foreign host, plain http or a
+ * `javascript:` address never gets through, whatever the answer held. `allowedOrigin` is the one test-only exception (the fake).
+ */
+function webAddressOf(
+  value: string | null | undefined,
+  allowedOrigin?: string,
+): string | null {
+  if (value === null || value === undefined || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    if (url.username !== "" || url.password !== "") return null;
+    if (allowedOrigin !== undefined && url.origin === allowedOrigin)
+      return url.toString();
+    const stripeHost =
+      url.hostname === "stripe.com" || url.hostname.endsWith(".stripe.com");
+    return url.protocol === "https:" && stripeHost ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A delayed payment that Stripe gave up on leaves its payment intent without a payment method (or canceled). */

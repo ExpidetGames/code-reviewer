@@ -17,7 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
 import type { WorkspaceBillingApi } from "../api.ts";
-import type { WorkspaceBillingView } from "../view.ts";
+import type { InvoiceView, WorkspaceBillingView } from "../view.ts";
 import { BillingPageContent } from "./billing-page.tsx";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -120,6 +120,9 @@ function fakeApi(overrides: Partial<WorkspaceBillingApi> = {}) {
     ),
     journal: vi.fn(() =>
       Promise.resolve(ok({ rows: [], next: null as string | null })),
+    ),
+    invoices: vi.fn(() =>
+      Promise.resolve(ok({ invoices: [] as InvoiceView[] })),
     ),
     ...overrides,
   };
@@ -825,5 +828,120 @@ describe("the key and the invoices", () => {
       screen.getByRole("link", { name: "link.com" }).getAttribute("href"),
     ).toBe("https://link.com");
     expect(container.textContent).not.toMatch(/VAT-compliant|tax invoice/i);
+  });
+});
+
+const INVOICE: InvoiceView = {
+  id: "in_1",
+  number: "ACME-0001",
+  createdAt: "2026-10-20T15:30:00.000Z",
+  amountMinor: 2500,
+  currency: "usd",
+  status: "paid",
+  viewUrl: "https://invoice.example.test/i/1",
+  downloadUrl: "https://invoice.example.test/i/1/pdf",
+};
+
+describe("the invoices", () => {
+  // #659-T01
+  it("lists each invoice with its date, number, amount and status, and a link to view and one to download it", async () => {
+    const api = fakeApi({
+      invoices: vi.fn(() =>
+        Promise.resolve(
+          ok({
+            invoices: [
+              INVOICE,
+              {
+                ...INVOICE,
+                id: "in_0",
+                number: null,
+                createdAt: "2026-10-01T08:00:00.000Z",
+                amountMinor: 1000,
+                status: "open" as const,
+                downloadUrl: null,
+              },
+            ],
+          }),
+        ),
+      ),
+    });
+    page(OWNER_VIEW, { api });
+
+    const card = await screen.findByRole("region", { name: "Invoices" });
+    const rows = await within(card).findAllByRole("row");
+    expect(rows).toHaveLength(3);
+    // The card and its table are two things with two names: a screen reader does not hear "Invoices" twice.
+    expect(screen.getAllByRole("region", { name: "Invoices" })).toHaveLength(1);
+    expect(
+      within(card).getByRole("table", { name: "Invoice list" }),
+    ).toBeTruthy();
+    expect(
+      within(card)
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent),
+    ).toEqual(["Date", "Amount", "Status", "Links"]);
+    const first = within(rows[1] as HTMLElement);
+    expect(first.getByText("2026-10-20 15:30 UTC")).toBeTruthy();
+    expect(first.getByText("ACME-0001")).toBeTruthy();
+    expect(first.getByText("$25.00")).toBeTruthy();
+    expect(first.getByText("Paid")).toBeTruthy();
+    const view = first.getByRole("link", { name: "View ACME-0001" });
+    expect(view.getAttribute("href")).toBe("https://invoice.example.test/i/1");
+    expect(view.getAttribute("rel")).toContain("noopener");
+    expect(
+      first
+        .getByRole("link", { name: "Download PDF ACME-0001" })
+        .getAttribute("href"),
+    ).toBe("https://invoice.example.test/i/1/pdf");
+    const second = within(rows[2] as HTMLElement);
+    expect(second.getByText("$10.00")).toBeTruthy();
+    expect(second.getByText("Open")).toBeTruthy();
+    expect(second.getByRole("link", { name: "View invoice" })).toBeTruthy();
+    expect(second.queryByRole("link", { name: /Download/ })).toBeNull();
+  });
+
+  // #659-T04
+  it("says there is no invoice yet when the list is empty", async () => {
+    page(OWNER_VIEW);
+
+    const card = await screen.findByRole("region", { name: "Invoices" });
+    // No promise of an invoice to come: whether a payment leaves one at the provider is not settled (#503).
+    expect(await within(card).findByText("No invoices yet.")).toBeTruthy();
+    expect(within(card).queryByText(/appears/)).toBeNull();
+    expect(within(card).queryByRole("table")).toBeNull();
+  });
+
+  // #659-T01
+  it("says when the invoices cannot be loaded and tries again on request", async () => {
+    const invoices = vi
+      .fn<WorkspaceBillingApi["invoices"]>()
+      .mockResolvedValueOnce(refused("provider_unavailable"))
+      .mockResolvedValue(ok({ invoices: [INVOICE] }));
+    page(OWNER_VIEW, { api: fakeApi({ invoices }) });
+
+    const card = await screen.findByRole("region", { name: "Invoices" });
+    expect(await within(card).findByRole("alert")).toBeTruthy();
+    await userEvent.click(
+      within(card).getByRole("button", { name: "Try again" }),
+    );
+
+    expect(await within(card).findByText("ACME-0001")).toBeTruthy();
+    expect(invoices).toHaveBeenCalledTimes(2);
+  });
+
+  // #659-T03
+  it("is not on the page of a Member, and nothing is asked for", () => {
+    const { api } = page(MEMBER_VIEW);
+
+    expect(screen.queryByRole("region", { name: "Invoices" })).toBeNull();
+    expect(api.invoices).not.toHaveBeenCalled();
+  });
+
+  // #659-T04
+  it("is not on the page while there is no checkout (the manual adapter has no invoices)", () => {
+    const { api } = page({ ...OWNER_VIEW, topUpAvailable: false });
+
+    expect(screen.queryByRole("region", { name: "Invoices" })).toBeNull();
+    expect(api.invoices).not.toHaveBeenCalled();
   });
 });

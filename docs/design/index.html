@@ -727,13 +727,13 @@ em,i,cite{font-style:normal}
 </article>
 <article class="screen" id="s-E3">
 <header><span class="sid">E3</span><h4>Run detail</h4></header>
-<p class="purpose">One run: summary, timings, usage and cost, the log, and the call trace (sizes, counts and times only, never paths or text). Cost is hidden from members of managed workspaces. While billing is on, the summary has a Price row.</p>
+<p class="purpose">One run: a Summary (the facts, the cost and the duration) and the Findings, the review the run posted on GitHub, shown as readable text with a link to open it there. No log, call trace or timings: those are in the admin portal. The cost is the price while billing is on, and is hidden from members of managed workspaces while billing is off. A run that posted nothing says so.</p>
 <dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/runs/&lt;id&gt;</code></dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/runs/[id]/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 1500"><div class="screen-host" data-tpl="E3" data-w="1280" role="img" aria-label="Mockup of the screen Run detail"></div></div>
 </article>
 <article class="screen" id="s-E4">
 <header><span class="sid">E4</span><h4>Run detail, failed</h4></header>
-<p class="purpose">A failed run shows the reason as a sentence and the stable error code.</p>
+<p class="purpose">A failed run shows the reason as a sentence and the stable error code. The Findings say that nothing was posted.</p>
 <dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/runs/&lt;id&gt;</code></dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/runs/[id]/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 1000"><div class="screen-host" data-tpl="E4" data-w="1280" role="img" aria-label="Mockup of the screen Run detail, failed"></div></div>
 </article></section>
@@ -1349,33 +1349,15 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <main class="main">
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-E1">Runs</a><i class="ic ic-right sm"></i><span>itegro/code-reviewer #481</span></nav>
 <div class="ph"><div class="t"><h1>itegro/code-reviewer #481</h1><div class="row"><span class="badge b-ok"><i class="ic ic-check"></i>Succeeded</span><span class="hint">The review was published.</span></div></div><div class="acts"><a class="btn btn-s" href="#s-E1">All runs</a></div></div>
-<div class="grid2">
 <section class="card"><h2>Summary</h2>
-<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/code-reviewer</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#481 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Diff Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd><dt>Price</dt><dd>AI $1.50<br>Infrastructure $0.13</dd><dt>Started by</dt><dd>Push to the branch</dd><dt>Commit</dt><dd class="mono">5937da9</dd></dl></section>
-<section class="card"><h2>Timings</h2>
-<dl class="dl"><dt>Created</dt><dd>21 Oct 2026, 08:14:02 UTC</dd><dt>Started</dt><dd>21 Oct 2026, 08:14:05 UTC</dd><dt>Finished</dt><dd>21 Oct 2026, 08:17:17 UTC</dd><dt>Duration</dt><dd>3 min 12 s</dd><dt>Lost attempts</dt><dd>0</dd></dl></section>
-</div>
-<section class="card"><h2>Diagnostics</h2>
-<dl class="dl"><dt>Usage</dt><dd>184,203 tokens in 11 model calls</dd><dt>Cost</dt><dd>$0.42</dd><dt>Stopped early</dt><dd>No</dd><dt>Review comment</dt><dd><a class="lnk" href="#">Open the comment on GitHub</a></dd><dt>Superseded by</dt><dd class="muted">Not applicable</dd></dl>
-<div class="row between"><h3 style="font-size: 18px; line-height: 28px">Log</h3><button class="btn btn-g sm" type="button"><i class="ic ic-copy sm"></i>Copy log</button></div>
-<div class="pre">08:14:05 claim job 481
-08:14:06 clone itegro/code-reviewer at 5937da9
-08:14:21 diff 14 files, 612 lines
-08:14:22 model call 1 of 11
-08:17:09 review ready, 6 findings
-08:17:16 comment posted
-08:17:17 done</div>
-<p class="hint">The log was shortened: only the end of it is shown.</p></section>
-<section class="card"><h2>Call trace</h2>
-<p class="hint">What each call of this review was: sizes, counts and times only, never paths, arguments or text.</p>
-<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Model calls">
-<thead><tr><th>#</th><th>Started</th><th class="num">Prompt</th><th class="num">Cache read</th><th class="num">Output</th><th class="num">Cost</th><th>Ended</th><th class="num">Tools</th></tr></thead>
-<tbody><tr><td>1</td><td>08:14:22</td><td class="num">41,880</td><td class="num">0</td><td class="num">1,204</td><td class="num">$0.14</td><td>08:14:51</td><td class="num">3</td></tr>
-<tr><td>2</td><td>08:14:52</td><td class="num">43,210</td><td class="num">41,880</td><td class="num">2,116</td><td class="num">$0.07</td><td>08:15:40</td><td class="num">2</td></tr></tbody></table></div>
-<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Tool calls">
-<thead><tr><th>#</th><th>Tool</th><th>Result</th><th class="num">Repeat</th></tr></thead>
-<tbody><tr><td>1</td><td class="mono">read_file</td><td>Ok</td><td class="num">4</td></tr><tr><td>2</td><td class="mono">search</td><td>Ok</td><td class="num">2</td></tr></tbody></table></div>
-</section>
+<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/code-reviewer</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#481 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Diff Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd><dt>Cost</dt><dd>AI $1.50<br>Infrastructure $0.13</dd><dt>Duration</dt><dd>3 min 12 s</dd><dt>Started by</dt><dd>Push to the branch</dd><dt>Commit</dt><dd class="mono">5937da9</dd></dl></section>
+<section class="card"><h2>Findings</h2>
+<h3 style="font-size: 16px; line-height: 24px">PR Reviewer Guide</h3>
+<h4 style="font-size: 14px; line-height: 24px">P1 - Missing check for an empty list</h4>
+<p>The loop in <span class="code">collect()</span> reads the first item without checking that the list has one.</p>
+<h4 style="font-size: 14px; line-height: 24px">P2 - The error is swallowed</h4>
+<p>The catch block returns without logging, so a failed upload leaves no trace.</p>
+<p><a class="lnk" href="#">Open the review on GitHub</a></p></section>
 </main>
 </div>
 </div></template>
@@ -1387,20 +1369,10 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-E1">Runs</a><i class="ic ic-right sm"></i><span>itegro/landing #57</span></nav>
 <div class="ph"><div class="t"><h1>itegro/landing #57</h1><div class="row"><span class="badge b-fail"><i class="ic ic-x"></i>Failed</span><span class="hint">The run ended without a review.</span></div></div><div class="acts"><a class="btn btn-s" href="#s-E1">All runs</a></div></div>
 <div class="alert a-err" role="alert"><i class="ic ic-warn"></i><div class="body"><span class="at">The run took longer than the time limit, so it was stopped.</span><p>Error code: <span class="code">run_timeout</span></p></div></div>
-<div class="grid2">
 <section class="card"><h2>Summary</h2>
-<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/landing</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#57 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Dynamic Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd></dl></section>
-<section class="card"><h2>Timings</h2>
-<dl class="dl"><dt>Created</dt><dd>20 Oct 2026, 17:41 UTC</dd><dt>Started</dt><dd>20 Oct 2026, 17:41 UTC</dd><dt>Finished</dt><dd>20 Oct 2026, 17:56 UTC</dd><dt>Duration</dt><dd>15 min</dd><dt>Lost attempts</dt><dd>1</dd></dl></section>
-</div>
-<section class="card"><h2>Diagnostics</h2>
-<dl class="dl"><dt>Usage</dt><dd>Not available</dd><dt>Review comment</dt><dd class="muted">Not yet</dd></dl>
-<h3 style="font-size: 18px; line-height: 28px">Log</h3>
-<div class="pre">17:41:03 claim job 57
-17:41:09 agent started
-17:55:58 time limit reached
-17:56:00 stopped</div>
-<p class="hint">No log available is shown when the runner sent none.</p></section>
+<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/landing</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#57 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Dynamic Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd><dt>Cost</dt><dd><span class="muted">Not charged</span></dd><dt>Duration</dt><dd>15 min</dd></dl></section>
+<section class="card"><h2>Findings</h2>
+<p class="muted">Nothing was posted for this run.</p></section>
 </main>
 </div>
 </div></template>
@@ -1671,6 +1643,14 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="field"><label for="vat">VAT ID (optional)</label><input class="input err" id="vat" value="DE12345"><span class="ferr"><i class="ic ic-warn sm"></i>This does not look like a VAT ID of that country.</span></div></form>
 <div class="row"><button class="btn btn-s" type="button">Save billing details</button><span class="status">Billing details saved.</span></div></section>
 
+<section class="card"><h2>Invoices</h2>
+<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Invoices">
+<thead><tr><th>Date</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+<tbody>
+<tr><td>20 Oct 2026, 15:30 UTC<span class="sub">INV-0007</span></td><td class="num">$25.00</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Paid</span></td><td class="num"><a class="lnk" href="#">View <i class="ic ic-ext sm"></i></a> · <a class="lnk" href="#">Download PDF</a></td></tr>
+<tr><td>2 Oct 2026, 09:12 UTC<span class="sub">INV-0003</span></td><td class="num">$100.00</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Paid</span></td><td class="num"><a class="lnk" href="#">View <i class="ic ic-ext sm"></i></a> · <a class="lnk" href="#">Download PDF</a></td></tr>
+</tbody></table></div>
+<p class="hint">Owners and Admins only; Members do not see this card. Empty: No invoices yet. If Stripe cannot be reached: The invoices could not be loaded right now. Try again in a moment. [Try again]. The links open the invoice page and the PDF at the payment provider in a new tab. The card is absent when billing has no checkout (manual adapter).</p></section>
 <section class="card"><h2>Journal</h2>
 <div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Journal">
 <thead><tr><th>When</th><th>Entry</th><th class="num">Amount</th></tr></thead>
