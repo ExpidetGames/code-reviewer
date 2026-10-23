@@ -138,6 +138,7 @@ describe("the buttons", () => {
             accountType: "Organization",
             status: "active",
             repositoryCount: 2,
+            avatarUrl: null,
           },
         ],
         requests: null,
@@ -315,6 +316,7 @@ describe("a connection", () => {
     accountType: "Organization",
     status: "active" as const,
     repositoryCount: 1,
+    avatarUrl: null,
   };
 
   // #103-IB-14, #176-T02
@@ -375,6 +377,53 @@ describe("a connection", () => {
 
     expect(screen.getByText(hostile)).toBeTruthy();
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  // #638-T02
+  it("shows the avatar of the account, or its initials while there is none", () => {
+    renderPanel(
+      data({
+        connections: [
+          {
+            ...connection,
+            avatarUrl: "https://avatars.githubusercontent.com/u/5001?v=4",
+          },
+          {
+            ...connection,
+            id: "i2",
+            accountLogin: "helios-labs",
+            avatarUrl: null,
+          },
+        ],
+      }),
+    );
+
+    const [withAvatar, withoutAvatar] = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-connection]"),
+    );
+    expect(withAvatar!.querySelector("img")?.getAttribute("src")).toBe(
+      "https://avatars.githubusercontent.com/u/5001?v=4",
+    );
+    expect(withoutAvatar!.querySelector("img")).toBeNull();
+    expect(withoutAvatar!.textContent).toContain("HL");
+  });
+
+  // #638-T03
+  it("loads no avatar from a host other than GitHub's avatar host", () => {
+    renderPanel(
+      data({
+        connections: [
+          {
+            ...connection,
+            accountLogin: "acme-corp",
+            avatarUrl: "https://avatars.example.test/u/1",
+          },
+        ],
+      }),
+    );
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.getByText("AC")).toBeTruthy();
   });
 });
 
