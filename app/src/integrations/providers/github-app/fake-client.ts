@@ -7,6 +7,7 @@ import type {
   GithubAppClient,
   IssueComment,
   PullRequestReview,
+  ReadIssueComment,
   RemoteInstallation,
   RemoteRepository,
 } from "./client.ts";
@@ -32,7 +33,7 @@ export type FakeGithubAppClientData = {
   /** What `listIssueComments` answers, by "owner/name#number". */
   comments?: Record<string, IssueComment[]>;
   /** What `getIssueComment` answers, by "owner/name#id"; a comment not listed is not found (#657). */
-  issueComments?: Record<string, IssueComment>;
+  issueComments?: Record<string, ReadIssueComment>;
   /** Makes `getIssueComment` reject with this error (#657). */
   getCommentFailure?: Error;
   /** Makes `createCheckRun`, `updateCheckRun` and `findCheckRun` reject with this error (#405). */

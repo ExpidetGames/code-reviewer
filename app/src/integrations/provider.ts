@@ -120,7 +120,11 @@ export interface IntegrationProvider {
     repo: RepoRef,
     commentId: string,
     signal?: AbortSignal,
-  ): Promise<{ body: string } | null>;
+  ): Promise<{
+    body: string;
+    /** The repository and pull request the platform says the comment sits below; null when it names none. */
+    below: { repoFullName: string; number: number } | null;
+  } | null>;
 
   /**
    * Only where the platform shows the progress of a review next to the pull request (#405; GitHub: a check run):

@@ -301,7 +301,18 @@ export function createGithubAppProvider(
         if (comment === null) return null;
         // Only the app's own comment counts: anybody can write a comment, and this one is shown as what the run posted.
         const botLogin = `${(await getConfig()).slug}[bot]`;
-        return comment.authorLogin === botLogin ? { body: comment.body } : null;
+        return comment.authorLogin === botLogin
+          ? {
+              body: comment.body,
+              below:
+                comment.below === null
+                  ? null
+                  : {
+                      repoFullName: comment.below.repoFullName,
+                      number: comment.below.number,
+                    },
+            }
+          : null;
       } catch (error) {
         throw toReadError(error);
       }

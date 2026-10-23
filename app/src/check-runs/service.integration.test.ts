@@ -1850,6 +1850,31 @@ describe("keeping the review comment a run posted (#657)", () => {
   });
 
   // #657-T04
+  it("keeps an empty text for a link whose comment sits below another pull request of the repository", async () => {
+    const t = await createCheckRunsHarness();
+    const job = await t.fixture.enqueueNew();
+    const claimed = await t.claim();
+    // The app's own comment, but below pull request 8; the result names it as the comment of pull request 7.
+    const elsewhere = t.fake.addPullRequestComment(
+      t.repo,
+      8,
+      "the review of another pull request",
+    );
+    await t.succeed(claimed.job, claimed.token, {
+      commentUrl: `https://github.test/${t.repo}/pull/7#issuecomment-${String(elsewhere.id)}`,
+    });
+
+    await t.service.syncJob(job.id);
+
+    expect(
+      await createJobCheckRunsRepository(
+        t.fixture.db,
+        t.fixture.workspaceId,
+      ).reviewCommentOf(job.id),
+    ).toBe("");
+  });
+
+  // #657-T04
   it("does not fail the sync when the comment cannot be read: the check run is still completed and one stable code is logged", async () => {
     const t = await createCheckRunsHarness();
     const job = await t.fixture.enqueueNew();

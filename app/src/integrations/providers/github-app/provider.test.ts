@@ -951,6 +951,7 @@ describe("reading the review comment of a run (#657)", () => {
     id: "5001",
     body: "## Review\n\nA finding.",
     authorLogin: "code-reviewer-test[bot]",
+    below: { repoFullName: "acme/widgets", number: 7 },
   };
 
   // #657-T04
@@ -961,7 +962,7 @@ describe("reading the review comment of a run (#657)", () => {
 
     expect(
       await provider.readReviewComment?.(integration, widgets, "5001"),
-    ).toEqual({ body: own.body });
+    ).toEqual({ body: own.body, below: own.below });
 
     expect(
       client.calls.filter((call) => call.method === "getIssueComment"),

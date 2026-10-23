@@ -439,9 +439,15 @@ export function createCheckRunService(
           budget.signal,
         ),
       );
+      // The id in the result comes from the runner: the comment must sit below this very pull request of this repository.
+      const ofThisRun =
+        read !== null &&
+        read.below !== null &&
+        read.below.repoFullName.toLowerCase() === repo.fullName.toLowerCase() &&
+        read.below.number === job.prNumber;
       await checks.recordReviewComment(
         job.id,
-        read === null
+        read === null || !ofThisRun
           ? ""
           : read.body
               .replaceAll("\u0000", "")

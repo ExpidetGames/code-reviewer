@@ -39,7 +39,6 @@ import { migration as addJobReviewKind } from "./20261013090000_add_job_review_k
 import { migration as fixDynamicDefaultModel } from "./20261014090000_fix_dynamic_default_model.ts";
 import { migration as createWorkspaceEntitlements } from "./20261014120000_create_workspace_entitlements.ts";
 import { migration as createUsageRecords } from "./20261014150000_create_usage_records.ts";
-import { migration as addJobCheckRunsReviewComment } from "./20261023120000_add_job_check_runs_review_comment.ts";
 import { migration as createJobCheckRuns } from "./20261017100000_create_job_check_runs.ts";
 import { migration as addJobAcceptsSupersede } from "./20261016140000_add_job_accepts_supersede.ts";
 import { migration as widenUsageRecordSettledReason } from "./20261016140100_widen_usage_record_settled_reason.ts";
@@ -74,6 +73,7 @@ import { migration as addUsageRecordBillingState } from "./20261022010000_add_us
 import { migration as addBillingWebhookEventsResolution } from "./20261022020000_add_billing_webhook_events_resolution.ts";
 import { migration as createBillingNotifications } from "./20261022030000_create_billing_notifications.ts";
 import { migration as widenRefusalNoticeCodesForBillingSetup } from "./20261023090000_widen_refusal_notice_codes_for_billing_setup.ts";
+import { migration as addJobCheckRunsReviewComment } from "./20261023120000_add_job_check_runs_review_comment.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,

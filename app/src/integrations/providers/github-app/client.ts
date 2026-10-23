@@ -69,6 +69,15 @@ export type IssueComment = {
   authorLogin: string;
 };
 
+/** The pull request (or issue) a comment sits below, read from the links of the comment. */
+export type CommentTarget = { repoFullName: string; number: number };
+
+/** A comment read by its id (#657): the pull request it sits below is known when GitHub's links name it. */
+export type ReadIssueComment = IssueComment & {
+  /** From `issue_url`, else `html_url`; null when neither is a link to a pull request or issue of a repository. */
+  below: CommentTarget | null;
+};
+
 /** The fields of a check run (#405) that the app writes: the name and commit only when it is created. */
 export type CheckRunFields = {
   status: "queued" | "in_progress" | "completed";
@@ -161,7 +170,7 @@ export type GithubAppClient = {
     repoFullName: string,
     commentId: string,
     signal?: AbortSignal,
-  ): Promise<IssueComment | null>;
+  ): Promise<ReadIssueComment | null>;
   /**
    * Writes a comment below a pull request as the app, with a token of its own limited to `scope` (minted
    * for this call and switched off after it, also when the call fails). Rejects with the stable code of the
@@ -325,6 +334,27 @@ function toRepository(value: unknown, call: string): RemoteRepository {
     fullName: value.full_name,
     url: value.html_url,
   };
+}
+
+const ISSUE_URL =
+  /^https:\/\/[^/]+\/(?:api\/v3\/)?repos\/([^/]+\/[^/]+)\/issues\/(\d{1,10})$/;
+const COMMENT_HTML_URL =
+  /^https:\/\/[^/]+\/([^/]+\/[^/]+)\/(?:pull|issues)\/(\d{1,10})#issuecomment-\d{1,20}$/;
+
+/** The pull request or issue a comment answers to, from `issue_url` and else `html_url`. */
+export function commentTarget(
+  value: Record<string, unknown>,
+): CommentTarget | null {
+  for (const [field, pattern] of [
+    ["issue_url", ISSUE_URL],
+    ["html_url", COMMENT_HTML_URL],
+  ] as const) {
+    const link = value[field];
+    const match = typeof link === "string" ? pattern.exec(link) : null;
+    if (match?.[1] !== undefined && match[2] !== undefined)
+      return { repoFullName: match[1], number: Number(match[2]) };
+  }
+  return null;
 }
 
 function toIssueComment(
@@ -1023,10 +1053,14 @@ export function createGithubAppClient(
         scope,
         async (token) => {
           try {
-            return toIssueComment(
-              await request(token, "GET", path, undefined, signal),
-              "GET /repos/{owner}/{repo}/issues/comments/{id}",
-            );
+            const value = await request(token, "GET", path, undefined, signal);
+            return {
+              ...toIssueComment(
+                value,
+                "GET /repos/{owner}/{repo}/issues/comments/{id}",
+              ),
+              below: isRecord(value) ? commentTarget(value) : null,
+            };
           } catch (error) {
             if (
               error instanceof GithubAppError &&
