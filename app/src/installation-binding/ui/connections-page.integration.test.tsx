@@ -91,6 +91,30 @@ describe("the Connections page", () => {
     ).toBeTruthy();
   });
 
+  // #638-T02
+  it("shows the avatar of the installation's account, built from the account id GitHub gave", async () => {
+    const { data } = await openPage({
+      setup: async (h) => {
+        const owner = await h.person("owner-a");
+        const [workspace] = await h.workspaces.listForUser(owner.id);
+        await h.walk(owner, workspace!.workspace.id, {
+          installationId: 4242,
+          githubLogin: "octo",
+        });
+      },
+    });
+
+    expect(data.connections.map((c) => c.avatarUrl)).toEqual([
+      "https://avatars.githubusercontent.com/u/5001?v=4",
+    ]);
+    const row = screen
+      .getByRole("list", { name: "Installations" })
+      .querySelector("li");
+    expect(row?.querySelector("img")?.getAttribute("src")).toBe(
+      "https://avatars.githubusercontent.com/u/5001?v=4",
+    );
+  });
+
   // #103-IB-15
   it("shows a Member the connections without any control", async () => {
     await openPage({
