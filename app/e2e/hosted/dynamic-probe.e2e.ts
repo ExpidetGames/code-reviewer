@@ -48,7 +48,7 @@ const DYNAMIC = { id: 9700004, fullName: "hosted-probe/dynamic" };
 const DIFF = { id: 9700005, fullName: "hosted-probe/diff" };
 const OWNER_OF_REPOSITORIES = { login: "hosted-probe", id: OWNER.id };
 // The model name a person types into the project's settings.
-const MODEL = "vendor/agent-e2e";
+const MODEL = "deepseek/deepseek-v4-pro";
 
 test.describe.configure({ mode: "serial" });
 

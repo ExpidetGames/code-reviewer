@@ -29,11 +29,11 @@ export function llmAccessAttention({
     return {
       id: "llm_access",
       severity: "error",
-      title: "LLM access is not available",
+      title: "LLM is not available",
       detail: (
         <>
           Reviews of this workspace cannot run right now: this instance cannot
-          set up its LLM access at the moment. Contact the administrator of this
+          set up its LLM at the moment. Contact the administrator of this
           instance.
         </>
       ),

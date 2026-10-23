@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The estimated cost of one review with the model (and the fallback model), and the warnings of the
-// cost guard (src/review-settings/cost.ts): above the customer's limit, a model without a known
+// cost guard (src/review-settings/cost.ts): above the customer's warning level, a model without a known
 // price. Those two advise and never block a save; a token budget that does not fit the model's
 // context window is different: the service refuses that save, and the warning says so. The fallback
 // model is never called in the MVP (src/review-settings/README.md), so it is listed as "not used
@@ -9,17 +9,11 @@
 // refused for it too). Model names are typed by people, so they are rendered as text like everything
 // else. #174 moves the summary into the Model card, right below the fields it depends on.
 import { Alert } from "../../components/ui/alert.tsx";
-import {
-  REVIEW_COST_LIMIT_USD,
-  type ModelCostEstimate,
-  type ReviewCostGuard,
-} from "../cost.ts";
+import type { ModelCostEstimate, ReviewCostGuard } from "../cost.ts";
 
 export function formatUsd(value: number): string {
   return `$${value.toFixed(value < 0.01 ? 4 : 3)}`;
 }
-
-const LIMIT_TEXT = `$${REVIEW_COST_LIMIT_USD.toFixed(2)}`;
 
 function Estimate({
   label,
@@ -60,11 +54,12 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
         </p>
       </div>
     );
+  const LIMIT_TEXT = `$${cost.limitUsd.toFixed(2)}`;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4 text-sm">
       <p>
-        <strong>Estimated cost per review</strong> (a large pull request; the
-        limit is {LIMIT_TEXT}):
+        <strong>Estimated cost per review</strong> (a large pull request; we
+        warn above {LIMIT_TEXT}):
       </p>
       <ul className="flex flex-col gap-1">
         <Estimate label="Model" estimate={cost.primary} />
@@ -92,8 +87,8 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
                 <span className="font-mono">
                   {modelOf(cost, warning.model)}
                 </span>{" "}
-                is above the limit of {LIMIT_TEXT} per review. You can still
-                save it.
+                is above the warning level of {LIMIT_TEXT} per review. You can
+                still save it.
               </>
             ) : (
               <>

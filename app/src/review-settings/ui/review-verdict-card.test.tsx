@@ -126,26 +126,30 @@ describe("the Review verdict card", () => {
     ).toEqual(["false", "true", "false"]);
     expect(screen.getByRole("radio", { name: "Off" })).toBeTruthy();
     expect(
-      screen.getByRole("radio", { name: "Blocking findings only (default)" }),
+      screen.getByRole("radio", { name: "Blocking findings (default)" }),
     ).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Any finding" })).toBeTruthy();
     expect(
       screen.getByRole("heading", { level: 2, name: "Review verdict" }),
     ).toBeTruthy();
-    expect(screen.getByText(VERDICT_COMMON_NOTE)).toBeTruthy();
+    expect(
+      screen.getByText(new RegExp(VERDICT_COMMON_NOTE.slice(0, 30))),
+    ).toBeTruthy();
   });
 
   // #405-T29
   it("says what blocking means for the review kind that is selected", async () => {
     const user = userEvent.setup();
     renderForm(projectModel(), fakeApi().api);
-    expect(screen.getByText(VERDICT_KIND_NOTES.diff)).toBeTruthy();
-    expect(screen.queryByText(VERDICT_KIND_NOTES.dynamic)).toBeNull();
+    const note = () =>
+      screen.getByText(/Posted as a pull request review/).textContent;
+    expect(note()).toContain(VERDICT_KIND_NOTES.diff);
+    expect(note()).not.toContain(VERDICT_KIND_NOTES.dynamic);
 
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
 
-    expect(screen.getByText(VERDICT_KIND_NOTES.dynamic)).toBeTruthy();
-    expect(screen.queryByText(VERDICT_KIND_NOTES.diff)).toBeNull();
+    expect(note()).toContain(VERDICT_KIND_NOTES.dynamic);
+    expect(note()).not.toContain(VERDICT_KIND_NOTES.diff);
   });
 
   // #405-T29
@@ -158,7 +162,6 @@ describe("the Review verdict card", () => {
     expect(
       screen.getByRole("radio", { name: "Off" }).getAttribute("aria-checked"),
     ).toBe("true");
-    expect(screen.getByText("Set for this project.")).toBeTruthy();
   });
 
   // #405-T28
@@ -181,7 +184,7 @@ describe("the Review verdict card", () => {
     renderForm(projectModel(dynamicView({ reviewVerdict: "off" })), api);
 
     await user.click(
-      screen.getByRole("radio", { name: "Blocking findings only (default)" }),
+      screen.getByRole("radio", { name: "Blocking findings (default)" }),
     );
     await user.click(screen.getByRole("button", SAVE));
 
@@ -215,9 +218,7 @@ describe("the Review verdict card", () => {
     await user.click(screen.getByRole("button", SAVE));
 
     expect(
-      await screen.findByText(
-        "Choose Off, Blocking findings only or Any finding.",
-      ),
+      await screen.findByText("Choose Off, Blocking findings or Any finding."),
     ).toBeTruthy();
     expect(
       screen

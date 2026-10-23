@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the removal of the stored keys at the end of the "LLM access" page (#178, moved there from "Advanced" by #658):
+// Pins down the removal of the stored keys at the end of the "LLM" page (#178, moved there from "Advanced" by #658):
 // it is actions only (no form), and every removal is confirmed in a dialog before the request (#178-T04).
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

@@ -11,7 +11,7 @@ import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 
-export const metadata: Metadata = { title: "Settings · LLM access" };
+export const metadata: Metadata = { title: "Settings · LLM" };
 
 // The LLM access of the workspace (#178): the provider and the write-only key on one form (an Admin or
 // an Owner), with "Save key" and "Test key"; a Member only reads whether reviews have a key. Removing

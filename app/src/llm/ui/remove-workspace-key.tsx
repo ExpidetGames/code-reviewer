@@ -4,7 +4,7 @@
 // The destructive part of a workspace key (#178, #426): removing it is confirmed in an AlertDialog (the
 // kit's danger zone) before the request, and the result is shown politely. The removal moved out of
 // the key form so the "LLM access" sub-page has one job (change the key) and the destructive action
-// sits at the end of "LLM access" (rulebook R8; #658).
+// sits at the end of "LLM" (rulebook R8; #658).
 //
 // The component owns the "a key is saved" state: after a removal it stays mounted (the LLM access page
 // always renders it for a person who may manage the key) with no zone but the confirmation, so the

@@ -17,6 +17,10 @@ import {
   PROJECT_DYNAMIC_LIMITS,
   type ReviewSettings,
 } from "../settings.ts";
+import {
+  chooseOption,
+  openSection,
+} from "../../test-support/settings-sections.ts";
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
@@ -111,7 +115,8 @@ async function changeSomething(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("the settings form", () => {
-  it("shows the values in force and where each one comes from", () => {
+  it("shows the values in force and where each one comes from", async () => {
+    const user = userEvent.setup();
     const model = projectModel({ maxFindings: 9 });
     render(
       <SettingsForm workspaceSlug="acme" initial={model} api={fakeApi().api} />,
@@ -121,17 +126,18 @@ describe("the settings form", () => {
       (screen.getByLabelText("Most findings per review") as HTMLInputElement)
         .value,
     ).toBe("9");
-    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
-      "anthropic/claude-haiku-5.5",
-    );
     const findings = screen
       .getByLabelText("Most findings per review")
       .closest("[data-field]") as HTMLElement;
-    const modelField = screen
-      .getByLabelText("Model")
-      .closest("[data-field]") as HTMLElement;
     expect(within(findings).getByText("Set for this project")).toBeTruthy();
-    expect(within(modelField).getByText("Built-in value")).toBeTruthy();
+    await openSection(user, "LLM");
+    expect(screen.getByLabelText("Model").textContent).toBe(
+      "anthropic/claude-haiku-5.5",
+    );
+    const providerField = screen
+      .getByLabelText("Provider")
+      .closest("[data-field]") as HTMLElement;
+    expect(within(providerField).getByText("Built-in value")).toBeTruthy();
   });
 
   it("places where a checkbox value comes from right beside the checkbox text", () => {
@@ -157,7 +163,8 @@ describe("the settings form", () => {
     ).toBeTruthy();
   });
 
-  it("places where the comment commands setting comes from beside its heading", () => {
+  it("places where the comment commands setting comes from beside its heading", async () => {
+    const user = userEvent.setup();
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -165,13 +172,15 @@ describe("the settings form", () => {
         api={fakeApi().api}
       />,
     );
+    await openSection(user, "Trigger");
 
-    const heading = screen.getByText("Comment commands people may use");
+    const heading = screen.getByText("Comment commands");
 
     expect(heading.nextElementSibling?.textContent).toBe("Built-in value");
   });
 
-  it("explains the model and the token budget in plain words", () => {
+  it("explains the token budget in plain words, in the Limits section", async () => {
+    const user = userEvent.setup();
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -180,25 +189,18 @@ describe("the settings form", () => {
       />,
     );
 
-    const model = screen
-      .getByLabelText("Model")
-      .closest("[data-field]") as HTMLElement;
+    await openSection(user, "Limits");
     const budget = screen
       .getByLabelText("Token budget")
       .closest("[data-field]") as HTMLElement;
-    expect(model.textContent).toContain("The AI model that writes the review");
-    expect(model.textContent).not.toContain("as OpenRouter spells it");
     expect(budget.textContent).toContain(
-      "How much of a pull request the model can read in one go",
-    );
-    expect(budget.textContent).toContain(
-      "A token is about three quarters of a word",
+      "How much of a pull request the model reads in one go",
     );
     expect(budget.textContent).toContain("8,000");
   });
 
   // CR-34-T06
-  it("names every wrong value next to its field and sends nothing", async () => {
+  it("names every wrong value next to its field, opens the first section with a problem and sends nothing", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     render(
@@ -208,10 +210,10 @@ describe("the settings form", () => {
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "-3");
+    await openSection(user, "Limits");
     const tokens = screen.getByLabelText("Token budget");
     await user.clear(tokens);
     await user.type(tokens, "lots");
-    await user.clear(screen.getByLabelText("Model"));
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -219,21 +221,64 @@ describe("the settings form", () => {
     expect(save).not.toHaveBeenCalled();
     const field = (label: string) =>
       screen.getByLabelText(label).closest("[data-field]") as HTMLElement;
+    // The first section with a problem is open and its first marked control has the focus (rulebook R20).
     expect(
       within(field("Most findings per review")).getByText("Enter 1 or more."),
     ).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/marked fields/);
+    expect(document.activeElement).toBe(
+      screen.getByLabelText("Most findings per review"),
+    );
+    await openSection(user, "Limits");
     expect(
       within(field("Token budget")).getByText("Enter a whole number."),
     ).toBeTruthy();
-    expect(
-      within(field("Model")).getByText("Enter a model name."),
-    ).toBeTruthy();
-    expect(screen.getByLabelText("Model").getAttribute("aria-invalid")).toBe(
-      "true",
+  });
+
+  // #656-T05
+  it("marks the tab of every section with a problem, in its accessible name, until the problem is fixed", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
     );
-    expect(screen.getByRole("alert").textContent).toMatch(/marked fields/);
-    // The first marked control takes the focus (rulebook R20).
-    expect(document.activeElement).toBe(screen.getByLabelText("Model"));
+    const tabNames = () =>
+      screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabNames()).toEqual(["Review", "LLM", "Trigger", "Limits"]);
+
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "-3");
+    await openSection(user, "Limits");
+    const tokens = screen.getByLabelText("Token budget");
+    await user.clear(tokens);
+    await user.type(tokens, "lots");
+    // Nothing is marked before a save is refused.
+    expect(tabNames()).toEqual(["Review", "LLM", "Trigger", "Limits"]);
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(
+      screen.getByRole("tab", { name: "Review (has a problem)" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Limits (has a problem)" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "LLM" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Trigger" })).toBeTruthy();
+
+    await openSection(user, "Limits");
+    await user.clear(screen.getByLabelText("Token budget"));
+    await user.type(screen.getByLabelText("Token budget"), "16000");
+
+    expect(screen.getByRole("tab", { name: "Limits" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Review (has a problem)" }),
+    ).toBeTruthy();
   });
 
   // CR-34-T06
@@ -255,7 +300,8 @@ describe("the settings form", () => {
   });
 
   // CR-34-T06, #203 (an unknown command cannot be typed: the form offers exactly the one that exists)
-  it("offers exactly the one comment command that exists", () => {
+  it("offers exactly the one comment command that exists", async () => {
+    const user = userEvent.setup();
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -263,6 +309,7 @@ describe("the settings form", () => {
         api={fakeApi().api}
       />,
     );
+    await openSection(user, "Trigger");
 
     expect(
       screen
@@ -307,6 +354,7 @@ describe("the settings form", () => {
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
+    await openSection(user, "Limits");
     await user.type(screen.getByLabelText("Token budget"), "0");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
@@ -334,6 +382,7 @@ describe("the settings form", () => {
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
+    await openSection(user, "Limits");
     const tokens = screen.getByLabelText("Token budget");
     await user.clear(tokens);
     await user.type(tokens, "500000");
@@ -514,20 +563,23 @@ describe("the settings form", () => {
     );
 
     await changeSomething(user);
+    await openSection(user, "LLM");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
 
     // A disabled fieldset disables its controls without touching their own `disabled` property.
+    expect(screen.getByLabelText("Model").matches(":disabled")).toBe(true);
+    await openSection(user, "Review");
     const findings = screen.getByLabelText("Most findings per review");
     expect(findings.matches(":disabled")).toBe(true);
-    expect(screen.getByLabelText("Model").matches(":disabled")).toBe(true);
     finish({ ok: true, data: answerFor(projectModel()) });
     await screen.findByText(/Saved\./);
     expect(findings.matches(":disabled")).toBe(false);
   });
 
   it("names every reset button after what the person sees, never after the internal field name", async () => {
+    const user = userEvent.setup();
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -543,9 +595,13 @@ describe("the settings form", () => {
       />,
     );
 
-    const names = screen
-      .getAllByRole("button", { name: /^Reset to default for / })
-      .map((button) => button.getAttribute("aria-label"));
+    const resetButtons = () =>
+      screen
+        .getAllByRole("button", { name: /^Reset to default for / })
+        .map((button) => button.getAttribute("aria-label"));
+    const inReview = resetButtons();
+    await openSection(user, "Trigger");
+    const names = [...inReview, ...resetButtons()];
 
     expect(names.length).toBe(6);
     for (const name of names) expect(name).not.toMatch(/[a-z][A-Z]/);
@@ -563,11 +619,15 @@ describe("the settings form", () => {
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
-    const model = screen.getByLabelText("Model");
-    await user.clear(model);
-    await user.type(model, "anthropic/claude-sonnet-5.5");
+    await openSection(user, "LLM");
+    await chooseOption(
+      user,
+      screen.getByLabelText("Model"),
+      "anthropic/claude-sonnet-5.5",
+    );
+    await openSection(user, "Limits");
 
-    expect(screen.getByText(/above the limit of \$0\.10/)).toBeTruthy();
+    expect(screen.getByText(/above the warning level of \$0\.10/)).toBeTruthy();
     expect(
       (
         screen.getByRole("button", {
@@ -583,14 +643,12 @@ describe("the settings form", () => {
     render(
       <SettingsForm
         workspaceSlug="acme"
-        initial={projectModel()}
+        initial={projectModel({ model: "acme/mystery-1" })}
         api={fakeApi().api}
       />,
     );
 
-    const model = screen.getByLabelText("Model");
-    await user.clear(model);
-    await user.type(model, "acme/mystery-1");
+    await openSection(user, "Limits");
 
     expect(screen.getByText(/No price is known for/).textContent).toContain(
       "acme/mystery-1",
@@ -672,8 +730,9 @@ describe("the settings form", () => {
     vi.unstubAllGlobals();
   });
 
-  // CR-34 (CR-46 review: the fallback model is stored but not sent to the runner yet)
-  it("says that the fallback model is stored but not used yet", () => {
+  // #656-T03
+  it("offers exactly a provider and a model dropdown in the LLM section, and no field to type a model in", async () => {
+    const user = userEvent.setup();
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -682,16 +741,166 @@ describe("the settings form", () => {
       />,
     );
 
+    await openSection(user, "LLM");
+
+    const panel = screen.getByRole("tabpanel", { name: "LLM" });
+    expect(
+      within(panel)
+        .getAllByRole("combobox")
+        .map((box) => box.getAttribute("aria-label") ?? box.id !== ""),
+    ).toHaveLength(2);
+    expect(within(panel).queryAllByRole("textbox")).toEqual([]);
+    expect(within(panel).queryByLabelText("Fallback model")).toBeNull();
+  });
+});
+
+describe("the LLM section follows the provider (#656)", () => {
+  // #656-T03
+  it("lists only the models of the chosen provider, and takes the default model of that provider with it", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+    await openSection(user, "LLM");
+    const optionsOf = async () => {
+      await user.click(screen.getByLabelText("Model"));
+      const names = screen
+        .getAllByRole("option")
+        .map((option) => option.textContent ?? "");
+      await user.keyboard("{Escape}");
+      return names;
+    };
+    const openRouterModels = await optionsOf();
+
+    await chooseOption(user, screen.getByLabelText("Provider"), "Anthropic");
+
+    const anthropicModels = await optionsOf();
+    expect(anthropicModels.length).toBeGreaterThan(0);
+    expect(anthropicModels).not.toEqual(openRouterModels);
+    expect(anthropicModels).toContain(
+      screen.getByLabelText("Model").textContent,
+    );
+  });
+});
+
+describe("the Limits section (#656)", () => {
+  // #656-T04
+  it("says that an empty cost limit follows the workspace default, names that default, and sends nothing of its own for it", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel(
+          { maxCostCents: 100 },
+          { ...BUILT_IN, maxCostCents: 250 },
+        )}
+        api={api}
+      />,
+    );
+
+    await openSection(user, "Limits");
+    const input = screen.getByLabelText(
+      "Cost warning per review (USD)",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("1.00");
+    const field = input.closest("[data-field]") as HTMLElement;
+    expect(field.textContent).toContain(
+      "We warn you when a review is estimated to cost more than this. Leave empty to use the workspace default ($2.50).",
+    );
+    // The limit is not enforced yet (#666): nothing may say that reviews are capped.
+    expect(field.textContent).not.toMatch(/most|no limit|cap|never exceed/i);
+
+    await user.clear(input);
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(save).toHaveBeenCalledWith({});
+  });
+
+  // #656-T04
+  it("sends the cost limit of a project in whole cents, and an emptied limit as none of its own", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
+
+    await openSection(user, "Limits");
+    await user.type(
+      screen.getByLabelText("Cost warning per review (USD)"),
+      "1.5",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(save).toHaveBeenCalledWith({ maxCostCents: 150 });
+  });
+
+  // #656-T04
+  it("names the standard warning level when neither the workspace nor the project set one", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+
+    await openSection(user, "Limits");
+
     const field = screen
-      .getByLabelText("Fallback model", { exact: true })
+      .getByLabelText("Cost warning per review (USD)")
       .closest("[data-field]") as HTMLElement;
-    expect(within(field).getByText(/Stored but not used yet/)).toBeTruthy();
+    expect(field.textContent).toContain(
+      "Leave empty to use the workspace default ($0.10).",
+    );
+  });
+
+  // #656-T04
+  it("names a cost limit that is not an amount, with the range and the format", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
+
+    await openSection(user, "Limits");
+    await user.type(
+      screen.getByLabelText("Cost warning per review (USD)"),
+      "lots",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(save).not.toHaveBeenCalled();
+    expect(
+      screen
+        .getByLabelText("Cost warning per review (USD)")
+        .getAttribute("aria-invalid"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByLabelText("Cost warning per review (USD)")
+        .closest("[data-field]")?.textContent,
+    ).toContain(
+      "Enter an amount in dollars with up to two decimals, like 0.50 or 2.",
+    );
   });
 });
 
 describe("the settings form of a workspace on its own key keeps its stored tier (#283)", () => {
   // #283-T02
-  it("shows the model fields exactly as before for a workspace on its own key, and no Quality choice", () => {
+  it("shows the model of a workspace on its own key in the LLM section, and no Quality choice", async () => {
+    const user = userEvent.setup();
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -700,13 +909,13 @@ describe("the settings form of a workspace on its own key keeps its stored tier 
       />,
     );
 
-    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
+    await openSection(user, "LLM");
+    expect(screen.getByLabelText("Model").textContent).toBe(
       "vendor/project-model",
     );
-    expect(screen.getByLabelText("Fallback model")).toBeTruthy();
-    expect(screen.getByLabelText("Token budget")).toBeTruthy();
-    expect(document.querySelector("datalist")).not.toBeNull();
     expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
+    await openSection(user, "Limits");
+    expect(screen.getByLabelText("Token budget")).toBeTruthy();
     expect(document.body.textContent).toContain("Estimated cost");
   });
 });

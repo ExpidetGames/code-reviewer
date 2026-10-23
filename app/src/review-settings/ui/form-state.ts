@@ -34,6 +34,8 @@ export type FormValues = {
   extraInstructions: string;
   maxFindings: string;
   maxTokens: string;
+  /** The cost limit in dollars as typed ("1.50"); empty means no limit of this layer (#656). */
+  maxCostCents: string;
   largePrChunking: boolean;
   inlineKeyIssues: boolean;
   autoReviewOnOpen: boolean;
@@ -49,6 +51,11 @@ export type FormState = {
   dynamic?: DynamicFormValues;
 };
 
+/** Whole cents as the dollars a person types ("1.50"); empty for no limit. */
+function dollarsOf(cents: number | null): string {
+  return cents === null ? "" : (cents / 100).toFixed(2);
+}
+
 function valuesOf(settings: ReadableReviewSettings): FormValues {
   return {
     // Absent for a workspace on the operator's key, whose form has no field for them (#283).
@@ -58,6 +65,7 @@ function valuesOf(settings: ReadableReviewSettings): FormValues {
     extraInstructions: settings.extraInstructions,
     maxFindings: String(settings.maxFindings),
     maxTokens: String(settings.maxTokens),
+    maxCostCents: dollarsOf(settings.maxCostCents ?? null),
     largePrChunking: settings.largePrChunking,
     inlineKeyIssues: settings.inlineKeyIssues,
     autoReviewOnOpen: settings.autoReviewOnOpen,
@@ -90,7 +98,8 @@ export type TextField =
   | "fallbackModel"
   | "extraInstructions"
   | "maxFindings"
-  | "maxTokens";
+  | "maxTokens"
+  | "maxCostCents";
 export type BooleanField =
   | "largePrChunking"
   | "inlineKeyIssues"
@@ -105,7 +114,11 @@ export function setText(
   return {
     ...state,
     values: { ...state.values, [field]: value },
-    overridden: { ...state.overridden, [field]: true },
+    // An emptied limit is no limit of this layer: the field follows the layer below again (#656).
+    overridden: {
+      ...state.overridden,
+      [field]: field === "maxCostCents" ? value.trim() !== "" : true,
+    },
   };
 }
 
@@ -196,6 +209,8 @@ export function resetModelTo(
 }
 
 const WHOLE_NUMBER = /^[+-]?\d+$/;
+/** Dollars as typed: "2", "1.50", ".5", each with an optional leading "$". */
+const DOLLARS = /^\$?(\d+(\.\d{1,2})?|\.\d{1,2})$/;
 
 /** A typed whole number as a number; text that is no whole number stays text so the validator names it. */
 function typedNumber(text: string): number | string {
@@ -203,8 +218,18 @@ function typedNumber(text: string): number | string {
   return WHOLE_NUMBER.test(trimmed) ? Number(trimmed) : trimmed;
 }
 
+/** Typed dollars as whole cents; text that is no amount stays text so the validator names it. */
+function typedCents(text: string): number | string {
+  const trimmed = text.trim();
+  return DOLLARS.test(trimmed)
+    ? Math.round(Number(trimmed.replace("$", "")) * 100)
+    : trimmed;
+}
+
 function rawValue(values: FormValues, field: ReviewSettingField): unknown {
   switch (field) {
+    case "maxCostCents":
+      return typedCents(values.maxCostCents);
     case "maxFindings":
     case "maxTokens":
       return typedNumber(values[field]);
@@ -231,6 +256,8 @@ export function diffPatch(state: FormState): {
   const issues: ReviewSettingIssue[] = [];
   for (const field of REVIEW_SETTING_FIELDS) {
     if (!state.overridden[field]) continue;
+    if (field === "maxCostCents" && state.values.maxCostCents.trim() === "")
+      continue;
     // The validator only knows "not a number"; a number field left empty is its own problem.
     if (NUMBER_FIELDS.includes(field) && rawValue(state.values, field) === "") {
       issues.push({ field, code: "EMPTY" });

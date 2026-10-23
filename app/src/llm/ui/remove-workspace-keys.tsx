@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The removal of the stored keys, at the end of the "LLM access" page (#658; it was on "Advanced" before): one danger zone
+// The removal of the stored keys, at the end of the "LLM" page (#658; it was on "Advanced" before): one danger zone
 // for each provider that has a key (#426), for an Admin or an Owner (`manage_llm_key`). All providers are rendered, so a
 // card that removed its key stays mounted to confirm it (`RemoveWorkspaceKey` owns whether the key is still there).
 import { llmProviderDescriptors } from "../providers/index.ts";

@@ -2,7 +2,7 @@
 
 // The Advanced sub-page of the workspace settings (#658): only the deletion of the workspace, and only for an Owner (the page
 // and the route answer a person without that role as if it did not exist, so nothing here checks the role again). What it held
-// before moved: removing a stored LLM key is at the end of "LLM access", resetting the review defaults at the end of "Review
+// before moved: removing a stored LLM key is at the end of "LLM", resetting the review defaults at the end of "Review
 // defaults".
 import { DeleteWorkspaceCard } from "./delete-workspace-card.tsx";
 import { SettingsScreen } from "./settings-shell.tsx";
