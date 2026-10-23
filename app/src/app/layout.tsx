@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { PRODUCT_NAME } from "@/copy/product-name";
 import { initialThemeScript } from "@/theme/theme";
 import { ThemeSync } from "@/theme/theme-sync";
 import { fontVariables } from "./fonts.ts";
@@ -8,7 +9,7 @@ import { fontVariables } from "./fonts.ts";
 import "./theme.css";
 
 export const metadata: Metadata = {
-  title: { default: "Code Reviewer", template: "%s · Code Reviewer" },
+  title: { default: PRODUCT_NAME, template: `%s · ${PRODUCT_NAME}` },
   description: "Automatic code reviews for GitHub pull requests.",
 };
 

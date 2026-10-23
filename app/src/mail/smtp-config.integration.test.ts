@@ -21,7 +21,7 @@ const INPUT = {
   user: "mailer",
   password: PASSWORD,
   senderAddress: "reviewer@example.com",
-  senderName: "Code Reviewer",
+  senderName: "code-review.com",
 } as const;
 
 async function start(appSecret: string = APP_SECRET) {
@@ -66,7 +66,7 @@ describe("the stored mail server settings", () => {
       security: "starttls",
       user: "mailer",
       senderAddress: "reviewer@example.com",
-      senderName: "Code Reviewer",
+      senderName: "code-review.com",
       allowSelfSigned: false,
       allowPlainTextLogin: false,
     });

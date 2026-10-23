@@ -2,7 +2,8 @@
 
 // The brand of the app as the design board draws it (#633): the logo mark (a check between two code
 // brackets in a rounded tile, the tile in fg and the strokes in the page colour) next to the name in
-// 16px semibold. The name stays "Code Reviewer" until the rename has its own issue.
+// 16px semibold. The name is "code-review.com" (#635) and never breaks at its hyphen.
+import { PRODUCT_NAME } from "@/copy/product-name";
 import { cn } from "@/lib/utils";
 
 /** The logo tile alone; decorative, the name next to it carries the meaning. */
@@ -50,8 +51,13 @@ export function Brand({
     >
       <BrandMark />
       <span className={compact ? "sr-only sm:not-sr-only" : undefined}>
-        Code Reviewer
+        {PRODUCT_NAME}
       </span>
     </span>
   );
+}
+
+/** The product name inside a sentence, kept on one line so it never breaks at its hyphen. */
+export function ProductName() {
+  return <span className="whitespace-nowrap">{PRODUCT_NAME}</span>;
 }

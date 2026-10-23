@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The "Review verdict" card of a project's settings form (#405): whether Code Reviewer, after a successful
+// The "Review verdict" card of a project's settings form (#405): whether code-review.com, after a successful
 // review, also submits a pull request review as itself (Request changes while a blocking finding is open,
 // Approve otherwise). One choice for both review kinds; what "blocking" means differs, and the card says so for
 // the kind that is selected. Saved with the Review kind card (one project-only request). The text is short (#656):
@@ -39,7 +39,7 @@ export const VERDICT_KIND_NOTES: Record<ProjectReviewKind, string> = {
 };
 
 export const VERDICT_COMMON_NOTE =
-  "Posted as a pull request review by Code Reviewer after a complete review. Do not rely on it for branch protection.";
+  "Posted as a pull request review by code-review.com after a complete review. Do not rely on it for branch protection.";
 
 function isMode(value: string): value is ReviewVerdictMode {
   return REVIEW_VERDICT_MODES.some((mode) => mode === value);

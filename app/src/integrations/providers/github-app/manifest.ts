@@ -100,7 +100,7 @@ export function buildAppManifest({
     callback_urls: [`${origin}${GITHUB_APP_PATHS.signInCallback}`],
     setup_url: `${origin}${GITHUB_APP_PATHS.installationSetup}`,
     setup_on_update: true,
-    description: "Automatic pull request reviews by Code Reviewer.",
+    description: "Automatic pull request reviews by code-review.com.",
     public: tenancy === "multi",
     request_oauth_on_install: false,
     default_events: [...SUBSCRIBED_EVENTS],
