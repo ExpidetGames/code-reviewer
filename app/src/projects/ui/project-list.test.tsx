@@ -38,6 +38,7 @@ function renderList(
     canConnect?: boolean;
     canManage?: boolean;
     activationBlocked?: string | null;
+    canStartReview?: boolean;
   } = {},
 ) {
   const view: ProjectListView = { rows };
@@ -47,6 +48,7 @@ function renderList(
       view={view}
       canConnect={options.canConnect ?? true}
       canManage={options.canManage ?? true}
+      canStartReview={options.canStartReview ?? true}
       activationBlocked={options.activationBlocked ?? null}
     />,
   );
@@ -94,6 +96,51 @@ describe("the project list without repositories", () => {
       screen.queryByRole("button", { name: "How to connect GitHub" }),
     ).toBeNull();
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+  });
+});
+
+describe("the play button of a row", () => {
+  // #655-T02
+  it("is on every row, enabled for an active project, and also for a Member who cannot switch", () => {
+    renderList(
+      [
+        row({
+          repositoryId: "a",
+          fullName: "acme/a",
+          status: "active",
+          switchedOn: true,
+        }),
+        row({ repositoryId: "b", fullName: "acme/b" }),
+      ],
+      { canManage: false },
+    );
+
+    const [first, second] = repositoryRows();
+    expect(
+      (
+        within(first!).getByRole("button", {
+          name: "Start a review of acme/a",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect(
+      (
+        within(second!).getByRole("button", {
+          name: "Start a review of acme/b",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+  });
+
+  // #655-T02
+  it("is left out for a person who may not start a review", () => {
+    renderList([row({ status: "active", switchedOn: true })], {
+      canStartReview: false,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /Start a review of/ }),
+    ).toBeNull();
   });
 });
 

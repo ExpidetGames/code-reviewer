@@ -58,7 +58,6 @@ import SettingsPage from "../app/(app)/w/[workspace]/settings/page.tsx";
 import MembersPage from "../app/(app)/w/[workspace]/members/page.tsx";
 import ProjectSettingsPage from "../app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx";
 import PlanSettingsPage from "../app/(app)/w/[workspace]/settings/plan/page.tsx";
-import ProjectReviewPage from "../app/(app)/w/[workspace]/projects/[repositoryId]/review/page.tsx";
 import { noWorkspaceGates, openGates } from "../test-support/open-gates.ts";
 import type { AccessGates } from "../auth/access-gates.ts";
 
@@ -118,16 +117,6 @@ const APP_PAGES = [
           repositoryId: "some-repository",
         }),
       } as Parameters<typeof ProjectSettingsPage>[0]),
-  },
-  {
-    path: "/w/acme/projects/some-repository/review",
-    render: () =>
-      ProjectReviewPage({
-        params: Promise.resolve({
-          ...WORKSPACE,
-          repositoryId: "some-repository",
-        }),
-      } as Parameters<typeof ProjectReviewPage>[0]),
   },
 ] as const;
 
