@@ -265,6 +265,7 @@ shows how many are open. The app never guesses here; a person decides.
 | `intent_unresolved` | An event about a payment that is none of our top-ups (for example another product on a shared Stripe account). |
 | `amount_rejected`   | A payment or a refund with an amount, currency or environment that does not fit what we asked for.      |
 | `amount_conflict`   | A payment that changes the amount of a credit that was already given.                                   |
+| `workspace_deleted` | A payment for a top-up of a workspace that was deleted meanwhile. Nothing was credited; refund it.       |
 | `event_invalid`     | A signed event the app could not read.                                                                  |
 
 For each row you see the workspace, our top-up and the Stripe object. Look the payment up in the Stripe dashboard (the row
@@ -293,6 +294,24 @@ the log (section 8). A top-up that Stripe expired or that failed shows its state
   zero") until it tops up above zero or you correct the balance.
 - A refund or dispute that is larger than its payment, or that together with the others takes back more than the credit,
   is `amount_rejected` and final. Repair it with a manual correction, not by asking Stripe to deliver again.
+
+### A customer deletes a workspace
+
+An Owner can delete a workspace under **Settings, Advanced** (#658). It is refused while the balance is not exactly zero
+(unused credit is paid out by you, by hand: refund the payment at Stripe or agree a payout, and book a correction for it;
+an open amount has to be settled first), while a review is running and while a top-up checkout may still be paid (up to
+three days, whether it is pending or expired).
+
+What stays, because the books need it: the journal, the balance and the top-up intents of the workspace (amounts, minutes
+and Stripe references, no names), and **Stripe's customer reference** on an emptied billing profile, which a refund or a
+dispute of an earlier payment may still need. The legal name, the address, the VAT ID and the person who confirmed the
+business terms are erased. **Stripe is the merchant of record and keeps the invoices** and the customer's data on its side;
+a request to erase those goes to Stripe, not to this app.
+
+A payment can still arrive after the deletion (a delayed payment method succeeds days after the checkout began). The app
+credits nobody for it: the event is a **Payment review** with the outcome `workspace_deleted`, and you refund the payment in
+the Stripe dashboard. Close the row with a note when it is done. The refund event that follows is answered with a retry for
+up to three days (the app does not know the payment); that is expected.
 
 ### Negative or empty balance
 

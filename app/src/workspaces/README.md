@@ -89,25 +89,44 @@ characters without control or formatting characters (they end up in mails and pa
 `DELETE /api/w/:workspace` with `{ "confirmName": "<the name>" }`, for an Owner (`delete_workspace`), from the one card of
 Settings → Advanced (the page and its tab exist for an Owner only; for anybody else they are the 404 page). `delete-workspace.ts`
 decides inside one transaction, from the database: the person is an Owner now, the typed name is the workspace's, and then
-the refusals, each with a stable code and the data untouched: `balance_positive` (unused credit; a deletion would destroy
-money paid in, so it waits for the owner of the product to decide how credit is paid out, and the person is told to contact
-support), `review_running` (a job holds a lease or a reservation is open) and `payment_open` (a top-up checkout started in
-the last 48 hours may still be paid). The workspace row and the balance row are locked first, so no claim, charge or top-up
-slips in between the check and the deletion.
+the refusals, each with a stable code and the data untouched: `balance_positive` (unused credit: a deletion would destroy
+money paid in, so the person is told to contact support for a payout), `balance_negative` (an open amount is settled first),
+`review_running` (a job is running, a superseded run still drains under its lease, or a reservation is open) and `payment_open`
+(a top-up checkout started within `PENDING_TOP_UP_WINDOW_MS`, three days, that is neither `paid` nor `failed`, `pending` or
+`expired`: a delayed payment method can still succeed after its checkout page expired).
+
+The locks (Postgres; SQLite has one writer), in the order the queue's writers use: the Dynamic gate, shared (a claim holds it
+exclusively from its start to its commit, so a claim in flight is waited for and none starts meanwhile, which also keeps a
+claim from waiting for rows this deletion holds); the workspace row; the repositories and the waiting, running and superseded
+jobs (`FOR UPDATE`, by id: a writer that sets a job running without the gate is waited for as well); the balance row last.
+After the waits the deletion reads the state again, so a claim that committed is seen as `review_running`.
 
 Then `WorkspaceErasure` (`db/repositories/workspace-erasure-repository.ts`, scoped to the workspace) removes everything
-the customer owns: members, invitations, link requests, connections (the GitHub installation is released: the connection row
-goes, so another workspace can link it, and it is noted as unclaimed; nothing is sent to GitHub, the App stays installed there
-until the person removes it), repositories, projects, all jobs with their queue entries, comments, check runs, dispatches,
-claimed keys, VM runs, usage records and refusal notices (waiting jobs are cancelled by going: no runner can claim them), the
-settings, stored keys, entitlements, hand-over tokens, and the billing profile, limit and notification state.
+the customer owns: members, invitations, link requests, connections (every GitHub installation, disconnected or not, is
+released: the connection row goes, so another workspace can link it, and it is noted as unclaimed; nothing is sent to GitHub
+for that, the App stays installed there until the person removes it), repositories, projects, all jobs with their queue entries,
+comments, check runs, dispatches, claimed keys, VM runs, usage records and refusal notices (waiting jobs are cancelled by going:
+no runner can claim them), the settings, stored keys, entitlements, hand-over tokens, and the billing limit and notification
+state. After the commit the check runs of the waiting reviews are completed on GitHub (`finish-checks.ts`: conclusion
+`neutral`, "The workspace was deleted."), best effort: a connection that cannot be reached is one log line
+(`CHECK_RUN_NOT_COMPLETED`), never a failed deletion.
 
-What stays, and why: the **`workspaces` row**, anonymised (name "Deleted workspace", slug `deleted-<id>`, `created_by` null; the old address is free again), because the **billing journal** is append-only (the database refuses an update and a delete) and
-holds a foreign key to it; the journal, the cached balance and the top-up intents are what the books need (amounts, minutes, provider
-references, no names or addresses); and the start credit memory, so a deleted workspace cannot earn the credit twice.
-A tombstone is recognised by that address (the id is random, nobody can ask for it), so the schema did not change and the
-migrations stay additive; `findDefault()` and `count()` ignore a deleted workspace. Sessions belong to users, not workspaces: nobody is signed out; the
-person's next page is the start page, which leads to another workspace of theirs or to `/no-access`.
+What stays, and why: the **`workspaces` row**, anonymised (name "Deleted workspace", slug `deleted-<id>`, `created_by` null; the
+old address is free again) and marked with `deleted_at`, because the **billing journal** is append-only (the database refuses an
+update and a delete) and holds a foreign key to it; the journal, the cached balance and the top-up intents are what the books
+need (amounts, minutes, provider references, no names or addresses); the start credit memory, so a deleted workspace cannot earn
+the credit twice; and the payment provider's **customer reference** on a billing profile that is emptied (legal name, address,
+VAT ID and confirming user erased; a profile that never reached the provider is removed), which a refund or dispute of an earlier
+payment may need. The provider is the merchant of record and keeps the invoices (`docs/billing.md`).
+
+A tombstone is told from a workspace by `deleted_at` (migration `20261023150000_add_workspace_deleted_at`, nullable, additive).
+One helper serves every reader: `isDeleted` for a workspace in memory, `NOT_DELETED` for a query
+(`db/repositories/workspaces-repository.ts`). `get`, `findDefault`, `count`, `search`, `listPage`, a member's workspaces and
+the rename ignore a tombstone, so the instance admin's counts and tenancy change, the operator's search, lookup and credit, and
+the operator API (list, entitlements, usage) do not see it; `getIncludingDeleted` is for the readers that explain money which
+belongs to one. A payment that arrives for a deleted workspace credits nobody (`workspace_deleted`, a payment review), and no
+balance mail is made or sent for it. Sessions belong to users, not workspaces: nobody is signed out; the person's next page is
+the start page, which leads to another workspace of theirs or to `/no-access`.
 
 ## Invitations
 
