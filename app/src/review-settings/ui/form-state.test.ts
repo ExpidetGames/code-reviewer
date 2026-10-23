@@ -76,6 +76,33 @@ describe("the cost limit field", () => {
     });
   });
 
+  // #656-T04
+  it.each([
+    ["$1.50", 150],
+    ["$2", 200],
+    [".5", 50],
+    ["$.25", 25],
+    [" 0.5 ", 50],
+    ["100", 10_000],
+  ])("reads %s as an amount of dollars", (text, cents) => {
+    expect(
+      buildPatch(setText(initialFormState(model()), "maxCostCents", text)),
+    ).toEqual({ ok: true, patch: { maxCostCents: cents } });
+  });
+
+  // #656-T04
+  it.each(["1,5", "$", ".", "1.234", "$ 1", "1$", "--1", "1e2", "$$1"])(
+    "does not take %s for an amount",
+    (text) => {
+      expect(
+        buildPatch(setText(initialFormState(model()), "maxCostCents", text)),
+      ).toMatchObject({
+        ok: false,
+        issues: [{ field: "maxCostCents", code: "INVALID_TYPE" }],
+      });
+    },
+  );
+
   it("follows the workspace default again when the person empties the field, and sends nothing for it", () => {
     let state = initialFormState(model({ maxCostCents: 150 }));
 

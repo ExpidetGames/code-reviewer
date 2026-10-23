@@ -759,13 +759,15 @@ describe("the Limits section (#656)", () => {
 
     await openSection(user, "Limits");
     const input = screen.getByLabelText(
-      "Cost limit per review (USD)",
+      "Cost warning per review (USD)",
     ) as HTMLInputElement;
     expect(input.value).toBe("1.00");
     const field = input.closest("[data-field]") as HTMLElement;
     expect(field.textContent).toContain(
-      "Leave empty to use the workspace default ($2.50)",
+      "We warn you when a review is estimated to cost more than this. Leave empty to use the workspace default ($2.50).",
     );
+    // The limit is not enforced yet (#666): nothing may say that reviews are capped.
+    expect(field.textContent).not.toMatch(/most|no limit|cap|never exceed/i);
 
     await user.clear(input);
     await user.click(
@@ -785,7 +787,7 @@ describe("the Limits section (#656)", () => {
 
     await openSection(user, "Limits");
     await user.type(
-      screen.getByLabelText("Cost limit per review (USD)"),
+      screen.getByLabelText("Cost warning per review (USD)"),
       "1.5",
     );
     await user.click(
@@ -796,7 +798,28 @@ describe("the Limits section (#656)", () => {
   });
 
   // #656-T04
-  it("names a cost limit that is not an amount", async () => {
+  it("names the standard warning level when neither the workspace nor the project set one", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+
+    await openSection(user, "Limits");
+
+    const field = screen
+      .getByLabelText("Cost warning per review (USD)")
+      .closest("[data-field]") as HTMLElement;
+    expect(field.textContent).toContain(
+      "Leave empty to use the workspace default ($0.10).",
+    );
+  });
+
+  // #656-T04
+  it("names a cost limit that is not an amount, with the range and the format", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     render(
@@ -805,7 +828,7 @@ describe("the Limits section (#656)", () => {
 
     await openSection(user, "Limits");
     await user.type(
-      screen.getByLabelText("Cost limit per review (USD)"),
+      screen.getByLabelText("Cost warning per review (USD)"),
       "lots",
     );
     await user.click(
@@ -815,9 +838,16 @@ describe("the Limits section (#656)", () => {
     expect(save).not.toHaveBeenCalled();
     expect(
       screen
-        .getByLabelText("Cost limit per review (USD)")
+        .getByLabelText("Cost warning per review (USD)")
         .getAttribute("aria-invalid"),
     ).toBe("true");
+    expect(
+      screen
+        .getByLabelText("Cost warning per review (USD)")
+        .closest("[data-field]")?.textContent,
+    ).toContain(
+      "Enter an amount in dollars with up to two decimals, like 0.50 or 2.",
+    );
   });
 });
 

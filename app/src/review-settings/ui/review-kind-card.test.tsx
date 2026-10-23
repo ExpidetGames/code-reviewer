@@ -239,7 +239,7 @@ describe("the Review kind card", () => {
     ).toBeTruthy();
     await openSection(user, "Limits");
     expect(screen.queryByLabelText("Token budget")).toBeNull();
-    expect(screen.getByLabelText(/Cost limit per review/)).toBeTruthy();
+    expect(screen.getByLabelText(/Cost warning per review/)).toBeTruthy();
     // There are no engine or command controls, and the only provider control is the dropdown of the LLM section.
     expect(
       screen.queryAllByLabelText(

@@ -188,11 +188,12 @@ the selected kind does not show opens Review, where the note about it is.
   entries of the catalog by the names the operator gave them (never a vendor or a model id, ADR 0005). The provider and its model
   are one choice: one origin badge, and "Reset to default" takes both back. The fallback model has no field any more (it was stored
   and never used); a stored value is kept.
-- **Limits** holds `maxCostCents` (#656), roughly the most one review may cost, typed in dollars and stored in whole cents. It is a
-  review setting like the others: a project value over the workspace default over none. An empty field on a project follows the
-  workspace default and the field says which one that is; an empty workspace default is no limit of its own (the limit of the
-  instance, the cost guard of #540, applies in every case). It is validated like the other fields (`validate.ts`, 1 cent to 100
-  dollars) and sets the limit the Diff cost estimate warns above (`cost.ts` `costLimitUsdOf`).
+- **Limits** holds `maxCostCents` (#656), the level the cost estimate warns above, typed in dollars (a leading `$` and `.5` are fine)
+  and stored in whole cents. It is a review setting like the others: a project value over the workspace default over the standard
+  level (`REVIEW_COST_LIMIT_USD`). **It only warns:** it does not cap what a review costs; enforcing it is #666, and the copy
+  ("Cost warning per review") changes then. An empty field on a project follows the workspace default and the field says which one
+  that is. It is validated like the other fields (`validate.ts`, 1 cent to 100 dollars; `ui/messages.ts` names the range) and sets
+  the level the Diff cost estimate warns above (`cost.ts` `costLimitUsdOf`).
 - **New projects start as Dynamic Review** where the instance has Dynamic Review on and a Dynamic review of the workspace can
   resolve a model: on the operator's key a usable instance default entry of Dynamic Review exists, on the workspace's own key a
   key is stored for the default provider. Otherwise they start as Diff Review, so the first review is not refused

@@ -44,9 +44,9 @@ export type ReviewSettings = {
   /** The comment commands people may use. */
   allowedCommands: ReviewCommand[];
   /**
-   * #656: roughly the most one review may cost, in whole US cents; `null` is no limit of its own, so the limit of the
-   * instance (`RUNNER_DYNAMIC_MAX_COST_USD`, the cost guard of #540) applies alone. A project that sets none follows the
-   * workspace default, which is `null` until somebody sets it.
+   * #656: the cost level a review is warned above, in whole US cents; `null` is none of its own, so the standard level of the
+   * estimate applies. It does not cap a review (enforcing it is #666; the cost guard of #540 is the instance's own limit). A
+   * project that sets none follows the workspace default, which is `null` until somebody sets it.
    */
   maxCostCents: number | null;
 };

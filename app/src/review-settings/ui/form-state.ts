@@ -209,7 +209,8 @@ export function resetModelTo(
 }
 
 const WHOLE_NUMBER = /^[+-]?\d+$/;
-const DOLLARS = /^\d+(\.\d{1,2})?$/;
+/** Dollars as typed: "2", "1.50", ".5", each with an optional leading "$". */
+const DOLLARS = /^\$?(\d+(\.\d{1,2})?|\.\d{1,2})$/;
 
 /** A typed whole number as a number; text that is no whole number stays text so the validator names it. */
 function typedNumber(text: string): number | string {
@@ -220,7 +221,9 @@ function typedNumber(text: string): number | string {
 /** Typed dollars as whole cents; text that is no amount stays text so the validator names it. */
 function typedCents(text: string): number | string {
   const trimmed = text.trim();
-  return DOLLARS.test(trimmed) ? Math.round(Number(trimmed) * 100) : trimmed;
+  return DOLLARS.test(trimmed)
+    ? Math.round(Number(trimmed.replace("$", "")) * 100)
+    : trimmed;
 }
 
 function rawValue(values: FormValues, field: ReviewSettingField): unknown {

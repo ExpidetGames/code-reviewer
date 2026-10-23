@@ -50,6 +50,8 @@ function numberWithCommas(value: number): string {
   return value.toLocaleString("en-US");
 }
 
+const COST_RANGE = `Enter an amount from $${(REVIEW_SETTING_LIMITS.maxCostCents.min / 100).toFixed(2)} to $${String(REVIEW_SETTING_LIMITS.maxCostCents.max / 100)}.`;
+
 const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   UNKNOWN_FIELD: () => "This setting does not exist.",
   INVALID_TYPE: (field) => {
@@ -59,6 +61,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
       case "maxFindings":
       case "maxTokens":
         return "Enter a whole number.";
+      case "maxCostCents":
+        return "Enter an amount in dollars with up to two decimals, like 0.50 or 2.";
       case "allowedCommands":
         return "Choose from the listed commands.";
       case "extraInstructions":
@@ -80,6 +84,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     return "Enter a value.";
   },
   TOO_SMALL: (field) => {
+    if (field === "maxCostCents") return COST_RANGE;
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.min)} or more.`;
     if (field === "maxTokens")
@@ -87,6 +92,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     return "This value is too small.";
   },
   TOO_LARGE: (field) => {
+    if (field === "maxCostCents") return COST_RANGE;
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.max)} or less.`;
     if (field === "maxTokens")
