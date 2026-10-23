@@ -48,23 +48,25 @@ test.describe("the key mode of a workspace", () => {
       card.getByText(/charged for infrastructure only/),
     ).toBeVisible();
 
-    // Our models are the default, and the own key cannot be picked before one is saved.
+    // Our models are the default, and nothing about keys is on the page while they are chosen (#656).
     await expect(ours).toBeChecked();
-    await expect(own).toBeDisabled();
+    const form = page.getByRole("form", { name: "OpenRouter LLM key" });
+    await expect(form).toHaveCount(0);
+
+    // Selecting the own key brings the key forms; the choice cannot be saved before a key is.
+    await own.click();
     await expect(
       card.getByText(/Save a provider key below first/),
     ).toBeVisible();
-
-    // The key forms stay on the page while our models are chosen, so the key can be saved first.
-    const form = page.getByRole("form", { name: "OpenRouter LLM key" });
+    await expect(
+      card.getByRole("button", { name: "Save choice" }),
+    ).toBeDisabled();
     await form.getByLabel("API key").fill(KEY);
     await form.getByRole("button", { name: "Save key" }).click();
     await expect(
       form.getByText(`A key is saved (ends in ${KEY.slice(-4)})`),
     ).toBeVisible();
 
-    await expect(own).toBeEnabled();
-    await own.click();
     await card.getByRole("button", { name: "Save choice" }).click();
     await expect(card.getByText("The choice is saved.")).toBeVisible();
 
@@ -75,8 +77,9 @@ test.describe("the key mode of a workspace", () => {
     expect(await answer.json()).toEqual({ keyMode: "own" });
     expect(await page.content()).not.toContain(KEY);
 
-    // And back to our models.
+    // And back to our models: the key forms go.
     await ours.click();
+    await expect(form).toHaveCount(0);
     await card.getByRole("button", { name: "Save choice" }).click();
     await expect(card.getByText("The choice is saved.")).toBeVisible();
     await page.reload();

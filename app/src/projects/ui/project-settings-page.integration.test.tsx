@@ -9,6 +9,10 @@
 // is the real component tree.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  chooseOption,
+  openSection,
+} from "../../test-support/settings-sections.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -174,7 +178,8 @@ describe("the settings page of a repository that was never activated", () => {
 
 describe("the settings page of a project", () => {
   // #174-T01
-  it("has exactly one form and shows the estimated cost inside the Model card", async () => {
+  it("has exactly one form with the four sections, and shows the estimated cost in the Limits section", async () => {
+    const user = userEvent.setup();
     const app = await openProject();
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
@@ -182,11 +187,19 @@ describe("the settings page of a project", () => {
     const { container } = renderReady(app, data);
 
     expect(container.querySelectorAll("form")).toHaveLength(1);
-    const modelCard = screen
-      .getByRole("heading", { name: "Model" })
+    // #656-T01: four sections and no setting outside them.
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Review",
+      "LLM",
+      "Trigger",
+      "Limits",
+    ]);
+    await openSection(user, "Limits");
+    const limitsCard = screen
+      .getByRole("heading", { name: "Limits" })
       .closest('[data-slot="card"]') as HTMLElement;
     expect(
-      within(modelCard).getByText(/Estimated cost per review/),
+      within(limitsCard).getByText(/Estimated cost per review/),
     ).toBeTruthy();
   });
 
@@ -232,6 +245,7 @@ describe("the settings page of a project", () => {
 
   // CR-34-T08
   it("follows a changed global default unless the project has its own value", async () => {
+    const user = userEvent.setup();
     const app = await openProject();
     await app.service.updateProjectSettings(app.first.id, { maxFindings: 3 });
     await app.service.updateGlobalSettings(
@@ -248,6 +262,7 @@ describe("the settings page of a project", () => {
     const own = screen
       .getByLabelText("Most findings per review")
       .closest("[data-field]") as HTMLElement;
+    await openSection(user, "Limits");
     const inherited = screen
       .getByLabelText("Token budget")
       .closest("[data-field]") as HTMLElement;
@@ -257,10 +272,12 @@ describe("the settings page of a project", () => {
 
   // A page that was left stays mounted (Cache Components) and is shown again with fresh data.
   it("shows the new value and its source when the page is rendered again after a global default changed", async () => {
+    const user = userEvent.setup();
     const app = await openProject();
     const before = await app.load();
     if (before.kind !== "ready") throw new Error("expected a project");
     const view = renderReady(app, before);
+    await openSection(user, "Limits");
     expect(
       (screen.getByLabelText("Token budget") as HTMLInputElement).value,
     ).toBe("100000");
@@ -276,6 +293,7 @@ describe("the settings page of a project", () => {
       />,
     );
 
+    await openSection(user, "Limits");
     const field = screen
       .getByLabelText("Token budget")
       .closest("[data-field]") as HTMLElement;
@@ -320,9 +338,13 @@ describe("the settings page of a project", () => {
     // A budget the model cannot hold: the client check passes, the service refuses.
     renderReady(app, data);
 
-    const model = screen.getByLabelText("Model");
-    await user.clear(model);
-    await user.type(model, "deepseek/deepseek-v3.2");
+    await openSection(user, "LLM");
+    await chooseOption(
+      user,
+      screen.getByLabelText("Model"),
+      "deepseek/deepseek-v3.2",
+    );
+    await openSection(user, "Limits");
     const tokens = screen.getByLabelText("Token budget");
     await user.clear(tokens);
     await user.type(tokens, "500000");
@@ -435,9 +457,13 @@ describe("the Review kind card of the settings page of a project", () => {
     const { app, view } = await readyPage({ dynamicReviewEnabled: true });
 
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
-    const model = screen.getByLabelText("Dynamic Review model");
-    await user.clear(model);
-    await user.type(model, "vendor/agent-1");
+    await openSection(user, "LLM");
+    await chooseOption(
+      user,
+      screen.getByLabelText("Model"),
+      "deepseek/deepseek-v4-pro",
+    );
+    await openSection(user, "Review");
     await user.click(screen.getByRole("button", { name: "Edit skill" }));
     const skill = screen.getByLabelText("Review skill");
     await user.clear(skill);
@@ -453,14 +479,14 @@ describe("the Review kind card of the settings page of a project", () => {
     const stored = JSON.parse((await app.projectRows())[0]?.settings ?? "{}");
     expect(stored).toMatchObject({
       reviewKind: "dynamic",
-      dynamicModel: "vendor/agent-1",
+      dynamicModel: "deepseek/deepseek-v4-pro",
       reviewSkill: "Look for security problems only.",
     });
     const reloaded = await app.load();
     if (reloaded.kind !== "ready") throw new Error("expected a project");
     expect(reloaded.model.dynamic?.effective).toEqual({
       reviewKind: "dynamic",
-      dynamicModel: "vendor/agent-1",
+      dynamicModel: "deepseek/deepseek-v4-pro",
       dynamicProvider: "openrouter",
       reviewSkill: "Look for security problems only.",
       reviewVerdict: "blocking",
@@ -481,7 +507,7 @@ describe("the Review kind card of the settings page of a project", () => {
     expect(afterReset).not.toHaveProperty("reviewSkill");
     expect(afterReset).toMatchObject({
       reviewKind: "dynamic",
-      dynamicModel: "vendor/agent-1",
+      dynamicModel: "deepseek/deepseek-v4-pro",
     });
     const final = await app.load();
     if (final.kind !== "ready") throw new Error("expected a project");
@@ -498,7 +524,7 @@ describe("the Review kind card of the settings page of a project", () => {
     const { app } = await readyPage();
     expect(
       screen
-        .getByRole("radio", { name: "Blocking findings only (default)" })
+        .getByRole("radio", { name: "Blocking findings (default)" })
         .getAttribute("aria-checked"),
     ).toBe("true");
 
@@ -516,7 +542,7 @@ describe("the Review kind card of the settings page of a project", () => {
 
     // Choosing the default again removes the override instead of storing it.
     await user.click(
-      screen.getByRole("radio", { name: "Blocking findings only (default)" }),
+      screen.getByRole("radio", { name: "Blocking findings (default)" }),
     );
     await user.click(screen.getByRole("button", SAVE));
     await screen.findByText(/Saved\./);
@@ -737,16 +763,19 @@ describe("the pinned address on the settings page of a project (#588)", () => {
   it("carries the right to confirm from the page to the form: the checkbox for an Owner or Admin, the hint for a Member", async () => {
     const { app, data } = await changedAddress();
 
+    const user = userEvent.setup();
     renderReady(app, data, {
       nativeCatalog: CATALOG,
       canConfirmProviderAddress: true,
     });
+    await openSection(user, "LLM");
     expect(
       screen.getByRole("checkbox", { name: /confirm the new address/i }),
     ).toBeTruthy();
     cleanup();
 
     renderReady(app, data, { nativeCatalog: CATALOG });
+    await openSection(user, "LLM");
     expect(
       screen.queryByRole("checkbox", { name: /confirm the new address/i }),
     ).toBeNull();

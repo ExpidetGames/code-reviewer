@@ -579,14 +579,15 @@ test.describe("the billing journeys of a review", () => {
     await signInAsAdmin(page);
     // The Owner saves a key and chooses it, as the key mode journey does.
     await page.goto("/w/default/settings/llm");
+    // The key forms are there while the own key is selected, not while our models are (#656).
+    const card = page.getByRole("region", { name: "Which key reviews use" });
+    await card.getByRole("radio", { name: /Use my own provider key/ }).click();
     const form = page.getByRole("form", { name: "OpenRouter LLM key" });
     await form.getByLabel("API key").fill(OWN_KEY);
     await form.getByRole("button", { name: "Save key" }).click();
     await expect(
       form.getByText(`A key is saved (ends in ${OWN_KEY.slice(-4)})`),
     ).toBeVisible();
-    const card = page.getByRole("region", { name: "Which key reviews use" });
-    await card.getByRole("radio", { name: /Use my own provider key/ }).click();
     await card.getByRole("button", { name: "Save choice" }).click();
     await expect(card.getByText("The choice is saved.")).toBeVisible();
 

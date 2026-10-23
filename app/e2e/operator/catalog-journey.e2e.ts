@@ -84,6 +84,7 @@ import {
 } from "../helpers/operator-api";
 import { rawRequest } from "../helpers/raw-request";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import {
   dynamicRunnerScript,
   type ClaimedDynamicJob,
@@ -156,7 +157,8 @@ const CATALOG_MODEL_IDS: string[] = Object.values(ENTRIES).map(
   (entry) => entry.model,
 );
 // What workspace O chooses for its project: its own model, not an entry of the catalog.
-const OWN_MODEL = "ownproof/own-model-k3j4";
+// A model of the list the dropdown offers for the provider: a workspace on its own key cannot type one (#656).
+const OWN_MODEL = "openai/gpt-5.4-mini";
 const UNKNOWN_ENTRY = "00000000-0000-4000-8000-000000000000";
 
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
@@ -623,21 +625,30 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     test.setTimeout(240_000);
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
-    const diffChoice = page.locator('[data-field="catalogEntryDiff"]');
-    // Released entries by name and description, in the order of the catalog; the draft is not offered.
-    await expect(diffChoice.locator("[data-entry]")).toHaveCount(2);
-    await expect(diffChoice).toContainText(ENTRIES.small.description);
-    await expect(diffChoice).toContainText(ENTRIES.big.description);
-    await expect(diffChoice).not.toContainText(ENTRIES.draft.name);
-    await expect(diffChoice).toContainText("Default of this instance");
-    await diffChoice.getByRole("radio", { name: /^Big/ }).click();
+    await openSection(page, "LLM");
+    // Released entries by name, in the order of the catalog; the draft is not offered.
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(
+      page.getByRole("option", { name: ENTRIES.small.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.big.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.draft.name }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("option", { name: "Default of this instance" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await chooseOption(page, "Model", /^Big/);
     await save(page);
     await page.reload();
-    await expect(
-      page
-        .locator('[data-field="catalogEntryDiff"]')
-        .getByRole("radio", { name: /^Big/ }),
-    ).toBeChecked();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      "Big",
+    );
 
     await openRuns(page, slugM);
     await open(request, "M", 2);
@@ -663,10 +674,12 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
-    const dynamicChoice = page.locator('[data-field="catalogEntryDynamic"]');
-    await expect(dynamicChoice.locator("[data-entry]")).toHaveCount(2);
+    await openSection(page, "LLM");
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(page.getByRole("option")).toHaveCount(3);
+    await page.keyboard.press("Escape");
     // The instance default of Dynamic Review is Big; the Owner picks the other entry.
-    await dynamicChoice.getByRole("radio", { name: /^Small/ }).click();
+    await chooseOption(page, "Model", /^Small/);
     await save(page, "Switch to Dynamic Review");
 
     await open(request, "M", 3);
@@ -898,6 +911,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
 
       // The project chooses a provider and a model, not an entry: the catalog is nowhere on the page.
       await openProject(page, slugO, REPO_O.fullName);
+      await openSection(page, "LLM");
       await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
         0,
       );
@@ -907,10 +921,11 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       });
       await provider.click();
       await page.getByRole("option", { name: /^OpenRouter/ }).click();
-      await page.getByLabel("Model", { exact: true }).fill(OWN_MODEL);
+      await chooseOption(page, "Model", OWN_MODEL);
       await save(page);
       await page.reload();
-      await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+      await openSection(page, "LLM");
+      await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
         OWN_MODEL,
       );
 

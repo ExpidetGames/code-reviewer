@@ -15,6 +15,7 @@ import {
   type GithubAccount,
 } from "../helpers/github-fake";
 import { e2eEnv } from "../helpers/e2e-env";
+import { chooseOption, openSection } from "../helpers/settings-form";
 
 const account: GithubAccount = {
   id: 7300002,
@@ -144,9 +145,9 @@ test.describe("the project list and the settings pages", () => {
     await signInThroughTheForm(page, account);
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
 
-    await page
-      .getByLabel("Model", { exact: true })
-      .fill("anthropic/claude-sonnet-5.5");
+    await openSection(page, "LLM");
+    await chooseOption(page, "Model", "anthropic/claude-sonnet-5.5");
+    await openSection(page, "Limits");
     await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(
@@ -154,9 +155,11 @@ test.describe("the project list and the settings pages", () => {
     ).toBeVisible();
     await page.reload();
 
-    await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
       "anthropic/claude-sonnet-5.5",
     );
+    await openSection(page, "Limits");
     await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
   });
 
@@ -168,6 +171,7 @@ test.describe("the project list and the settings pages", () => {
     // The project page is visited first: Next keeps it mounted (hidden) while the person is
     // elsewhere and shows it again later, which must not bring back the old value.
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
+    await openSection(page, "Limits");
     const budget = () =>
       page
         .getByLabel("Token budget", { exact: true })
@@ -193,6 +197,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Review defaults" }),
     ).toBeVisible();
+    await openSection(page, "Limits");
     await budget().fill("60000");
     await page.getByRole("button", { name: "Save review defaults" }).click();
     await expect(
@@ -207,6 +212,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: REPOSITORY }),
     ).toBeVisible();
+    await openSection(page, "Limits");
     await expect(budget()).toHaveValue("60000");
     await expect(
       page
@@ -214,6 +220,7 @@ test.describe("the project list and the settings pages", () => {
         .getByText("Global default"),
     ).toBeVisible();
     await page.reload();
+    await openSection(page, "Limits");
     await expect(budget()).toHaveValue("60000");
   });
 
@@ -279,6 +286,7 @@ test.describe("the project list and the settings pages", () => {
       expect(await overflow()).toBeLessThanOrEqual(0);
 
       await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
+      await openSection(page, "Limits");
       await expect(
         page.getByLabel("Token budget", { exact: true }),
       ).toBeVisible();

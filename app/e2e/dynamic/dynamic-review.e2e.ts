@@ -48,6 +48,7 @@ import {
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const account: GithubAccount = {
@@ -59,8 +60,8 @@ const account: GithubAccount = {
 const INSTALLATION_ID = 9500101;
 const WIDGETS = { id: 9600101, fullName: "dynamic-journey/widgets" };
 const OWNER = { login: account.login, id: account.id };
-// The model name a person types into the project's settings; the engine asks the fake LLM for it.
-const MODEL = "vendor/agent-e2e";
+// A model of the list the project settings offer (#656); the engine asks the fake LLM for it.
+const MODEL = "deepseek/deepseek-v4-pro";
 const TITLE = "Add a user handler";
 const BODY = "Shows a user by the name in the request.";
 const FINDING_TITLE = "SQL text is built from the user name";
@@ -167,9 +168,8 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     const dynamic = page.getByRole("radio", { name: "Dynamic Review" });
     if (!(await dynamic.isChecked())) {
       await dynamic.click();
-      await page
-        .getByLabel("Dynamic Review model", { exact: true })
-        .fill(MODEL);
+      await openSection(page, "LLM");
+      await chooseOption(page, "Model", MODEL);
       await page.getByRole("button", { name: "Save review settings" }).click();
       await page
         .getByRole("alertdialog")
@@ -179,9 +179,10 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     }
     await page.reload();
     await expect(dynamic).toBeChecked();
-    await expect(
-      page.getByLabel("Dynamic Review model", { exact: true }),
-    ).toHaveValue(MODEL);
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
+      MODEL,
+    );
     await context.close();
   });
 
