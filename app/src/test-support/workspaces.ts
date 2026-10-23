@@ -80,3 +80,24 @@ export async function linkTestInstallation(
     },
   });
 }
+
+/**
+ * Turns a workspace into the tombstone a deletion leaves (#658) without running the deletion: anonymised name and address and
+ * the `deleted_at` mark, the data untouched. For tests of the readers that must pass a deleted workspace by.
+ */
+export async function markWorkspaceDeleted(
+  db: Kysely<Database>,
+  workspaceId: string,
+  at = "2026-10-23T12:00:00.000Z",
+): Promise<void> {
+  await db
+    .updateTable("workspaces")
+    .set({
+      name: "Deleted workspace",
+      slug: `deleted-${workspaceId}`,
+      created_by: null,
+      deleted_at: at,
+    })
+    .where("id", "=", workspaceId)
+    .execute();
+}

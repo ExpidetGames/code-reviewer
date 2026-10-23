@@ -103,10 +103,33 @@ describe("the Advanced settings sub-page", () => {
       within(dialog).getByRole("button", { name: "Delete this workspace" }),
     );
 
+    expect(await within(dialog).findByText(/still has credit/)).toBeTruthy();
     expect(
-      await within(dialog).findByText(/still has unused credit/),
+      within(dialog).getByText(/Contact support for a payout/),
     ).toBeTruthy();
-    expect(within(dialog).getByText(/Contact support/)).toBeTruthy();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  // #658-T04
+  it("says what to settle first when the workspace owes an amount, and stays open", async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    renderAdvanced(
+      fakeApi({ ok: false, code: "balance_negative", status: 409 } as never),
+      navigate,
+    );
+
+    const dialog = await openDialog(user);
+    await user.type(
+      within(dialog).getByLabelText("Type Acme Reviews to confirm"),
+      "Acme Reviews",
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete this workspace" }),
+    );
+
+    expect(await within(dialog).findByText(/Settle it first/)).toBeTruthy();
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();
   });

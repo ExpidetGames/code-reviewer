@@ -7,17 +7,26 @@
 // Refused, with a stable code (the data stays exactly as it was):
 // - `forbidden` / `not_found`: not an Owner / not a member (any more), or the workspace is deleted already;
 // - `name_mismatch`: the typed name is not the workspace's name (exact, after trimming the ends);
-// - `balance_positive`: unused prepaid credit. Until the owner of the product decides how credit is refunded, a deletion
-//   would destroy money the customer paid for, so it waits (the person is told to contact support);
-// - `review_running`: a review is running or still holds a reservation. It would report to a workspace that is gone, so the
-//   person tries again when it has finished;
-// - `payment_open`: a top-up checkout was started recently and may still be paid, which would credit a deleted workspace.
+// - `balance_positive` / `balance_negative`: the balance is not exactly zero. Unused prepaid credit would be destroyed (it is
+//   paid out by support, not by a deletion), and an open amount would be forgiven; either waits until it is settled;
+// - `review_running`: a review is running, or a superseded run still drains. It would report to a workspace that is gone, so
+//   the person tries again when it has finished;
+// - `payment_open`: a top-up checkout was started within the window a late payment is still credited in
+//   (`PENDING_TOP_UP_WINDOW_MS`) and has no end yet (`paid`, `failed`), so a payment may still arrive: it would credit nobody.
 //
-// What happens otherwise: the balance row is locked first (a top-up, a claim or a charge cannot slip in between the check
-// and the deletion), the GitHub installations of the workspace are released (the connection rows go, and each installation
-// is noted as unclaimed so another workspace, or this person's next one, can link it again; nothing is sent to GitHub, the
-// App stays installed there until the person removes it), and the repository `WorkspaceErasure` removes the data and
-// anonymises the row. The journal and the money records stay: see `workspace-erasure-repository.ts`.
+// The locks, in the order every writer of the queue uses (Postgres; SQLite has one writer): the Dynamic gate, shared (a claim
+// holds it exclusively from its start to its commit, so a claim in flight is waited for, and a claim that starts later waits
+// for this deletion); the workspace row (the members, like every writer that follows); the repositories and the waiting,
+// running and superseded jobs of the workspace (`lockActiveJobs`); the balance row last (a top-up, a claim or a charge cannot
+// slip in between the check and the deletion). A claim takes the gate, then its job row, the workspace row, the balance row:
+// the same order, so the two cannot wait for each other.
+//
+// What happens otherwise: the GitHub installations of the workspace are released (the connection rows go, and each
+// installation, disconnected or not, is noted as unclaimed so another workspace, or this person's next one, can link it
+// again; nothing is sent to GitHub, the App stays installed there until the person removes it), and the repository
+// `WorkspaceErasure` removes the data and turns the row into the tombstone. The journal and the money records stay: see
+// `workspace-erasure-repository.ts`. After the commit the check runs of the waiting reviews are completed on GitHub, best
+// effort (`finish-checks.ts`).
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
@@ -28,14 +37,18 @@ import {
   createWorkspacesRepository,
   deletedWorkspaceSlug,
 } from "../db/repositories/workspaces-repository.ts";
+import { lockDynamicReviewGate } from "../db/dynamic-review-lock.ts";
 import type { Database } from "../db/schema.ts";
+import { PENDING_TOP_UP_WINDOW_MS } from "../billing/topup-intent.ts";
 import { can } from "./permissions.ts";
+import type { CheckFinisher, ChecksToFinish } from "./finish-checks.ts";
 
 export const DELETE_WORKSPACE_ERROR_CODES = [
   "not_found",
   "forbidden",
   "name_mismatch",
   "balance_positive",
+  "balance_negative",
   "review_running",
   "payment_open",
 ] as const;
@@ -50,12 +63,10 @@ export const DELETE_WORKSPACE_ERROR_STATUS: Record<
   forbidden: 403,
   name_mismatch: 422,
   balance_positive: 409,
+  balance_negative: 409,
   review_running: 409,
   payment_open: 409,
 };
-
-/** A checkout older than this has ended at the provider (a session lasts 24 hours at most), whatever the row says. */
-export const OPEN_PAYMENT_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 /** The name every deleted workspace carries; the address is `deleted-<id>`. */
 export const DELETED_WORKSPACE_NAME = "Deleted workspace";
@@ -80,22 +91,28 @@ export function createWorkspaceDeletion({
   db,
   now = () => new Date(),
   log = (message) => console.log(message),
+  finishChecks,
 }: {
   db: Kysely<Database>;
   now?: () => Date;
   log?: (message: string) => void;
+  /** Completes the check runs of the waiting reviews after the commit; absent where no platform is connected (tests). */
+  finishChecks?: CheckFinisher;
 }): WorkspaceDeletion {
   return {
     async delete({ workspaceId, actorId, confirmName }) {
+      let released: ChecksToFinish | undefined;
       const result = await db
         .transaction()
         .execute(async (trx): Promise<DeleteWorkspaceResult> => {
+          // Before any row: a claim in flight is waited for, and none starts until this deletion has ended.
+          await lockDynamicReviewGate(trx, false);
           const members = createWorkspaceMembersRepository(
             trx,
             workspaceId,
             now,
           );
-          // The workspace row first, like every writer that follows (members, claims): one at a time.
+          // The workspace row, like every writer that follows (members, claims): one at a time.
           await members.lock();
           const actor = await members.get(actorId);
           if (actor === undefined) return { ok: false, error: "not_found" };
@@ -108,33 +125,36 @@ export function createWorkspaceDeletion({
           if (text(confirmName)?.trim() !== workspace.name)
             return { ok: false, error: "name_mismatch" };
 
+          const erasure = createWorkspaceErasureRepository(trx, workspaceId);
+          await erasure.lockActiveJobs();
           const journal = createBillingJournalRepository(trx, workspaceId, now);
           await journal.lockBalance();
           const balance = await journal.balance();
           if (balance.balanceMicroUsd > 0)
             return { ok: false, error: "balance_positive" };
-          const erasure = createWorkspaceErasureRepository(trx, workspaceId);
-          if (balance.reservedMicroUsd > 0 || (await erasure.hasRunningJobs()))
+          if (balance.balanceMicroUsd < 0)
+            return { ok: false, error: "balance_negative" };
+          if (
+            balance.reservedMicroUsd > 0 ||
+            (await erasure.hasRunningJobs(now()))
+          )
             return { ok: false, error: "review_running" };
           if (
             await erasure.hasOpenPayment(
-              new Date(now().getTime() - OPEN_PAYMENT_WINDOW_MS),
+              new Date(now().getTime() - PENDING_TOP_UP_WINDOW_MS),
             )
           )
             return { ok: false, error: "payment_open" };
 
-          const unclaimed = createUnclaimedInstallationsRepository(trx, now);
-          for (const integration of await createIntegrationsRepository(
+          const integrations = await createIntegrationsRepository(
             trx,
             workspaceId,
             now,
-          ).list()) {
-            // One the person disconnected earlier is not noted again: it was let go on purpose.
-            if (
-              integration.type !== "github_app" ||
-              integration.status === "disconnected"
-            )
-              continue;
+          ).list();
+          const checks = await erasure.openChecks();
+          const unclaimed = createUnclaimedInstallationsRepository(trx, now);
+          for (const integration of integrations) {
+            if (integration.type !== "github_app") continue;
             await unclaimed.record({
               installationId: integration.externalId,
               accountLogin:
@@ -151,11 +171,20 @@ export function createWorkspaceDeletion({
           await erasure.erase({
             name: DELETED_WORKSPACE_NAME,
             slug: deletedWorkspaceSlug(workspaceId),
+            deletedAt: now(),
           });
+          released = { workspaceId, integrations, checks };
           return { ok: true };
         });
-      if (result.ok)
-        log(`[workspaces] workspace ${workspaceId} was deleted by ${actorId}.`);
+      if (!result.ok) return result;
+      log(`[workspaces] workspace ${workspaceId} was deleted by ${actorId}.`);
+      // The deletion stands whatever happens to the check runs: nothing here can fail it.
+      if (finishChecks !== undefined && released !== undefined)
+        await finishChecks(released).catch((error: unknown) => {
+          log(
+            `[workspaces] CHECK_RUN_NOT_COMPLETED workspace ${workspaceId}: ${error instanceof Error ? error.name : "error"}`,
+          );
+        });
       return result;
     },
   };

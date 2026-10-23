@@ -53,7 +53,9 @@ const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,
   name_mismatch: "That is not the name of this workspace.",
   balance_positive:
-    "This workspace still has unused credit, so it cannot be deleted yet. Contact support and we will sort the credit out with you first.",
+    "This workspace still has credit. Contact support for a payout, then delete it.",
+  balance_negative:
+    "This workspace has an open amount. Settle it first, then delete it.",
   review_running:
     "A review is running right now. Try again when it has finished.",
   payment_open:

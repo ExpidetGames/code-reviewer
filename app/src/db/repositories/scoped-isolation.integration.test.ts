@@ -1505,8 +1505,22 @@ const CASES: Case[] = [
   // erasure (#658): A's scope reads nothing of B's (B has a queued job and a pending top-up intent) and erases only A.
   {
     name: "erasure.hasRunningJobs",
-    run: (a) => a.erasure.hasRunningJobs(),
+    run: (a) => a.erasure.hasRunningJobs(new Date("2026-10-23T12:00:00.000Z")),
     expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "erasure.lockActiveJobs",
+    run: (a) => a.erasure.lockActiveJobs(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "erasure.openChecks",
+    run: (a) => a.erasure.openChecks(),
+    // Only A's own waiting check run, never B's.
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject([
+        { jobId: a.job.id, checkRunId: "check-a" },
+      ]),
   },
   {
     name: "erasure.hasOpenPayment",
@@ -1515,7 +1529,12 @@ const CASES: Case[] = [
   },
   {
     name: "erasure.erase",
-    run: (a) => a.erasure.erase({ name: "Deleted", slug: "deleted-a" }),
+    run: (a) =>
+      a.erasure.erase({
+        name: "Deleted",
+        slug: "deleted-a",
+        deletedAt: new Date("2026-10-23T12:00:00.000Z"),
+      }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs

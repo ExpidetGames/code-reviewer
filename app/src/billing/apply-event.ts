@@ -55,7 +55,7 @@ import {
 } from "./adapter.ts";
 import { BillingJournalError } from "./journal.ts";
 import { netShareMicroUsd } from "./net-share.ts";
-import type { TopUpIntent } from "./topup-intent.ts";
+import { PENDING_TOP_UP_WINDOW_MS, type TopUpIntent } from "./topup-intent.ts";
 
 export type ApplyResult = {
   outcome: BillingEventOutcome;
@@ -88,12 +88,6 @@ export class BillingEventRetryError extends Error {
     this.code = code;
   }
 }
-
-/**
- * How long a top-up that was started and not paid can still be the payment of a refund or dispute we cannot place: the
- * provider redelivers for three days, and a checkout is open for a day (a delayed method takes a few more).
- */
-const PENDING_TOP_UP_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 type Context = {
   trx: Kysely<Database>;

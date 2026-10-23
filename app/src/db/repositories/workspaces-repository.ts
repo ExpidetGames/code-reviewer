@@ -16,16 +16,27 @@ export type Workspace = {
   slug: string;
   createdBy: string | null;
   createdAt: string;
+  /** When the workspace was deleted (#658), or null. The readers below do not return a deleted one, except `getIncludingDeleted`. */
+  deletedAt: string | null;
 };
 
 /** A workspace a user belongs to, with the role they have in it. */
 export type Membership = { workspace: Workspace; role: WorkspaceRole };
 
 export type WorkspacesRepository = {
+  /** The workspace, or undefined when there is none or it was deleted (#658). */
   get(id: string): Promise<Workspace | undefined>;
+  /**
+   * The workspace as the row has it, a tombstone (name and address anonymised, `deletedAt` set) included. For the readers that
+   * explain money which belongs to a deleted workspace; every other reader uses `get`.
+   */
+  getIncludingDeleted(id: string): Promise<Workspace | undefined>;
   /** The oldest workspace that is not deleted, which is the default one the migration made; undefined when there is none. */
   findDefault(): Promise<Workspace | undefined>;
-  /** Whether a workspace has this slug. */
+  /**
+   * Whether a workspace has this slug. A tombstone counts only with its own anonymised address, which is unique like every
+   * address; the address it had before is free again.
+   */
   slugExists(slug: string): Promise<boolean>;
   /** The workspaces the user is a member of, in the order they joined (then by id). */
   listForUser(userId: string): Promise<Membership[]>;
@@ -78,16 +89,20 @@ export type WorkspacesRepository = {
 export const DEFAULT_WORKSPACE_SLUG = "default";
 
 /**
- * The address a deleted workspace keeps (#658). The row stays because the billing journal points at it, with its name and
- * address anonymised; the address is also the mark of a tombstone, so that no schema change is needed to tell it from a
- * workspace (the id is random, a person cannot ask for this address).
+ * The address a deleted workspace keeps (#658): the row stays because the billing journal points at it, with its name and
+ * address anonymised (the address stays unique, so it carries the id). What marks it a tombstone is `deleted_at`, not this.
  */
 export function deletedWorkspaceSlug(id: string): string {
   return `deleted-${id}`;
 }
 
-/** The rows that are workspaces, not tombstones. */
-const NOT_DELETED = sql<boolean>`slug <> ${sql.lit("deleted-")} || id`;
+/** Whether a workspace is a tombstone. The one test for a workspace in memory; `NOT_DELETED` is the same for a query. */
+export function isDeleted(workspace: { deletedAt: string | null }): boolean {
+  return workspace.deletedAt !== null;
+}
+
+/** The rows that are workspaces, not tombstones: the condition of every query that reads `workspaces` for a customer or an operator. */
+export const NOT_DELETED = sql<boolean>`workspaces.deleted_at is null`;
 
 function toWorkspace(row: WorkspacesTable): Workspace {
   return {
@@ -96,6 +111,7 @@ function toWorkspace(row: WorkspacesTable): Workspace {
     slug: row.slug,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    deletedAt: row.deleted_at,
   };
 }
 
@@ -119,8 +135,10 @@ export function createWorkspacesRepository(
         "workspaces.slug as slug",
         "workspaces.created_by as created_by",
         "workspaces.created_at as created_at",
+        "workspaces.deleted_at as deleted_at",
         "workspace_members.role as role",
-      ]);
+      ])
+      .where(NOT_DELETED);
   }
 
   function toMembership(row: WorkspacesTable & { role: string }): Membership {
@@ -147,6 +165,16 @@ export function createWorkspacesRepository(
         .selectFrom("workspaces")
         .selectAll()
         .where("id", "=", id)
+        .where(NOT_DELETED)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toWorkspace(row);
+    },
+
+    async getIncludingDeleted(id) {
+      const row = await db
+        .selectFrom("workspaces")
+        .selectAll()
+        .where("id", "=", id)
         .executeTakeFirst();
       return row === undefined ? undefined : toWorkspace(row);
     },
@@ -164,7 +192,7 @@ export function createWorkspacesRepository(
 
     async search(text, limit) {
       const escaped = text.toLowerCase().replace(/[\\%_]/g, "\\$&");
-      let query = db.selectFrom("workspaces").selectAll();
+      let query = db.selectFrom("workspaces").selectAll().where(NOT_DELETED);
       if (escaped !== "")
         query = query.where(
           sql<boolean>`lower(name) like ${`%${escaped}%`} escape '\\'`,
@@ -236,6 +264,7 @@ export function createWorkspacesRepository(
         .updateTable("workspaces")
         .set({ name })
         .where("id", "=", workspaceId)
+        .where(NOT_DELETED)
         .executeTakeFirst();
       return Number(result.numUpdatedRows) === 1;
     },
@@ -247,6 +276,7 @@ export function createWorkspacesRepository(
         slug: input.slug,
         created_by: input.createdBy,
         created_at: formatTimestamp(now()),
+        deleted_at: null,
       };
       await db.insertInto("workspaces").values(row).execute();
       return toWorkspace(row);
@@ -279,7 +309,7 @@ export function createWorkspacesRepository(
     },
 
     async listPage({ after, limit }) {
-      let query = db.selectFrom("workspaces").selectAll();
+      let query = db.selectFrom("workspaces").selectAll().where(NOT_DELETED);
       if (after !== undefined) query = query.where("id", ">", after);
       // One more than asked for tells whether another page follows.
       const rows = await query

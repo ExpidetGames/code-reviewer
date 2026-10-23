@@ -33,6 +33,7 @@ import {
   DELETED_WORKSPACE_NAME,
   type DeleteWorkspaceResult,
 } from "./delete-workspace.ts";
+import { PENDING_TOP_UP_WINDOW_MS } from "../billing/topup-intent.ts";
 
 const SHA = "b".repeat(40);
 const NOW = new Date("2026-10-23T12:00:00.000Z");
@@ -215,11 +216,16 @@ async function seed(
     legalName: `Legal ${tag} GmbH`,
     country: "DE",
     addressLine1: `Street ${tag}`,
-    addressLine2: null,
+    addressLine2: `Floor ${tag}`,
     postalCode: "10115",
     city: "Berlin",
-    vatId: null,
+    vatId: "DE123456789",
   });
+  await profiles.confirmBusiness({
+    userId: `owner-${tag}`,
+    termsVersion: "2026-10",
+  });
+  await profiles.setCustomer("fake", `cus_${tag}`);
   await createBillingNotificationsRepository(db, workspaceId).markSent(
     "empty",
     "due",
@@ -270,6 +276,7 @@ async function tablesWithWorkspaceId(db: Kysely<Database>): Promise<string[]> {
 /** What stays after a deletion, each for a reason (src/db/repositories/workspace-erasure-repository.ts). */
 const KEPT = [
   "billing_balances",
+  "billing_profiles",
   "billing_journal_entries",
   "billing_start_credit_grants",
   "billing_topup_intents",
@@ -433,6 +440,7 @@ function suite(engine: BillingEngine) {
         name: DELETED_WORKSPACE_NAME,
         slug: `deleted-${workspaceId}`,
         created_by: null,
+        deleted_at: NOW.toISOString(),
       });
       const workspaces = createWorkspacesRepository(db);
       expect(await workspaces.slugExists("billing-a")).toBe(false);
@@ -572,19 +580,30 @@ function suite(engine: BillingEngine) {
     });
 
     // #658-T04
-    it("is allowed at a balance of zero and below it (the journal keeps the debt)", async () => {
+    it("is allowed only at a balance of exactly zero: below it the open amount is settled first", async () => {
       const { db, workspaceId, remove } = await start();
+      const before = await snapshot(db, workspaceId);
       await createBillingJournalRepository(db, workspaceId).append({
         type: "correction",
         amountMicroUsd: -3,
         refKey: "debt",
       });
+      const withDebt = await snapshot(db, workspaceId);
 
+      expect(await remove()).toEqual({ ok: false, error: "balance_negative" });
+
+      expect(await snapshot(db, workspaceId)).toEqual(withDebt);
+      expect(withDebt).not.toEqual(before);
+      await createBillingJournalRepository(db, workspaceId).append({
+        type: "correction",
+        amountMicroUsd: 3,
+        refKey: "debt-settled",
+      });
       expect(await remove()).toEqual({ ok: true });
     });
 
-    it("waits while a review is running, and while a top-up checkout may still be paid", async () => {
-      const { db, a, workspaceId, remove } = await start();
+    it("waits while a review is running", async () => {
+      const { db, a, remove } = await start();
       await db
         .updateTable("jobs")
         .set({ status: "running" })
@@ -597,20 +616,156 @@ function suite(engine: BillingEngine) {
         .where("id", "=", a.queuedJobId)
         .execute();
 
-      await createBillingTopUpIntentsRepository(
+      expect(await remove()).toEqual({ ok: true });
+    });
+
+    // #658-T04
+    it("waits while a superseded run still drains under its lease, and not after the lease has run out", async () => {
+      const { db, a, remove } = await start();
+      const supersede = (leaseExpiresAt: string | null) =>
+        db
+          .updateTable("jobs")
+          .set({ status: "superseded", lease_expires_at: leaseExpiresAt })
+          .where("id", "=", a.queuedJobId)
+          .execute();
+
+      await supersede(new Date(NOW.getTime() + 60_000).toISOString());
+      expect(await remove()).toEqual({ ok: false, error: "review_running" });
+
+      await supersede(new Date(NOW.getTime() - 60_000).toISOString());
+      expect(await remove()).toEqual({ ok: true });
+    });
+
+    // #658-T04
+    it("waits while a top-up checkout may still be paid, whether it is pending or expired, for as long as a late payment is credited", async () => {
+      const { db, workspaceId, remove } = await start();
+      const intents = createBillingTopUpIntentsRepository(
+        db,
+        workspaceId,
+        () => NOW,
+      );
+      const intent = await intents.create({
+        adapter: "fake",
+        amountMicroUsd: 10_000_000,
+      });
+      const setIntent = (state: string, createdAt: string) =>
+        db
+          .updateTable("billing_topup_intents")
+          .set({ state, created_at: createdAt })
+          .where("id", "=", intent.id)
+          .execute();
+      const daysAgo = (days: number) =>
+        new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      await setIntent("pending", NOW.toISOString());
+      expect(await remove()).toEqual({ ok: false, error: "payment_open" });
+      // A delayed payment method can succeed days after the checkout began: the checkout page expiring ends nothing.
+      await setIntent("pending", daysAgo(2));
+      expect(await remove()).toEqual({ ok: false, error: "payment_open" });
+      await setIntent("expired", daysAgo(2));
+      expect(await remove()).toEqual({ ok: false, error: "payment_open" });
+      // It ends when the provider says so (a payment or a refusal), or when the window in which a late payment is
+      // still credited has passed (PENDING_TOP_UP_WINDOW_MS: the provider redelivers for three days).
+      await setIntent("failed", NOW.toISOString());
+      expect(await remove()).toEqual({ ok: true });
+    });
+
+    // #658-T04
+    it("does not wait for a checkout that began after the window a late payment is credited in", async () => {
+      const { db, workspaceId, remove } = await start();
+      const intent = await createBillingTopUpIntentsRepository(
         db,
         workspaceId,
         () => NOW,
       ).create({ adapter: "fake", amountMicroUsd: 10_000_000 });
-      expect(await remove()).toEqual({ ok: false, error: "payment_open" });
-
-      // A checkout that began days ago has ended at the provider.
       await db
         .updateTable("billing_topup_intents")
-        .set({ created_at: "2026-10-01T00:00:00.000Z" })
+        .set({
+          state: "expired",
+          created_at: new Date(
+            NOW.getTime() - PENDING_TOP_UP_WINDOW_MS - 1000,
+          ).toISOString(),
+        })
+        .where("id", "=", intent.id)
+        .execute();
+
+      expect(await remove()).toEqual({ ok: true });
+    });
+
+    // #658-T03
+    it("keeps the provider's customer reference and erases the legal name, address and VAT id of the billing profile", async () => {
+      const { db, workspaceId, remove } = await start();
+
+      expect(await remove()).toEqual({ ok: true });
+
+      const profile = await db
+        .selectFrom("billing_profiles")
+        .selectAll()
+        .where("workspace_id", "=", workspaceId)
+        .executeTakeFirstOrThrow();
+      expect(profile).toMatchObject({
+        legal_name: "",
+        country: "",
+        address_line1: "",
+        address_line2: null,
+        postal_code: "",
+        city: "",
+        vat_id: null,
+        confirmed_by: null,
+        customer_adapter: "fake",
+        customer_ref: "cus_a",
+        terms_version: "2026-10",
+      });
+      const text = JSON.stringify(profile);
+      for (const marker of [
+        "Legal a GmbH",
+        "Street a",
+        "DE123456789",
+        "Floor a",
+      ])
+        expect(text).not.toContain(marker);
+    });
+
+    // #658-T03
+    it("removes a billing profile that never reached the provider altogether", async () => {
+      const { db, workspaceId, remove } = await start();
+      await db
+        .updateTable("billing_profiles")
+        .set({ customer_adapter: null, customer_ref: null })
         .where("workspace_id", "=", workspaceId)
         .execute();
+
       expect(await remove()).toEqual({ ok: true });
+
+      expect(
+        await db
+          .selectFrom("billing_profiles")
+          .select("workspace_id")
+          .where("workspace_id", "=", workspaceId)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    // #658-T03
+    it("notes an installation the person had disconnected as unclaimed too", async () => {
+      const { db, workspaceId, remove } = await start();
+      const integrations = createIntegrationsRepository(db, workspaceId);
+      const disconnected = await integrations.create({
+        type: "github_app",
+        displayName: "acme-old",
+        externalId: "installation-old",
+        config: { accountLogin: "acme-old", accountType: "User" },
+      });
+      await integrations.setStatus(disconnected.id, "disconnected");
+
+      expect(await remove()).toEqual({ ok: true });
+
+      expect(await integrations.list()).toEqual([]);
+      expect(
+        await createUnclaimedInstallationsRepository(db).get(
+          "installation-old",
+        ),
+      ).toMatchObject({ accountLogin: "acme-old", accountType: "User" });
     });
 
     it("cannot be repeated: a deleted workspace has no Owner any more", async () => {

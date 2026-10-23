@@ -103,6 +103,8 @@ export interface WorkspacesTable {
   created_by: string | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
+  /** When the workspace was deleted (#658), or null; the row then is a tombstone (src/db/repositories/workspaces-repository.ts). */
+  deleted_at: string | null;
 }
 
 /** A user's membership of a workspace, with a role (a WorkspaceRole, src/workspaces/roles.ts). */

@@ -306,6 +306,25 @@ describe("deleting the workspace", () => {
     expect(await body(response)).toEqual({ error: "balance_positive" });
     expect(await t.h.workspaces.slugExists("acme")).toBe(true);
   });
+
+  // #658-T04
+  it("answers 409 balance_negative while the workspace owes an amount", async () => {
+    const t = await team();
+    await createBillingJournalRepository(t.h.db, t.workspace.id).append({
+      type: "correction",
+      amountMicroUsd: -1_000,
+      refKey: "debt-1",
+    });
+
+    const response = await t.h.handlers.deleteWorkspace(
+      json({ confirmName: t.workspace.name }),
+      t.owner,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await body(response)).toEqual({ error: "balance_negative" });
+    expect(await t.h.workspaces.slugExists("acme")).toBe(true);
+  });
 });
 
 describe("members", () => {

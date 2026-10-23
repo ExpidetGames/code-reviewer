@@ -25,6 +25,7 @@ const WORKSPACE = {
   slug: "acme",
   createdBy: null,
   createdAt: "2026-10-12T00:00:00.000Z",
+  deletedAt: null,
 };
 const memberships: Record<string, Membership["role"]> = { acme: "member" };
 
