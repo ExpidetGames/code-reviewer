@@ -295,14 +295,14 @@ balance below zero `balance_negative`. One exception stays from #498: a job that
 `canCostAnything`) needs only a balance that is not negative. Refusals fail the job with the stable codes below, count no attempt, leave **no usage record and no entry**,
 and are reported to `onRefused` like the refusals of the entitlements:
 
-| Code                        | When                                                                                                            | Notice |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------- | ------ |
-| `insufficient_balance`      | the balance is exactly zero                                                                                     | yes    |
-| `balance_negative`          | the balance is below zero (a final charge, a refund or a chargeback took it there), also for a job that is free | yes    |
+| Code                        | When                                                                                                            | Notice     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------- |
+| `insufficient_balance`      | the balance is exactly zero                                                                                     | yes        |
+| `balance_negative`          | the balance is below zero (a final charge, a refund or a chargeback took it there), also for a job that is free | yes        |
 | `billing_rates_incomplete`  | billing is on and a rate is missing, or the switch is set and the adapter is not ready (`isBillingOn` is false) | yes (#632) |
-| `reviews_paused`            | the hidden brake: the workspace started too many reviews in the last hour (#499, below)                         | yes    |
-| `monthly_limit_reached`     | the workspace's own monthly total limit was reached (#499, below)                                               | yes    |
-| `billing_limits_unreadable` | the brake or the monthly limit could not be evaluated (#499): closed for this job                               | no     |
+| `reviews_paused`            | the hidden brake: the workspace started too many reviews in the last hour (#499, below)                         | yes        |
+| `monthly_limit_reached`     | the workspace's own monthly total limit was reached (#499, below)                                               | yes        |
+| `billing_limits_unreadable` | the brake or the monthly limit could not be evaluated (#499): closed for this job                               | no         |
 
 `billing_hold_released` (a job claimed again whose hold was released) is no longer given: it stays in the code lists and the Runs page for the rows that carry it.
 
