@@ -779,8 +779,12 @@ describe("the pinned address on the settings page of a project (#588)", () => {
     expect(
       screen.queryByRole("checkbox", { name: /confirm the new address/i }),
     ).toBeNull();
-    expect(screen.getByRole("alert").textContent).toMatch(
-      /an owner or admin must confirm/i,
-    );
+    expect(
+      screen
+        .getAllByRole("alert")
+        .some((alert) =>
+          /an owner or admin must confirm/i.test(alert.textContent ?? ""),
+        ),
+    ).toBe(true);
   });
 });

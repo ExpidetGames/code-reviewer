@@ -26,12 +26,7 @@ function links(showPlan?: boolean): string[] {
 describe("the settings navigation", () => {
   // #282-T01
   it("has no Plan entry unless the workspace has entitlements", () => {
-    expect(links()).toEqual([
-      "General",
-      "Review defaults",
-      "LLM",
-      "Advanced",
-    ]);
+    expect(links()).toEqual(["General", "Review defaults", "LLM", "Advanced"]);
   });
 
   it("has the Plan entry before Advanced for a workspace that has entitlements", () => {

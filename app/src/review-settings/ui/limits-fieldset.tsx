@@ -3,8 +3,8 @@
 "use client";
 // The "Limits" section of the settings form (#656): what one review may cost, and (for a Diff Review) how much of a pull
 // request the model reads. An empty field is not "no limit" on a project: it follows the workspace default, and the field
-// says which one that is. The cost limit is roughly the most one review may cost; it counts what the AI model costs and
-// never lifts the limit of the instance (the cost guard of Dynamic Review, #540).
+// says which one that is. The cost limit is roughly the most one review may cost; it never lifts the limit of the instance
+// (the cost guard of Dynamic Review, #540).
 import { REVIEW_SETTING_LIMITS } from "../settings.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import { CostSummary } from "./cost-summary.tsx";
@@ -27,12 +27,18 @@ export function describeCostLimit(cents: number | null | undefined): string {
     : `$${(cents / 100).toFixed(2)}`;
 }
 
+/**
+ * What the cost limit means, by whose key pays, and what an empty field does. No rate and no markup is named: on the
+ * operator's key the limit is held to our price, on the workspace's own key to the model cost plus our infrastructure fee.
+ */
 export function costLimitHint(
   mode: "project" | "global",
   inherited: number | null | undefined,
+  managed: boolean,
 ): string {
-  const start =
-    "Roughly the most one review may cost, in US dollars. It counts what the AI model costs.";
+  const start = managed
+    ? "Roughly the most one review may cost, at our price."
+    : "Roughly the most one review may cost: the model cost at your provider plus our infrastructure fee.";
   return mode === "project"
     ? `${start} Leave empty to use the workspace default (${describeCostLimit(inherited)}).`
     : `${start} Leave empty for no limit of your own; the limit of this instance still applies.`;
@@ -65,7 +71,11 @@ export function LimitsFieldset({
       <SettingsTextField
         name="maxCostCents"
         label="Cost limit per review (USD)"
-        hint={costLimitHint(model.mode, model.inherited.maxCostCents)}
+        hint={costLimitHint(
+          model.mode,
+          model.inherited.maxCostCents,
+          model.managed,
+        )}
         error={errors.maxCostCents}
         origin={origin("maxCostCents", "Cost limit per review")}
         value={state.values.maxCostCents}
