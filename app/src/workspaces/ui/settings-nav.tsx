@@ -6,40 +6,42 @@
 //
 // "Advanced" (#658) only holds the deletion of the workspace and is the Owner's alone, so only an Owner sees the link. The
 // settings layout (`app/(app)/w/[workspace]/settings/layout.tsx`) knows the role and hands it down through
-// `SettingsAccessProvider`, so no page has to pass it on; the nav takes it from there unless a caller says it itself.
+// `SettingsAccessProvider`, so no page has to pass it on; the nav takes it from there unless a caller says it itself. It is a
+// promise, read with `use` behind the nav's own <Suspense> boundary: the nav shows without the link until the role is known, and
+// the page below stays outside any boundary of the layout, so a page that answers "not found" still answers with status 404.
 import { PILL_LINK_CLASS } from "@/components/pill-link";
 import Link from "next/link";
-import { createContext, useContext, type ReactNode } from "react";
+import {
+  createContext,
+  Suspense,
+  use,
+  useContext,
+  type ReactNode,
+} from "react";
 import {
   SETTINGS_SECTIONS,
   settingsSectionHref,
   type SettingsSection,
 } from "./settings-sections.ts";
 
-const SettingsAccessContext = createContext({ showAdvanced: false });
+const SettingsAccessContext = createContext<Promise<boolean> | null>(null);
 
-/** Tells every settings navigation below it whether the person may see "Advanced" (the Owner). */
+/** Tells every settings navigation below it whether the person may see "Advanced" (the Owner); the answer may still be coming. */
 export function SettingsAccessProvider({
   showAdvanced,
   children,
 }: {
-  showAdvanced: boolean;
+  showAdvanced: Promise<boolean>;
   children: ReactNode;
 }) {
   return (
-    <SettingsAccessContext.Provider value={{ showAdvanced }}>
+    <SettingsAccessContext.Provider value={showAdvanced}>
       {children}
     </SettingsAccessContext.Provider>
   );
 }
 
-export function SettingsNav({
-  workspaceSlug,
-  current,
-  showPlan = false,
-  showBilling = false,
-  showAdvanced,
-}: {
+type SettingsNavProps = {
   workspaceSlug: string;
   current: SettingsSection;
   /** The workspace has entitlements (#282): the Plan page is listed. An unlimited workspace has no entry. */
@@ -48,9 +50,30 @@ export function SettingsNav({
   showBilling?: boolean;
   /** The Advanced page is listed. Left out, the settings layout decides (the Owner sees it). */
   showAdvanced?: boolean;
-}) {
+};
+
+export function SettingsNav(props: SettingsNavProps) {
+  return (
+    <Suspense fallback={<SettingsLinks {...props} advanced={false} />}>
+      <SettingsNavWithAccess {...props} />
+    </Suspense>
+  );
+}
+
+function SettingsNavWithAccess(props: SettingsNavProps) {
   const access = useContext(SettingsAccessContext);
-  const advanced = showAdvanced ?? access.showAdvanced;
+  const advanced =
+    props.showAdvanced ?? (access === null ? false : use(access));
+  return <SettingsLinks {...props} advanced={advanced} />;
+}
+
+function SettingsLinks({
+  workspaceSlug,
+  current,
+  showPlan = false,
+  showBilling = false,
+  advanced,
+}: SettingsNavProps & { advanced: boolean }) {
   return (
     <nav aria-label="Settings sections">
       <ul className="flex flex-wrap items-center gap-1">

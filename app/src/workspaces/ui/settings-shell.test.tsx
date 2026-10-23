@@ -3,7 +3,7 @@
 // @vitest-environment jsdom
 // The sub-navigation of the workspace settings and its Plan entry (#282): the entry exists only for a workspace
 // that has entitlements, and its address is the one the operator's page and the refusal notice send people to.
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { planReturnPath } from "../../plan-handoff/return-path.ts";
 import { SettingsAccessProvider } from "./settings-nav.tsx";
@@ -46,24 +46,29 @@ describe("the settings navigation", () => {
   });
 
   // #658-T02
-  it("takes Advanced from the settings layout when the caller does not say", () => {
-    const names = (showAdvanced: boolean) => {
-      const view = render(
-        <SettingsAccessProvider showAdvanced={showAdvanced}>
-          <SettingsNav workspaceSlug="acme" current="" />
-        </SettingsAccessProvider>,
-      );
-      const found = within(
-        screen.getByRole("navigation", { name: "Settings sections" }),
-      )
-        .getAllByRole("link")
-        .map((link) => link.textContent ?? "");
-      view.unmount();
-      return found;
+  it("takes Advanced from the settings layout when the caller does not say", async () => {
+    // The answer of the layout is a promise the navigation waits for, so a component suspends inside the render.
+    const renderWithin = async (showAdvanced: boolean) => {
+      let view: ReturnType<typeof render> | undefined;
+      await act(async () => {
+        view = render(
+          <SettingsAccessProvider showAdvanced={Promise.resolve(showAdvanced)}>
+            <SettingsNav workspaceSlug="acme" current="" />
+          </SettingsAccessProvider>,
+        );
+      });
+      return view;
     };
 
-    expect(names(true)).toContain("Advanced");
-    expect(names(false)).not.toContain("Advanced");
+    const owner = await renderWithin(true);
+    expect(screen.getByRole("link", { name: "Advanced" })).toBeTruthy();
+    owner?.unmount();
+
+    const other = await renderWithin(false);
+    expect(screen.getByRole("link", { name: "General" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Advanced" })).toBeNull();
+    other?.unmount();
+
     // Outside a layout (a page rendered alone) nobody gets the entry.
     render(<SettingsNav workspaceSlug="acme" current="" />);
     expect(screen.queryByRole("link", { name: "Advanced" })).toBeNull();
