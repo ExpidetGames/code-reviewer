@@ -478,6 +478,7 @@ describe("the contract file and the options the app sends", () => {
       "apiKey",
       "baseUrl",
       "fallbackModels",
+      "maxCostUsd",
       "maxTokens",
       "model",
       "provider",

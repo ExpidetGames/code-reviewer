@@ -257,6 +257,18 @@ describe("the check run of a job that did not finish", () => {
     expect(check.summary).toContain("`llm_auth`");
   });
 
+  // #666-T04
+  it("says that a Diff Review stopped at the cost limit of its project, and where to change it", () => {
+    const check = describeCheck(
+      subject({ status: "failed", errorCode: "cost_limit_reached" }),
+    );
+
+    expect(check.conclusion).toBe("neutral");
+    expect(check.summary).toContain("cost limit set for this project");
+    expect(check.summary).toContain("Limits in the project settings");
+    expect(check.summary).toContain("`cost_limit_reached`");
+  });
+
   // #499-T13
   it("says that reviews are paused for a refused job of the hidden brake, with no code, number or window", () => {
     const check = describeCheck(

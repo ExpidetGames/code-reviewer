@@ -619,6 +619,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `checkout_incomplete` | The checkout for a Dynamic Review could not be prepared completely. The result carries a stable `errorReason` (a `CheckoutReason`, listed in `contracts/runner-api.v1.json` as `KnownCheckoutReason`), the log tail starts with `checkout_incomplete [<reason>]` and the runner's `finished:` line names it |
 | `dynamic_policy_violation` | The Dynamic Review would have broken a hard policy (a tool, a path or an output rule) and was stopped |
 | `dynamic_budget_exceeded` | The Dynamic Review used more than its allowed budget |
+| `cost_limit_reached` | A Diff Review sent no further model request because what its calls cost had reached the cost limit of its project (#666, `llm.maxCostUsd`); usage and cost are reported as usual |
 | `dynamic_accounting_failed` | The Dynamic Review's model usage could not be established or accounted for (an answer without usage, or a call the provider's price list cannot price, #511) |
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires (a forced tool choice, #511), or OpenRouter found no provider that supports every parameter of a request (404, #270); there is no fallback model or provider |
 | `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |

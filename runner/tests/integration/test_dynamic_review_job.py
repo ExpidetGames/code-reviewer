@@ -1345,9 +1345,9 @@ def test_a_dynamic_run_after_a_slow_start_is_ended_by_the_time_that_is_left(
     deadlines: list[float] = []
     real = runner.dynamic_ledger
 
-    def spy(capabilities: Any, environment: Any, deadline: float) -> Any:
+    def spy(capabilities: Any, environment: Any, deadline: float, *rest: Any) -> Any:
         deadlines.append(deadline)
-        return real(capabilities, environment, deadline)
+        return real(capabilities, environment, deadline, *rest)
 
     monkeypatch.setattr(runner, "dynamic_ledger", spy)
     script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
