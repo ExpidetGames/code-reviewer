@@ -14,12 +14,20 @@
 // - `payment_open`: a top-up checkout was started within the window a late payment is still credited in
 //   (`PENDING_TOP_UP_WINDOW_MS`) and has no end yet (`paid`, `failed`), so a payment may still arrive: it would credit nobody.
 //
-// The locks, in the order every writer of the queue uses (Postgres; SQLite has one writer): the Dynamic gate, shared (a claim
-// holds it exclusively from its start to its commit, so a claim in flight is waited for, and a claim that starts later waits
-// for this deletion); the workspace row (the members, like every writer that follows); the repositories and the waiting,
-// running and superseded jobs of the workspace (`lockActiveJobs`); the balance row last (a top-up, a claim or a charge cannot
-// slip in between the check and the deletion). A claim takes the gate, then its job row, the workspace row, the balance row:
-// the same order, so the two cannot wait for each other.
+// The locks, in this order (Postgres; SQLite has one writer): the Dynamic gate, shared; the workspace row (the members, like every
+// writer that follows); the repositories and the waiting, running and superseded jobs of the workspace (`lockActiveJobs`); the
+// balance row last (a top-up or a charge cannot slip in between the check and the deletion).
+//
+// A claim does NOT take its locks in that order, and does not have to: it holds the gate exclusively from its start to its commit
+// and this deletion holds it shared, so the two never run at the same time. A claim in flight is waited for (and `hasRunningJobs`
+// then sees its result), and one that starts later waits for this deletion. Inside the claim the order is the gate, the job row
+// (`FOR UPDATE SKIP LOCKED`), the workspace row (`FOR NO KEY UPDATE`, only when a limit applies to the job), the balance row (the
+// hold, or the note of a refusal for the balance). That is job before workspace, the opposite of the deletion: only the gate keeps
+// them from waiting for each other. The balance row after the workspace row is the order of `apply-event.ts` too (the workspace
+// `FOR SHARE`, then the journal), and the workspace row is always taken first for a workspace whose balance the claim locks: the
+// limit that makes the claim lock the workspace row is the same for every job of that workspace in one claim (its entitlements),
+// so a claim that locked a balance row has locked the workspace row before it, or never asks for it. A top-up and a claim of one
+// workspace therefore wait for each other in one direction only, and a claim of another workspace is not waited for at all.
 //
 // What happens otherwise: the GitHub installations of the workspace are released (the connection rows go, and each
 // installation, disconnected or not, is noted as unclaimed so another workspace, or this person's next one, can link it

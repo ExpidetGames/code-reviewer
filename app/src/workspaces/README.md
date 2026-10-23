@@ -95,10 +95,15 @@ money paid in, so the person is told to contact support for a payout), `balance_
 (a top-up checkout started within `PENDING_TOP_UP_WINDOW_MS`, three days, that is neither `paid` nor `failed`, `pending` or
 `expired`: a delayed payment method can still succeed after its checkout page expired).
 
-The locks (Postgres; SQLite has one writer), in the order the queue's writers use: the Dynamic gate, shared (a claim holds it
-exclusively from its start to its commit, so a claim in flight is waited for and none starts meanwhile, which also keeps a
-claim from waiting for rows this deletion holds); the workspace row; the repositories and the waiting, running and superseded
-jobs (`FOR UPDATE`, by id: a writer that sets a job running without the gate is waited for as well); the balance row last.
+The locks (Postgres; SQLite has one writer): the Dynamic gate, shared (a claim holds it exclusively from its start to its commit,
+so a claim in flight is waited for and none starts meanwhile; the gate is also what keeps a claim from waiting for rows this
+deletion holds, because a claim takes its job row before the workspace row and the deletion the other way round); the
+workspace row; the repositories and the waiting, running and superseded jobs (`FOR UPDATE`, by id: a writer that sets a job
+running without the gate is waited for as well); the balance row last. A top-up and an operator's manual credit read the
+workspace row `FOR SHARE` before they write the journal, so a deletion in flight ends before they read it (they then credit
+nobody) and one that starts later waits for them (and then refuses on the balance). The delete of the jobs rides on the index
+`jobs_superseded_by` (`20261023160000_add_jobs_superseded_by_index`): without it every deleted job scanned the table for a job
+that still points at it, 13 s for 20 000 jobs while the gate was held (1.7 s with it; `delete-workspace-scale.integration.test.ts`).
 After the waits the deletion reads the state again, so a claim that committed is seen as `review_running`.
 
 Then `WorkspaceErasure` (`db/repositories/workspace-erasure-repository.ts`, scoped to the workspace) removes everything
