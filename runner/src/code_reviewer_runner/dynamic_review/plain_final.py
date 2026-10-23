@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from code_reviewer_runner.dynamic_findings import DynamicFindings, EnvelopeError, FindingsError
-from code_reviewer_runner.dynamic_review.budget import STOPPED_EARLY_COST, BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.final_json import (
     Problem,
     engine_error_name,
@@ -151,7 +151,9 @@ class PlainFinalization:
         if outcome is None:
             # The guard refused a call: the agent phase is over, the answer is still owed. The run
             # stopped early now: the adapter acts on the refusal (and on no other).
-            self._ledger.note_wrap_up(self._ledger.refusal_reason or STOPPED_EARLY_COST)
+            self._ledger.note_wrap_up(
+                self._ledger.refusal_reason or self._ledger.limits.cost_stop_reason
+            )
             self.record.final_call = "exempt"
             self._ask(final_message, abort=True)
             outcome = self._read() or self._after_the_final_call()

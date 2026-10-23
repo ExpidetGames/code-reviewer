@@ -14,6 +14,7 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
               "baseUrl": "http://127.0.0.1:<port>/api/v1",     // optional, loopback only (fakes)
               "requireParameters": true,                       // optional, with baseUrl (fakes)
               "maxTokens": 163840,                             // optional, context window
+              "maxCostUsd": 0.5,                               // optional, the project's cost limit
               "fallbackModels": ["<vendor>/<model>"]},         // optional, at most five
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
@@ -34,6 +35,7 @@ detail ends up in the result JSON and in logs. Details name fields, never conten
 """
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -88,6 +90,7 @@ _LLM_FIELDS = {
     "baseUrl",
     "requireParameters",
     "maxTokens",
+    "maxCostUsd",
     "fallbackModels",
 }
 _DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities", "cost", "modelEntry"}
@@ -124,6 +127,8 @@ _LOWER_SHA = re.compile(r"[0-9a-f]{40}")
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MIN_CONTEXT_TOKENS = 1000
 MAX_CONTEXT_TOKENS = 10_000_000
+# #666: the most a project may set as its cost limit per review (the app's bound, 10 000 cents).
+MAX_PROJECT_COST_USD = 100
 # A fallback chain longer than this only multiplies the cost and the time of a failing review.
 MAX_FALLBACK_MODELS = 5
 _FIELD_NAME = re.compile(r"[A-Za-z0-9_.-]{1,40}")
@@ -255,6 +260,9 @@ class LlmAccess:
     api_key: str
     base_url: str | None = None
     max_tokens: int | None = None
+    # #666: the cost limit the customer set for a review of the project, in USD; None: none was set.
+    # The run is held to the smaller of this and the operator's limit.
+    max_cost_usd: Decimal | None = None
     fallback_models: tuple[str, ...] = ()
     # Whether every request carries the provider's require-parameters field (OpenRouter's
     # `provider.require_parameters`, #270). True for the provider itself when its entry has the
@@ -376,6 +384,7 @@ def _catalog_llm_access(llm: dict[str, Any], slug: str) -> LlmAccess:
         api_key=_secret(llm, "apiKey", "llm."),
         require_parameters=False,
         max_tokens=_max_tokens(llm),
+        max_cost_usd=_max_cost_usd(llm),
     )
 
 
@@ -403,6 +412,7 @@ def _llm_access(data: dict[str, Any], *, catalog: bool = False) -> LlmAccess:
         require_parameters=_require_parameters(llm, base_url)
         and provider.require_parameters is not None,
         max_tokens=_max_tokens(llm),
+        max_cost_usd=_max_cost_usd(llm),
         fallback_models=_fallback_models(llm, model, provider),
     )
 
@@ -443,6 +453,19 @@ def _max_tokens(llm: dict[str, Any]) -> int | None:
     if not MIN_CONTEXT_TOKENS <= value <= MAX_CONTEXT_TOKENS:
         raise _invalid("llm.maxTokens is out of range")
     return value
+
+
+def _max_cost_usd(llm: dict[str, Any]) -> Decimal | None:
+    """`llm.maxCostUsd` (#666): a finite number above zero and at most `MAX_PROJECT_COST_USD`."""
+    if "maxCostUsd" not in llm:
+        return None
+    value = llm["maxCostUsd"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _invalid("llm.maxCostUsd must be a number")
+    if not math.isfinite(value) or not 0 < value <= MAX_PROJECT_COST_USD:
+        raise _invalid("llm.maxCostUsd is out of range")
+    # The shortest text of the number, so 0.07 is 0.07 and not the float's long tail.
+    return Decimal(repr(value))
 
 
 def _fallback_models(
