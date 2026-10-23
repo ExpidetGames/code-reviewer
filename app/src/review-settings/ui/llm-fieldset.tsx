@@ -62,6 +62,8 @@ export type OwnLlmChoice = {
   addressNote?: ReactNode;
   /** The form offers the catalog providers the workspace holds a key for: say where to add the key of another. */
   keysHint: boolean;
+  /** One line after a change the person did not ask for by name (the fallback model went with the provider). */
+  notice?: string;
 };
 
 /** The choice of a workspace on the operator's key: one entry of the catalog for the review kind. */
@@ -149,6 +151,11 @@ function OwnKeyChoice({
         error={choice.providerError}
         onChange={choice.onProvider}
       />
+      {choice.notice === undefined ? null : (
+        <p className="text-sm text-muted-foreground" data-llm-notice="">
+          {choice.notice}
+        </p>
+      )}
       {choice.keysHint ? (
         <p className="text-sm text-muted-foreground">
           Only providers you have a key for are listed. Add a key on the{" "}

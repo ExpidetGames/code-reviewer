@@ -37,6 +37,9 @@ const ENTRY_FIELDS: readonly string[] = [
   "catalogEntryDiff",
   "catalogEntryDynamic",
 ];
+/** After the Diff provider changed while a fallback model was stored: a fallback of another provider is invalid, so it went. */
+export const FALLBACK_REMOVED_NOTICE =
+  "The fallback model of the previous provider was removed.";
 const CHOOSE_PROVIDER = "Choose one of the listed providers.";
 const CHOOSE_OPTION = "Choose one of the listed options.";
 

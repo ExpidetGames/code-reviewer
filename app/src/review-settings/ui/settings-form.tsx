@@ -107,6 +107,7 @@ import {
   describeIssue,
   describeSaveFailure,
   describeWarning,
+  FALLBACK_REMOVED_NOTICE,
 } from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 
@@ -352,6 +353,8 @@ export function SettingsForm({
   // The notes of the save that was just shown as saved (#269); only shown with that status.
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // A different Diff provider removes the fallback model that was stored for the old one; the LLM section says so.
+  const [fallbackRemoved, setFallbackRemoved] = useState(false);
   // A save that waits for the person to confirm the switch of the review kind.
   const [confirming, setConfirming] = useState<{
     steps: SaveStep[];
@@ -414,6 +417,7 @@ export function SettingsForm({
     setModel(next);
     setState(initialFormState(next));
     setErrors({});
+    setFallbackRemoved(false);
     return true;
   }
 
@@ -570,6 +574,7 @@ export function SettingsForm({
   function discard() {
     setState(initialFormState(model));
     setErrors({});
+    setFallbackRemoved(false);
     setFormError(null);
     setKindError(null);
     setStatus(null);
@@ -654,6 +659,11 @@ export function SettingsForm({
         model: state.values.model,
         modelError: errors.model,
         onProvider: (next) => {
+          if (
+            next !== state.values.provider &&
+            state.values.fallbackModel !== ""
+          )
+            setFallbackRemoved(true);
           const withProvider = setProvider(state, next);
           const fallback = providerDefaultModel(next, "diff");
           edit(
@@ -666,6 +676,7 @@ export function SettingsForm({
         onModel: (next) => handlers.setText("model", next),
         registryModels: suggestionsOf(provider, "diff"),
         keysHint: false,
+        ...(fallbackRemoved ? { notice: FALLBACK_REMOVED_NOTICE } : {}),
       };
     }
     const defaultDynamicModel = projectView.defaults.dynamicModel ?? "";

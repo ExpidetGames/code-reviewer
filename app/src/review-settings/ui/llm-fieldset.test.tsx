@@ -37,6 +37,8 @@ import { SettingsForm } from "./settings-form.tsx";
 afterEach(cleanup);
 
 const SAVE = { name: "Save review settings" };
+const FALLBACK_REMOVED =
+  "The fallback model of the previous provider was removed.";
 type User = ReturnType<typeof userEvent.setup>;
 
 const modelDropdown = () => screen.getByLabelText("Model");
@@ -435,5 +437,74 @@ describe("a stored fallback model", () => {
       fallbackModel: "vendor/fallback-model",
       maxFindings: 12,
     });
+  });
+
+  // #656-T03
+  it("is removed when the provider changes, because a fallback of another provider is invalid, and the form says so", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({
+          overrides: { fallbackModel: "vendor/fallback-model" },
+        })}
+        keyedProviders={["openrouter", "anthropic"]}
+        api={api}
+      />,
+    );
+    await openSection(user, "LLM");
+    expect(screen.queryByText(FALLBACK_REMOVED)).toBeNull();
+
+    await chooseOption(user, screen.getByLabelText("Provider"), "Anthropic");
+
+    expect(screen.getByText(FALLBACK_REMOVED)).toBeTruthy();
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ provider: "anthropic" });
+    expect(save.mock.calls[0]?.[0]).not.toMatchObject({
+      fallbackModel: "vendor/fallback-model",
+    });
+  });
+
+  // #656-T03
+  it("says nothing about a fallback when there was none to remove", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel()}
+        keyedProviders={["openrouter", "anthropic"]}
+        api={fakeApi().api}
+      />,
+    );
+    await openSection(user, "LLM");
+
+    await chooseOption(user, screen.getByLabelText("Provider"), "Anthropic");
+
+    expect(screen.queryByText(FALLBACK_REMOVED)).toBeNull();
+  });
+
+  // #656-T03
+  it("keeps the fallback, and says nothing, while the same provider is chosen again", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({
+          overrides: { fallbackModel: "vendor/fallback-model" },
+        })}
+        keyedProviders={["openrouter", "anthropic"]}
+        api={api}
+      />,
+    );
+    await openSection(user, "LLM");
+
+    await chooseOption(user, screen.getByLabelText("Provider"), "OpenRouter");
+
+    expect(screen.queryByText(FALLBACK_REMOVED)).toBeNull();
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save).not.toHaveBeenCalled();
   });
 });
