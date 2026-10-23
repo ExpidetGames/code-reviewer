@@ -945,3 +945,78 @@ describe("posting the notice of a refused review (#281)", () => {
     expect(client.calls).toEqual([]);
   });
 });
+
+describe("reading the review comment of a run (#657)", () => {
+  const own = {
+    id: "5001",
+    body: "## Review\n\nA finding.",
+    authorLogin: "code-reviewer-test[bot]",
+  };
+
+  // #657-T04
+  it("reads the body of the app's own comment with a token limited to the repository and the read permission", async () => {
+    const { client, provider } = setup({
+      issueComments: { "acme/widgets#5001": own },
+    });
+
+    expect(
+      await provider.readReviewComment?.(integration, widgets, "5001"),
+    ).toEqual({ body: own.body });
+
+    expect(
+      client.calls.filter((call) => call.method === "getIssueComment"),
+    ).toEqual([
+      {
+        method: "getIssueComment",
+        args: [
+          "4242",
+          {
+            repositoryIds: [7001],
+            permissions: { issues: "read", metadata: "read" },
+          },
+          "acme/widgets",
+          "5001",
+        ],
+      },
+    ]);
+  });
+
+  // #657-T04
+  it("answers null for a comment of somebody else and for one that is gone", async () => {
+    const { provider } = setup({
+      issueComments: {
+        "acme/widgets#5002": { ...own, id: "5002", authorLogin: "mallory" },
+      },
+    });
+
+    expect(
+      await provider.readReviewComment?.(integration, widgets, "5002"),
+    ).toBeNull();
+    expect(
+      await provider.readReviewComment?.(integration, widgets, "5003"),
+    ).toBeNull();
+  });
+
+  it("turns a failure into a provider neutral code and refuses a foreign repository without a request", async () => {
+    const failing = setup({
+      getCommentFailure: new GithubAppError(
+        "GITHUB_APP_UNAVAILABLE",
+        "GitHub could not be reached.",
+      ),
+    });
+    await expect(
+      failing.provider.readReviewComment?.(integration, widgets, "5001"),
+    ).rejects.toMatchObject({ code: "INTEGRATION_ACCESS_UNAVAILABLE" });
+
+    const { client, provider } = setup();
+    await expect(
+      provider.readReviewComment?.(
+        integration,
+        { ...widgets, integrationId: "another" },
+        "5001",
+      ),
+    ).rejects.toMatchObject({ code: "INTEGRATION_ACCESS_SCOPE_REFUSED" });
+    expect(client.calls).toEqual([]);
+  });
+});
+

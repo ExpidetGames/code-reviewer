@@ -151,6 +151,18 @@ export type GithubAppClient = {
     options?: { since?: string },
   ): Promise<IssueComment[]>;
   /**
+   * One comment below a pull request by its id (#657; `GET .../issues/comments/{id}`), read with a token of its own
+   * limited to `scope`. null when there is no such comment (it was deleted). Nothing here is the pull request's own
+   * text: the caller keeps the body as untrusted data.
+   */
+  getIssueComment(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    commentId: string,
+    signal?: AbortSignal,
+  ): Promise<IssueComment | null>;
+  /**
    * Writes a comment below a pull request as the app, with a token of its own limited to `scope` (minted
    * for this call and switched off after it, also when the call fails). Rejects with the stable code of the
    * answer (403 `GITHUB_APP_FORBIDDEN`, 404 `GITHUB_APP_NOT_FOUND`, ...); the body is never part of a message.
@@ -315,7 +327,10 @@ function toRepository(value: unknown, call: string): RemoteRepository {
   };
 }
 
-function toIssueComment(value: unknown): IssueComment {
+function toIssueComment(
+  value: unknown,
+  call = "GET /repos/{owner}/{repo}/issues/{n}/comments",
+): IssueComment {
   const user = isRecord(value) ? value.user : undefined;
   if (
     !isRecord(value) ||
@@ -324,7 +339,7 @@ function toIssueComment(value: unknown): IssueComment {
     !isRecord(user) ||
     typeof user.login !== "string"
   )
-    throw shapeError("GET /repos/{owner}/{repo}/issues/{n}/comments");
+    throw shapeError(call);
   return { id: String(value.id), body: value.body, authorLogin: user.login };
 }
 
@@ -990,6 +1005,38 @@ export function createGithubAppClient(
           },
           (item) => toIssueComment(item),
         ),
+      );
+    },
+
+    async getIssueComment(
+      installationId,
+      scope,
+      repoFullName,
+      commentId,
+      signal,
+    ) {
+      checkInstallationId(installationId);
+      checkCheckRunId(commentId);
+      const path = `${repoPath(repoFullName)}/issues/comments/${commentId}`;
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          try {
+            return toIssueComment(
+              await request(token, "GET", path, undefined, signal),
+              "GET /repos/{owner}/{repo}/issues/comments/{id}",
+            );
+          } catch (error) {
+            if (
+              error instanceof GithubAppError &&
+              error.code === "GITHUB_APP_NOT_FOUND"
+            )
+              return null;
+            throw error;
+          }
+        },
+        signal,
       );
     },
 
