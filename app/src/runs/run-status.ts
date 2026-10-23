@@ -5,12 +5,19 @@
 // never told apart by color alone: the label is text and the symbol is a different shape for each.
 import { JOB_STATUSES, type JobStatus } from "../jobs/job-status.ts";
 
+/** The symbols of the run statuses, as the design board pairs them (#633, #636). */
+export type RunStatusSymbol =
+  "hourglass" | "play" | "check" | "x" | "prohibit" | "arrow-clockwise";
+
 export type RunStatusPresentation = {
   label: string;
   /** A short sentence for the detail page and for assistive technology. */
   description: string;
-  /** One character that differs per status; decoration only (the label carries the meaning). */
-  symbol: string;
+  /**
+   * The name of a Phosphor icon that differs per status (#636); decoration only (the label carries the
+   * meaning). A name, not a component, so this module stays free of React; the badge draws it.
+   */
+  symbol: RunStatusSymbol;
   /** Whether the run can still change (the pages poll while one of these is shown). */
   settled: boolean;
 };
@@ -20,38 +27,38 @@ export const RUN_STATUS_PRESENTATION: Record<JobStatus, RunStatusPresentation> =
     queued: {
       label: "Waiting",
       description: "Waiting for a runner to pick it up.",
-      symbol: "⏳",
+      symbol: "hourglass",
       settled: false,
     },
     running: {
       label: "Running",
       description: "A runner is working on it now.",
-      symbol: "▶",
+      symbol: "play",
       settled: false,
     },
     succeeded: {
       label: "Succeeded",
       description: "The review was published.",
-      symbol: "✓",
+      symbol: "check",
       settled: true,
     },
     failed: {
       label: "Failed",
       description: "The run ended without a review.",
-      symbol: "✗",
+      symbol: "x",
       settled: true,
     },
     cancelled: {
       label: "Cancelled",
       description: "The run was stopped before it produced a review.",
-      symbol: "⊘",
+      symbol: "prohibit",
       settled: true,
     },
     superseded: {
       label: "Superseded",
       description:
         "A newer push replaced this run, so it was stopped and a newer run took its place. A review it had not published is not on the pull request.",
-      symbol: "↻",
+      symbol: "arrow-clockwise",
       settled: true,
     },
   };

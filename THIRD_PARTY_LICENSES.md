@@ -108,8 +108,9 @@ SOFTWARE.
 ```
 
 The Tailwind CSS v4 packages the app installs (`tailwindcss`, `@tailwindcss/postcss`) and the
-shadcn runtime dependencies (`clsx`, `tailwind-merge`, `class-variance-authority`, `lucide-react`,
-`tw-animate-css`, `radix-ui`) are MIT/Apache-2.0/ISC and need no exception.
+shadcn runtime dependencies (`clsx`, `tailwind-merge`, `class-variance-authority`, `tw-animate-css`,
+`radix-ui`) are MIT/Apache-2.0/ISC and need no exception. The app's icons come from
+`@phosphor-icons/react` (MIT, as on the landing page) and need no exception either.
 
 ## OpenCode and ripgrep (prebuilt binaries of the Dynamic runner image)
 

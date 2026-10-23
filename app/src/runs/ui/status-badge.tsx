@@ -2,13 +2,35 @@
 
 "use client";
 // The status of a run as a quiet badge: the label as text, a symbol of its own and a soft tone per
-// status, so the status is never told by colour alone. The symbol is decoration for assistive
-// technology (the label carries the meaning). The full description is not printed next to the label;
+// status, so the status is never told by colour alone. The symbol is a Phosphor icon (#636), hidden
+// from assistive technology: the label is the accessible name of the status and is read once. The full description is not printed next to the label;
 // on the run detail page `hint` adds the focusable "?" that holds it.
 import { Badge } from "../../components/ui/badge.tsx";
 import { InfoHint } from "../../components/info-hint.tsx";
 import type { JobStatus } from "../../jobs/job-status.ts";
-import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
+import {
+  ArrowClockwiseIcon,
+  CheckIcon,
+  HourglassIcon,
+  PlayIcon,
+  ProhibitIcon,
+  XIcon,
+} from "@phosphor-icons/react/dist/ssr";
+import type { Icon } from "@phosphor-icons/react";
+import {
+  RUN_STATUS_PRESENTATION,
+  type RunStatusSymbol,
+} from "../run-status.ts";
+
+/** The Phosphor icon behind each status symbol (the design board's run badges). */
+const SYMBOL_ICON: Record<RunStatusSymbol, Icon> = {
+  hourglass: HourglassIcon,
+  play: PlayIcon,
+  check: CheckIcon,
+  x: XIcon,
+  prohibit: ProhibitIcon,
+  "arrow-clockwise": ArrowClockwiseIcon,
+};
 
 /** One soft tone per status; the meaning stays in the label, the tone is only a hint. */
 const STATUS_TONE: Record<
@@ -34,6 +56,7 @@ export function RunStatusBadge({
   hint?: boolean;
 }) {
   const presentation = RUN_STATUS_PRESENTATION[status];
+  const StatusIcon = SYMBOL_ICON[presentation.symbol];
   const badge = (
     // The description is reachable without a second control per row: a non-interactive `title` on the
     // list badge, and the focusable "?" (`hint`) on the run detail.
@@ -43,7 +66,7 @@ export function RunStatusBadge({
       data-status={status}
       title={presentation.description}
     >
-      <span aria-hidden="true">{presentation.symbol}</span>
+      <StatusIcon aria-hidden="true" weight="bold" />
       {presentation.label}
     </Badge>
   );

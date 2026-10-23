@@ -6,7 +6,7 @@
 // person would see on its own page and a Configure link), then the import notice as a one-line banner.
 // The old "Setting" badge and the page description are gone.
 import Link from "next/link";
-import { CheckCircle2, TriangleAlert } from "lucide-react";
+import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react/dist/ssr";
 import {
   NeedsAttention,
   type AttentionNotice,
@@ -43,7 +43,7 @@ function SetupRow({
   /** Left out for a setting that has no page of its own (a read-only status). */
   href?: string;
 }) {
-  const Icon = status === "ok" ? CheckCircle2 : TriangleAlert;
+  const Icon = status === "ok" ? CheckCircleIcon : WarningIcon;
   return (
     <li className="flex items-start gap-3 border-t border-border py-3 first:border-t-0">
       <Icon
