@@ -121,6 +121,7 @@ describe("the migrations of both epics", () => {
       "20261022010000_add_usage_record_billing_state",
       "20261022020000_add_billing_webhook_events_resolution",
       "20261022030000_create_billing_notifications",
+      "20261023090000_widen_refusal_notice_codes_for_billing_setup",
     ]);
   });
 

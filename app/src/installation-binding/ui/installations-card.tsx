@@ -6,7 +6,8 @@
 // reviews, a status badge and, for an Owner or Admin, a Disconnect action. Disconnecting asks for
 // confirmation in a dialog (the only destructive action of the page). The account name comes from
 // GitHub: it is text, truncated, never markup. Status is not told by colour alone; the badge label
-// carries the meaning and the variant is only the quiet tone.
+// carries the meaning and the variant is only the quiet tone. Each row starts with the account's GitHub
+// avatar, or its initials without one (#638).
 import { useId } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -27,6 +28,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.tsx";
+import { UserAvatar } from "../../shell/user-avatar.tsx";
 import type { ConnectionView } from "./connections-page.tsx";
 
 const STATUS_COPY: Record<ConnectionView["status"], string> = {
@@ -101,13 +103,23 @@ export function InstallationsCard({
                 data-connection={connection.id}
                 className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-4 first:pt-0 last:pb-0"
               >
-                <div className="flex min-w-0 flex-col">
-                  <span className="min-w-0 truncate font-semibold text-foreground">
-                    {connection.accountLogin}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {rowNote(connection)}
-                  </span>
+                <div className="flex min-w-0 items-center gap-3">
+                  <UserAvatar
+                    size="lg"
+                    user={{
+                      name: connection.accountLogin,
+                      login: connection.accountLogin,
+                      avatarUrl: connection.avatarUrl,
+                    }}
+                  />
+                  <div className="flex min-w-0 flex-col">
+                    <span className="min-w-0 truncate font-semibold text-foreground">
+                      {connection.accountLogin}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {rowNote(connection)}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <Badge variant={STATUS_VARIANT[connection.status]}>

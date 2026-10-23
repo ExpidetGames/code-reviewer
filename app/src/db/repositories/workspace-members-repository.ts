@@ -21,6 +21,8 @@ export type Member = {
   role: WorkspaceRole;
   /** ISO 8601 text in UTC. */
   joinedAt: string;
+  /** The numeric id of the member's GitHub account, as text, for the avatar; null without one (#638). */
+  githubAccountId: string | null;
 };
 
 export type WorkspaceMembersRepository = {
@@ -54,17 +56,26 @@ export function createWorkspaceMembersRepository(
   now: () => Date = () => new Date(),
 ): WorkspaceMembersRepository {
   function members() {
-    return db
-      .selectFrom("workspace_members")
-      .innerJoin("users", "users.id", "workspace_members.user_id")
-      .select([
-        "workspace_members.user_id as user_id",
-        "workspace_members.role as role",
-        "workspace_members.created_at as joined_at",
-        "users.name as name",
-        "users.email as email",
-      ])
-      .where("workspace_members.workspace_id", "=", workspaceId);
+    return (
+      db
+        .selectFrom("workspace_members")
+        .innerJoin("users", "users.id", "workspace_members.user_id")
+        // At most one GitHub account per user (the unique index accounts_user_provider).
+        .leftJoin("accounts", (join) =>
+          join
+            .onRef("accounts.user_id", "=", "users.id")
+            .on("accounts.provider_id", "=", "github"),
+        )
+        .select([
+          "workspace_members.user_id as user_id",
+          "workspace_members.role as role",
+          "workspace_members.created_at as joined_at",
+          "users.name as name",
+          "users.email as email",
+          "accounts.account_id as github_account_id",
+        ])
+        .where("workspace_members.workspace_id", "=", workspaceId)
+    );
   }
 
   function toMember(row: {
@@ -73,6 +84,7 @@ export function createWorkspaceMembersRepository(
     joined_at: string;
     name: string;
     email: string;
+    github_account_id: string | null;
   }): Member {
     if (!isWorkspaceRole(row.role))
       throw new Error(`The database holds an unknown role "${row.role}".`);
@@ -82,6 +94,7 @@ export function createWorkspaceMembersRepository(
       email: row.email,
       role: row.role,
       joinedAt: row.joined_at,
+      githubAccountId: row.github_account_id,
     };
   }
 

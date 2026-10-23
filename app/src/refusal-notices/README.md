@@ -99,8 +99,8 @@ ran for this change." and "This workspace has no credit left for reviews." (or "
 continue": with a link to the billing page of the workspace (`/w/<slug>/settings/billing`, `settingsUrl`, #505; the workspace settings while billing is off, `billing-link.ts`) it says an Owner or
 Admin can do so there, without one it says to contact an Owner or Admin. It names no amount, rate, formula or model. It is **one per pull request head**,
 not per period: the row is recorded under `head:<commit id>` in the `period_start` column (`notice-key.ts`; a value that is no commit id gets no notice),
-so a new push after a top-up that was not enough is told again and the same head is told once. `billing_rates_incomplete` and `billing_hold_released`
-have no notice: they are the operator's side. The check of `refusal_notices.code` took the two codes with migration `20261021090000_widen_refusal_notice_codes`.
+so a new push after a top-up that was not enough is told again and the same head is told once. `billing_hold_released`
+has no notice: it is the operator's side (`billing_rates_incomplete` has one since #632, below). The check of `refusal_notices.code` took the two codes with migration `20261021090000_widen_refusal_notice_codes`.
 
 ## The limits (#499)
 
@@ -112,6 +112,19 @@ while." and "Please try again later.": **it never names the number of reviews, t
 page, because nobody in the workspace can lift it (`noticeLinkKind`). Neither text holds a digit or an amount. `billing_limits_unreadable` has no notice:
 it is the operator's side. The check of `refusal_notices.code` took the two codes with migration
 `20261021210000_widen_refusal_notice_codes_for_limits`.
+
+## An incomplete billing setup (#632)
+
+A job the claim refuses because billing is switched on but its setup is not complete (`billing_rates_incomplete`: a rate, a Stripe
+credential, the connection check or the link to the terms is missing, `src/billing/readiness.ts`) gets a notice too. This is the
+operator's side, but it refuses **every** review of the instance, so it must never be silent on the pull request (it was until
+#632: the job failed and nobody heard of it). The notice is keyed by the head like the balance's (`head:<commit id>`), so the same head
+is told once and a new push again. Its text is "No review ran for this change.", "Reviews cannot start because the billing setup of this
+instance is not complete." and "Please contact whoever runs this instance.": it names no missing item, no amount and no setting, and it
+points to no page, because nobody in the workspace can complete it (`noticeLinkKind`). The claim is the app's in both runtime modes (a
+runner polls it, or a Dispatcher claims a job by its id), so both get the notice. The check of `refusal_notices.code` took the code with
+migration `20261023090000_widen_refusal_notice_codes_for_billing_setup`. The operator sees the same state as a banner on every page of the
+admin portal (`src/admin/README.md`).
 
 ## Not covered
 

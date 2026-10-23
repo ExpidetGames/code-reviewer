@@ -13,6 +13,7 @@ import type { InstallationLinkRequestsRepository } from "../../db/repositories/i
 import type { IntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../../db/repositories/repositories-repository.ts";
 import type { IntegrationStatus } from "../../integrations/types.ts";
+import { githubAvatarUrl } from "../../shell/user-display.ts";
 import { isBindingResultCode } from "../errors.ts";
 import type { InstallationLinkRequestStatus } from "../requests.ts";
 import type {
@@ -31,6 +32,8 @@ export type ConnectionView = {
   status: IntegrationStatus;
   /** Repositories GitHub lists for the installation now. */
   repositoryCount: number;
+  /** The avatar of the account on GitHub's avatar host, from its stored id; null without one (#638). */
+  avatarUrl: string | null;
 };
 
 export type RequestView = {
@@ -104,6 +107,11 @@ export async function loadConnectionsPage(deps: {
       repositoryCount: repositories.filter(
         (repository) => repository.integrationId === integration.id,
       ).length,
+      avatarUrl: githubAvatarUrl(
+        typeof integration.config.accountId === "number"
+          ? integration.config.accountId
+          : null,
+      ),
     })),
     requests:
       requests === null

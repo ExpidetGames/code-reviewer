@@ -26,13 +26,13 @@
     "opencode-providers:derive": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/opencode-providers/cli.ts --write"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@vercel/functions": "^3.10.1",
     "better-auth": "1.7.7",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "kysely": "^0.29.6",
-    "lucide-react": "^1.55.0",
     "next": "16.4.0",
     "nodemailer": "10.0.16",
     "pg": "^8.23.1",

@@ -258,6 +258,24 @@ describe("the check run of a job that did not finish", () => {
     expect(check.summary).not.toMatch(/\d|hour|brake|window/i);
   });
 
+  // #632-T02
+  it("is neutral for a job refused because the billing setup is not complete, and says so with its stable code", () => {
+    const check = describeCheck(
+      subject({ status: "failed", errorCode: "billing_rates_incomplete" }),
+    );
+
+    expect(check).toMatchObject({
+      status: "completed",
+      conclusion: "neutral",
+      title: "Review did not finish",
+    });
+    expect(check.summary).toContain(
+      "the billing setup of this instance is not complete",
+    );
+    expect(check.summary).toContain("whoever runs this instance");
+    expect(check.summary).toContain("`billing_rates_incomplete`");
+  });
+
   // #405-T06
   it("is neutral for a timeout and a lease that ran out", () => {
     for (const errorCode of ["timeout", "lease_expired"]) {
