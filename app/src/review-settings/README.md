@@ -172,6 +172,30 @@ valid. Two families sit side by side and only the one that matches the workspace
 - The model a provider other than the default would use when no
   layer sets one is the claim's business (#432): the views show the model of the layers.
 
+## The four sections of the settings form (#656)
+
+`ui/settings-form.tsx` shows its fields in four sections, as tabs: **Review** (the review kind and its skill, the review
+verdict, then the review options), **LLM** (`ui/llm-fieldset.tsx`), **Trigger** (`ui/when-fieldset.tsx`: when the reviewer
+starts) and **Limits** (`ui/limits-fieldset.tsx`: the cost limit of a review, and for a Diff Review the token budget with its
+cost estimate). The workspace defaults page (Settings, Review defaults) is the same form without the project-only fields, so it has
+the same sections. A refused save opens the first section with a problem and focuses its first marked field; a problem in a field
+the selected kind does not show opens Review, where the note about it is.
+
+- **LLM** has two dropdowns and nothing else, in both key modes: a provider, then a model of that provider (`ui/model-select.tsx`;
+  a saved model the provider no longer lists stays in the list). On the workspace's own key the providers are the registry's and the
+  catalog providers it holds a key for, and choosing a provider takes its default model with it; the models of a catalog provider
+  are fetched (`native-providers/ui/api.ts`). On the operator's key the one provider is the product name and the models are the
+  entries of the catalog by the names the operator gave them (never a vendor or a model id, ADR 0005). The provider and its model
+  are one choice: one origin badge, and "Reset to default" takes both back. The fallback model has no field any more (it was stored
+  and never used); a stored value is kept.
+- **Limits** holds `maxCostCents` (#656), roughly the most one review may cost, typed in dollars and stored in whole cents. It is a
+  review setting like the others: a project value over the workspace default over none. An empty field on a project follows the
+  workspace default and the field says which one that is; an empty workspace default is no limit of its own (the limit of the
+  instance, the cost guard of #540, applies in every case). It is validated like the other fields (`validate.ts`, 1 cent to 100
+  dollars) and sets the limit the Diff cost estimate warns above (`cost.ts` `costLimitUsdOf`).
+- **New projects start as Dynamic Review** where the instance has Dynamic Review on (`projects/new-project-settings.ts`, read in
+  the transaction that creates the project row); projects that exist keep their kind.
+
 ## The settings form: provider, model and catalog entry (#433)
 
 `ui/settings-form.tsx` is one form for the workspace defaults and for a project. What the Model card (Diff Review) and

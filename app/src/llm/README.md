@@ -160,8 +160,10 @@ described above, and a workspace without any is on its own key. With billing on:
   path that does not exist.
 - **The page.** While billing is on, **Settings → LLM access** starts with the choice (`ui/key-mode-card.tsx`): "Use our models" and
   "Use my own provider key", one sentence each about what is charged (AI and infrastructure, or infrastructure only; no rate, no
-  formula), read-only for a Member. The key forms stay on the page whichever is chosen, so the key can be saved before switching;
-  the own option waits for a saved key. With billing off the page is the one described under "The workspace pages" below.
+  formula), read-only for a Member. The tab is called **LLM** (#656). The settings of the own key (the key forms and the catalog
+  providers) follow the selected option (`ui/key-mode-gate.tsx`): they are hidden while "Use our models" is selected and shown as
+  soon as "Use my own provider key" is, so the key can still be saved before the choice is; the choice itself can be saved once a
+  key is stored. With billing off the page is the one described under "The workspace pages" below.
 
 ## Which provider, model and entry a job gets (#431)
 
