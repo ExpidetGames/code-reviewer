@@ -2,11 +2,11 @@
 
 "use client";
 // The billing page of a workspace, `/w/:ws/settings/billing` (ADR 0006, 2.5; #505): the balance, adding credit, the payments on
-// their way, the billing details, the journal with the price of each review, the monthly limit, and whose key reviews run on. It
+// their way, the billing details, the invoices, the journal with the price of each review, the monthly limit, and whose key reviews run on. It
 // replaces the plan and usage page while billing is on. An Owner or an Admin changes things; a Member reads the balance and the
 // journal. The server renders the first view and renders it again after every change (`router.refresh()`); a person who comes back
 // from the payment page gets a note, and the page looks again for the credit until it arrives.
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { SettingsScreen } from "../../workspaces/ui/settings-shell.tsx";
@@ -22,6 +22,7 @@ import {
 import type { WorkspaceBillingView } from "../view.ts";
 import { BalanceCard } from "./balance-card.tsx";
 import { BillingNotes } from "./billing-notes.tsx";
+import { InvoicesCard } from "./invoices-card.tsx";
 import { JournalCard } from "./journal-card.tsx";
 import { MonthlyLimitCard } from "./monthly-limit-card.tsx";
 import { PendingTopUps } from "./pending-top-ups.tsx";
@@ -71,7 +72,11 @@ export function BillingPageContent({
   api?: WorkspaceBillingApi;
   navigate?: (url: string) => void;
 }) {
-  const api = apiProp ?? browserWorkspaceBillingApi(workspaceSlug);
+  // One api for the life of the page: the invoices card asks again when it changes.
+  const api = useMemo(
+    () => apiProp ?? browserWorkspaceBillingApi(workspaceSlug),
+    [apiProp, workspaceSlug],
+  );
   return (
     <SettingsScreen workspaceSlug={workspaceSlug} current="billing" showBilling>
       <div className="flex max-w-[64rem] flex-col gap-6">
@@ -106,6 +111,9 @@ export function BillingPageContent({
         ) : null}
         {view.canManage && view.profileRequired ? (
           <ProfileCard profile={view.profile} api={api} />
+        ) : null}
+        {view.canManage && view.topUpAvailable ? (
+          <InvoicesCard api={api} refreshKey={view.balanceMicroUsd} />
         ) : null}
         <JournalCard
           workspaceSlug={workspaceSlug}

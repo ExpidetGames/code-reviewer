@@ -77,6 +77,7 @@ export function createStore(options: { now: () => number }) {
   const sessions = new Map<string, FakeObject>();
   const paymentIntents = new Map<string, FakeObject>();
   const charges = new Map<string, FakeObject>();
+  const invoices = new Map<string, FakeObject>();
   const refunds = new Map<string, FakeObject>();
   const disputes = new Map<string, FakeObject>();
   const endpoints = new Map<string, FakeEndpoint>();
@@ -247,6 +248,7 @@ export function createStore(options: { now: () => number }) {
       sessions,
       paymentIntents,
       charges,
+      invoices,
       refunds,
       disputes,
       endpoints,
@@ -397,6 +399,25 @@ export function createStore(options: { now: () => number }) {
       intent.latest_charge = charge.id;
       paymentIntents.set(intent.id, intent);
       charges.set(charge.id, charge);
+      // Managed Payments: Stripe, the seller of record, issues the buyer's invoice; the app asks for none (`invoice_creation` is
+      // refused). It belongs to the customer of the session and carries the page and the PDF Stripe hosts. NOT recorded against
+      // the sandbox (maintainer task #503): that a Managed Payments payment leaves an Invoice object is this fake's assumption.
+      if (typeof session.customer === "string") {
+        const invoice = copyOf("invoice", ids.next("in"), {
+          amount_due: total,
+          amount_paid: total,
+          total,
+          currency,
+          customer: session.customer,
+          payment_intent: intent.id,
+          created: seconds(),
+          number: `FAKE-${String(invoices.size + 1).padStart(4, "0")}`,
+          status: "paid",
+          hosted_invoice_url: `${new URL(String(session.url)).origin}/i/${intent.id}`,
+          invoice_pdf: `${new URL(String(session.url)).origin}/i/${intent.id}/pdf`,
+        });
+        invoices.set(invoice.id, invoice);
+      }
       session.status = "complete";
       session.payment_status = "paid";
       session.payment_intent = intent.id;
@@ -451,6 +472,20 @@ export function createStore(options: { now: () => number }) {
     getPaymentIntent(id: string): FakeObject {
       const found = paymentIntents.get(id);
       if (found === undefined) throw noSuch("payment_intent", id, "intent");
+      return found;
+    },
+    /** An invoice Stripe made on its own (a draft, one still open, one voided): no request of the app is behind it. */
+    addInvoice(patch: Record<string, unknown>): FakeObject {
+      const invoice = copyOf("invoice", ids.next("in"), {
+        created: seconds(),
+        ...patch,
+      });
+      invoices.set(invoice.id, invoice);
+      return invoice;
+    },
+    getInvoice(id: string): FakeObject {
+      const found = invoices.get(id);
+      if (found === undefined) throw noSuch("invoice", id, "invoice");
       return found;
     },
     getCharge(id: string): FakeObject {
@@ -559,6 +594,7 @@ export function createStore(options: { now: () => number }) {
         sessions,
         paymentIntents,
         charges,
+        invoices,
         refunds,
         disputes,
         endpoints,

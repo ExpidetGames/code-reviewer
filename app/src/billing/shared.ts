@@ -41,6 +41,8 @@ import {
   type MonthlyLimitRoute,
 } from "./monthly-limit-http.ts";
 import { createMonthlyLimitService } from "./monthly-limit-service.ts";
+import { createInvoicesRoute, type InvoicesRoute } from "./invoices-http.ts";
+import { createInvoicesService } from "./invoices-service.ts";
 import { createJournalRoute, type JournalRoute } from "./journal-http.ts";
 import { createProfileRoute, type ProfileRoute } from "./profile-http.ts";
 import { createBillingProfileService } from "./profile-service.ts";
@@ -161,6 +163,21 @@ export function getJournalRoute(): JournalRoute {
   return createJournalRoute({
     guard: { isOn: () => isBillingOn(db), notFound },
     service: getWorkspaceBillingService(),
+  });
+}
+
+/** The handler of `GET /api/w/:workspace/billing/invoices`, wired to the running server (#659). */
+export function getInvoicesRoute(): InvoicesRoute {
+  const db = getDatabase();
+  return createInvoicesRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    service: createInvoicesService({
+      db,
+      activeAdapter: createActiveAdapterResolver(
+        db,
+        getBillingAdapterRegistry(),
+      ),
+    }),
   });
 }
 

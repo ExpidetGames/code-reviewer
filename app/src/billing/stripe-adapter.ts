@@ -33,10 +33,13 @@ import {
   TOP_UP_MAX_MICRO_USD,
   TOP_UP_MIN_MICRO_USD,
   assertTopUpAmount,
+  isProviderCurrency,
+  toProviderAmount,
   type BillingAdapter,
   type BillingCapabilities,
   type BillingProfile,
   type BillingWebhookRejectionCode,
+  type InvoiceSummary,
   type ProviderRef,
   type TopUpLookupEvent,
 } from "./adapter.ts";
@@ -446,6 +449,38 @@ export function createStripeAdapter({
       return event;
     },
 
+    async listInvoices({ customer }) {
+      const client = await clientOf();
+      const found = await atStripe(() => client.listInvoices(customer));
+      const invoices: InvoiceSummary[] = [];
+      for (const invoice of found) {
+        // Stripe is asked for one customer; an answer for another one is never shown (a mistake of ours or Stripe's).
+        if (invoice.customer !== customer) continue;
+        const status = invoice.status;
+        if (
+          status !== "paid" &&
+          status !== "open" &&
+          status !== "void" &&
+          status !== "uncollectible"
+        )
+          continue;
+        if (!isProviderCurrency(invoice.currency)) continue;
+        if (!Number.isSafeInteger(invoice.total) || invoice.total <= 0)
+          continue;
+        invoices.push({
+          id: invoice.id,
+          number: invoice.number ?? null,
+          createdAt: new Date(invoice.created * 1000).toISOString(),
+          amount: toProviderAmount(invoice.total),
+          currency: invoice.currency,
+          status,
+          viewUrl: webAddressOf(invoice.hosted_invoice_url),
+          downloadUrl: webAddressOf(invoice.invoice_pdf),
+        });
+      }
+      return invoices;
+    },
+
     async createTopUpCheckout({ customer, intentId, amount, returnUrl }) {
       assertTopUpAmount(capabilities, amount);
       if (amount % MICRO_USD_PER_CENT !== 0)
@@ -505,6 +540,19 @@ export function createStripeAdapter({
       };
     },
   };
+}
+
+/** An address Stripe sent, when it is a plain http(s) address (never `javascript:` or the like); else null. */
+function webAddressOf(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A delayed payment that Stripe gave up on leaves its payment intent without a payment method (or canceled). */

@@ -30,6 +30,7 @@ import {
   stripeCustomerSchema,
   stripeDeletedSchema,
   stripeErrorSchema,
+  stripeInvoiceSchema,
   stripeListSchema,
   stripePaymentIntentSchema,
   stripeRefundSchema,
@@ -39,6 +40,7 @@ import {
   type StripeCharge,
   type StripeCheckoutSession,
   type StripeCustomer,
+  type StripeInvoice,
   type StripePaymentIntent,
   type StripeRefund,
   type StripeTaxId,
@@ -50,6 +52,7 @@ export type {
   StripeCharge,
   StripeCheckoutSession,
   StripeCustomer,
+  StripeInvoice,
   StripePaymentIntent,
   StripeRefund,
   StripeTaxId,
@@ -746,6 +749,30 @@ export function createStripeClient(options: StripeClientOptions) {
     getCharge: (chargeId: string): Promise<StripeCharge> =>
       request("GET", `/v1/charges/${id(chargeId)}`, stripeChargeSchema),
 
+    /**
+     * The newest invoices of ONE customer, first page only (`limit` 1 to 100, default 24). The customer is always named: a call
+     * with none would list the whole account, so there is no way to ask without one.
+     */
+    listInvoices: async (
+      customerId: string,
+      options: { limit?: number } = {},
+    ): Promise<StripeInvoice[]> => {
+      const limit = options.limit ?? 24;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+        throw new StripeClientError("invalid_argument");
+      const answer = await request(
+        "GET",
+        "/v1/invoices",
+        stripeListSchema(stripeInvoiceSchema),
+        {
+          query: [
+            ["customer", id(customerId)],
+            ["limit", String(limit)],
+          ],
+        },
+      );
+      return answer.data;
+    },
     createRefund: (
       input: CreateRefundInput,
       write: MoneyWriteOptions,

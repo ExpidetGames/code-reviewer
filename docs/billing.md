@@ -125,8 +125,8 @@ you to paste one into a chat or an issue.
 3. **The product tax code.** The top-up is sold as one line, "Review credit", with the tax code `txcd_10105002`. Stripe
    must accept that code for your product under Managed Payments. If it refuses, the checkout is refused too.
 4. **The API key.** Create a **restricted** key with the least permissions that work. The app uses these Stripe resources:
-   customers (with their tax IDs), Checkout sessions, payment intents (read), webhook endpoints, and the account (the
-   connection check reads it). It does not create refunds. Test the key with the connection check (section 5) and one
+   customers (with their tax IDs), Checkout sessions, payment intents (read), invoices (read, for the invoice list of the
+   workspace page), webhook endpoints, and the account (the connection check reads it). It does not create refunds. Test the key with the connection check (section 5) and one
    test top-up, and widen it only as far as a failure shows.
 5. **Test and live keys are separate.** A key starting `sk_test_` or `rk_test_` is the test environment, a key starting
    `sk_live_` or `rk_live_` is live. The admin page shows the environment it read from the prefix. The app sends events
@@ -142,6 +142,17 @@ you to paste one into a chat or an issue.
 Invoices and receipts are issued and emailed by Link, the merchant of record. The app makes no promise about
 VAT-compliant invoices until you have verified them in the sandbox (the maintainer task #503). The workspace page says
 only that receipts come from Link.
+
+**Invoices on the workspace page (#659).** Owners and Admins see the card **Invoices** on Settings, Billing: the invoices
+Stripe lists for the workspace's own Stripe customer (`GET /v1/invoices?customer=...`), newest first, with date, number,
+amount, status and a link to read each one and to download its PDF (Stripe's hosted page and PDF; the app keeps no copy).
+Nothing else is listed: the customer is the one the app stored for the workspace's billing profile, never a filter from
+the request. A Member does not see the card and the route refuses them. The app does **not** ask Checkout for invoice
+creation (`invoice_creation`): Managed Payments does not support it, the merchant of record issues the invoice itself,
+and the fake Stripe refuses the parameter like the documentation says. The charge, the prices and the wording of the
+page are unchanged. Whether a Managed Payments payment really leaves an Invoice object at Stripe is part of #503: until
+you have seen it in the sandbox, the card may be empty on a real instance, and then says "No invoices yet". The
+restricted API key needs read access to invoices for this card (section 3, step 4).
 
 ## 4. The rates and numbers
 

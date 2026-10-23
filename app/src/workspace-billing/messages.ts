@@ -18,7 +18,11 @@ import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../ui/transport-messages.ts";
-import type { JournalRowKind, WorkspaceKeyMode } from "./view.ts";
+import type {
+  InvoiceStatus,
+  JournalRowKind,
+  WorkspaceKeyMode,
+} from "./view.ts";
 
 export const BILLING_PAGE_TITLE = "Billing";
 export const BILLING_NAV_LABEL = "Billing";
@@ -127,6 +131,21 @@ export const INVOICES_TEXT =
   "Invoices and receipts are issued and emailed by Link, the seller of record for your payments.";
 export const INVOICES_LINK_TEXT = "link.com";
 export const INVOICES_LINK_HREF = "https://link.com";
+
+export const INVOICES_HEADING = "Invoices";
+export const INVOICES_EMPTY = "No invoices yet. One appears after a payment.";
+export const INVOICES_LOADING = "Loading invoices";
+export const INVOICES_FAILED =
+  "The invoices could not be loaded right now. Try again in a moment.";
+export const INVOICES_RETRY_BUTTON = "Try again";
+export const INVOICE_VIEW_LINK = "View";
+export const INVOICE_DOWNLOAD_LINK = "Download PDF";
+export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
+  paid: "Paid",
+  open: "Open",
+  void: "Void",
+  uncollectible: "Uncollectible",
+};
 
 export const READ_ONLY_TEXT =
   "You can see the balance and the journal. Owners and Admins add credit and change the billing details and the limit.";

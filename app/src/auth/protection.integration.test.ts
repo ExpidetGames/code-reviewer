@@ -168,6 +168,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/invitations/accept",
   // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/api/w/[workspace]",
+  "/api/w/[workspace]/billing/invoices",
   "/api/w/[workspace]/billing/journal",
   "/api/w/[workspace]/billing/monthly-limit",
   "/api/w/[workspace]/billing/profile",

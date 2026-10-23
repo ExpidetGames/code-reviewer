@@ -117,6 +117,7 @@ export type StripeFake = {
   checkoutSessions(): FakeObject[];
   paymentIntents(): FakeObject[];
   charges(): FakeObject[];
+  invoices(): FakeObject[];
   refunds(): FakeObject[];
   disputes(): FakeObject[];
   webhookEndpoints(): FakeObject[];
@@ -161,6 +162,8 @@ export type StripeFake = {
       options?: { amount?: number; reason?: string },
     ): { dispute: FakeObject; charge: FakeObject };
     closeDispute(disputeId: string, outcome: "won" | "lost"): FakeObject;
+    /** An invoice Stripe made on its own (a draft, an open one, a voided one). */
+    addInvoice(patch: Record<string, unknown>): FakeObject;
   };
   /** Sends the events that no endpoint has taken yet to the endpoints that subscribed to them. */
   flush(options?: DeliveryOptions): Promise<DeliveryResult[]>;
@@ -701,6 +704,7 @@ export async function startStripeFake(
     checkoutSessions: () => values(store.maps.sessions),
     paymentIntents: () => values(store.maps.paymentIntents),
     charges: () => values(store.maps.charges),
+    invoices: () => values(store.maps.invoices),
     refunds: () => values(store.maps.refunds),
     disputes: () => values(store.maps.disputes),
     webhookEndpoints: () => values(store.maps.endpoints),
@@ -721,6 +725,7 @@ export async function startStripeFake(
         structuredClone(store.openDispute(chargeId, disputeOptions)),
       closeDispute: (disputeId, outcome) =>
         structuredClone(store.closeDispute(disputeId, outcome)),
+      addInvoice: (patch) => structuredClone(store.addInvoice(patch)),
     },
     forgetIdempotencyKeys: () => saved.clear(),
     flush,
