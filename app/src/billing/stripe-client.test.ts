@@ -437,7 +437,7 @@ describe("the requests", () => {
       url: "https://app.example.test/api/billing/webhook",
       status: "enabled",
       enabled_events: ["checkout.session.completed"],
-      description: "Code Reviewer",
+      description: "code-review.com",
       api_version: null,
       livemode: false,
     };
@@ -455,14 +455,14 @@ describe("the requests", () => {
     const created = await client.createWebhookEndpoint({
       url: endpoint.url,
       enabled_events: ["checkout.session.completed", "charge.refunded"],
-      description: "Code Reviewer",
+      description: "code-review.com",
     });
     expect(created.secret).toBe("whsec_dummy_for_unit_tests");
     expect(Object.fromEntries(bodyOf(calls[0]))).toEqual({
       url: endpoint.url,
       "enabled_events[0]": "checkout.session.completed",
       "enabled_events[1]": "charge.refunded",
-      description: "Code Reviewer",
+      description: "code-review.com",
     });
     const listed = await client.listWebhookEndpoints();
     expect(listed).toHaveLength(1);

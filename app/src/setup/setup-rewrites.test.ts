@@ -62,6 +62,8 @@ describe("the setup rewrite of next.config.ts", () => {
       "_next/static/chunks/a.js",
       "_next/image",
       "favicon.ico",
+      "icon.svg",
+      "apple-icon.png",
     ])
       expect(matches.test(skipped), skipped).toBe(false);
   });

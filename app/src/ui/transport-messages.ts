@@ -9,7 +9,7 @@ import { SESSION_ENDED } from "../copy/messages.ts";
 export const TRANSPORT_FAILURE_COPY: Record<TransportErrorCode, string> = {
   UNAUTHENTICATED: SESSION_ENDED,
   ACCESS_DENIED:
-    "Your GitHub account is not allowed to use this Code Reviewer instance.",
+    "Your GitHub account is not allowed to use this code-review.com instance.",
   NETWORK_ERROR:
     "The server could not be reached. Check your connection and try again.",
   UNEXPECTED_RESPONSE:
