@@ -195,12 +195,21 @@ test.describe("the runs pages", () => {
       .locator('[data-slot="run-detail"]')
       .filter({ visible: true });
     const comment = detail.getByRole("link", {
-      name: "Open the comment on GitHub",
+      name: "Open the review on GitHub",
     });
     await expect(comment).toHaveAttribute("href", COMMENT_URL);
     await expect(comment).toHaveAttribute("rel", /noopener/);
-    await expect(detail.getByText("posted the review")).toBeVisible();
     await expect(detail.getByText("Automatic", { exact: true })).toBeVisible();
+    // #657: a Summary with the duration and the Findings; no log, no timings, no diagnostics, no call trace.
+    await expect(
+      detail.getByRole("region", { name: "Summary" }).getByText("Duration"),
+    ).toBeVisible();
+    await expect(
+      detail.getByRole("region", { name: "Findings" }),
+    ).toBeVisible();
+    for (const gone of ["Diagnostics", "Timings", "Call trace", "Log"])
+      await expect(detail.getByRole("heading", { name: gone })).toHaveCount(0);
+    await expect(detail.getByText("posted the review")).toHaveCount(0);
 
     // The Projects page shows the status of the same run as the last run of the repository.
     await page.getByRole("link", { name: "Projects", exact: true }).click();
@@ -319,11 +328,16 @@ test.describe("the runs pages", () => {
     await expect(
       detail.getByText("Started by runs-journey", { exact: true }),
     ).toBeVisible();
-    await expect(detail.getByText("The log was shortened")).toBeVisible();
-    await expect(detail.getByText("402 from the provider")).toBeVisible();
+    // #657: the log is for the admin portal; a member's page has none, and no link to a review that was not posted.
+    await expect(detail.getByText("402 from the provider")).toHaveCount(0);
     await expect(
-      detail.getByRole("link", { name: "Open the comment on GitHub" }),
+      detail.getByRole("link", { name: "Open the review on GitHub" }),
     ).toHaveCount(0);
+    await expect(
+      detail
+        .getByRole("region", { name: "Findings" })
+        .getByText("Nothing was posted for this run."),
+    ).toBeVisible();
   });
 
   // CR-35-T05, CR-35-T16
@@ -374,7 +388,9 @@ test.describe("the runs pages", () => {
         .getByRole("link")
         .first()
         .click();
-      await expect(page.getByRole("heading", { name: "Log" })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Findings" }),
+      ).toBeVisible();
 
       expect(await overflow()).toBeLessThanOrEqual(0);
     });
