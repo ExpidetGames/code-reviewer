@@ -270,7 +270,7 @@ describe("the Runs page", () => {
 
 describe("the page of one run", () => {
   // CR-35-T04
-  it("shows the run with its error sentence, code and log", async () => {
+  it("shows the run with its error sentence and code, and not its log", async () => {
     const app = await openRuns();
     const job = await app.f.finished(
       {
@@ -305,7 +305,7 @@ describe("the page of one run", () => {
     ).toBeTruthy();
     expect(screen.getByText("git_rate_limit")).toBeTruthy();
     expect(screen.getByText("Started by alice")).toBeTruthy();
-    expect(screen.getByText("429 from GitHub")).toBeTruthy();
+    expect(screen.queryByText("429 from GitHub")).toBeNull();
   });
 
   // CR-35-T05

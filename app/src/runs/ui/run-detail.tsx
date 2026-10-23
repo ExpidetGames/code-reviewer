@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The detail page of one run: a status banner, then the facts grouped into Summary, Timings and
-// Diagnostics, with the runner's log at the end of Diagnostics. The full status description is not
-// printed beside the badge; it sits behind the badge's "?" (Summary facts). While the run waits or
-// runs the browser asks for newer data; once it is settled it stops. Everything that came from outside
-// (the project name, the login, the question of an `/ask`, the log) is rendered as text, and the one
-// link made from stored data is the comment link, already checked to be a github.com address.
+// The detail page of one run for a member (#657): a status banner, a Summary (the facts, with the cost and the duration) and
+// the Findings, the review the run posted on GitHub. No log, no call trace and no timings: those are for the admin portal.
+// While the run waits or runs the browser asks for newer data; once it is settled it stops. Everything that came from outside
+// (the project name, the login, the question of an `/ask`, the review text) is rendered as text, and the one link made from
+// stored data is the comment link, already checked to be a github.com address.
 import Link from "next/link";
-import { useId, useMemo, useState, type ReactNode } from "react";
-import { Button } from "../../components/button.tsx";
+import { useId, useMemo, type ReactNode } from "react";
 import { DescriptionList } from "../../components/description-list.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
 import {
@@ -18,35 +16,31 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.tsx";
-import { formatUtc } from "../../ui/format-time.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { formatDuration } from "../run-duration.ts";
 import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { isSettled } from "../run-status.ts";
-import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
+import type { CustomerRunDetailView, RunDetailSnapshot } from "../run-view.ts";
 import { browserRunsApi, RUNS_POLL, type RunsApi } from "./api.ts";
 import {
   describePollFailure,
   DETAIL_POLL_FAILED_TEXT,
 } from "./poll-messages.ts";
-import { CallTraceTables } from "./call-trace.tsx";
-import { CALL_TRACE_COPY } from "./call-trace-messages.ts";
+import {
+  FINDINGS_HEADING,
+  FINDINGS_LINK_TEXT,
+  FINDINGS_NONE_TEXT,
+  FINDINGS_NOT_AVAILABLE_TEXT,
+  FINDINGS_NOT_POSTED_TEXT,
+  FINDINGS_WAITING_TEXT,
+} from "./findings-messages.ts";
+import { ReviewText } from "./review-text.tsx";
 import { RunStatusBadge } from "./status-badge.tsx";
-import { usageItems } from "./usage-facts.tsx";
+import { STOPPED_EARLY_TEXT, usageItems } from "./usage-facts.tsx";
 import { RunPriceText } from "../../workspace-billing/ui/run-price.tsx";
 
-export const NO_LOG_TEXT = "No log available.";
-export const LOG_SHORTENED_TEXT =
-  "The log was shortened: only the end of it is shown.";
-
-function Time({ value }: { value: string | null }) {
-  if (value === null)
-    return <span className="text-muted-foreground">Not yet</span>;
-  return <time dateTime={value}>{formatUtc(value)}</time>;
-}
-
-function DurationText({ run }: { run: RunDetailView }) {
+function DurationText({ run }: { run: CustomerRunDetailView }) {
   if (run.durationMs === null)
     return <span className="text-muted-foreground">Not available</span>;
   return (
@@ -57,15 +51,8 @@ function DurationText({ run }: { run: RunDetailView }) {
   );
 }
 
-function FactGroup({
-  title,
-  items,
-  children,
-}: {
-  title: string;
-  items: readonly { term: ReactNode; description: ReactNode }[];
-  children?: ReactNode;
-}) {
+/** A titled card: the heading is the name of the region. */
+function Section({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
   return (
     <Card role="region" aria-labelledby={id}>
@@ -79,67 +66,72 @@ function FactGroup({
           </h2>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {items.length === 0 ? null : <DescriptionList items={items} />}
-        {children}
-      </CardContent>
+      <CardContent className="flex flex-col gap-4">{children}</CardContent>
     </Card>
   );
 }
 
-/** Copies the log to the clipboard; the result is announced in the one polite region of the panel. */
-function CopyLogButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
-  async function copy(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied("yes");
-    } catch {
-      setCopied("failed");
-    }
-  }
+/**
+ * What the run cost: the price while billing is on (what was charged, or not charged), else the cost the runner reported when a
+ * member may see it. Nothing when neither exists: a run on the operator's key with billing off has no cost to show.
+ */
+function costItem(
+  run: CustomerRunDetailView,
+  usage: ReturnType<typeof usageItems>,
+) {
+  if (run.price !== undefined)
+    return [{ term: "Cost", description: <RunPriceText price={run.price} /> }];
+  if (run.costHidden || run.usage === null) return [];
+  const cost = usage.consumption.find((item) => item.term === "Cost");
+  return cost === undefined ? [] : [cost];
+}
+
+/** What the run posted on GitHub: the text of the review, or the reason there is none to show. */
+function Findings({ run }: { run: CustomerRunDetailView }) {
+  const stoppedEarly = run.usage?.stoppedEarly ?? null;
   return (
-    <span className="flex items-center gap-2">
-      <Button variant="ghost" size="sm" onClick={() => void copy()}>
-        Copy log
-      </Button>
-      <StatusRegion label="Copying the log">
-        {copied === "yes"
-          ? "Copied."
-          : copied === "failed"
-            ? "Copying did not work: select the log and copy it."
-            : ""}
-      </StatusRegion>
-    </span>
+    <Section title={FINDINGS_HEADING}>
+      {run.reviewText !== null ? (
+        <ReviewText text={run.reviewText} />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {findingsEmptyText(run)}
+        </p>
+      )}
+      {stoppedEarly === null ? null : (
+        <p className="text-sm text-warning">
+          {STOPPED_EARLY_TEXT[stoppedEarly]}
+        </p>
+      )}
+      {run.commentUrl === null ? null : (
+        <p className="text-sm">
+          <a href={run.commentUrl} target="_blank" rel="noopener noreferrer">
+            {FINDINGS_LINK_TEXT}
+          </a>
+        </p>
+      )}
+    </Section>
   );
 }
 
-function LogPanel({ run }: { run: RunDetailView }) {
+function findingsEmptyText(run: CustomerRunDetailView): string {
+  if (run.commentUrl !== null) return FINDINGS_NOT_AVAILABLE_TEXT;
+  if (!isSettled(run.status)) return FINDINGS_WAITING_TEXT;
+  return run.status === "succeeded"
+    ? FINDINGS_NONE_TEXT
+    : FINDINGS_NOT_POSTED_TEXT;
+}
+
+/** How long after the end of a run its review text is still waited for: the app reads the comment right after the run ends. */
+const REVIEW_TEXT_WAIT_MS = 2 * 60 * 1000;
+
+/** A run that posted a review whose text has not arrived yet, in the first minutes after it ended (by the clock of the server). */
+function awaitsReviewText(snapshot: RunDetailSnapshot): boolean {
+  const { run, generatedAt } = snapshot;
+  if (run.commentUrl === null || run.reviewText !== null) return false;
+  if (run.finishedAt === null) return false;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Log</h3>
-        {run.log.text !== "" ? <CopyLogButton text={run.log.text} /> : null}
-      </div>
-      {run.log.text === "" ? (
-        <p className="text-sm text-muted-foreground">{NO_LOG_TEXT}</p>
-      ) : (
-        <>
-          {run.log.truncated ? (
-            <p className="text-xs text-muted-foreground">
-              {LOG_SHORTENED_TEXT}
-            </p>
-          ) : null}
-          <pre
-            tabIndex={0}
-            aria-label="Log of the run"
-            className="max-h-[28rem] overflow-auto rounded-xl bg-raised p-4 font-mono text-xs leading-4 break-words whitespace-pre-wrap"
-          >
-            {run.log.text}
-          </pre>
-        </>
-      )}
-    </div>
+    Date.parse(generatedAt) - Date.parse(run.finishedAt) < REVIEW_TEXT_WAIT_MS
   );
 }
 
@@ -162,12 +154,14 @@ export function RunDetail({
   const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.detail(initial.run.id),
-    isSettled: (snapshot) => isSettled(snapshot.run.status),
+    isSettled: (snapshot) =>
+      isSettled(snapshot.run.status) && !awaitsReviewText(snapshot),
     activeIntervalMs: RUNS_POLL.activeMs,
     // A settled run does not change any more: no more requests.
     idleIntervalMs: null,
   });
   const run = data.run;
+  const usage = usageItems(run);
 
   const summaryItems: { term: ReactNode; description: ReactNode }[] = [
     {
@@ -202,15 +196,10 @@ export function RunDetail({
       term: "Review kind",
       description: KIND_NAMES[run.reviewKind],
     },
+    ...usage.model,
+    ...costItem(run, usage),
+    { term: "Duration", description: <DurationText run={run} /> },
   ];
-  const usage = usageItems(run);
-  summaryItems.push(...usage.model);
-  // What the review cost (#505): present only while billing is on and the review was billed.
-  if (run.price !== undefined)
-    summaryItems.push({
-      term: "Price",
-      description: <RunPriceText price={run.price} />,
-    });
   if (run.args !== "")
     summaryItems.push({
       term: "Question",
@@ -232,61 +221,6 @@ export function RunDetail({
       ),
     },
   );
-
-  const timingItems: { term: ReactNode; description: ReactNode }[] = [
-    { term: "Created", description: <Time value={run.createdAt} /> },
-    { term: "Started", description: <Time value={run.startedAt} /> },
-    { term: "Finished", description: <Time value={run.finishedAt} /> },
-    { term: "Duration", description: <DurationText run={run} /> },
-  ];
-  if (run.attempts > 0)
-    timingItems.push({
-      term: "Lost attempts",
-      description: (
-        <span>
-          {run.attempts}{" "}
-          <span className="text-muted-foreground">
-            (the runner stopped or gave the run back and it was tried again)
-          </span>
-        </span>
-      ),
-    });
-
-  const diagnosticItems: { term: ReactNode; description: ReactNode }[] = [
-    ...usage.consumption,
-  ];
-  if (run.commentUrl !== null)
-    diagnosticItems.push({
-      term: "Review comment",
-      description: (
-        <a href={run.commentUrl} target="_blank" rel="noopener noreferrer">
-          Open the comment on GitHub
-        </a>
-      ),
-    });
-  else if (run.commentMissing)
-    diagnosticItems.push({
-      term: "Review comment",
-      description: (
-        <span className="text-muted-foreground">
-          The review was published, but the link to its comment was not found.
-        </span>
-      ),
-    });
-  if (run.supersededBy !== null)
-    diagnosticItems.push({
-      term: "Superseded by",
-      description: (
-        <Link
-          href={workspacePath(
-            workspaceSlug,
-            `/runs/${encodeURIComponent(run.supersededBy)}`,
-          )}
-        >
-          The newer run
-        </Link>
-      ),
-    });
 
   return (
     <div data-slot="run-detail" className="flex flex-col gap-6">
@@ -316,23 +250,23 @@ export function RunDetail({
             </span>
           </p>
         ) : null}
+        {run.supersededBy === null ? null : (
+          <p className="text-sm">
+            <Link
+              href={workspacePath(
+                workspaceSlug,
+                `/runs/${encodeURIComponent(run.supersededBy)}`,
+              )}
+            >
+              Replaced by a newer run
+            </Link>
+          </p>
+        )}
       </div>
-      {/* Summary and timings side by side on a wide screen, as on the design board (#633). */}
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <FactGroup title="Summary" items={summaryItems} />
-        <FactGroup title="Timings" items={timingItems} />
-      </div>
-      <FactGroup title="Diagnostics" items={diagnosticItems}>
-        <LogPanel run={run} />
-      </FactGroup>
-      {run.callTrace === null ? null : (
-        <FactGroup title={CALL_TRACE_COPY.title} items={[]}>
-          <CallTraceTables
-            trace={run.callTrace}
-            showProviderDetail={!run.costHidden}
-          />
-        </FactGroup>
-      )}
+      <Section title="Summary">
+        <DescriptionList items={summaryItems} />
+      </Section>
+      <Findings run={run} />
     </div>
   );
 }

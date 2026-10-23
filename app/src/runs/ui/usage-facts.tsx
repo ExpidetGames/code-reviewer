@@ -17,7 +17,8 @@ const COUNT = new Intl.NumberFormat("en-US");
 /** The smallest cost the display can tell from zero; a real cost below it must not read as $0. */
 const COST_PRECISION = 0.0001;
 
-function costText(costUsd: number): string {
+/** A cost in US dollars as the Runs pages write it: `$0.42`, and `Less than $0.0001` for a real cost below the display. */
+export function costText(costUsd: number): string {
   return costUsd > 0 && costUsd < COST_PRECISION
     ? `Less than ${COST.format(COST_PRECISION)}`
     : COST.format(costUsd);

@@ -102,6 +102,7 @@ export const CHECK_RUN_LOG_CODES = [
   "REVIEW_VERDICT_WITHDRAWN",
   "REVIEW_VERDICT_SKIPPED",
   "REVIEW_VERDICT_REFUSED",
+  "REVIEW_COMMENT_UNREADABLE",
 ] as const;
 
 export type CheckRunServiceDeps = {
@@ -200,7 +201,10 @@ function checkIsOpen(row: StoredJobCheck): boolean {
 /** A method a provider may or may not have, bound to it; the caller has checked that it has it. */
 function bound<
   K extends
-    "publishReviewCheck" | "submitReviewVerdict" | "withdrawReviewVerdict",
+    | "publishReviewCheck"
+    | "submitReviewVerdict"
+    | "withdrawReviewVerdict"
+    | "readReviewComment",
 >(provider: IntegrationProvider, name: K): NonNullable<IntegrationProvider[K]> {
   const method = provider[name];
   if (method === undefined)
@@ -210,6 +214,9 @@ function bound<
     );
   return method.bind(provider) as NonNullable<IntegrationProvider[K]>;
 }
+
+/** The most characters of a review comment that is kept: GitHub's own limit for a comment. */
+export const MAX_REVIEW_COMMENT_CHARS = 65_536;
 
 /** The link to the review comment, only when it is a comment of this very pull request. */
 function trustedCommentUrl(
@@ -221,6 +228,38 @@ function trustedCommentUrl(
   const prefix = `${repo.url.replace(/\/+$/, "")}/pull/${String(prNumber)}#issuecomment-`;
   return url.startsWith(prefix) && /^\d{1,20}$/.test(url.slice(prefix.length))
     ? url
+    : null;
+}
+
+/**
+ * The id of the review comment a run links to (#657), only when the link is a comment of this very pull request of this
+ * very repository. The host is github.com, as the runner reports it, or the host the repository itself is stored with (a
+ * test double or an enterprise server whose pull request pages sit elsewhere than the comment links the runner got).
+ */
+function postedCommentId(
+  url: string | null,
+  repo: RepoRef,
+  prNumber: number,
+): string | null {
+  if (url === null) return null;
+  let host = "github.com";
+  try {
+    host = new URL(repo.url).host;
+  } catch {
+    // The repository has no usable address: only github.com links count.
+  }
+  const hosts = new Set(["github.com", host]);
+  const match =
+    /^https:\/\/([^/]+)\/([^/]+\/[^/]+)\/pull\/(\d+)#issuecomment-(\d{1,20})$/.exec(
+      url,
+    );
+  if (match === null) return null;
+  const [, linkHost, fullName, number, id] = match;
+  return linkHost !== undefined &&
+    hosts.has(linkHost) &&
+    fullName === repo.fullName &&
+    number === String(prNumber)
+    ? (id ?? null)
     : null;
 }
 
@@ -367,6 +406,59 @@ export function createCheckRunService(
         modelCalls: facts.modelCalls,
       }),
     };
+  }
+
+  /**
+   * After a run that posted a review comment (#657): reads the comment once and keeps its body, so the run page can show
+   * what was posted. Best effort and never a reason to retry the sync: a failure is one log line with a stable code, and
+   * the run page then offers the link to the comment alone. A comment that is gone, or not the app's own, is kept as "".
+   */
+  async function captureReviewComment(
+    target: Target,
+    checks: JobCheckRunsRepository,
+    budget: Budget,
+  ): Promise<void> {
+    const { job, integration, provider, repo } = target;
+    if (provider.readReviewComment === undefined) return;
+    if (!FINAL_STATUSES.includes(job.status)) return;
+    const commentId = postedCommentId(
+      readResultFacts(job.result).commentUrl,
+      repo,
+      job.prNumber,
+    );
+    if (commentId === null) return;
+    if ((await checks.reviewCommentOf(job.id)) !== null) return;
+    // A read is not started with no time left for it: the sync would be cut off, and the check run is more important.
+    if (timeLeft(budget) < MIN_TIME_FOR_SYNC_MS) return;
+    try {
+      const read = await viaRetries(budget, () =>
+        bound(provider, "readReviewComment")(
+          integration,
+          repo,
+          commentId,
+          budget.signal,
+        ),
+      );
+      // The id in the result comes from the runner: the comment must sit below this very pull request of this repository.
+      const ofThisRun =
+        read !== null &&
+        read.below !== null &&
+        read.below.repoFullName.toLowerCase() === repo.fullName.toLowerCase() &&
+        read.below.number === job.prNumber;
+      await checks.recordReviewComment(
+        job.id,
+        read === null || !ofThisRun
+          ? ""
+          : read.body
+              .replaceAll("\u0000", "")
+              .slice(0, MAX_REVIEW_COMMENT_CHARS),
+      );
+    } catch (error) {
+      if (error instanceof DeadlineReached) throw error;
+      deps.log.error(
+        `[check-runs] REVIEW_COMMENT_UNREADABLE ${where(job)} code=${errorCodeOf(error)}`,
+      );
+    }
   }
 
   type CheckStep = "ok" | "dropped" | { retry: IntegrationError };
@@ -728,6 +820,7 @@ export function createCheckRunService(
       const { target } = reached;
       const plan = await planVerdict(job);
       const step = await syncCheck(target, held, checks, plan, budget);
+      await captureReviewComment(target, checks, budget);
       if (step === "dropped") return false;
       const afterCheck = (await checks.find(job.id)) ?? held;
       await syncVerdict(target, afterCheck, checks, plan, budget);

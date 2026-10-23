@@ -504,6 +504,11 @@ export interface JobCheckRunsTable {
   next_attempt_at: string;
   /** The stable code of the last failure or of the reason the row was dropped. */
   last_code: string | null;
+  /**
+   * The body of the review comment the run posted, read once after the run ended (#657); null until then. An empty
+   * string: the comment was looked for and could not be read.
+   */
+  review_comment: string | null;
   created_at: string;
   updated_at: string;
 }

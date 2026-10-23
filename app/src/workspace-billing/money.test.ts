@@ -4,6 +4,7 @@
 // to whole cents. No floating point touches an amount.
 import { describe, expect, it } from "vitest";
 import {
+  formatInvoiceAmount,
   formatMoney,
   formatPrice,
   formatSignedMoney,
@@ -128,5 +129,20 @@ describe("a typed monthly limit", () => {
     expect([MONTHLY_LIMIT_MIN_CENTS, MONTHLY_LIMIT_MAX_CENTS]).toEqual([
       100, 100_000_000,
     ]);
+  });
+});
+
+describe("the amount of an invoice", () => {
+  // #659-T01
+  it("is written from the provider's cents in the currency of the invoice", () => {
+    expect(formatInvoiceAmount(2500, "usd")).toBe("$25.00");
+    expect(formatInvoiceAmount(123456, "usd")).toBe("$1,234.56");
+    expect(formatInvoiceAmount(2500, "eur")).toBe("€25.00");
+    expect(formatInvoiceAmount(2500, "jpy")).toBe("¥2,500");
+  });
+
+  // #659-T01
+  it("falls back to the number and the code for a currency the runtime does not know", () => {
+    expect(formatInvoiceAmount(2500, "zzz")).toMatch(/25|2500/);
   });
 });

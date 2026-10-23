@@ -46,20 +46,43 @@ export function createRunPriceSource(
           records.map((record) => record.job_id),
         )
         .execute();
+      // What a correction of the run changed afterwards (the late end of its VM credits started minutes, #498): the price a
+      // customer reads is the settled one, the charge and its corrections together. The only writer of a correction with a job
+      // is the infrastructure one, so it moves the infrastructure part (a credit, a positive amount, lowers it). Without it the list kept the first price (#657).
+      const corrections = await db
+        .selectFrom("billing_journal_entries")
+        .select(["job_id", "amount_micro_usd"])
+        .where("workspace_id", "=", workspaceId)
+        .where("type", "=", "correction")
+        .where("job_id", "in", ids)
+        .execute();
+      const correctionOf = new Map<string, number>();
+      for (const row of corrections) {
+        if (row.job_id === null) continue;
+        correctionOf.set(
+          row.job_id,
+          (correctionOf.get(row.job_id) ?? 0) + Number(row.amount_micro_usd),
+        );
+      }
       const chargeOf = new Map(
         charges.map((charge) => [charge.ref_key, charge]),
       );
       for (const record of records) {
         const charge = chargeOf.get(record.job_id);
         if (charge !== undefined) {
-          prices.set(record.job_id, {
-            state: "charged",
-            aiMicroUsd:
-              record.key_mode === "own"
-                ? null
-                : Number(charge.ai_micro_usd ?? 0),
-            infraMicroUsd: Number(charge.infra_micro_usd ?? 0),
-          });
+          const ai =
+            record.key_mode === "own" ? null : Number(charge.ai_micro_usd ?? 0);
+          const infra = Math.max(
+            0,
+            Number(charge.infra_micro_usd ?? 0) -
+              (correctionOf.get(record.job_id) ?? 0),
+          );
+          prices.set(
+            record.job_id,
+            (ai ?? 0) + infra === 0
+              ? { state: "not_charged" }
+              : { state: "charged", aiMicroUsd: ai, infraMicroUsd: infra },
+          );
           continue;
         }
         // Settled with nothing charged. An open record is still to be settled: it has no price yet.

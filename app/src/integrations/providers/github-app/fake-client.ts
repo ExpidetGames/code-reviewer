@@ -7,6 +7,7 @@ import type {
   GithubAppClient,
   IssueComment,
   PullRequestReview,
+  ReadIssueComment,
   RemoteInstallation,
   RemoteRepository,
 } from "./client.ts";
@@ -31,6 +32,10 @@ export type FakeGithubAppClientData = {
   listCommentsFailure?: Error;
   /** What `listIssueComments` answers, by "owner/name#number". */
   comments?: Record<string, IssueComment[]>;
+  /** What `getIssueComment` answers, by "owner/name#id"; a comment not listed is not found (#657). */
+  issueComments?: Record<string, ReadIssueComment>;
+  /** Makes `getIssueComment` reject with this error (#657). */
+  getCommentFailure?: Error;
   /** Makes `createCheckRun`, `updateCheckRun` and `findCheckRun` reject with this error (#405). */
   checkRunFailure?: Error;
   /** What `findCheckRun` answers; null (the default) finds none. */
@@ -158,6 +163,25 @@ export function fakeGithubAppClient(
       );
       if (data.listCommentsFailure) throw data.listCommentsFailure;
       return data.comments?.[`${repoFullName}#${prNumber}`] ?? [];
+    },
+    async getIssueComment(
+      installationId,
+      scope,
+      repoFullName,
+      commentId,
+      signal,
+    ) {
+      record(
+        "getIssueComment",
+        installationId,
+        scope,
+        repoFullName,
+        commentId,
+        ...(signal === undefined ? [] : [signal]),
+      );
+      throwIfAborted(signal);
+      if (data.getCommentFailure) throw data.getCommentFailure;
+      return data.issueComments?.[`${repoFullName}#${commentId}`] ?? null;
     },
     async createIssueComment(
       installationId,
