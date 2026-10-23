@@ -3,7 +3,7 @@
 // The "LLM access" sub-page of the workspace settings (#178, #426): one card per registered provider, each
 // with the write-only key form of that provider (an Admin or an Owner), or one card with whether reviews have a
 // key and the state of each provider's key (a Member). The storage claim is behind a disclosure in every card;
-// the removal of a key is a destructive action and lives in "Advanced" (`remove-workspace-key.tsx`). A workspace
+// the removal of a key is a destructive action and sits at the end of the page (`remove-workspace-keys.tsx`, #658). A workspace
 // whose access the instance provides gets the note instead of the cards. The model is not set here: it is the
 // `model` of the review defaults, whose built-in value is the instance's default model (`LLM_MODEL`).
 import {

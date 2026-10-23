@@ -2,12 +2,13 @@
 
 // The "Review defaults" sub-page of the workspace settings (#178): the form for the global defaults
 // every project inherits (reusing the settings form of #174 in its global mode, where there is no
-// project reset; the destructive reset lives in "Advanced"). `loadGlobalSettingsPage` gathers the
+// project reset; the destructive reset of every default sits at the end of this page, #658). `loadGlobalSettingsPage` gathers the
 // data from the service (passed in), `GlobalSettingsPageContent` renders it.
 import type { ReviewSettingsService } from "../service.ts";
 import type { SettingsApi } from "./api.ts";
 import { SettingsScreen } from "../../workspaces/ui/settings-shell.tsx";
 import { modelFromGlobalView, type SettingsFormModel } from "./form-model.ts";
+import { ResetReviewDefaults } from "./reset-defaults.tsx";
 import { SettingsForm } from "./settings-form.tsx";
 
 export type GlobalSettingsPageData = {
@@ -30,6 +31,7 @@ export function GlobalSettingsPageContent({
   keyedProviders,
   data,
   api,
+  resetApi,
 }: {
   /** The workspace of the page. */
   workspaceSlug: string;
@@ -43,6 +45,8 @@ export function GlobalSettingsPageContent({
   keyedProviders?: readonly string[];
   data: GlobalSettingsPageData;
   api?: SettingsApi;
+  /** Only tests pass this. */
+  resetApi?: Pick<SettingsApi, "save">;
 }) {
   return (
     <SettingsScreen
@@ -65,6 +69,12 @@ export function GlobalSettingsPageContent({
           {...(keyedProviders === undefined ? {} : { keyedProviders })}
           {...(api === undefined ? {} : { api })}
         />
+        {canEdit ? (
+          <ResetReviewDefaults
+            workspaceSlug={workspaceSlug}
+            {...(resetApi === undefined ? {} : { api: resetApi })}
+          />
+        ) : null}
       </div>
     </SettingsScreen>
   );

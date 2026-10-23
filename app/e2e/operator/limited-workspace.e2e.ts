@@ -865,8 +865,15 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     ).toHaveCount(0);
 
     // Every page and answer a member can read, and the same for the Owner.
-    const memberTexts = await collectViews(member, slugA, REPO_A.fullName);
-    const ownerTexts = await collectViews(ownerPage(), slugA, REPO_A.fullName);
+    const memberTexts = await collectViews(member, slugA, REPO_A.fullName, {
+      advanced: false,
+    });
+    const ownerTexts = await collectViews(
+      ownerPage(),
+      slugA,
+      REPO_A.fullName,
+      { advanced: true },
+    );
     // What the browser shows once the pages are hydrated and have polled: the DOM and the visible text of the plan,
     // the runs, a run and the review defaults, for the member and for the Owner.
     const runIds = (
@@ -1139,6 +1146,7 @@ async function collectViews(
   page: Page,
   slug: string,
   repository: string,
+  options: { advanced: boolean },
 ): Promise<Array<[string, string]>> {
   const texts: Array<[string, string]> = [];
   const read = async (path: string) => {
@@ -1153,7 +1161,6 @@ async function collectViews(
     `/w/${slug}/settings/review-defaults`,
     `/w/${slug}/settings/llm`,
     `/w/${slug}/settings/plan`,
-    `/w/${slug}/settings/advanced`,
     `/w/${slug}/projects`,
     `/w/${slug}/connections`,
     `/w/${slug}/members`,
@@ -1164,6 +1171,13 @@ async function collectViews(
     `/api/w/${slug}/review-settings`,
   ])
     await read(path);
+  // Advanced (the deletion of the workspace, #658) is the Owner's page; for a member it does not exist.
+  if (options.advanced) await read(`/w/${slug}/settings/advanced`);
+  else
+    expect(
+      (await page.request.get(`/w/${slug}/settings/advanced`)).status(),
+      "Advanced for a member",
+    ).toBe(404);
   // The project of the repository (its page and its settings), found by the link on the Projects page.
   const projects =
     texts.find(([name]) => name.endsWith("/projects"))?.[1] ?? "";

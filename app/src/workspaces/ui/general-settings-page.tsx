@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The General sub-page of the workspace settings (#178): the rename (an Owner; everybody else reads
-// the name), the read-only instance, tenancy and member facts, and the one "Needs attention" strip of
-// the area (the configuration hints plus the workspace's LLM hint, #173). The body is a server
-// component; the only interactive part is the rename form.
+// the name), the plan hand-over, and the one "Needs attention" strip of the area (the configuration hints plus
+// the workspace's LLM hint, #173). The Instance facts (tenancy, member count, GitHub App state) are gone (#658):
+// the strip already says when the App is not set up, and the members are on their own page. The body is a
+// server component; the only interactive part is the rename form.
 import {
   NeedsAttention,
   type AttentionNotice,
@@ -14,7 +15,6 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.tsx";
-import { InstanceStatus } from "../../config-status/instance-status.tsx";
 import { describeConfigNotices } from "../../config-status/notices.ts";
 import type {
   ConfigAudience,
@@ -49,8 +49,6 @@ export function GeneralSettingsPageContent({
   showPlan = false,
   showBilling = false,
   audience = "member",
-  tenancy,
-  memberCount,
   config,
   llmSummary,
   api,
@@ -70,8 +68,6 @@ export function GeneralSettingsPageContent({
   /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
   showBilling?: boolean;
   audience?: ConfigAudience;
-  tenancy: "single" | "multi";
-  memberCount: number;
   config: ConfigStatus;
   llmSummary: WorkspaceLlmSummary;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
@@ -122,19 +118,6 @@ export function GeneralSettingsPageContent({
             {...(planError === undefined ? {} : { error: planError })}
           />
         ) : null}
-        <Card role="region" aria-labelledby="instance-heading">
-          <CardHeader>
-            <SectionTitle id="instance-heading">Instance</SectionTitle>
-          </CardHeader>
-          <CardContent>
-            <InstanceStatus
-              status={config}
-              audience={audience}
-              tenancy={tenancy}
-              memberCount={memberCount}
-            />
-          </CardContent>
-        </Card>
       </div>
     </SettingsScreen>
   );

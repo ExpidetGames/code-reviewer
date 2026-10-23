@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Settings · LLM access" };
 
 // The LLM access of the workspace (#178): the provider and the write-only key on one form (an Admin or
 // an Owner), with "Save key" and "Test key"; a Member only reads whether reviews have a key. Removing
-// the key is a destructive action and lives in "Advanced".
+// the key is a destructive action at the end of this page (#658).
 export default async function LlmSettingsPage({
   params,
 }: PageProps<"/w/[workspace]/settings/llm">) {
@@ -40,12 +40,15 @@ async function LlmSettingsContent({
   canManage: boolean;
 }) {
   const llm = getWorkspaceLlm();
-  const [keyStatuses, summary, showPlan, showBilling] = await Promise.all([
-    llm.keyServiceFor(workspaceId).statusAll(),
-    llm.summaryFor(workspaceId),
-    planPageLinkedFor(workspaceId),
-    billingPageLinkedFor(),
-  ]);
+  const [keyStatuses, nativeStatuses, summary, showPlan, showBilling] =
+    await Promise.all([
+      llm.keyServiceFor(workspaceId).statusAll(),
+      // The keys of the catalog providers (#555) can be removed too, whatever the catalog offers now.
+      llm.keyServiceFor(workspaceId).nativeStatuses(),
+      llm.summaryFor(workspaceId),
+      planPageLinkedFor(workspaceId),
+      billingPageLinkedFor(),
+    ]);
   // While billing is on the workspace chooses whose key its reviews use (#496); the key forms stay on the page whichever it chose.
   // `showBilling` is the switch: with billing off there is no choice and the page is what it was.
   const keyChoice = showBilling
@@ -59,10 +62,38 @@ async function LlmSettingsContent({
           keyStatuses: await llm.keyServiceFor(workspaceId).nativeStatuses(),
         }
       : undefined;
+  const catalogLabels =
+    !canManage || nativeStatuses.length === 0
+      ? new Map<string, string>()
+      : new Map(
+          (await getNativeCatalog().providers()).map((provider) => [
+            provider.id,
+            provider.label,
+          ]),
+        );
   return (
     <LlmSettingsPageContent
       workspaceSlug={workspaceSlug}
       canManage={canManage}
+      instanceAccess={instanceAccessOf(summary)}
+      removableKeys={
+        canManage
+          ? [
+              ...keyStatuses.map(({ provider, status }) => ({
+                provider,
+                configured: status.state !== "not_configured",
+              })),
+              ...nativeStatuses.map(({ provider, status }) => {
+                const label = catalogLabels.get(provider);
+                return {
+                  provider,
+                  configured: status.state !== "not_configured",
+                  ...(label === undefined ? {} : { label }),
+                };
+              }),
+            ]
+          : []
+      }
       keyStatuses={keyStatuses}
       {...(catalog === undefined ? {} : { catalog })}
       summary={summary}

@@ -1,233 +1,134 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the "Advanced" sub-page of the workspace settings (#178): it is actions only (no form),
-// and every destructive action is confirmed in a dialog before the request (#178-T04): the workspace
-// key removal (an Admin or an Owner, `manage_llm_key`) and resetting every review default
-// (`manage_review_defaults`). A person with neither permission sees no action.
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+// The Advanced sub-page of the workspace settings (#658): one action, Delete workspace, confirmed by typing the name of the
+// workspace. The request is not made before the name matches, a refusal is said in the dialog (which stays open), and a
+// success sends the person to the start page.
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: navigation.refresh, push: vi.fn() }),
-}));
-
-import type { LlmKeyApi } from "../../llm/ui/api.ts";
+import type { WorkspaceApi } from "./api.ts";
 import { AdvancedSettingsPageContent } from "./advanced-settings-page.tsx";
 
-afterEach(() => {
-  cleanup();
-  navigation.refresh.mockClear();
-});
+afterEach(cleanup);
 
-function fakeKeyApi(): LlmKeyApi {
-  return {
-    save: vi.fn(
-      async () => ({ ok: true, data: { ok: true, changed: true } }) as never,
-    ),
-    remove: vi.fn(
-      async () => ({ ok: true, data: { ok: true, removed: true } }) as never,
-    ),
-    test: vi.fn(async () => ({ ok: true, data: { ok: true } }) as never),
-  };
+function fakeApi(
+  answer: Awaited<ReturnType<WorkspaceApi["deleteWorkspace"]>> = {
+    ok: true,
+    data: { ok: true },
+  },
+) {
+  return { deleteWorkspace: vi.fn(async () => answer) };
 }
 
 function renderAdvanced(
-  props: Partial<Parameters<typeof AdvancedSettingsPageContent>[0]> = {},
+  api = fakeApi(),
+  navigate: (path: string) => void = () => undefined,
 ) {
-  return render(
+  render(
     <AdvancedSettingsPageContent
       workspaceSlug="acme"
-      canManageKey
-      keys={[{ provider: "openrouter", configured: true }]}
-      canResetDefaults
-      {...props}
+      workspaceName="Acme Reviews"
+      api={api}
+      navigate={navigate}
     />,
   );
+  return api;
+}
+
+async function openDialog(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Delete workspace…" }));
+  return screen.getByRole("alertdialog");
 }
 
 describe("the Advanced settings sub-page", () => {
-  // #178-T04, #178 review M1
-  it("confirms removing the workspace key before the request, and keeps the confirmation after the refresh", async () => {
-    const user = userEvent.setup();
-    const api = fakeKeyApi();
-    const view = renderAdvanced({ removeApi: api });
-
-    expect(view.container.querySelectorAll("form")).toHaveLength(0);
-    await user.click(
-      screen.getByRole("button", { name: "Remove the OpenRouter key…" }),
-    );
-    expect(api.remove).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
-    await waitFor(() => expect(api.remove).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("The key is removed.")).toBeTruthy();
-    expect(navigation.refresh).toHaveBeenCalled();
-
-    // What `router.refresh()` does: the server re-renders the page with the key gone. The zone goes,
-    // the confirmation stays (the component owns the state, so the refresh does not unmount it).
-    view.rerender(
-      <AdvancedSettingsPageContent
-        workspaceSlug="acme"
-        canManageKey
-        keys={[{ provider: "openrouter", configured: false }]}
-        canResetDefaults
-        removeApi={api}
-      />,
-    );
-    expect(screen.getByText("The key is removed.")).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "Remove the OpenRouter key…" }),
-    ).toBeNull();
-  });
-
-  it("confirms resetting every review default before the request", async () => {
-    const user = userEvent.setup();
-    const save = vi.fn(async () => ({ ok: true, data: {} }) as never);
-    renderAdvanced({ resetApi: { save } });
-
-    await user.click(
-      screen.getByRole("button", { name: "Reset every default…" }),
-    );
-    expect(save).not.toHaveBeenCalled();
-
-    await user.click(
-      screen.getByRole("button", { name: "Yes, reset every default" }),
-    );
-    await waitFor(() => expect(save).toHaveBeenCalledWith({}));
-    expect(await screen.findByText("The defaults are reset.")).toBeTruthy();
-  });
-
-  // #426-T07
-  it("offers one removal for each provider that has a key, and removes only that one", async () => {
-    const user = userEvent.setup();
-    const api = fakeKeyApi();
-    renderAdvanced({
-      removeApi: api,
-      keys: [
-        { provider: "openrouter", configured: true },
-        { provider: "fakeai", configured: true },
-        { provider: "third", configured: false },
-      ],
-    });
+  // #658-T02
+  it("holds the deletion of the workspace and nothing else, and its navigation lists Advanced", () => {
+    renderAdvanced();
 
     expect(
-      screen.getByRole("button", { name: "Remove the OpenRouter key…" }),
+      screen.getByRole("heading", { level: 2, name: "Delete workspace" }),
     ).toBeTruthy();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByText(/Reset every default/)).toBeNull();
+    expect(screen.queryByText(/Remove the .* key/)).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(
-      screen.queryByRole("button", { name: /Remove the third key/ }),
-    ).toBeNull();
-    await user.click(
-      screen.getByRole("button", { name: "Remove the fakeai key…" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
-
-    await waitFor(() => expect(api.remove).toHaveBeenCalledWith("fakeai"));
-    expect(api.remove).toHaveBeenCalledTimes(1);
+      within(nav)
+        .getByRole("link", { name: "Advanced" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 
-  it("offers no removal when there is no key", () => {
-    renderAdvanced({
-      keys: [{ provider: "openrouter", configured: false }],
-    });
-
-    expect(
-      screen.queryByRole("button", { name: "Remove the OpenRouter key…" }),
-    ).toBeNull();
-  });
-
-  it("shows no action to a person who may not change the key or the defaults", () => {
-    renderAdvanced({ canManageKey: false, canResetDefaults: false });
-
-    expect(
-      screen.queryByRole("button", {
-        name: /Remove the .* key|Reset every default/,
-      }),
-    ).toBeNull();
-    expect(screen.getByText(/Only an Admin or an Owner/)).toBeTruthy();
-  });
-
-  describe("on the access of the instance (a managed workspace)", () => {
-    const PROVIDER = /openrouter/i;
-
-    // #435-T06
-    it("still removes a key the workspace stored earlier, without naming its provider", async () => {
-      const user = userEvent.setup();
-      const api = fakeKeyApi();
-      const view = renderAdvanced({
-        instanceAccess: "provided",
-        removeApi: api,
-        keys: [
-          { provider: "openrouter", configured: true },
-          { provider: "fakeai", configured: false },
-        ],
-      });
-
-      expect(view.container.textContent).not.toMatch(PROVIDER);
-      await user.click(
-        screen.getByRole("button", { name: "Remove the stored key…" }),
-      );
-      expect(document.body.textContent).not.toMatch(PROVIDER);
-      await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
-
-      await waitFor(() =>
-        expect(api.remove).toHaveBeenCalledWith("openrouter"),
-      );
-      expect(api.remove).toHaveBeenCalledTimes(1);
-      expect(await screen.findByText("The key is removed.")).toBeTruthy();
-    });
-
-    it("lists the provider by name for a workspace on its own key, as before", () => {
-      renderAdvanced({
-        instanceAccess: null,
-        keys: [{ provider: "openrouter", configured: true }],
-      });
-
-      expect(
-        screen.getByRole("button", { name: "Remove the OpenRouter key…" }),
-      ).toBeTruthy();
-    });
-  });
-});
-
-describe("the Advanced sub-page with a key of a catalog provider (#555)", () => {
-  // #555-T02
-  it("lists the removal of a catalog provider's key by the name the catalog gives it, and removes that provider's key only", async () => {
+  // #658-T03
+  it("asks for the name and only deletes once it is typed", async () => {
     const user = userEvent.setup();
-    const api = fakeKeyApi();
-    renderAdvanced({
-      removeApi: api,
-      keys: [
-        { provider: "openrouter", configured: true },
-        { provider: "deepseek", configured: true, label: "DeepSeek" },
-      ],
+    const navigate = vi.fn();
+    const api = renderAdvanced(fakeApi(), navigate);
+
+    const dialog = await openDialog(user);
+    const confirm = within(dialog).getByRole("button", {
+      name: "Delete this workspace",
     });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
 
-    await user.click(
-      screen.getByRole("button", { name: "Remove the DeepSeek key…" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
+    const field = within(dialog).getByLabelText("Type Acme Reviews to confirm");
+    await user.type(field, "Acme");
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    expect(api.deleteWorkspace).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(api.remove).toHaveBeenCalledWith("deepseek"));
-    expect(api.remove).toHaveBeenCalledTimes(1);
+    await user.type(field, " Reviews");
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    await user.click(confirm);
+
+    expect(api.deleteWorkspace).toHaveBeenCalledWith("Acme Reviews");
+    expect(navigate).toHaveBeenCalledWith("/");
   });
 
-  // #555-T08
-  it("names no provider for a workspace on the instance's access, not even for a catalog key it stored earlier", () => {
-    const view = renderAdvanced({
-      instanceAccess: "provided",
-      keys: [
-        { provider: "openrouter", configured: false },
-        { provider: "deepseek", configured: true, label: "DeepSeek" },
-      ],
-    });
+  // #658-T04
+  it("says why a workspace with credit cannot be deleted, and stays open", async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    renderAdvanced(
+      fakeApi({ ok: false, code: "balance_positive", status: 409 } as never),
+      navigate,
+    );
 
-    expect(view.container.textContent).not.toContain("DeepSeek");
-    expect(view.container.textContent).not.toContain("deepseek");
+    const dialog = await openDialog(user);
+    await user.type(
+      within(dialog).getByLabelText("Type Acme Reviews to confirm"),
+      "Acme Reviews",
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete this workspace" }),
+    );
+
     expect(
-      screen.getByRole("button", { name: "Remove the stored key…" }),
+      await within(dialog).findByText(/still has unused credit/),
     ).toBeTruthy();
+    expect(within(dialog).getByText(/Contact support/)).toBeTruthy();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("forgets the typed name when the dialog is closed", async () => {
+    const user = userEvent.setup();
+    renderAdvanced();
+
+    const dialog = await openDialog(user);
+    await user.type(
+      within(dialog).getByLabelText("Type Acme Reviews to confirm"),
+      "Acme Reviews",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const again = await openDialog(user);
+
+    expect(
+      (
+        within(again).getByLabelText(
+          "Type Acme Reviews to confirm",
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("");
   });
 });

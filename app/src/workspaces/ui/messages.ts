@@ -51,7 +51,28 @@ const FAILURE_COPY: Record<string, string> = {
   email_not_verified:
     "Confirm your email address first, then accept the invitation.",
   cross_site_request: CROSS_SITE_REQUEST,
+  name_mismatch: "That is not the name of this workspace.",
+  balance_positive:
+    "This workspace still has unused credit, so it cannot be deleted yet. Contact support and we will sort the credit out with you first.",
+  review_running:
+    "A review is running right now. Try again when it has finished.",
+  payment_open:
+    "A payment is still open. Try again once it has gone through or has expired.",
 };
+
+/** The words of the Advanced page: the one action it has. */
+export const DELETE_WORKSPACE_COPY = {
+  title: "Delete workspace",
+  description:
+    "Removes this workspace with its projects, runs, settings and keys, and disconnects its GitHub installations. This cannot be undone.",
+  action: "Delete workspace…",
+  confirmTitle: (name: string) => `Delete ${name}?`,
+  confirmDescription:
+    "Everyone loses access, pending reviews are cancelled and the GitHub installations are released. Billing records are kept for the books.",
+  nameLabel: (name: string) => `Type ${name} to confirm`,
+  confirm: "Delete this workspace",
+  deleting: "Deleting",
+} as const;
 
 /** The sentence for a failed call of a workspace route. */
 export function describeWorkspaceFailure(code: string): string {

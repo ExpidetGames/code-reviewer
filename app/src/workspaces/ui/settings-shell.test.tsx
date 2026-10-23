@@ -6,15 +6,17 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { planReturnPath } from "../../plan-handoff/return-path.ts";
+import { SettingsAccessProvider } from "./settings-nav.tsx";
 import { SettingsNav, settingsSectionHref } from "./settings-shell.tsx";
 
 afterEach(cleanup);
 
-function links(showPlan?: boolean): string[] {
+function links(showPlan?: boolean, showAdvanced = true): string[] {
   render(
     <SettingsNav
       workspaceSlug="acme"
       current=""
+      showAdvanced={showAdvanced}
       {...(showPlan === undefined ? {} : { showPlan })}
     />,
   );
@@ -32,6 +34,39 @@ describe("the settings navigation", () => {
       "LLM access",
       "Advanced",
     ]);
+  });
+
+  // #658-T02
+  it("lists Advanced only for the Owner: the layout says so, and without it there is no entry", () => {
+    expect(links(undefined, false)).toEqual([
+      "General",
+      "Review defaults",
+      "LLM access",
+    ]);
+  });
+
+  // #658-T02
+  it("takes Advanced from the settings layout when the caller does not say", () => {
+    const names = (showAdvanced: boolean) => {
+      const view = render(
+        <SettingsAccessProvider showAdvanced={showAdvanced}>
+          <SettingsNav workspaceSlug="acme" current="" />
+        </SettingsAccessProvider>,
+      );
+      const found = within(
+        screen.getByRole("navigation", { name: "Settings sections" }),
+      )
+        .getAllByRole("link")
+        .map((link) => link.textContent ?? "");
+      view.unmount();
+      return found;
+    };
+
+    expect(names(true)).toContain("Advanced");
+    expect(names(false)).not.toContain("Advanced");
+    // Outside a layout (a page rendered alone) nobody gets the entry.
+    render(<SettingsNav workspaceSlug="acme" current="" />);
+    expect(screen.queryByRole("link", { name: "Advanced" })).toBeNull();
   });
 
   it("has the Plan entry before Advanced for a workspace that has entitlements", () => {
@@ -59,6 +94,7 @@ describe("the settings navigation while billing is on (#505)", () => {
       <SettingsNav
         workspaceSlug="acme"
         current=""
+        showAdvanced
         {...(options.showPlan === undefined
           ? {}
           : { showPlan: options.showPlan })}

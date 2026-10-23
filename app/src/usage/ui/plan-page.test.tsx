@@ -325,7 +325,6 @@ describe("the plan page, for people who do not see colours", () => {
       "Review defaults",
       "LLM access",
       "Plan",
-      "Advanced",
     ]);
   });
 });

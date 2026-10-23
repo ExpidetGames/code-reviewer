@@ -4,7 +4,7 @@
 // Pins down the "LLM access" section: an Admin or an Owner gets the form (provider, write-only key,
 // save, test); a Member is only told whether reviews have a key; nothing on the page holds the key;
 // changing the provider asks for the key again; the hint "LLM not configured" links to the section and
-// is gone while a key works. Removing the key is a destructive action of the "Advanced" sub-page
+// is gone while a key works. Removing the key is a destructive action at the end of the LLM access page, not of the form
 // (`remove-workspace-key.tsx`).
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -300,7 +300,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
     ).toBe(true);
   });
 
-  it("offers no removal: removing the key is a destructive action of the Advanced sub-page", () => {
+  it("offers no removal: removing the key is a destructive action at the end of the page, not of the form", () => {
     section({ keyStatus: CONFIGURED, summary: WORKS });
 
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();

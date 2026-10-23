@@ -6,7 +6,7 @@
 //   - a person who is no admin gets the answer of a path that does not exist for the portal and its data routes (T05);
 //   - the instance admin saves the operator's key, adds three models in the portal (a draft stays a draft), releases two
 //     and sets the default of each kind (T01);
-//   - a managed workspace reviews on the default entry (T02); its Owner reads an Advanced page that names no provider;
+//   - a managed workspace reviews on the default entry (T02); its Owner reads an Advanced page (the deletion of the workspace) and the LLM access page that name no provider;
 //     the Owner picks another entry by name and the review runs with that entry's model on the operator's key; the
 //     Dynamic job of the same project is handed out with its entry's model, also on the operator's key (T02);
 //   - the provider answers with an error that names the model, the provider and the operator's key: nothing of it reaches
@@ -584,8 +584,8 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     expect(runnerOutput()).not.toContain(OPERATOR_KEY);
   });
 
-  // #435-T06
-  test("@smoke the Advanced settings page of the Owner of a managed workspace names no provider", async () => {
+  // #435-T06, #658-T02
+  test("@smoke the Advanced and LLM access pages of the Owner of a managed workspace name no provider", async () => {
     const page = ownerOfM();
     const catalog = await adminCatalog();
     const providers = forbiddenFor({
@@ -594,25 +594,32 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       providerLabels: catalog.providers.map((provider) => provider.label),
       keys: [],
     });
-    const path = `/w/${slugM}/settings/advanced`;
-    const surfaces = [
-      ...(await readAs(page, path, { marker: "Settings · Advanced" })).surfaces,
-      ...(
-        await readAs(page, path, {
-          headers: { RSC: "1" },
-          marker: slugM,
-          label: `${path} (RSC payload)`,
-        })
-      ).surfaces,
-      ...(await browse(page, path, { title: "Settings · Advanced" })),
-    ];
-    // The page is the one that holds the other danger zone, so it was read as the Owner and not as a shell.
-    await expect(
-      page.getByRole("button", { name: "Reset every default…" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: /Remove .*key/ }),
-    ).toHaveCount(0);
+    const surfaces: Surface[] = [];
+    for (const [path, title] of [
+      [`/w/${slugM}/settings/advanced`, "Settings · Advanced"],
+      [`/w/${slugM}/settings/llm`, "Settings · LLM access"],
+    ] as const) {
+      surfaces.push(
+        ...(await readAs(page, path, { marker: title })).surfaces,
+        ...(
+          await readAs(page, path, {
+            headers: { RSC: "1" },
+            marker: slugM,
+            label: `${path} (RSC payload)`,
+          })
+        ).surfaces,
+        ...(await browse(page, path, { title })),
+      );
+      if (path.endsWith("/advanced"))
+        // The Owner's page holds the deletion of the workspace and nothing about keys or defaults.
+        await expect(
+          page.getByRole("button", { name: "Delete workspace…" }),
+        ).toBeVisible();
+      else
+        await expect(
+          page.getByRole("button", { name: /Remove .*key/ }),
+        ).toHaveCount(0);
+    }
     expect(findLeaks(surfaces, providers)).toEqual([]);
   });
 
