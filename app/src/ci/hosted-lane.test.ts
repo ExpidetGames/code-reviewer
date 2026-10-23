@@ -103,7 +103,7 @@ describe("the CI job of the hosted lane", () => {
     expect(text).toMatch(/app\s+pnpm install --frozen-lockfile/);
     expect(text).toMatch(/dispatcher\s+pnpm install --frozen-lockfile/);
     expect(text).toContain("uv sync --locked");
-    expect(text).toContain("playwright install --with-deps chromium");
+    expect(text).toContain("playwright install chromium");
     expect(text).toContain("prime_tiktoken_cache.py");
   });
 
