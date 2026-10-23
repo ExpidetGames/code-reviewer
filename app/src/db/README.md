@@ -573,6 +573,13 @@ reviews; no row changes, and the table stays instance level (the actor is an ope
 finds the mails that wait. The table is new and empty and no existing row is touched. **Customer data, workspace scoped** (`billing-notifications-repository.ts`, classified in `scoping.test.ts`, covered row by row in `scoped-isolation.integration.test.ts`);
 the one instance-level reader, `billing-notification-directory-repository.ts`, only claims due mails and records how a delivery ended. Written in the transaction of every journal write, see `src/billing/README.md`, "Balance notifications (#506)".
 
+### The notice of an incomplete billing setup (#632)
+
+`20261023090000_widen_refusal_notice_codes_for_billing_setup` replaces the check on `refusal_notices.code` (Postgres) or rebuilds the table with the wider check
+(SQLite, like #499) so it takes `billing_rates_incomplete`: a review refused because billing is switched on but its setup is not complete gets a notice on its pull
+request. No column changes and every row survives, so the release that is still running is not affected; its `down` deletes the notices of that code first. See
+`src/refusal-notices/README.md`, "An incomplete billing setup (#632)".
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):

@@ -197,9 +197,14 @@ When billing is on:
 - The settings navigation shows **Billing** instead of **Plan**.
 - The run quotas of the entitlements are not applied.
 
-If the switch is on but the setup is no longer ready (a credential vanished from a damaged database), the page says "the
-switch is on, but billing is not running". Reviews are then refused with `billing_rates_incomplete` and no notice is
-posted. Fix the item the page names.
+If the switch is on but the setup is no longer ready (a credential vanished from a damaged database, or a Stripe setup
+switched on before the terms link existed: the update of #626 made the link required and fills in nothing for you), every
+page of the admin portal shows the banner **Billing is switched on but not complete** with the missing items, and the
+Billing page says "the switch is on, but billing is not running". Every review is then refused with
+`billing_rates_incomplete`: its pull request gets one notice per pushed commit ("the billing setup of this instance is not
+complete", naming no item) and its check run **Code Reviewer** is completed as neutral with that reason. Complete the item
+the banner names (for the terms link: enter it in **Terms and privacy**; it can be added while billing is on), or switch
+billing off (reviews then run without charge). **Before you deploy an update that adds a required item, add it first.**
 
 ### Changing the Stripe key
 
@@ -317,7 +322,7 @@ Billing page when a legitimate burst trips it. Never tell a workspace the number
 | `balance_negative`          | The balance is below zero (a review ended, or a refund or dispute took it there). Top-up or correction.     |
 | `monthly_limit_reached`     | The workspace's own limit was reached. An Owner or Admin changes it.                                        |
 | `reviews_paused`            | The hidden hourly brake. Raise the number if the burst is legitimate.                                       |
-| `billing_rates_incomplete`  | Billing is on but the setup is not ready (a rate or credential is gone). Fix the item the page names. No notice. |
+| `billing_rates_incomplete`  | Billing is on but the setup is not ready (a rate, a credential, the check or the terms link is missing). Complete the item the admin banner names. A notice per commit. |
 | `billing_limits_unreadable` | The brake or limit could not be evaluated. Look at `CLAIM_CAPS_FAILED`. No notice.                          |
 
 ### Log lines to watch
