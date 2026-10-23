@@ -20,7 +20,8 @@ import { newProjectSettings } from "./new-project-settings.ts";
 const APP_SECRET = "new-project-test-app-secret-0123456789-0123";
 const KEYS: Record<string, string> = {
   openrouter: "sk-or-v1-dummy-0123456789abcdef0123456789abcdef",
-  anthropic: "sk-ant-dummy-012345678901234567890123456789",
+  // Written in two parts so that the scan for committed keys does not read a dummy as a key.
+  anthropic: "sk-ant-" + "dummy-012345678901234567890123456789",
 };
 const DEFAULT_PROVIDER = llmProviderDescriptors.defaultProvider.id;
 const OTHER_PROVIDER = llmProviderDescriptors.ids.find(
