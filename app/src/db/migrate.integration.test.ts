@@ -124,6 +124,7 @@ describe("the migrations of both epics", () => {
       "20261023090000_widen_refusal_notice_codes_for_billing_setup",
       "20261023120000_add_job_check_runs_review_comment",
       "20261023150000_add_workspace_deleted_at",
+      "20261023160000_add_jobs_superseded_by_index",
     ]);
   });
 
