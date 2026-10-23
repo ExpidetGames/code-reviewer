@@ -38,6 +38,7 @@ import {
 } from "../../components/ui/field.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { Label } from "../../components/ui/label.tsx";
+import { PRODUCT_NAME } from "../../copy/product-name.ts";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -489,7 +490,7 @@ export function MailForm({
                 id={`${ids}-sender-name`}
                 type="text"
                 autoComplete="off"
-                placeholder="Code Reviewer"
+                placeholder={PRODUCT_NAME}
                 value={senderName}
                 onChange={(event) => setSenderName(event.target.value)}
                 aria-invalid={invalid("senderName")}

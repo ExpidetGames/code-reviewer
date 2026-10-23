@@ -78,7 +78,7 @@ function verdictLine(verdict: VerdictDecision | undefined): string | null {
   const wayOut =
     VERDICT_SKIP_WAY_OUT[verdict.reason] ??
     "stays until it is dismissed by hand";
-  return `No review verdict was submitted: ${because}. An earlier request for changes by Code Reviewer on this pull request ${wayOut}.`;
+  return `No review verdict was submitted: ${because}. An earlier request for changes by code-review.com on this pull request ${wayOut}.`;
 }
 
 function linkLine(commentUrl: string | null): string | null {

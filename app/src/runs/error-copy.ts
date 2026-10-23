@@ -210,10 +210,10 @@ export const CHECKOUT_REASON_COPY: Readonly<Record<string, string>> = {
 };
 
 export const UNKNOWN_REASON_COPY =
-  "The checkout failed for a reason this version of Code Reviewer does not know. The reason below helps whoever runs the server to look it up.";
+  "The checkout failed for a reason this version of code-review.com does not know. The reason below helps whoever runs the server to look it up.";
 
 export const UNKNOWN_ERROR_COPY =
-  "The run ended with an error this version of Code Reviewer does not know. The error code below helps whoever runs the server to look it up.";
+  "The run ended with an error this version of code-review.com does not know. The error code below helps whoever runs the server to look it up.";
 
 /** A code is a short word with underscores; anything else is not shown. */
 const CODE_SHAPE = /^[a-z][a-z0-9_]{0,63}$/;
