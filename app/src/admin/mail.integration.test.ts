@@ -34,7 +34,7 @@ async function start() {
     user: TEST_SMTP_USER,
     password: TEST_SMTP_PASSWORD,
     senderAddress: "reviewer@example.com",
-    senderName: "Code Reviewer",
+    senderName: "code-review.com",
     allowSelfSigned: true,
     ...overrides,
   });

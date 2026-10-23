@@ -28,7 +28,7 @@ export function passwordResetMessage({
   const text = [
     "Reset your password",
     "",
-    `Someone asked to reset the password of your Code Reviewer account. Open this link to choose a new password (the link works once and for ${minutes} minutes):`,
+    `Someone asked to reset the password of your code-review.com account. Open this link to choose a new password (the link works once and for ${minutes} minutes):`,
     "",
     link,
     "",
@@ -36,7 +36,7 @@ export function passwordResetMessage({
   ].join("\n");
   const html = [
     "<p>Reset your password</p>",
-    `<p>Someone asked to reset the password of your Code Reviewer account. Open this link to choose a new password (the link works once and for ${minutes} minutes):</p>`,
+    `<p>Someone asked to reset the password of your code-review.com account. Open this link to choose a new password (the link works once and for ${minutes} minutes):</p>`,
     `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
     "<p>If this was not you, ignore this message: nothing changes until the link is used.</p>",
   ].join("\n");

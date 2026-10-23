@@ -19,7 +19,7 @@ function copyOf(
   if (level === "low")
     return {
       subject: `Low balance in "${workspace}"`,
-      headline: `The prepaid balance of the workspace "${workspace}" at Code Reviewer is low: ${balanceText} is left.`,
+      headline: `The prepaid balance of the workspace "${workspace}" at code-review.com is low: ${balanceText} is left.`,
       detail:
         "Reviews keep starting while there is credit. Add credit so they do not stop.",
     };
@@ -27,8 +27,8 @@ function copyOf(
     subject: `No credit left in "${workspace}"`,
     headline:
       level === "negative"
-        ? `The prepaid balance of the workspace "${workspace}" at Code Reviewer is below zero: ${balanceText}.`
-        : `The prepaid balance of the workspace "${workspace}" at Code Reviewer has run out: ${balanceText}.`,
+        ? `The prepaid balance of the workspace "${workspace}" at code-review.com is below zero: ${balanceText}.`
+        : `The prepaid balance of the workspace "${workspace}" at code-review.com has run out: ${balanceText}.`,
     detail:
       "New reviews are not started until credit is added; the pull requests get a notice instead. Reviews that are already running finish.",
   };
