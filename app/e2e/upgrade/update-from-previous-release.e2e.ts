@@ -504,7 +504,7 @@ test.describe(
       await runner?.stop();
       await page.getByRole("radio").first().check();
       await page.getByRole("button", { name: "Start review" }).click();
-      const started = page.getByRole("status");
+      const started = page.getByRole("dialog").getByRole("status");
       await expect(started).toContainText("Started: review for pull request");
       await started.getByRole("link", { name: "View the run" }).click();
       await expect(page).toHaveURL(/\/runs\/[0-9a-fA-F-]{36}$/);
