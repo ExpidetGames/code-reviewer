@@ -33,7 +33,6 @@ import { formatUtc } from "../../ui/format-time.ts";
 import {
   CATALOG_FIELD_OF_KIND,
   PROJECT_DYNAMIC_SETTING_FIELDS,
-  PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   type ProjectReviewKind,
   type ReviewSettingField,
@@ -169,12 +168,31 @@ const SECTION_OF_FIELD: Record<string, Section> = {
   maxTokens: "limits",
 };
 
-/** The first section (in tab order) with a problem, or null. */
-function firstSectionWithProblem(errors: Errors): Section | null {
+/**
+ * The first section (in tab order) with a problem, or null. A field the selected kind does not show has its note in the
+ * Review section, so that one opens for it.
+ */
+function firstSectionWithProblem(
+  errors: Errors,
+  hiddenFields: readonly string[],
+): Section | null {
   const found = new Set(
-    Object.keys(errors).flatMap((field) => SECTION_OF_FIELD[field] ?? []),
+    Object.keys(errors).flatMap((field) =>
+      hiddenFields.includes(field) ? "review" : (SECTION_OF_FIELD[field] ?? []),
+    ),
   );
   return SECTIONS.find((section) => found.has(section)) ?? null;
+}
+
+/** The origin of a provider and its model as one choice: it counts as set when either of the two was set here. */
+function pairOrigin(
+  origin: SettingsOrigin,
+  set: boolean,
+  setText: string,
+): SettingsOrigin {
+  return set
+    ? { ...origin, source: setText, resetLabel: RESET_LABEL }
+    : { ...origin, resetLabel: null };
 }
 
 /** The kind that has a problem the selected kind does not show, or null. */
@@ -363,13 +381,16 @@ export function SettingsForm({
   // the selected kind does not show, or a failure that belongs to no field, takes it instead.
   useEffect(() => {
     if (focusRequest === 0) return;
-    const form = formRef.current;
-    const target =
-      form?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
-      form?.querySelector<HTMLElement>("[data-hidden-problem]") ??
-      form?.querySelector<HTMLElement>("[data-kind-error]") ??
-      form?.querySelector<HTMLElement>("[data-form-error]");
-    target?.focus();
+    // A section that was opened by the refusal mounts right after this render: look once it is there.
+    queueMicrotask(() => {
+      const form = formRef.current;
+      const target =
+        form?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+        form?.querySelector<HTMLElement>("[data-hidden-problem]") ??
+        form?.querySelector<HTMLElement>("[data-kind-error]") ??
+        form?.querySelector<HTMLElement>("[data-form-error]");
+      target?.focus();
+    });
   }, [focusRequest]);
 
   // A change takes the problem of its field away, and any message of a save that failed: the
@@ -398,7 +419,14 @@ export function SettingsForm({
 
   function refuse(fieldErrors: Errors, message: string) {
     setErrors(fieldErrors);
-    const withProblem = firstSectionWithProblem(fieldErrors);
+    const withProblem = firstSectionWithProblem(
+      fieldErrors,
+      projectView === undefined
+        ? []
+        : kind === "diff"
+          ? DYNAMIC_ONLY_FIELDS
+          : DIFF_ONLY_FIELDS,
+    );
     if (withProblem !== null) setSection(withProblem);
     setFormError(message);
     setFocusRequest((count) => count + 1);
@@ -608,13 +636,20 @@ export function SettingsForm({
         modelName: "model",
         providers: providerChoices,
         provider,
-        providerOrigin: settingsOrigin({
-          model,
-          state,
-          name: "provider",
-          label: "Provider",
-          onReset: () => handlers.reset("provider"),
-        }),
+        // The provider and its model are one choice: one origin, and a reset takes both back.
+        providerOrigin: pairOrigin(
+          settingsOrigin({
+            model,
+            state,
+            name: "provider",
+            label: "provider and model",
+            onReset: () => handlers.reset("provider"),
+          }),
+          state.overridden.provider || state.overridden.model,
+          model.mode === "project"
+            ? "Set for this project"
+            : "Changed from the built-in value",
+        ),
         providerError: errors.provider,
         model: state.values.model,
         modelError: errors.model,
@@ -633,21 +668,24 @@ export function SettingsForm({
         keysHint: false,
       };
     }
+    const defaultDynamicModel = projectView.defaults.dynamicModel ?? "";
+    const dynamicChanged =
+      chosenDynamicProvider !== defaultProvider ||
+      state.dynamic.dynamicModel !== defaultDynamicModel;
     const providerOrigin: SettingsOrigin = {
       source:
+        dynamicChanged ||
         projectView.sources.dynamicProvider === "project" ||
-        state.dynamic.dynamicProvider !==
-          (projectView.defaults.dynamicProvider ?? "")
+        projectView.sources.dynamicModel === "project"
           ? "Set for this project"
           : "Built-in value",
-      resetLabel:
-        state.dynamic.dynamicProvider === defaultProvider ? null : RESET_LABEL,
-      resetAriaLabel: "Reset to default for Dynamic Review provider",
+      resetLabel: dynamicChanged ? RESET_LABEL : null,
+      resetAriaLabel: "Reset to default for Dynamic Review provider and model",
       onReset: () =>
         edit(
           setDynamicModel(
             setDynamicProvider(state, defaultProvider),
-            projectView.defaults.dynamicModel ?? "",
+            defaultDynamicModel,
           ),
           "dynamicProvider",
         ),
