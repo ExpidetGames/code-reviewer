@@ -62,6 +62,21 @@ export async function switchProjectOn(
   if ((await row.getByText("Active", { exact: true }).count()) === 0)
     await row.getByRole("switch", { name: `Review ${fullName}` }).click();
   await expect(row.getByText("Active", { exact: true })).toBeVisible();
+  // A project that is switched on starts as Dynamic Review where the instance has it on (#656); the journeys that review a pull request
+  // as a Diff Review start from that kind, and the ones that want Dynamic Review choose it (`chooseDynamicReview`).
+  await row.getByRole("link", { name: fullName, exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: fullName }),
+  ).toBeVisible();
+  if (await page.getByRole("radio", { name: "Dynamic Review" }).isChecked()) {
+    await page.getByRole("radio", { name: "Diff Review" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Diff Review" })
+      .click();
+    await expect(page.getByRole("status")).toContainText("Saved.");
+  }
 }
 
 /**
