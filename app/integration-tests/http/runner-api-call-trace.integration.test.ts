@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";
 import type { RunnerCallTrace } from "../../src/runner-api/contract.ts";
+import { toRunDetailView } from "../../src/runs/run-view.ts";
 import { createRunsService } from "../../src/runs/runs-service.ts";
 import {
   goodResult,
@@ -44,6 +45,13 @@ const viewOf = (h: RunnerApiHarness) =>
     redact: (text) => text,
   });
 
+// The trace is for the admin portal (#657): a member's run page has none, so it is read from the admin's view of the job.
+async function traceOf(h: RunnerApiHarness, id: string) {
+  const job = await h.queue.get(id);
+  if (job === undefined) throw new Error("No such job.");
+  return toRunDetailView(job, "acme/widgets", new Date()).callTrace;
+}
+
 describe("the call trace of a completed job", () => {
   // #541-T08
   it("is stored with the result and read back by the Runs view", async () => {
@@ -61,7 +69,7 @@ describe("the call trace of a completed job", () => {
       .where("id", "=", job.id)
       .executeTakeFirstOrThrow();
     expect(String(stored.result)).toContain('"callTrace"');
-    expect((await viewOf(h).get(job.id))?.run.callTrace).toStrictEqual(trace);
+    expect(await traceOf(h, job.id)).toStrictEqual(trace);
   });
 
   // #541-T08
@@ -71,9 +79,8 @@ describe("the call trace of a completed job", () => {
 
     await h.complete(job.id, job.leaseToken, {});
 
-    const snapshot = await viewOf(h).get(job.id);
-    expect(snapshot?.run.callTrace).toBeNull();
-    expect(snapshot?.run.usage).not.toBeNull();
+    expect(await traceOf(h, job.id)).toBeNull();
+    expect((await viewOf(h).get(job.id))?.run.usage).not.toBeNull();
   });
 
   // #541-T07, #541-T08: observability only, so a trace that is not the contract's costs the trace and
@@ -95,7 +102,7 @@ describe("the call trace of a completed job", () => {
     expect(response.status).toBe(200);
     expect(await h.queue.get(job.id)).toMatchObject({ status: "succeeded" });
     const snapshot = await viewOf(h).get(job.id);
-    expect(snapshot?.run.callTrace).toBeNull();
+    expect(await traceOf(h, job.id)).toBeNull();
     expect(snapshot?.run.usage).toMatchObject({
       aiCalls: goodResult().usage?.aiCalls,
     });

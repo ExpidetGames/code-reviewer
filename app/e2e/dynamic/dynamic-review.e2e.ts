@@ -333,19 +333,22 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
       detail.getByText("Dynamic Review", { exact: true }),
     ).toBeVisible();
     await expect(detail.locator('[data-slot="run-model"]')).toHaveText(MODEL);
-    const usage = await detail
-      .getByText(/\d[\d,]* tokens in \d+ model calls?/)
-      .innerText();
-    const [, tokens, calls] =
-      /([\d,]+) tokens in (\d+) model call/.exec(usage) ?? [];
-    expect(Number(calls)).toBeGreaterThanOrEqual(2);
-    expect(Number(calls)).toBeLessThanOrEqual(first.length);
-    // The fake LLM reports 100 + 20 tokens for every answer; the page shows what the proxy summed.
-    expect(Number((tokens ?? "").replaceAll(",", ""))).toBe(
-      120 * Number(calls),
-    );
+    // The tokens and calls are no longer on the page (#657): the data route of the run still carries what the proxy summed.
+    const runId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    const stored = (await (
+      await page.request.get(`/api/w/default/runs/${runId}`)
+    ).json()) as { run: { usage: { totalTokens: number; aiCalls: number } } };
+    const { totalTokens: tokens, aiCalls: calls } = stored.run.usage;
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(calls).toBeLessThanOrEqual(first.length);
+    // The fake LLM reports 100 + 20 tokens for every answer; the data shows what the proxy summed.
+    expect(tokens).toBe(120 * calls);
+    // The Findings show what the review posted: the finding of the comment.
     await expect(
-      detail.getByRole("link", { name: "Open the comment on GitHub" }),
+      detail.getByRole("region", { name: "Findings" }),
+    ).toContainText(FINDING_TITLE);
+    await expect(
+      detail.getByRole("link", { name: "Open the review on GitHub" }),
     ).toHaveAttribute("href", summary?.htmlUrl ?? "missing");
     expect(summary?.htmlUrl).toMatch(
       /^https:\/\/github\.com\/dynamic-journey\/widgets\/pull\/\d+#issuecomment-\d+$/,
