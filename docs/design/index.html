@@ -382,7 +382,7 @@ em,i,cite{font-style:normal}
 <li><a href="#cat-1">1. Sign in and sign up</a><ul><li><a href="#s-A1">Sign in</a></li><li><a href="#s-A2">Sign in, error</a></li><li><a href="#s-A3">Sign up</a></li><li><a href="#s-A4">Sign up, check inbox</a></li><li><a href="#s-A5">Forgot password</a></li><li><a href="#s-A6">Set a new password</a></li><li><a href="#s-A7">Confirm email address</a></li><li><a href="#s-A8">Invitation</a></li></ul></li>
 <li><a href="#cat-2">2. First run setup</a><ul><li><a href="#s-B1">Setup code</a></li><li><a href="#s-B2">Setup step 1, usage</a></li><li><a href="#s-B3">Setup step 2, who may sign up</a></li><li><a href="#s-B4">Setup step 3, admin account</a></li></ul></li>
 <li><a href="#cat-3">3. Start and invitations</a><ul><li><a href="#s-C1">No workspace yet</a></li><li><a href="#s-C2">Invitations</a></li><li><a href="#s-C3">Create a workspace</a></li><li><a href="#s-C4">GitHub result</a></li></ul></li>
-<li><a href="#cat-4">4. Projects</a><ul><li><a href="#s-D1">Projects</a></li><li><a href="#s-D2">Projects, empty</a></li><li><a href="#s-D3">Project settings</a></li><li><a href="#s-D4">Review now</a></li><li><a href="#s-D5">Projects, balance banner</a></li></ul></li>
+<li><a href="#cat-4">4. Projects</a><ul><li><a href="#s-D1">Projects</a></li><li><a href="#s-D2">Projects, empty</a></li><li><a href="#s-D3">Project settings</a></li><li><a href="#s-D4">Start a review</a></li><li><a href="#s-D5">Projects, balance banner</a></li></ul></li>
 <li><a href="#cat-5">5. Runs</a><ul><li><a href="#s-E1">Runs</a></li><li><a href="#s-E2">Runs, empty</a></li><li><a href="#s-E3">Run detail</a></li><li><a href="#s-E4">Run detail, failed</a></li></ul></li>
 <li><a href="#cat-6">6. Connections and members</a><ul><li><a href="#s-F1">Connections</a></li><li><a href="#s-G1">Members</a></li><li><a href="#s-G2">Members, confirm dialog</a></li></ul></li>
 <li><a href="#cat-7">7. Workspace settings</a><ul><li><a href="#s-H1">Settings, General</a></li><li><a href="#s-H2">Settings, Review defaults</a></li><li><a href="#s-H3">Settings, LLM access</a></li><li><a href="#s-H4">Settings, Plan</a></li><li><a href="#s-H5">Settings, Advanced</a></li><li><a href="#s-H6">Settings, Billing</a></li><li><a href="#s-H7">Settings, Billing, member view</a></li></ul></li>
@@ -702,10 +702,10 @@ em,i,cite{font-style:normal}
 <div class="frame" style="aspect-ratio: 1280 / 2000"><div class="screen-host" data-tpl="D3" data-w="1280" role="img" aria-label="Mockup of the screen Project settings"></div></div>
 </article>
 <article class="screen" id="s-D4">
-<header><span class="sid">D4</span><h4>Review now</h4></header>
-<p class="purpose">Start a review of an open pull request by hand, drafts included. Results: started (with a link to the run), or the same review is already waiting. Works only while the project is active.</p>
-<dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/projects/&lt;repository&gt;/review</code></dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/projects/[repositoryId]/review/page.tsx</code></dd></dl>
-<div class="frame" style="aspect-ratio: 1280 / 900"><div class="screen-host" data-tpl="D4" data-w="1280" role="img" aria-label="Mockup of the screen Review now"></div></div>
+<header><span class="sid">D4</span><h4>Start a review</h4></header>
+<p class="purpose">Start a review of an open pull request by hand, drafts included. The play button in the Review column of the project list opens a dialog with the open pull requests; the title and the Start review button stay in view while the list scrolls. Results: started (with a link to the run), or the same review is already waiting. The button is disabled, with the reason as a tooltip, while the project is not active.</p>
+<dl class="facts"><dt>Address</dt><dd>A dialog on <code>/w/&lt;workspace&gt;/projects</code>, no page of its own.</dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/manual-reviews/ui/start-review-dialog.tsx</code></dd></dl>
+<div class="frame" style="aspect-ratio: 1280 / 900"><div class="screen-host" data-tpl="D4" data-w="1280" role="img" aria-label="Mockup of the screen Start a review"></div></div>
 </article>
 <article class="screen" id="s-D5">
 <header><span class="sid">D5</span><h4>Projects, balance banner</h4></header>
@@ -1167,10 +1167,10 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <table class="tbl" aria-label="Repositories">
 <thead><tr><th>Name</th><th>Installation</th><th>Status</th><th>Last run</th><th>Review</th></tr></thead>
 <tbody>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/code-reviewer</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-ok"><i class="ic ic-check"></i>Succeeded</span><span class="sub">21 Oct 2026, 08:14 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/code-reviewer: on"></span>On</div></td></tr>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/landing</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-fail"><i class="ic ic-x"></i>Failed</span><span class="sub">20 Oct 2026, 17:41 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/landing: on"></span>On</div></td></tr>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/billing-service</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-neutral">Inactive</span></td><td class="muted">No run yet</td><td><div class="sw"><span class="switch" role="img" aria-label="Review itegro/billing-service: off"></span>Off</div></td></tr>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/legacy-api</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-warn"><i class="ic ic-warn"></i>Unavailable</span></td><td class="muted">18 Oct 2026, 11:02 UTC</td><td><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/legacy-api: on"></span>On</div><span class="sub">It was on and resumes if the repository comes back.</span></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/code-reviewer</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-ok"><i class="ic ic-check"></i>Succeeded</span><span class="sub">21 Oct 2026, 08:14 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="row"><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/code-reviewer: on"></span>On</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/code-reviewer"><i class="ic ic-play"></i></button></div></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/landing</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-fail"><i class="ic ic-x"></i>Failed</span><span class="sub">20 Oct 2026, 17:41 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="row"><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/landing: on"></span>On</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/landing"><i class="ic ic-play"></i></button></div></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/billing-service</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-neutral">Inactive</span></td><td class="muted">No run yet</td><td><div class="row"><div class="sw"><span class="switch" role="img" aria-label="Review itegro/billing-service: off"></span>Off</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/billing-service" disabled><i class="ic ic-play"></i></button></div></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/legacy-api</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-warn"><i class="ic ic-warn"></i>Unavailable</span></td><td class="muted">18 Oct 2026, 11:02 UTC</td><td><div class="row"><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/legacy-api: on"></span>On</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/legacy-api" disabled><i class="ic ic-play"></i></button></div><span class="sub">It was on and resumes if the repository comes back.</span></td></tr>
 </tbody></table>
 </div>
 <p class="hint">Members see the switches read only: Only Admins and Owners can switch a project on or off.</p>
@@ -1203,8 +1203,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <aside class="side"><a class="cur" href="#s-D1" aria-current="page">Projects</a><a href="#s-E1">Runs</a><hr><a href="#s-F1">Connections</a><a href="#s-G1">Members</a><a href="#s-H1">Settings</a></aside>
 <main class="main">
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-D1">Projects</a><i class="ic ic-right sm"></i><span>itegro/code-reviewer</span><i class="ic ic-right sm"></i><span>Settings</span></nav>
-<div class="ph"><div class="t"><h1>itegro/code-reviewer <span class="badge b-ok"><i class="ic ic-check"></i>Active</span></h1></div><div class="acts"><a class="btn btn-s" href="#s-D4">Review now</a></div></div>
-<nav class="tabs" aria-label="Project"><a class="cur" href="#s-D3" aria-current="page">Settings</a><a href="#s-D4">Review now</a></nav>
+<div class="ph"><div class="t"><h1>itegro/code-reviewer <span class="badge b-ok"><i class="ic ic-check"></i>Active</span></h1></div></div>
 
 <form class="col" aria-label="Review settings" style="gap: 24px">
 <section class="card"><h2>Review kind</h2>
@@ -1268,22 +1267,19 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="shell">
 <aside class="side"><a class="cur" href="#s-D1" aria-current="page">Projects</a><a href="#s-E1">Runs</a><hr><a href="#s-F1">Connections</a><a href="#s-G1">Members</a><a href="#s-H1">Settings</a></aside>
 <main class="main">
-<nav class="bc" aria-label="Breadcrumb"><a href="#s-D1">Projects</a><i class="ic ic-right sm"></i><span>itegro/code-reviewer</span><i class="ic ic-right sm"></i><span>Review now</span></nav>
-<div class="ph"><div class="t"><h1>itegro/code-reviewer <span class="badge b-ok"><i class="ic ic-check"></i>Active</span></h1></div></div>
-<nav class="tabs" aria-label="Project"><a href="#s-D3">Settings</a><a class="cur" href="#s-D4" aria-current="page">Review now</a></nav>
-<div class="alert a-ok" role="status"><i class="ic ic-check"></i><p>Started: review for pull request #482. <a class="lnk" href="#s-E3">View the run</a></p></div>
-<form class="card" aria-label="Start a review now">
-<div class="row between"><h2>Open pull requests</h2><button class="btn btn-s sm" type="button"><i class="ic ic-redo sm"></i>Refresh list</button></div>
-<p>Start a review for an open pull request by hand. It does not wait for new commits and works for drafts too.</p>
+<div class="ph"><div class="t"><h1>Projects</h1></div></div>
+<div class="card" role="dialog" aria-label="Start a review">
+<h2>Start a review</h2>
+<p>Pick an open pull request of itegro/code-reviewer.</p>
 <div class="fieldset"><span class="label">Pull request</span>
 <div class="opt on"><span class="dot"></span><div class="grow"><b>#482 Add retry to the webhook handler</b><span>by anna-keller</span></div><a class="lnk sm" href="#">GitHub</a></div>
 <div class="opt"><span class="dot"></span><div class="grow"><b>#479 Scope the run query to the workspace <span class="badge">Draft</span></b><span>by tobias-brandt</span></div><a class="lnk sm" href="#">GitHub</a></div>
 <div class="opt"><span class="dot"></span><div class="grow"><b>#474 Update the Docker Compose guide</b><span>by mira-vogel</span></div><a class="lnk sm" href="#">GitHub</a></div>
 </div>
-<div class="row"><button class="btn btn-p" type="button">Review now</button></div>
-</form>
-<div class="alert a-warn"><i class="ic ic-warn"></i><p>Reviews can be started by hand only while the project is active.</p></div>
-<p class="hint">The warning replaces the form when the project is inactive. With no open pull requests the card says: There are no open pull requests in this repository. Open one on GitHub, then refresh the list.</p>
+<div class="row"><button class="btn btn-p" type="button">Start review</button><button class="btn btn-s" type="button"><i class="ic ic-redo sm"></i>Refresh list</button></div>
+<div class="alert a-ok" role="status"><i class="ic ic-check"></i><p>Started: review for pull request #482. <a class="lnk" href="#s-E3">View the run</a></p></div>
+</div>
+<p class="hint">With no open pull requests the dialog says: There are no open pull requests in this repository. Open one on GitHub, then refresh the list. For a project that is not active the play button is disabled; its tooltip says: Switch the project on to start a review.</p>
 </main>
 </div>
 </div></template>

@@ -83,6 +83,10 @@ describe("the play button and its dialog", () => {
     });
     await user.click(await within(dialog).findByRole("radio", { name: /#7/ }));
     expect(within(dialog).getByRole("radio", { name: /#3/ })).toBeTruthy();
+    // The form inside carries no name of its own: the dialog's title is the one "Start a review".
+    expect(
+      within(dialog).queryByRole("form", { name: "Start a review" }),
+    ).toBeNull();
     await user.click(
       within(dialog).getByRole("button", { name: "Start review" }),
     );
@@ -146,5 +150,50 @@ describe("the play button and its dialog", () => {
         ?.textContent,
     ).toBe("Switch the project on to start a review.");
     expect(listPullRequests).not.toHaveBeenCalled();
+  });
+
+  // #655-T02
+  it("shows the reason to everyone, as a tooltip on the focusable wrapper of the disabled button", async () => {
+    const user = renderDialog(fakeApi(pullRequests([7])).api, false);
+
+    // A disabled button takes no focus, so the wrapper around it does; Tab reaches it.
+    await user.tab();
+    const wrapper = screen.getByRole("group", {
+      name: "Start a review of acme/widgets",
+    });
+    expect(document.activeElement).toBe(wrapper);
+
+    const tip = await screen.findByRole("tooltip");
+    expect(tip.textContent).toBe("Switch the project on to start a review.");
+  });
+
+  // #655-T03
+  it("keeps the title and the actions in view and scrolls only the pull request list", async () => {
+    const user = renderDialog(
+      fakeApi(pullRequests(Array.from({ length: 40 }, (_, i) => i + 1))).api,
+    );
+
+    await user.click(play());
+    const dialog = await screen.findByRole("dialog", {
+      name: "Start a review",
+    });
+    await within(dialog).findByRole("radio", { name: /#40/ });
+
+    // The dialog never outgrows the viewport, and the one scrolling area holds the list but not the
+    // actions (jsdom has no layout, so the real behaviour is the e2e journey's).
+    expect(dialog.className).toContain("max-h-[90vh]");
+    const scroller = within(dialog).getByTestId("pull-request-scroll");
+    expect(scroller.className).toContain("overflow-y-auto");
+    expect(within(scroller).getAllByRole("radio")).toHaveLength(40);
+    expect(
+      within(scroller).queryByRole("button", { name: "Start review" }),
+    ).toBeNull();
+    expect(
+      within(scroller).queryByRole("button", { name: "Refresh list" }),
+    ).toBeNull();
+    expect(
+      within(dialog).getByRole("button", { name: "Refresh list" }),
+    ).toBeTruthy();
+    expect(dialog.contains(scroller)).toBe(true);
   });
 });

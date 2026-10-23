@@ -111,7 +111,7 @@ export function StartReviewPanel({
     !busy;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       {loading ? (
         <div className="flex flex-col gap-2" aria-busy="true">
           <span className="sr-only">Loading the open pull requests</span>
@@ -129,25 +129,30 @@ export function StartReviewPanel({
       ) : null}
       {ready !== null ? (
         <form
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-1 flex-col gap-4"
           onSubmit={(event) => void submit(event)}
-          aria-label="Start a review"
         >
-          <PullRequestList
-            pullRequests={ready.pullRequests}
-            selected={selected}
-            onSelect={(number) => {
-              setSelected(number);
-              setOutcome(null);
-            }}
-            name={groupName}
-          />
+          {/* Only the list scrolls: the actions below stay in view however many pull requests are open. */}
+          <div
+            className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1"
+            data-testid="pull-request-scroll"
+          >
+            <PullRequestList
+              pullRequests={ready.pullRequests}
+              selected={selected}
+              onSelect={(number) => {
+                setSelected(number);
+                setOutcome(null);
+              }}
+              name={groupName}
+            />
+          </div>
           {ready.allowedCommands.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Review is switched off in the settings of this project.
             </p>
           ) : null}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
             <Button type="submit" disabled={!canStart}>
               Start review
             </Button>

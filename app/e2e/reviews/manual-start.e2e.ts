@@ -30,6 +30,9 @@ const account: GithubAccount = {
 };
 const INSTALLATION_ID = 9500001;
 const WIDGETS = { id: 9600001, fullName: "manual-journey/widgets" };
+// A repository with far more open pull requests than fit on a screen.
+const BUSY = { id: 9600002, fullName: "manual-journey/busy" };
+const BUSY_PULL_REQUESTS = 40;
 // The Runs page learns about runs within its polling interval.
 const POLL_WAIT = { timeout: 20_000 };
 
@@ -44,8 +47,13 @@ test.describe("starting a review by hand", () => {
         id: INSTALLATION_ID,
         account: GITHUB_APP_OWNER_ACCOUNT,
       },
-      [WIDGETS],
+      [WIDGETS, BUSY],
     );
+    for (let number = 1; number <= BUSY_PULL_REQUESTS; number++)
+      await addGithubPullRequest(request, BUSY.fullName, {
+        number,
+        title: `Busy change ${String(number)}`,
+      });
     await addGithubPullRequest(request, WIDGETS.fullName, {
       number: 12,
       title: "Add widget caching",
@@ -193,5 +201,52 @@ test.describe("starting a review by hand", () => {
     await expect(
       page.getByRole("button", { name: "Start review" }),
     ).toBeDisabled();
+  });
+
+  // #655-T03
+  test("with many open pull requests only the list scrolls: the title and the actions stay in view", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+    const row = page.getByRole("row").filter({ hasText: BUSY.fullName });
+    await row.getByRole("switch", { name: `Review ${BUSY.fullName}` }).click();
+    await expect(row.getByText("Active", { exact: true })).toBeVisible();
+    await row
+      .getByRole("button", { name: `Start a review of ${BUSY.fullName}` })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Start a review" });
+    await expect(dialog).toBeVisible();
+
+    const last = dialog.getByRole("radio", {
+      name: new RegExp(`#${String(BUSY_PULL_REQUESTS)} `),
+    });
+    await expect(last).toBeAttached();
+    // The list is taller than the dialog (it scrolls), yet the dialog fits the window and so do its
+    // title and both actions, without scrolling the page or the dialog itself.
+    const scroller = dialog.getByTestId("pull-request-scroll");
+    const metrics = await scroller.evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+    await expect(dialog).toBeInViewport({ ratio: 1 });
+    await expect(
+      dialog.getByRole("heading", { name: "Start a review" }),
+    ).toBeInViewport({ ratio: 1 });
+
+    await last.check();
+    await expect(last).toBeInViewport();
+    const start = dialog.getByRole("button", { name: "Start review" });
+    await expect(start).toBeEnabled();
+    await expect(start).toBeInViewport({ ratio: 1 });
+    await expect(
+      dialog.getByRole("button", { name: "Refresh list" }),
+    ).toBeInViewport({ ratio: 1 });
+
+    await start.click();
+    await expect(dialog.getByRole("status")).toContainText(
+      `Started: review for pull request #${String(BUSY_PULL_REQUESTS)}`,
+    );
+    await expect(dialog).toBeInViewport({ ratio: 1 });
   });
 });

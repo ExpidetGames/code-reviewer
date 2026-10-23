@@ -44,7 +44,7 @@ publishes as one persistent summary comment. The decisions are in epic
    instance gate is on**. With the gate off the run is created `failed` with
    `dynamic_review_disabled`; it is never reviewed as a Diff. The kind comes from the project's
    stored settings, resolved by the queue inside the enqueue transaction, so it is the same for an
-   automatic review, an authorized `/review` and a manual Review now. Nothing a pull request or a
+   automatic review, an authorized `/review` and a review started by hand with the play button in the project list. Nothing a pull request or a
    comment says (title, body, `/review` text) can select or change the kind, model, budget or skill.
    The Run's detail page shows the actual kind, model, tokens, model calls and cost. For Dynamic
    the cost is the `usage.cost` that OpenRouter reports with each answer, i.e. the credits it charged
@@ -1339,7 +1339,7 @@ not advertised` the reason is in the same line: see the table in "The startup se
    and admin only; it uses the instance settings setter (lock, then cancellation), never raw SQL.
    Nothing changes for existing projects: all are Diff until step 6.
 6. **Choose one project to try it on:** set its review kind to Dynamic on its settings page. Open a
-   pull request (or use Review now) and look at the Run: the kind, the model and a result URL are
+   pull request (or press the play button of the project in the project list and pick one) and look at the Run: the kind, the model and a result URL are
    visible, and the previous successful summary stays in place if a run fails.
 
 **Rollback** (the full procedure and its reasons are in `contracts/README.md`):
