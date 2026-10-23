@@ -148,7 +148,9 @@ test.describe("the project list and the settings pages", () => {
     await openSection(page, "LLM");
     await chooseOption(page, "Model", "anthropic/claude-sonnet-5.5");
     await openSection(page, "Limits");
-    await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
+    await expect(
+      page.getByText(/is above the warning level of \$0\.10/),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
@@ -160,7 +162,9 @@ test.describe("the project list and the settings pages", () => {
       "anthropic/claude-sonnet-5.5",
     );
     await openSection(page, "Limits");
-    await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
+    await expect(
+      page.getByText(/is above the warning level of \$0\.10/),
+    ).toBeVisible();
   });
 
   // CR-34-T14

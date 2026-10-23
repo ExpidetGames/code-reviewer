@@ -911,11 +911,11 @@ test.describe("the catalog from the admin portal to a member's run", () => {
 
       // The project chooses a provider and a model, not an entry: the catalog is nowhere on the page.
       await openProject(page, slugO, REPO_O.fullName);
-      // A project that was switched on starts as Dynamic Review where the instance has it on (#656-T02); this review is a Diff Review.
+      // The project was switched on before the workspace had a key, so a Dynamic review could not have run on it: it starts as
+      // a Diff Review (#656-T02); this review is a Diff Review.
       await expect(
-        page.getByRole("radio", { name: "Dynamic Review" }),
+        page.getByRole("radio", { name: "Diff Review" }),
       ).toBeChecked();
-      await page.getByRole("radio", { name: "Diff Review" }).click();
       await openSection(page, "LLM");
       await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
         0,
@@ -927,7 +927,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       await provider.click();
       await page.getByRole("option", { name: /^OpenRouter/ }).click();
       await chooseOption(page, "Model", OWN_MODEL);
-      await save(page, "Switch to Diff Review");
+      await save(page);
       await page.reload();
       await openSection(page, "LLM");
       await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
