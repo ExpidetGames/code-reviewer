@@ -24,7 +24,7 @@ test.describe("start page", () => {
       page.getByRole("button", { name: "Sign in with GitHub" }),
     ).toBeVisible();
     await page.waitForLoadState("load");
-    await expect(page).toHaveTitle("Code Reviewer");
+    await expect(page).toHaveTitle("code-review.com");
     expect(consoleErrors).toEqual([]);
   });
 

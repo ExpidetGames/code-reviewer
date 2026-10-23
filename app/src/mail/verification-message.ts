@@ -28,7 +28,7 @@ export function verificationMessage({
   const text = [
     "Confirm your email address",
     "",
-    "Someone created an account at Code Reviewer with this email address. Open this link and enter the",
+    "Someone created an account at code-review.com with this email address. Open this link and enter the",
     `password chosen at that sign-up to confirm it (the link works once and for ${String(validForHours)} hours):`,
     "",
     link,
@@ -37,7 +37,7 @@ export function verificationMessage({
   ].join("\n");
   const html = [
     "<p>Confirm your email address</p>",
-    "<p>Someone created an account at Code Reviewer with this email address. Open this link and enter the",
+    "<p>Someone created an account at code-review.com with this email address. Open this link and enter the",
     `password chosen at that sign-up to confirm it (the link works once and for ${String(validForHours)} hours):</p>`,
     `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
     "<p>If this was not you, ignore this message: without that password the link does nothing.</p>",

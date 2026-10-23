@@ -18,6 +18,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
+import { PRODUCT_NAME } from "../copy/product-name.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import type { Database } from "../db/schema.ts";
@@ -81,7 +82,7 @@ export function createAuth({
   verificationRequired,
 }: CreateAuthOptions) {
   return betterAuth({
-    appName: "Code Reviewer",
+    appName: PRODUCT_NAME,
     baseURL: config.baseUrl,
     secret: config.secret,
     database: { db, type: "sqlite", transaction: true },
