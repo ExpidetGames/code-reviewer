@@ -23,7 +23,7 @@ afterEach(cleanup);
 const ada: ShellUser = {
   name: "Ada Lovelace",
   login: "ada",
-  avatarUrl: "https://avatars.example.test/u/1",
+  avatarUrl: "https://avatars.githubusercontent.com/u/1",
 };
 
 function renderMenu(
@@ -230,6 +230,16 @@ describe("a person without a display name or avatar", () => {
     renderMenu({ ...ada, avatarUrl: "javascript:alert(1)" });
 
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  // #638-T03
+  it("does not load an avatar from a host other than GitHub's avatar host", () => {
+    renderMenu({ ...ada, avatarUrl: "https://avatars.example.test/u/1" });
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /Ada Lovelace/ }).textContent,
+    ).toContain("AL");
   });
 });
 
