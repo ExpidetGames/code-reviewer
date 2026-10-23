@@ -6,9 +6,11 @@
 // limit (the claim feature `cost_limit`) never gets a job that carries one: the job ends before any credential exists, like a
 // job with a cost policy does (#553). A job without a limit is the job of today, byte for byte.
 import { describe, expect, it } from "vitest";
+import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import {
   startRunnerApiHarness,
   TEST_LLM_API_KEY,
+  TEST_LLM_MODEL,
 } from "../../src/test-support/runner-api-harness.ts";
 import { createContractValidator } from "../../src/test-support/runner-contract.ts";
 
@@ -145,5 +147,60 @@ describe.each([
     });
 
     expect(started.details.job.input.llm.maxCostUsd).toBe(2.5);
+  });
+});
+
+describe("a run that was stopped by the cost limit of its project", () => {
+  const USAGE = {
+    model: TEST_LLM_MODEL,
+    promptTokens: 300,
+    completionTokens: 30,
+    totalTokens: 330,
+    aiCalls: 3,
+    fallbackUsed: false,
+    costUsd: 0.0123,
+  };
+
+  // #666-T05
+  it("settles a wrapped-up Dynamic Review with the cost it really had, and is a success that may be incomplete", async () => {
+    const h = await start({ dynamic: true, project: 2 });
+    const { job } = await h.claimed(claimOf(true, ["cost_limit"]));
+
+    const response = await h.complete(job.id, job.leaseToken, {
+      usage: { ...USAGE, stoppedEarly: "project_cost_limit" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await h.queue.get(job.id)).toMatchObject({ status: "succeeded" });
+    expect(
+      await createUsageRecordsRepository(h.db, h.workspaceId, h.clock.now).get(
+        job.id,
+      ),
+    ).toMatchObject({ state: "settled", costMicroUsd: 12_300 });
+  });
+
+  // #666-T05
+  it("settles a Diff Review that sent no further request with the cost of the calls it made", async () => {
+    const h = await start({ project: 2 });
+    const { job } = await h.claimed(claimOf(false, ["cost_limit"]));
+
+    const response = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "cost_limit_reached",
+      errorMessage: "the cost limit of the project is reached",
+      commentUrl: null,
+      usage: { ...USAGE, stoppedEarly: null },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "cost_limit_reached",
+    });
+    expect(
+      await createUsageRecordsRepository(h.db, h.workspaceId, h.clock.now).get(
+        job.id,
+      ),
+    ).toMatchObject({ state: "settled", costMicroUsd: 12_300 });
   });
 });

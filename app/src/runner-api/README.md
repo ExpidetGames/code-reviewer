@@ -233,8 +233,14 @@ The body may also name `features` (#279): `["dynamic_capabilities"]` says the ru
 `dynamic.capabilities`. Unknown names are ignored; a list that is not a list of plain names is
 `400 RUNNER_REQUEST_INVALID`. A previous-release runner names none.
 
-A Diff job keeps the exact legacy payload, whatever runner asked: no field is added, so a
-previous-release runner parses it unchanged. A Dynamic job is only ever handed to a runner that
+**#666:** `["cost_limit"]` says the runner reads `llm.maxCostUsd`, the cost limit of the job's project in US dollars (the effective
+`maxCostCents` of the review settings, `/100`), and enforces it next to its own limit. Both kinds of job carry it, in `llm`, and only
+when the project (or the workspace default) sets one; a job that carries it and meets a caller without the feature (a runner's
+claim, or a Worker's details request) ends `dynamic_engine_unavailable` before any credential exists, so no runner runs a job with
+a bound it cannot keep. A project without a limit sends nothing.
+
+A Diff job keeps the exact legacy payload, whatever runner asked, unless its project has a cost limit and the caller named
+`cost_limit` (#666): no other field is added, so a previous-release runner parses it unchanged. A Dynamic job is only ever handed to a runner that
 advertised `opencode`, and its `input` is tagged:
 
 - `reviewKind: "dynamic"`;

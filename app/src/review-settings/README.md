@@ -188,12 +188,14 @@ the selected kind does not show opens Review, where the note about it is.
   entries of the catalog by the names the operator gave them (never a vendor or a model id, ADR 0005). The provider and its model
   are one choice: one origin badge, and "Reset to default" takes both back. The fallback model has no field any more (it was stored
   and never used); a stored value is kept.
-- **Limits** holds `maxCostCents` (#656), the level the cost estimate warns above, typed in dollars (a leading `$` and `.5` are fine)
-  and stored in whole cents. It is a review setting like the others: a project value over the workspace default over the standard
-  level (`REVIEW_COST_LIMIT_USD`). **It only warns:** it does not cap what a review costs; enforcing it is #666, and the copy
-  ("Cost warning per review") changes then. An empty field on a project follows the workspace default and the field says which one
-  that is. It is validated like the other fields (`validate.ts`, 1 cent to 100 dollars; `ui/messages.ts` names the range) and sets
-  the level the Diff cost estimate warns above (`cost.ts` `costLimitUsdOf`).
+- **Limits** holds `maxCostCents` (#656), the cost limit of a review ("Cost limit per review (USD)"), typed in dollars (a leading
+  `$` and `.5` are fine) and stored in whole cents. It is a review setting like the others: a project value over the workspace
+  default over none. **It is enforced (#666):** the claim sends the effective value to the runner as `llm.maxCostUsd`
+  (`runner-api/claim.ts`, only to a runner that named the claim feature `cost_limit`), and the review stops when it reaches it
+  (`docs/billing.md`, "The cost limit of a project"). An empty field on a project follows the workspace default and the field says
+  which one that is, or that there is no limit of the customer's own. It is validated like the other fields (`validate.ts`, 1 cent
+  to 100 dollars; `ui/messages.ts` names the range). The estimate under the field (`cost.ts`) is held to the same level when one is
+  set (`customLimit`); without one it warns above the standard level (`REVIEW_COST_LIMIT_USD`), which is never enforced.
 - **New projects start as Dynamic Review** where the instance has Dynamic Review on and a Dynamic review of the workspace can
   resolve a model: on the operator's key a usable instance default entry of Dynamic Review exists, on the workspace's own key a
   key is stored for the default provider. Otherwise they start as Diff Review, so the first review is not refused
@@ -305,7 +307,9 @@ secret). The provider and the key are not review settings: they are the workspac
 `estimateReviewCost(settings)` (`cost.ts`) answers what a typical review is expected to cost with the
 model (and the fallback model) and lists the warnings: `above_limit` when the estimate is above **0.10 USD**,
 the customer's limit (exactly 0.10 does not warn), and `cost_unknown` for a model the price table does
-not know. `warn` is true when there is any. It never blocks a setting; the UI shows the warnings.
+not know. `warn` is true when there is any. It never blocks a setting; the UI shows the warnings. The limit the customer set is
+enforced where a review runs (#666, `docs/billing.md`, "The cost limit of a project"); the standard level of 0.10 USD, used while
+the customer set none, only warns (`customLimit` says which of the two the estimate was held to).
 
 The price per model is a small static table (`src/llm/providers/openrouter/model-pricing.ts`, behind the provider's adapter, USD per million tokens from OpenRouter's
 model list, with the day it was read, the same prices the model comparison used); the model comparison

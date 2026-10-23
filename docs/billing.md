@@ -95,6 +95,34 @@ deleting and re-creating a workspace does not give a second one. It is the only 
   hidden. The workspace is told only that reviews are paused for a while.
 - While billing is on, the per-period run quotas of the entitlements are not applied. The operator API limits stay.
 
+#### The cost limit of a project
+
+A project (or the workspace default) can set a **cost limit per review** in whole cents, 1 cent to 100 dollars (Project settings,
+Limits; #656). It is enforced where the review runs (#666), next to the instance's own limit
+(`RUNNER_DYNAMIC_MAX_COST_USD`, default 1.00 USD, which only the operator changes): a review is held to the **smaller** of the
+two. The claim sends the project's value as `llm.maxCostUsd`, only to a runner or Worker that named the claim feature
+`cost_limit`; a job that carries one and meets a caller without it ends `dynamic_engine_unavailable` before any credential
+exists, so an older runner never runs a job with a bound it cannot keep. No limit set means nothing is sent and the job is the
+job of before.
+
+- **Dynamic Review.** The limit is the budget of the run: the run is wrapped up when a further call and a final one would not
+  fit, delivers the review with the findings it has, and says so ("stopped early", on the pull request, the check run and the run
+  detail) with the reason `project_cost_limit` when the project's limit was the smaller one (the operator's is `cost_limit`).
+  The documented bound of the cost guard holds for it: the limit plus the excess of the last normal call plus the final call,
+  and the run reports how far it passed the limit. A limit so small that not even a first call fits gives a review of nothing
+  but the wrap-up.
+- **Diff Review.** One model request is never cut short, so the limit decides about the _next_ request: once what the answers so
+  far cost has reached it, the runner sends no further request (a fallback model, a retry of an unusable answer) and the run
+  ends `cost_limit_reached`. A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
+  under the field (a large pull request, warned above the limit) is how a customer judges a model before choosing it. Nothing is
+  refused at the start on an estimate: the estimate is a typical review, and a small pull request costs far less.
+- **Billing.** A stopped run is billed like any other run: what the calls really cost (the exact cost the runner reports, never
+  the limit), and for a Diff Review that ended `cost_limit_reached` in full like other failures after a model call. No hold is
+  made for the limit and none is released; the hold of a run stays the one of the kind (`app/src/billing/hold.ts`), which is
+  larger than any limit below the default.
+- **An own key whose model has no known price** cannot be bounded in dollars (no cost is counted): the token cap of the instance
+  still bounds it (#553), and the project's limit has nothing to compare.
+
 ## 2. Before you start
 
 Check these before you plan the go-live. Each is explained below.
