@@ -3,8 +3,8 @@
 // @vitest-environment jsdom
 // Pins down the shape of the workspace settings sub-pages (#178): each is its own screen with the
 // settings sub-nav marking it, and no page stacks independent forms — one form on "General"
-// (rename), "Review defaults" and "LLM access", and "Advanced" only holds destructive actions, so no
-// form at all (issue target design: "actions only"). The behaviour of each form is pinned in its own
+// (rename), "Review defaults" and "LLM access", and "Advanced" only holds the deletion of the workspace
+// (#658), a dialog with its own form, so none on the page itself. The behaviour of each form is pinned in its own
 // file; this one pins the split.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -67,8 +67,6 @@ const renders = [
         canRename
         canManageLlmKey
         audience="operator"
-        tenancy="multi"
-        memberCount={2}
         config={workingConfig()}
         llmSummary={WORKS}
       />
@@ -102,12 +100,7 @@ const renders = [
     key: "advanced",
     label: "Advanced",
     element: (
-      <AdvancedSettingsPageContent
-        workspaceSlug="acme"
-        canManageKey
-        keys={[{ provider: "openrouter", configured: true }]}
-        canResetDefaults
-      />
+      <AdvancedSettingsPageContent workspaceSlug="acme" workspaceName="Acme" />
     ),
     forms: 0,
   },
@@ -127,7 +120,10 @@ describe("the workspace settings sub-pages", () => {
           .getAttribute("aria-current"),
         label,
       ).toBe("page");
-      expect(within(nav).getAllByRole("link")).toHaveLength(4);
+      // The Owner's navigation has Advanced (the Advanced page itself says so); the others have three links.
+      expect(within(nav).getAllByRole("link")).toHaveLength(
+        key === "advanced" ? 4 : 3,
+      );
       unmount();
     }
   });

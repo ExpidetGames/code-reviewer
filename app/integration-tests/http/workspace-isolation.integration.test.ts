@@ -470,6 +470,19 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    // #658: only an Owner. The name typed is wrong on purpose, so an Owner's call is a 422 and the workspace stays for the
+    // next case; the deletion itself is proven in src/workspaces/delete-workspace.integration.test.ts.
+    name: "DELETE workspace",
+    route: "/api/w/[workspace]",
+    method: "DELETE",
+    minRole: MINIMUM_ROLE.delete_workspace,
+    path: () => "",
+    body: () => ({ confirmName: "not the name" }),
+    params: () => ({}),
+    file: "route.ts",
+    takesNoIds: true,
+  },
+  {
     name: "PATCH members/[userId]",
     route: "/api/w/[workspace]/members/[userId]",
     method: "PATCH",

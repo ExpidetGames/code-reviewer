@@ -15,6 +15,7 @@ import {
 import { createFakeMail } from "../test-support/fake-mail.ts";
 import { afterQueryPlugin } from "../test-support/query-hook.ts";
 import { insertUser } from "../test-support/users.ts";
+import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
 
 const USD = 1_000_000;
@@ -253,6 +254,46 @@ for (const engine of BILLING_ENGINES) {
 
       expect(t.mail.outbox).toEqual([]);
       expect(t.logged[0]).toContain("code=no_recipients");
+    });
+
+    // #658-T04
+    it("skips a crossing of a workspace that was deleted meanwhile without a word: no mail, no failure line, the crossing is closed", async () => {
+      const t = await start();
+      await t.topUp(10 * USD);
+      await t.charge(6 * USD);
+      await markWorkspaceDeleted(t.db, t.workspaceId);
+
+      const result = await t.deliver();
+
+      expect(t.mail.outbox).toEqual([]);
+      expect(t.logged).toEqual([]);
+      expect(result).toEqual({ delivered: 0, failed: 0 });
+      expect((await t.notifications.get("low")).delivery).not.toBe("due");
+      expect((await t.notifications.get("low")).delivery).not.toBe("sending");
+    });
+
+    // #658-T04
+    it("does not leave a crossing due for a workspace that is deleted when its balance moves", async () => {
+      const t = await start();
+      await t.topUp(10 * USD);
+      await markWorkspaceDeleted(t.db, t.workspaceId);
+      await t.db
+        .deleteFrom("billing_notifications")
+        .where("workspace_id", "=", t.workspaceId)
+        .execute();
+
+      await t.charge(6 * USD);
+      await t.deliver();
+
+      expect(
+        await t.db
+          .selectFrom("billing_notifications")
+          .selectAll()
+          .where("workspace_id", "=", t.workspaceId)
+          .execute(),
+      ).toEqual([]);
+      expect(t.mail.outbox).toEqual([]);
+      expect(t.logged).toEqual([]);
     });
 
     // #506-T07

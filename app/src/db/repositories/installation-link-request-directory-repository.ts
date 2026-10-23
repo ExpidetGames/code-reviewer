@@ -14,6 +14,7 @@ import type {
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import { toLinkRequest } from "./installation-link-requests-repository.ts";
+import { NOT_DELETED } from "./workspaces-repository.ts";
 
 export type InstallationLinkRequestDirectory = {
   /** One request of any workspace, with the names the admin needs. */
@@ -57,7 +58,8 @@ export function createInstallationLinkRequestDirectory(
         "workspaces.slug as workspace_slug",
         "users.name as requester_name",
         "users.email as requester_email",
-      ]);
+      ])
+      .where(NOT_DELETED);
   }
   type Row = Awaited<ReturnType<ReturnType<typeof views>["execute"]>>[number];
   const toView = (row: Row): InstallationLinkRequestView => ({

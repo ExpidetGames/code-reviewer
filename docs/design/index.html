@@ -440,8 +440,8 @@ em,i,cite{font-style:normal}
 <tbody>
 <tr><td><strong>Signed out</strong></td><td>Only the sign in and sign up pages. Every other address leads to Sign in. Before the first setup everything leads to the setup wizard.</td></tr>
 <tr><td><strong>Member</strong></td><td>See projects, runs and members. Start a review by hand. Change the settings of a single project. Read the balance and the journal.</td></tr>
-<tr><td><strong>Admin</strong></td><td>Everything a member can, plus: switch projects on or off, change review defaults, connect GitHub and sync, manage the LLM key, add credit and set a monthly limit, invite and revoke Members, remove Members, use the danger zones.</td></tr>
-<tr><td><strong>Owner</strong></td><td>Everything an Admin can, plus: change roles, rename the workspace, invite any role, remove anyone.</td></tr>
+<tr><td><strong>Admin</strong></td><td>Everything a member can, plus: switch projects on or off, change review defaults, connect GitHub and sync, manage the LLM key, add credit and set a monthly limit, invite and revoke Members, remove Members, reset the review defaults and remove a stored key (at the end of those pages).</td></tr>
+<tr><td><strong>Owner</strong></td><td>Everything an Admin can, plus: change roles, rename the workspace, delete the workspace (Settings, Advanced), invite any role, remove anyone.</td></tr>
 <tr><td><strong>Instance admin</strong></td><td>Sees the Admin entry in the user menu and the whole <code>/admin</code> area. For everybody else <code>/admin</code> is a 404.</td></tr>
 </tbody></table>
 <div class="prose" style="margin-top:24px"><p>Two instance settings change what is shown: <strong>single or multi tenant</strong> (one workspace, or people can create more) and <strong>billing on or off</strong> (Billing replaces the Plan tab, a balance banner appears, runs show a price). A workspace can also use <strong>our models</strong> (managed key) or <strong>its own provider key</strong>; managed workspaces never see provider or model names.</p></div>
@@ -781,8 +781,8 @@ em,i,cite{font-style:normal}
 </article>
 <article class="screen" id="s-H5">
 <header><span class="sid">H5</span><h4>Settings, Advanced</h4></header>
-<p class="purpose">Destructive workspace actions in danger zones: remove a stored key, reset every default. Each asks for confirmation.</p>
-<dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/settings/advanced</code></dd><dt>Who sees it</dt><dd>Admins and Owners.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/settings/advanced/page.tsx</code></dd></dl>
+<p class="purpose">One danger zone: Delete workspace. It asks for the name of the workspace to be typed, and is refused while the workspace still has unused credit.</p>
+<dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/settings/advanced</code></dd><dt>Who sees it</dt><dd>Owners only. For everybody else the tab is not listed and the address is a 404.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/settings/advanced/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 800"><div class="screen-host" data-tpl="H5" data-w="1280" role="img" aria-label="Mockup of the screen Settings, Advanced"></div></div>
 </article>
 <article class="screen" id="s-H6">
@@ -1477,8 +1477,6 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <section class="card"><h2>Plan</h2>
 <p>The plan of this workspace is managed on an operator configured page. You arrive there as an Owner or Admin of this workspace, with a link that works once and for five minutes.</p>
 <div><button class="btn btn-s" type="button">Manage plan <i class="ic ic-ext sm"></i></button></div></section>
-<section class="card"><h2>Instance</h2>
-<dl class="dl"><dt>Tenancy</dt><dd>Single tenant</dd><dt>Members</dt><dd>3</dd><dt>GitHub</dt><dd>Set up</dd></dl></section>
 </main>
 </div>
 </div></template>
@@ -1515,6 +1513,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="row"><button class="btn btn-p" type="button">Save review defaults</button><button class="btn btn-g" type="button">Discard changes</button><span class="hint">Last saved 20 Oct 2026, 16:02 UTC by Anna Keller.</span></div>
 <p class="hint">Members see the form read only: Only Admins and Owners can change these values.</p>
 </form>
+<div class="danger"><div class="t"><b>Reset every default</b><span>Every review default goes back to the built in value; projects that set their own keep theirs.</span></div><button class="btn btn-d" type="button">Reset every default…</button></div>
 </main>
 </div>
 </div></template>
@@ -1554,6 +1553,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <p>LLM access for this workspace is provided by this instance. Reviews do not use a key of this workspace, so there is nothing to enter here.</p>
 <div class="alert a-warn"><i class="ic ic-warn"></i><p>The access is not available at the moment, so reviews cannot run. Contact the administrator of this instance.</p></div>
 <p class="hint">Members see: Only an Admin or an Owner of the workspace can change it.</p></section>
+<div class="danger"><div class="t"><b>Remove the OpenRouter key</b><span>Reviews of this workspace stop until a new key is saved. This cannot be undone.</span></div><button class="btn btn-d" type="button">Remove the key…</button></div>
 </main>
 </div>
 </div></template>
@@ -1592,11 +1592,8 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-H1">Settings</a><i class="ic ic-right sm"></i><span>Advanced</span></nav>
 <div class="ph"><div class="t"><h1>Advanced</h1></div></div>
 <nav class="tabs" aria-label="Settings"><a href="#s-H1">General</a><a href="#s-H2">Review defaults</a><a href="#s-H3">LLM access</a><a href="#s-H4">Plan</a><a class="cur" href="#s-H5" aria-current="page">Advanced</a></nav>
-<section class="card"><h2>Danger zone</h2>
-<div class="danger"><div class="t"><b>Remove the OpenRouter key</b><span>Reviews of this workspace stop until a new key is saved. This cannot be undone.</span></div><button class="btn btn-d" type="button">Remove the key…</button></div>
-<div class="danger"><div class="t"><b>Reset every default</b><span>Every review default goes back to the built in value; projects that set their own keep theirs.</span></div><button class="btn btn-d" type="button">Reset every default…</button></div>
-</section>
-<p class="hint">Members see: Only an Admin or an Owner of this workspace can remove the key or reset the defaults. The confirm dialogs read: Remove the key? [Cancel] [Yes, remove it] and Reset every review default? [Cancel] [Yes, reset every default].</p>
+<div class="danger"><div class="t"><b>Delete workspace</b><span>Removes this workspace with its projects, runs, settings and keys, and disconnects its GitHub installations. This cannot be undone.</span></div><button class="btn btn-d" type="button">Delete workspace…</button></div>
+<p class="hint">The confirm dialog reads: Delete Itegro? Everyone loses access, pending reviews are cancelled and the GitHub installations are released. Billing records are kept for the books. Field: Type Itegro to confirm. [Cancel] [Delete this workspace], the button stays disabled until the name matches. A workspace with unused credit answers: This workspace still has unused credit, so it cannot be deleted yet. Contact support and we will sort the credit out with you first.</p>
 </main>
 </div>
 </div></template>
