@@ -258,6 +258,36 @@ describe("the switch and the statement", () => {
   });
 });
 
+describe("a switch that is on while the setup is not complete (#632)", () => {
+  // #632-T07
+  it("says that every review is refused, not that reviews run uncharged, and lists the terms link of a setup saved before it existed", () => {
+    render(
+      <BillingPage
+        billing={{
+          ...RATED,
+          enabled: true,
+          on: false,
+          adapter: "stripe",
+          missing: ["terms_url_missing"],
+        }}
+        notice={NOTICE}
+        api={api()}
+      />,
+    );
+
+    const warning = screen
+      .getByText(/The switch is on, but billing is not running/)
+      .closest("[role=note]") as HTMLElement;
+    expect(warning.textContent).toMatch(/every review is refused/i);
+    expect(warning.textContent).not.toMatch(/not charged/i);
+    expect(screen.getByText("The link to your terms")).toBeTruthy();
+    // The admin completes it: nothing is filled in for them.
+    expect(
+      (screen.getByLabelText("Link to the terms") as HTMLInputElement).value,
+    ).toBe("");
+  });
+});
+
 describe("the payment adapter and the Stripe credentials", () => {
   // #504-T04
   it("chooses Stripe and shows its fields only then", async () => {

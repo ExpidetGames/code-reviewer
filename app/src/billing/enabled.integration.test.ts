@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createSecretsRepository } from "../db/repositories/secrets-repository.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { readClaimBilling } from "./claim-billing.ts";
 import {
   guardBillingRoute,
+  incompleteBillingItems,
   isBillingOn,
   readBillingSwitch,
 } from "./enabled.ts";
@@ -154,6 +156,73 @@ describe("whether billing is on", () => {
     expect(state.missing).toContain("minute_rate_diff_missing");
     expect(state.missing).toContain("stripe_api_key_missing");
     expect(await isBillingOn(db)).toBe(false);
+  });
+});
+
+describe("a Stripe setting switched on before the terms link existed (#626)", () => {
+  // #632-T01
+  it("stays switched on but not ready, names only the terms link as missing, and invents no link", async () => {
+    const { db } = await createTestDatabase();
+    const settings = createInstanceSettingsRepository(db);
+    const secrets = createSecretsRepository(db);
+    // The shape a release before #626 stored: no `legal` at all.
+    const stored = {
+      enabled: true,
+      adapter: "stripe",
+      ...RATES,
+      stripe: {
+        checkedAt: "2026-10-20T10:00:00.000Z",
+        checkedEnvironment: "live",
+      },
+    };
+    await settings.set("billing_settings", stored as never, null);
+    for (const name of ["stripe_api_key", "stripe_webhook_secret"])
+      await secrets.put({
+        name,
+        ciphertext: "c",
+        nonce: "n",
+        keyVersion: 1,
+        lastFour: null,
+        updatedBy: null,
+      });
+
+    const state = await readBillingSwitch(db);
+    const claim = await readClaimBilling(db);
+
+    expect(state).toMatchObject({
+      enabled: true,
+      missing: ["terms_url_missing"],
+    });
+    expect(await isBillingOn(db)).toBe(false);
+    // Not off: the claim refuses every job with the stable code instead of running it for free.
+    expect(claim).toEqual({ state: "rates_incomplete" });
+    // Reading it wrote nothing: no terms link was made up for the operator.
+    expect(await settings.get("billing_settings")).toEqual(stored);
+  });
+});
+
+describe("what the banner of the admin portal names (#632)", () => {
+  // #632-T06
+  it("names what is missing only while the switch is on and billing is not ready", async () => {
+    const { db } = await createTestDatabase();
+    const settings = createInstanceSettingsRepository(db);
+
+    const unset = await incompleteBillingItems(db);
+    await settings.set("billing_settings", { enabled: false } as never, null);
+    const off = await incompleteBillingItems(db);
+    await settings.set("billing_settings", { enabled: true, ...RATES }, null);
+    const running = await incompleteBillingItems(db);
+    await settings.set(
+      "billing_settings",
+      { enabled: true, ...RATES, factorA: undefined } as never,
+      null,
+    );
+    const incomplete = await incompleteBillingItems(db);
+
+    expect(unset).toEqual([]);
+    expect(off).toEqual([]);
+    expect(running).toEqual([]);
+    expect(incomplete).toEqual(["factor_a_missing"]);
   });
 });
 

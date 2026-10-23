@@ -146,3 +146,16 @@ export function describeMissingItem(item: string): string {
     GENERIC_FAILURE
   );
 }
+
+/**
+ * The banner on every page of the admin portal while billing is switched on but its setup is not complete (#632): the claim
+ * refuses every review then (`billing_rates_incomplete`), so it must not wait for the admin to open the Billing page.
+ */
+export const BILLING_INCOMPLETE_TITLE =
+  "Billing is switched on but not complete";
+export const BILLING_INCOMPLETE_DETAIL =
+  "Until it is complete, every review on this instance is refused, and each pull request gets a notice that no review ran. Missing:";
+export const BILLING_INCOMPLETE_ACTION_LEAD = "Complete it on";
+export const BILLING_INCOMPLETE_ACTION_LINK = "Billing";
+export const BILLING_INCOMPLETE_ACTION_TAIL =
+  ", or switch billing off there (reviews then run without charge).";

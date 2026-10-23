@@ -299,7 +299,7 @@ and are reported to `onRefused` like the refusals of the entitlements:
 | --------------------------- | --------------------------------------------------------------------------------------------------------------- | ------ |
 | `insufficient_balance`      | the balance is exactly zero                                                                                     | yes    |
 | `balance_negative`          | the balance is below zero (a final charge, a refund or a chargeback took it there), also for a job that is free | yes    |
-| `billing_rates_incomplete`  | billing is on and a rate is missing, or the switch is set and the adapter is not ready (`isBillingOn` is false) | no     |
+| `billing_rates_incomplete`  | billing is on and a rate is missing, or the switch is set and the adapter is not ready (`isBillingOn` is false) | yes (#632) |
 | `reviews_paused`            | the hidden brake: the workspace started too many reviews in the last hour (#499, below)                         | yes    |
 | `monthly_limit_reached`     | the workspace's own monthly total limit was reached (#499, below)                                               | yes    |
 | `billing_limits_unreadable` | the brake or the monthly limit could not be evaluated (#499): closed for this job                               | no     |
@@ -498,10 +498,15 @@ read: `isBillingOn` is `enabled && missing.length === 0`. The state "set, but no
 since the switch was set, which the admin page does not allow but a damaged database can show) is **off for `isBillingOn`**, so
 a route is inert; the claim of a job (#498, `readClaimBilling`) tells it from off and refuses the job with the stable code
 `billing_rates_incomplete` (the closest existing code: a new job error code would widen the check of the jobs table and the
-refusal notices for a state the operator has to repair; the Runs page says so, the pull request gets no notice, it is the
-operator's side), so reviews do not run free and no hold is taken while `isBillingOn` is false
-(`jobs/claim-billing.integration.test.ts`, #498-T15 and #498-T18). The admin page shows "the switch is on, but billing is not
-running" with the list. To keep the state from arising, the switch-on in `admin-service.ts` judges `missingItemsOf` (the
+refusal notices for a state the operator has to repair; the Runs page says so), so reviews do not run free and no hold is taken
+while `isBillingOn` is false (`jobs/claim-billing.integration.test.ts`, #498-T15 and #498-T18). **It is never silent (#632):** the
+refusal refuses every review of the instance, so the pull request gets a notice per head (`src/refusal-notices/README.md`, "An
+incomplete billing setup"), the check run of the job is completed at once with the reason (`notifyingRunnerQueue.onRefused`), and
+every page of the admin portal shows a banner with the missing items (`incompleteBillingItems`, `readIncompleteBilling`,
+`admin/ui/billing-incomplete-banner.tsx`). The Billing page shows "the switch is on, but billing is not running" with the list.
+A Stripe setup switched on before #626 made the terms link required is in this state after the update: the link is not
+filled in for the operator (no legal value is made up); the admin adds it on the Billing page, which is allowed while billing
+is on (`enabled.integration.test.ts`, #632-T01). To keep the state from arising, the switch-on in `admin-service.ts` judges `missingItemsOf` (the
 rates) and `canSwitchBillingOnWithDispatcher` (a Dispatcher that does not report `vm_lifecycle` and claimed within a day,
 `dispatcher_lacks_vm_lifecycle`) inside the same `lockBillingSettings` transaction that writes `enabled`
 (`admin-billing.integration.test.ts`, #498-T19). Text in `billing_settings` that is no JSON reads as not set, on the claim

@@ -79,8 +79,10 @@ export function BillingSwitchCard({
           <Alert variant="warning" role="note">
             <AlertDescription>
               <strong>The switch is on, but billing is not running.</strong>{" "}
-              Something it needs is missing or changed, so reviews are not
-              charged. Fix the list below, or switch billing off.
+              Something it needs is missing or changed, so every review is
+              refused and its pull request gets a notice that no review ran.
+              Complete the list below, or switch billing off (reviews then run
+              without charge).
             </AlertDescription>
           </Alert>
         ) : null}
@@ -107,8 +109,8 @@ export function BillingSwitchCard({
         </div>
         <FieldDescription>
           Switching on needs the factor A, both rates and the AI reserve; with
-          Stripe also the API key, the webhook secret and a passing connection
-          check. Switching off is always possible and leaves every balance and
+          Stripe also the API key, the webhook secret, a passing connection
+          check and the link to your terms. Switching off is always possible and leaves every balance and
           the journal as they are.
         </FieldDescription>
         <OutcomeNote outcome={outcome} describeMissing={describeMissingItem} />
