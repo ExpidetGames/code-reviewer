@@ -9,6 +9,7 @@ import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import type { HandoffRole } from "./plan-handoff-tokens-repository.ts";
+import { NOT_DELETED } from "./workspaces-repository.ts";
 
 export type RedeemedHandoff = {
   workspaceId: string;
@@ -58,6 +59,7 @@ export function createPlanHandoffRedeemRepository(
           .select(["workspaces.slug as slug", "workspace_members.role as role"])
           .where("workspace_members.workspace_id", "=", used.workspace_id)
           .where("workspace_members.user_id", "=", used.user_id)
+          .where(NOT_DELETED)
           .executeTakeFirst();
         if (member === undefined || member.role !== used.role) return undefined;
         if (used.role !== "owner" && used.role !== "admin") return undefined;

@@ -7,6 +7,7 @@
 import "server-only";
 import { sql, type Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
+import { databaseDriver } from "../driver.ts";
 import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
 import type { Database, WorkspacesTable } from "../schema.ts";
 
@@ -28,9 +29,14 @@ export type WorkspacesRepository = {
   get(id: string): Promise<Workspace | undefined>;
   /**
    * The workspace as the row has it, a tombstone (name and address anonymised, `deletedAt` set) included. For the readers that
-   * explain money which belongs to a deleted workspace; every other reader uses `get`.
+   * explain money which belongs to a deleted workspace; every other reader uses `get`. With `lock` the row is read `FOR SHARE`
+   * on Postgres: a deletion that is in flight (it holds the row) is waited for and its result is what is read, so a credit that
+   * checks the workspace first cannot land in one that is being deleted.
    */
-  getIncludingDeleted(id: string): Promise<Workspace | undefined>;
+  getIncludingDeleted(
+    id: string,
+    options?: { lock?: boolean },
+  ): Promise<Workspace | undefined>;
   /** The oldest workspace that is not deleted, which is the default one the migration made; undefined when there is none. */
   findDefault(): Promise<Workspace | undefined>;
   /**
@@ -170,12 +176,11 @@ export function createWorkspacesRepository(
       return row === undefined ? undefined : toWorkspace(row);
     },
 
-    async getIncludingDeleted(id) {
-      const row = await db
-        .selectFrom("workspaces")
-        .selectAll()
-        .where("id", "=", id)
-        .executeTakeFirst();
+    async getIncludingDeleted(id, options) {
+      let query = db.selectFrom("workspaces").selectAll().where("id", "=", id);
+      if (options?.lock === true && databaseDriver(db) === "postgres")
+        query = query.forShare();
+      const row = await query.executeTakeFirst();
       return row === undefined ? undefined : toWorkspace(row);
     },
 

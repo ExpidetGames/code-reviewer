@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { changeTenancy } from "./tenancy.ts";
 
 async function startInstance(tenancy: "single" | "multi") {
@@ -112,6 +113,88 @@ describe("changing the tenancy from multi to single", () => {
     expect(
       await settings.getWithMeta("tenancy").then((meta) => meta?.updatedBy),
     ).toBeNull();
+  });
+});
+
+describe("changing the tenancy from multi to single with deleted workspaces", () => {
+  // #658-T03
+  it("does not count a deleted workspace: one live workspace and a tombstone is allowed and keeps the live one", async () => {
+    const { db, settings, workspaces } = await startInstance("multi");
+    const live = await workspaces.create({
+      name: "Team A",
+      slug: "team-a",
+      createdBy: "user-2",
+    });
+    const gone = await workspaces.create({
+      name: "Team B",
+      slug: "team-b",
+      createdBy: "user-2",
+    });
+    await markWorkspaceDeleted(db, gone.id);
+
+    const result = await changeTenancy(db, {
+      actorId: "admin-1",
+      tenancy: "single",
+    });
+
+    expect(result).toEqual({ ok: true, changed: true });
+    expect(await settings.get("tenancy")).toBe("single");
+    expect(await workspaces.count()).toBe(1);
+    expect((await workspaces.findDefault())?.id).toBe(live.id);
+  });
+
+  // #658-T03
+  it("reports the number of live workspaces when it refuses, not the tombstones", async () => {
+    const { db, workspaces } = await startInstance("multi");
+    for (const slug of ["a", "b"])
+      await workspaces.create({ name: slug, slug, createdBy: "user-2" });
+    const gone = await workspaces.create({
+      name: "C",
+      slug: "c",
+      createdBy: "user-2",
+    });
+    await markWorkspaceDeleted(db, gone.id);
+
+    const result = await changeTenancy(db, {
+      actorId: "admin-1",
+      tenancy: "single",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "too_many_workspaces",
+      count: 2,
+    });
+  });
+
+  // #658-T03
+  it("creates the Default workspace when only tombstones are left, with the acting admin as its Owner", async () => {
+    const { db, settings, workspaces, members } = await startInstance("multi");
+    const gone = await workspaces.create({
+      name: "Team B",
+      slug: "default",
+      createdBy: "user-2",
+    });
+    await markWorkspaceDeleted(db, gone.id);
+
+    const result = await changeTenancy(db, {
+      actorId: "admin-1",
+      tenancy: "single",
+    });
+
+    expect(result).toEqual({ ok: true, changed: true });
+    expect(await settings.get("tenancy")).toBe("single");
+    expect(await workspaces.count()).toBe(1);
+    const created = await workspaces.findDefault();
+    expect(created).toMatchObject({
+      name: "Default workspace",
+      slug: "default",
+      createdBy: "admin-1",
+    });
+    expect(created?.id).not.toBe(gone.id);
+    expect(await members()).toEqual([
+      { workspace_id: created?.id, user_id: "admin-1", role: "owner" },
+    ]);
   });
 });
 

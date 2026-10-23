@@ -13,6 +13,7 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { createSmtpConfigStore } from "../mail/smtp-config.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { createAdminService } from "./service.ts";
 
@@ -131,6 +132,18 @@ describe("reading the settings", () => {
     const { db, service } = await startService();
     await sql`insert into workspaces (id, name, slug, created_by, created_at)
       values ('w1', 'W', 'w', null, '2026-10-11T00:00:00.000Z')`.execute(db);
+
+    expect((await service.readSettings()).workspaceCount).toBe(1);
+  });
+
+  // #658-T03
+  it("does not count a deleted workspace", async () => {
+    const { db, service } = await startService();
+    await sql`insert into workspaces (id, name, slug, created_by, created_at)
+      values ('w1', 'W', 'w', null, '2026-10-11T00:00:00.000Z'), ('w2', 'X', 'x', null, '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+    await markWorkspaceDeleted(db, "w2");
 
     expect((await service.readSettings()).workspaceCount).toBe(1);
   });
