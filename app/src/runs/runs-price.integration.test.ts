@@ -55,7 +55,7 @@ async function start(options: { pricesOn?: boolean } = {}) {
       });
     return job.id;
   }
-  return { f, service, billed };
+  return { f, service, billed, journal };
 }
 
 describe("the price of a review in the Runs list and the run detail", () => {
@@ -129,5 +129,46 @@ describe("the price of a review in the Runs list and the run detail", () => {
     for (const word of ["minutes", "factor", "costusd"])
       expect(body.toLowerCase()).not.toContain(word);
     expect(JSON.stringify(price)).not.toContain("rate");
+  });
+
+  // #657-T01
+  it("shows the settled price of a review: a late-minutes correction is part of what the run cost, in the list and in the detail", async () => {
+    const t = await start();
+    const id = await t.billed("managed", { ai: 1_500_000, infra: 130_000 });
+    // The late end of the VM credits 5 of the 10 minutes charged at 13,000 micro-USD: the run finally cost 65,000 of infrastructure.
+    await t.journal.append({
+      type: "correction",
+      amountMicroUsd: 65_000,
+      jobId: id,
+      refKey: `late-minutes:${id}`,
+      note: "late end of the VM",
+    });
+    const settled = {
+      state: "charged",
+      aiMicroUsd: 1_500_000,
+      infraMicroUsd: 65_000,
+    };
+
+    const list = await t.service.list({});
+    const detail = await t.service.get(id);
+
+    expect(list.runs.find((run) => run.id === id)?.price).toEqual(settled);
+    expect(detail?.run.price).toEqual(settled);
+  });
+
+  // #657-T01
+  it("says not charged when corrections took back the whole charge", async () => {
+    const t = await start();
+    const id = await t.billed("own", { ai: 0, infra: 130_000 });
+    await t.journal.append({
+      type: "correction",
+      amountMicroUsd: 130_000,
+      jobId: id,
+      refKey: `late-minutes:${id}`,
+    });
+
+    expect((await t.service.get(id))?.run.price).toEqual({
+      state: "not_charged",
+    });
   });
 });
