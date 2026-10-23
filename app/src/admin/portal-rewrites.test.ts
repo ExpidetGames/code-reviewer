@@ -83,6 +83,8 @@ describe("the rewrites of next.config.ts", () => {
       "/_next/static/chunks/a.js",
       "/_next/image",
       "/favicon.ico",
+      "/icon.svg",
+      "/apple-icon.png",
     ];
     for (const rule of portal)
       for (const path of skipped)
@@ -125,6 +127,8 @@ describe("the rewrites of next.config.ts", () => {
       "_next/static/chunks/a.js",
       "_next/image",
       "favicon.ico",
+      "icon.svg",
+      "apple-icon.png",
     ])
       expect(matches.test(skipped), skipped).toBe(false);
   });

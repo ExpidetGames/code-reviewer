@@ -74,13 +74,13 @@ describe("the auth card", () => {
   it("renders no heading of its own when no title is given", () => {
     render(
       <AuthCard>
-        <h1>Set up Code Reviewer</h1>
+        <h1>Set up code-review.com</h1>
       </AuthCard>,
     );
 
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
-    expect(headings[0]?.textContent).toBe("Set up Code Reviewer");
+    expect(headings[0]?.textContent).toBe("Set up code-review.com");
   });
 });
 

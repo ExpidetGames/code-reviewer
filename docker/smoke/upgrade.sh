@@ -199,7 +199,7 @@ state=$(query_database "select (select count(*) from workspaces) as workspaces, 
 # that was imported from the environment, and the runner API accepts the runner token.
 step "during the setup window the webhook route and the runner API keep answering"
 start_page=$(curl --silent --max-time 5 "http://127.0.0.1:$port/")
-grep -q 'Set up Code Reviewer' <<<"$start_page" || fail "the start page does not show the setup"
+grep -q 'Set up code-review.com' <<<"$start_page" || fail "the start page does not show the setup"
 send_ping() {
   local base=$1 secret_value=$2 body signature
   body='{"zen":"Keep it logically awesome.","hook_id":1}'

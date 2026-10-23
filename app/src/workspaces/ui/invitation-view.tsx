@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { Button } from "@/components/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ProductName } from "@/components/brand";
 import { canonicalEmail } from "../../signup/rule.ts";
 import type { WorkspaceRole } from "../roles.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
@@ -45,9 +46,9 @@ export function InvitationView({
   return (
     <>
       <p className="text-sm text-muted-foreground text-pretty">
-        You are invited to join <strong>{workspaceName}</strong> at Code
-        Reviewer as {role === "admin" ? "an" : "a"} {ROLE_LABEL[role]}. The
-        invitation is for <strong>{email}</strong>.
+        You are invited to join <strong>{workspaceName}</strong> at{" "}
+        <ProductName /> as {role === "admin" ? "an" : "a"} {ROLE_LABEL[role]}.
+        The invitation is for <strong>{email}</strong>.
       </p>
       {signedInAs === null ? (
         <div className="flex flex-col gap-3">
