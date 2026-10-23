@@ -28,6 +28,30 @@ async function refusal(
   throw new Error("expected the call to be refused");
 }
 
+// #656-T04
+describe("the cost limit of a review", () => {
+  it("is the workspace default for a project that sets none, and the project's own once it does", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const none = await app.service.getProjectSettings(app.first.id);
+    await app.service.updateGlobalSettings({ maxCostCents: 200 }, "octocat");
+    const inherited = await app.service.getProjectSettings(app.first.id);
+    const own = await app.service.updateProjectSettings(app.first.id, {
+      maxCostCents: 50,
+    });
+    const back = await app.service.updateProjectSettings(app.first.id, {});
+
+    expect(none.effective.maxCostCents).toBeNull();
+    expect(inherited.effective.maxCostCents).toBe(200);
+    expect(inherited.sources.maxCostCents).toBe("global");
+    expect(inherited.inherited.maxCostCents).toBe(200);
+    expect(own.effective.maxCostCents).toBe(50);
+    expect(own.sources.maxCostCents).toBe("project");
+    expect(back.effective.maxCostCents).toBe(200);
+  });
+});
+
 // #656-T02
 describe("a new project", () => {
   it("is Dynamic Review from the start, also on the page of a repository that has no project yet", async () => {

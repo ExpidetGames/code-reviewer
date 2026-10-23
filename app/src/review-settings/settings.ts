@@ -43,6 +43,12 @@ export type ReviewSettings = {
   autoReviewOnPush: boolean;
   /** The comment commands people may use. */
   allowedCommands: ReviewCommand[];
+  /**
+   * #656: roughly the most one review may cost, in whole US cents; `null` is no limit of its own, so the limit of the
+   * instance (`RUNNER_DYNAMIC_MAX_COST_USD`, the cost guard of #540) applies alone. A project that sets none follows the
+   * workspace default, which is `null` until somebody sets it.
+   */
+  maxCostCents: number | null;
 };
 
 export type ReviewSettingField = keyof ReviewSettings;
@@ -194,6 +200,7 @@ export const REVIEW_SETTING_FIELDS = [
   "autoReviewOnOpen",
   "autoReviewOnPush",
   "allowedCommands",
+  "maxCostCents",
 ] as const satisfies readonly ReviewSettingField[];
 
 /** A layer: only the fields somebody set. */
@@ -205,6 +212,8 @@ export const REVIEW_SETTING_LIMITS = {
   maxFindings: { min: 1, max: 30 },
   /** Below the lower bound the prompts of PR-Agent leave no room for a diff; the upper bound is above every context window in use. */
   maxTokens: { min: 8_000, max: 2_000_000 },
+  /** #656: one cent to one hundred US dollars. The cost guard of the instance still caps a run below its own limit. */
+  maxCostCents: { min: 1, max: 10_000 },
 } as const;
 
 /** The limits of the project-only settings (#194): the skill override is data and is bounded in bytes. */
@@ -254,5 +263,6 @@ export function builtInReviewSettings(
     autoReviewOnOpen: true,
     autoReviewOnPush: true,
     allowedCommands: [...REVIEW_COMMANDS],
+    maxCostCents: null,
   };
 }

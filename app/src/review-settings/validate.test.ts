@@ -33,6 +33,38 @@ function projectIssuesOf(input: unknown) {
   return result.issues;
 }
 
+// #656-T04
+describe("validating the cost limit of a review", () => {
+  it("accepts whole cents from one cent to the largest limit", () => {
+    for (const cents of [
+      REVIEW_SETTING_LIMITS.maxCostCents.min,
+      150,
+      REVIEW_SETTING_LIMITS.maxCostCents.max,
+    ])
+      expect(validateReviewSettingsPatch({ maxCostCents: cents })).toEqual({
+        ok: true,
+        value: { maxCostCents: cents },
+      });
+  });
+
+  it.each([
+    [0, "TOO_SMALL"],
+    [REVIEW_SETTING_LIMITS.maxCostCents.max + 1, "TOO_LARGE"],
+    [1.5, "INVALID_TYPE"],
+    ["150", "INVALID_TYPE"],
+    // "No limit" is the absence of the field, so the workspace default applies; a stored null would hide it.
+    [null, "INVALID_TYPE"],
+  ])("refuses %j", (value, code) => {
+    expect(issuesOf({ maxCostCents: value })).toEqual([
+      { field: "maxCostCents", code },
+    ]);
+  });
+
+  it("has no limit of its own built in", () => {
+    expect(builtInReviewSettings().maxCostCents).toBeNull();
+  });
+});
+
 describe("validating review settings", () => {
   it("accepts a complete valid set and returns it normalized", () => {
     const result = validateReviewSettingsPatch({
@@ -353,7 +385,8 @@ describe("the documented limits", () => {
   it("pins the constants to the same numbers", () => {
     expect(REVIEW_SETTING_LIMITS).toEqual({
       extraInstructionsMaxChars: 4_000,
-      maxFindings: { min: 1, max: 30 },
+      maxTokens: { min: 8_000, max: 2_000_000 },
+      maxCostCents: { min: 1, max: 10_000 },
       maxTokens: { min: 8_000, max: 2_000_000 },
     });
     expect(PROJECT_DYNAMIC_LIMITS).toEqual({ reviewSkillMaxBytes: 16_384 });
