@@ -40,6 +40,8 @@ const ENTRY_FIELDS: readonly string[] = [
 /** After the Diff provider changed while a fallback model was stored: a fallback of another provider is invalid, so it went. */
 export const FALLBACK_REMOVED_NOTICE =
   "The fallback model of the previous provider was removed.";
+/** Read after the name of a tab whose section holds a field with a problem ("LLM (has a problem)"). */
+export const TAB_PROBLEM_NOTE = "(has a problem)";
 const CHOOSE_PROVIDER = "Choose one of the listed providers.";
 const CHOOSE_OPTION = "Choose one of the listed options.";
 

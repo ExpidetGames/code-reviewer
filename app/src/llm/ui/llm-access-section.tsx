@@ -46,20 +46,20 @@ function InstanceAccessCard({
             id="llm-key-heading"
             className="text-lg leading-7 font-semibold tracking-normal"
           >
-            LLM access
+            LLM
           </h2>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {access === "settings_unreadable" ? (
           <p>
-            This instance cannot set up LLM access for this workspace at the
+            This instance cannot set up the LLM for this workspace at the
             moment, so reviews cannot run. Contact the administrator of this
             instance.
           </p>
         ) : (
           <>
-            <p>LLM access for this workspace is provided by this instance.</p>
+            <p>The LLM for this workspace is provided by this instance.</p>
             <p className="text-sm text-muted-foreground">
               Reviews do not use a key of this workspace, so there is nothing to
               enter here: this workspace does not use a key of its own.

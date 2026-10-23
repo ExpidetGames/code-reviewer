@@ -8,9 +8,13 @@ type User = ReturnType<typeof userEvent.setup>;
 
 export type SectionName = "Review" | "LLM" | "Trigger" | "Limits";
 
-/** Opens a section of the form, the way a person clicks its tab. */
+/** Opens a section of the form, the way a person clicks its tab (its name may say "(has a problem)" after a refused save). */
 export async function openSection(user: User, name: SectionName) {
-  await user.click(screen.getByRole("tab", { name }));
+  await user.click(
+    screen.getByRole("tab", {
+      name: new RegExp(`^${name}( \\(has a problem\\))?$`),
+    }),
+  );
 }
 
 /** Opens a dropdown and chooses one option by its name. */

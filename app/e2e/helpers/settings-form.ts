@@ -12,7 +12,9 @@ export async function openSection(
 ): Promise<void> {
   // Next keeps a page that was left mounted, hidden: only the tab that can be seen counts.
   const tab = page
-    .getByRole("tab", { name: section, exact: true })
+    .getByRole("tab", {
+      name: new RegExp(`^${section}( \\(has a problem\\))?$`),
+    })
     .filter({ visible: true });
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");

@@ -9,6 +9,7 @@
 // card at the bottom. Problems are checked before sending (the same validation the server runs, which checks again), shown as
 // sentences at their field, and the first marked field gets the focus (its section is opened first); the estimated cost
 // updates while the person types and warns above the limit without blocking anything.
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Alert } from "../../components/ui/alert.tsx";
 import {
@@ -108,6 +109,7 @@ import {
   describeSaveFailure,
   describeWarning,
   FALLBACK_REMOVED_NOTICE,
+  TAB_PROBLEM_NOTE,
 } from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 
@@ -177,12 +179,20 @@ function firstSectionWithProblem(
   errors: Errors,
   hiddenFields: readonly string[],
 ): Section | null {
-  const found = new Set(
+  const found = sectionsWithProblems(errors, hiddenFields);
+  return SECTIONS.find((section) => found.has(section)) ?? null;
+}
+
+/** Every section that holds a field with a problem, for the marker on its tab. */
+function sectionsWithProblems(
+  errors: Errors,
+  hiddenFields: readonly string[],
+): ReadonlySet<Section> {
+  return new Set(
     Object.keys(errors).flatMap((field) =>
       hiddenFields.includes(field) ? "review" : (SECTION_OF_FIELD[field] ?? []),
     ),
   );
-  return SECTIONS.find((section) => found.has(section)) ?? null;
 }
 
 /** The origin of a provider and its model as one choice: it counts as set when either of the two was set here. */
@@ -794,6 +804,14 @@ export function SettingsForm({
     );
   };
   const sectionNames = SECTION_NAMES;
+  const withProblems = sectionsWithProblems(
+    errors,
+    projectView === undefined
+      ? []
+      : kind === "diff"
+        ? DYNAMIC_ONLY_FIELDS
+        : DIFF_ONLY_FIELDS,
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -812,8 +830,23 @@ export function SettingsForm({
         >
           <TabsList aria-label="Settings sections">
             {SECTIONS.map((name) => (
-              <TabsTrigger key={name} value={name}>
+              <TabsTrigger
+                key={name}
+                value={name}
+                {...(withProblems.has(name)
+                  ? {
+                      "aria-label": `${sectionNames[name]} ${TAB_PROBLEM_NOTE}`,
+                    }
+                  : {})}
+              >
                 {sectionNames[name]}
+                {withProblems.has(name) ? (
+                  <WarningCircleIcon
+                    aria-hidden="true"
+                    weight="fill"
+                    className="text-destructive"
+                  />
+                ) : null}
               </TabsTrigger>
             ))}
           </TabsList>

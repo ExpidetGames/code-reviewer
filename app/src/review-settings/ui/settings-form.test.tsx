@@ -235,6 +235,52 @@ describe("the settings form", () => {
     ).toBeTruthy();
   });
 
+  // #656-T05
+  it("marks the tab of every section with a problem, in its accessible name, until the problem is fixed", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+    const tabNames = () =>
+      screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabNames()).toEqual(["Review", "LLM", "Trigger", "Limits"]);
+
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "-3");
+    await openSection(user, "Limits");
+    const tokens = screen.getByLabelText("Token budget");
+    await user.clear(tokens);
+    await user.type(tokens, "lots");
+    // Nothing is marked before a save is refused.
+    expect(tabNames()).toEqual(["Review", "LLM", "Trigger", "Limits"]);
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(
+      screen.getByRole("tab", { name: "Review (has a problem)" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Limits (has a problem)" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "LLM" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Trigger" })).toBeTruthy();
+
+    await openSection(user, "Limits");
+    await user.clear(screen.getByLabelText("Token budget"));
+    await user.type(screen.getByLabelText("Token budget"), "16000");
+
+    expect(screen.getByRole("tab", { name: "Limits" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Review (has a problem)" }),
+    ).toBeTruthy();
+  });
+
   // CR-34-T06
   it("names project rules that are too long", async () => {
     const user = userEvent.setup();

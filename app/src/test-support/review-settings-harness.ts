@@ -105,7 +105,8 @@ export async function setupReviewSettings(
       ? {}
       : {
           newProjectSettings: () =>
-            options.newProjectSettings?.(database, workspaceId) ?? Promise.resolve({}),
+            options.newProjectSettings?.(database, workspaceId) ??
+            Promise.resolve({}),
         }),
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
     ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
