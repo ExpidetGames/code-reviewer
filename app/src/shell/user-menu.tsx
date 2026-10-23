@@ -7,7 +7,7 @@
 // focus return, so the menu works without a mouse.
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
-import { ChevronDown } from "lucide-react";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,7 +48,7 @@ export function UserMenu({
           <span className="sr-only max-w-40 truncate text-sm font-semibold sm:not-sr-only">
             {name}
           </span>
-          <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+          <CaretDownIcon aria-hidden="true" className="size-4 shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

@@ -9,7 +9,7 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
@@ -55,7 +55,7 @@ export function HelpDisclosure({
           className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-3 text-left font-semibold text-foreground transition-all hover:bg-surface"
         >
           {label}
-          <ChevronDown
+          <CaretDownIcon
             aria-hidden="true"
             className={cn(
               "size-4 shrink-0 transition-transform",
