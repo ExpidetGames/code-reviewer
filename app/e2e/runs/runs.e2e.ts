@@ -388,7 +388,9 @@ test.describe("the runs pages", () => {
         .getByRole("link")
         .first()
         .click();
-      await expect(page.getByRole("heading", { name: "Log" })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Findings" }),
+      ).toBeVisible();
 
       expect(await overflow()).toBeLessThanOrEqual(0);
     });
