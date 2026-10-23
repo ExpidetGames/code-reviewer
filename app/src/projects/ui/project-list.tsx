@@ -101,14 +101,15 @@ export function ProjectList({
     );
   return (
     <>
-      <Table aria-label="Repositories" className="table-fixed">
+      {/* A minimum width: on a narrow window the table scrolls inside its card instead of squeezing the Review column's switch and play button out of their cell. */}
+      <Table aria-label="Repositories" className="min-w-[680px] table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[32%]">Name</TableHead>
-            <TableHead className="w-[16%]">Installation</TableHead>
+            <TableHead className="w-[26%]">Name</TableHead>
+            <TableHead className="w-[14%]">Installation</TableHead>
             <TableHead className="w-[12%]">Status</TableHead>
-            <TableHead className="w-[26%]">Last run</TableHead>
-            <TableHead className="w-[14%]">Review</TableHead>
+            <TableHead className="w-[24%]">Last run</TableHead>
+            <TableHead className="w-[24%]">Review</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
