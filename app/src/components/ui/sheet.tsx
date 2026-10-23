@@ -7,7 +7,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { XIcon } from "lucide-react";
+import { XIcon } from "@phosphor-icons/react/dist/ssr";
 import { Dialog as SheetPrimitive } from "radix-ui";
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
@@ -80,7 +80,7 @@ function SheetContent({
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close className="absolute top-4 right-4 inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-accent hover:text-foreground disabled:pointer-events-none">
-            <XIcon className="size-4" />
+            <XIcon aria-hidden="true" className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
         )}

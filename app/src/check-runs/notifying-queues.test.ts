@@ -154,6 +154,29 @@ describe("the runner side of the queue", () => {
     expect(calls).toEqual(["change", "change", "change"]);
   });
 
+  // #632-T02
+  it("tells of every job a claim refused, so its check run is completed at once instead of staying queued", () => {
+    const { notify, calls } = notifier();
+    const hook = notifyingRunnerQueue.onRefused(notify);
+
+    hook({ jobId: "j1" });
+    hook({ jobId: "j2" });
+
+    expect(calls).toEqual(["job j1", "job j2"]);
+  });
+
+  // #632-T02
+  it("never lets the notifier of a refusal throw into the claim", () => {
+    const hook = notifyingRunnerQueue.onRefused({
+      job: () => {
+        throw new Error("boom");
+      },
+      change: () => undefined,
+    });
+
+    expect(() => hook({ jobId: "j1" })).not.toThrow();
+  });
+
   it("returns what the queue answered whatever the notifier does", async () => {
     const answer = { status: "completed", job: job("j1") };
     const queue = notifyingRunnerQueue(

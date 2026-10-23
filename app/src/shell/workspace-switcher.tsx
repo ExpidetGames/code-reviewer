@@ -8,7 +8,7 @@
 // are ever passed in.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown } from "lucide-react";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,7 +54,7 @@ export function WorkspaceSwitcher({
               {current?.name ?? "Switch"}
             </span>
           </span>
-          <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+          <CaretDownIcon aria-hidden="true" className="size-4 shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">

@@ -9,6 +9,7 @@
 // role help reachable with the keyboard.
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -40,6 +41,7 @@ const member = (id: string, role: WorkspaceRole, name = id): Member => ({
   email: `${id}@example.test`,
   role,
   joinedAt: "2026-10-12T08:00:00.000Z",
+  githubAccountId: null,
 });
 
 const DATA: MembersPageData = {
@@ -412,5 +414,72 @@ describe("inviting from the page", () => {
     renderFor("owner", "owner-1", { ...DATA, mailConfigured: true });
 
     expect(screen.getAllByRole("button", { name: /again$/ })).toHaveLength(2);
+  });
+});
+
+describe("the avatar of a member", () => {
+  function rowOf(userId: string): HTMLElement {
+    const row = document.querySelector<HTMLElement>(
+      `[data-member="${userId}"]`,
+    );
+    if (row === null) throw new Error(`no row for ${userId}`);
+    return row;
+  }
+
+  // #638-T01
+  it("is the GitHub avatar of a member with a GitHub account, and the initials of the name otherwise", () => {
+    renderFor("member", "member-1", {
+      ...DATA,
+      members: [
+        {
+          ...member("owner-1", "owner", "Anna Keller"),
+          githubAccountId: "4711",
+        },
+        member("member-1", "member", "Mira Vogel"),
+      ],
+    });
+
+    const image = rowOf("owner-1").querySelector("img");
+    expect(image?.getAttribute("src")).toBe(
+      "https://avatars.githubusercontent.com/u/4711?v=4",
+    );
+    expect(image?.getAttribute("alt")).toBe("");
+    expect(rowOf("member-1").querySelector("img")).toBeNull();
+    expect(rowOf("member-1").textContent).toContain("MV");
+  });
+
+  // #638-T01
+  it("falls back to the initials when the GitHub avatar cannot be loaded", () => {
+    renderFor("member", "member-1", {
+      ...DATA,
+      members: [
+        {
+          ...member("owner-1", "owner", "Anna Keller"),
+          githubAccountId: "4711",
+        },
+      ],
+    });
+
+    fireEvent.error(rowOf("owner-1").querySelector("img")!);
+
+    expect(rowOf("owner-1").querySelector("img")).toBeNull();
+    expect(rowOf("owner-1").textContent).toContain("AK");
+  });
+
+  // #638-T03
+  it("loads no picture from any host other than GitHub's avatar host", () => {
+    renderFor("owner", "owner-1", {
+      ...DATA,
+      members: [
+        { ...member("owner-1", "owner"), githubAccountId: "1" },
+        { ...member("admin-1", "admin"), githubAccountId: "../../evil.test" },
+        member("member-1", "member"),
+      ],
+    });
+
+    const sources = Array.from(document.querySelectorAll("img")).map(
+      (image) => new URL(image.getAttribute("src") ?? "").host,
+    );
+    expect(sources).toEqual(["avatars.githubusercontent.com"]);
   });
 });

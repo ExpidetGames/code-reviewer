@@ -12,7 +12,8 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { Slot } from "radix-ui";
-import { Check, TriangleAlert, X, type LucideIcon } from "lucide-react";
+import { CheckIcon, WarningIcon, XIcon } from "@phosphor-icons/react/dist/ssr";
+import type { Icon } from "@phosphor-icons/react";
 
 const badgeVariants = cva(
   "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-line-strong px-3 py-1 text-xs leading-4 font-semibold whitespace-nowrap text-foreground no-underline transition-all aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3",
@@ -44,12 +45,12 @@ const badgeVariants = cva(
 // The symbol of a tone, as the design board pairs them (#633): a check for success, a cross for a
 // failure, a warning sign for a warning. Decorative: the label carries the meaning.
 const TONE_ICON: Partial<
-  Record<NonNullable<VariantProps<typeof badgeVariants>["variant"]>, LucideIcon>
+  Record<NonNullable<VariantProps<typeof badgeVariants>["variant"]>, Icon>
 > = {
-  success: Check,
-  danger: X,
-  destructive: X,
-  warning: TriangleAlert,
+  success: CheckIcon,
+  danger: XIcon,
+  destructive: XIcon,
+  warning: WarningIcon,
 };
 
 function Badge({
@@ -75,7 +76,7 @@ function Badge({
       className={cn(badgeVariants({ variant }), className)}
       {...props}
     >
-      {Icon ? <Icon aria-hidden="true" /> : null}
+      {Icon ? <Icon aria-hidden="true" weight="bold" /> : null}
       {children}
     </Comp>
   );

@@ -153,7 +153,7 @@ export const JOB_ERROR_CODES = [
   "balance_negative",
   /** Failed at claim because the workspace's balance is used up and nothing can be held for the run (#498). */
   "insufficient_balance",
-  /** Failed at claim because billing is switched on while the rates it needs are not all set (#498). */
+  /** Failed at claim because billing is switched on while its setup is not complete: a rate, a Stripe credential, the check or the terms link (#498, #632). */
   "billing_rates_incomplete",
   /** Failed at claim because the hold of this job was released already: nothing is held, so it must not run (#498). */
   "billing_hold_released",

@@ -113,12 +113,14 @@ describe("CI workflow triggers and jobs", () => {
     }
   });
 
-  // #105-PG-04
+  // #105-PG-04, moved to app-int by #641
   it("runs the database integration tests against a Postgres service container as well as SQLite", () => {
-    const job = jobNamed("app-fast");
+    const job = jobNamed("app-int");
     const services = job.services as
       Record<string, { image?: string }> | undefined;
-    const integration = steps(job).find((step) => step.run === "pnpm test:int");
+    const integration = steps(job).find((step) =>
+      step.run?.startsWith("pnpm test:int"),
+    );
     const environment = integration?.env as Record<string, string> | undefined;
 
     expect(services?.postgres?.image).toMatch(/^postgres:/);
@@ -201,13 +203,11 @@ describe("CI workflow triggers and jobs", () => {
     expect(job).not.toHaveProperty("secrets");
   });
 
-  // CR-16-T01
-  it("runs the browser smoke tests against the production build with the system libraries installed", () => {
+  // CR-16-T01, browser install changed by #641
+  it("runs the browser smoke tests against the production build with the browser installed", () => {
     const lines = commandLines(jobNamed("e2e"));
 
-    expect(lines).toContain(
-      "pnpm exec playwright install --with-deps chromium",
-    );
+    expect(lines).toContain("pnpm exec playwright install chromium");
     expect(lines).toContain("pnpm test:e2e --grep @smoke --grep-invert @flaky");
     expect(lines).toContain("pnpm test:e2e --grep-invert @flaky");
   });
@@ -305,6 +305,50 @@ describe("CI compose job", () => {
     expect(condition).toContain("github.base_ref == 'main'");
     expect(condition).toContain("needs.changes.outputs.app == 'true'");
     expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+});
+
+describe("CI time limits", () => {
+  const browserJobs = ["e2e", "e2e-hosted", "e2e-dynamic"];
+
+  // #641-T01
+  it("runs the integration tests outside app-fast, in two shards of their own job", () => {
+    const job = jobNamed("app-int");
+    const matrix = (job.strategy as { matrix?: { shard?: number[] } }).matrix;
+
+    expect(commandLines(jobNamed("app-fast")).join("\n")).not.toContain(
+      "pnpm test:int",
+    );
+    expect(matrix?.shard).toEqual([1, 2]);
+    expect(commandLines(job)).toContain('pnpm test:int --shard="$SHARD/2"');
+    expect(
+      steps(job).find((step) => step.run?.startsWith("pnpm test:int"))?.env,
+    ).toMatchObject({ SHARD: "${{ matrix.shard }}" });
+    expect(jobNamed("ci-passed").needs).toContain("app-int");
+  });
+
+  // #641-T01
+  it("restores the browser from the cache and installs it without the apt packages, under a time limit of its own", () => {
+    for (const id of browserJobs) {
+      const jobSteps = steps(jobNamed(id));
+      const cache = jobSteps.find(
+        (step) => step.with?.path === "~/.cache/ms-playwright",
+      );
+      const install = jobSteps.find(
+        (step) => step.run === "pnpm exec playwright install chromium",
+      );
+
+      expect(cache?.with?.key, id).toContain(
+        "steps.playwright.outputs.version",
+      );
+      expect(install?.["timeout-minutes"], id).toBeLessThanOrEqual(5);
+      expect(jobSteps.indexOf(cache!), id).toBeLessThan(
+        jobSteps.indexOf(install!),
+      );
+      expect(runCommands(jobNamed(id)).join("\n"), id).not.toContain(
+        "--with-deps",
+      );
+    }
   });
 });
 
@@ -528,6 +572,7 @@ describe("CI workflow aggregate check", () => {
   it("runs the app, runner, browser and workflow jobs independently so one red job stops no other", () => {
     for (const id of [
       "app-fast",
+      "app-int",
       "runner-fast",
       "engine",
       "e2e",

@@ -74,3 +74,13 @@ export function noticeMonthlyLimitAt(linkText: string, url: string): string {
 export const NOTICE_REVIEWS_PAUSED_FOR_A_WHILE =
   "Reviews are paused for this workspace for a while.";
 export const NOTICE_TRY_AGAIN_LATER = "Please try again later.";
+
+/**
+ * Why, when billing is switched on for the instance but its setup is not complete (#632): every review is refused until the
+ * operator completes it. It names no item (a price, a credential, a link): that is the operator's business. Nobody in the
+ * workspace can act, so it points to no page.
+ */
+export const NOTICE_BILLING_SETUP_INCOMPLETE =
+  "Reviews cannot start because the billing setup of this instance is not complete.";
+export const NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE =
+  "Please contact whoever runs this instance.";
