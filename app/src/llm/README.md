@@ -1,7 +1,7 @@
 # LLM access
 
 A workspace brings its own LLM key (bring your own key, BYOK; `docs/decisions/0001-editions-setup-and-accounts.md`,
-sections 2.7 and 2.8), or, where an operator has set its key mode to `managed`, uses the operator's own key (below). An Admin or an Owner enters it under **Settings → LLM access** of the workspace
+sections 2.7 and 2.8), or, where an operator has set its key mode to `managed`, uses the operator's own key (below). An Admin or an Owner enters it under **Settings → LLM** of the workspace
 (`/w/:workspace/settings/llm`), one card and one key for **each registered provider** (#426); removing a key is a danger zone under **Settings → Advanced**, one button for each provider that has a key. The app
 hands the key of the job's own workspace to the runner with every job. The legacy `LLM_PROVIDER` and `LLM_API_KEY`
 were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
@@ -158,7 +158,7 @@ described above, and a workspace without any is on its own key. With billing on:
   page) set it, with the audit line `[llm] KEY_MODE_CHANGED workspace=<id> user=<id> key_mode=<mode>`. The route is `GET` and `PUT
 /api/w/:workspace/llm-key-mode` (`key-mode-http.ts`, `key-mode-service.ts`; same site, `no-store`); billing off is the 404 of a
   path that does not exist.
-- **The page.** While billing is on, **Settings → LLM access** starts with the choice (`ui/key-mode-card.tsx`): "Use our models" and
+- **The page.** While billing is on, **Settings → LLM** starts with the choice (`ui/key-mode-card.tsx`): "Use our models" and
   "Use my own provider key", one sentence each about what is charged (AI and infrastructure, or infrastructure only; no rate, no
   formula), read-only for a Member. The tab is called **LLM** (#656). The settings of the own key (the key forms and the catalog
   providers) follow the selected option (`ui/key-mode-gate.tsx`): they are hidden while "Use our models" is selected and shown as
@@ -260,7 +260,7 @@ provider_not_found`.
 - **The workspace pages.** For a workspace whose key mode is managed (`instanceAccessOf` in `access.ts`), **Settings →
   LLM access** shows no key form to anybody and says that access is provided by this instance (a Member sees the same
   note); when the operator has no usable key it says so and tells the person to contact the administrator of the
-  instance. The "LLM not configured" hint of the other pages becomes "LLM access is not available" without a link to a
+  instance. The "LLM not configured" hint of the other pages becomes "LLM is not available" without a link to a
   form. The routes that save, test and remove a workspace key keep working: the key is only not used while managed.
 
 ## The keys of a workspace
