@@ -26,7 +26,7 @@ function safely(work: () => void): void {
   }
 }
 
-export function notifyingRunnerQueue(
+function notifyingRunnerQueueFunction(
   queue: RunnerQueue,
   notify: CheckNotifier,
 ): RunnerQueue {
@@ -78,6 +78,23 @@ export function notifyingRunnerQueue(
     },
   };
 }
+
+/**
+ * #632: the jobs a claim refused (a limit, the balance, a billing setup that is not complete) were failed inside the claim, and
+ * the claim answers 204 for them, so `claimNext` cannot name them. The queue's `onRefused` hook (`src/jobs/shared.ts`) names
+ * each one after the commit: its check run is completed at once with the reason, instead of showing "Waiting" until a
+ * reconcile finds it. Never throws into the claim.
+ */
+function onRefused(
+  notify: CheckNotifier,
+): (refusal: { jobId: string }) => void {
+  return (refusal) => safely(() => notify.job(refusal.jobId));
+}
+
+export const notifyingRunnerQueue = Object.assign(
+  notifyingRunnerQueueFunction,
+  { onRefused },
+);
 
 /**
  * The producer side. `onEnqueued` is the hook `createJobQueue` calls once an enqueue has committed: it names the new

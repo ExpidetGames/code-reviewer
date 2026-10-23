@@ -53,7 +53,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   insufficient_balance:
     "The balance of this workspace is used up, so this run did not start and no AI model was used. Add credit to continue.",
   billing_rates_incomplete:
-    "Billing is switched on for this instance but its prices are not all set, so this run did not start and no AI model was used. Ask whoever runs this instance.",
+    "This run did not start because the billing setup of this instance is not complete, and no AI model was used. Ask whoever runs this instance.",
   billing_hold_released:
     "The credit held for this run was released before it could start, so it did not start and no AI model was used. It will run again on the next push or review request.",
   monthly_limit_reached:
