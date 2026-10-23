@@ -571,3 +571,34 @@ describe("finding the jobs whose check run is behind", () => {
     );
   });
 });
+
+describe("the review comment of a job", () => {
+  // #657-T04
+  it("keeps the body once, reads it back, and keeps what is there", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+    expect(await t.checks.reviewCommentOf(t.job.id)).toBeNull();
+
+    await t.checks.recordReviewComment(t.job.id, "## Review\n\nLooks fine.");
+    await t.checks.recordReviewComment(t.job.id, "a later, edited comment");
+
+    expect(await t.checks.reviewCommentOf(t.job.id)).toBe(
+      "## Review\n\nLooks fine.",
+    );
+  });
+
+  // #657-T04
+  it("keeps the body of a settled row, and says nothing of a job of another workspace", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+    await t.checks.finish(t.job.id, { settled: true });
+    await t.checks.recordReviewComment(t.job.id, "body");
+
+    expect(await t.checks.reviewCommentOf(t.job.id)).toBe("body");
+    const other = createJobCheckRunsRepository(t.db, "another-workspace");
+    expect(await other.reviewCommentOf(t.job.id)).toBeNull();
+    await other.recordReviewComment(t.job.id, "intruder");
+    expect(await t.checks.reviewCommentOf(t.job.id)).toBe("body");
+  });
+});
+
