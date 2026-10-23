@@ -601,4 +601,3 @@ describe("the review comment of a job", () => {
     expect(await t.checks.reviewCommentOf(t.job.id)).toBe("body");
   });
 });
-

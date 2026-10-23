@@ -400,11 +400,12 @@ export function toCustomerRunDetailView(
   reviewComment: string | null = null,
 ): CustomerRunDetailView {
   // Left out here, so neither is ever part of what a member's browser receives.
-  const {
-    log: _log,
-    callTrace: _callTrace,
-    ...detail
-  } = toRunDetailView(job, project, now, redact, onManagedKey);
+  const full = toRunDetailView(job, project, now, redact, onManagedKey);
+  const detail = Object.fromEntries(
+    Object.entries(full).filter(
+      ([key]) => key !== "log" && key !== "callTrace",
+    ),
+  ) as Omit<RunDetailView, "log" | "callTrace">;
   const redacted =
     reviewComment === null ? "" : redact(cleanLog(reviewComment)).trim();
   const text = onManagedKey ? maskProvidersInText(redacted) : redacted;

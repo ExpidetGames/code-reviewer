@@ -1019,4 +1019,3 @@ describe("reading the review comment of a run (#657)", () => {
     expect(client.calls).toEqual([]);
   });
 });
-
