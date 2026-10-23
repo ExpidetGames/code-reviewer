@@ -41,6 +41,7 @@ async function start(options: { billingOn?: boolean } = {}) {
   const fake = await startTestStripe();
   const stripe = createStripeAdapter({
     client: () => Promise.resolve(clientFor(fake)),
+    allowedLinkOrigin: fake.baseUrl,
   });
   let adapter: BillingAdapter = stripe;
   const logs: string[] = [];
@@ -119,6 +120,8 @@ async function start(options: { billingOn?: boolean } = {}) {
     fake,
     logs,
     person,
+    as,
+    route,
     customerOf,
     pay,
     get,
@@ -184,6 +187,62 @@ describe("the invoices of a workspace", () => {
     expect(member.status).toBe(403);
     expect(visitor.status).toBe(401);
     expect(await member.text()).not.toContain("FAKE-");
+    expect(t.fake.requests().length).toBe(before);
+  });
+
+  // #659-T03
+  // The real route file asks for `manage_billing` in `withWorkspace`; src/admin/portal-guards.test.ts (#501-T04) pins that for it.
+  it("refuses a Member at the route even if the service would answer", async () => {
+    const t = await start();
+    const customer = await t.customerOf(t.workspaceId);
+    await t.pay(customer, "intent-1", 10);
+    let asked = 0;
+    const route = createInvoicesRoute({
+      guard: {
+        isOn: () => Promise.resolve(true),
+        notFound: () => {
+          throw new NotFound("x");
+        },
+      },
+      service: {
+        list: () => {
+          asked += 1;
+          return Promise.resolve({ ok: true, list: { invoices: [] } });
+        },
+      },
+    });
+
+    const answer = await route.get(
+      new Request("https://app.example.test/api/w/acme/billing/invoices"),
+      "acme",
+      t.as(await t.person("member")),
+    );
+
+    expect(answer.status).toBe(403);
+    expect(asked).toBe(0);
+  });
+
+  // #659-T03
+  it("refuses a Member at the service even when the route's access check is bypassed", async () => {
+    const t = await start();
+    const customer = await t.customerOf(t.workspaceId);
+    await t.pay(customer, "intent-1", 10);
+    const before = t.fake.requests().length;
+    // A bypassed check hands the handler a Member's access as if it were allowed.
+    const member = await t.person("member");
+    const answer = await t.route.get(
+      new Request("https://app.example.test/api/w/acme/billing/invoices"),
+      "acme",
+      (handler) =>
+        handler({
+          workspace: { id: t.workspaceId },
+          user: { id: member.user.id },
+          role: "member",
+        } as never),
+    );
+
+    expect(answer.status).toBe(403);
+    expect(await answer.json()).toEqual({ error: "forbidden" });
     expect(t.fake.requests().length).toBe(before);
   });
 
@@ -256,6 +315,37 @@ describe("the invoices of a workspace", () => {
     expect(answer.status).toBe(502);
     expect(await answer.json()).toEqual({ error: "provider_unavailable" });
     expect(t.logs.join("\n")).toContain("result=provider_unavailable");
+  });
+
+  // #659-T04
+  it("is an empty list, logged once with the workspace and a code, when Stripe has no such customer", async () => {
+    const t = await start();
+    // A customer stored while the instance ran on a test key; the key is a live one now.
+    await createBillingProfilesRepository(t.db, t.workspaceId).save(PROFILE);
+    await createBillingProfilesRepository(t.db, t.workspaceId).setCustomer(
+      "stripe",
+      "cus_madeUnderTheTestKey",
+    );
+
+    const answer = await t.get(await t.person("owner"));
+
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ invoices: [] });
+    expect(t.logs).toEqual([
+      `[billing] INVOICES_LISTED workspace=${t.workspaceId} result=customer_missing`,
+    ]);
+  });
+
+  // #659-T04
+  it("keeps a key Stripe refuses an error: 503 provider_not_configured", async () => {
+    const t = await start();
+    await t.customerOf(t.workspaceId);
+    t.fake.faults.failWith({ method: "GET", path: "/v1/invoices" }, 403);
+
+    const answer = await t.get(await t.person("owner"));
+
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({ error: "provider_not_configured" });
   });
 
   // #659-T03

@@ -677,11 +677,17 @@ export function createRoutes(): Route[] {
       pattern: /^\/v1\/invoices$/,
       handler: (context) => {
         const { customer, status } = context.query;
-        // Like Stripe, a list of invoices is of one customer (or of the account): a filter that is no id matches nothing.
+        // Like Stripe, a list of invoices is of one customer (or of the account), and a customer Stripe does not know (never
+        // made, deleted, or made under the key of the other environment) is a 400 "No such customer", not an empty list.
+        const ignoreFilter = context.store.invoiceCustomerFilterIgnored();
+        if (typeof customer === "string" && !ignoreFilter)
+          context.store.existingCustomer(customer, "customer", 400);
         const all = [...context.store.maps.invoices.values()];
         const matching = all.filter(
           (invoice) =>
-            (customer === undefined || invoice.customer === customer) &&
+            (customer === undefined ||
+              ignoreFilter ||
+              invoice.customer === customer) &&
             (status === undefined || invoice.status === status),
         );
         return page(context, matching, "/v1/invoices", {

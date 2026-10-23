@@ -870,6 +870,16 @@ describe("the invoices", () => {
     const card = await screen.findByRole("region", { name: "Invoices" });
     const rows = await within(card).findAllByRole("row");
     expect(rows).toHaveLength(3);
+    // The card and its table are two things with two names: a screen reader does not hear "Invoices" twice.
+    expect(screen.getAllByRole("region", { name: "Invoices" })).toHaveLength(1);
+    expect(
+      within(card).getByRole("table", { name: "Invoice list" }),
+    ).toBeTruthy();
+    expect(
+      within(card)
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent),
+    ).toEqual(["Date", "Amount", "Status", "Links"]);
     const first = within(rows[1] as HTMLElement);
     expect(first.getByText("2026-10-20 15:30 UTC")).toBeTruthy();
     expect(first.getByText("ACME-0001")).toBeTruthy();
@@ -895,7 +905,9 @@ describe("the invoices", () => {
     page(OWNER_VIEW);
 
     const card = await screen.findByRole("region", { name: "Invoices" });
-    expect(await within(card).findByText(/No invoices yet/)).toBeTruthy();
+    // No promise of an invoice to come: whether a payment leaves one at the provider is not settled (#503).
+    expect(await within(card).findByText("No invoices yet.")).toBeTruthy();
+    expect(within(card).queryByText(/appears/)).toBeNull();
     expect(within(card).queryByRole("table")).toBeNull();
   });
 

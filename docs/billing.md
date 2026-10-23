@@ -49,15 +49,15 @@ dollars. The AI price is 0.20, the infrastructure price is 0.08, and the review 
 
 ### Who pays when something goes wrong
 
-| What happened to the review                                                                              | AI price                        | Infrastructure price |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------- | -------------------- |
-| Result delivered                                                                                         | yes (your models, cost known)   | yes                  |
-| Failed or stopped at a limit, but the model ran                                                          | yes                             | yes                  |
-| Ended without a result, or cancelled or replaced by a newer commit                                       | yes                             | yes                  |
-| AI cost unknown (for example the provider did not report it)                                             | no                              | yes                  |
-| Clearly our fault: VM failed to start, crash, a timeout, our infrastructure, the managed key failing     | no                              | no                   |
-| A replaced review that failed with our error                                                             | no                              | no                   |
-| Never ran (refused at the start, or cancelled while it waited)                                           | no                              | no                   |
+| What happened to the review                                                                          | AI price                      | Infrastructure price |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------- |
+| Result delivered                                                                                     | yes (your models, cost known) | yes                  |
+| Failed or stopped at a limit, but the model ran                                                      | yes                           | yes                  |
+| Ended without a result, or cancelled or replaced by a newer commit                                   | yes                           | yes                  |
+| AI cost unknown (for example the provider did not report it)                                         | no                            | yes                  |
+| Clearly our fault: VM failed to start, crash, a timeout, our infrastructure, the managed key failing | no                            | no                   |
+| A replaced review that failed with our error                                                         | no                            | no                   |
+| Never ran (refused at the start, or cancelled while it waited)                                       | no                            | no                   |
 
 The rule is: **free only when the failure is clearly ours, everything else is charged.** On the workspace's own key the AI
 price is always zero, and a failure of that key is the workspace's. The exact list of codes is in
@@ -151,22 +151,25 @@ the request. A Member does not see the card and the route refuses them. The app 
 creation (`invoice_creation`): Managed Payments does not support it, the merchant of record issues the invoice itself,
 and the fake Stripe refuses the parameter like the documentation says. The charge, the prices and the wording of the
 page are unchanged. Whether a Managed Payments payment really leaves an Invoice object at Stripe is part of #503: until
-you have seen it in the sandbox, the card may be empty on a real instance, and then says "No invoices yet". The
-restricted API key needs read access to invoices for this card (section 3, step 4).
+you have seen it in the sandbox, the card may stay empty on a real instance after payments, and then says only "No invoices
+yet." (it promises no invoice). **Open: #503.** The restricted API key needs read access to **invoices** for this card
+(section 3, step 4); without it Stripe refuses the list and the card shows its error line with a retry. An invoice link is
+shown only when it is an https address on a Stripe host (`stripe.com` and its subdomains); any other address is left out.
+A customer Stripe does not know (stored under a test key, then a live key is saved) shows the empty list instead of an error.
 
 ## 4. The rates and numbers
 
 In the admin portal, menu **Billing**, the card **Rates and numbers**:
 
-| Field                                  | What it is                                                                                           | Example (made up) |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------- |
-| Factor A                               | Multiplies the real AI cost on your models. At least 1.                                              | 2.0               |
-| Rate per started minute, Diff          | Dollars per started minute of a Diff review.                                                         | 0.020             |
-| Rate per started minute, Dynamic       | Dollars per started minute of a Dynamic review.                                                      | 0.030             |
-| AI reserve per Diff review             | Not used any more, but still required. Any value in range works.                                     | 0.10              |
-| Start credit                           | Granted once per GitHub account. 0 switches it off. Default 2.                                        | 2                 |
-| Low-balance threshold                  | A balance below this sends the "low" mail once. Default 5.                                           | 5                 |
-| Hourly review limit per workspace      | The hidden brake. Default 60.                                                                        | 60                |
+| Field                             | What it is                                                       | Example (made up) |
+| --------------------------------- | ---------------------------------------------------------------- | ----------------- |
+| Factor A                          | Multiplies the real AI cost on your models. At least 1.          | 2.0               |
+| Rate per started minute, Diff     | Dollars per started minute of a Diff review.                     | 0.020             |
+| Rate per started minute, Dynamic  | Dollars per started minute of a Dynamic review.                  | 0.030             |
+| AI reserve per Diff review        | Not used any more, but still required. Any value in range works. | 0.10              |
+| Start credit                      | Granted once per GitHub account. 0 switches it off. Default 2.   | 2                 |
+| Low-balance threshold             | A balance below this sends the "low" mail once. Default 5.       | 5                 |
+| Hourly review limit per workspace | The hidden brake. Default 60.                                    | 60                |
 
 - Pick A and B from your real costs (the Vercel Sandbox minutes, the functions and the model price list) and your fees.
   Stripe's fee comes out of your payout, not out of the buyer's credit.
@@ -271,12 +274,12 @@ credit, to repair a payment that could not be credited, or to fix a mistake. It 
 The menu entry **Payment reviews** (`/admin/billing/reviews`) lists payments the app could not credit by itself. A badge
 shows how many are open. The app never guesses here; a person decides.
 
-| Outcome             | What it means                                                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| Outcome             | What it means                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `intent_unresolved` | An event about a payment that is none of our top-ups (for example another product on a shared Stripe account). |
-| `amount_rejected`   | A payment or a refund with an amount, currency or environment that does not fit what we asked for.      |
-| `amount_conflict`   | A payment that changes the amount of a credit that was already given.                                   |
-| `event_invalid`     | A signed event the app could not read.                                                                  |
+| `amount_rejected`   | A payment or a refund with an amount, currency or environment that does not fit what we asked for.             |
+| `amount_conflict`   | A payment that changes the amount of a credit that was already given.                                          |
+| `event_invalid`     | A signed event the app could not read.                                                                         |
 
 For each row you see the workspace, our top-up and the Stripe object. Look the payment up in the Stripe dashboard (the row
 holds no amount of the buyer). Then:
@@ -327,36 +330,36 @@ Billing page when a legitimate burst trips it. Never tell a workspace the number
 
 ### Refusal codes at the start of a review
 
-| Code                        | Meaning and what to do                                                                                      |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `insufficient_balance`      | The balance is exactly zero. The workspace adds credit.                                                     |
-| `balance_negative`          | The balance is below zero (a review ended, or a refund or dispute took it there). Top-up or correction.     |
-| `monthly_limit_reached`     | The workspace's own limit was reached. An Owner or Admin changes it.                                        |
-| `reviews_paused`            | The hidden hourly brake. Raise the number if the burst is legitimate.                                       |
+| Code                        | Meaning and what to do                                                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `insufficient_balance`      | The balance is exactly zero. The workspace adds credit.                                                                                                                 |
+| `balance_negative`          | The balance is below zero (a review ended, or a refund or dispute took it there). Top-up or correction.                                                                 |
+| `monthly_limit_reached`     | The workspace's own limit was reached. An Owner or Admin changes it.                                                                                                    |
+| `reviews_paused`            | The hidden hourly brake. Raise the number if the burst is legitimate.                                                                                                   |
 | `billing_rates_incomplete`  | Billing is on but the setup is not ready (a rate, a credential, the check or the terms link is missing). Complete the item the admin banner names. A notice per commit. |
-| `billing_limits_unreadable` | The brake or limit could not be evaluated. Look at `CLAIM_CAPS_FAILED`. No notice.                          |
+| `billing_limits_unreadable` | The brake or limit could not be evaluated. Look at `CLAIM_CAPS_FAILED`. No notice.                                                                                      |
 
 ### Log lines to watch
 
-| Line                                                                           | Meaning                                                              |
-| ------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `billing_webhook_rejected code=<code>`                                         | A webhook was refused (bad, old or missing signature). Many of these mean a wrong signing secret or a proxy that rewrites the body. |
-| `billing_webhook_needs_review outcome=<code>`                                  | A payment needs a person. See Payment reviews.                       |
-| `billing_webhook_event_invalid`                                                | A signed event was not an event. Recorded when it has an id.         |
-| `billing_webhook_failed code=<code>`, `billing_webhook_adapter_failed`         | The webhook failed and answered 500. Stripe will deliver again.      |
-| `billing_webhook_credit_pending`                                               | A refund or dispute arrived before its credit. Answered 503, Stripe delivers again. |
-| `billing_webhook_applied outcome=<code>`                                       | A normal delivery.                                                   |
-| `[billing] TOPUP_STARTED workspace=<id> result=<code>`                         | A top-up was started. Never an amount.                               |
-| `[billing] TOPUP_CHECKED workspace=<id> result=<code>`                         | "Check payment" was used.                                            |
-| `billing_review_resolved provider=<p> event=<id> actor=<user> entry=<id\|none>`| A review row was closed.                                             |
-| `[billing] BILLING_PRICING_FAILED job=<id> code=<code>`                        | A run could not be priced. It was charged nothing. Look at it.       |
-| `[usage] job=<id> workspace=<id> settled with an unknown cost ...`             | A run had no known AI cost. It is charged its minutes only. Many of these mean a provider that does not report cost. |
-| `[billing] CLAIM_CAPS_FAILED workspace=<id> error=<kind> retry=<yes\|no>`       | The limits could not be read. Retried or refused.                    |
-| `[billing] BILLING_START_CREDIT_GRANTED` / `BILLING_START_CREDIT_FAILED`       | The start credit.                                                    |
-| `[billing] BALANCE_MAIL_FAILED workspace=<id> kind=<kind> code=<code>`         | A mail did not go out (`not_configured` means no mail server).       |
-| `[billing] MONTHLY_LIMIT_CHANGED workspace=<id> user=<id> ...`                 | A workspace changed its monthly limit.                               |
-| `[billing] WALL_CLOCK_NOT_RECORDED`, `DISPATCHER_NOT_NOTED`                    | A measure of a job without a VM, or a note of a Dispatcher, failed. |
-| `[billing] BILLING_JOURNAL_INCONSISTENT workspace=<id> ...`, `BILLING_JOURNAL_CHECK_DONE ...` | The daily journal check found a workspace whose balance and journal differ, or finished a pass. |
+| Line                                                                                          | Meaning                                                                                                                             |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `billing_webhook_rejected code=<code>`                                                        | A webhook was refused (bad, old or missing signature). Many of these mean a wrong signing secret or a proxy that rewrites the body. |
+| `billing_webhook_needs_review outcome=<code>`                                                 | A payment needs a person. See Payment reviews.                                                                                      |
+| `billing_webhook_event_invalid`                                                               | A signed event was not an event. Recorded when it has an id.                                                                        |
+| `billing_webhook_failed code=<code>`, `billing_webhook_adapter_failed`                        | The webhook failed and answered 500. Stripe will deliver again.                                                                     |
+| `billing_webhook_credit_pending`                                                              | A refund or dispute arrived before its credit. Answered 503, Stripe delivers again.                                                 |
+| `billing_webhook_applied outcome=<code>`                                                      | A normal delivery.                                                                                                                  |
+| `[billing] TOPUP_STARTED workspace=<id> result=<code>`                                        | A top-up was started. Never an amount.                                                                                              |
+| `[billing] TOPUP_CHECKED workspace=<id> result=<code>`                                        | "Check payment" was used.                                                                                                           |
+| `billing_review_resolved provider=<p> event=<id> actor=<user> entry=<id\|none>`               | A review row was closed.                                                                                                            |
+| `[billing] BILLING_PRICING_FAILED job=<id> code=<code>`                                       | A run could not be priced. It was charged nothing. Look at it.                                                                      |
+| `[usage] job=<id> workspace=<id> settled with an unknown cost ...`                            | A run had no known AI cost. It is charged its minutes only. Many of these mean a provider that does not report cost.                |
+| `[billing] CLAIM_CAPS_FAILED workspace=<id> error=<kind> retry=<yes\|no>`                     | The limits could not be read. Retried or refused.                                                                                   |
+| `[billing] BILLING_START_CREDIT_GRANTED` / `BILLING_START_CREDIT_FAILED`                      | The start credit.                                                                                                                   |
+| `[billing] BALANCE_MAIL_FAILED workspace=<id> kind=<kind> code=<code>`                        | A mail did not go out (`not_configured` means no mail server).                                                                      |
+| `[billing] MONTHLY_LIMIT_CHANGED workspace=<id> user=<id> ...`                                | A workspace changed its monthly limit.                                                                                              |
+| `[billing] WALL_CLOCK_NOT_RECORDED`, `DISPATCHER_NOT_NOTED`                                   | A measure of a job without a VM, or a note of a Dispatcher, failed.                                                                 |
+| `[billing] BILLING_JOURNAL_INCONSISTENT workspace=<id> ...`, `BILLING_JOURNAL_CHECK_DONE ...` | The daily journal check found a workspace whose balance and journal differ, or finished a pass.                                     |
 
 The logs name codes and ids only. They never hold a body, a header, a secret, an amount of a payment or a billing profile.
 

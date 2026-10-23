@@ -8,7 +8,9 @@
 //   2. adapter    the active adapter can list invoices (`listInvoices`): else there are none to list  an empty list
 //   3. customer   the provider's customer the app stored for THIS workspace's billing profile, made at this adapter:
 //                 a workspace that never topped up has none, and the list is empty without a call
-//   4. ask        the adapter lists the invoices of that one customer; nothing else is ever passed to the provider
+//   4. ask        the adapter lists the invoices of that one customer; nothing else is ever passed to the provider.
+//                 A provider that has no such customer (stored under a key of the other environment) is an empty list,
+//                 logged as `customer_missing`; any other failure ends the request
 //
 // The workspace is the actor's, from the access check of the request; no id of the request body or address names a customer, so
 // another workspace's invoices cannot be asked for. A provider that fails is a stable code, never a word of what it said. The log
@@ -57,17 +59,17 @@ export function createInvoicesService({
 }): InvoicesService {
   return {
     async list(actor) {
-      const done = (result: InvoicesResult): InvoicesResult => {
+      const done = (result: InvoicesResult, code?: string): InvoicesResult => {
         log(
-          `[billing] INVOICES_LISTED workspace=${actor.workspaceId} result=${result.ok ? "ok" : result.error}`,
+          `[billing] INVOICES_LISTED workspace=${actor.workspaceId} result=${code ?? (result.ok ? "ok" : result.error)}`,
         );
         return result;
       };
       if (!can(actor.role, "manage_billing"))
         return done({ ok: false, error: "forbidden" });
 
-      const adapter = await activeAdapter();
       const empty: InvoicesResult = { ok: true, list: { invoices: [] } };
+      const adapter = await activeAdapter();
       if (adapter?.listInvoices === undefined) return done(empty);
 
       const profile = await createBillingProfilesRepository(
@@ -102,6 +104,13 @@ export function createInvoicesService({
           },
         });
       } catch (error) {
+        // The provider does not know the stored customer (a key of the other environment): nothing to list, and a retry would
+        // fail the same way, so the card shows the empty list instead of an error. The log line carries the code.
+        if (
+          error instanceof BillingAdapterError &&
+          error.code === "customer_missing"
+        )
+          return done(empty, "customer_missing");
         if (error instanceof BillingAdapterError)
           return done({
             ok: false,

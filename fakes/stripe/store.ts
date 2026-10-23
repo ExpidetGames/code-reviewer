@@ -78,6 +78,7 @@ export function createStore(options: { now: () => number }) {
   const paymentIntents = new Map<string, FakeObject>();
   const charges = new Map<string, FakeObject>();
   const invoices = new Map<string, FakeObject>();
+  let invoiceCustomerFilterIgnored = false;
   const refunds = new Map<string, FakeObject>();
   const disputes = new Map<string, FakeObject>();
   const endpoints = new Map<string, FakeEndpoint>();
@@ -483,6 +484,13 @@ export function createStore(options: { now: () => number }) {
       invoices.set(invoice.id, invoice);
       return invoice;
     },
+    /** A bad day of Stripe: the list of invoices forgets its `customer` filter and answers every customer's invoices. */
+    ignoreInvoiceCustomerFilter(ignored: boolean): void {
+      invoiceCustomerFilterIgnored = ignored;
+    },
+    invoiceCustomerFilterIgnored(): boolean {
+      return invoiceCustomerFilterIgnored;
+    },
     getInvoice(id: string): FakeObject {
       const found = invoices.get(id);
       if (found === undefined) throw noSuch("invoice", id, "invoice");
@@ -603,6 +611,7 @@ export function createStore(options: { now: () => number }) {
       ] as Array<Map<string, unknown>>)
         map.clear();
       deletedCustomers.clear();
+      invoiceCustomerFilterIgnored = false;
       events.length = 0;
       ids.reset();
     },

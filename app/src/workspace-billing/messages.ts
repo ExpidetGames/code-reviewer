@@ -133,7 +133,12 @@ export const INVOICES_LINK_TEXT = "link.com";
 export const INVOICES_LINK_HREF = "https://link.com";
 
 export const INVOICES_HEADING = "Invoices";
-export const INVOICES_EMPTY = "No invoices yet. One appears after a payment.";
+export const INVOICES_EMPTY = "No invoices yet.";
+export const INVOICES_TABLE_LABEL = "Invoice list";
+export const INVOICES_COLUMN_DATE = "Date";
+export const INVOICES_COLUMN_AMOUNT = "Amount";
+export const INVOICES_COLUMN_STATUS = "Status";
+export const INVOICES_COLUMN_LINKS = "Links";
 export const INVOICES_LOADING = "Loading invoices";
 export const INVOICES_FAILED =
   "The invoices could not be loaded right now. Try again in a moment.";

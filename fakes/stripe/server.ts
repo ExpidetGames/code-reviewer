@@ -164,6 +164,8 @@ export type StripeFake = {
     closeDispute(disputeId: string, outcome: "won" | "lost"): FakeObject;
     /** An invoice Stripe made on its own (a draft, an open one, a voided one). */
     addInvoice(patch: Record<string, unknown>): FakeObject;
+    /** A bad day: the list of invoices answers every customer's invoices whatever `customer` it was asked for. */
+    ignoreInvoiceCustomerFilter(ignored?: boolean): void;
   };
   /** Sends the events that no endpoint has taken yet to the endpoints that subscribed to them. */
   flush(options?: DeliveryOptions): Promise<DeliveryResult[]>;
@@ -726,6 +728,8 @@ export async function startStripeFake(
       closeDispute: (disputeId, outcome) =>
         structuredClone(store.closeDispute(disputeId, outcome)),
       addInvoice: (patch) => structuredClone(store.addInvoice(patch)),
+      ignoreInvoiceCustomerFilter: (ignored = true) =>
+        store.ignoreInvoiceCustomerFilter(ignored),
     },
     forgetIdempotencyKeys: () => saved.clear(),
     flush,

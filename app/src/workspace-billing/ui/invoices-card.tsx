@@ -32,11 +32,16 @@ import {
   INVOICE_DOWNLOAD_LINK,
   INVOICE_STATUS_LABEL,
   INVOICE_VIEW_LINK,
+  INVOICES_COLUMN_AMOUNT,
+  INVOICES_COLUMN_DATE,
+  INVOICES_COLUMN_LINKS,
+  INVOICES_COLUMN_STATUS,
   INVOICES_EMPTY,
   INVOICES_FAILED,
   INVOICES_HEADING,
   INVOICES_LOADING,
   INVOICES_RETRY_BUTTON,
+  INVOICES_TABLE_LABEL,
 } from "../messages.ts";
 import { formatInvoiceAmount } from "../money.ts";
 import type { InvoiceStatus, InvoiceView } from "../view.ts";
@@ -174,14 +179,16 @@ export function InvoicesCard({
           <p className="text-sm text-muted-foreground">{INVOICES_EMPTY}</p>
         ) : null}
         {state.kind === "ready" && state.invoices.length > 0 ? (
-          <Table aria-label={INVOICES_HEADING}>
+          <Table aria-label={INVOICES_TABLE_LABEL}>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[30%]">Date</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="w-[30%]">
+                  {INVOICES_COLUMN_DATE}
+                </TableHead>
+                <TableHead>{INVOICES_COLUMN_AMOUNT}</TableHead>
+                <TableHead>{INVOICES_COLUMN_STATUS}</TableHead>
                 <TableHead className="text-right">
-                  <span className="sr-only">Links</span>
+                  <span className="sr-only">{INVOICES_COLUMN_LINKS}</span>
                 </TableHead>
               </TableRow>
             </TableHeader>

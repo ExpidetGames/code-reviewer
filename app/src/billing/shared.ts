@@ -31,7 +31,7 @@ import {
   stripeWebhookSecretFromSecrets,
 } from "./stripe-credentials.ts";
 import { createStripeClient } from "./stripe-client.ts";
-import { stripeApiBaseUrl } from "../stripe-endpoints.ts";
+import { stripeApiBaseUrl, stripeLinkOrigin } from "../stripe-endpoints.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { incompleteBillingItems, isBillingOn } from "./enabled.ts";
 import type { BillingMissingItem } from "./readiness.ts";
@@ -78,6 +78,7 @@ function publicAddress(): string {
  * when a top-up, a webhook or a check needs them (never at startup).
  */
 export function getBillingAdapterRegistry() {
+  const linkOrigin = stripeLinkOrigin();
   return createAdapterRegistry([
     manualAdapter,
     createStripeAdapter({
@@ -85,6 +86,8 @@ export function getBillingAdapterRegistry() {
         secrets: getSecretStore,
         baseUrl: stripeApiBaseUrl(),
       }),
+      // Only a test stack that points the app at a loopback fake gets that fake's links; in production this is undefined.
+      ...(linkOrigin === undefined ? {} : { allowedLinkOrigin: linkOrigin }),
       webhookSecret: stripeWebhookSecretFromSecrets({
         secrets: getSecretStore,
       }),
