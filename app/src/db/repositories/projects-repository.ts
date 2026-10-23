@@ -215,6 +215,7 @@ function toStoredProject(
 /** The settings of a project row that is being created (#656), read inside the transaction that creates it. */
 export type NewProjectSettings = (
   executor: Kysely<Database>,
+  workspaceId: WorkspaceId,
 ) => Promise<ProjectSettings>;
 
 export function createProjectsRepository(
@@ -420,7 +421,7 @@ export function createProjectsRepository(
           id: newId(),
           repository_id: repositoryId,
           active: encodeBoolean(false),
-          settings: encodeJson(change(await newProjectSettings(trx))),
+          settings: encodeJson(change(await newProjectSettings(trx, workspaceId))),
           created_at: timestamp,
           updated_at: timestamp,
         })
@@ -498,7 +499,7 @@ export function createProjectsRepository(
               id: newId(),
               repository_id: repositoryId,
               active: encodeBoolean(true),
-              settings: encodeJson(await newProjectSettings(trx)),
+              settings: encodeJson(await newProjectSettings(trx, workspaceId)),
               created_at: timestamp,
               updated_at: timestamp,
             })

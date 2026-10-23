@@ -193,8 +193,10 @@ the selected kind does not show opens Review, where the note about it is.
   workspace default and the field says which one that is; an empty workspace default is no limit of its own (the limit of the
   instance, the cost guard of #540, applies in every case). It is validated like the other fields (`validate.ts`, 1 cent to 100
   dollars) and sets the limit the Diff cost estimate warns above (`cost.ts` `costLimitUsdOf`).
-- **New projects start as Dynamic Review** where the instance has Dynamic Review on (`projects/new-project-settings.ts`, read in
-  the transaction that creates the project row); projects that exist keep their kind.
+- **New projects start as Dynamic Review** where the instance has Dynamic Review on and a Dynamic review of the workspace can
+  resolve a model: on the operator's key a usable instance default entry of Dynamic Review exists, on the workspace's own key a
+  key is stored for the default provider. Otherwise they start as Diff Review, so the first review is not refused
+  (`projects/new-project-settings.ts`, read in the transaction that creates the project row); projects that exist keep their kind.
 
 ## The settings form: provider, model and catalog entry (#433)
 

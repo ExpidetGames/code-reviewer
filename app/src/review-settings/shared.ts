@@ -56,7 +56,7 @@ export function reviewSettingsServiceFor(
     ),
     // #195: a kind change cancels the project's waiting review jobs in this transaction.
     hooks: createJobReviewSettingsHooks(workspaceId),
-    newProjectSettings: () => newProjectSettings(db),
+    newProjectSettings: () => newProjectSettings(db, workspaceId),
     modelCapabilities,
     // #283: the models of a workspace on the operator's key are the operator's, and the workspace's budget is not
     // checked against the stored one. Anything but the workspace's own key hides the model fields and the estimate,
