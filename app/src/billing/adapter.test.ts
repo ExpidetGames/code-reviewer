@@ -107,6 +107,7 @@ describe("the code constants", () => {
       "intent_unresolved",
       "amount_rejected",
       "amount_conflict",
+      "workspace_deleted",
       "event_invalid",
     ]);
     for (const outcome of BILLING_REVIEW_OUTCOMES)

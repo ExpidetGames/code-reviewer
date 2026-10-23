@@ -5,7 +5,7 @@
 // "Save key" and "Test key". Every provider has its own key and its own form (#426). The key is write-only:
 // the page shows whether one is saved (and its last four characters), an empty field keeps it, and the saved
 // value never reaches this page. A saved key that was made for another provider than this card's is not
-// carried over. Removing the key is a destructive action of the "Advanced" sub-page
+// carried over. Removing the key is a destructive action at the end of the LLM access page, not of the form
 // (`remove-workspace-key.tsx`).
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";

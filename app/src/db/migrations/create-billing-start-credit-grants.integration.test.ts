@@ -19,6 +19,7 @@ import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
 import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
+import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const MIGRATION = "20261021150000_create_billing_start_credit_grants";
 const T = "2026-10-21T08:00:00.000Z";
@@ -165,9 +166,12 @@ for (const engine of ENGINES) {
 
         await migrateToLatest(db);
 
-        expect(await db.selectFrom("workspaces").selectAll().execute()).toEqual(
-          before,
-        );
+        expect(
+          withoutColumnsAddedLater(
+            "workspaces",
+            await db.selectFrom("workspaces").selectAll().execute(),
+          ),
+        ).toEqual(before);
         expect(
           await db
             .selectFrom("billing_start_credit_grants")

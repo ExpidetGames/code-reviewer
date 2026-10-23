@@ -17,6 +17,7 @@ import {
   createPostgresTestDatabase,
   hasPostgres,
 } from "../../test-support/postgres-test-database.ts";
+import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const SPLIT = "20261017140000_create_model_catalog_entries";
 
@@ -60,7 +61,7 @@ async function rowsOfEveryTable(
       continue;
     const { rows } =
       await sql<unknown>`select * from ${sql.table(table.name)}`.execute(db);
-    result[table.name] = rows;
+    result[table.name] = withoutColumnsAddedLater(table.name, rows);
   }
   return result;
 }

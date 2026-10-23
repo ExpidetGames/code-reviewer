@@ -16,6 +16,7 @@ import {
   startOperatorApiHarness,
   TEST_OPERATOR_TOKEN,
 } from "../../src/test-support/operator-api-harness.ts";
+import { markWorkspaceDeleted } from "../../src/test-support/workspaces.ts";
 
 const ENTITLEMENTS = {
   planLabel: "team",
@@ -164,6 +165,26 @@ describe("listing workspaces", () => {
     expect(firstBody.nextAfter).toBe(workspaces[2]?.id);
     expect(second.workspaces).toHaveLength(1);
     expect(second.nextAfter).toBeNull();
+  });
+
+  // #658-T03
+  it("does not list a deleted workspace, and the cursor walks past it", async () => {
+    const h = await startOperatorApiHarness();
+    const gone = await h.addWorkspace("gone");
+    const kept = await h.addWorkspace("kept");
+    await markWorkspaceDeleted(h.db, gone);
+
+    const answer = await json(
+      await h.call("GET", "/api/operator/v1/workspaces?limit=10"),
+    );
+
+    const ids = (answer.workspaces as Array<{ id: string }>).map(
+      (workspace) => workspace.id,
+    );
+    expect(ids).toContain(kept);
+    expect(ids).toContain(h.workspaceId);
+    expect(ids).not.toContain(gone);
+    expect(JSON.stringify(answer)).not.toContain(`deleted-${gone}`);
   });
 
   // #275-T12
@@ -519,6 +540,32 @@ describe("the entitlements of a workspace", () => {
         });
       }
     }
+  });
+
+  // #658-T03
+  it("answers a deleted workspace like an unknown one on every method, and writes nothing", async () => {
+    const h = await startOperatorApiHarness();
+    const gone = await h.addWorkspace("gone");
+    await h.call("PUT", path(gone), { body: ENTITLEMENTS });
+    await markWorkspaceDeleted(h.db, gone);
+
+    for (const method of ["GET", "PUT", "DELETE"]) {
+      const response = await h.call(method, path(gone), {
+        body: method === "PUT" ? ENTITLEMENTS : undefined,
+      });
+      expect(response.status, method).toBe(404);
+      expect(await json(response)).toEqual({
+        version: 1,
+        error: "workspace_not_found",
+      });
+    }
+    expect(
+      await h.db
+        .selectFrom("workspace_entitlements")
+        .select("plan_label")
+        .where("workspace_id", "=", gone)
+        .execute(),
+    ).toHaveLength(1);
   });
 
   // #275-T11
