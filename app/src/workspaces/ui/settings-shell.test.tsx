@@ -29,7 +29,7 @@ describe("the settings navigation", () => {
     expect(links()).toEqual([
       "General",
       "Review defaults",
-      "LLM access",
+      "LLM",
       "Advanced",
     ]);
   });
@@ -38,7 +38,7 @@ describe("the settings navigation", () => {
     expect(links(true)).toEqual([
       "General",
       "Review defaults",
-      "LLM access",
+      "LLM",
       "Plan",
       "Advanced",
     ]);
@@ -77,7 +77,7 @@ describe("the settings navigation while billing is on (#505)", () => {
     expect(billingLinks({ showPlan: true })).toEqual([
       "General",
       "Review defaults",
-      "LLM access",
+      "LLM",
       "Plan",
       "Advanced",
     ]);
@@ -88,7 +88,7 @@ describe("the settings navigation while billing is on (#505)", () => {
     expect(billingLinks({ showPlan: true, showBilling: true })).toEqual([
       "General",
       "Review defaults",
-      "LLM access",
+      "LLM",
       "Billing",
       "Advanced",
     ]);

@@ -24,7 +24,7 @@ export const SETTINGS_SECTIONS = [
     label: "Review defaults",
     title: "Review defaults",
   },
-  { segment: "llm", label: "LLM access", title: "LLM access" },
+  { segment: "llm", label: "LLM", title: "LLM" },
   // Only listed while the workspace has entitlements (`showPlan`); the page itself exists for everybody.
   { segment: "plan", label: PLAN_NAV_LABEL, title: PLAN_PAGE_TITLE },
   // Only listed while billing is on (`showBilling`), and then instead of the Plan page (#505).

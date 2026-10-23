@@ -144,7 +144,7 @@ test.describe("the LLM key of a workspace", () => {
 
     await member.goto(`/w/${slug}/settings/llm`);
     await expect(
-      member.getByRole("heading", { level: 1, name: "LLM access" }),
+      member.getByRole("heading", { level: 1, name: "LLM" }),
     ).toBeVisible();
     await expect(
       member.getByText("Reviews of this workspace have an LLM key."),

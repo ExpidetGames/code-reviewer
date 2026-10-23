@@ -3,7 +3,8 @@
 // @vitest-environment jsdom
 // The choice of the key mode on the LLM access page while billing is on (#496): "Use our models" and "Use my own provider key", each
 // with one sentence about what is charged and no rate; an Admin or an Owner changes it, a Member reads it; a workspace without a key
-// of its own cannot pick its own key; the key forms stay on the page whichever is chosen, so the key can be saved before switching.
+// of its own can select its own key to reach the key form but cannot save the choice before a key is stored; the own-key settings are
+// shown while the own key is selected and hidden while our models are (#656).
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -119,15 +120,19 @@ describe("the key mode card", () => {
   });
 
   // #496-T05
-  it("cannot pick the own key without one, and says where to save it", () => {
+  it("lets the own key be selected without one, but not saved, and says where to save the key", async () => {
+    const user = userEvent.setup();
     card({ hasOwnKey: false });
+    expect(screen.queryByText(/Save a provider key below first/)).toBeNull();
 
+    await user.click(screen.getByRole("radio", { name: /Use my own/ }));
+
+    expect(screen.getByText(/Save a provider key below first/)).toBeTruthy();
     expect(
       screen
-        .getByRole("radio", { name: /Use my own provider key/ })
+        .getByRole("button", { name: "Save choice" })
         .hasAttribute("disabled"),
     ).toBe(true);
-    expect(screen.getByText(/Save a provider key below first/)).toBeTruthy();
   });
 
   // #496-T05
@@ -186,8 +191,9 @@ describe("the LLM access section with the choice", () => {
     { provider: "openrouter", status: { state: "not_configured" } },
   ];
 
-  // #496-T09
-  it("keeps the key form on the page when our models are chosen, so a key can be saved before switching", () => {
+  // #656-T05
+  it("hides every setting of the own key while our models are chosen, and shows the key form as soon as the own key is selected", async () => {
+    const user = userEvent.setup();
     render(
       <LlmAccessSection
         workspaceSlug="acme"
@@ -195,16 +201,40 @@ describe("the LLM access section with the choice", () => {
         keyStatuses={keyStatuses}
         summary={PROVIDED}
         keyChoice={{ keyMode: "managed", hasOwnKey: false }}
+        keyModeApi={fakeApi()}
       />,
     );
 
-    expect(screen.getByLabelText("API key")).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Use our models/ })).toBeTruthy();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save key" })).toBeNull();
     expect(
       screen.queryByText(
         "LLM access for this workspace is provided by this instance.",
       ),
     ).toBeNull();
+
+    await user.click(screen.getByRole("radio", { name: /Use my own/ }));
+    expect(screen.getByLabelText("API key")).toBeTruthy();
+
+    await user.click(screen.getByRole("radio", { name: /Use our models/ }));
+    expect(screen.queryByLabelText("API key")).toBeNull();
+  });
+
+  // #656-T05
+  it("shows the key form while the own key is chosen", () => {
+    render(
+      <LlmAccessSection
+        workspaceSlug="acme"
+        canManage
+        keyStatuses={keyStatuses}
+        summary={PROVIDED}
+        keyChoice={{ keyMode: "own", hasOwnKey: true }}
+        keyModeApi={fakeApi()}
+      />,
+    );
+
+    expect(screen.getByLabelText("API key")).toBeTruthy();
   });
 
   // #496-T03

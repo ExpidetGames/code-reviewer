@@ -103,7 +103,7 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
 
     // The providers of the catalog, searchable, next to the two cards of the registry.
     await page.getByRole("link", { name: "Settings" }).first().click();
-    await page.getByRole("link", { name: "LLM access" }).first().click();
+    await page.getByRole("link", { name: "LLM", exact: true }).first().click();
     await expect(
       page.getByRole("heading", { level: 2, name: "Other providers" }),
     ).toBeVisible();

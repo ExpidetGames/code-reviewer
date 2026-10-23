@@ -708,6 +708,119 @@ describe("the settings form", () => {
   });
 });
 
+describe("the LLM section follows the provider (#656)", () => {
+  // #656-T03
+  it("lists only the models of the chosen provider, and takes the default model of that provider with it", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
+    await openSection(user, "LLM");
+    const optionsOf = async () => {
+      await user.click(screen.getByLabelText("Model"));
+      const names = screen
+        .getAllByRole("option")
+        .map((option) => option.textContent ?? "");
+      await user.keyboard("{Escape}");
+      return names;
+    };
+    const openRouterModels = await optionsOf();
+
+    await chooseOption(user, screen.getByLabelText("Provider"), "Anthropic");
+
+    const anthropicModels = await optionsOf();
+    expect(anthropicModels.length).toBeGreaterThan(0);
+    expect(anthropicModels).not.toEqual(openRouterModels);
+    expect(anthropicModels).toContain(
+      screen.getByLabelText("Model").textContent,
+    );
+  });
+});
+
+describe("the Limits section (#656)", () => {
+  // #656-T04
+  it("says that an empty cost limit follows the workspace default, names that default, and sends nothing of its own for it", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel(
+          { maxCostCents: 100 },
+          { ...BUILT_IN, maxCostCents: 250 },
+        )}
+        api={api}
+      />,
+    );
+
+    await openSection(user, "Limits");
+    const input = screen.getByLabelText(
+      "Cost limit per review (USD)",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("1.00");
+    const field = input.closest("[data-field]") as HTMLElement;
+    expect(field.textContent).toContain(
+      "Leave empty to use the workspace default ($2.50)",
+    );
+
+    await user.clear(input);
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(save).toHaveBeenCalledWith({});
+  });
+
+  // #656-T04
+  it("sends the cost limit of a project in whole cents, and an emptied limit as none of its own", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
+
+    await openSection(user, "Limits");
+    await user.type(
+      screen.getByLabelText("Cost limit per review (USD)"),
+      "1.5",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(save).toHaveBeenCalledWith({ maxCostCents: 150 });
+  });
+
+  // #656-T04
+  it("names a cost limit that is not an amount", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
+
+    await openSection(user, "Limits");
+    await user.type(
+      screen.getByLabelText("Cost limit per review (USD)"),
+      "lots",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    expect(save).not.toHaveBeenCalled();
+    expect(
+      screen
+        .getByLabelText("Cost limit per review (USD)")
+        .getAttribute("aria-invalid"),
+    ).toBe("true");
+  });
+});
+
 describe("the settings form of a workspace on its own key keeps its stored tier (#283)", () => {
   // #283-T02
   it("shows the model of a workspace on its own key in the LLM section, and no Quality choice", async () => {
