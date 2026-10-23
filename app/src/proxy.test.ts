@@ -26,17 +26,25 @@ describe("the proxy matcher", () => {
     "/_next/static",
     "/favicon.icoo",
     "/x/favicon.ico",
+    "/icon.svgx",
+    "/x/icon.svg",
+    "/apple-icon.pngx",
+    "/x/apple-icon.png",
     "/_next/data/build/x.json",
   ])("sees %s", (pathname) => {
     expect(matcher.test(pathname)).toBe(true);
   });
 
-  it.each(["/_next/static/chunks/a.js", "/_next/image", "/favicon.ico"])(
-    "leaves out %s, which is not an app page",
-    (pathname) => {
-      expect(matcher.test(pathname)).toBe(false);
-    },
-  );
+  // #650-T01
+  it.each([
+    "/_next/static/chunks/a.js",
+    "/_next/image",
+    "/favicon.ico",
+    "/icon.svg",
+    "/apple-icon.png",
+  ])("leaves out %s, which is not an app page", (pathname) => {
+    expect(matcher.test(pathname)).toBe(false);
+  });
 });
 
 describe("the paths the proxy leaves out", () => {

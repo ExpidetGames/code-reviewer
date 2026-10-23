@@ -212,7 +212,7 @@ code=$(setup_code_from_log "$(dc logs --no-color app 2>&1)") || exit 1
 # (Captured first: `grep -q` ends at its first match, and under pipefail the curl it leaves behind
 # would fail the pipeline with SIGPIPE.)
 start_page=$(curl --silent --max-time 5 "$base/")
-grep -q 'Set up Code Reviewer' <<<"$start_page" || fail "the start page does not show the setup"
+grep -q 'Set up code-review.com' <<<"$start_page" || fail "the start page does not show the setup"
 grep -qF "$code" <<<"$start_page" && fail "the setup code is in the start page"
 for path in /api/projects /api/webhooks/github-app /api/runners/v1/claim; do
   answer=$(curl --silent --max-time 5 --write-out ' %{http_code}' --request POST "$base$path")

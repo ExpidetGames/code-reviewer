@@ -49,7 +49,7 @@ test.describe("the app frame", () => {
         "aria-current",
         "page",
       );
-      await expect(page).toHaveTitle(`${title} · Code Reviewer`);
+      await expect(page).toHaveTitle(`${title} · code-review.com`);
       await expect(page.getByRole("banner")).toBeVisible();
     }
 

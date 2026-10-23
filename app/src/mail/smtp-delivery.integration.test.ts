@@ -28,7 +28,7 @@ const QUICK: SmtpTimeouts = {
 
 const MESSAGE = {
   to: "admin@example.com",
-  subject: "Test mail from Code Reviewer",
+  subject: "Test mail from code-review.com",
   text: "It works.",
   html: "<p>It works.</p>",
 };
@@ -43,7 +43,7 @@ function settingsFor(
     security: "starttls",
     user: null,
     senderAddress: "reviewer@example.com",
-    senderName: "Code Reviewer",
+    senderName: "code-review.com",
     allowSelfSigned: true,
     allowPlainTextLogin: false,
     ...overrides,
@@ -85,12 +85,12 @@ describe("a delivery over SMTP", () => {
     expect(message?.authenticatedAs).toBe(TEST_SMTP_USER);
     expect(message?.from).toBe("reviewer@example.com");
     expect(message?.to).toEqual(["admin@example.com"]);
-    expect(message?.subject).toBe("Test mail from Code Reviewer");
+    expect(message?.subject).toBe("Test mail from code-review.com");
     expect(message?.text.trim()).toBe("It works.");
     expect(message?.html.trim()).toBe("<p>It works.</p>");
     expect(message?.headers["auto-submitted"]).toEqual(["auto-generated"]);
     expect(message?.headers.from).toEqual([
-      "Code Reviewer <reviewer@example.com>",
+      '"code-review.com" <reviewer@example.com>',
     ]);
   });
 

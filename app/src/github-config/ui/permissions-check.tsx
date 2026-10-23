@@ -7,6 +7,7 @@
 // them this App really lacks. It sits behind the "Permissions GitHub granted" disclosure of the page.
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
+import { ProductName } from "../../components/brand.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { browserGithubApi, type GithubApi } from "./api.ts";
 import { describeGithubFailure, PERMISSION_LABELS } from "./messages.ts";
@@ -64,7 +65,7 @@ export function PermissionsCheck({
         {outcome?.kind === "missing" && outcome.missing.length === 0 ? (
           <Alert variant="success" role="status">
             <AlertDescription>
-              The App has every permission Code Reviewer asks for.
+              The App has every permission <ProductName /> asks for.
             </AlertDescription>
           </Alert>
         ) : null}
