@@ -868,12 +868,9 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     const memberTexts = await collectViews(member, slugA, REPO_A.fullName, {
       advanced: false,
     });
-    const ownerTexts = await collectViews(
-      ownerPage(),
-      slugA,
-      REPO_A.fullName,
-      { advanced: true },
-    );
+    const ownerTexts = await collectViews(ownerPage(), slugA, REPO_A.fullName, {
+      advanced: true,
+    });
     // What the browser shows once the pages are hydrated and have polled: the DOM and the visible text of the plan,
     // the runs, a run and the review defaults, for the member and for the Owner.
     const runIds = (

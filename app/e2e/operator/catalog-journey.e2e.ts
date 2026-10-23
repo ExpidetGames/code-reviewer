@@ -595,9 +595,24 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       keys: [],
     });
     const surfaces: Surface[] = [];
-    for (const [path, title] of [
-      [`/w/${slugM}/settings/advanced`, "Settings · Advanced"],
-      [`/w/${slugM}/settings/llm`, "Settings · LLM access"],
+    for (const [path, title, check] of [
+      // The Owner's Advanced page holds the deletion of the workspace and nothing about keys or defaults.
+      [
+        `/w/${slugM}/settings/advanced`,
+        "Settings · Advanced",
+        () =>
+          expect(
+            page.getByRole("button", { name: "Delete workspace…" }),
+          ).toBeVisible(),
+      ],
+      [
+        `/w/${slugM}/settings/llm`,
+        "Settings · LLM access",
+        () =>
+          expect(
+            page.getByRole("button", { name: /Remove .*key/ }),
+          ).toHaveCount(0),
+      ],
     ] as const) {
       surfaces.push(
         ...(await readAs(page, path, { marker: title })).surfaces,
@@ -610,15 +625,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
         ).surfaces,
         ...(await browse(page, path, { title })),
       );
-      if (path.endsWith("/advanced"))
-        // The Owner's page holds the deletion of the workspace and nothing about keys or defaults.
-        await expect(
-          page.getByRole("button", { name: "Delete workspace…" }),
-        ).toBeVisible();
-      else
-        await expect(
-          page.getByRole("button", { name: /Remove .*key/ }),
-        ).toHaveCount(0);
+      await check();
     }
     expect(findLeaks(surfaces, providers)).toEqual([]);
   });

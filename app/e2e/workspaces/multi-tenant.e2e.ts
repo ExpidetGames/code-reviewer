@@ -138,7 +138,9 @@ test.describe("a multi-tenant instance", () => {
 
     // General has no Instance part; the Owner's navigation lists Advanced, which holds Delete workspace only.
     await page.goto("/w/closing-time/settings");
-    await expect(page.getByRole("heading", { name: "Instance" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Instance" })).toHaveCount(
+      0,
+    );
     const nav = page.getByRole("navigation", { name: "Settings sections" });
     await nav.getByRole("link", { name: "Advanced" }).click();
     await expect(page).toHaveURL(/\/w\/closing-time\/settings\/advanced$/);
@@ -152,16 +154,18 @@ test.describe("a multi-tenant instance", () => {
     await expect(confirm).toBeDisabled();
     await dialog.getByLabel("Type Closing Time to confirm").fill("Closing");
     await expect(confirm).toBeDisabled();
-    await dialog.getByLabel("Type Closing Time to confirm").fill("Closing Time");
+    await dialog
+      .getByLabel("Type Closing Time to confirm")
+      .fill("Closing Time");
     await confirm.click();
 
     // Nothing is left to open: the person has no workspace any more, and the address is not found.
     await expect(page).toHaveURL(/\/no-access$/);
     await page.goto("/w/closing-time/settings/advanced");
     await expect(page).toHaveURL(/\/no-access$/);
-    expect(
-      (await page.request.get("/api/w/closing-time/runs")).status(),
-    ).toBe(403);
+    expect((await page.request.get("/api/w/closing-time/runs")).status()).toBe(
+      403,
+    );
     expect(
       (
         await page.request.delete("/api/w/closing-time", {
