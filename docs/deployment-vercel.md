@@ -785,14 +785,14 @@ with `DEPLOY_CONFIG_INVALID` naming the variables (never the values).
 **Switch soon after step 4, and before pull requests are opened.** In poll mode the give-up is off. The first
 webhook-mode sweep (it runs every 2 hours) applies `RUNNER_DISPATCH_GIVE_UP_SECONDS` (default 3600) to every job that has been queued longer
 than that: such a job is **not woken, it fails with `dispatch_unavailable`** (no attempt is counted, and the next push or
-*Review now* runs it again). Steps 3 and 4 take well under an hour of your time, and you opened no pull request before
+the play button in the project list runs it again). Steps 3 and 4 take well under an hour of your time, and you opened no pull request before
 this step, so normally nothing waits. If something does, let it fail and trigger it again, or raise the give-up time for
 the switch and lower it afterwards. Jobs queued for less than the give-up time are woken by the first request that
 touches the database (a delivery, a heartbeat) or by the next sweep.
 
 ### Step 6. Smoke test: a Diff review, then a Dynamic review
 
-**Diff.** Open (or push to) a pull request on the test repository, or use *Review now* on its page.
+**Diff.** Open (or push to) a pull request on the test repository, or press the play button of its row in the project list and pick the pull request.
 
 - Runs page: the run goes `queued`, `running`, `succeeded`; a review comment appears on the pull request.
 - Dispatcher function log: `launched` for the job id (`launch_failed` with a `code` if it did not).
@@ -1075,8 +1075,8 @@ promptly is done by the request that causes it, after its response (`after()`), 
 
 | What | Who does it, and when |
 |---|---|
-| A review of a new pull request, of a push, a person's *Review now* | The App's enqueue hook sends the wake-up in the request that queued the job. There is no debounce. A push to a pull request whose review is still waiting replaces that waiting job; a review that is running finishes first, and the new job is sent when it ends (the next row) |
-| A wake-up that failed (a 5xx, a timeout, no connection, `429`/`503` with a short `Retry-After`) | The same request repeats it up to three more times (pauses of 1, 3 and 8 seconds, at most 45 seconds in all, counted from the moment the request queued the job, so that 15 of the function's 60 seconds are left for what the request did before and for the database round trips; the routes that queue a job, the webhooks and *Review now* (`/api/w/**`), have those 60 seconds set in `app/vercel.json`). `Retry-After` is honoured if it is 30 seconds or less: the 20 of a Dispatcher that is not ready and the 30 of a busy one both fit (#479). A refusal (`DISPATCH_REJECTED`) is never repeated: an operator has to look |
+| A review of a new pull request, of a push, a person's start with the play button | The App's enqueue hook sends the wake-up in the request that queued the job. There is no debounce. A push to a pull request whose review is still waiting replaces that waiting job; a review that is running finishes first, and the new job is sent when it ends (the next row) |
+| A wake-up that failed (a 5xx, a timeout, no connection, `429`/`503` with a short `Retry-After`) | The same request repeats it up to three more times (pauses of 1, 3 and 8 seconds, at most 45 seconds in all, counted from the moment the request queued the job, so that 15 of the function's 60 seconds are left for what the request did before and for the database round trips; the routes that queue a job, the webhooks and the play button's review start (`/api/w/**`), have those 60 seconds set in `app/vercel.json`). `Retry-After` is honoured if it is 30 seconds or less: the 20 of a Dispatcher that is not ready and the 30 of a busy one both fit (#479). A refusal (`DISPATCH_REJECTED`) is never repeated: an operator has to look |
 | A wake-up answered `429` (busy) or `503` (not ready) with a `Retry-After` the request does not wait for, or that kept failing after the repeats | The row keeps the longer of its back-off and the `Retry-After`, and **a job that ends** wakes it at once: the App asks these jobs along with the ones behind the pool cap (below), whatever time the row says, but never within 9 seconds of the last call. Any other delivery, heartbeat or result sends it when its time has passed (the last row of this table). No timer and no poll is added, so a database that scales to zero stays asleep |
 | A job that waited behind the pool cap or behind the running job of its pull request | When a job ends (the Worker's result, a release), the App sends the waiting jobs, the one of the same pull request first, until as many wake-ups were accepted as the pool cap `RUNNER_DISPATCH_MAX_RUNNING` has free slots (one per freed slot when it is not set); a job that waits only for the running job of its own pull request is not asked |
 | A job given back after a failed launch (`launch_failed`) | The release frees its slot first, then sends the job again once its retry time has passed (the Dispatcher gives it back with 30 seconds; the request waits for it if it fits in about 45 seconds, else the next request that touches the database or the sweep sends it) |

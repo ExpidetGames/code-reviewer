@@ -42,7 +42,7 @@ touches it is `src/db/repositories/projects-repository.ts`.
   project), and CR-34 may want to say "will resume if the repository comes back" in the list. The
   alternative (the sync running the deactivate path when it flips a repository inactive) was rejected.
 - Events that arrive while a project is inactive are not replayed on activation: a pull request opened
-  in between needs a new push, a comment command or the manual start ("Review now", `src/manual-reviews/README.md`).
+  in between needs a new push, a comment command or the manual start (the play button of the project list, `src/manual-reviews/README.md`).
 - `listProjects()` returns one entry per repository the platform lists, plus the ones that
   disappeared but have a project, ordered by name, each with its integration and its project (or
   `null`). A repository that disappeared and never had a project is left out.
@@ -115,9 +115,8 @@ on or off needs an Admin or an Owner (`manage_projects`), a Member sees the swit
 
 ## The pages
 
-The Projects page (`src/app/(app)/w/[workspace]/projects/page.tsx`) and the two project pages
-(`src/app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx` for the settings and
-`.../[repositoryId]/review/page.tsx` for the manual start, #174) are built from `src/projects/ui/`:
+The Projects page (`src/app/(app)/w/[workspace]/projects/page.tsx`) and the project settings page
+(`src/app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx`) are built from `src/projects/ui/`:
 
 | File                           | Role                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -127,9 +126,8 @@ The Projects page (`src/app/(app)/w/[workspace]/projects/page.tsx`) and the two 
 | `ui/project-toggle.tsx`        | The switch. Calls `PUT /api/w/:workspace/repositories/:id/project` and refreshes; a refusal is shown as a sentence (`ui/messages.ts`), never as a code. Off projects cannot be switched on while the GitHub App is not configured; the switch explains why through `aria-describedby` and an `InfoHint` (#173).                                                                         |
 | `ui/sync-button.tsx`           | "Sync from GitHub" for an Owner or Admin of the workspace: `POST /api/w/:workspace/integrations/sync` reads the workspace's own connections, says how many repositories are new and what went wrong at GitHub. `InstanceSyncButton` is the instance admin's, on the Approvals page of the portal (`POST /api/admin/integrations/sync`).                                                 |
 | `ui/projects-page.tsx`         | `loadProjectsPage` gathers the data from the services, `ProjectsPageContent` renders one `NeedsAttention` strip (the configuration hints and the workspace's LLM hint as rows of the same region, #173) and the list.                                                                                                                                                                   |
-| `ui/project-page-header.tsx`   | The shared header of the two project pages (#174): one `h1` with the repository name and its state badge, the trail `Projects / <project> / Settings                                                                                                                                                                                                                                    | Review now`, the "Review now" action and the segmented navigation between the two pages. |
+| `ui/project-page-header.tsx`   | The header of the project page (#174): one `h1` with the repository name and its state badge and the trail `Projects / <project> / Settings`.                                                                                                                                                                                                                                           |
 | `ui/project-settings-page.tsx` | The settings page of a project: one `NeedsAttention` strip (the project state, the configuration hints and the workspace's LLM hint) and the form of `src/review-settings/ui` for the overrides; every repository of the list has a settings page, also an inactive one; an unknown id shows the not-found page (status 200: under Cache Components the data sits behind `<Suspense>`). |
-| `ui/project-review-page.tsx`   | The manual-review page of a project (#174): the `StartReviewPanel` of `src/manual-reviews/ui` and nothing of the settings; the workspace's LLM-key hint is a row of the page's attention strip; a project that is off says (as a note) that a review can be started by hand only while it is active. An unknown id shows the not-found page.                                            |
 
 The components never touch the database: pages call the services (`getProjectService()`,
 `getReviewSettingsService()`), the browser calls the routes above. Everything that comes from GitHub
@@ -137,10 +135,10 @@ The components never touch the database: pages call the services (`getProjectSer
 address becomes a link only when it is an http(s) address. The configuration hints
 (`src/config-status/`) name the variables of a missing GitHub App setting or LLM key, never a value.
 
-**Review now:** the settings page of a project renders one form; its primary action "Review now" and
-the segmented navigation lead to the project's review page (`ui/project-review-page.tsx`), which holds
-the `StartReviewPanel` of `src/manual-reviews/ui` (pick an open pull request, start it) and nothing of
-the settings. A project that is off says that a review can be started by hand only while it is active.
+**Start a review:** every row of the project list has a play button ("Start a review of <project>",
+`src/manual-reviews/ui/start-review-dialog.tsx`, #655). It opens a dialog with the open pull requests of
+the repository (pick one, "Start review"); the button is disabled with a reason while the project is not
+active and left out for a person without `start_review`. The project page has no start action.
 
 **Last run:** `projects/page.tsx` passes `getLastRunSource()` (`src/runs/shared.ts`) to
 `loadProjectsPage`: the newest job of each repository, whatever its status, with the time it last
