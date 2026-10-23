@@ -32,6 +32,11 @@ export type StoredRun = {
    * (#280). The cost of such a run is not shown to a member.
    */
   onManagedKey: boolean;
+  /**
+   * The body of the review comment the run posted, as kept after the run ended (#657); null when none was kept, an empty
+   * string when the comment could not be read. Untrusted text.
+   */
+  reviewComment: string | null;
 };
 /** A job as the list shows it: the listed fields only. */
 export type StoredRunRow = { job: RunRowSource; project: string };
@@ -139,12 +144,18 @@ export function createRunsRepository(
             .onRef("usage_records.job_id", "=", "jobs.id")
             .on("usage_records.workspace_id", "=", workspaceId),
         )
+        .leftJoin("job_check_runs", (join) =>
+          join
+            .onRef("job_check_runs.job_id", "=", "jobs.id")
+            .on("job_check_runs.workspace_id", "=", workspaceId),
+        )
         .selectAll("jobs")
         .select("repositories.full_name as project")
         .select([
           "usage_records.key_mode as key_mode",
           "usage_records.catalog_entry_id as catalog_entry_id",
           "usage_records.model_tier as model_tier",
+          "job_check_runs.review_comment as review_comment",
         ])
         .where("jobs.workspace_id", "=", workspaceId)
         .where("jobs.id", "=", id)
@@ -155,6 +166,7 @@ export function createRunsRepository(
         key_mode: keyMode,
         catalog_entry_id: entryId,
         model_tier: modelTier,
+        review_comment: reviewComment,
         ...job
       } = row;
       return {
@@ -162,6 +174,7 @@ export function createRunsRepository(
         project,
         onManagedKey:
           keyMode === "managed" || entryId !== null || modelTier !== null,
+        reviewComment,
       };
     },
 

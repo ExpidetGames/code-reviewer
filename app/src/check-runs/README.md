@@ -95,6 +95,12 @@ body). The work is bounded in time and in tries:
   have their own codes, and a 403 for another reason is retried like any failure.
 - A refused review (own pull request, 403, 422) is `REVIEW_VERDICT_REFUSED` and dropped. An App that may not review is
   believed so for ten minutes too: the jobs that follow ask GitHub for nothing and log it once.
+- The review comment of a run (#657): after a run that links to a comment of its pull request, the sync reads that
+  comment once, with a token limited to the repository and `issues: read`, and keeps the body of the app's own comment on
+  the row (`job_check_runs.review_comment`) for the Findings of the run page. A comment that is gone, written by somebody
+  else, or whose links (`issue_url`, else `html_url`) do not name this repository and pull request is kept as an empty
+  text (the id comes from the runner's result). A read that fails is `REVIEW_COMMENT_UNREADABLE`, one log line, no retry and no effect on
+  the check run or the verdict; the run page then shows the link to the comment only.
 - A check run that was made and whose id was not kept (the response was lost) is found again by its `external_id`
   (the job id) on the commit; this is also done for a job that was cancelled or replaced meanwhile, so that run is
   completed `neutral` and none is made.

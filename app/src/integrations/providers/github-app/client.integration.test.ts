@@ -5,7 +5,11 @@
 import { describe, expect, it } from "vitest";
 import type { FakeGithub } from "../../../../../fakes/github/server.ts";
 import { startGithubAppHarness } from "../../../test-support/github-app-harness.ts";
-import { createGithubAppClient, type GithubAppClient } from "./client.ts";
+import {
+  commentTarget,
+  createGithubAppClient,
+  type GithubAppClient,
+} from "./client.ts";
 import { loadGithubAppConfig } from "./config.ts";
 import { GithubAppError } from "./errors.ts";
 
@@ -756,6 +760,41 @@ describe("comments below a pull request, written and read with a narrow token", 
     ]);
   });
 
+  // #657-T04
+  it("reads one comment by its id with a token limited to the repository and the read permission, and answers null for one that is gone", async () => {
+    const { fake, client } = await withPullRequest();
+    const created = await client.createIssueComment(
+      "4242",
+      NOTICE_SCOPE,
+      "acme/widgets",
+      7,
+      "## Review\n\nA finding.",
+    );
+    const scope = {
+      repositoryIds: [7001],
+      permissions: { issues: "read", metadata: "read" },
+    } as const;
+
+    expect(
+      await client.getIssueComment("4242", scope, "acme/widgets", created.id),
+    ).toEqual({
+      id: created.id,
+      body: "## Review\n\nA finding.",
+      authorLogin: "fake-app[bot]",
+      // The pull request the comment sits below, from its links (#657).
+      below: { repoFullName: "acme/widgets", number: 7 },
+    });
+    expect(
+      await client.getIssueComment("4242", scope, "acme/widgets", "999999"),
+    ).toBeNull();
+    expect(fake.tokenRequests().at(-1)).toMatchObject({
+      repositoryIds: [7001],
+      permissions: { issues: "read", metadata: "read" },
+    });
+    // One for the comment written, one for each read.
+    expect(fake.revokedInstallationTokens()).toHaveLength(3);
+  });
+
   it("switches the token off after the call, whether it worked or not", async () => {
     const { fake, client } = await withPullRequest();
 
@@ -851,5 +890,33 @@ describe("comments below a pull request, written and read with a narrow token", 
     );
 
     expect(fake.requests()).toEqual([]);
+  });
+});
+
+// #657-T04
+describe("the pull request a comment sits below, from its links", () => {
+  it("reads issue_url first, then html_url, and nothing from a link that is not one of a repository", () => {
+    expect(
+      commentTarget({
+        issue_url: "https://api.github.com/repos/acme/widgets/issues/7",
+        html_url: "https://github.com/acme/other/pull/9#issuecomment-1",
+      }),
+    ).toEqual({ repoFullName: "acme/widgets", number: 7 });
+    expect(
+      commentTarget({
+        issue_url: "https://ghe.example/api/v3/repos/acme/widgets/issues/7",
+      }),
+    ).toEqual({ repoFullName: "acme/widgets", number: 7 });
+    expect(
+      commentTarget({
+        html_url: "https://github.com/acme/widgets/pull/8#issuecomment-55",
+      }),
+    ).toEqual({ repoFullName: "acme/widgets", number: 8 });
+    expect(
+      commentTarget({ issue_url: "http://x/repos/a/b/issues/7" }),
+    ).toBeNull();
+    expect(commentTarget({ html_url: "https://github.com/acme" })).toBeNull();
+    expect(commentTarget({ issue_url: 7 })).toBeNull();
+    expect(commentTarget({})).toBeNull();
   });
 });
