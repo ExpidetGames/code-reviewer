@@ -16,7 +16,10 @@ import {
   createBillingJournalRepository,
   type JournalEntry,
 } from "../db/repositories/billing-journal-repository.ts";
-import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import {
+  createWorkspacesRepository,
+  isDeleted,
+} from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { BillingJournalError } from "./journal.ts";
 
@@ -74,6 +77,13 @@ export type ManualCreditService = {
 
 const REQUEST_ID = /^[A-Za-z0-9-]{1,64}$/;
 
+function inTransaction<T>(
+  db: Kysely<Database>,
+  run: (trx: Kysely<Database>) => Promise<T>,
+): Promise<T> {
+  return db.isTransaction ? run(db) : db.transaction().execute(run);
+}
+
 export function createManualCreditService(
   db: Kysely<Database>,
   deps: {
@@ -115,28 +125,38 @@ export function createManualCreditService(
         "request_id_invalid",
         "a request id is letters, digits and -",
       );
-    if (
-      (await createWorkspacesRepository(db).get(input.workspaceId)) ===
-      undefined
-    )
-      throw new ManualCreditError("workspace_not_found", "no such workspace");
 
     const ref = `manual_${input.requestId ?? newRef()}`;
     let entry: JournalEntry;
     try {
-      ({ entry } = await createBillingJournalRepository(
-        db,
-        input.workspaceId,
-        deps.now,
-      ).append({
-        type,
-        amountMicroUsd: input.amount,
-        refKey: ref,
-        provider: MANUAL_PROVIDER,
-        providerRef: ref,
-        actorUserId: input.actor,
-        note,
-      }));
+      // One transaction: the workspace is read `FOR SHARE` (like a top-up, `apply-event.ts`), so a deletion in flight (#658) has
+      // ended before the workspace is read, and one that starts afterwards waits for this entry and then refuses on the balance.
+      // A plain read outside the transaction would credit a workspace that was deleted in between.
+      entry = await inTransaction(db, async (trx) => {
+        const workspace = await createWorkspacesRepository(
+          trx,
+        ).getIncludingDeleted(input.workspaceId, { lock: true });
+        if (workspace === undefined || isDeleted(workspace))
+          throw new ManualCreditError(
+            "workspace_not_found",
+            "no such workspace",
+          );
+        return (
+          await createBillingJournalRepository(
+            trx,
+            input.workspaceId,
+            deps.now,
+          ).append({
+            type,
+            amountMicroUsd: input.amount,
+            refKey: ref,
+            provider: MANUAL_PROVIDER,
+            providerRef: ref,
+            actorUserId: input.actor,
+            note,
+          })
+        ).entry;
+      });
     } catch (error) {
       if (
         error instanceof BillingJournalError &&
