@@ -19,11 +19,14 @@ export type DueBalanceMail = {
 export type BillingNotificationDirectory = {
   /** Claims up to `limit` due mails, oldest crossing first; each is returned to exactly one caller. */
   claimDue(limit: number): Promise<DueBalanceMail[]>;
-  /** Records how the delivery of a claimed mail ended. Only a `sending` mail changes; a repeat changes nothing. */
+  /**
+   * Records how the delivery of a claimed mail ended: `none` when no mail was owed after all (the workspace was deleted meanwhile,
+   * #658). Only a `sending` mail changes; a repeat changes nothing.
+   */
   finish(
     workspaceId: string,
     kind: BalanceNotificationKind,
-    delivery: "delivered" | "failed",
+    delivery: "delivered" | "failed" | "none",
   ): Promise<void>;
 };
 

@@ -14,6 +14,8 @@
 //                 a provider field says maps a payment to a workspace. The intent row is locked, so every event about
 //                 one payment (its credit, its refunds, its disputes) is applied one after the other.
 //   3. order      a state of a refund or dispute that is older than the last one applied is `stale_ignored`.
+//   3b. deleted   a payment for a workspace that was deleted (#658) credits nobody: `workspace_deleted`, recorded for review so
+//                 an operator refunds it. The workspace row is read locked, so a deletion in flight has ended before it is read.
 //   4. bound      a credit is EXACTLY the amount WE asked for: the provider's net must equal the intent's amount (a
 //                 discount, a coupon or a different price all end as `amount_rejected`, never as a smaller or larger
 //                 credit). A refund or dispute arrives GROSS, in the provider's unit and currency, with the amount of
@@ -42,6 +44,10 @@ import { createBillingTopUpIntentDirectory } from "../db/repositories/billing-to
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import { createBillingWebhookEventsRepository } from "../db/repositories/billing-webhook-events-repository.ts";
 import { formatTimestamp } from "../db/codecs.ts";
+import {
+  createWorkspacesRepository,
+  isDeleted,
+} from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
   BILLING_REVIEW_OUTCOMES,
@@ -177,6 +183,15 @@ async function paymentSucceeded(
   const intent = await resolveIntent(context, event);
   if (intent === undefined) return unresolved;
   const workspaceId = intent.workspaceId;
+
+  // A payment for a workspace that was deleted credits nobody (#658): a delayed method can succeed days after the checkout
+  // began, and a deletion does not wait that long. The row is read locked, so a deletion in flight has ended before it is
+  // read. Recorded for review: the buyer paid, an operator refunds it.
+  const workspace = await createWorkspacesRepository(
+    context.trx,
+  ).getIncludingDeleted(workspaceId, { lock: true });
+  if (workspace === undefined || isDeleted(workspace))
+    return { outcome: "workspace_deleted", workspaceId, intentId: intent.id };
 
   // The provider's amount is data. The credit is what we asked for, no more and no less: a payment of another net amount
   // (a discount, a coupon, a price we did not set) is not the top-up the buyer started, and an operator decides.

@@ -17,6 +17,7 @@ import {
   type BillingEngine,
 } from "../test-support/billing-engines.ts";
 import { setBillingSwitch } from "../test-support/billing-switch.ts";
+import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { clientFor, startTestStripe } from "../test-support/stripe-fake.ts";
 import type { CreateCheckoutSessionInput } from "./stripe-client.ts";
 import { isBillingOn } from "./enabled.ts";
@@ -350,6 +351,46 @@ function suite(engine: BillingEngine) {
       expect(outcomes.filter((o) => o === "applied")).toHaveLength(1);
       expect(await s.topUps()).toHaveLength(1);
       expect(await s.balance()).toBe(25 * USD);
+    });
+
+    // #658-T04
+    it("credits nobody when a delayed payment succeeds after the workspace was deleted: the event is recorded for an operator to refund", async () => {
+      const s = await setup();
+      const { intent, session } = await s.startTopUp();
+      pay(s, session);
+      const [completed] = s.eventsOf("checkout.session.completed");
+      if (completed === undefined) throw new Error("no event");
+      // The workspace is deleted between the checkout and the payment (a delayed method succeeds days after the checkout began).
+      await markWorkspaceDeleted(s.db, s.workspaceId);
+      const asyncSuccess: StripeEvent = {
+        ...completed,
+        id: "evt_async_success_after_deletion",
+        type: "checkout.session.async_payment_succeeded",
+      };
+
+      const response = await s.post(asyncSuccess);
+
+      expect(await s.outcomeOf(response)).toBe("workspace_deleted");
+      expect(await s.balance()).toBe(0);
+      expect(await s.topUps()).toEqual([]);
+      expect(await s.intents.get(intent.id)).toMatchObject({
+        state: "pending",
+      });
+      expect(
+        await createBillingWebhookEventsRepository(s.db).getReview(
+          "stripe",
+          asyncSuccess.id,
+        ),
+      ).toMatchObject({
+        outcome: "workspace_deleted",
+        workspaceId: s.workspaceId,
+        reviewState: "open",
+      });
+      // The completed event of the same payment is no way in either.
+      expect(await s.outcomeOf(await s.post(completed))).toBe(
+        "workspace_deleted",
+      );
+      expect(await s.balance()).toBe(0);
     });
 
     // #502-T03

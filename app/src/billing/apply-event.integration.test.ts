@@ -14,6 +14,7 @@ import {
   type BillingEngine,
 } from "../test-support/billing-engines.ts";
 import { toProviderAmount, toUsd, type BillingEvent } from "./adapter.ts";
+import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { applyBillingEvent } from "./apply-event.ts";
 
 const USD = 1_000_000;
@@ -222,6 +223,60 @@ function suite(engine: BillingEngine) {
           state: "pending",
           paymentRef: null,
         });
+      });
+
+      // #658-T04
+      it("credits nobody for a payment that arrives after its workspace was deleted: a review for an operator to refund it, the balance unchanged", async () => {
+        const s = await seed(engine);
+        await markWorkspaceDeleted(s.db, s.workspaceId);
+        const event = succeeded(s);
+
+        const result = await apply(s, event);
+
+        expect(result).toEqual({
+          outcome: "workspace_deleted",
+          workspaceId: s.workspaceId,
+          needsReview: true,
+        });
+        expect(await entries(s)).toEqual([]);
+        expect(await balance(s)).toBe(0);
+        expect(await intentOf(s)).toMatchObject({
+          state: "pending",
+          creditedMicroUsd: 0,
+          paymentRef: null,
+        });
+        const review = await createBillingWebhookEventsRepository(
+          s.db,
+        ).getReview(PROVIDER, event.eventId);
+        expect(review).toMatchObject({
+          outcome: "workspace_deleted",
+          workspaceId: s.workspaceId,
+          intentId: s.intentId,
+          reviewState: "open",
+        });
+        // The same event again is a repeat, not a second review.
+        expect(await apply(s, event)).toMatchObject({
+          outcome: "duplicate_ignored",
+          needsReview: false,
+        });
+      });
+
+      // #658-T04
+      it("finds the intent of a deleted workspace by the checkout it recorded and still credits nothing", async () => {
+        const s = await seed(engine);
+        await createBillingTopUpIntentsRepository(
+          s.db,
+          s.workspaceId,
+        ).attachRefs(s.intentId, { checkoutRef: s.checkout });
+        await markWorkspaceDeleted(s.db, s.workspaceId);
+
+        const result = await apply(s, succeeded(s, { intentId: null }));
+
+        expect(result).toMatchObject({
+          outcome: "workspace_deleted",
+          needsReview: true,
+        });
+        expect(await balance(s)).toBe(0);
       });
 
       // #497-T03
