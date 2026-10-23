@@ -102,11 +102,11 @@ until the person removes it), repositories, projects, all jobs with their queue 
 claimed keys, VM runs, usage records and refusal notices (waiting jobs are cancelled by going: no runner can claim them), the
 settings, stored keys, entitlements, hand-over tokens, and the billing profile, limit and notification state.
 
-What stays, and why: the **`workspaces` row**, anonymised (name "Deleted workspace", slug `deleted-<id>`, `created_by` null, `deleted_at`
-set; the old address is free again), because the **billing journal** is append-only (the database refuses an update and a delete) and
+What stays, and why: the **`workspaces` row**, anonymised (name "Deleted workspace", slug `deleted-<id>`, `created_by` null; the old address is free again), because the **billing journal** is append-only (the database refuses an update and a delete) and
 holds a foreign key to it; the journal, the cached balance and the top-up intents are what the books need (amounts, minutes, provider
 references, no names or addresses); and the start credit memory, so a deleted workspace cannot earn the credit twice.
-`findDefault()` and `count()` ignore a deleted workspace. Sessions belong to users, not workspaces: nobody is signed out; the
+A tombstone is recognised by that address (the id is random, nobody can ask for it), so the schema did not change and the
+migrations stay additive; `findDefault()` and `count()` ignore a deleted workspace. Sessions belong to users, not workspaces: nobody is signed out; the
 person's next page is the start page, which leads to another workspace of theirs or to `/no-access`.
 
 ## Invitations

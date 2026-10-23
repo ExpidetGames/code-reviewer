@@ -433,7 +433,6 @@ function suite(engine: BillingEngine) {
         name: DELETED_WORKSPACE_NAME,
         slug: `deleted-${workspaceId}`,
         created_by: null,
-        deleted_at: NOW.toISOString(),
       });
       const workspaces = createWorkspacesRepository(db);
       expect(await workspaces.slugExists("billing-a")).toBe(false);
@@ -565,11 +564,11 @@ function suite(engine: BillingEngine) {
         (
           await db
             .selectFrom("workspaces")
-            .select("deleted_at")
+            .select("name")
             .where("id", "=", workspaceId)
             .executeTakeFirstOrThrow()
-        ).deleted_at,
-      ).toBeNull();
+        ).name,
+      ).not.toBe(DELETED_WORKSPACE_NAME);
     });
 
     // #658-T04

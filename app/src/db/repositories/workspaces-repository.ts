@@ -75,12 +75,21 @@ export type WorkspacesRepository = {
   }): Promise<{ workspaces: Workspace[]; hasMore: boolean }>;
 };
 
-/** The columns every read of a workspace has (`deleted_at` is only the repository's own concern). */
-type WorkspaceRow = Omit<WorkspacesTable, "deleted_at">;
-
 export const DEFAULT_WORKSPACE_SLUG = "default";
 
-function toWorkspace(row: WorkspaceRow): Workspace {
+/**
+ * The address a deleted workspace keeps (#658). The row stays because the billing journal points at it, with its name and
+ * address anonymised; the address is also the mark of a tombstone, so that no schema change is needed to tell it from a
+ * workspace (the id is random, a person cannot ask for this address).
+ */
+export function deletedWorkspaceSlug(workspaceId: string): string {
+  return `deleted-${workspaceId}`;
+}
+
+/** The rows that are workspaces, not tombstones. */
+const NOT_DELETED = sql<boolean>`slug <> ${sql.lit("deleted-")} || id`;
+
+function toWorkspace(row: WorkspacesTable): Workspace {
   return {
     id: row.id,
     name: row.name,
@@ -114,7 +123,7 @@ export function createWorkspacesRepository(
       ]);
   }
 
-  function toMembership(row: WorkspaceRow & { role: string }): Membership {
+  function toMembership(row: WorkspacesTable & { role: string }): Membership {
     if (!isWorkspaceRole(row.role))
       throw new Error(`The database holds an unknown role "${row.role}".`);
     return { workspace: toWorkspace(row), role: row.role };
@@ -124,7 +133,7 @@ export function createWorkspacesRepository(
     const row = await db
       .selectFrom("workspaces")
       .selectAll()
-      .where("deleted_at", "is", null)
+      .where(NOT_DELETED)
       .orderBy("created_at")
       .orderBy("id")
       .limit(1)
@@ -148,7 +157,7 @@ export function createWorkspacesRepository(
       const row = await db
         .selectFrom("workspaces")
         .select((builder) => builder.fn.countAll<string | number>().as("count"))
-        .where("deleted_at", "is", null)
+        .where(NOT_DELETED)
         .executeTakeFirst();
       return Number(row?.count ?? 0);
     },
@@ -238,7 +247,6 @@ export function createWorkspacesRepository(
         slug: input.slug,
         created_by: input.createdBy,
         created_at: formatTimestamp(now()),
-        deleted_at: null,
       };
       await db.insertInto("workspaces").values(row).execute();
       return toWorkspace(row);

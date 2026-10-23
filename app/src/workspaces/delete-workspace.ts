@@ -24,7 +24,10 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createUnclaimedInstallationsRepository } from "../db/repositories/unclaimed-installations-repository.ts";
 import { createWorkspaceErasureRepository } from "../db/repositories/workspace-erasure-repository.ts";
 import { createWorkspaceMembersRepository } from "../db/repositories/workspace-members-repository.ts";
-import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import {
+  createWorkspacesRepository,
+  deletedWorkspaceSlug,
+} from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { can } from "./permissions.ts";
 
@@ -110,11 +113,7 @@ export function createWorkspaceDeletion({
           const balance = await journal.balance();
           if (balance.balanceMicroUsd > 0)
             return { ok: false, error: "balance_positive" };
-          const erasure = createWorkspaceErasureRepository(
-            trx,
-            workspaceId,
-            now,
-          );
+          const erasure = createWorkspaceErasureRepository(trx, workspaceId);
           if (balance.reservedMicroUsd > 0 || (await erasure.hasRunningJobs()))
             return { ok: false, error: "review_running" };
           if (
@@ -151,7 +150,7 @@ export function createWorkspaceDeletion({
           }
           await erasure.erase({
             name: DELETED_WORKSPACE_NAME,
-            slug: `deleted-${workspaceId}`,
+            slug: deletedWorkspaceSlug(workspaceId),
           });
           return { ok: true };
         });

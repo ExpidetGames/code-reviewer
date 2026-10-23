@@ -34,7 +34,6 @@ export type WorkspaceErasure = {
 export function createWorkspaceErasureRepository(
   db: Kysely<Database>,
   workspaceId: WorkspaceId,
-  now: () => Date = () => new Date(),
 ): WorkspaceErasure {
   const ownJobs = () =>
     db.selectFrom("jobs").select("id").where("workspace_id", "=", workspaceId);
@@ -135,7 +134,6 @@ export function createWorkspaceErasureRepository(
           name,
           slug,
           created_by: null,
-          deleted_at: formatTimestamp(now()),
         })
         .where("id", "=", workspaceId)
         .execute();
