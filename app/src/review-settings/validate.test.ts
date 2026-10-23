@@ -385,9 +385,9 @@ describe("the documented limits", () => {
   it("pins the constants to the same numbers", () => {
     expect(REVIEW_SETTING_LIMITS).toEqual({
       extraInstructionsMaxChars: 4_000,
+      maxFindings: { min: 1, max: 30 },
       maxTokens: { min: 8_000, max: 2_000_000 },
       maxCostCents: { min: 1, max: 10_000 },
-      maxTokens: { min: 8_000, max: 2_000_000 },
     });
     expect(PROJECT_DYNAMIC_LIMITS).toEqual({ reviewSkillMaxBytes: 16_384 });
   });
