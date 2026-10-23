@@ -10,9 +10,11 @@ import { newProjectSettings } from "./new-project-settings.ts";
 describe("the settings a new project starts with", () => {
   it("name Dynamic Review while the instance has it turned on", async () => {
     const { db } = await createTestDatabase();
-    await createInstanceSettingsRepository(db).set(DYNAMIC_REVIEW_SETTING_KEY, {
-      enabled: true,
-    });
+    await createInstanceSettingsRepository(db).set(
+      DYNAMIC_REVIEW_SETTING_KEY,
+      { enabled: true },
+      null,
+    );
 
     expect(await newProjectSettings(db)).toEqual({ reviewKind: "dynamic" });
   });
