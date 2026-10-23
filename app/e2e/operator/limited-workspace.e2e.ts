@@ -1168,13 +1168,21 @@ async function collectViews(
     `/api/w/${slug}/review-settings`,
   ])
     await read(path);
-  // Advanced (the deletion of the workspace, #658) is the Owner's page; for a member it does not exist.
+  // Advanced (the deletion of the workspace, #658) is the Owner's page; for a member it is the 404 page, in the browser (the
+  // page streams, so what the server sends first is the loading state) and without anything of the page in it.
   if (options.advanced) await read(`/w/${slug}/settings/advanced`);
-  else
-    expect(
-      (await page.request.get(`/w/${slug}/settings/advanced`)).status(),
-      "Advanced for a member",
-    ).toBe(404);
+  else {
+    await page.goto(`/w/${slug}/settings`);
+    await expect(
+      page.getByRole("navigation", { name: "Settings sections" }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Advanced" })).toHaveCount(0);
+    await page.goto(`/w/${slug}/settings/advanced`);
+    await expect(page.getByText("404", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Delete workspace…" }),
+    ).toHaveCount(0);
+  }
   // The project of the repository (its page and its settings), found by the link on the Projects page.
   const projects =
     texts.find(([name]) => name.endsWith("/projects"))?.[1] ?? "";

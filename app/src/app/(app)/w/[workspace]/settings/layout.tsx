@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 import { SettingsAccessProvider } from "@/workspaces/ui/settings-nav";
