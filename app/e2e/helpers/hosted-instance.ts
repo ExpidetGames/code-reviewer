@@ -17,6 +17,7 @@ import { syncFromGithubAsAdmin } from "./admin-api";
 import { e2eEnv, llmEnv } from "./e2e-env";
 import { addGithubInstallation, GITHUB_APP_OWNER_ACCOUNT } from "./github-fake";
 import { hostedEnv } from "./hosted-env";
+import { chooseOption, openSection } from "./settings-form";
 import { rememberSecret } from "./hosted-secrets";
 
 /** The owner of the repositories the journeys review: the account the fake reports as the owner of the App. */
@@ -61,6 +62,21 @@ export async function switchProjectOn(
   if ((await row.getByText("Active", { exact: true }).count()) === 0)
     await row.getByRole("switch", { name: `Review ${fullName}` }).click();
   await expect(row.getByText("Active", { exact: true })).toBeVisible();
+  // A project that is switched on starts as Dynamic Review where the instance has it on (#656); the journeys that review a pull request
+  // as a Diff Review start from that kind, and the ones that want Dynamic Review choose it (`chooseDynamicReview`).
+  await row.getByRole("link", { name: fullName, exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: fullName }),
+  ).toBeVisible();
+  if (await page.getByRole("radio", { name: "Dynamic Review" }).isChecked()) {
+    await page.getByRole("radio", { name: "Diff Review" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Diff Review" })
+      .click();
+    await expect(page.getByRole("status")).toContainText("Saved.");
+  }
 }
 
 /**
@@ -97,7 +113,7 @@ export async function setUpReviewedRepositories(
 
 /**
  * Chooses Dynamic Review for a project in its settings page, the way a person does (the instance admin has turned the
- * gate on before): the model they type is the one the engine asks the fake LLM for. The account is signed in.
+ * gate on before): the model they choose (one the dropdown lists) is the one the engine asks the fake LLM for. The account is signed in.
  */
 export async function chooseDynamicReview(
   page: Page,
@@ -111,7 +127,8 @@ export async function chooseDynamicReview(
   ).toBeVisible();
   const dynamic = page.getByRole("radio", { name: "Dynamic Review" });
   await dynamic.click();
-  await page.getByLabel("Dynamic Review model", { exact: true }).fill(model);
+  await openSection(page, "LLM");
+  await chooseOption(page, "Model", model);
   await page.getByRole("button", { name: "Save review settings" }).click();
   await page
     .getByRole("alertdialog")

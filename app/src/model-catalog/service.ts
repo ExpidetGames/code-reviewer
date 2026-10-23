@@ -157,7 +157,7 @@ function sameKinds(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /** The shape of a stored `catalog_defaults`: both keys, each text or null. Anything else reads as no default. */
-function readStoredDefaults(value: unknown): CatalogDefaults {
+export function readStoredDefaults(value: unknown): CatalogDefaults {
   const stored = isPlainObject(value) ? value : {};
   return {
     diff: typeof stored.diff === "string" ? stored.diff : null,

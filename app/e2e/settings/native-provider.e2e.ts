@@ -26,6 +26,7 @@ import {
   type GithubAccount,
 } from "../helpers/github-fake";
 import { fetchModelsDevCatalog } from "../helpers/models-dev";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import {
   dynamicRunnerScript,
   type ClaimedDynamicJob,
@@ -103,7 +104,7 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
 
     // The providers of the catalog, searchable, next to the two cards of the registry.
     await page.getByRole("link", { name: "Settings" }).first().click();
-    await page.getByRole("link", { name: "LLM access" }).first().click();
+    await page.getByRole("link", { name: "LLM", exact: true }).first().click();
     await expect(
       page.getByRole("heading", { level: 2, name: "Other providers" }),
     ).toBeVisible();
@@ -128,15 +129,9 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
     // The project: Dynamic Review, the provider with a key, one of its models.
     await openProject(page);
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
-    const provider = page.getByRole("combobox", {
-      name: "Dynamic Review provider",
-    });
-    await provider.click();
-    await page.getByRole("option", { name: /^DeepSeek/ }).click();
-    await page.getByLabel("Search models").fill("v4-pro");
-    const models = page.getByRole("list", { name: "Models" });
-    await expect(models.getByRole("listitem")).toHaveCount(1);
-    await models.getByRole("button", { name: /DeepSeek V4 Pro/ }).click();
+    await openSection(page, "LLM");
+    await chooseOption(page, "Provider", /^DeepSeek/);
+    await chooseOption(page, "Model", /DeepSeek V4 Pro/);
     await expect(page.getByTestId("cost-note")).toContainText("models.dev");
     await page.screenshot({
       path: "test-results/native-provider-project-settings.png",
@@ -153,10 +148,13 @@ test.describe("a provider of the catalog for Dynamic Review", () => {
 
     // After a reload the same pair is there, and the provider's key is nowhere.
     await page.reload();
+    await openSection(page, "LLM");
     await expect(
-      page.getByRole("combobox", { name: "Dynamic Review provider" }),
+      page.getByRole("combobox", { name: "Provider", exact: true }),
     ).toContainText("DeepSeek");
-    await expect(page.getByText("Chosen:")).toContainText("deepseek-v4-pro");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      "DeepSeek V4 Pro",
+    );
     expect(await page.content()).not.toContain(KEY);
     for (const url of requestedUrls) expect(url).not.toContain(KEY);
   });

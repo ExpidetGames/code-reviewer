@@ -38,7 +38,18 @@ export type CostSettings = Pick<
 > & {
   /** The provider of the models (#433); absent: the default provider's price table. */
   provider?: string | undefined;
+  /** #656: the limit the customer set, in whole US cents; absent or `null`: the default limit above. */
+  maxCostCents?: number | null | undefined;
 };
+
+/** The limit an estimate is held to: the one the customer set (#656), else `REVIEW_COST_LIMIT_USD`. */
+export function costLimitUsdOf(
+  settings: Pick<CostSettings, "maxCostCents">,
+): number {
+  return settings.maxCostCents === null || settings.maxCostCents === undefined
+    ? REVIEW_COST_LIMIT_USD
+    : settings.maxCostCents / 100;
+}
 
 /** What the estimate reads of the registry: the provider a setting names, else the default one. */
 export type CostProviders = {
@@ -132,7 +143,7 @@ function estimate(
     model,
     usd,
     upperUsd,
-    aboveLimit: usd > REVIEW_COST_LIMIT_USD,
+    aboveLimit: usd > costLimitUsdOf(settings),
   };
 }
 
@@ -184,7 +195,7 @@ export function estimateReviewCost(
       warnings.push({ model: which, kind: "above_limit" });
   }
   return {
-    limitUsd: REVIEW_COST_LIMIT_USD,
+    limitUsd: costLimitUsdOf(settings),
     primary,
     fallback,
     warnings,

@@ -117,7 +117,7 @@ export function ProviderSelect({
               href={workspacePath(workspaceSlug, "/settings/llm")}
               className="font-semibold underline underline-offset-4"
             >
-              LLM access
+              LLM
             </Link>{" "}
             page.
           </p>

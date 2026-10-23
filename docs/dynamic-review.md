@@ -1312,7 +1312,7 @@ the runner first. A newer runner with an older app is safe: an absent key means 
 **Before you start.** A Linux Docker host (Docker Engine with Compose v2) whose kernel has
 `nf_tables` (every current distribution kernel; the self-check tells you when it does not), that can
 give the Dynamic runner container at least 2 GiB; an app that is already running with the workspace's
-LLM key entered (Settings, LLM access; Dynamic Review reuses it, there is no other key); and, for the
+LLM key entered (Settings, LLM; Dynamic Review reuses it, there is no other key); and, for the
 model you choose, the knowledge of what it supports (tool choice "required" and structured output).
 
 1. **Upgrade every app instance** to the version that routes by `review_kind`

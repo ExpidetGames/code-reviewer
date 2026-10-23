@@ -1,22 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The review settings form, for the global defaults and for one project (#174). One form, one save:
-// the three cards (Model, Review, When to review) read the values in force, and every field shows where
-// its value comes from and can be taken back to the layer below with "Reset to default". A save
-// replaces the whole set of the layer and is the only action in the footer; resetting the whole
-// project to the defaults is a separate action in its own card at the bottom. Problems are checked
-// before sending (the same validation the server runs, which checks again), shown as sentences at
-// their field, and the first marked field gets the focus; the estimated cost updates while the person
-// types and warns above the limit without blocking anything.
-import {
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+// The review settings form, for the global defaults and for one project (#174, #656). One form, one save, four
+// sections as tabs: Review (the kind, the verdict and the review options), LLM (a provider and a model dropdown), Trigger
+// (when the reviewer starts) and Limits (what one review may cost). The values in force are shown, every field says where
+// its value comes from and can be taken back to the layer below with "Reset to default". A save replaces the whole set of the
+// layer and is the only action in the footer; resetting the whole project to the defaults is a separate action in its own
+// card at the bottom. Problems are checked before sending (the same validation the server runs, which checks again), shown as
+// sentences at their field, and the first marked field gets the focus (its section is opened first); the estimated cost
+// updates while the person types and warns above the limit without blocking anything.
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Alert } from "../../components/ui/alert.tsx";
 import {
   AlertDialog,
@@ -30,11 +24,16 @@ import {
 } from "../../components/ui/alert-dialog.tsx";
 import { Button } from "../../components/button.tsx";
 import { DangerZone } from "../../components/danger-zone.tsx";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../../components/ui/tabs.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import {
   CATALOG_FIELD_OF_KIND,
   PROJECT_DYNAMIC_SETTING_FIELDS,
-  PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   type ProjectReviewKind,
   type ReviewSettingField,
@@ -83,11 +82,12 @@ import {
   type TextField,
 } from "./form-state.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
-import { ModelFieldset } from "./model-fieldset.tsx";
 import { ProviderAddressNote } from "./provider-address-note.tsx";
-import { ModelChoice, ModelChoiceNote } from "./model-choice.tsx";
-import { CatalogModelPicker } from "../../native-providers/ui/catalog-model-picker.tsx";
+import { LlmFieldset, type OwnLlmChoice } from "./llm-fieldset.tsx";
+import { LimitsFieldset } from "./limits-fieldset.tsx";
 import type { NativeFormData } from "../../native-providers/form-data.ts";
+import type { CatalogModelsApi } from "../../native-providers/ui/api.ts";
+import { MODEL_CHOICE_PER_PROJECT_NOTE } from "../../copy/model-choice.ts";
 import { providerOptions } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import {
@@ -98,11 +98,18 @@ import {
 import { ReviewFieldset } from "./review-fieldset.tsx";
 import { ReviewVerdictFieldset } from "./review-verdict-fieldset.tsx";
 import { WhenFieldset } from "./when-fieldset.tsx";
-import { type SettingsFieldHandlers } from "./settings-fields.tsx";
+import {
+  RESET_LABEL,
+  settingsOrigin,
+  type SettingsFieldHandlers,
+  type SettingsOrigin,
+} from "./settings-fields.tsx";
 import {
   describeIssue,
   describeSaveFailure,
   describeWarning,
+  FALLBACK_REMOVED_NOTICE,
+  TAB_PROBLEM_NOTE,
 } from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 
@@ -125,6 +132,79 @@ const DYNAMIC_ONLY_FIELDS: readonly string[] = [
   "catalogEntryDynamic",
   "reviewSkill",
 ];
+
+/** The four sections of the form, in the order of the tabs. */
+const SECTIONS = ["review", "llm", "trigger", "limits"] as const;
+type Section = (typeof SECTIONS)[number];
+
+const SECTION_NAMES: Record<Section, string> = {
+  review: "Review",
+  llm: "LLM",
+  trigger: "Trigger",
+  limits: "Limits",
+};
+
+function isSection(value: string): value is Section {
+  return SECTIONS.some((section) => section === value);
+}
+
+/** The section that shows a field, so a problem on it opens that section. */
+const SECTION_OF_FIELD: Record<string, Section> = {
+  reviewKind: "review",
+  reviewVerdict: "review",
+  reviewSkill: "review",
+  extraInstructions: "review",
+  maxFindings: "review",
+  largePrChunking: "review",
+  inlineKeyIssues: "review",
+  provider: "llm",
+  model: "llm",
+  fallbackModel: "llm",
+  dynamicProvider: "llm",
+  dynamicModel: "llm",
+  catalogEntryDiff: "llm",
+  catalogEntryDynamic: "llm",
+  autoReviewOnOpen: "trigger",
+  autoReviewOnPush: "trigger",
+  allowedCommands: "trigger",
+  maxCostCents: "limits",
+  maxTokens: "limits",
+};
+
+/**
+ * The first section (in tab order) with a problem, or null. A field the selected kind does not show has its note in the
+ * Review section, so that one opens for it.
+ */
+function firstSectionWithProblem(
+  errors: Errors,
+  hiddenFields: readonly string[],
+): Section | null {
+  const found = sectionsWithProblems(errors, hiddenFields);
+  return SECTIONS.find((section) => found.has(section)) ?? null;
+}
+
+/** Every section that holds a field with a problem, for the marker on its tab. */
+function sectionsWithProblems(
+  errors: Errors,
+  hiddenFields: readonly string[],
+): ReadonlySet<Section> {
+  return new Set(
+    Object.keys(errors).flatMap((field) =>
+      hiddenFields.includes(field) ? "review" : (SECTION_OF_FIELD[field] ?? []),
+    ),
+  );
+}
+
+/** The origin of a provider and its model as one choice: it counts as set when either of the two was set here. */
+function pairOrigin(
+  origin: SettingsOrigin,
+  set: boolean,
+  setText: string,
+): SettingsOrigin {
+  return set
+    ? { ...origin, source: setText, resetLabel: RESET_LABEL }
+    : { ...origin, resetLabel: null };
+}
 
 /** The kind that has a problem the selected kind does not show, or null. */
 function hiddenProblemOf(
@@ -190,6 +270,7 @@ export function SettingsForm({
   canConfirmProviderAddress = false,
   providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
+  catalogApi,
 }: {
   /** The workspace of the page: the call is made in it. */
   workspaceSlug: string;
@@ -229,6 +310,8 @@ export function SettingsForm({
   >;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
+  /** Only tests pass this: the call that lists the models of a catalog provider. */
+  catalogApi?: CatalogModelsApi;
 }) {
   // One client for the life of the component: a new one every render would restart what depends on it.
   const defaultApi = useMemo(
@@ -239,7 +322,6 @@ export function SettingsForm({
     [initial.mode, repositoryId, workspaceSlug],
   );
   const api = apiOverride ?? defaultApi;
-  const datalistId = `${useId()}-models`;
   const providerChoices = useMemo(
     () => providerOptions(providerDescriptors, keyedProviders),
     [providerDescriptors, keyedProviders],
@@ -281,6 +363,8 @@ export function SettingsForm({
   // The notes of the save that was just shown as saved (#269); only shown with that status.
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // A different Diff provider removes the fallback model that was stored for the old one; the LLM section says so.
+  const [fallbackRemoved, setFallbackRemoved] = useState(false);
   // A save that waits for the person to confirm the switch of the review kind.
   const [confirming, setConfirming] = useState<{
     steps: SaveStep[];
@@ -288,6 +372,8 @@ export function SettingsForm({
   } | null>(null);
   // Bumped when a save was refused: the first marked field is focused then (rulebook R20).
   const [focusRequest, setFocusRequest] = useState(0);
+  // The section that is open (#656); a refused save opens the first one that has a problem.
+  const [section, setSection] = useState<Section>("review");
 
   // The project form of a repository holds the project-only settings (#194); the global form does not.
   const projectView = model.mode === "project" ? model.dynamic : undefined;
@@ -308,13 +394,16 @@ export function SettingsForm({
   // the selected kind does not show, or a failure that belongs to no field, takes it instead.
   useEffect(() => {
     if (focusRequest === 0) return;
-    const form = formRef.current;
-    const target =
-      form?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
-      form?.querySelector<HTMLElement>("[data-hidden-problem]") ??
-      form?.querySelector<HTMLElement>("[data-kind-error]") ??
-      form?.querySelector<HTMLElement>("[data-form-error]");
-    target?.focus();
+    // A section that was opened by the refusal mounts right after this render: look once it is there.
+    queueMicrotask(() => {
+      const form = formRef.current;
+      const target =
+        form?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+        form?.querySelector<HTMLElement>("[data-hidden-problem]") ??
+        form?.querySelector<HTMLElement>("[data-kind-error]") ??
+        form?.querySelector<HTMLElement>("[data-form-error]");
+      target?.focus();
+    });
   }, [focusRequest]);
 
   // A change takes the problem of its field away, and any message of a save that failed: the
@@ -338,11 +427,21 @@ export function SettingsForm({
     setModel(next);
     setState(initialFormState(next));
     setErrors({});
+    setFallbackRemoved(false);
     return true;
   }
 
   function refuse(fieldErrors: Errors, message: string) {
     setErrors(fieldErrors);
+    const withProblem = firstSectionWithProblem(
+      fieldErrors,
+      projectView === undefined
+        ? []
+        : kind === "diff"
+          ? DYNAMIC_ONLY_FIELDS
+          : DIFF_ONLY_FIELDS,
+    );
+    if (withProblem !== null) setSection(withProblem);
     setFormError(message);
     setFocusRequest((count) => count + 1);
   }
@@ -485,6 +584,7 @@ export function SettingsForm({
   function discard() {
     setState(initialFormState(model));
     setErrors({});
+    setFallbackRemoved(false);
     setFormError(null);
     setKindError(null);
     setStatus(null);
@@ -519,12 +619,6 @@ export function SettingsForm({
   const defaultProvider = projectView?.defaults.dynamicProvider ?? "";
   // The default model goes with the provider: the built-in one only while the built-in provider is chosen (#532).
   const chosenDynamicProvider = state.dynamic?.dynamicProvider ?? "";
-  const defaultModel =
-    chosenDynamicProvider === defaultProvider
-      ? (projectView?.defaults.dynamicModel ?? "")
-      : (providerDefaultModel(chosenDynamicProvider, "dynamic") ??
-        projectView?.defaults.dynamicModel ??
-        "");
   // A Dynamic provider outside the registry is a catalog provider: its model is picked from the catalog's list (#555).
   const chosenNative =
     nativeCatalog === undefined || chosenDynamicProvider === ""
@@ -534,47 +628,190 @@ export function SettingsForm({
         );
   const kindHandlers: ReviewKindHandlers = {
     setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
-    setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
-    resetModel: () =>
-      edit(setDynamicModel(state, defaultModel), "dynamicModel"),
-    setProvider: (provider) =>
-      edit(setDynamicProvider(state, provider), "dynamicProvider"),
-    // The model goes back with the provider it belongs to.
-    resetProvider: () =>
-      edit(
-        setDynamicModel(
-          setDynamicProvider(state, defaultProvider),
-          projectView?.defaults.dynamicModel ?? "",
-        ),
-        "dynamicProvider",
-      ),
     editSkill: () => edit(editSkill(state, shippedSkill), "reviewSkill"),
     setSkill: (text) => edit(setSkillText(state, text), "reviewSkill"),
     resetSkill: () => edit(resetSkill(state, shippedSkill), "reviewSkill"),
   };
-  // The workspace reviews on the operator's key (#283, #433): the entry of the catalog for a kind takes the place of
-  // its provider and model fields. The workspace defaults hold no entry (decision C3), only a note.
-  const choice = (reviewKind: ProjectReviewKind) =>
-    state.dynamic === undefined ? (
-      <ModelChoiceNote />
-    ) : (
-      <ModelChoice
-        workspaceSlug={workspaceSlug}
-        kind={reviewKind}
-        choices={model.catalog?.choices[reviewKind] ?? []}
-        value={state.dynamic.catalogEntries[reviewKind]}
-        error={errors[CATALOG_FIELD_OF_KIND[reviewKind]]}
-        onChange={(id) =>
-          edit(
-            setCatalogEntry(state, reviewKind, id),
-            CATALOG_FIELD_OF_KIND[reviewKind],
-          )
-        }
-      />
-    );
   const disabled = busy || readOnly;
   const saveLabel =
     model.mode === "project" ? "Save review settings" : "Save review defaults";
+
+  // The LLM section (#656): a provider and a model dropdown for the review kind that is selected. A provider chosen takes
+  // the default model of that provider with it, so the model dropdown is never left empty (a catalog provider has none).
+  const ownChoice = (): OwnLlmChoice => {
+    const dynamicChoice = projectView !== undefined && kind === "dynamic";
+    if (
+      !dynamicChoice ||
+      state.dynamic === undefined ||
+      projectView === undefined
+    ) {
+      const provider = state.values.provider;
+      return {
+        providerName: "provider",
+        modelName: "model",
+        providers: providerChoices,
+        provider,
+        // The provider and its model are one choice: one origin, and a reset takes both back.
+        providerOrigin: pairOrigin(
+          settingsOrigin({
+            model,
+            state,
+            name: "provider",
+            label: "provider and model",
+            onReset: () => handlers.reset("provider"),
+          }),
+          state.overridden.provider || state.overridden.model,
+          model.mode === "project"
+            ? "Set for this project"
+            : "Changed from the built-in value",
+        ),
+        providerError: errors.provider,
+        model: state.values.model,
+        modelError: errors.model,
+        onProvider: (next) => {
+          if (
+            next !== state.values.provider &&
+            state.values.fallbackModel !== ""
+          )
+            setFallbackRemoved(true);
+          const withProvider = setProvider(state, next);
+          const fallback = providerDefaultModel(next, "diff");
+          edit(
+            fallback === undefined || next === state.values.provider
+              ? withProvider
+              : setText(withProvider, "model", fallback),
+            "provider",
+          );
+        },
+        onModel: (next) => handlers.setText("model", next),
+        registryModels: suggestionsOf(provider, "diff"),
+        keysHint: false,
+        ...(fallbackRemoved ? { notice: FALLBACK_REMOVED_NOTICE } : {}),
+      };
+    }
+    const defaultDynamicModel = projectView.defaults.dynamicModel ?? "";
+    const dynamicChanged =
+      chosenDynamicProvider !== defaultProvider ||
+      state.dynamic.dynamicModel !== defaultDynamicModel;
+    const providerOrigin: SettingsOrigin = {
+      source:
+        dynamicChanged ||
+        projectView.sources.dynamicProvider === "project" ||
+        projectView.sources.dynamicModel === "project"
+          ? "Set for this project"
+          : "Built-in value",
+      resetLabel: dynamicChanged ? RESET_LABEL : null,
+      resetAriaLabel: "Reset to default for Dynamic Review provider and model",
+      onReset: () =>
+        edit(
+          setDynamicModel(
+            setDynamicProvider(state, defaultProvider),
+            defaultDynamicModel,
+          ),
+          "dynamicProvider",
+        ),
+    };
+    return {
+      providerName: "dynamicProvider",
+      modelName: "dynamicModel",
+      providers: dynamicProviderChoices,
+      provider: chosenDynamicProvider,
+      providerOrigin,
+      providerError: errors.dynamicProvider,
+      model: state.dynamic.dynamicModel,
+      modelError: errors.dynamicModel,
+      onProvider: (next) => {
+        const withProvider = setDynamicProvider(state, next);
+        const fallback = providerDefaultModel(next, "dynamic");
+        edit(
+          fallback === undefined || next === chosenDynamicProvider
+            ? withProvider
+            : setDynamicModel(withProvider, fallback),
+          "dynamicProvider",
+        );
+      },
+      onModel: (next) => edit(setDynamicModel(state, next), "dynamicModel"),
+      registryModels: suggestionsOf(chosenDynamicProvider, "dynamic"),
+      ...(nativeCatalog === undefined || chosenNative === undefined
+        ? {}
+        : {
+            catalog: {
+              label: chosenNative.label,
+              tokenCap: nativeCatalog.tokenCap,
+              billingOn: nativeCatalog.billingOn,
+            },
+          }),
+      ...(projectView.providerAddress == null ||
+      chosenDynamicProvider !== projectView.effective.dynamicProvider
+        ? {}
+        : {
+            // #588: only for the provider the project has pinned; one chosen instead is pinned by its own selection.
+            addressNote: (
+              <ProviderAddressNote
+                address={projectView.providerAddress}
+                confirm={state.dynamic.confirmProviderAddress}
+                canConfirm={canConfirmProviderAddress}
+                disabled={disabled}
+                onConfirmChange={(confirm) =>
+                  edit(
+                    setConfirmProviderAddress(state, confirm),
+                    "dynamicProvider",
+                  )
+                }
+              />
+            ),
+          }),
+      keysHint: nativeCatalog !== undefined,
+    };
+  };
+  const llmSection = () => {
+    if (!model.managed)
+      return (
+        <LlmFieldset
+          workspaceSlug={workspaceSlug}
+          disabled={disabled}
+          own={ownChoice()}
+          {...(catalogApi === undefined ? {} : { catalogApi })}
+        />
+      );
+    // The workspace reviews on the operator's key (#283, #433): the entry of the catalog for the kind is the model. The
+    // workspace defaults hold no entry (decision C3), only a note.
+    if (state.dynamic === undefined)
+      return (
+        <LlmFieldset
+          workspaceSlug={workspaceSlug}
+          disabled={disabled}
+          note={
+            <p className="text-sm text-muted-foreground">
+              {MODEL_CHOICE_PER_PROJECT_NOTE}
+            </p>
+          }
+        />
+      );
+    const field = CATALOG_FIELD_OF_KIND[kind];
+    return (
+      <LlmFieldset
+        workspaceSlug={workspaceSlug}
+        disabled={disabled}
+        managedFieldName={field}
+        managed={{
+          choices: model.catalog?.choices[kind] ?? [],
+          value: state.dynamic.catalogEntries[kind],
+          error: errors[field],
+          onChange: (id) => edit(setCatalogEntry(state, kind, id), field),
+        }}
+      />
+    );
+  };
+  const sectionNames = SECTION_NAMES;
+  const withProblems = sectionsWithProblems(
+    errors,
+    projectView === undefined
+      ? []
+      : kind === "diff"
+        ? DYNAMIC_ONLY_FIELDS
+        : DIFF_ONLY_FIELDS,
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -585,126 +822,92 @@ export function SettingsForm({
         noValidate
         className="flex flex-col gap-6"
       >
-        {model.managed
-          ? null
-          : providerDescriptors.flatMap((provider) =>
-              (model.mode === "project"
-                ? PROJECT_REVIEW_KINDS
-                : (["diff"] as const)
-              ).map((reviewKind) => (
-                <datalist
-                  key={`${reviewKind}-${provider.id}`}
-                  id={`${datalistId}-${reviewKind}-${provider.id}`}
-                >
-                  {suggestedModelsFor(provider, reviewKind).map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
-              )),
-            )}
-
-        {projectView !== undefined && state.dynamic !== undefined ? (
-          <ReviewKindFieldset
-            view={projectView}
-            values={state.dynamic}
-            errors={errors}
-            disabled={disabled}
-            dynamicReviewEnabled={dynamicReviewEnabled}
-            hiddenProblem={hiddenProblem}
-            kindError={kindError}
-            handlers={kindHandlers}
-            workspaceSlug={workspaceSlug}
-            providers={dynamicProviderChoices}
-            nativeProvidersHint={nativeCatalog !== undefined}
-            {...(projectView.providerAddress == null ||
-            chosenDynamicProvider !== projectView.effective.dynamicProvider
-              ? {}
-              : {
-                  // #588: only for the provider the project has pinned; one chosen instead is pinned by its own selection.
-                  addressNote: (
-                    <ProviderAddressNote
-                      address={projectView.providerAddress}
-                      confirm={state.dynamic.confirmProviderAddress}
-                      canConfirm={canConfirmProviderAddress}
-                      disabled={disabled}
-                      onConfirmChange={(confirm) =>
-                        edit(
-                          setConfirmProviderAddress(state, confirm),
-                          "dynamicProvider",
-                        )
-                      }
-                    />
-                  ),
-                })}
-            {...(nativeCatalog === undefined || chosenNative === undefined
-              ? {}
-              : {
-                  nativeModelField: (
-                    <CatalogModelPicker
-                      workspaceSlug={workspaceSlug}
-                      provider={chosenNative.id}
-                      providerLabel={chosenNative.label}
-                      value={state.dynamic.dynamicModel}
-                      onChange={kindHandlers.setModel}
-                      error={errors.dynamicModel}
-                      disabled={disabled}
-                      tokenCap={nativeCatalog.tokenCap}
-                      billingOn={nativeCatalog.billingOn}
-                    />
-                  ),
-                })}
-            datalistId={`${datalistId}-dynamic-${state.dynamic.dynamicProvider}`}
-            suggestedModels={suggestionsOf(
-              state.dynamic.dynamicProvider,
-              "dynamic",
-            )}
-            defaultModel={defaultModel}
-            choice={model.managed ? choice("dynamic") : undefined}
-          />
-        ) : null}
-        {projectView !== undefined && state.dynamic !== undefined ? (
-          <ReviewVerdictFieldset
-            value={state.dynamic.reviewVerdict}
-            kind={kind}
-            defaultMode={projectView.defaults.reviewVerdict}
-            source={projectView.sources.reviewVerdict}
-            error={errors.reviewVerdict}
-            disabled={disabled}
-            onChange={(mode) =>
-              edit(setReviewVerdict(state, mode), "reviewVerdict")
-            }
-          />
-        ) : null}
-        {kind === "diff" ? (
-          <ModelFieldset
-            model={model}
-            state={state}
-            errors={errors}
-            disabled={disabled}
-            handlers={handlers}
-            cost={cost}
-            workspaceSlug={workspaceSlug}
-            providers={providerChoices}
-            datalistId={`${datalistId}-diff-${state.values.provider}`}
-            suggestedModels={suggestionsOf(state.values.provider, "diff")}
-            choice={model.managed ? choice("diff") : undefined}
-          />
-        ) : null}
-        <ReviewFieldset
-          model={model}
-          state={state}
-          errors={errors}
-          disabled={disabled}
-          handlers={handlers}
-          kind={kind}
-        />
-        <WhenFieldset
-          model={model}
-          state={state}
-          errors={errors}
-          disabled={disabled}
-          handlers={handlers}
-        />
+        <Tabs
+          value={section}
+          onValueChange={(next) => {
+            if (isSection(next)) setSection(next);
+          }}
+        >
+          <TabsList aria-label="Settings sections">
+            {SECTIONS.map((name) => (
+              <TabsTrigger
+                key={name}
+                value={name}
+                {...(withProblems.has(name)
+                  ? {
+                      "aria-label": `${sectionNames[name]} ${TAB_PROBLEM_NOTE}`,
+                    }
+                  : {})}
+              >
+                {sectionNames[name]}
+                {withProblems.has(name) ? (
+                  <WarningCircleIcon
+                    aria-hidden="true"
+                    weight="fill"
+                    className="text-destructive"
+                  />
+                ) : null}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <TabsContent value="review" className="flex flex-col gap-6">
+            {projectView !== undefined && state.dynamic !== undefined ? (
+              <>
+                <ReviewKindFieldset
+                  view={projectView}
+                  values={state.dynamic}
+                  errors={errors}
+                  disabled={disabled}
+                  dynamicReviewEnabled={dynamicReviewEnabled}
+                  hiddenProblem={hiddenProblem}
+                  kindError={kindError}
+                  handlers={kindHandlers}
+                />
+                <ReviewVerdictFieldset
+                  value={state.dynamic.reviewVerdict}
+                  kind={kind}
+                  defaultMode={projectView.defaults.reviewVerdict}
+                  error={errors.reviewVerdict}
+                  disabled={disabled}
+                  onChange={(mode) =>
+                    edit(setReviewVerdict(state, mode), "reviewVerdict")
+                  }
+                />
+              </>
+            ) : null}
+            <ReviewFieldset
+              model={model}
+              state={state}
+              errors={errors}
+              disabled={disabled}
+              handlers={handlers}
+              kind={kind}
+            />
+          </TabsContent>
+          <TabsContent value="llm" className="flex flex-col gap-6">
+            {llmSection()}
+          </TabsContent>
+          <TabsContent value="trigger" className="flex flex-col gap-6">
+            <WhenFieldset
+              model={model}
+              state={state}
+              errors={errors}
+              disabled={disabled}
+              handlers={handlers}
+            />
+          </TabsContent>
+          <TabsContent value="limits" className="flex flex-col gap-6">
+            <LimitsFieldset
+              model={model}
+              state={state}
+              errors={errors}
+              disabled={disabled}
+              handlers={handlers}
+              cost={cost}
+              showTokenBudget={kind === "diff"}
+            />
+          </TabsContent>
+        </Tabs>
 
         {formError !== null ? (
           <Alert variant="destructive" tabIndex={-1} data-form-error="">

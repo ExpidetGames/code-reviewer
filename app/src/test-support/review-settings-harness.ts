@@ -4,7 +4,10 @@
 // the service on top of it. Not product code.
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
-import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import {
+  createProjectsRepository,
+  type NewProjectSettings,
+} from "../db/repositories/projects-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -73,12 +76,22 @@ export async function setupReviewSettings(
     providers?: ProviderLookup;
     /** #555: the catalog a Dynamic provider outside the registry is checked against; default none. */
     nativeCatalog?: NativeSelectionSource;
+    /** #656: what a project that is created starts with; default nothing. */
+    newProjectSettings?: NewProjectSettings;
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
   const workspaceId = await defaultWorkspaceId(database);
   const { first, second } = await seedRepositories(database, workspaceId);
-  const projects = createProjectsRepository(database, workspaceId);
+  const projects = createProjectsRepository(
+    database,
+    workspaceId,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.newProjectSettings,
+  );
   const appSettings = createAppSettingsRepository(database, workspaceId);
   let model = TEST_MODEL;
   let operatorsModels = options.operatorsModels === true;
@@ -88,6 +101,13 @@ export async function setupReviewSettings(
     builtIn: () => builtInReviewSettings(model),
     defaultSkill: () => TEST_DEFAULT_SKILL,
     operatorsModels: async () => operatorsModels,
+    ...(options.newProjectSettings === undefined
+      ? {}
+      : {
+          newProjectSettings: () =>
+            options.newProjectSettings?.(database, workspaceId) ??
+            Promise.resolve({}),
+        }),
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
     ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
     ...(options.providers === undefined
