@@ -112,6 +112,18 @@ export async function isBillingOn(db: Kysely<Database>): Promise<boolean> {
   return state.enabled && state.missing.length === 0;
 }
 
+/**
+ * What keeps billing from running while its switch is on (#632): the claim refuses every review then
+ * (`billing_rates_incomplete`), and the admin portal shows these items in a banner on every page. Empty while the switch is
+ * off or billing is running.
+ */
+export async function incompleteBillingItems(
+  db: Kysely<Database>,
+): Promise<BillingMissingItem[]> {
+  const state = await readBillingSwitch(db);
+  return state.enabled ? state.missing : [];
+}
+
 export type BillingRouteGuard = {
   isOn: () => Promise<boolean>;
   /** Next.js's own 404: the answer of a path that does not exist. Throws. */
