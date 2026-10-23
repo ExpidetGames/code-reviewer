@@ -218,20 +218,25 @@ describe("a signed in user on the allow list", () => {
   });
 
   // CR-35-T04
-  it("reads one run with its comment link and log", async () => {
+  it("reads one run with its comment link and without its log", async () => {
     const app = await startApp();
     const { cookies } = await app.harness.signIn();
 
     const response = await app.through()(`/api/runs/${app.job.id}`, cookies);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({
       run: {
         id: app.job.id,
         commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-1",
-        log: { text: SECRET_LOG_MARKER },
       },
     });
+    // The log and the call trace are for the admin portal (#657): a member's data does not carry them.
+    const { run } = JSON.parse(text) as { run: Record<string, unknown> };
+    expect(run).not.toHaveProperty("log");
+    expect(run).not.toHaveProperty("callTrace");
+    expect(text).not.toContain(SECRET_LOG_MARKER);
   });
 
   // CR-35-T05

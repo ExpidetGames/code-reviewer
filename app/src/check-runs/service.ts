@@ -231,6 +231,38 @@ function trustedCommentUrl(
     : null;
 }
 
+/**
+ * The id of the review comment a run links to (#657), only when the link is a comment of this very pull request of this
+ * very repository. The host is github.com, as the runner reports it, or the host the repository itself is stored with (a
+ * test double or an enterprise server whose pull request pages sit elsewhere than the comment links the runner got).
+ */
+function postedCommentId(
+  url: string | null,
+  repo: RepoRef,
+  prNumber: number,
+): string | null {
+  if (url === null) return null;
+  let host = "github.com";
+  try {
+    host = new URL(repo.url).host;
+  } catch {
+    // The repository has no usable address: only github.com links count.
+  }
+  const hosts = new Set(["github.com", host]);
+  const match =
+    /^https:\/\/([^/]+)\/([^/]+\/[^/]+)\/pull\/(\d+)#issuecomment-(\d{1,20})$/.exec(
+      url,
+    );
+  if (match === null) return null;
+  const [, linkHost, fullName, number, id] = match;
+  return linkHost !== undefined &&
+    hosts.has(linkHost) &&
+    fullName === repo.fullName &&
+    number === String(prNumber)
+    ? (id ?? null)
+    : null;
+}
+
 const WITHDRAW_MESSAGE =
   "The review verdict of code-review.com is switched off for this project, so its earlier request for changes no longer applies.";
 
@@ -389,16 +421,15 @@ export function createCheckRunService(
     const { job, integration, provider, repo } = target;
     if (provider.readReviewComment === undefined) return;
     if (!FINAL_STATUSES.includes(job.status)) return;
-    const url = trustedCommentUrl(
+    const commentId = postedCommentId(
       readResultFacts(job.result).commentUrl,
       repo,
       job.prNumber,
     );
-    if (url === null) return;
+    if (commentId === null) return;
     if ((await checks.reviewCommentOf(job.id)) !== null) return;
     // A read is not started with no time left for it: the sync would be cut off, and the check run is more important.
     if (timeLeft(budget) < MIN_TIME_FOR_SYNC_MS) return;
-    const commentId = url.slice(url.lastIndexOf("-") + 1);
     try {
       const read = await viaRetries(budget, () =>
         bound(provider, "readReviewComment")(

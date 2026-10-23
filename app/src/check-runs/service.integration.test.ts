@@ -1784,6 +1784,47 @@ describe("keeping the review comment a run posted (#657)", () => {
   });
 
   // #657-T04
+  it("reads the comment of a link on github.com when the repository is stored with another host, and of no other host or pull request", async () => {
+    const t = await createCheckRunsHarness();
+    const checks = createJobCheckRunsRepository(
+      t.fixture.db,
+      t.fixture.workspaceId,
+    );
+    const comment = t.fake.addPullRequestComment(t.repo, 7, "the findings");
+    const link = (host: string, pull: number) =>
+      `https://${host}/${t.repo}/pull/${String(pull)}#issuecomment-${String(comment.id)}`;
+
+    const strange = await t.fixture.enqueueNew({ prNumber: 7 });
+    const first = await t.claim();
+    await t.succeed(first.job, first.token, {
+      commentUrl: link("evil.example", 7),
+    });
+    await t.service.syncJob(strange.id);
+    expect(await checks.reviewCommentOf(strange.id)).toBeNull();
+
+    t.fixture.clock.advance(MINUTE);
+    const other = await t.fixture.enqueueNew({
+      prNumber: 7,
+      headSha: sha("b"),
+    });
+    const second = await t.claim();
+    await t.succeed(second.job, second.token, {
+      commentUrl: link("github.com", 8),
+    });
+    await t.service.syncJob(other.id);
+    expect(await checks.reviewCommentOf(other.id)).toBeNull();
+
+    t.fixture.clock.advance(MINUTE);
+    const own = await t.fixture.enqueueNew({ prNumber: 7, headSha: sha("c") });
+    const third = await t.claim();
+    await t.succeed(third.job, third.token, {
+      commentUrl: link("github.com", 7),
+    });
+    await t.service.syncJob(own.id);
+    expect(await checks.reviewCommentOf(own.id)).toBe("the findings");
+  });
+
+  // #657-T04
   it("never keeps a comment somebody else wrote, even when the result links to it", async () => {
     const t = await createCheckRunsHarness();
     const job = await t.fixture.enqueueNew();

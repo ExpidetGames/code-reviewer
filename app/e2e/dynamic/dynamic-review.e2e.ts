@@ -343,10 +343,11 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     expect(calls).toBeLessThanOrEqual(first.length);
     // The fake LLM reports 100 + 20 tokens for every answer; the data shows what the proxy summed.
     expect(tokens).toBe(120 * calls);
-    // The Findings show what the review posted: the finding of the comment.
+    // The Findings show what the review posted: the finding of the comment. The app reads the comment right after the run
+    // ended and the page asks again until the text is there.
     await expect(
       detail.getByRole("region", { name: "Findings" }),
-    ).toContainText(FINDING_TITLE);
+    ).toContainText(FINDING_TITLE, { timeout: 60_000 });
     await expect(
       detail.getByRole("link", { name: "Open the review on GitHub" }),
     ).toHaveAttribute("href", summary?.htmlUrl ?? "missing");
