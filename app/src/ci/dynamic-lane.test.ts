@@ -107,7 +107,7 @@ describe("the CI job of the privileged Dynamic e2e lane", () => {
       .join("\n");
 
     expect(text).toContain("pnpm install --frozen-lockfile");
-    expect(text).toContain("playwright install --with-deps chromium");
+    expect(text).toContain("playwright install chromium");
     expect(text).toContain("uv sync --locked");
     expect(text).toMatch(/apt-get install .*nftables/);
     // The pinned `rg` and OpenCode come from the fetch scripts (size and SHA-256 of the pin files), never from apt.

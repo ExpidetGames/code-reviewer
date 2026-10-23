@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// What the user menu shows about the signed in person. The name is whatever GitHub gave us, so it
-// is untrusted text: these functions only produce plain strings, React renders them as text.
+// What the user menu shows about the signed in person, and the avatars of members and installations (#638).
+// The name is whatever GitHub gave us, so it is untrusted text: these functions only produce plain strings,
+// React renders them as text.
 
 export type ShellUser = {
   /** The display name from the GitHub profile; can be empty. */
@@ -40,12 +41,39 @@ export function initials(user: ShellUser): string {
   return letters.length === 0 ? "?" : letters.join("");
 }
 
-/** The avatar address if it is safe to load as an image (https only), otherwise null. */
+/** GitHub's avatar host: the one host an avatar is ever loaded from (#638). */
+export const GITHUB_AVATAR_HOST = "avatars.githubusercontent.com";
+
+/**
+ * The avatar address if it is safe to load as an image: https on GitHub's avatar host (no port, no
+ * credentials), otherwise null.
+ */
 export function safeAvatarUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   try {
-    return new URL(url).protocol === "https:" ? url : null;
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" &&
+      parsed.host === GITHUB_AVATAR_HOST &&
+      parsed.username === "" &&
+      parsed.password === ""
+      ? url
+      : null;
   } catch {
     return null;
   }
+}
+
+const GITHUB_ACCOUNT_ID = /^[1-9][0-9]*$/;
+
+/**
+ * The avatar of a GitHub account (a user or an organization) from its numeric id, which the app stores
+ * already; null for a missing id or one that is not a positive whole number.
+ */
+export function githubAvatarUrl(
+  accountId: string | number | null | undefined,
+): string | null {
+  if (accountId === null || accountId === undefined) return null;
+  const id = typeof accountId === "number" ? String(accountId) : accountId;
+  if (!GITHUB_ACCOUNT_ID.test(id)) return null;
+  return `https://${GITHUB_AVATAR_HOST}/u/${id}?v=4`;
 }

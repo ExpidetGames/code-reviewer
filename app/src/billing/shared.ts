@@ -33,7 +33,8 @@ import {
 import { createStripeClient } from "./stripe-client.ts";
 import { stripeApiBaseUrl } from "../stripe-endpoints.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
-import { isBillingOn } from "./enabled.ts";
+import { incompleteBillingItems, isBillingOn } from "./enabled.ts";
+import type { BillingMissingItem } from "./readiness.ts";
 import { manualAdapter } from "./manual-adapter.ts";
 import {
   createMonthlyLimitRoute,
@@ -254,6 +255,19 @@ export async function countOpenBillingReviews(): Promise<number> {
   } catch {
     console.error("[billing] BILLING_REVIEW_COUNT_UNAVAILABLE");
     return 0;
+  }
+}
+
+/**
+ * What keeps billing from running while its switch is on, for the banner of the admin portal (#632). A database that cannot
+ * answer must not break every page of the portal, so it names nothing (the Billing page itself says what is wrong).
+ */
+export async function readIncompleteBilling(): Promise<BillingMissingItem[]> {
+  try {
+    return await incompleteBillingItems(getDatabase());
+  } catch {
+    console.error("[billing] BILLING_READINESS_UNAVAILABLE");
+    return [];
   }
 }
 

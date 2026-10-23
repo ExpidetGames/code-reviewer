@@ -9,7 +9,7 @@
 // alone is not a name, it must carry an `aria-label` (or `aria-labelledby`) or the render throws:
 // the failure is loud on purpose, since such a button is unusable with a screen reader.
 import type { ComponentProps } from "react";
-import { Loader2 } from "lucide-react";
+import { CircleNotchIcon } from "@phosphor-icons/react/dist/ssr";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -73,7 +73,7 @@ export function Button({
     >
       {loading ? (
         <>
-          <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+          <CircleNotchIcon aria-hidden="true" className="size-4 animate-spin" />
           {loadingLabel ? (
             <span className="sr-only">{loadingLabel}</span>
           ) : (

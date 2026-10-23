@@ -404,3 +404,49 @@ describe("renaming the workspace", () => {
     ).toEqual({ ok: false, error: "not_found" });
   });
 });
+
+describe("the members list", () => {
+  async function addAccount(
+    h: WorkspaceHarness,
+    userId: string,
+    providerId: string,
+    accountId: string,
+  ) {
+    const at = h.now().toISOString();
+    await h.db
+      .insertInto("accounts")
+      .values({
+        id: `${providerId}-${userId}`,
+        account_id: accountId,
+        provider_id: providerId,
+        user_id: userId,
+        access_token: null,
+        refresh_token: null,
+        id_token: null,
+        access_token_expires_at: null,
+        refresh_token_expires_at: null,
+        scope: null,
+        password: null,
+        created_at: at,
+        updated_at: at,
+      })
+      .execute();
+  }
+
+  // #638-T01
+  it("carries the GitHub account id of a member who signs in with GitHub, and none for anybody else", async () => {
+    const { h, workspace } = await team();
+    await addAccount(h, "owner-1", "github", "4711");
+    await addAccount(h, "admin-1", "credential", "admin-1");
+
+    const members = await h.members.list(workspace.id);
+
+    const ids = Object.fromEntries(
+      members.map((m) => [m.userId, m.githubAccountId]),
+    );
+    expect(ids["owner-1"]).toBe("4711");
+    expect(ids["admin-1"]).toBeNull();
+    expect(ids["member-1"]).toBeNull();
+    expect(members).toHaveLength(6);
+  });
+});

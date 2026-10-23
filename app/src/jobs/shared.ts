@@ -55,6 +55,7 @@ export function getRunnerQueue(): RunnerQueue {
 }
 
 function createRunnerQueueOfTheServer(): RunnerQueue {
+  const checkOfRefusal = notifyingRunnerQueue.onRefused(checkNotifier);
   return createRunnerQueue(getDatabase(), {
     // #195: how long a job no capable runner claims may wait; the operator owns the value.
     limits: { noCapableRunnerMs: configuredNoCapableRunnerMs(process.env) },
@@ -65,6 +66,8 @@ function createRunnerQueueOfTheServer(): RunnerQueue {
       console.info(
         `[queue] job=${jobId} workspace=${workspaceId} refused at claim: ${errorCode}${detail === undefined ? "" : ` (${detail})`}`,
       );
+      // #632: the check run of the refused job is completed with the reason after the response, not left "Waiting".
+      checkOfRefusal(refusal);
       // #281: the pull request gets one notice per period, posted after the response of the claim.
       noticeOfRefusal(refusal);
       // #506: a refusal for the balance decided in its transaction that the workspace is empty; the mail goes out now.

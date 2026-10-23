@@ -15,7 +15,7 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
-import { PanelLeftIcon } from "lucide-react";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr";
 import { Slot } from "radix-ui";
 
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -314,7 +314,7 @@ function SidebarTrigger({
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <SidebarSimpleIcon aria-hidden="true" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
