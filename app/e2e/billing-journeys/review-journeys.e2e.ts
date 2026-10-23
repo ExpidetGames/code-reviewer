@@ -383,6 +383,25 @@ test.describe("the billing journeys of a review", () => {
       banner.getByRole("link", { name: "Go to billing" }),
     ).toHaveAttribute("href", BILLING_PAGE);
 
+    // A project that was switched on starts as Dynamic Review where the instance has it on (#656-T02); this journey starts with
+    // a Diff Review.
+    await page.goto("/w/default/projects");
+    await page
+      .getByRole("link", { name: REPOSITORY.fullName, exact: true })
+      .click();
+    await expect(
+      page.getByRole("radio", { name: "Dynamic Review" }),
+    ).toBeChecked();
+    await page.getByRole("radio", { name: "Diff Review" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog", { name: "Switch to Diff Review?" })
+      .getByRole("button", { name: "Switch to Diff Review" })
+      .click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
+
     // A Diff review on our key: two prices on the run and in the journal, and the balance is the credit minus them.
     const diffJob = await review(request, "diff", DIFF_COST_USD);
     expect(diffJob.llm.apiKey).toBe(OPERATOR_KEY);

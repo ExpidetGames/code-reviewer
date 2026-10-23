@@ -767,10 +767,10 @@ test.describe("the catalog from the admin portal to a member's run", () => {
 
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
-    const retiredEntry = page
-      .locator('[data-field="catalogEntryDiff"]')
-      .locator(`[data-entry="${entryId(ENTRIES.big.name)}"]`);
-    await expect(retiredEntry).toContainText("No longer available");
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      `${ENTRIES.big.name} (No longer available)`,
+    );
     await expect(page.locator("[data-choice-unavailable]")).toBeVisible();
 
     await openRuns(page, slugM);
@@ -911,6 +911,11 @@ test.describe("the catalog from the admin portal to a member's run", () => {
 
       // The project chooses a provider and a model, not an entry: the catalog is nowhere on the page.
       await openProject(page, slugO, REPO_O.fullName);
+      // A project that was switched on starts as Dynamic Review where the instance has it on (#656-T02); this review is a Diff Review.
+      await expect(
+        page.getByRole("radio", { name: "Dynamic Review" }),
+      ).toBeChecked();
+      await page.getByRole("radio", { name: "Diff Review" }).click();
       await openSection(page, "LLM");
       await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
         0,
@@ -922,7 +927,7 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       await provider.click();
       await page.getByRole("option", { name: /^OpenRouter/ }).click();
       await chooseOption(page, "Model", OWN_MODEL);
-      await save(page);
+      await save(page, "Switch to Diff Review");
       await page.reload();
       await openSection(page, "LLM");
       await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
