@@ -92,7 +92,7 @@ describe("the test mail", () => {
     const [message] = smtp.messages;
     expect(message?.to).toEqual(["admin@example.test"]);
     expect(message?.from).toBe("reviewer@example.com");
-    expect(message?.subject).toBe("Test mail from Code Reviewer");
+    expect(message?.subject).toBe("Test mail from code-review.com");
     expect(message?.text).toContain("https://code-reviewer.example.com");
     expect(message?.raw).not.toContain(TEST_SMTP_PASSWORD);
     expect(message?.raw).not.toMatch(/token=/);

@@ -232,7 +232,7 @@ function trustedCommentUrl(
 }
 
 const WITHDRAW_MESSAGE =
-  "The review verdict of Code Reviewer is switched off for this project, so its earlier request for changes no longer applies.";
+  "The review verdict of code-review.com is switched off for this project, so its earlier request for changes no longer applies.";
 
 export function createCheckRunService(
   deps: CheckRunServiceDeps,

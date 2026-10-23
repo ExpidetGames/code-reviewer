@@ -29,7 +29,7 @@ test.describe("the first-run setup", () => {
   }) => {
     const plain = await rawRequest(page, e2eEnv.setupAppUrl, "/");
     expect(plain.status).toBe(200);
-    expect(plain.body).toContain("Set up Code Reviewer");
+    expect(plain.body).toContain("Set up code-review.com");
 
     for (const forwarded of [
       "https",
@@ -45,7 +45,7 @@ test.describe("the first-run setup", () => {
         headers: { "x-forwarded-proto": forwarded },
       });
       expect(answer.status, `page ${label}`).toBe(200);
-      expect(answer.body, `page ${label}`).toContain("Set up Code Reviewer");
+      expect(answer.body, `page ${label}`).toContain("Set up code-review.com");
     }
 
     // What a reverse proxy (Coolify, Traefik) sends with a request.
@@ -57,7 +57,7 @@ test.describe("the first-run setup", () => {
       },
     });
     expect(proxied.status).toBe(200);
-    expect(proxied.body).toContain("Set up Code Reviewer");
+    expect(proxied.body).toContain("Set up code-review.com");
 
     // An API route answers setup_required, not a 500.
     for (const forwarded of ["https", "garbage ://"]) {
@@ -83,7 +83,7 @@ test.describe("the first-run setup", () => {
     const response = await page.goto("/");
     expect(response?.status()).toBe(200);
     await expect(
-      page.getByRole("heading", { name: "Set up Code Reviewer" }),
+      page.getByRole("heading", { name: "Set up code-review.com" }),
     ).toBeVisible();
     expect(await page.content()).not.toContain(code);
 

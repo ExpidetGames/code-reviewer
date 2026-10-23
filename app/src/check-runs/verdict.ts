@@ -88,8 +88,8 @@ export function verdictBody(input: {
   const kind = mode === "blocking" ? "P0 finding" : "finding";
   const line =
     event === "request_changes"
-      ? `**Code Reviewer: changes requested.** ${plural(blocking, kind)} open.`
-      : `**Code Reviewer: approved.** No ${mode === "blocking" ? "P0 finding is" : "open finding is"} left.`;
+      ? `**code-review.com: changes requested.** ${plural(blocking, kind)} open.`
+      : `**code-review.com: approved.** No ${mode === "blocking" ? "P0 finding is" : "open finding is"} left.`;
   const link = safeLink(input.commentUrl);
   return [
     link === null ? line : `${line} [Review summary](${link})`,

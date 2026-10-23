@@ -37,10 +37,10 @@ export function invitationMessage({
 }): MailMessage {
   const workspace = oneLine(workspaceName);
   const inviter = oneLine(inviterName, 60);
-  const intro = `${inviter} invited you to the workspace "${workspace}" at Code Reviewer as ${role === "admin" ? "an" : "a"} ${role}.`;
+  const intro = `${inviter} invited you to the workspace "${workspace}" at code-review.com as ${role === "admin" ? "an" : "a"} ${role}.`;
   const how = `Open this link, sign in or create an account with this email address, and accept the invitation (the link works once and for ${String(validForDays)} days):`;
   const text = [
-    `Join "${workspace}" at Code Reviewer`,
+    `Join "${workspace}" at code-review.com`,
     "",
     intro,
     how,
@@ -50,7 +50,7 @@ export function invitationMessage({
     "If you did not expect this, ignore this message: nothing happens until the invitation is accepted.",
   ].join("\n");
   const html = [
-    `<p>Join &quot;${escapeHtml(workspace)}&quot; at Code Reviewer</p>`,
+    `<p>Join &quot;${escapeHtml(workspace)}&quot; at code-review.com</p>`,
     `<p>${escapeHtml(intro)}</p>`,
     `<p>${escapeHtml(how)}</p>`,
     `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
@@ -58,7 +58,7 @@ export function invitationMessage({
   ].join("\n");
   return {
     to,
-    subject: `Join "${workspace}" at Code Reviewer`,
+    subject: `Join "${workspace}" at code-review.com`,
     text,
     html,
   };
