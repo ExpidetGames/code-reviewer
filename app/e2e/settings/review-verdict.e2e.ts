@@ -57,20 +57,19 @@ test.describe("the review verdict of a project", () => {
   }) => {
     await openProject(page, owner);
     const blocking = page.getByRole("radio", {
-      name: /Blocking findings only/,
+      name: /Blocking findings/,
     });
     const any = page.getByRole("radio", { name: /Any finding/ });
     const off = page.getByRole("radio", { name: "Off" });
     // Blocking findings is the default.
     await expect(blocking).toBeChecked();
-    await expect(page.getByText("Built-in value.")).toBeVisible();
+    await expect(blocking).toHaveAccessibleName(/\(default\)/);
 
     await any.click();
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await page.reload();
     await expect(any).toBeChecked();
-    await expect(page.getByText("Set for this project.")).toBeVisible();
 
     await off.click();
     await page.getByRole("button", { name: "Save review settings" }).click();
@@ -83,12 +82,12 @@ test.describe("the review verdict of a project", () => {
     await signOutThroughTheMenu(page, owner);
     await openProject(page, member);
     await expect(page.getByRole("radio", { name: "Off" })).toBeChecked();
-    await page.getByRole("radio", { name: /Blocking findings only/ }).click();
+    await page.getByRole("radio", { name: /Blocking findings/ }).click();
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await page.reload();
     await expect(
-      page.getByRole("radio", { name: /Blocking findings only/ }),
+      page.getByRole("radio", { name: /Blocking findings/ }),
     ).toBeChecked();
   });
 });

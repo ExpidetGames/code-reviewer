@@ -297,6 +297,11 @@ const FIELD_CHECKS: {
   autoReviewOnOpen: bool,
   autoReviewOnPush: bool,
   allowedCommands: commands,
+  // A limit is a number; "no limit" is the absence of the field (the workspace default applies), never a stored null.
+  maxCostCents: integerBetween(
+    REVIEW_SETTING_LIMITS.maxCostCents.min,
+    REVIEW_SETTING_LIMITS.maxCostCents.max,
+  ),
 };
 
 export type ValidationResult =

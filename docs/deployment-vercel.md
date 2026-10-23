@@ -541,7 +541,7 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
 
 ### 3.5 LLM keys: a workspace's own, or the operator's
 
-- **`own` (the default).** Every workspace enters its own OpenRouter key (Settings, LLM access); it is stored
+- **`own` (the default).** Every workspace enters its own OpenRouter key (Settings, LLM); it is stored
   encrypted with `APP_SECRET`. A workspace without one fails its runs with `llm_not_configured`.
 - **`managed`.** The operator's own key serves the workspaces whose entitlements say `keyMode: "managed"`. The
   instance admin saves that key in the admin portal under **LLM key** (`/admin/llm`): OpenRouter, write-only, encrypted
@@ -576,7 +576,7 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
   released catalog entries of the same names and made the Medium ones the defaults, and `PUT /api/operator/v1/model-tiers` is
   answered `404`. The old setting stays in the database, unread, for one release. Create and release the entries and set the defaults before you set a workspace to
   `managed`, and roll the new App out completely first (`app/src/model-catalog/README.md`).
-  The workspace's Settings, LLM access page shows a note instead of a key form.
+  The workspace's Settings, LLM page shows a note instead of a key form.
 - **No usable operator key** (none saved, or one that cannot be decrypted, for example after a changed `APP_SECRET`):
   every job of a managed workspace fails with **`llm_not_configured`**, and the log names `operator_key_missing` or
   `operator_key_unreadable`. Save the key in the admin portal and the next job runs. Save it **before** you set the
@@ -765,7 +765,7 @@ After that:
    ([`github-app.md`](github-app.md)): its webhook URL is `https://<app>/api/webhooks/github-app`. Use the
    hosted instance's **own** App.
 2. Install the App on one test repository, activate the repository as a project, and in the workspace enter an LLM
-   key (Settings, LLM access). Without it a run ends `llm_not_configured`.
+   key (Settings, LLM). Without it a run ends `llm_not_configured`.
 3. Only if you operate `managed` workspaces (section 3.5): save the operator's key under **LLM key** (`/admin/llm`) now.
    It is optional for the first deployment and the smoke test.
 

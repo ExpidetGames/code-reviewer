@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// The project settings form with the catalog (#555): the Dynamic provider select offers the catalog providers the workspace holds
-// a key for next to the registry's, choosing one swaps the model field for the picker, a pick is saved with the provider, the
-// Diff provider select is unchanged, and a workspace on the operator's key sees none of it.
+// The project settings form with the catalog (#555, #656): the Dynamic provider dropdown of the LLM section offers the catalog
+// providers the workspace holds a key for next to the registry's, choosing one fills the model dropdown with the models of that
+// provider, a pick is saved with the provider, the Diff provider dropdown is unchanged, and a workspace on the operator's key
+// sees none of it.
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateReviewCost } from "../../review-settings/cost.ts";
 import { DEFAULT_REVIEW_SKILL } from "../../review-settings/default-skill.ts";
+import { openSection } from "../../test-support/settings-sections.ts";
 import type { SettingsApi } from "../../review-settings/ui/api.ts";
 import type { SettingsFormModel } from "../../review-settings/ui/form-model.ts";
 import { SettingsForm } from "../../review-settings/ui/settings-form.tsx";
@@ -18,6 +20,7 @@ import {
   DEFAULT_DYNAMIC_MODEL,
   PROJECT_DYNAMIC_LIMITS,
 } from "../../review-settings/settings.ts";
+import { PRODUCT_NAME } from "../../copy/product-name.ts";
 import type { NativeFormData } from "../form-data.ts";
 import type { NativeModelView } from "../catalog.ts";
 import type { CatalogModelsApi } from "./api.ts";
@@ -143,6 +146,13 @@ function renderForm(
   );
 }
 
+async function renderLlm(...args: Parameters<typeof renderForm>) {
+  const user = userEvent.setup();
+  renderForm(...args);
+  await openSection(user, "LLM");
+  return user;
+}
+
 async function choose(
   user: ReturnType<typeof userEvent.setup>,
   select: string,
@@ -155,12 +165,12 @@ async function choose(
 describe("the Dynamic provider and model of a project on its own key", () => {
   // #555-T01
   it("offers the catalog providers with a key next to the registry's in the Dynamic select", async () => {
-    const user = userEvent.setup();
-    renderForm(model(view({ reviewKind: "dynamic" })), fakeApi().api);
-
-    await user.click(
-      screen.getByRole("combobox", { name: "Dynamic Review provider" }),
+    const user = await renderLlm(
+      model(view({ reviewKind: "dynamic" })),
+      fakeApi().api,
     );
+
+    await user.click(screen.getByRole("combobox", { name: "Provider" }));
     const options = screen
       .getAllByRole("option")
       .map((option) => option.textContent);
@@ -172,8 +182,10 @@ describe("the Dynamic provider and model of a project on its own key", () => {
 
   // #555-T01
   it("keeps the Diff provider select as it was: the registry's providers only, until #558", async () => {
-    const user = userEvent.setup();
-    renderForm(model(view({ reviewKind: "diff" })), fakeApi().api);
+    const user = await renderLlm(
+      model(view({ reviewKind: "diff" })),
+      fakeApi().api,
+    );
 
     await user.click(screen.getByRole("combobox", { name: "Provider" }));
     const options = screen
@@ -184,16 +196,18 @@ describe("the Dynamic provider and model of a project on its own key", () => {
   });
 
   // #555-T03
-  it("swaps the model field for the picker when a catalog provider is chosen, and saves provider and model together", async () => {
-    const user = userEvent.setup();
+  it("lists the models of a catalog provider when it is chosen, and saves provider and model together", async () => {
     const { api, save } = fakeApi();
-    renderForm(model(), api);
-    expect(screen.queryByLabelText("Search models")).toBeNull();
+    const user = await renderLlm(model(), api);
 
-    await choose(user, "Dynamic Review provider", "DeepSeek");
-    await user.click(
-      await screen.findByRole("button", { name: /DeepSeek V4 Pro/ }),
+    await choose(user, "Provider", "DeepSeek");
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("combobox", { name: "Model" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
     );
+    await choose(user, "Model", "DeepSeek V4 Pro");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -208,11 +222,10 @@ describe("the Dynamic provider and model of a project on its own key", () => {
 
   // #555-T04
   it("refuses a catalog provider without a model before anything is sent", async () => {
-    const user = userEvent.setup();
     const { api, save } = fakeApi();
-    renderForm(model(), api);
+    const user = await renderLlm(model(), api);
 
-    await choose(user, "Dynamic Review provider", "DeepSeek");
+    await choose(user, "Provider", "DeepSeek");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -222,20 +235,23 @@ describe("the Dynamic provider and model of a project on its own key", () => {
   });
 
   // #555-T04
-  it("shows the refusal of a model outside the catalog next to the picker", async () => {
-    const user = userEvent.setup();
+  it("shows the refusal of a model outside the catalog next to the dropdown", async () => {
     const save = vi.fn<SettingsApi["save"]>(async () => ({
       ok: false,
       status: 400,
       code: "REVIEW_SETTINGS_INVALID",
       issues: [{ field: "dynamicModel", code: "MODEL_NOT_IN_CATALOG" }],
     }));
-    renderForm(model(), { save });
+    const user = await renderLlm(model(), { save });
 
-    await choose(user, "Dynamic Review provider", "DeepSeek");
-    await user.click(
-      await screen.findByRole("button", { name: /DeepSeek V4 Pro/ }),
+    await choose(user, "Provider", "DeepSeek");
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("combobox", { name: "Model" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
     );
+    await choose(user, "Model", "DeepSeek V4 Pro");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -244,8 +260,8 @@ describe("the Dynamic provider and model of a project on its own key", () => {
   });
 
   // #555-T01
-  it("shows the picker straight away for a project that already has a catalog provider, and marks one without a key", async () => {
-    renderForm(
+  it("lists the models straight away for a project that already has a catalog provider, and marks one without a key", async () => {
+    await renderLlm(
       model(view({ dynamicProvider: "openai", dynamicModel: "gpt-5.5" })),
       fakeApi().api,
       {
@@ -254,16 +270,21 @@ describe("the Dynamic provider and model of a project on its own key", () => {
       },
     );
 
-    expect(await screen.findByLabelText("Search models")).toBeTruthy();
+    await waitFor(() =>
+      expect(modelsApi.models).toHaveBeenCalledWith("openai"),
+    );
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
     expect(screen.getByText(/No key is stored for OpenAI yet/)).toBeTruthy();
   });
 
-  // #555-T08
-  it("is not there for a workspace on the operator's key: no provider, no model, no picker", () => {
-    renderForm(model(view(), true), fakeApi().api, undefined);
+  // #555-T08, #656-T03
+  it("is not there for a workspace on the operator's key: one provider that is not a vendor, no catalog models", async () => {
+    await renderLlm(model(view(), true), fakeApi().api, undefined);
 
     expect(screen.queryByLabelText("Search models")).toBeNull();
-    expect(screen.queryByRole("combobox", { name: /provider/i })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe(
+      PRODUCT_NAME,
+    );
     expect(document.body.textContent).not.toContain("DeepSeek");
   });
 });
@@ -283,7 +304,7 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
 
   // #588-T30
   it("shows the pinned address of the project's catalog provider, read-only", async () => {
-    renderForm(
+    await renderLlm(
       model(withAddress({ pinned: OLD, current: OLD, state: "pinned" })),
       fakeApi().api,
     );
@@ -296,9 +317,8 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
 
   // #588-T30
   it("saves the confirmation of a new address as its own action, with no other field", async () => {
-    const user = userEvent.setup();
     const { api, save } = fakeApi();
-    renderForm(
+    const user = await renderLlm(
       model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
       api,
       CATALOG,
@@ -319,8 +339,7 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
 
   // #588-T30
   it("hides the note for a provider the person chose instead, whose address is fixed by its own selection", async () => {
-    const user = userEvent.setup();
-    renderForm(
+    const user = await renderLlm(
       model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
       fakeApi().api,
       CATALOG,
@@ -328,7 +347,7 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
     );
     expect(await screen.findByRole("alert")).toBeTruthy();
 
-    await choose(user, "Dynamic Review provider", "OpenAI");
+    await choose(user, "Provider", "OpenAI");
 
     expect(
       screen.queryByRole("checkbox", { name: /confirm the new address/i }),
@@ -338,7 +357,7 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
   // #588-T45
   it("offers a person who may not manage the LLM key no confirmation, and says an Owner or Admin must confirm", async () => {
     const { api, save } = fakeApi();
-    renderForm(
+    await renderLlm(
       model(withAddress({ pinned: OLD, current: NEW, state: "changed" })),
       api,
     );
@@ -354,8 +373,8 @@ describe("the pinned address of a catalog provider in the project form (#588)", 
   });
 
   // #588-T30
-  it("shows no address for a project on a registry provider", () => {
-    renderForm(model(view({ reviewKind: "dynamic" })), fakeApi().api);
+  it("shows no address for a project on a registry provider", async () => {
+    await renderLlm(model(view({ reviewKind: "dynamic" })), fakeApi().api);
 
     expect(document.body.textContent).not.toContain("fixed when this provider");
   });

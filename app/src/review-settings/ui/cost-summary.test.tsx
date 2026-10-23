@@ -29,7 +29,7 @@ describe("the cost summary", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("warns above_limit for a model that is estimated above the limit, naming the model and the limit", () => {
+  it("warns above_limit for a model that is estimated above the warning level, naming the model and the level", () => {
     render(
       <CostSummary
         cost={estimateReviewCost({
@@ -42,7 +42,7 @@ describe("the cost summary", () => {
     const warning = screen.getByRole("status");
     expect(warning.textContent).toContain("anthropic/claude-sonnet-5.5");
     expect(warning.textContent).toContain("$0.10");
-    expect(warning.textContent).toMatch(/above the limit/i);
+    expect(warning.textContent).toMatch(/above the warning level/i);
   });
 
   it("warns cost_unknown for a model the price table does not know", () => {

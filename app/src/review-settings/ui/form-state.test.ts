@@ -41,6 +41,7 @@ function model(
       autoReviewOnOpen: "built_in",
       autoReviewOnPush: "built_in",
       allowedCommands: "built_in",
+      maxCostCents: "built_in",
     },
     cost: estimateReviewCost(effective),
     managed: false,
@@ -49,6 +50,95 @@ function model(
     ...(dynamic === undefined ? {} : { dynamic }),
   };
 }
+
+// #656-T04
+describe("the cost limit field", () => {
+  it("is empty while no layer sets a limit, and shows a stored limit in dollars", () => {
+    expect(initialFormState(model()).values.maxCostCents).toBe("");
+    expect(
+      initialFormState(model({ maxCostCents: 150 })).values.maxCostCents,
+    ).toBe("1.50");
+  });
+
+  it("sends the typed dollars as whole cents", () => {
+    let state = initialFormState(model());
+
+    state = setText(state, "maxCostCents", "0.75");
+
+    expect(state.overridden.maxCostCents).toBe(true);
+    expect(buildPatch(state)).toEqual({
+      ok: true,
+      patch: { maxCostCents: 75 },
+    });
+    expect(buildPatch(setText(state, "maxCostCents", "2"))).toEqual({
+      ok: true,
+      patch: { maxCostCents: 200 },
+    });
+  });
+
+  // #656-T04
+  it.each([
+    ["$1.50", 150],
+    ["$2", 200],
+    [".5", 50],
+    ["$.25", 25],
+    [" 0.5 ", 50],
+    ["100", 10_000],
+  ])("reads %s as an amount of dollars", (text, cents) => {
+    expect(
+      buildPatch(setText(initialFormState(model()), "maxCostCents", text)),
+    ).toEqual({ ok: true, patch: { maxCostCents: cents } });
+  });
+
+  // #656-T04
+  it.each(["1,5", "$", ".", "1.234", "$ 1", "1$", "--1", "1e2", "$$1"])(
+    "does not take %s for an amount",
+    (text) => {
+      expect(
+        buildPatch(setText(initialFormState(model()), "maxCostCents", text)),
+      ).toMatchObject({
+        ok: false,
+        issues: [{ field: "maxCostCents", code: "INVALID_TYPE" }],
+      });
+    },
+  );
+
+  it("follows the workspace default again when the person empties the field, and sends nothing for it", () => {
+    let state = initialFormState(model({ maxCostCents: 150 }));
+
+    state = setText(state, "maxCostCents", "  ");
+
+    expect(state.overridden.maxCostCents).toBe(false);
+    expect(buildPatch(state)).toEqual({ ok: true, patch: {} });
+  });
+
+  it("names a text that is no amount, an amount of less than a cent and one above the largest limit", () => {
+    const problem = (text: string) =>
+      buildPatch(setText(initialFormState(model()), "maxCostCents", text));
+
+    expect(problem("abc")).toMatchObject({
+      ok: false,
+      issues: [{ field: "maxCostCents", code: "INVALID_TYPE" }],
+    });
+    expect(problem("0")).toMatchObject({
+      ok: false,
+      issues: [{ field: "maxCostCents", code: "TOO_SMALL" }],
+    });
+    expect(problem("101")).toMatchObject({
+      ok: false,
+      issues: [{ field: "maxCostCents", code: "TOO_LARGE" }],
+    });
+  });
+
+  it("takes the field back to the workspace default with a reset", () => {
+    const m = model({ maxCostCents: 150 });
+
+    const state = resetField(initialFormState(m), "maxCostCents", m);
+
+    expect(state.overridden.maxCostCents).toBe(false);
+    expect(state.values.maxCostCents).toBe("");
+  });
+});
 
 describe("the form values", () => {
   it("start from the settings in force, with no field marked as set by the person", () => {

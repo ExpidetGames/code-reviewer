@@ -110,7 +110,7 @@ merges the two accounts. How it works: `app/src/auth/README.md`, `app/src/github
 ### LLM access
 
 Every workspace brings its own LLM key (bring your own key): an Admin or an Owner enters it under
-**Settings, LLM access** of the workspace (a provider, OpenRouter or Anthropic, a write-only key, a "Test key" button). The key is
+**Settings, LLM** of the workspace (a provider, OpenRouter or Anthropic, a write-only key, a "Test key" button). The key is
 stored encrypted in the database (with `APP_SECRET`; the operator of the instance holds that key and can technically
 decrypt it), never shown again, never logged, and reviews of a workspace use the key of that workspace only. A
 workspace without a key fails its reviews with `llm_not_configured` and shows "LLM not configured" with a link to
@@ -280,7 +280,7 @@ Open `http://localhost:3000`: a new instance asks for the **setup code**, which 
 | `OPERATOR_API_TOKEN` | Optional. Switches on the operator API (`/api/operator/v1`, [`app/src/operator-api/README.md`](app/src/operator-api/README.md)); without it the API does not exist. At least 32 characters, different from `RUNNER_TOKEN`, `APP_SECRET` and `BETTER_AUTH_SECRET` |
 | `BETTER_AUTH_URL` | The address people use, https beyond localhost (a local try-out needs nothing) |
 | The GitHub App | Not an environment variable: create it in the admin portal under Integrations ([docs/github-app.md](docs/github-app.md): one click, or by hand). `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` of an installation from before accounts are imported once by the update and ignored afterwards ([Updating from a version before accounts](#updating-from-a-version-before-accounts)); `GITHUB_OAUTH_*` are no longer used |
-| `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy, optional: an installation from before accounts has its key imported once into the default workspace by the update. The key is normally entered per workspace in the UI (Settings, LLM access) |
+| `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy, optional: an installation from before accounts has its key imported once into the default workspace by the update. The key is normally entered per workspace in the UI (Settings, LLM) |
 
 `RUNNER_TOKEN` empty stops `docker compose up` with a message naming the variable, before any container
 is created. The production app refuses to start without `APP_SECRET` (or `BETTER_AUTH_SECRET`) and

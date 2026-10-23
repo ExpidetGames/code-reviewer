@@ -20,7 +20,7 @@ export const OWN_TEXT =
 export const OWN_KEY_FIRST_HINT =
   "Save a provider key below first to use this option.";
 export const MANAGED_KEY_UNUSED_NOTE =
-  "A key you save below stays stored and is not used while this workspace uses our models.";
+  "A key you saved stays stored and is not used while this workspace uses our models.";
 export const READ_ONLY_NOTE =
   "Only an Admin or an Owner of the workspace can change this.";
 export const SAVE_CHOICE_BUTTON = "Save choice";

@@ -58,6 +58,37 @@ const settings = (changes: Partial<CostSettings>): CostSettings => ({
   ...changes,
 });
 
+// #656-T04
+describe("the limit the customer set", () => {
+  it("replaces the default limit of the estimate, and a model above it warns", () => {
+    const guard = estimateReviewCost(
+      settings({ model: "test/cheap", maxCostCents: 3 }),
+      prices,
+    );
+
+    // 0.036 USD for a typical review against a limit of 0.03 USD
+    expect(guard.limitUsd).toBe(0.03);
+    expect(guard.primary).toMatchObject({ usd: 0.036, aboveLimit: true });
+    expect(guard.warnings).toEqual([{ model: "primary", kind: "above_limit" }]);
+  });
+
+  it("raises the limit above the default one, and a null limit leaves the default", () => {
+    const raised = estimateReviewCost(
+      settings({ model: "test/dear", maxCostCents: 500 }),
+      prices,
+    );
+    const none = estimateReviewCost(
+      settings({ model: "test/dear", maxCostCents: null }),
+      prices,
+    );
+
+    expect(raised.limitUsd).toBe(5);
+    expect(raised.warn).toBe(false);
+    expect(none.limitUsd).toBe(REVIEW_COST_LIMIT_USD);
+    expect(none.warn).toBe(true);
+  });
+});
+
 describe("estimating the cost of a review", () => {
   // Cost guard (a decision of the project lead, no Jira test case): the price times a typical review
   it("is the price of the typical prompt and reply", () => {

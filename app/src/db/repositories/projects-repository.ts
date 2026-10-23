@@ -212,6 +212,12 @@ function toStoredProject(
   };
 }
 
+/** The settings of a project row that is being created (#656), read inside the transaction that creates it. */
+export type NewProjectSettings = (
+  executor: Kysely<Database>,
+  workspaceId: WorkspaceId,
+) => Promise<ProjectSettings>;
+
 export function createProjectsRepository(
   db: Kysely<Database>,
   workspaceId: WorkspaceId,
@@ -219,6 +225,12 @@ export function createProjectsRepository(
   newId: () => string = () => crypto.randomUUID(),
   warn: (message: string) => void = console.warn,
   driver: DatabaseDriver = databaseDriver(db),
+  /**
+   * The settings a project row starts with when it is created (#656): the instance decides inside the write
+   * transaction, so the default review kind of a new project is read together with the row it is written to. A project
+   * that exists is never given them. Default: none.
+   */
+  newProjectSettings: NewProjectSettings = async () => ({}),
 ): ProjectsRepository {
   const toStored = (row: ProjectsTable): StoredProject =>
     toStoredProject(row, warn);
@@ -409,7 +421,9 @@ export function createProjectsRepository(
           id: newId(),
           repository_id: repositoryId,
           active: encodeBoolean(false),
-          settings: encodeJson(change({})),
+          settings: encodeJson(
+            change(await newProjectSettings(trx, workspaceId)),
+          ),
           created_at: timestamp,
           updated_at: timestamp,
         })
@@ -487,7 +501,7 @@ export function createProjectsRepository(
               id: newId(),
               repository_id: repositoryId,
               active: encodeBoolean(true),
-              settings: encodeJson({}),
+              settings: encodeJson(await newProjectSettings(trx, workspaceId)),
               created_at: timestamp,
               updated_at: timestamp,
             })
