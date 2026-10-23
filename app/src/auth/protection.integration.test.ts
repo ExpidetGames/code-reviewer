@@ -117,7 +117,6 @@ const PROTECTED_ROUTES = [
   "/w/[workspace]/members",
   "/w/[workspace]/projects",
   "/w/[workspace]/projects/[repositoryId]",
-  "/w/[workspace]/projects/[repositoryId]/review",
   "/w/[workspace]/runs",
   "/w/[workspace]/runs/[id]",
   "/w/[workspace]/settings",

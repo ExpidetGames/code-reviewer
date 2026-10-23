@@ -451,7 +451,7 @@ test.describe(
     });
 
     // #203-T17
-    test("a historical run of a removed command stays readable in the browser and Review now starts a fresh review", async ({
+    test("a historical run of a removed command stays readable in the browser and a review started from the project list is a fresh review", async ({
       page,
     }) => {
       test.setTimeout(180_000);
@@ -490,33 +490,21 @@ test.describe(
         detail.locator('[data-slot="run-question"] img'),
       ).toHaveCount(0);
 
-      // Review now works on the upgraded installation. The real runner is stood in for by the queue
+      // Starting a review works on the upgraded installation. The real runner is stood in for by the queue
       // helper here (its own tests cover the real path, and it would race the child after the app
       // restarts): the run is followed through completion.
       await page.getByRole("link", { name: "Projects", exact: true }).click();
-      const projectLink = page.getByRole("link", {
-        name: UPGRADE_WIDGETS.fullName,
-        exact: true,
-      });
-      await expect(projectLink).toBeVisible();
-      // The row overlay of the redesigned list intercepts a direct click; follow the link's address.
-      await page.goto((await projectLink.getAttribute("href")) ?? "/");
-      await expect(
-        page.getByRole("heading", {
-          level: 1,
-          name: UPGRADE_WIDGETS.fullName,
-        }),
-      ).toBeVisible();
-      // The review panel is its own page since #174.
       await page
-        .getByRole("navigation", { name: "Project" })
-        .getByRole("link", { name: "Review now" })
+        .getByRole("row")
+        .filter({ hasText: UPGRADE_WIDGETS.fullName })
+        .getByRole("button", {
+          name: `Start a review of ${UPGRADE_WIDGETS.fullName}`,
+        })
         .click();
-      await expect(page).toHaveURL(/\/projects\/[^/]+\/review$/);
       await runner?.stop();
       await page.getByRole("radio").first().check();
-      await page.getByRole("button", { name: "Review now" }).click();
-      const started = page.getByRole("status");
+      await page.getByRole("button", { name: "Start review" }).click();
+      const started = page.getByRole("dialog").getByRole("status");
       await expect(started).toContainText("Started: review for pull request");
       await started.getByRole("link", { name: "View the run" }).click();
       await expect(page).toHaveURL(/\/runs\/[0-9a-fA-F-]{36}$/);

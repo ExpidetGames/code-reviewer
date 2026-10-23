@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+
+"use client";
+// The play button of a project row and the dialog it opens (#655): the open pull requests of the
+// repository, one to pick, "Start review". It is the only way to start a review by hand. The panel
+// inside is mounted only while the dialog is open, so each opening loads the pull requests again. A
+// project that is not active shows the button disabled, with the reason as its description and, for
+// everyone who can see it, as a tooltip on a focusable wrapper (a disabled button takes no hover or
+// focus itself).
+import { PlayIcon } from "@phosphor-icons/react/dist/ssr";
+import { useId, useState } from "react";
+import { Button } from "../../components/button.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../../components/ui/dialog.tsx";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../../components/ui/tooltip.tsx";
+import type { ManualReviewApi } from "./api.ts";
+import { StartReviewPanel } from "./start-review-panel.tsx";
+
+export const START_REVIEW_INACTIVE_COPY =
+  "Switch the project on to start a review.";
+
+export function StartReviewDialog({
+  workspaceSlug,
+  repositoryId,
+  fullName,
+  startable,
+  api,
+}: {
+  workspaceSlug: string;
+  repositoryId: string;
+  /** Untrusted GitHub text; rendered as text only. */
+  fullName: string;
+  /** Whether a review can be started now: only an active project. */
+  startable: boolean;
+  /** Only tests pass this. */
+  api?: ManualReviewApi;
+}) {
+  const [open, setOpen] = useState(false);
+  const reasonId = useId();
+  const label = `Start a review of ${fullName}`;
+  if (!startable)
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="group"
+              aria-label={label}
+              aria-describedby={reasonId}
+              tabIndex={0}
+              className="inline-flex rounded-lg"
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={label}
+                aria-describedby={reasonId}
+                disabled
+              >
+                <PlayIcon aria-hidden="true" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{START_REVIEW_INACTIVE_COPY}</TooltipContent>
+        </Tooltip>
+        <span id={reasonId} className="sr-only">
+          {START_REVIEW_INACTIVE_COPY}
+        </span>
+      </TooltipProvider>
+    );
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label={label}>
+          <PlayIcon aria-hidden="true" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="flex max-h-[90vh] flex-col">
+        <DialogHeader>
+          <DialogTitle>Start a review</DialogTitle>
+          <DialogDescription>
+            Pick an open pull request of {fullName}.
+          </DialogDescription>
+        </DialogHeader>
+        {open ? (
+          <StartReviewPanel
+            workspaceSlug={workspaceSlug}
+            repositoryId={repositoryId}
+            {...(api === undefined ? {} : { api })}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}

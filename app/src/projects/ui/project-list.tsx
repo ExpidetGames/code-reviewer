@@ -16,6 +16,8 @@ import {
 } from "../../components/ui/table.tsx";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { formatUtc } from "../../ui/format-time.ts";
+import { StartReviewDialog } from "../../manual-reviews/ui/start-review-dialog.tsx";
+import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
@@ -69,9 +71,11 @@ export function ProjectList({
   workspaceSlug,
   canManage = true,
   canConnect = true,
+  canStartReview = true,
   view,
   activationBlocked,
   api,
+  manualReviewApi,
 }: {
   /** The workspace of the page: every link and call stays in it. */
   workspaceSlug: string;
@@ -79,10 +83,14 @@ export function ProjectList({
   canManage?: boolean;
   /** Whether the person may connect GitHub (an Admin or an Owner). */
   canConnect?: boolean;
+  /** Whether the person may start a review by hand (`start_review`, every member today): the play button of a row (#655). */
+  canStartReview?: boolean;
   view: ProjectListView;
   /** Why no project can be switched on right now (the GitHub App is not configured), or null. */
   activationBlocked: string | null;
   api?: ProjectsApi;
+  /** Only tests pass this: the calls of the play button's dialog. */
+  manualReviewApi?: ManualReviewApi;
 }) {
   if (view.rows.length === 0)
     return (
@@ -93,14 +101,15 @@ export function ProjectList({
     );
   return (
     <>
-      <Table aria-label="Repositories" className="table-fixed">
+      {/* A minimum width: on a narrow window the table scrolls inside its card instead of squeezing the Review column's switch and play button out of their cell. */}
+      <Table aria-label="Repositories" className="min-w-[680px] table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[32%]">Name</TableHead>
-            <TableHead className="w-[16%]">Installation</TableHead>
+            <TableHead className="w-[26%]">Name</TableHead>
+            <TableHead className="w-[14%]">Installation</TableHead>
             <TableHead className="w-[12%]">Status</TableHead>
-            <TableHead className="w-[26%]">Last run</TableHead>
-            <TableHead className="w-[14%]">Review</TableHead>
+            <TableHead className="w-[24%]">Last run</TableHead>
+            <TableHead className="w-[24%]">Review</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -149,16 +158,29 @@ export function ProjectList({
                 ) : null}
               </TableCell>
               <TableCell className="align-top">
-                <ProjectToggle
-                  key={`${row.repositoryId}:${String(row.switchedOn)}`}
-                  workspaceSlug={workspaceSlug}
-                  canManage={canManage}
-                  repositoryId={row.repositoryId}
-                  fullName={row.fullName}
-                  checked={row.switchedOn}
-                  blockedReason={blockedReasonOf(row, activationBlocked)}
-                  {...(api === undefined ? {} : { api })}
-                />
+                <div className="flex items-center gap-2">
+                  <ProjectToggle
+                    key={`${row.repositoryId}:${String(row.switchedOn)}`}
+                    workspaceSlug={workspaceSlug}
+                    canManage={canManage}
+                    repositoryId={row.repositoryId}
+                    fullName={row.fullName}
+                    checked={row.switchedOn}
+                    blockedReason={blockedReasonOf(row, activationBlocked)}
+                    {...(api === undefined ? {} : { api })}
+                  />
+                  {canStartReview ? (
+                    <StartReviewDialog
+                      workspaceSlug={workspaceSlug}
+                      repositoryId={row.repositoryId}
+                      fullName={row.fullName}
+                      startable={row.status === "active"}
+                      {...(manualReviewApi === undefined
+                        ? {}
+                        : { api: manualReviewApi })}
+                    />
+                  ) : null}
+                </div>
               </TableCell>
             </TableRow>
           ))}
