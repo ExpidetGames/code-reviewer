@@ -46,7 +46,8 @@ export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
  * A request for these never has its `PORTAL_DENIED_HEADER` taken off, so the rewrite that acts on the
  * header leaves them out too.
  */
-export const PROXY_SKIPPED_PATHS = "_next/static/|_next/image$|favicon\\.ico$";
+export const PROXY_SKIPPED_PATHS =
+  "_next/static/|_next/image$|favicon\\.ico$|icon\\.svg$|apple-icon\\.png$";
 
 /**
  * Data routes outside the portal's address that are still the instance admin's alone: they are about the
