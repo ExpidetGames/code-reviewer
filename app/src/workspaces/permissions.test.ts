@@ -37,6 +37,8 @@ const MATRIX: Record<WorkspaceAction, [boolean, boolean, boolean]> = {
   manage_invitations: [false, true, true],
   change_member_roles: [false, false, true],
   rename_workspace: [false, false, true],
+  // #658-T02: deleting the workspace is the Owner's alone.
+  delete_workspace: [false, false, true],
 };
 
 const ORDER: WorkspaceRole[] = ["member", "admin", "owner"];

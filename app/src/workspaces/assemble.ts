@@ -17,6 +17,7 @@ import {
   createInvitationService,
   type InvitationService,
 } from "./invitations.ts";
+import { createWorkspaceDeletion } from "./delete-workspace.ts";
 import { createMembersService, type MembersService } from "./members.ts";
 import { createWorkspaceLimits, type WorkspaceLimits } from "./rate-limits.ts";
 
@@ -63,6 +64,7 @@ export function assembleWorkspaces(
   const handlers = createWorkspaceRouteHandlers({
     members,
     invitations,
+    deletion: createWorkspaceDeletion({ db, now, log: options.log }),
     async createWorkspace({ name, creatorId }) {
       const permission = await limits.createWorkspace(creatorId);
       if (!permission.allowed)

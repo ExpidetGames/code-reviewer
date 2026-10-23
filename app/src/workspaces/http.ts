@@ -4,6 +4,7 @@
 // so the route files only wire the real ones and tests wire the real services over a test database:
 //
 //   PATCH  /api/w/:workspace                                 { name }            rename (Owner)
+//   DELETE /api/w/:workspace                                 { confirmName }     delete the workspace (Owner)
 //   PATCH  /api/w/:workspace/members/:userId                 { role }            change a role (Owner)
 //   DELETE /api/w/:workspace/members/:userId                                     remove a member, or leave
 //   POST   /api/w/:workspace/invitations                     { email, role }     invite
@@ -27,6 +28,11 @@ import {
 import { isCrossSite } from "../http/request-checks.ts";
 import type { WorkspaceAccess } from "./access.ts";
 import type { CreateWorkspaceResult } from "./create-workspace.ts";
+import {
+  DELETE_WORKSPACE_ERROR_STATUS,
+  type DeleteWorkspaceErrorCode,
+  type WorkspaceDeletion,
+} from "./delete-workspace.ts";
 import {
   INVITATION_ERROR_STATUS,
   type Acceptor,
@@ -56,6 +62,7 @@ type RefusalCode =
   | MemberErrorCode
   | InvitationErrorCode
   | keyof typeof CREATE_WORKSPACE_ERROR_STATUS
+  | DeleteWorkspaceErrorCode
   | "invalid_request";
 
 const STATUS: Record<RefusalCode, number> = {
@@ -63,6 +70,7 @@ const STATUS: Record<RefusalCode, number> = {
   ...MEMBER_ERROR_STATUS,
   ...INVITATION_ERROR_STATUS,
   ...CREATE_WORKSPACE_ERROR_STATUS,
+  ...DELETE_WORKSPACE_ERROR_STATUS,
   invalid_request: 422,
 };
 
@@ -91,6 +99,7 @@ function done(body: object): Response {
 export type WorkspaceRouteDependencies = {
   members: MembersService;
   invitations: InvitationService;
+  deletion: WorkspaceDeletion;
   /** Creates a workspace for the user (src/workspaces/create-workspace.ts) after the person's limit. */
   createWorkspace: (input: {
     name: string;
@@ -105,6 +114,7 @@ export type WorkspaceRouteDependencies = {
 
 export type WorkspaceRouteHandlers = {
   rename(request: Request, access: WorkspaceAccess): Promise<Response>;
+  deleteWorkspace(request: Request, access: WorkspaceAccess): Promise<Response>;
   changeRole(
     request: Request,
     access: WorkspaceAccess,
@@ -138,6 +148,7 @@ function inviterName(user: SessionUser): string {
 export function createWorkspaceRouteHandlers({
   members,
   invitations,
+  deletion,
   createWorkspace,
   loadAcceptor,
 }: WorkspaceRouteDependencies): WorkspaceRouteHandlers {
@@ -153,6 +164,17 @@ export function createWorkspaceRouteHandlers({
       return result.ok
         ? done({ ok: true, name: result.name })
         : refusal(result.error);
+    },
+
+    async deleteWorkspace(request, access) {
+      const body = await readJsonObject(request, WORKSPACE_REQUEST_MAX_BYTES);
+      if (!body.ok) return refusal(body.error);
+      const result = await deletion.delete({
+        workspaceId: access.workspace.id,
+        actorId: access.user.id,
+        confirmName: body.value.confirmName,
+      });
+      return result.ok ? done({ ok: true }) : refusal(result.error);
     },
 
     async changeRole(request, access, targetUserId) {

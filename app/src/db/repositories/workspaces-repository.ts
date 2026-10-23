@@ -23,7 +23,7 @@ export type Membership = { workspace: Workspace; role: WorkspaceRole };
 
 export type WorkspacesRepository = {
   get(id: string): Promise<Workspace | undefined>;
-  /** The oldest workspace, which is the default one the migration made; undefined when there is none. */
+  /** The oldest workspace that is not deleted, which is the default one the migration made; undefined when there is none. */
   findDefault(): Promise<Workspace | undefined>;
   /** Whether a workspace has this slug. */
   slugExists(slug: string): Promise<boolean>;
@@ -58,7 +58,7 @@ export type WorkspacesRepository = {
   ): Promise<void>;
   /** Whether the workspace has at least one Owner. */
   hasOwner(workspaceId: string): Promise<boolean>;
-  /** How many workspaces the instance has. */
+  /** How many workspaces the instance has (a deleted one, #658, is not one). */
   count(): Promise<number>;
   /**
    * The workspaces whose name holds the text (any case, `%` and `_` are plain characters), by name, at most `limit`; an
@@ -75,9 +75,12 @@ export type WorkspacesRepository = {
   }): Promise<{ workspaces: Workspace[]; hasMore: boolean }>;
 };
 
+/** The columns every read of a workspace has (`deleted_at` is only the repository's own concern). */
+type WorkspaceRow = Omit<WorkspacesTable, "deleted_at">;
+
 export const DEFAULT_WORKSPACE_SLUG = "default";
 
-function toWorkspace(row: WorkspacesTable): Workspace {
+function toWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
     name: row.name,
@@ -111,7 +114,7 @@ export function createWorkspacesRepository(
       ]);
   }
 
-  function toMembership(row: WorkspacesTable & { role: string }): Membership {
+  function toMembership(row: WorkspaceRow & { role: string }): Membership {
     if (!isWorkspaceRole(row.role))
       throw new Error(`The database holds an unknown role "${row.role}".`);
     return { workspace: toWorkspace(row), role: row.role };
@@ -121,6 +124,7 @@ export function createWorkspacesRepository(
     const row = await db
       .selectFrom("workspaces")
       .selectAll()
+      .where("deleted_at", "is", null)
       .orderBy("created_at")
       .orderBy("id")
       .limit(1)
@@ -144,6 +148,7 @@ export function createWorkspacesRepository(
       const row = await db
         .selectFrom("workspaces")
         .select((builder) => builder.fn.countAll<string | number>().as("count"))
+        .where("deleted_at", "is", null)
         .executeTakeFirst();
       return Number(row?.count ?? 0);
     },
@@ -233,6 +238,7 @@ export function createWorkspacesRepository(
         slug: input.slug,
         created_by: input.createdBy,
         created_at: formatTimestamp(now()),
+        deleted_at: null,
       };
       await db.insertInto("workspaces").values(row).execute();
       return toWorkspace(row);

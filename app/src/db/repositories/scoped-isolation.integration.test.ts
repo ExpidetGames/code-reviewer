@@ -19,6 +19,7 @@ import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createInvitationsRepository } from "./invitations-repository.ts";
 import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
+import { createWorkspaceErasureRepository } from "./workspace-erasure-repository.ts";
 import { createWorkspaceSecretsRepository } from "./workspace-secrets-repository.ts";
 import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
@@ -61,6 +62,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     profiles: createBillingProfilesRepository(db, workspaceId),
     limits: createBillingWorkspaceSettingsRepository(db, workspaceId),
     notifications: createBillingNotificationsRepository(db, workspaceId),
+    erasure: createWorkspaceErasureRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -1499,6 +1501,22 @@ const CASES: Case[] = [
     name: "notifications.rearm",
     run: (a) => a.notifications.rearm("low"),
     expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  // erasure (#658): A's scope reads nothing of B's (B has a queued job and a pending top-up intent) and erases only A.
+  {
+    name: "erasure.hasRunningJobs",
+    run: (a) => a.erasure.hasRunningJobs(),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "erasure.hasOpenPayment",
+    run: (a) => a.erasure.hasOpenPayment(new Date("2000-01-01T00:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
+  {
+    name: "erasure.erase",
+    run: (a) => a.erasure.erase({ name: "Deleted", slug: "deleted-a" }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {

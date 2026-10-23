@@ -103,6 +103,11 @@ export interface WorkspacesTable {
   created_by: string | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
+  /**
+   * ISO 8601 text in UTC: when the workspace was deleted (#658), else null. A deleted workspace is a tombstone: its data is
+   * gone, its name and slug are anonymised, and only the money history that must be kept still points at it.
+   */
+  deleted_at: string | null;
 }
 
 /** A user's membership of a workspace, with a role (a WorkspaceRole, src/workspaces/roles.ts). */

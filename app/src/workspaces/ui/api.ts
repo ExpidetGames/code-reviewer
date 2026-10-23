@@ -28,6 +28,8 @@ export type AcceptAnswer = {
 
 export type WorkspaceApi = {
   rename(name: string): Promise<RequestResult<{ ok: true; name: string }>>;
+  /** Deletes the workspace; the name is the one the person typed. */
+  deleteWorkspace(confirmName: string): Promise<RequestResult<{ ok: true }>>;
   changeRole(
     userId: string,
     role: WorkspaceRole,
@@ -54,6 +56,8 @@ export function createWorkspaceApi(
     path(`/invitations/${encodeURIComponent(id)}`);
   return {
     rename: (name) => requestJson(fetchImpl, "PATCH", path(), { name }),
+    deleteWorkspace: (confirmName) =>
+      requestJson(fetchImpl, "DELETE", path(), { confirmName }),
     changeRole: (userId, role) =>
       requestJson(fetchImpl, "PATCH", member(userId), { role }),
     removeMember: (userId) => requestJson(fetchImpl, "DELETE", member(userId)),

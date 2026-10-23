@@ -7,6 +7,7 @@
 // (members.integration.test.ts, invitations.integration.test.ts); here it is proven that the routes pass it
 // on and that the answers are the documented ones.
 import { describe, expect, it } from "vitest";
+import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { sessionUser } from "../test-support/session-lookup.ts";
 import {
   createWorkspaceHarness,
@@ -214,6 +215,96 @@ describe("renaming", () => {
       expect(response.status).toBe(422);
       expect(await body(response)).toEqual({ error: "invalid_name" });
     }
+  });
+});
+
+describe("deleting the workspace", () => {
+  // #658-T03
+  it("answers ok for the Owner who types the name, and the workspace is gone for everybody", async () => {
+    const t = await team();
+
+    const response = await t.h.handlers.deleteWorkspace(
+      json({ confirmName: t.workspace.name }),
+      t.owner,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await body(response)).toEqual({ ok: true });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await t.h.workspaces.listForUser("owner-1")).toEqual([]);
+    expect(await t.h.workspaces.listForUser("admin-1")).toEqual([]);
+    expect(await t.h.workspaces.slugExists("acme")).toBe(false);
+  });
+
+  // #658-T02
+  it("answers 403 forbidden for an Admin and a Member, and the workspace stays", async () => {
+    const t = await team();
+
+    for (const access of [t.admin, t.member]) {
+      const response = await t.h.handlers.deleteWorkspace(
+        json({ confirmName: t.workspace.name }),
+        access,
+      );
+      expect(response.status).toBe(403);
+      expect(await body(response)).toEqual({ error: "forbidden" });
+    }
+
+    expect((await t.h.workspaces.get(t.workspace.id))?.name).toBe(
+      t.workspace.name,
+    );
+    expect(await t.h.workspaces.slugExists("acme")).toBe(true);
+  });
+
+  // #658-T03
+  it("answers 422 name_mismatch for a name that is not the workspace's, and 422 for a body that is no JSON object", async () => {
+    const t = await team();
+
+    for (const confirmName of ["", "Acme", undefined, 7]) {
+      const response = await t.h.handlers.deleteWorkspace(
+        json({ confirmName }),
+        t.owner,
+      );
+      expect(response.status).toBe(422);
+      expect(await body(response)).toEqual({ error: "name_mismatch" });
+    }
+    const broken = await t.h.handlers.deleteWorkspace(json("[]"), t.owner);
+    expect(broken.status).toBeGreaterThanOrEqual(400);
+    expect(await t.h.workspaces.slugExists("acme")).toBe(true);
+  });
+
+  it("refuses a request from another site before anything is done", async () => {
+    const t = await team();
+
+    const response = await t.h.handlers.deleteWorkspace(
+      json(
+        { confirmName: t.workspace.name },
+        { "sec-fetch-site": "cross-site" },
+      ),
+      t.owner,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await body(response)).toEqual({ error: "cross_site_request" });
+    expect(await t.h.workspaces.slugExists("acme")).toBe(true);
+  });
+
+  // #658-T04
+  it("answers 409 balance_positive while the workspace has unused credit", async () => {
+    const t = await team();
+    await createBillingJournalRepository(t.h.db, t.workspace.id).append({
+      type: "top_up",
+      amountMicroUsd: 10_000_000,
+      refKey: "payment-1",
+    });
+
+    const response = await t.h.handlers.deleteWorkspace(
+      json({ confirmName: t.workspace.name }),
+      t.owner,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await body(response)).toEqual({ error: "balance_positive" });
+    expect(await t.h.workspaces.slugExists("acme")).toBe(true);
   });
 });
 
