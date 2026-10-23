@@ -7,7 +7,7 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import { CircleHelp } from "lucide-react";
+import { QuestionIcon } from "@phosphor-icons/react/dist/ssr";
 import {
   Tooltip,
   TooltipContent,
@@ -43,7 +43,7 @@ export function InfoHint({
             }}
             onClick={() => setOpen((current) => !current)}
           >
-            <CircleHelp aria-hidden="true" className="size-4" />
+            <QuestionIcon aria-hidden="true" className="size-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent id={descriptionId}>{children}</TooltipContent>

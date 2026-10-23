@@ -7,7 +7,11 @@
 // no new obligation. The table lists every entry, a retired one too; a row has its actions (edit, release, retire,
 // delete, order) and the default of each kind it serves. Every refusal is a stable code that catalog-messages.ts turns
 // into a sentence; nothing here throws.
-import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  CaretUpIcon,
+} from "@phosphor-icons/react/dist/ssr";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { Button } from "../../components/button.tsx";
@@ -170,9 +174,9 @@ export function ModelCatalogSection({
                 aria-label={open ? "Hide model catalog" : "Show model catalog"}
               >
                 {open ? (
-                  <ChevronDown aria-hidden="true" />
+                  <CaretDownIcon aria-hidden="true" />
                 ) : (
-                  <ChevronRight aria-hidden="true" />
+                  <CaretRightIcon aria-hidden="true" />
                 )}
                 {open ? "Hide" : "Show"}
               </Button>
@@ -291,7 +295,7 @@ export function ModelCatalogSection({
                               disabled={busy || index === 0}
                               onClick={() => move(index, -1)}
                             >
-                              <ChevronUp aria-hidden="true" />
+                              <CaretUpIcon aria-hidden="true" />
                             </Button>
                             <Button
                               size="icon"
@@ -302,7 +306,7 @@ export function ModelCatalogSection({
                               }
                               onClick={() => move(index, 1)}
                             >
-                              <ChevronDown aria-hidden="true" />
+                              <CaretDownIcon aria-hidden="true" />
                             </Button>
                             <Button
                               size="sm"

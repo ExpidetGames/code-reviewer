@@ -8,7 +8,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import { CircleX, TriangleAlert } from "lucide-react";
+import { WarningIcon, XCircleIcon } from "@phosphor-icons/react/dist/ssr";
 import {
   AlertDescription,
   AlertTitle,
@@ -66,9 +66,9 @@ export function NeedsAttention({
           )}
         >
           {notice.severity === "error" ? (
-            <CircleX aria-hidden="true" />
+            <XCircleIcon aria-hidden="true" />
           ) : (
-            <TriangleAlert aria-hidden="true" />
+            <WarningIcon aria-hidden="true" />
           )}
           <AlertTitle>{notice.title}</AlertTitle>
           <AlertDescription>{notice.detail}</AlertDescription>
