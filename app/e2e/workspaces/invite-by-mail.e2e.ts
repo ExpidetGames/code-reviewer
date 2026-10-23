@@ -25,7 +25,7 @@ const NEWCOMER = `newcomer-${RUN}@e2e.test`;
 const PASSWORD = "e2e-mail-passphrase-quartz-lake-58";
 const WORKSPACE = "Mail Team";
 const CONFIRM_SUBJECT = "Confirm your email address";
-const INVITATION_SUBJECT = `Join "${WORKSPACE}" at Code Reviewer`;
+const INVITATION_SUBJECT = `Join "${WORKSPACE}" at code-review.com`;
 
 const linkOf = (text: string) => /https?:\/\/\S+/.exec(text)?.[0] ?? "";
 

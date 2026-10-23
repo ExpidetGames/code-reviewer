@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The "Review verdict" card of a project's settings form (#405): whether Code Reviewer, after a successful
+// The "Review verdict" card of a project's settings form (#405): whether code-review.com, after a successful
 // review, also submits a pull request review as itself (Request changes while a blocking finding is open,
 // Approve otherwise). One choice for both review kinds; what "blocking" means differs, and the card says so for
 // the kind that is selected. Saved with the Review kind card (one project-only request).
@@ -26,7 +26,7 @@ export const VERDICT_NAMES: Record<ReviewVerdictMode, string> = {
 };
 
 const VERDICT_HINTS: Record<ReviewVerdictMode, string> = {
-  off: "Code Reviewer never submits a pull request review. The check run still shows the result.",
+  off: "code-review.com never submits a pull request review. The check run still shows the result.",
   blocking:
     "Requests changes while a blocking finding is open, and approves otherwise.",
   any: "Requests changes while any finding is open, and approves when none is.",
@@ -40,7 +40,7 @@ export const VERDICT_KIND_NOTES: Record<ProjectReviewKind, string> = {
 };
 
 export const VERDICT_COMMON_NOTE =
-  "After a successful review Code Reviewer submits the review as itself on the commit that was reviewed, with a link to the review comment. A failed, cancelled or replaced run submits none, and a new push replaces the earlier verdict. A review that is not whole (it stopped at a limit, dropped a finding or left files out) submits none and leaves an earlier request for changes in place; only Off dismisses it. The verdict comes from the model and can be wrong or manipulated, and GitHub does not document that the approval of an App counts towards required approvals: do not rely on it for branch protection, and require a code owner review where a person must approve.";
+  "After a successful review code-review.com submits the review as itself on the commit that was reviewed, with a link to the review comment. A failed, cancelled or replaced run submits none, and a new push replaces the earlier verdict. A review that is not whole (it stopped at a limit, dropped a finding or left files out) submits none and leaves an earlier request for changes in place; only Off dismisses it. The verdict comes from the model and can be wrong or manipulated, and GitHub does not document that the approval of an App counts towards required approvals: do not rely on it for branch protection, and require a code owner review where a person must approve.";
 
 function isMode(value: string): value is ReviewVerdictMode {
   return REVIEW_VERDICT_MODES.some((mode) => mode === value);

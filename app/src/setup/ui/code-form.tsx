@@ -9,6 +9,7 @@ import { Button } from "@/components/button.tsx";
 import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { PRODUCT_NAME } from "@/copy/product-name.ts";
 import { browserSetupApi, type SetupApi } from "./api.ts";
 import { describeSetupFailure, type SetupHosting } from "./messages.ts";
 
@@ -48,7 +49,7 @@ export function CodeForm({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Set up Code Reviewer
+          {`Set up ${PRODUCT_NAME}`}
         </h1>
         <p className="text-sm text-muted-foreground">
           {hosting === "serverless" ? (

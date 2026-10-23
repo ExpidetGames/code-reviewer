@@ -25,6 +25,7 @@
 //   the admin enters the secret or recreates the endpoint (billing off). The environment of the endpoint (its `livemode`) must be the one of the API key.
 import "server-only";
 import type { Kysely } from "kysely";
+import { PRODUCT_NAME } from "../copy/product-name.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { isBillingOn } from "./enabled.ts";
@@ -709,7 +710,7 @@ export function createBillingAdminService({
       const created = await client.createWebhookEndpoint({
         url: webhookUrl,
         enabled_events: [...STRIPE_WEBHOOK_EVENTS],
-        description: "Code Reviewer",
+        description: PRODUCT_NAME,
         // The events are rendered in the version the client's calls use, not the account's default, which can change.
         api_version: STRIPE_MANAGED_PAYMENTS_API_VERSION,
       });

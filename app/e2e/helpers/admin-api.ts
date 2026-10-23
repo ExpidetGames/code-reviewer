@@ -33,7 +33,7 @@ export async function configureFakeMailServer(baseURL: string): Promise<void> {
       user: e2eEnv.smtp.user,
       password: e2eEnv.smtp.password,
       senderAddress: "code-reviewer@e2e.test",
-      senderName: "Code Reviewer",
+      senderName: "code-review.com",
       allowSelfSigned: true,
     },
   });

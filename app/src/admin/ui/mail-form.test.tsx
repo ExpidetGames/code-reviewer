@@ -34,7 +34,7 @@ const SAVED_SETTINGS = {
   security: "starttls",
   user: "mailer",
   senderAddress: "reviewer@example.com",
-  senderName: "Code Reviewer",
+  senderName: "code-review.com",
   allowSelfSigned: false,
   allowPlainTextLogin: false,
 } as const;
@@ -121,7 +121,7 @@ describe("the mail form", () => {
         security: "starttls",
         user: "mailer",
         senderAddress: "reviewer@example.com",
-        senderName: "Code Reviewer",
+        senderName: "code-review.com",
         allowSelfSigned: false,
         allowPlainTextLogin: false,
       },

@@ -47,7 +47,7 @@ async function start(auth = true) {
       security: "starttls",
       allowSelfSigned: true,
       senderAddress: "reviewer@example.com",
-      senderName: "Code Reviewer",
+      senderName: "code-review.com",
       ...(auth ? { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD } : {}),
       ...overrides,
     });
