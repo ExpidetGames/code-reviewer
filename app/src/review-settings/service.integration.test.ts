@@ -28,6 +28,31 @@ async function refusal(
   throw new Error("expected the call to be refused");
 }
 
+// #656-T02
+describe("a new project", () => {
+  it("is Dynamic Review from the start, also on the page of a repository that has no project yet", async () => {
+    const app = await setupReviewSettings(undefined, {
+      newProjectSettings: async () => ({ reviewKind: "dynamic" }),
+    });
+
+    const before = await app.service.getProjectSettings(app.first.id);
+    await app.projects.activate(app.first.id);
+    const after = await app.service.getProjectSettings(app.first.id);
+
+    expect(before.dynamic.effective.reviewKind).toBe("dynamic");
+    expect(after.dynamic.effective.reviewKind).toBe("dynamic");
+  });
+
+  it("is Diff Review where nothing asks for another kind, and a project that exists keeps its kind", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const view = await app.service.getProjectSettings(app.first.id);
+
+    expect(view.dynamic.effective.reviewKind).toBe("diff");
+  });
+});
+
 describe("the global defaults", () => {
   it("are the built-in values until somebody saves some, with the model of the instance", async () => {
     const app = await setupReviewSettings();

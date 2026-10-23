@@ -7,6 +7,7 @@ import { createAppSettingsRepository } from "../db/repositories/app-settings-rep
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { newProjectSettings } from "../projects/new-project-settings.ts";
 import { getDatabase } from "../db/startup.ts";
 import { createJobReviewSettingsHooks } from "../jobs/review-settings-hooks.ts";
 import { configuredLlmModel } from "../llm/config.ts";
@@ -44,9 +45,18 @@ export function reviewSettingsServiceFor(
     (entitlements ??= readEffectiveEntitlements(db, workspaceId));
   return createReviewSettingsService({
     appSettings: createAppSettingsRepository(db, workspaceId),
-    projects: createProjectsRepository(db, workspaceId),
+    projects: createProjectsRepository(
+      db,
+      workspaceId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      newProjectSettings,
+    ),
     // #195: a kind change cancels the project's waiting review jobs in this transaction.
     hooks: createJobReviewSettingsHooks(workspaceId),
+    newProjectSettings: () => newProjectSettings(db),
     modelCapabilities,
     // #283: the models of a workspace on the operator's key are the operator's, and the workspace's budget is not
     // checked against the stored one. Anything but the workspace's own key hides the model fields and the estimate,
