@@ -4,7 +4,8 @@
 // The "Review verdict" card of a project's settings form (#405): whether Code Reviewer, after a successful
 // review, also submits a pull request review as itself (Request changes while a blocking finding is open,
 // Approve otherwise). One choice for both review kinds; what "blocking" means differs, and the card says so for
-// the kind that is selected. Saved with the Review kind card (one project-only request).
+// the kind that is selected. Saved with the Review kind card (one project-only request). The text is short (#656):
+// one line per choice and one note.
 import { useId } from "react";
 import { FieldDescription, FieldLabel } from "../../components/ui/field.tsx";
 import {
@@ -21,26 +22,24 @@ import { SettingsCard } from "./settings-fields.tsx";
 
 export const VERDICT_NAMES: Record<ReviewVerdictMode, string> = {
   off: "Off",
-  blocking: "Blocking findings only",
+  blocking: "Blocking findings",
   any: "Any finding",
 };
 
 const VERDICT_HINTS: Record<ReviewVerdictMode, string> = {
-  off: "Code Reviewer never submits a pull request review. The check run still shows the result.",
-  blocking:
-    "Requests changes while a blocking finding is open, and approves otherwise.",
-  any: "Requests changes while any finding is open, and approves when none is.",
+  off: "No review on the pull request.",
+  blocking: "Request changes while a blocking finding is open.",
+  any: "Request changes while any finding is open.",
 };
 
-/** What the choice means for the selected review kind, in one sentence. */
+/** What "blocking" means for the selected review kind, in one short sentence. */
 export const VERDICT_KIND_NOTES: Record<ProjectReviewKind, string> = {
-  dynamic:
-    "In a Dynamic Review a P0 finding blocks; the lower priorities (P1 to P3) only count under Any finding.",
-  diff: "PR-Agent gives its findings no severity, so Blocking findings only submits no review for a Diff Review. Choose Any finding to get a verdict from the findings it keeps as active.",
+  dynamic: "Blocking means a P0 finding.",
+  diff: "A Diff Review has no severities, so Blocking findings posts nothing.",
 };
 
 export const VERDICT_COMMON_NOTE =
-  "After a successful review Code Reviewer submits the review as itself on the commit that was reviewed, with a link to the review comment. A failed, cancelled or replaced run submits none, and a new push replaces the earlier verdict. A review that is not whole (it stopped at a limit, dropped a finding or left files out) submits none and leaves an earlier request for changes in place; only Off dismisses it. The verdict comes from the model and can be wrong or manipulated, and GitHub does not document that the approval of an App counts towards required approvals: do not rely on it for branch protection, and require a code owner review where a person must approve.";
+  "Posted as a pull request review by Code Reviewer after a complete review. Do not rely on it for branch protection.";
 
 function isMode(value: string): value is ReviewVerdictMode {
   return REVIEW_VERDICT_MODES.some((mode) => mode === value);
@@ -50,7 +49,6 @@ export function ReviewVerdictFieldset({
   value,
   kind,
   defaultMode,
-  source,
   error,
   disabled,
   onChange,
@@ -59,8 +57,6 @@ export function ReviewVerdictFieldset({
   /** The review kind selected in the form: the note says what blocking means for it. */
   kind: ProjectReviewKind;
   defaultMode: ReviewVerdictMode;
-  /** Whether the saved value is the project's own or the default. */
-  source: "built_in" | "project";
   error: string | undefined;
   disabled: boolean;
   onChange: (mode: ReviewVerdictMode) => void;
@@ -69,7 +65,6 @@ export function ReviewVerdictFieldset({
   const errorId = `${ids}-error`;
   return (
     <SettingsCard title="Review verdict" disabled={disabled}>
-      <p className="text-sm text-muted-foreground">{VERDICT_COMMON_NOTE}</p>
       <RadioGroup
         value={value}
         onValueChange={(next) => {
@@ -122,10 +117,7 @@ export function ReviewVerdictFieldset({
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        {VERDICT_KIND_NOTES[kind]}
-      </p>
-      <p className="text-sm text-muted-foreground">
-        {source === "project" ? "Set for this project." : "Built-in value."}
+        {VERDICT_KIND_NOTES[kind]} {VERDICT_COMMON_NOTE}
       </p>
     </SettingsCard>
   );

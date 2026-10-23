@@ -45,7 +45,7 @@ export function ReviewFieldset({
     });
   const instructionsLength = state.values.extraInstructions.length;
   return (
-    <SettingsCard title="Review" disabled={disabled}>
+    <SettingsCard title="Review options" disabled={disabled}>
       <SettingsTextField
         name="maxFindings"
         label="Most findings per review"

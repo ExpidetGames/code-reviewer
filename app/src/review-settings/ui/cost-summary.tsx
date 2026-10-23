@@ -9,17 +9,11 @@
 // refused for it too). Model names are typed by people, so they are rendered as text like everything
 // else. #174 moves the summary into the Model card, right below the fields it depends on.
 import { Alert } from "../../components/ui/alert.tsx";
-import {
-  REVIEW_COST_LIMIT_USD,
-  type ModelCostEstimate,
-  type ReviewCostGuard,
-} from "../cost.ts";
+import type { ModelCostEstimate, ReviewCostGuard } from "../cost.ts";
 
 export function formatUsd(value: number): string {
   return `$${value.toFixed(value < 0.01 ? 4 : 3)}`;
 }
-
-const LIMIT_TEXT = `$${REVIEW_COST_LIMIT_USD.toFixed(2)}`;
 
 function Estimate({
   label,
@@ -60,6 +54,7 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
         </p>
       </div>
     );
+  const LIMIT_TEXT = `$${cost.limitUsd.toFixed(2)}`;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4 text-sm">
       <p>

@@ -7,6 +7,12 @@
 
 export const MODEL_CHOICE_HEADING = "Quality";
 
+/** The one provider of a workspace on the operator's key (#656): the first dropdown names whose models these are, not a vendor. */
+export const MODEL_CHOICE_PROVIDER = "Our models";
+
+/** The option that takes the choice back, so the default of the instance applies. */
+export const MODEL_CHOICE_DEFAULT_OPTION = "Default of this instance";
+
 /** The one sentence under the heading. */
 export const MODEL_CHOICE_HINT =
   "How reviews of this kind are done. This instance takes care of the rest.";

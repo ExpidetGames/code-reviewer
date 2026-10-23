@@ -25,16 +25,6 @@ import {
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 
-/**
- * The pick list under a model field (#532). The same words are its visible placeholder and its accessible name, so a
- * person who hears the name and a person who sees the text get the same one, and each field has its own.
- */
-export const SUGGESTED_MODEL_PICK = {
-  model: "Pick a suggested model",
-  fallbackModel: "Pick a suggested fallback model",
-  dynamicModel: "Pick a suggested Dynamic Review model",
-} as const;
-
 const GENERIC_ISSUE = "This value is not valid.";
 const MODEL_FIELDS: readonly string[] = [
   "model",
