@@ -68,9 +68,7 @@ test.describe("the review kind of a project", () => {
     const dynamic = page.getByRole("radio", { name: "Dynamic Review" });
     await expect(diff).toBeChecked();
     // The instance has not turned Dynamic Review on: the option says so, before anything is chosen.
-    await expect(
-      page.getByText("Not enabled on this instance yet."),
-    ).toBeVisible();
+    await expect(page.getByText("Not enabled yet.")).toBeVisible();
 
     // An untouched form sends nothing.
     await page.getByRole("button", { name: "Save review settings" }).click();
@@ -81,7 +79,9 @@ test.describe("the review kind of a project", () => {
     await page.keyboard.press("ArrowDown", { delay: 200 });
     await expect(dynamic).toBeChecked();
     await expect(
-      page.getByText(/Reviews of this project fail until an instance admin/),
+      page.getByText(
+        /Reviews of this project fail until a code-review.com admin/,
+      ),
     ).toBeVisible();
     // The Diff-only controls are gone, the shipped skill is shown read-only.
     await openSection(page, "Limits");

@@ -134,7 +134,7 @@ export function cleanTexts(): Surface[] {
     },
     {
       name: "the words of the Plan page",
-      text: `Not included in your plan · Manage plan · Model access is provided by this instance`,
+      text: `Not included in your plan · Manage plan · Model access is provided and billed via code-review.com`,
     },
   ];
 }

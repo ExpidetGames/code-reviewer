@@ -113,7 +113,7 @@ describe("the review kind in the list", () => {
           run({
             reviewKind: "dynamic",
             status: "failed",
-            problem: "Dynamic Review is not switched on for this instance yet.",
+            problem: "Dynamic Review is not switched on yet.",
           }),
         ])}
         filter={{}}

@@ -103,22 +103,22 @@ const ENTRIES = {
   quick: {
     name: "Quick look",
     description: "Fast passes over small changes.",
-    model: "entryproof/m-alpha-z1y2",
+    model: "acme-labs/entryproof-m-alpha-z1y2",
   },
   thorough: {
     name: "Thorough",
     description: "Careful passes over large changes.",
-    model: "entryproof/m-beta-z1y2",
+    model: "acme-labs/entryproof-m-beta-z1y2",
   },
   explorer: {
     name: "Explorer",
     description: "Explores the repository around a change.",
-    model: "entryproof/m-gamma-z1y2",
+    model: "acme-labs/entryproof-m-gamma-z1y2",
   },
   detective: {
     name: "Detective",
     description: "Follows every call to the end.",
-    model: "entryproof/m-delta-z1y2",
+    model: "acme-labs/entryproof-m-delta-z1y2",
   },
 } as const;
 const ENTRY_MODEL_IDS: string[] = Object.values(ENTRIES).map(
@@ -582,15 +582,22 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       page.getByRole("heading", { level: 1, name: REPO_A.fullName }),
     ).toBeVisible();
 
-    // The LLM section of a workspace on the operator's key: one provider, which names no vendor, and the entries of the
-    // catalog that serve Diff Review by the names the operator gave them, in the order of the catalog, and no Dynamic entry.
+    // The LLM section of a workspace on the operator's key: the provider dropdown names the maker of the models (never the
+    // product), then the entries of that provider that serve Diff Review by the names the operator gave them, in the order of
+    // the catalog, and no Dynamic entry. Who bills is a note, not a provider.
     await openSection(page, "LLM");
-    await expect(
-      page.getByRole("combobox", { name: "Provider", exact: true }),
-    ).toHaveText(PRODUCT_NAME);
+    const providerDropdown = page.getByRole("combobox", {
+      name: "Provider",
+      exact: true,
+    });
+    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toBeVisible();
+    await providerDropdown.click();
+    await expect(page.getByRole("option")).toHaveCount(2);
+    await page.getByRole("option", { name: "Acme Labs" }).click();
+    await expect(providerDropdown).toHaveText("Acme Labs");
     const diffModel = page.getByRole("combobox", { name: "Model" });
     await diffModel.click();
-    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("option")).toHaveCount(2);
     await expect(
       page.getByRole("option", { name: ENTRIES.quick.name }),
     ).toBeVisible();
@@ -606,8 +613,9 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await openSection(page, "Review");
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
     await openSection(page, "LLM");
+    await chooseOption(page, "Provider", "Acme Labs");
     await page.getByRole("combobox", { name: "Model" }).click();
-    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("option")).toHaveCount(2);
     await page.keyboard.press("Escape");
     await chooseOption(page, "Model", /^Detective/);
     await page.getByRole("button", { name: "Save review settings" }).click();
@@ -865,7 +873,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expect(member.getByText("2 of 2, limit reached")).toBeVisible();
     await expect(
       member.getByText(
-        "The models for your reviews are provided by this instance.",
+        "The models for your reviews are provided and billed via code-review.com.",
       ),
     ).toBeVisible();
     // Two runs of four runs' worth of cost: exactly half, and the Dynamic line is there too.
@@ -1031,7 +1039,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await page.goto(`/w/${slugB}/settings/plan`);
     await expect(
       page.getByText(
-        "The models for your reviews are provided by this instance.",
+        "The models for your reviews are provided and billed via code-review.com.",
       ),
     ).toHaveCount(0);
     await expect(page.getByText("2 used, no limit").first()).toBeVisible();

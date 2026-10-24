@@ -41,7 +41,7 @@ export function costLimitHint(
   const note = diff
     ? " For a Diff Review the limit is checked between model requests, so a single request can exceed it."
     : "";
-  const instance = " The instance may enforce a lower limit.";
+  const instance = " code-review.com may enforce a lower limit.";
   if (mode === "global")
     return `${start}${note}${instance} Leave empty for no limit of your own.`;
   if (inherited === null || inherited === undefined)

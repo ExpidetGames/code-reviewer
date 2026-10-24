@@ -2,8 +2,9 @@
 
 // The model catalog as far as the selection settings of a project need it (#430, ADR 0005, 2.7): which entries a
 // workspace on the operator's key may pick from, and whether one may be chosen for a review kind. Everything here
-// works on `MemberCatalogEntry` and on the status and kinds of an entry: the provider and the model id of an entry
-// are never read, so no view built from here can carry them. The review settings read it only for a workspace on
+// works on `MemberCatalogEntry` and on the status and kinds of an entry: the provider id and the model id of an entry
+// are never read, so no view built from here can carry them; the label of the model provider (#675) is all of the
+// provider a view carries. The review settings read it only for a workspace on
 // the operator's key; a workspace on its own key never touches the catalog.
 import type { CatalogStatus } from "../model-catalog/entries.ts";
 import type { MemberCatalogEntry } from "../model-catalog/member.ts";
@@ -80,6 +81,8 @@ export type CatalogChoice = {
   id: string;
   name: string;
   description: string | null;
+  /** The name of the model provider, for the provider dropdown (#675). */
+  providerLabel: string;
   available: boolean;
   reason: CatalogChoiceReason | null;
 };
@@ -109,6 +112,7 @@ export async function catalogChoices(
         id: entry.id,
         name: entry.name,
         description: entry.description,
+        providerLabel: entry.providerLabel,
       };
       if (entry.status === "released") {
         const allowed = await source.allowed(entry.id);

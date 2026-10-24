@@ -50,7 +50,7 @@ export const TOP_UP_HEADING = "Add credit";
 export const TOP_UP_EXPLAINER =
   "Top up between $10 and $500. There is no automatic recharge. Credit is not refunded by us.";
 export const MANUAL_TOP_UP_TEXT =
-  "Credit for this workspace is added by the operator of this instance. Ask your operator to add credit.";
+  "Credit for this workspace is added by the operator. Ask your operator to add credit.";
 export const PRESET_LABEL = "Amount";
 export const CUSTOM_AMOUNT_LABEL = "Other amount (USD)";
 export const BUSINESS_CONFIRMATION_LABEL =

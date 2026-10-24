@@ -56,8 +56,7 @@ function EmailCard({ account }: { account: AccountView }) {
             <span className="font-mono">{account.emailConflict}</span> as your
             verified address, but another account here has it already. Nothing
             was taken over or merged, and your account keeps its placeholder
-            address. Ask an admin of this instance to sort out which of the two
-            accounts you use.
+            address. Ask an admin to sort out which of the two accounts you use.
           </HelpDisclosure>
         ) : account.placeholder ? (
           <HelpDisclosure label="Where this address comes from">
@@ -94,7 +93,7 @@ function GithubCard({
         {identity === null ? (
           <LinkPanel
             available={githubSignInAvailable}
-            unavailableReason="Signing in with GitHub is not set up on this instance."
+            unavailableReason="Signing in with GitHub is not set up here."
             merge={isInstanceAdmin && githubSignInAvailable}
           />
         ) : (

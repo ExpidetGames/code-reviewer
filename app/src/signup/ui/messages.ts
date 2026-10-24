@@ -21,13 +21,12 @@ import {
 
 const FAILURE_COPY: Record<string, string> = {
   signup_closed:
-    "Signing up is not open on this instance right now. Ask the person who runs it.",
+    "Signing up is not open right now. Ask the person who runs it.",
   sign_up_disabled:
-    "Signing up with an email address is switched off on this instance. Use the sign-in on the login page.",
+    "Signing up with an email address is switched off. Use the sign-in on the login page.",
   rate_limited: TOO_MANY_ATTEMPTS,
   unavailable: UNAVAILABLE,
-  not_available:
-    "Email is not set up on this instance, so there is nothing to confirm.",
+  not_available: "Email is not set up here, so there is nothing to confirm.",
   invalid_token:
     "The link or the password is not correct. Use the password you chose when you signed up with this link; a link from somebody else's sign-up cannot be completed.",
   token_expired: "This link has expired. Ask for a new one.",

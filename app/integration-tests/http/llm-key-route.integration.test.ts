@@ -646,7 +646,7 @@ describe("a workspace whose key mode is managed (#276)", () => {
 
     for (const html of pages) {
       expect(html).toContain(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       );
       expect(html).not.toContain("<form");
       expect(html).not.toContain("<input");

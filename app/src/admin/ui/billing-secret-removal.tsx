@@ -31,7 +31,7 @@ export function BillingSecretRemoval({
         <DangerZone
           key={which}
           title={`Remove the ${what}`}
-          description={`Only when this instance should no longer use this ${what}.`}
+          description={`Only when code-review.com should no longer use this ${what}.`}
           actionLabel={`Remove the ${what}`}
           confirmTitle={`Remove the ${what}?`}
           confirmDescription="Billing stays off until a new one is saved."

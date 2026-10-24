@@ -192,7 +192,7 @@ describe("the Projects page", () => {
 
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
     expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
-    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).toContain("Ask your admin");
     expect(container.textContent).not.toMatch(
       /GITHUB_APP|LLM_|GitHub App not configured/,
     );

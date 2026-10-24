@@ -59,6 +59,8 @@ const PROVIDERS = [
         "generated from the runner API contract, whose `KnownLlmProvider` lists the slugs of this release (#424)",
       "app/src/copy/member-copy-scan.ts":
         "the list of vendor words that copy for a member must never say, the provider's name among them",
+      "app/src/model-catalog/provider-label.ts":
+        "the display names of the makers a model id can start with, which a member reads as the provider of a catalog entry (#675)",
       "app/src/ci/opencode-providers/derive.ts":
         "the table of the SDKs the pinned engine bundles and the address each one defaults to, by package name (#548)",
       "app/src/models-dev/wire.ts":

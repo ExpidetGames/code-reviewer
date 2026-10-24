@@ -32,9 +32,9 @@ export function BillingPage({
         Billing is off until you switch it on here, and while it is off nothing
         of it runs: no page for workspaces, no route and no call to a payment
         provider. The Stripe API key and the webhook secret are stored encrypted
-        on this server with the key of this instance (APP_SECRET), so anyone who
-        holds both can decrypt them. Only an instance admin can see or change
-        this page.
+        on this server with the key of this server (APP_SECRET), so anyone who
+        holds both can decrypt them. Only a code-review.com admin can see or
+        change this page.
       </HelpDisclosure>
       <BillingSwitchCard billing={billing} notice={notice} api={api} />
       <BillingJournalCheckCard billing={billing} />

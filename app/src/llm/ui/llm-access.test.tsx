@@ -324,7 +324,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
   it("says that the operator can decrypt the key", () => {
     const { container } = section();
 
-    expect(container.textContent).toMatch(/operator of this instance/);
+    expect(container.textContent).toMatch(/operator of this server/);
     expect(container.textContent).toMatch(/technically decrypt/);
   });
 });
@@ -439,7 +439,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
       screen.queryByRole("button", { name: /save key|test key|remove key/i }),
     ).toBeNull();
     expect(container.textContent).toContain(
-      "The LLM for this workspace is provided by this instance.",
+      "The LLM for this workspace is billed via code-review.com.",
     );
     expect(container.textContent).toContain("does not use a key of its own");
     // The key of the workspace is stored and ignored: nothing of it is shown while it is not used.
@@ -459,12 +459,12 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
     });
 
     expect(member.container.textContent).toContain(
-      "The LLM for this workspace is provided by this instance.",
+      "The LLM for this workspace is billed via code-review.com.",
     );
     expect(member.container.textContent).not.toContain(
       "Only an Admin or an Owner",
     );
-    expect(adminText).toContain("provided by this instance");
+    expect(adminText).toContain("billed via code-review.com");
     expect(screen.queryByLabelText("API key")).toBeNull();
   });
 
@@ -483,7 +483,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
 
         expect(screen.queryByLabelText("API key")).toBeNull();
         expect(container.textContent).toContain(
-          "The LLM for this workspace is provided by this instance.",
+          "The LLM for this workspace is billed via code-review.com.",
         );
         expect(container.textContent).toContain(
           "not available at the moment, so reviews cannot run",
@@ -498,18 +498,18 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
 
     expect(screen.getByLabelText("API key")).toBeTruthy();
     expect(document.body.textContent).not.toContain(
-      "provided by this instance",
+      "billed via code-review.com",
     );
   });
 
   // #276-T09
-  it("does not ask a workspace for a key it cannot use: the hint says the instance has no access to give, and does not link to the form", () => {
+  it("does not ask a workspace for a key it cannot use: the hint says code-review.com has no access to give, and does not link to the form", () => {
     const { container } = render(
       <LlmAccessNotice workspaceSlug="acme" summary={UNAVAILABLE} canManage />,
     );
 
     expect(screen.getByText("LLM is not available")).toBeTruthy();
-    expect(container.textContent).toContain("administrator of this instance");
+    expect(container.textContent).toContain("Contact the administrator.");
     expect(screen.queryByRole("link")).toBeNull();
     expect(container.textContent).not.toMatch(/Add a key|add one/);
   });
@@ -628,7 +628,7 @@ describe("one card per provider (#426)", () => {
       });
 
       expect(container.textContent).toContain(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       );
       expect(screen.queryAllByRole("form")).toHaveLength(0);
       expect(screen.queryByRole("region", { name: "OpenRouter" })).toBeNull();

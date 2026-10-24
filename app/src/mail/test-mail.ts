@@ -47,12 +47,12 @@ export function testMessage(to: string, baseUrl: string): MailMessage {
   const text = [
     "This is a test message from code-review.com.",
     "",
-    `It was sent by the instance at ${baseUrl} to check the mail server settings.`,
+    `It was sent by code-review.com at ${baseUrl} to check the mail server settings.`,
     "If you can read it, the settings work. Nobody needs to answer.",
   ].join("\n");
   const html = [
     "<p>This is a test message from code-review.com.</p>",
-    `<p>It was sent by the instance at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
+    `<p>It was sent by code-review.com at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
   ].join("\n");
   return { to, subject: "Test mail from code-review.com", text, html };
 }

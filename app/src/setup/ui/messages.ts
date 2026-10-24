@@ -36,7 +36,7 @@ const FAILURE_COPY: Record<string, string> = {
   setup_unavailable: `This app has not printed a setup code. ${RESTART}`,
   setup_session_required: `Enter the setup code first. If you did, the session was lost: reload the page.`,
   setup_session_expired: `The setup session ended after 30 minutes. ${RESTART}`,
-  already_set_up: "This instance is already set up. Reload the page.",
+  already_set_up: "Setup is already done. Reload the page.",
   email_in_use: "An account with this email address exists already.",
   admin_unusable:
     "This email address or password cannot be used to sign in. Nothing was created: change them and try again.",
@@ -96,7 +96,7 @@ export function describeSetupIssue(field: string, code: string): string {
  * is `PASSWORD_RULE_HINT` in `auth/password-policy.ts`; this only says why there are no other rules.
  */
 export const PASSWORD_REASON =
-  "There are no other rules: a long passphrase of a few unrelated words is the strongest choice. The same rule applies to every account on this instance.";
+  "There are no other rules: a long passphrase of a few unrelated words is the strongest choice. The same rule applies to every account here.";
 
 /**
  * The one line under a rule that names emails or domains (#172). The shared warning
@@ -104,7 +104,7 @@ export const PASSWORD_REASON =
  * only carries what the person has to know without opening it.
  */
 export const FAIL_CLOSED_LINE =
-  "Until the instance can verify addresses, nobody except you can sign up.";
+  "Until addresses can be verified, nobody except you can sign up.";
 
 /** The step of the wizard (1 to 3) a field belongs to, to show the problem where it can be fixed. */
 export function stepOfField(field: string): 1 | 2 | 3 {

@@ -352,7 +352,7 @@ test.describe("a person who signs up on their own", () => {
 
     await expect(page).toHaveURL(/\/no-access$/);
     await expect(
-      page.getByText("Ask an admin of this instance for an invitation."),
+      page.getByText("Ask an admin for an invitation."),
     ).toBeVisible();
     await expect(
       page.getByRole("form", { name: "Create a workspace" }),

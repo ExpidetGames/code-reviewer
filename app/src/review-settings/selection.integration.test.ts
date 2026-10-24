@@ -510,6 +510,8 @@ describe("the views of a workspace on the operator's key", () => {
       id: alpha.id,
       name: "Alpha",
       description: alpha.description,
+      // The maker in the model id of the harness's entries, read as the provider (#675); the id itself is not there.
+      providerLabel: "Sentinel",
       available: true,
       reason: null,
     });

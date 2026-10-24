@@ -47,7 +47,7 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
       <AlertDescription className="flex flex-col gap-3">
         <span>
           {delivery.reason === "no_mail_server"
-            ? `This instance cannot send mail. Send this link to ${shown.email} yourself.`
+            ? `code-review.com cannot send mail. Send this link to ${shown.email} yourself.`
             : `The mail server did not accept the message. Send this link to ${shown.email} yourself.`}{" "}
           {INVITATION_LINK_LIFETIME}
         </span>

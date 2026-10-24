@@ -44,14 +44,14 @@ export function NoAccessContent({
             <CreateWorkspaceForm {...withApi} />
           ) : (
             <p className="text-sm text-muted-foreground text-pretty">
-              Ask an admin of this instance for an invitation.
+              Ask an admin for an invitation.
             </p>
           )}
         </CardContent>
       </Card>
       {isInstanceAdmin ? (
         <p className="text-sm text-muted-foreground">
-          You run this instance:{" "}
+          You run code-review.com:{" "}
           <Link href="/admin" className="underline underline-offset-4">
             open the admin portal
           </Link>

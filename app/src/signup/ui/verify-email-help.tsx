@@ -37,7 +37,7 @@ export function VerifyEmailHelp({
       </HelpDisclosure>
       {isAdmin ? (
         <p className="text-sm text-muted-foreground">
-          You run this instance:{" "}
+          You run code-review.com:{" "}
           <Link href="/admin" className="underline underline-offset-4">
             open the admin portal
           </Link>

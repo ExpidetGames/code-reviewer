@@ -49,7 +49,7 @@ test.describe("the billing page in the admin portal", () => {
       page.getByText(/Each workspace chooses its key mode/),
     ).toBeVisible();
     await expect(
-      page.getByText(/This instance has 1 workspace\./),
+      page.getByText(/code-review.com has 1 workspace\./),
     ).toBeVisible();
 
     // Stripe, with the credentials: they are write-only.

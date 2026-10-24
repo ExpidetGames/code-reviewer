@@ -129,7 +129,7 @@ describe("the plan page of a workspace with limits", () => {
 
     expect(
       screen.getByText(
-        "The models for your reviews are provided by this instance.",
+        "The models for your reviews are provided and billed via code-review.com.",
       ),
     ).toBeTruthy();
   });
@@ -137,7 +137,7 @@ describe("the plan page of a workspace with limits", () => {
   it("does not say that for a workspace on its own key", () => {
     page(limited());
 
-    expect(screen.queryByText(/provided by this instance/)).toBeNull();
+    expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
   });
 
   // #282-T06
@@ -204,7 +204,7 @@ describe("the cost limit on the plan page", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText(/not exact/i)).toBeTruthy();
-    expect(screen.queryByText(/provided by this instance/)).toBeNull();
+    expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
     expect(container.innerHTML).not.toMatch(MONEY);
   });
 
