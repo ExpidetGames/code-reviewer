@@ -13,6 +13,7 @@ import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
+  addGithubOrgMember,
   setGithubAppSetupUrl,
   type GithubAccount,
 } from "../helpers/github-fake";
@@ -54,6 +55,11 @@ test.describe("the review defaults of a workspace", () => {
     await addGithubInstallation(request, { id: 9850001, account: ORG }, [
       { id: 9860001, fullName: REPOSITORY },
     ]);
+    await addGithubOrgMember(request, {
+      org: ORG.login,
+      login: account.login,
+      role: "admin",
+    });
     await setGithubAppSetupUrl(
       request,
       `${e2eEnv.multiAppUrl}/github/connected`,
@@ -100,7 +106,9 @@ test.describe("the review defaults of a workspace", () => {
   test("the Review defaults page has the sections of a project, with the kind and verdict as defaults and no skill", async () => {
     await openProject();
     await expect(diff()).toBeChecked();
-    await expect(page.getByText("Global default")).toHaveCount(0);
+    await expect(page.getByText("Global default", { exact: true })).toHaveCount(
+      0,
+    );
 
     await openDefaults();
     await expect(page.getByRole("tab").filter({ visible: true })).toHaveText([
@@ -158,7 +166,9 @@ test.describe("the review defaults of a workspace", () => {
   test("a project that sets nothing follows them and says so; its own model wins, and Reset to default returns to the workspace's", async () => {
     await openProject();
     await expect(dynamic()).toBeChecked();
-    await expect(page.getByText("Global default").first()).toBeVisible();
+    await expect(
+      page.getByText("Global default", { exact: true }).first(),
+    ).toBeVisible();
     await expect(
       page.getByRole("radio", { name: /Any finding/ }),
     ).toBeChecked();
@@ -168,7 +178,9 @@ test.describe("the review defaults of a workspace", () => {
     );
 
     await chooseOption(page, "Model", SHIPPED_MODEL);
-    await expect(page.getByText("Set for this project")).toBeVisible();
+    await expect(
+      page.getByText("Set for this project", { exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await page.reload();
@@ -193,7 +205,9 @@ test.describe("the review defaults of a workspace", () => {
     await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
       WORKSPACE_MODEL,
     );
-    await expect(page.getByText("Set for this project")).toHaveCount(0);
+    await expect(
+      page.getByText("Set for this project", { exact: true }),
+    ).toHaveCount(0);
   });
 
   // #676-T02, #676-T08
@@ -209,6 +223,8 @@ test.describe("the review defaults of a workspace", () => {
 
     await page.reload();
     await expect(diff()).toBeChecked();
-    await expect(page.getByText("Global default")).toHaveCount(1);
+    await expect(page.getByText("Global default", { exact: true })).toHaveCount(
+      1,
+    );
   });
 });
