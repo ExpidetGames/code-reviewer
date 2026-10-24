@@ -8,6 +8,7 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PLAN_MANAGED_UNBILLED } from "../../copy/plan-usage.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import type { PlanView } from "../plan-view.ts";
 import type { PlanApi } from "./api.ts";
@@ -29,6 +30,7 @@ function limited(overrides: Partial<Limited> = {}): Limited {
     planLabel: "Team",
     managed: false,
     suspended: false,
+    billed: true,
     periodStart: "2026-10-01T00:00:00.000Z",
     runs: {
       diff: { used: 3, limit: 5 },
@@ -129,15 +131,23 @@ describe("the plan page of a workspace with limits", () => {
 
     expect(
       screen.getByText(
-        "The models for your reviews are provided by this instance.",
+        "The models for your reviews are provided and billed via code-review.com.",
       ),
     ).toBeTruthy();
+  });
+
+  // #675-F5
+  it("does not say it is billed while billing is off", () => {
+    page(limited({ managed: true, billed: false }));
+
+    expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
+    expect(screen.getByText(PLAN_MANAGED_UNBILLED)).toBeTruthy();
   });
 
   it("does not say that for a workspace on its own key", () => {
     page(limited());
 
-    expect(screen.queryByText(/provided by this instance/)).toBeNull();
+    expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
   });
 
   // #282-T06
@@ -204,7 +214,7 @@ describe("the cost limit on the plan page", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText(/not exact/i)).toBeTruthy();
-    expect(screen.queryByText(/provided by this instance/)).toBeNull();
+    expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
     expect(container.innerHTML).not.toMatch(MONEY);
   });
 

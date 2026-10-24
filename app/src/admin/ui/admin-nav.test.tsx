@@ -72,7 +72,7 @@ describe("the sections of the portal", () => {
       "Overview",
       "Approvals",
       "Runs",
-      "Instance",
+      "General",
       "Sign-up",
       "Sign-in",
       "Integrations",
@@ -90,7 +90,7 @@ describe("the sections of the portal", () => {
       links
         .filter((link) => link.getAttribute("aria-current") === "page")
         .map((link) => link.textContent),
-    ).toEqual(["Instance"]);
+    ).toEqual(["General"]);
   });
 
   // #504-T11
@@ -158,7 +158,7 @@ describe("the sections on a narrow screen", () => {
       "Overview",
       "Approvals",
       "Runs",
-      "Instance",
+      "General",
       "Sign-up",
       "Sign-in",
       "Integrations",

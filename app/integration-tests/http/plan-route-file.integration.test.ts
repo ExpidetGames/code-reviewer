@@ -107,6 +107,7 @@ describe("the plan route file", () => {
       planLabel: "Team",
       managed: true,
       suspended: false,
+      billed: false,
       periodStart: "2026-10-01T00:00:00.000Z",
       runs: {
         diff: { used: 3, limit: 5 },

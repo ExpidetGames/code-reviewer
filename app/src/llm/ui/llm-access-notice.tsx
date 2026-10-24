@@ -32,9 +32,8 @@ export function llmAccessAttention({
       title: "LLM is not available",
       detail: (
         <>
-          Reviews of this workspace cannot run right now: this instance cannot
-          set up its LLM at the moment. Contact the administrator of this
-          instance.
+          Reviews of this workspace cannot run right now: code-review.com cannot
+          set up the LLM at the moment. Contact the administrator.
         </>
       ),
     };

@@ -267,6 +267,7 @@ export function SettingsForm({
   dynamicReviewEnabled = false,
   keyedProviders,
   nativeCatalog,
+  billingOn = true,
   canConfirmProviderAddress = false,
   providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
@@ -298,6 +299,8 @@ export function SettingsForm({
    * then offers those providers next to the registry's and the model is picked from a list. The Diff provider is not affected.
    */
   nativeCatalog?: NativeFormData;
+  /** Billing is on (#675): a workspace on the operator's key is told its reviews are billed via code-review.com. Unknown counts as on. */
+  billingOn?: boolean;
   /**
    * The person may manage the workspace's LLM key (`manage_llm_key`, Owner and Admin): only they confirm a new address of the
    * project's catalog provider (#588); the route refuses anyone else. Unknown counts as no.
@@ -794,6 +797,7 @@ export function SettingsForm({
         workspaceSlug={workspaceSlug}
         disabled={disabled}
         managedFieldName={field}
+        billingOn={billingOn}
         managed={{
           choices: model.catalog?.choices[kind] ?? [],
           value: state.dynamic.catalogEntries[kind],

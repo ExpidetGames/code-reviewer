@@ -444,7 +444,7 @@ em,i,cite{font-style:normal}
 <tr><td><strong>Owner</strong></td><td>Everything an Admin can, plus: change roles, rename the workspace, delete the workspace (Settings, Advanced), invite any role, remove anyone.</td></tr>
 <tr><td><strong>Instance admin</strong></td><td>Sees the Admin entry in the user menu and the whole <code>/admin</code> area. For everybody else <code>/admin</code> is a 404.</td></tr>
 </tbody></table>
-<div class="prose" style="margin-top:24px"><p>Two instance settings change what is shown: <strong>single or multi tenant</strong> (one workspace, or people can create more) and <strong>billing on or off</strong> (Billing replaces the Plan tab, a balance banner appears, runs show a price). A workspace can also use <strong>our models</strong> (managed key) or <strong>its own provider key</strong>; managed workspaces never see provider or model names.</p></div>
+<div class="prose" style="margin-top:24px"><p>Two instance settings change what is shown: <strong>single or multi tenant</strong> (one workspace, or people can create more) and <strong>billing on or off</strong> (Billing replaces the Plan tab, a balance banner appears, runs show a price). A workspace can also use <strong>our models</strong> (managed key) or <strong>its own provider key</strong>; managed workspaces pick the name of a model provider (Anthropic, OpenAI, ...) and then an option by the name the operator gave it, never a model id; a note says the reviews are billed via code-review.com while billing is on, and the Default option stands for the code-review.com default.</p></div>
 </section>
 
 <section class="part" id="design-system">

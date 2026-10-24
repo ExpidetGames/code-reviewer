@@ -86,7 +86,7 @@ describe("the catalog providers on the LLM access page", () => {
 
     expect(
       screen.getByText(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText("Other providers")).toBeNull();

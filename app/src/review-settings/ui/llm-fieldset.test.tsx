@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
-// The LLM section of a workspace on the operator's key (#433, #656, ADR 0005): one provider, the product name, and a
-// dropdown of the entries of the catalog by the names the operator gave them. What a member may see and what a request
-// may carry: never a provider or a model id. Ported from the chooser tests of before the dropdowns (#433-T02, T03, T04,
-// T06), with the same expectations.
+// The LLM section of a workspace on the operator's key (#433, #656, #675, ADR 0005): a provider dropdown that names the
+// model providers of the catalog (Anthropic, OpenAI, ...; never the product name), then a dropdown of the entries of
+// that provider by the names the operator gave them. What a member may see and what a request may carry: the name of the
+// provider, never a provider id or a model id. Ported from the chooser tests of before the dropdowns (#433-T02, T03,
+// T04, T06), with the same expectations.
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,9 +14,11 @@ import {
   MODEL_CHOICE_DEFAULT_OPTION,
   MODEL_CHOICE_LOCKED_BADGE,
   MODEL_CHOICE_MANAGE_PLAN,
+  MODEL_CHOICE_NONE_CHOSEN,
   MODEL_CHOICE_NONE_OFFERED,
+  MODEL_CHOICE_UNAVAILABLE_OPTION,
+  MODEL_CHOICE_BILLED_NOTE,
   MODEL_CHOICE_PER_PROJECT_NOTE,
-  MODEL_CHOICE_PROVIDER,
   MODEL_CHOICE_RETIRED_BADGE,
 } from "../../copy/model-choice.ts";
 import {
@@ -42,8 +45,19 @@ const FALLBACK_REMOVED =
 type User = ReturnType<typeof userEvent.setup>;
 
 const modelDropdown = () => screen.getByLabelText("Model");
+const providerDropdown = () => screen.getByLabelText("Provider");
 const labelOf = (name: string, note?: string) =>
   note === undefined ? name : `${name} (${note})`;
+
+/** Opens the provider dropdown and names its options. */
+async function providersOffered(user: User): Promise<string[]> {
+  await user.click(providerDropdown());
+  const names = screen
+    .getAllByRole("option")
+    .map((option) => option.textContent ?? "");
+  await user.keyboard("{Escape}");
+  return names;
+}
 
 /** Opens the LLM section, then the model dropdown, and names its options. */
 async function offered(user: User): Promise<string[]> {
@@ -65,6 +79,7 @@ async function renderManaged(
   user: User,
   initial = managedModel(),
   section: SectionName | null = "LLM",
+  billingOn = true,
 ) {
   const { api, save } = fakeApi();
   render(
@@ -72,6 +87,7 @@ async function renderManaged(
       workspaceSlug="acme"
       initial={initial}
       dynamicReviewEnabled
+      billingOn={billingOn}
       api={api}
     />,
   );
@@ -80,34 +96,57 @@ async function renderManaged(
 }
 
 describe("the catalog dropdown of a workspace on the operator's key", () => {
-  // #433-T02
-  it("names the product as the one provider and lists the entries that serve Diff Review in the order of the view", async () => {
+  // #675-T01
+  it("names the model providers of the entries that serve Diff Review, and never the product, next to the default option", async () => {
     const user = userEvent.setup();
     await renderManaged(user);
 
-    expect(screen.getByLabelText("Provider").textContent).toBe(
-      MODEL_CHOICE_PROVIDER,
-    );
-    expect(await offered(user)).toEqual([
+    expect(await providersOffered(user)).toEqual([
       MODEL_CHOICE_DEFAULT_OPTION,
-      "Quick look",
+      "Anthropic",
+      "OpenAI",
+    ]);
+    expect(providerDropdown().textContent).not.toMatch(/code-review\.com/i);
+  });
+
+  // #675-T02
+  it("lists only the entries of the chosen provider, in the order of the view", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user);
+
+    await chooseOption(user, providerDropdown(), "OpenAI");
+
+    expect(providerDropdown().textContent).toBe("OpenAI");
+    expect(await offered(user)).toEqual([
       "Thorough",
       labelOf("Premium", MODEL_CHOICE_LOCKED_BADGE),
     ]);
   });
 
   // #433-T02
-  it("lists the entries that serve Dynamic Review once that kind is chosen", async () => {
+  it("lists the providers and the entries that serve Dynamic Review once that kind is chosen", async () => {
     const user = userEvent.setup();
     await renderManaged(user);
 
     await chooseKind(user, "Dynamic Review");
 
-    expect(await offered(user)).toEqual([
+    expect(await providersOffered(user)).toEqual([
       MODEL_CHOICE_DEFAULT_OPTION,
-      "Explorer",
-      "Detective",
+      "Anthropic",
+      "Google",
     ]);
+    await chooseOption(user, providerDropdown(), "Anthropic");
+    expect(await offered(user)).toEqual(["Explorer"]);
+  });
+
+  // #675-T03
+  it("says that the managed key is billed via code-review.com, in a note and not as a provider", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user);
+
+    expect(MODEL_CHOICE_BILLED_NOTE).toBe("Billed via code-review.com");
+    expect(screen.getByText(MODEL_CHOICE_BILLED_NOTE)).toBeTruthy();
+    expect(providerDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
   });
 
   // #433-T02
@@ -117,12 +156,14 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
 
     expect(screen.getByText(MODEL_CHOICE_PER_PROJECT_NOTE)).toBeTruthy();
     expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByLabelText("Provider")).toBeNull();
+    expect(screen.queryByText(MODEL_CHOICE_BILLED_NOTE)).toBeNull();
     await openSection(user, "Limits");
     expect(screen.getByLabelText("Token budget")).toBeTruthy();
   });
 
   // #433-T02
-  it("says so when the instance offers nothing for the kind", async () => {
+  it("says so when code-review.com offers nothing for the kind", async () => {
     const user = userEvent.setup();
     await renderManaged(
       user,
@@ -130,6 +171,7 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
     );
 
     expect(screen.getByText(MODEL_CHOICE_NONE_OFFERED)).toBeTruthy();
+    expect(screen.queryByLabelText("Provider")).toBeNull();
     expect(screen.queryByLabelText("Model")).toBeNull();
   });
 
@@ -143,9 +185,10 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
 
     expect(modelDropdown().textContent).toBe("Thorough");
 
-    await chooseOption(user, modelDropdown(), MODEL_CHOICE_DEFAULT_OPTION);
+    await chooseOption(user, providerDropdown(), MODEL_CHOICE_DEFAULT_OPTION);
 
-    expect(modelDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
+    expect(providerDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
+    expect(screen.queryByLabelText("Model")).toBeNull();
     await user.click(screen.getByRole("button", SAVE));
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0]?.[0]).toEqual({ catalogEntryDiff: null });
@@ -156,7 +199,23 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
     const user = userEvent.setup();
     await renderManaged(user);
 
-    expect(modelDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
+    expect(providerDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
+    expect(screen.queryByLabelText("Model")).toBeNull();
+  });
+
+  // #675-T02
+  it("chooses the first entry of a provider that can be chosen when the provider changes, and sends only that entry", async () => {
+    const user = userEvent.setup();
+    const { save } = await renderManaged(user);
+
+    await chooseOption(user, providerDropdown(), "OpenAI");
+
+    expect(modelDropdown().textContent).toBe("Thorough");
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      catalogEntryDiff: "ent-thorough",
+    });
   });
 
   // #433-T02
@@ -167,7 +226,7 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
     await user.click(screen.getByRole("button", SAVE));
     expect(save).not.toHaveBeenCalled();
 
-    await chooseOption(user, modelDropdown(), "Quick look");
+    await chooseOption(user, providerDropdown(), "Anthropic");
     await user.click(screen.getByRole("button", SAVE));
 
     expect(save).toHaveBeenCalledTimes(1);
@@ -179,10 +238,11 @@ describe("an entry the plan does not include, or that is retired", () => {
   // #433-T03
   it("shows an entry the plan does not include as locked, with a link to Manage plan, and does not let it be chosen", async () => {
     const user = userEvent.setup();
-    const { save } = await renderManaged(user);
+    await renderManaged(user);
 
     const link = screen.getByRole("link", { name: MODEL_CHOICE_MANAGE_PLAN });
     expect(link.getAttribute("href")).toBe("/w/acme/settings/plan");
+    await chooseOption(user, providerDropdown(), "OpenAI");
     await user.click(modelDropdown());
     const premium = screen.getByRole("option", {
       name: labelOf("Premium", MODEL_CHOICE_LOCKED_BADGE),
@@ -190,15 +250,13 @@ describe("an entry the plan does not include, or that is retired", () => {
     expect(premium.getAttribute("aria-disabled")).toBe("true");
     expect(
       screen
-        .getByRole("option", { name: "Quick look" })
+        .getByRole("option", { name: "Thorough" })
         .getAttribute("aria-disabled"),
     ).toBeNull();
 
     await user.click(premium);
     await user.keyboard("{Escape}");
-    expect(modelDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
-    await user.click(screen.getByRole("button", SAVE));
-    expect(save).not.toHaveBeenCalled();
+    expect(modelDropdown().textContent).toBe("Thorough");
     expect(screen.queryByText(MODEL_CHOICE_CHOSEN_UNAVAILABLE)).toBeNull();
   });
 
@@ -226,6 +284,7 @@ describe("an entry the plan does not include, or that is retired", () => {
     );
 
     expect(screen.getByText(MODEL_CHOICE_CHOSEN_UNAVAILABLE)).toBeTruthy();
+    expect(providerDropdown().textContent).toBe("OpenAI");
     expect(modelDropdown().textContent).toBe(
       labelOf("Premium", MODEL_CHOICE_LOCKED_BADGE),
     );
@@ -248,6 +307,7 @@ describe("an entry the plan does not include, or that is retired", () => {
           id: "ent-old",
           name: "Classic",
           description: null,
+          providerLabel: "Anthropic",
           available: false,
           reason: "CATALOG_ENTRY_NOT_RELEASED",
         },
@@ -278,6 +338,7 @@ describe("an entry the plan does not include, or that is retired", () => {
           id: "ent-old",
           name: "Classic",
           description: null,
+          providerLabel: "Anthropic",
           available: false,
           reason: "CATALOG_ENTRY_NOT_RELEASED",
         },
@@ -287,6 +348,7 @@ describe("an entry the plan does not include, or that is retired", () => {
     };
     await renderManaged(user, managedModel({ choices }));
 
+    await chooseOption(user, providerDropdown(), "Anthropic");
     await user.click(modelDropdown());
     expect(
       screen
@@ -315,9 +377,96 @@ describe("an entry the plan does not include, or that is retired", () => {
   });
 });
 
+describe("a provider whose entries the plan does not include, and a chosen entry that is no longer listed", () => {
+  const LOCKED_ONLY: CatalogChoices = {
+    diff: [
+      ...CHOICES.diff.slice(0, 1),
+      {
+        id: "ent-locked",
+        name: "Locked",
+        description: null,
+        providerLabel: "Lockedlabs",
+        available: false,
+        reason: "CATALOG_ENTRY_NOT_ALLOWED",
+      },
+    ],
+    dynamic: [],
+  };
+
+  // #675-F1
+  it("does not offer a provider none of whose entries can be chosen", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user, managedModel({ choices: LOCKED_ONLY }));
+
+    expect(await providersOffered(user)).toEqual([
+      MODEL_CHOICE_DEFAULT_OPTION,
+      "Anthropic",
+    ]);
+  });
+
+  // #675-F1
+  it("keeps the provider of a chosen entry that the plan no longer includes, and never turns the saved choice into the default", async () => {
+    const user = userEvent.setup();
+    const { save } = await renderManaged(
+      user,
+      managedModel({
+        choices: LOCKED_ONLY,
+        selection: { diff: "ent-locked", dynamic: null },
+      }),
+    );
+
+    expect(providerDropdown().textContent).toBe("Lockedlabs");
+    expect(await providersOffered(user)).toContain("Lockedlabs");
+    await openSection(user, "Review");
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "12");
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save.mock.calls[0]?.[0]).toEqual({ maxFindings: 12 });
+  });
+
+  // #675-F2
+  it("says the chosen model is unavailable, not Default, when the saved entry is not listed any more", async () => {
+    const user = userEvent.setup();
+    const { save } = await renderManaged(
+      user,
+      managedModel({ selection: { diff: "ent-gone", dynamic: null } }),
+    );
+
+    expect(providerDropdown().textContent).toBe(
+      MODEL_CHOICE_UNAVAILABLE_OPTION,
+    );
+    expect(screen.getByText(MODEL_CHOICE_CHOSEN_UNAVAILABLE)).toBeTruthy();
+    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe("what the default option stands for, and the billing note while billing is off", () => {
+  // #675-F5
+  it("says under the default option that the default of code-review.com applies", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user);
+
+    expect(screen.getByText(MODEL_CHOICE_NONE_CHOSEN)).toBeTruthy();
+    await chooseOption(user, providerDropdown(), "OpenAI");
+    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+  });
+
+  // #675-F5
+  it("shows no billing note while billing is off", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user, managedModel(), "LLM", false);
+
+    expect(providerDropdown()).toBeTruthy();
+    expect(screen.queryByText(MODEL_CHOICE_BILLED_NOTE)).toBeNull();
+  });
+});
+
 describe("what a workspace on the operator's key may see and send", () => {
-  // #433-T04
-  it("shows no provider and no model anywhere in the DOM, even when the views carry them", async () => {
+  // #433-T04, #675-T01
+  it("shows no provider id and no model anywhere in the DOM, even when the views carry them", async () => {
     const user = userEvent.setup();
     await renderManaged(user, managedModel({ leak: true, kind: "dynamic" }));
 
@@ -325,13 +474,13 @@ describe("what a workspace on the operator's key may see and send", () => {
     for (const kind of ["Dynamic Review", "Diff Review"] as const) {
       await chooseKind(user, kind);
       // The dropdown is there, so the test cannot pass on an empty page.
-      expect((await offered(user)).length).toBeGreaterThan(1);
+      expect((await providersOffered(user)).length).toBeGreaterThan(1);
       for (const section of sections) {
         await openSection(user, section);
         const html = document.body.innerHTML;
         expect(html).not.toContain(SENTINEL);
         expect(html).not.toContain("sentinel-vendor");
-        expect(html).not.toMatch(/openrouter|anthropic/i);
+        expect(html).not.toMatch(/openrouter/i);
         expect(html).not.toContain(DEFAULT_DYNAMIC_MODEL);
         expect(html).not.toContain("claude-haiku");
         expect(document.querySelector("datalist")).toBeNull();
@@ -349,6 +498,7 @@ describe("what a workspace on the operator's key may see and send", () => {
     const user = userEvent.setup();
     await renderManaged(user, managedModel({ leak: true }));
 
+    await chooseOption(user, providerDropdown(), "OpenAI");
     const names = await offered(user);
 
     expect(names.join("|")).not.toContain(SENTINEL);
@@ -360,9 +510,9 @@ describe("what a workspace on the operator's key may see and send", () => {
     const user = userEvent.setup();
     const { save } = await renderManaged(user, managedModel({ leak: true }));
 
-    await chooseOption(user, modelDropdown(), "Thorough");
+    await chooseOption(user, providerDropdown(), "OpenAI");
     await chooseKind(user, "Dynamic Review");
-    await chooseOption(user, modelDropdown(), "Detective");
+    await chooseOption(user, providerDropdown(), "Google");
     await openSection(user, "Review");
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
@@ -383,9 +533,9 @@ describe("what a workspace on the operator's key may see and send", () => {
     const user = userEvent.setup();
     const { save } = await renderManaged(user);
 
-    await chooseOption(user, modelDropdown(), "Thorough");
+    await chooseOption(user, providerDropdown(), "OpenAI");
     await chooseKind(user, "Dynamic Review");
-    await chooseOption(user, modelDropdown(), "Detective");
+    await chooseOption(user, providerDropdown(), "Google");
     await chooseKind(user, "Diff Review");
 
     expect(modelDropdown().textContent).toBe("Thorough");

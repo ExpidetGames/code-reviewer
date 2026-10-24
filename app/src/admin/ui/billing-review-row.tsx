@@ -165,7 +165,7 @@ export function BillingReviewRow({
         )}
         <Fact label="Workspace">
           {review.workspace === null ? (
-            "No workspace of this instance is known for this event."
+            "No workspace is known for this event."
           ) : (
             <>
               {review.workspace.name}{" "}

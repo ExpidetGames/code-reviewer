@@ -9,7 +9,7 @@ import { InstanceForm } from "@/admin/ui/instance-form";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { PageHeader } from "@/components/page-header";
 
-export const metadata: Metadata = { title: "Instance · Admin" };
+export const metadata: Metadata = { title: "General · Admin" };
 
 export default async function AdminSetupInstancePage() {
   await requireAdmin();
@@ -17,7 +17,7 @@ export default async function AdminSetupInstancePage() {
   return (
     <>
       <PageHeader
-        title="Instance"
+        title="General"
         breadcrumb={
           <Breadcrumbs
             items={[{ label: "Admin", href: "/admin" }, { label: "Setup" }]}

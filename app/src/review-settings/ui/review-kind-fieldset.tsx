@@ -26,9 +26,9 @@ const KIND_HINTS: Record<ProjectReviewKind, string> = {
   diff: "Reviews the changes of the pull request.",
 };
 
-export const GATE_OFF_BADGE = "Not enabled on this instance yet.";
+export const GATE_OFF_BADGE = "Not enabled yet.";
 export const GATE_OFF_WARNING =
-  "Dynamic Review is not enabled on this instance yet. Reviews of this project fail until an instance admin turns it on.";
+  "Dynamic Review is not enabled yet. Reviews of this project fail until a code-review.com admin turns it on.";
 const KINDS: readonly ProjectReviewKind[] = ["dynamic", "diff"];
 
 function isKind(value: string): value is ProjectReviewKind {

@@ -131,9 +131,7 @@ describe("the state of the fetch", () => {
       (screen.getByRole("button", { name: "Fetch now" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    expect(
-      screen.getByText(/The fetch is switched off for this instance/),
-    ).toBeTruthy();
+    expect(screen.getByText(/The fetch is switched off/)).toBeTruthy();
   });
 });
 

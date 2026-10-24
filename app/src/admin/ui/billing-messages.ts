@@ -154,7 +154,7 @@ export function describeMissingItem(item: string): string {
 export const BILLING_INCOMPLETE_TITLE =
   "Billing is switched on but not complete";
 export const BILLING_INCOMPLETE_DETAIL =
-  "Until it is complete, every review on this instance is refused, and each pull request gets a notice that no review ran. Missing:";
+  "Until it is complete, every review is refused, and each pull request gets a notice that no review ran. Missing:";
 export const BILLING_INCOMPLETE_ACTION_LEAD = "Complete it on";
 export const BILLING_INCOMPLETE_ACTION_LINK = "Billing";
 export const BILLING_INCOMPLETE_ACTION_TAIL =

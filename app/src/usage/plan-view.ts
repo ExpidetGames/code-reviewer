@@ -49,6 +49,8 @@ export type PlanView =
       managed: boolean;
       /** Reviews are paused for the workspace. */
       suspended: boolean;
+      /** Billing is on: what the workspace uses is billed via code-review.com (#675). */
+      billed: boolean;
       /** ISO 8601 UTC: usage is counted from here. The app does not know when the period ends. */
       periodStart: string;
       /**
@@ -88,6 +90,7 @@ export function buildPlanView(
     planLabel: entitlements.planLabel,
     managed,
     suspended: entitlements.suspended,
+    billed: options.runQuotas === false,
     periodStart: entitlements.periodStart,
     runs:
       options.runQuotas === false

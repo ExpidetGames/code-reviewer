@@ -56,9 +56,7 @@ test.describe("the payment reviews in the admin portal", () => {
     await expect(refused.getByText(/Default workspace/)).toBeVisible();
     await expect(refused.getByText(/25\.00 USD asked/)).toBeVisible();
     await expect(foreign.getByText("Refund re_e2e_foreign")).toBeVisible();
-    await expect(
-      foreign.getByText(/No workspace of this instance/),
-    ).toBeVisible();
+    await expect(foreign.getByText(/No workspace is known/)).toBeVisible();
     await expect(foreign.getByRole("button", { name: /Credit/ })).toHaveCount(
       0,
     );
