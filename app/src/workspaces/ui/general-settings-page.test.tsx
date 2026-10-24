@@ -2,7 +2,7 @@
 
 // @vitest-environment jsdom
 // Pins down the "General" sub-page of the workspace settings (#178): the rename (an Owner) or the
-// read-only name (everybody else), the read-only instance, tenancy and member facts, and the one
+// read-only name (everybody else), and the one
 // "Needs attention" strip that carries the configuration hints and the workspace's LLM hint. A member
 // reads no variable name and no value.
 import {
@@ -74,8 +74,6 @@ function general({
       canRename={canRename}
       canManageLlmKey
       audience={audience}
-      tenancy="multi"
-      memberCount={4}
       config={config}
       llmSummary={llmSummary}
       {...(canManagePlan === undefined ? {} : { canManagePlan })}
@@ -163,15 +161,16 @@ describe("the General settings sub-page", () => {
     ).toBe("page");
   });
 
-  it("reads the instance, tenancy and member facts", () => {
+  // #658-T01
+  it("has no Instance part: no heading, no tenancy, member count or GitHub fact", () => {
     general();
 
-    expect(screen.getByText("Tenancy")).toBeTruthy();
-    expect(screen.getByText("Multi-tenant")).toBeTruthy();
-    expect(screen.getByText("Members")).toBeTruthy();
-    expect(screen.getByText("4")).toBeTruthy();
-    expect(screen.getByText("GitHub")).toBeTruthy();
-    expect(screen.getByText(/Configured/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Instance" })).toBeNull();
+    expect(screen.queryByText("Tenancy")).toBeNull();
+    expect(screen.queryByText("Multi-tenant")).toBeNull();
+    expect(screen.queryByText("Members")).toBeNull();
+    expect(screen.queryByText("GitHub")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
   });
 
   it("has one Needs attention strip that carries the configuration hints and the LLM hint", () => {

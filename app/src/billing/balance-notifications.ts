@@ -22,6 +22,10 @@
 import "server-only";
 import { sql, type Kysely } from "kysely";
 import { createBillingNotificationsRepository } from "../db/repositories/billing-notifications-repository.ts";
+import {
+  createWorkspacesRepository,
+  isDeleted,
+} from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { BALANCE_NOTIFICATION_KINDS, kindsInStateOf } from "./balance-state.ts";
 import { readBillingSwitch } from "./enabled.ts";
@@ -30,7 +34,9 @@ export type BalanceMove = "down" | "up";
 
 /** What the decision did, for the callers that care and for the tests. */
 export type BalanceNoteResult =
-  { state: "off" } | { state: "noted"; mailDue: boolean };
+  | { state: "off" }
+  | { state: "deleted" }
+  | { state: "noted"; mailDue: boolean };
 
 export async function noteBalanceMoved(
   trx: Kysely<Database>,
@@ -38,6 +44,13 @@ export async function noteBalanceMoved(
 ): Promise<BalanceNoteResult> {
   const billing = await readBillingSwitch(trx);
   if (!billing.enabled || billing.missing.length > 0) return { state: "off" };
+  // A deleted workspace (#658) has nobody to tell and no state to keep: a late entry of its journal (a refund, a correction of
+  // an operator) leaves no notification behind.
+  const workspace = await createWorkspacesRepository(trx).getIncludingDeleted(
+    input.workspaceId,
+  );
+  if (workspace !== undefined && isDeleted(workspace))
+    return { state: "deleted" };
   const row = await trx
     .selectFrom("billing_balances")
     .select("balance_micro_usd")

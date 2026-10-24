@@ -9,6 +9,7 @@ import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { createTestDirectory } from "../../test-support/test-database.ts";
 import { migrationProvider } from "./index.ts";
+import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const SPLIT = "20261020090000_create_model_decisions";
 const NEW_TABLES = ["model_enablements", "model_price_confirmations"];
@@ -61,7 +62,10 @@ describe("the model decisions migration", () => {
     await migrateToLatest(db, migrationProvider);
 
     expect(
-      (await sql<unknown>`select * from workspaces`.execute(db)).rows,
+      withoutColumnsAddedLater(
+        "workspaces",
+        (await sql<unknown>`select * from workspaces`.execute(db)).rows,
+      ),
     ).toEqual(before);
     for (const name of NEW_TABLES) {
       expect(await tables()).toContain(name);

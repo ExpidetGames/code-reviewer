@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// What the Advanced page hands to the browser for a workspace on the access of the instance (#435): the props of a
+// What the removal of the keys hands to the browser for a workspace on the access of the instance (#435): the props of a
 // client component travel in the page's payload whether or not the component draws anything, so a card for a provider
 // with no key (which draws nothing) would still carry the provider's id and name to the Owner. The real removal card
 // is replaced by a recorder of its props.
@@ -14,14 +14,14 @@ const handed = vi.hoisted(
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }));
-vi.mock("../../llm/ui/remove-workspace-key.tsx", () => ({
+vi.mock("./remove-workspace-key.tsx", () => ({
   RemoveWorkspaceKey: (props: { provider: string; label: string | null }) => {
     handed.push({ provider: props.provider, label: props.label });
     return null;
   },
 }));
 
-import { AdvancedSettingsPageContent } from "./advanced-settings-page.tsx";
+import { RemoveWorkspaceKeys } from "./remove-workspace-keys.tsx";
 
 afterEach(() => {
   cleanup();
@@ -33,26 +33,20 @@ const KEYS = [
   { provider: "fakeai", configured: false },
 ];
 
-function renderAdvanced(
-  props: Partial<Parameters<typeof AdvancedSettingsPageContent>[0]>,
+function renderRemoval(
+  props: Partial<Parameters<typeof RemoveWorkspaceKeys>[0]>,
 ) {
   return render(
-    <AdvancedSettingsPageContent
-      workspaceSlug="acme"
-      canManageKey
-      keys={KEYS}
-      canResetDefaults
-      {...props}
-    />,
+    <RemoveWorkspaceKeys workspaceSlug="acme" keys={KEYS} {...props} />,
   );
 }
 
-describe("the props the Advanced page hands to the removal cards", () => {
+describe("the props the removal of the keys hands to the cards", () => {
   // #435-T06
   it.each(["provided", "key_unavailable", "settings_unreadable"] as const)(
     "carries no provider for a workspace on the access of the instance with no stored key (%s)",
     (instanceAccess) => {
-      renderAdvanced({ instanceAccess });
+      renderRemoval({ instanceAccess });
 
       expect(handed).toEqual([]);
     },
@@ -60,7 +54,7 @@ describe("the props the Advanced page hands to the removal cards", () => {
 
   // #435-T06
   it("carries the provider of a stored key and no name for it", () => {
-    renderAdvanced({
+    renderRemoval({
       instanceAccess: "provided",
       keys: [
         { provider: "openrouter", configured: true },
@@ -72,7 +66,7 @@ describe("the props the Advanced page hands to the removal cards", () => {
   });
 
   it("carries every provider by name for a workspace on its own key", () => {
-    renderAdvanced({ instanceAccess: null });
+    renderRemoval({ instanceAccess: null });
 
     expect(handed.map((card) => card.provider)).toEqual([
       "openrouter",

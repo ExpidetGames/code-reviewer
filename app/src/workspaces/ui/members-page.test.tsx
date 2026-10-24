@@ -77,6 +77,9 @@ function fakeApi(): WorkspaceApi {
     rename: vi.fn(
       async () => ({ ok: true, data: { ok: true, name: "x" } }) as never,
     ),
+    deleteWorkspace: vi.fn(
+      async () => ({ ...ok, data: { ok: true } }) as never,
+    ),
     changeRole: vi.fn(
       async () => ({ ...ok, data: { ok: true, changed: true } }) as never,
     ),

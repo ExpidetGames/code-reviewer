@@ -21,6 +21,7 @@ import {
   type GithubAccount,
 } from "../helpers/github-fake";
 import { operatorClient } from "../helpers/operator-api";
+import { openSection } from "../helpers/settings-form";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
@@ -209,7 +210,8 @@ test.describe("an instance without an operator token and without entitlements", 
 
     // The workspace is still asked for a model and a key.
     await openSettings(page, "/review-defaults");
-    await expect(page.getByLabel("Model", { exact: true })).toBeVisible();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toBeVisible();
     await openSettings(page, "/llm");
     await expect(
       page.getByRole("form", { name: "OpenRouter LLM key" }),

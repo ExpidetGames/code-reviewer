@@ -38,6 +38,7 @@ const SCOPED = [
   "runs-repository.ts",
   "usage-records-repository.ts",
   "workspace-entitlements-repository.ts",
+  "workspace-erasure-repository.ts",
   "workspace-members-repository.ts",
   "workspace-secrets-repository.ts",
 ] as const;

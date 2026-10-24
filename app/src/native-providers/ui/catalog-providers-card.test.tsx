@@ -174,7 +174,7 @@ describe("the providers of the catalog", () => {
   });
 
   // #555-T01
-  it("mentions a saved key whose provider the catalog no longer offers, so it can be removed under Advanced", () => {
+  it("mentions a saved key whose provider the catalog no longer offers, so it can be removed at the end of the page", () => {
     card({
       keyStatuses: [
         ...KEYED,
