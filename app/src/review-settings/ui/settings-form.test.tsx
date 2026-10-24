@@ -1051,8 +1051,10 @@ describe("the form of the workspace defaults has the sections of a project (#676
     );
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // The kind is in every save, Diff Review too (#676 review fix 1).
     expect(save.mock.calls[0]?.[0]).toEqual({
       maxFindings: 12,
+      reviewKind: "diff",
       reviewVerdict: "any",
     });
   });
@@ -1190,5 +1192,154 @@ describe("a project form follows the workspace defaults (#676)", () => {
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     // The model of the workspace default is the default: choosing it again clears the project's own.
     expect(save.mock.calls[0]?.[0]).toEqual({ dynamicModel: null });
+  });
+});
+
+// #676: the review of #679 (fixes 4 and 5).
+describe("the confirmation and the version of a save of the workspace defaults", () => {
+  const SAVE_DEFAULTS = { name: "Save review defaults" };
+
+  async function switchToDynamic(
+    following: number | undefined,
+  ): Promise<HTMLElement> {
+    const user = userEvent.setup();
+    const { api } = fakeApi();
+    const base = ownModel({ mode: "global" });
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={{
+          ...base,
+          ...(following === undefined ? {} : { followingProjects: following }),
+        }}
+        api={api}
+        dynamicReviewEnabled
+      />,
+    );
+    await openSection(user, "Review");
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+    return screen.findByRole("alertdialog", {
+      name: "Switch to Dynamic Review?",
+    });
+  }
+
+  // #676-T04
+  it("says how many projects follow the default and switch, and that their waiting reviews are cancelled", async () => {
+    const dialog = await switchToDynamic(3);
+
+    expect(dialog.textContent).toMatch(
+      /3 projects follow this default and switch to Dynamic Review\./,
+    );
+    expect(dialog.textContent).toMatch(
+      /reviews that are still waiting are cancelled, and a review that is already running finishes/,
+    );
+    expect(dialog.textContent).not.toMatch(
+      /keep the kind they were queued for/,
+    );
+  });
+
+  // #676-T04
+  it("says so when one project, or none, follows the default", async () => {
+    expect((await switchToDynamic(1)).textContent).toMatch(
+      /1 project follows this default and switches to Dynamic Review\./,
+    );
+    cleanup();
+    expect((await switchToDynamic(0)).textContent).toMatch(
+      /No existing project follows this default, so nothing switches/,
+    );
+  });
+
+  // #676-T09
+  it("sends the version of the defaults it was built from, and sends none for a project", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    const model: SettingsFormModel = {
+      ...ownModel({ mode: "global" }),
+      lastSaved: { at: "2026-10-10T08:00:00.000Z", by: "ada" },
+    };
+    render(<SettingsForm workspaceSlug="acme" initial={model} api={api} />);
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[1]).toEqual({
+      expectedUpdatedAt: "2026-10-10T08:00:00.000Z",
+    });
+
+    cleanup();
+    const project = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({})}
+        api={project.api}
+      />,
+    );
+    await changeSomething(user);
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+    await waitFor(() => expect(project.save).toHaveBeenCalledTimes(1));
+    expect(project.save.mock.calls[0]).toHaveLength(1);
+  });
+
+  // #676-T09
+  it("tells the person that the defaults were changed meanwhile, and keeps their edit", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    save.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      code: "REVIEW_SETTINGS_STALE",
+      issues: [],
+    });
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({ mode: "global" })}
+        api={api}
+      />,
+    );
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+
+    expect(
+      await screen.findByText(
+        "These defaults were changed meanwhile — reload the page and decide again.",
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Most findings per review") as HTMLInputElement)
+        .value,
+    ).toBe("12");
+  });
+
+  // #676-T07
+  it("names the projects a refused provider change would break", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    save.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [
+        { field: "dynamicProvider", code: "PROJECT_MODEL_BOUND_TO_PROVIDER" },
+      ],
+      details: { projects: ["acme/widgets", "acme/gadgets"] },
+    });
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({ mode: "global" })}
+        api={api}
+      />,
+    );
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+
+    expect(
+      await screen.findByText(/Projects: acme\/widgets, acme\/gadgets\./),
+    ).toBeTruthy();
   });
 });

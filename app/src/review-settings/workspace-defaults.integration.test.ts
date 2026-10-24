@@ -40,11 +40,34 @@ async function issuesOf(
   throw new Error("expected the call to be refused");
 }
 
+async function errorOf(
+  promise: Promise<unknown>,
+): Promise<ReviewSettingsError> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof ReviewSettingsError) return error;
+    throw error;
+  }
+  throw new Error("expected the call to be refused");
+}
+
+/** A clock that moves one second with every save, so two saves have different times. */
+function ticking(): () => Date {
+  let seconds = 0;
+  return () => new Date(Date.UTC(2026, 9, 10, 8, 0, seconds++));
+}
+
 async function start(
   options: {
     managed?: boolean;
     hooks?: ReviewSettingsHooks;
     modelCapabilities?: ModelCapabilityChecker;
+    dynamicReady?: Parameters<typeof setupReviewSettings>[1] extends
+      { dynamicReady?: infer Ready } | undefined
+      ? Ready
+      : never;
+    settingsClock?: () => Date;
   } = {},
 ) {
   const { db } = await createTestDatabase();
@@ -57,6 +80,12 @@ async function start(
     ...(options.modelCapabilities === undefined
       ? {}
       : { modelCapabilities: options.modelCapabilities }),
+    ...(options.dynamicReady === undefined
+      ? {}
+      : { dynamicReady: options.dynamicReady }),
+    ...(options.settingsClock === undefined
+      ? {}
+      : { settingsClock: options.settingsClock }),
   });
   await app.projects.activate(app.first.id);
   return { ...app, catalog };
@@ -521,5 +550,234 @@ describe("the defaults of a workspace on its own key", () => {
       { field: "catalogEntryDiff", code: "CATALOG_ENTRY_OWN_KEY_MODE" },
     ]);
     expect(app.catalog.reads.count).toBe(0);
+  });
+});
+
+// The review of #679: what a save of the workspace defaults may break or overwrite.
+describe("a save of the workspace defaults that would break a project (review fix 2)", () => {
+  // #676-T07
+  it("is refused when a project holds a Dynamic model of its own and no provider, and names the project", async () => {
+    const app = await start();
+    await app.service.updateProjectSettings(app.first.id, {
+      dynamicModel: "vendor/own-model",
+    });
+
+    const refused = await errorOf(
+      app.service.updateGlobalSettings(
+        { dynamicProvider: FAKE_PROVIDER_ID },
+        "ada",
+      ),
+    );
+
+    expect(refused.issues).toEqual([
+      { field: "dynamicProvider", code: "PROJECT_MODEL_BOUND_TO_PROVIDER" },
+    ]);
+    expect(refused.projects).toEqual([app.first.fullName]);
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #676-T07
+  it("is refused for the Diff provider and model the same way", async () => {
+    const app = await start();
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "vendor/own-model",
+    });
+
+    const refused = await errorOf(
+      app.service.updateGlobalSettings({ provider: FAKE_PROVIDER_ID }, "ada"),
+    );
+
+    expect(refused.issues).toEqual([
+      { field: "provider", code: "PROJECT_MODEL_BOUND_TO_PROVIDER" },
+    ]);
+    expect(refused.projects).toEqual([app.first.fullName]);
+  });
+
+  // #676-T07
+  it("goes through when the provider stays, when the project holds its own provider too, or when it holds no model", async () => {
+    const app = await start();
+    await app.service.updateProjectSettings(app.first.id, {
+      dynamicProvider: FAKE_PROVIDER_ID,
+      dynamicModel: "fake-large",
+    });
+    await app.service.updateProjectSettings(app.second.id, {
+      reviewVerdict: "off",
+    });
+    // The workspace default keeps the default provider; the project that sets its own pair is not affected.
+    await app.service.updateGlobalSettings({ reviewKind: "dynamic" }, "ada");
+
+    const saved = await app.service.updateGlobalSettings(
+      { dynamicProvider: FAKE_PROVIDER_ID },
+      "ada",
+    );
+
+    expect(saved.dynamic.overrides).toEqual({
+      dynamicProvider: FAKE_PROVIDER_ID,
+    });
+  });
+});
+
+describe("Dynamic Review as the workspace default (review fix 3)", () => {
+  // #676-T04
+  it("is refused when Dynamic Review cannot run for the workspace, and stores nothing", async () => {
+    const asked = vi.fn(async () => false);
+    const app = await start({ dynamicReady: asked });
+
+    const refused = await errorOf(
+      app.service.updateGlobalSettings({ reviewKind: "dynamic" }, "ada"),
+    );
+
+    expect(refused.issues).toEqual([
+      { field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" },
+    ]);
+    expect(asked).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewKind: "dynamic" }),
+    );
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #676-T04
+  it("is saved when it can run, and Diff Review is never asked about", async () => {
+    let ready = true;
+    const app = await start({ dynamicReady: async () => ready });
+    ready = false;
+    await app.service.updateGlobalSettings({ reviewKind: "diff" }, "ada");
+    ready = true;
+
+    const saved = await app.service.updateGlobalSettings(
+      { reviewKind: "dynamic" },
+      "ada",
+    );
+
+    expect(saved.dynamic.effective.reviewKind).toBe("dynamic");
+  });
+
+  // #676-T04
+  it("does not block an unrelated save of defaults that were set up while the key was there, but a change of the model it runs on is asked again", async () => {
+    let ready = true;
+    const app = await start({ dynamicReady: async () => ready });
+    await app.service.updateGlobalSettings({ reviewKind: "dynamic" }, "ada");
+    ready = false;
+
+    await app.service.updateGlobalSettings(
+      { reviewKind: "dynamic", maxFindings: 5 },
+      "ada",
+    );
+    const refused = await errorOf(
+      app.service.updateGlobalSettings(
+        { reviewKind: "dynamic", dynamicModel: "vendor/other-model" },
+        "ada",
+      ),
+    );
+
+    expect(refused.issues).toEqual([
+      { field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" },
+    ]);
+  });
+});
+
+describe("a stale save of the workspace defaults (review fix 4)", () => {
+  // #676-T09
+  it("is refused when the defaults were saved since the form was read, and stores nothing of it", async () => {
+    const app = await start({ settingsClock: ticking() });
+    const first = await app.service.updateGlobalSettings(
+      { maxFindings: 9 },
+      "ada",
+    );
+    await app.service.updateGlobalSettings({ maxFindings: 8 }, "bo");
+
+    const refused = await errorOf(
+      app.service.updateGlobalSettings({ maxFindings: 7 }, "ada", {
+        expectedUpdatedAt: first.updatedAt,
+      }),
+    );
+
+    expect(refused.code).toBe("REVIEW_SETTINGS_STALE");
+    expect((await app.appSettings.get("review_defaults"))?.value).toEqual({
+      maxFindings: 8,
+    });
+  });
+
+  // #676-T09
+  it("is accepted when nothing changed since, from the first save on and after it, and a save that names no version still replaces", async () => {
+    const app = await start({ settingsClock: ticking() });
+    const never = await app.service.getGlobalSettings();
+    expect(never.updatedAt).toBeNull();
+
+    const first = await app.service.updateGlobalSettings(
+      { maxFindings: 9 },
+      "ada",
+      { expectedUpdatedAt: never.updatedAt },
+    );
+    const second = await app.service.updateGlobalSettings(
+      { maxFindings: 8 },
+      "ada",
+      { expectedUpdatedAt: first.updatedAt },
+    );
+    const last = await app.service.updateGlobalSettings(
+      { maxFindings: 7 },
+      "bo",
+    );
+
+    expect(second.overrides).toEqual({ maxFindings: 8 });
+    expect(last.overrides).toEqual({ maxFindings: 7 });
+  });
+
+  // #676-T09
+  it("is refused for a form that read the defaults before any was saved, once somebody saved", async () => {
+    const app = await start({ settingsClock: ticking() });
+    await app.service.updateGlobalSettings({ maxFindings: 9 }, "bo");
+
+    const refused = await errorOf(
+      app.service.updateGlobalSettings({ maxFindings: 7 }, "ada", {
+        expectedUpdatedAt: null,
+      }),
+    );
+
+    expect(refused.code).toBe("REVIEW_SETTINGS_STALE");
+  });
+});
+
+describe("the review kind of a project that follows the defaults (review fix 6)", () => {
+  // #676-T02
+  it("is the workspace default in the event of a save that sets something else", async () => {
+    const changed = vi.fn<ReviewSettingsHooks["onProjectSettingsChanged"]>(
+      async () => undefined,
+    );
+    const app = await start({ hooks: { onProjectSettingsChanged: changed } });
+    await app.service.updateGlobalSettings({ reviewKind: "dynamic" }, "ada");
+
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewVerdict: "off",
+    });
+
+    expect(changed.mock.calls.map(([event]) => event)).toMatchObject([
+      { previousKind: "dynamic", nextKind: "dynamic", kindChanged: false },
+    ]);
+  });
+
+  // #676-T02
+  it("is the same before and after the reset of a project that followed the default, and changes for one that had its own kind", async () => {
+    const changed = vi.fn<ReviewSettingsHooks["onProjectSettingsChanged"]>(
+      async () => undefined,
+    );
+    const app = await start({ hooks: { onProjectSettingsChanged: changed } });
+    await app.service.updateGlobalSettings({ reviewKind: "dynamic" }, "ada");
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewVerdict: "off",
+    });
+    await app.projects.activate(app.second.id);
+    await app.service.updateProjectSettings(app.second.id, {
+      reviewKind: "diff",
+    });
+    changed.mockClear();
+
+    await app.service.resetProjectSettings(app.first.id);
+    await app.service.resetProjectSettings(app.second.id);
+
+    expect(changed.mock.calls.map(([event]) => event)).toMatchObject([
+      { previousKind: "dynamic", nextKind: "dynamic", kindChanged: false },
+      { previousKind: "diff", nextKind: "dynamic", kindChanged: true },
+    ]);
   });
 });

@@ -12,6 +12,7 @@ import {
   createModelCapabilityChecker,
   type ModelCapabilityChecker,
 } from "../llm/model-capabilities.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
 import {
@@ -19,6 +20,9 @@ import {
   createReviewSettingsRouteHandlers,
 } from "./http.ts";
 
+const OTHER_PROVIDER = llmProviderDescriptors.ids.find(
+  (id) => id !== llmProviderDescriptors.defaultProvider.id,
+)!;
 const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 const URL_BASE = "https://app.test";
 
@@ -514,6 +518,68 @@ describe("the project-only settings over HTTP", () => {
     });
     expect(text).not.toContain(sentinel);
     expect((await app.projects.get(app.first.id))?.settings).toEqual({});
+  });
+});
+
+// #676: the review of #679, over HTTP.
+describe("saving the workspace defaults over HTTP, against a stale form and a project it would break", () => {
+  it("answers 409 REVIEW_SETTINGS_STALE for defaults that were saved since the form was read, and stores nothing of it", async () => {
+    const app = await setup();
+    await app.putGlobal({ settings: { maxFindings: 9 } });
+
+    const stale = await app.putGlobal({
+      settings: { maxFindings: 7 },
+      expectedUpdatedAt: null,
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "REVIEW_SETTINGS_STALE" });
+    const current = (await (
+      await app.handlers.getGlobal(
+        new Request(`${URL_BASE}/api/review-settings`),
+      )
+    ).json()) as { updatedAt: string; overrides: unknown };
+    expect(current.overrides).toEqual({ maxFindings: 9 });
+
+    const fresh = await app.putGlobal({
+      settings: { maxFindings: 7 },
+      expectedUpdatedAt: current.updatedAt,
+    });
+    expect(fresh.status).toBe(200);
+  });
+
+  it("answers 400 REQUEST_INVALID for an expected time that is neither a text nor null", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({
+      settings: {},
+      expectedUpdatedAt: 5,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_REQUEST_INVALID",
+    });
+  });
+
+  it("names the projects a provider change would break, beside the issue", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, {
+      dynamicModel: "vendor/own-model",
+    });
+
+    const response = await app.putGlobal({
+      settings: { dynamicProvider: OTHER_PROVIDER },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [
+        { field: "dynamicProvider", code: "PROJECT_MODEL_BOUND_TO_PROVIDER" },
+      ],
+      projects: [app.first.fullName],
+    });
   });
 });
 

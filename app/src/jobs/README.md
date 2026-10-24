@@ -107,8 +107,9 @@ and, with nobody claiming, nothing else would.
 When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
 `cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become
 `cancelled` with `review_kind_changed`, a running job finishes, and a rejecting hook rolls the
-settings change (and the cancellation) back. The hook is `createJobReviewSettingsHooks`, wired in
-`review-settings/shared.ts`.
+settings change (and the cancellation) back. The same happens when the review kind of the workspace defaults changes (#676):
+`onWorkspaceDefaultsKindChanged` cancels the waiting jobs of every project that stores no kind of its own, in the transaction
+that writes the defaults. The hook is `createJobReviewSettingsHooks`, wired in `review-settings/shared.ts`.
 
 ## Enqueueing
 

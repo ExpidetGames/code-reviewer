@@ -100,7 +100,7 @@ describe("a save of the workspace defaults", () => {
   });
 
   // #676-T02
-  it("takes a default back by leaving it out when the shipped value is chosen again", () => {
+  it("takes a default back by leaving it out when the shipped value is chosen again, except the kind, which always travels", () => {
     const model = savedModel();
     let state = setReviewKind(initialFormState(model), "diff");
     state = setReviewVerdict(state, "blocking");
@@ -109,7 +109,7 @@ describe("a save of the workspace defaults", () => {
 
     expect(planGlobalSave(model, state)).toEqual({
       ok: true,
-      steps: [{ cards: ["diff", "kind"], body: {} }],
+      steps: [{ cards: ["diff", "kind"], body: { reviewKind: "diff" } }],
       kindChange: { from: "dynamic", to: "diff" },
     });
   });
@@ -145,7 +145,7 @@ describe("a save of the workspace defaults", () => {
   });
 
   // #676-T01
-  it("takes an entry back by leaving it out", () => {
+  it("takes an entry back by leaving it out, and keeps the kind in the request", () => {
     const model = managedModel({
       mode: "global",
       selection: { diff: "ent-fast", dynamic: null },
@@ -160,8 +160,44 @@ describe("a save of the workspace defaults", () => {
     expect(unchanged).toMatchObject({ ok: true, steps: [] });
     expect(taken).toEqual({
       ok: true,
-      steps: [{ cards: ["diff", "kind"], body: {} }],
+      steps: [{ cards: ["diff", "kind"], body: { reviewKind: "diff" } }],
       kindChange: null,
+    });
+  });
+});
+
+describe("the review kind of a save of the workspace defaults (#676 review fixes)", () => {
+  // #676-T01
+  it("sends Diff Review explicitly when the person chose it where none was stored, so new projects do not start on Dynamic Review", () => {
+    const model = ownModel({ mode: "global" });
+    const chosen = setReviewKind(
+      setReviewKind(initialFormState(model), "dynamic"),
+      "diff",
+    );
+
+    expect(planGlobalSave(model, chosen)).toEqual({
+      ok: true,
+      steps: [{ cards: ["diff", "kind"], body: { reviewKind: "diff" } }],
+      kindChange: null,
+    });
+    // Shown, not chosen: nothing to send.
+    expect(planGlobalSave(model, initialFormState(model))).toMatchObject({
+      steps: [],
+    });
+  });
+
+  // #676-T01
+  it("keeps a stored Diff Review in a save of something else", () => {
+    const base = ownModel({ mode: "global" });
+    const view = dynamicView("diff", false);
+    const model: SettingsFormModel = {
+      ...base,
+      dynamic: { ...view, overrides: { reviewKind: "diff" } },
+    };
+    const state = setText(initialFormState(model), "maxFindings", "9");
+
+    expect(planGlobalSave(model, state)).toMatchObject({
+      steps: [{ body: { maxFindings: 9, reviewKind: "diff" } }],
     });
   });
 });

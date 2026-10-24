@@ -16,7 +16,15 @@ import {
   addWorkspace,
   defaultWorkspaceId,
 } from "../test-support/workspaces.ts";
-import { newProjectSettings } from "./new-project-settings.ts";
+import { setReviewKind } from "../review-settings/ui/dynamic-form-state.ts";
+import { initialFormState } from "../review-settings/ui/form-state.ts";
+import { modelFromGlobalView } from "../review-settings/ui/form-model.ts";
+import { planGlobalSave } from "../review-settings/ui/global-save.ts";
+import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
+import {
+  dynamicReviewCanResolve,
+  newProjectSettings,
+} from "./new-project-settings.ts";
 
 const APP_SECRET = "new-project-test-app-secret-0123456789-0123";
 const KEYS: Record<string, string> = {
@@ -332,5 +340,83 @@ describe("the settings a new project starts with, when the workspace chose a def
     expect(await newProjectSettings(db, workspaceId)).toEqual({
       reviewKind: "dynamic",
     });
+  });
+});
+
+// #676-T01: what the form of the workspace defaults saves is what a new project starts with (review fix 1).
+describe("the workspace defaults as the form saves them", () => {
+  it("start a new project on Diff Review after Diff Review was chosen, though the shipped kind would start it on Dynamic Review", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    const app = await setupReviewSettings(db);
+    // Nothing saved: a project that is created now starts on Dynamic Review, though the page shows Diff Review.
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "dynamic",
+    });
+
+    const model = modelFromGlobalView(await app.service.getGlobalSettings());
+    const plan = planGlobalSave(
+      model,
+      setReviewKind(setReviewKind(initialFormState(model), "dynamic"), "diff"),
+    );
+    if (!plan.ok) throw new Error("the form could not plan the save");
+    for (const step of plan.steps)
+      await app.service.updateGlobalSettings(step.body, "ada");
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({});
+  });
+
+  // #676-T04: Dynamic Review as the default is judged the way a new project and the claim judge it (review fix 3).
+  it("refuse Dynamic Review as the default while the key of its provider is missing, and take it once the key is stored", async () => {
+    const { db, workspaceId } = await start();
+    const app = await setupReviewSettings(db, {
+      dynamicReady: (defaults) =>
+        dynamicReviewCanResolve(db, workspaceId, defaults),
+    });
+    const refused = await app.service
+      .updateGlobalSettings({ reviewKind: "dynamic" }, "ada")
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(refused).toMatchObject({
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" }],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    const saved = await app.service.updateGlobalSettings(
+      { reviewKind: "dynamic" },
+      "ada",
+    );
+    expect(saved.dynamic.effective.reviewKind).toBe("dynamic");
+  });
+
+  it("refuse Dynamic Review as the default on the operator's key while no usable entry exists", async () => {
+    const { db, workspaceId } = await start();
+    await chooseManaged(db, workspaceId);
+    const app = await setupReviewSettings(db, {
+      operatorsModels: true,
+      dynamicReady: (defaults) =>
+        dynamicReviewCanResolve(db, workspaceId, defaults),
+    });
+    const refused = await app.service
+      .updateGlobalSettings({ reviewKind: "dynamic" }, "ada")
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(refused).toMatchObject({
+      issues: [{ field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" }],
+    });
+
+    await addEntry(db);
+    const saved = await app.service.updateGlobalSettings(
+      { reviewKind: "dynamic" },
+      "ada",
+    );
+    expect(saved.dynamic.effective.reviewKind).toBe("dynamic");
   });
 });

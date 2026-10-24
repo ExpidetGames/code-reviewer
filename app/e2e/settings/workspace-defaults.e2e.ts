@@ -143,8 +143,9 @@ test.describe("the review defaults of a workspace", () => {
     const dialog = page.getByRole("alertdialog", {
       name: "Switch to Dynamic Review?",
     });
+    // The server counts the projects that follow the default; the confirmation names that number.
     await expect(dialog).toContainText(
-      "Every project that sets no review kind",
+      /(project follows|projects follow) this default and switch|No existing project follows this default/,
     );
     await dialog
       .getByRole("button", { name: "Switch to Dynamic Review" })

@@ -366,7 +366,10 @@ column, no migration: they are more keys of the same JSON, and a set stored befo
   names the workspace's entry per kind for the entry chooser. The view of the workspace defaults (`GlobalSettingsView.dynamic`,
   `catalogChoices`, `catalogSelection`) has the shape of a project's, with the shipped values below it.
 - **A save of the defaults replaces the whole set** (Diff and the new fields alike); a field left out is inherited again, and
-  `{}` removes them all. The form sends the fields that differ from the shipped value (`ui/global-save.ts`). What the other key
+  `{}` removes them all. The form sends the fields that differ from the shipped value (`ui/global-save.ts`), **except the
+  review kind, which always travels**, Diff Review too: a kind left out would be taken back, and new projects would then start
+  on the shipped kind (Dynamic Review where it can run) while the page shows Diff Review. A kind the person chose on purpose
+  where none was stored counts as a change (`kindChosen`). What the other key
   mode stored stays stored, as for a project: the own-key models while on the operator's key, the entries while on the own key.
   The Dynamic model is put to the provider's metadata check like a project's (#269); the entries are checked like a project's.
 - **Registry providers only.** The Dynamic provider of the defaults is one of the registry (`PROVIDER_UNKNOWN` for a catalog
@@ -374,11 +377,26 @@ column, no migration: they are more keys of the same JSON, and a set stored befo
   per-project choice. `confirmProviderAddress` and `reviewSkill` are unknown fields of the defaults.
 - **A provider and a model of different layers** are paired by the rule of the claim (`modelProviderMismatch`): a project provider
   next to a workspace model of another provider, and a workspace change that would newly pair them, are refused
-  `MODEL_PROVIDER_MISMATCH` on `dynamicProvider` / `dynamicModel`, as for the Diff model (#432).
+  `MODEL_PROVIDER_MISMATCH` on `dynamicProvider` / `dynamicModel`, as for the Diff model (#432). A project that holds a model of
+  its own and **no provider of its own** chose that model for the provider the default had then, so a default with another
+  provider (Diff or Dynamic) is refused `PROJECT_MODEL_BOUND_TO_PROVIDER` and the answer names the projects (`projects`, repository
+  names; the form prints them). Own key mode only.
+- **Dynamic Review as the default must be able to run.** A save that makes the kind Dynamic Review (or changes the model it runs
+  on while it is) asks `dynamicReady` (`projects/new-project-settings.ts` `dynamicReviewCanResolve`, the question a new project and
+  the claim ask): a key for the provider on the workspace's own key, a usable entry on the operator's. Otherwise it is refused
+  `DYNAMIC_REVIEW_NOT_READY` on `reviewKind`. The gate of the instance is not part of it: that stays the warning of the form.
+- **A stale save is refused.** The form sends the `updatedAt` of the defaults it was built from (`expectedUpdatedAt` beside
+  `settings`, `null` for defaults never saved); a save over defaults that were saved since is refused `409 REVIEW_SETTINGS_STALE` and
+  stores nothing (`AppSettingsRepository.setIfUnchanged`, one conditional write, both engines). A caller that names no version
+  (the reset of the defaults, a script) replaces whatever is there. The confirmation of a kind change is computed from the view the
+  form was built from, which that check keeps equal to the stored defaults; the number of projects it names is
+  `GlobalSettingsView.followingProjects`.
 - **The claim** gets `modelLayers.dynamic = { workspace, project }` and the resolved catalog entry (`runner-api/review-settings-job-options.ts`).
 - **The kind a job is pinned to** is the project's, else the workspace default, else Diff, read inside the enqueue transaction
-  (`jobs/review-kind.ts`). A change of the default does not cancel reviews that are waiting: they keep the kind they were queued
-  for (a project's own kind change still cancels them, #195). The verdict follows the same order (`check-runs/verdict-mode.ts`),
+  (`jobs/review-kind.ts`). A change of the default's kind cancels the waiting reviews of the projects that follow it (store no
+  kind), exactly as a project's own change does (#195): `hooks.onWorkspaceDefaultsKindChanged` runs in the transaction of the write
+  and a rejection rolls the save back; a running review finishes. Without this both kinds would run, and bill, for the same
+  head. The verdict follows the same order (`check-runs/verdict-mode.ts`),
   and the model catalog counts a project that follows the default entry as using it (`countProjectsUsing`).
 - **New projects** (`projects/new-project-settings.ts`): a workspace default of Diff gives a project that follows it (nothing
   stored). A default of Dynamic does too where a Dynamic Review can run its first review, judged with the Dynamic provider and
