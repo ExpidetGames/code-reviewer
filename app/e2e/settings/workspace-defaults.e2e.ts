@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The workspace Review defaults in a real browser (#676), against a production build next to the fake GitHub and the fake
 // LLM. An Owner of a workspace of their own (the multi-tenant app, so the defaults change nothing for the other journeys) finds

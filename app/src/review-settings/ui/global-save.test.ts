@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the form of the workspace defaults becomes a request (#676): one request that carries the whole set (every
 // field that differs from the shipped value), nothing when nothing changed, an empty set to take a default back.

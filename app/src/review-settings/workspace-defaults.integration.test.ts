@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #676: the review kind, the Dynamic provider and model (a catalog entry per kind on the operator's key) and the verdict as
 // workspace defaults, against a real database: what a save stores beside the Diff defaults, how a project inherits and

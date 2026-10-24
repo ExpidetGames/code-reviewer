@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How the form of the workspace defaults becomes a request (#676). A save of the defaults replaces the whole set of the layer
 // (a field left out is inherited again), and the set holds the Diff settings next to the review kind, the Dynamic provider and

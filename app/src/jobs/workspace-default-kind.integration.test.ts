@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #676-T04: the kind a job is pinned to when it is queued is the project's own, else the workspace default, else Diff. It
 // is resolved inside the enqueue transaction, on both engines (the Postgres cases run when TEST_DATABASE_URL is set).
