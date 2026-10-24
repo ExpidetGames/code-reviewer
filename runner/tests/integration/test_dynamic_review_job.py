@@ -67,6 +67,7 @@ def job_document(
     git_base_url: str = "https://api.github.com",
     git_token: str = "dummy-installation-token-0123456789",
     require_parameters: bool | None = None,
+    max_cost_usd: float | None = None,
 ) -> dict[str, Any]:
     document: dict[str, Any] = {
         "prUrl": pr_url,
@@ -100,6 +101,9 @@ def job_document(
     if require_parameters is not None:
         # What a test double that stands in for OpenRouter adds next to its address (#270).
         document["llm"]["requireParameters"] = require_parameters
+    if max_cost_usd is not None:
+        # #666: the cost limit of the project, narrower than the operator's.
+        document["llm"]["maxCostUsd"] = max_cost_usd
     return document
 
 
@@ -242,6 +246,64 @@ def test_a_run_at_its_cost_limit_is_wrapped_up_published_and_marked(tmp_path: Pa
     assert result.usage is not None
     assert result.usage.stopped_early == "cost_limit"
     assert result.usage.to_json()["stoppedEarly"] == "cost_limit"
+
+
+# #666-T01 (legacy path), #666-T05: the operator's limit is the default 1.00 USD, the project's is
+# 0.02: the run is wrapped up at the project's limit and the review says whose limit it was.
+def test_a_run_at_the_projects_cost_limit_is_wrapped_up_and_names_that_limit(
+    tmp_path: Path,
+) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+    charged = {"prompt_tokens": 11, "completion_tokens": 7, "cost": 0.0123}
+
+    with FakeUpstream(
+        [asks(tool_call("c1", "StructuredOutput", findings()))], usage=charged
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1", max_cost_usd=0.02),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    # The final call alone reached the provider: the project's limit left no room for another.
+    assert len(upstream.requests) == 1
+    assert len(publisher.calls) == 1
+    assert publisher.calls[0][1].stopped_early == "project_cost_limit"
+    assert result.usage is not None
+    assert result.usage.stopped_early == "project_cost_limit"
+    assert result.usage.to_json()["stoppedEarly"] == "project_cost_limit"
+    # Billed with what the call really cost (nothing was held, nothing is rounded up to the limit).
+    assert result.usage.cost_usd == pytest.approx(0.0123)
+
+
+# #666-T02 (legacy path): the same job without a project limit is unchanged, it names no limit.
+def test_a_run_without_a_project_cost_limit_is_not_stopped_early(tmp_path: Path) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+    publisher = RecordingPublisher()
+
+    with FakeUpstream([asks(tool_call("c1", "StructuredOutput", findings()))]) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    assert result.usage is not None
+    assert result.usage.stopped_early is None
+    assert publisher.calls[0][1].stopped_early is None
 
 
 # #540-N4: the final call of the wrap-up costs more than the limit (it is delivered anyway); the
@@ -1283,9 +1345,9 @@ def test_a_dynamic_run_after_a_slow_start_is_ended_by_the_time_that_is_left(
     deadlines: list[float] = []
     real = runner.dynamic_ledger
 
-    def spy(capabilities: Any, environment: Any, deadline: float) -> Any:
+    def spy(capabilities: Any, environment: Any, deadline: float, *rest: Any) -> Any:
         deadlines.append(deadline)
-        return real(capabilities, environment, deadline)
+        return real(capabilities, environment, deadline, *rest)
 
     monkeypatch.setattr(runner, "dynamic_ledger", spy)
     script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}

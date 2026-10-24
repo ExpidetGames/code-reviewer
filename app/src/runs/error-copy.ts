@@ -150,7 +150,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "No provider can serve this model with everything the review asks for, so the AI service refused the request. Choose another model for this project.",
   runner_shutdown: "The runner was shut down while it worked on this run.",
   dynamic_engine_unavailable:
-    "This run needs the Dynamic Review engine, which no runner that answered has available yet.",
+    "This run needs something no runner that answered has available yet: the Dynamic Review engine, or, for a project with a cost limit, a runner that can enforce that limit.",
   dynamic_isolation_self_check_failed:
     "The Dynamic Review engine could not prove its isolation is safe, so no runner advertises it.",
   dynamic_config_invalid:
@@ -163,6 +163,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The Dynamic Review used more than its allowed budget and was stopped.",
   dynamic_accounting_failed:
     "The Dynamic Review's model usage could not be accounted for, so it was stopped.",
+  cost_limit_reached:
+    "The review stopped at the cost limit set for this project: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. You can change the limit under Limits in the project settings.",
   dynamic_model_features_unsupported:
     "The configured model does not support the features Dynamic Review requires. Choose another model.",
   lease_lost:

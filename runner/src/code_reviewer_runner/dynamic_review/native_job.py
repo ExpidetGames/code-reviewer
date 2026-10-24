@@ -32,6 +32,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    effective_cost_limit,
     max_cost_from_environment,
 )
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
@@ -138,9 +139,11 @@ def build_native_job(
             ErrorCode.DYNAMIC_CONFIG_INVALID, "the model provider of the job cannot be used"
         ) from None
     capability = new_proxy_capability()
+    max_cost, stop_reason = effective_cost_limit(
+        max_cost_from_environment(environment.get(_MAX_COST_VARIABLE)), job.llm.max_cost_usd
+    )
     limits = DynamicLimits(
-        deadline_seconds=deadline,
-        max_cost_usd=max_cost_from_environment(environment.get(_MAX_COST_VARIABLE)),
+        deadline_seconds=deadline, max_cost_usd=max_cost, cost_stop_reason=stop_reason
     )
     made = build_native_run(
         dynamic.cost,

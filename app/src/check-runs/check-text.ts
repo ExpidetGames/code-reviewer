@@ -33,6 +33,8 @@ export type CheckText = Pick<
 
 const STOPPED_EARLY_TEXT: Readonly<Record<string, string>> = {
   cost_limit: "The review stopped at its cost limit and may be incomplete.",
+  project_cost_limit:
+    "The review stopped at the cost limit set for this project and may be incomplete. You can change the limit under Limits in the project settings.",
   time_limit: "The review stopped at its time limit and may be incomplete.",
   token_limit: "The review stopped at its token limit and may be incomplete.",
 };

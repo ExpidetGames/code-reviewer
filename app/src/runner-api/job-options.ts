@@ -29,6 +29,11 @@ export type JobOptions = {
     /** `llm.maxTokens` of the job (a whole number of 1000 to 10 000 000). Null or left out: not sent. */
     maxTokens?: number | null;
     /**
+     * #666: the cost limit of the project in whole US cents (the project's setting over the workspace default). Null or left
+     * out: none is set and nothing is sent.
+     */
+    maxCostCents?: number | null;
+    /**
      * The fallback models, in order. Accepted here and not handed on: the MVP has no fallback chain
      * (the contract has the field, `llm.fallbackModels`, for when one is decided).
      */

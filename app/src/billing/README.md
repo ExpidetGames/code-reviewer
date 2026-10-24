@@ -203,8 +203,8 @@ maps to it.
   model call: the operator's side; the job never ran), and the refusals of the claim for billing (`balance_negative`,
   `insufficient_balance`, `billing_rates_incomplete`, and the retired `billing_hold_released` of old rows: nothing ran).
 - `charged`, everything else: a delivered result; a run that failed, including the `AI_COST_FAILURE_CODES` group
-  (`command_failed`, `dynamic_budget_exceeded`, `dynamic_policy_violation`, `llm_bad_request`,
-  `llm_context_length_exceeded`); a run stopped at a cost or time limit; a run that ended without a result (`no_result`,
+  (`command_failed`, `dynamic_budget_exceeded`, `cost_limit_reached`, `dynamic_policy_violation`,
+  `llm_bad_request`, `llm_context_length_exceeded`); a run stopped at a cost or time limit; a run that ended without a result (`no_result`,
   `review_not_published`, `llm_output_invalid`, a process the loop of a runner had to end); a run cancelled or superseded
   by a new commit; `git_auth` and `git_forbidden` (a revoked installation or our own App token: not clearly ours); and a
   code or checkout reason the build does not know. It never throws.

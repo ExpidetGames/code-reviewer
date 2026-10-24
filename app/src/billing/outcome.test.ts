@@ -501,6 +501,8 @@ describe("the failures that incurred AI cost", () => {
   it("names the group, in one place", () => {
     expect([...AI_COST_FAILURE_CODES].sort()).toStrictEqual([
       "command_failed",
+      // #666: a Diff Review stopped at the cost limit of its project.
+      "cost_limit_reached",
       "dynamic_budget_exceeded",
       "dynamic_policy_violation",
       "llm_bad_request",

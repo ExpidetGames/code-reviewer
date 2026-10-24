@@ -37,6 +37,7 @@ export function createReviewSettingsJobOptionsSource(deps: {
           llm: {
             model: resolved.dynamic.dynamicModel,
             maxTokens: resolved.settings.maxTokens,
+            maxCostCents: resolved.settings.maxCostCents,
           },
           dynamic: {
             model: resolved.dynamic.dynamicModel,
@@ -53,7 +54,11 @@ export function createReviewSettingsJobOptionsSource(deps: {
           layers: resolved.modelLayers.diff,
           entryId: resolved.dynamic.catalogEntryDiff,
         },
-        llm: { ...llm, fallbackModels },
+        llm: {
+          ...llm,
+          fallbackModels,
+          maxCostCents: resolved.settings.maxCostCents,
+        },
       };
     },
   };
