@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The answer of `GET /api/w/:workspace/plan`, the route the plan page polls (src/app/api/w/[workspace]/plan/). The
 // view is already the boundary to the browser (`plan-view.ts`); the answer adds only that it is never cached,

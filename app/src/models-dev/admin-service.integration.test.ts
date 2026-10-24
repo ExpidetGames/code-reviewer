@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin's side of the models.dev catalog (#554), over a real database on both engines: the providers with the state
 // of their addresses, the confirmation of a changed address (a guarded update of the one row, never of a refused address,

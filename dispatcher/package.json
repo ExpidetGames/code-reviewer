@@ -2,7 +2,7 @@
   "name": "code-reviewer-dispatcher",
   "version": "0.1.0",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "start": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/node.ts",

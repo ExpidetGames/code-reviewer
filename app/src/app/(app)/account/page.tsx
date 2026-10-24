@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Account: the address, and the GitHub account linked to it. Any signed-in person who may use the app.
 import type { Metadata } from "next";

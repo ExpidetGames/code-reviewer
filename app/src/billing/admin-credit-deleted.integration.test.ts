@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #658: an operator's lookup, search and manual credit never reach a deleted workspace (a tombstone: anonymised, its journal kept
 // for the books). Crediting one would put money where nobody can spend it.

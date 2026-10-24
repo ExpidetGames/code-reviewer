@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Portable column conventions (see README.md in this folder). Every repository converts between
 // application values and column values through these helpers, so the encodings live in one place.

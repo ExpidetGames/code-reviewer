@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The links to the operator's terms and privacy statement (#626): two instance settings of the billing page of the admin portal,
 // `billing_settings.legal`. The terms link is what the business confirmation of the first top-up points to, and the Stripe

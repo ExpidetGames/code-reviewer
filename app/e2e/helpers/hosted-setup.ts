@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The first-run setup of an app in its serverless mode (#321, #332): there is no log to read the code from, the
 // operator makes it with `pnpm setup-code` against the database of the deployment. The same command, then the same two

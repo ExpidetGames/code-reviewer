@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake models.dev as a process of its own (#554), for the Playwright run: the app under test fetches the catalog from
 // it (`MODELS_DEV_URL`) and a journey scripts it over HTTP (see `server.ts`). Loopback only; the port is

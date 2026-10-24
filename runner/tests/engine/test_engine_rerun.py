@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the identity patch against the real GitHub provider of PR-Agent: a second review of
 the same pull request edits the first comment of the bot instead of posting a duplicate, although

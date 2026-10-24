@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server: the configuration as the database and the process environment have it
 // right now. Read on every call, never cached, so a fixed setting shows on the next page load.

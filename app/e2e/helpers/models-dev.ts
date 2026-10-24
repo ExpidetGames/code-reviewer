@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Fills the models.dev catalog of the app under test the way the daily fetch does, with the committed fixture and no network
 // (src/test-support/e2e-models-dev-child.ts). The journeys never write rows themselves.

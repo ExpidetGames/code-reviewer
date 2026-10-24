@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A sign in limiter that never refuses, for tests that are about something else than the limit.
 import { handleAuthRequest } from "../auth/http.ts";

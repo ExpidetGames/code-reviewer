@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `job_check_runs` (#405): where the check run and the review verdict of a review job stand on GitHub, one row per
 // job (src/check-runs/README.md). `check_run_id` and `review_id` are what makes the work idempotent: the check run

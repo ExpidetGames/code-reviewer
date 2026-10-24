@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The synchronization that runs when the server starts. It must never stop the start: a platform
 // that is down, or settings that are missing, are reported in the log and the app serves requests

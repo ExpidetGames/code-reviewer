@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The dispatch webhook of the running server: the hook the job queues of the request handlers get
 // (src/jobs/shared.ts), and the service the sweep (#328) calls. Per request code asks for them here.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the agent mode of the fake LLM (fakes/llm): the answers the real, pinned OpenCode gets from the
 // runner's model proxy in the Dynamic e2e lane (#253). The engine sends a chat completion that offers tools;

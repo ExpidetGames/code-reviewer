@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: what the application pins when it credits a payment (the amount the buyer was charged, in the provider's unit) and
 // what it does with the events a provider sends without it (a Stripe refund names its own amount and no total), plus the

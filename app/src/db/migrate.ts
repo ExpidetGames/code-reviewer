@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Brings the database to the latest schema. All pending migrations run in one transaction (see
 // dialect.ts): if one fails, nothing of the batch is applied or recorded, and the error names the

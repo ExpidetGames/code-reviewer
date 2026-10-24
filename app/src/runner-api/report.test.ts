@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a job's result keeps of the model of a catalog entry when it ran on the operator's key (#432): the mechanics of
 // the masking, below the claim and the completion that feed it.

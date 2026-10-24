@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The fixed core of Dynamic Review (#198): the code-owned, versioned rules that no input can change.
 

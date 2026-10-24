@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Leaves two billing review rows in the app under test the way the webhook does, through the app's real repositories on its
 // database file (src/test-support/e2e-billing-reviews-child.ts). The journeys never write rows themselves.

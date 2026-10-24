@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check run service (#405) over what it really runs on: a migrated database with the job queue fixture, the real
 // GitHub App provider and client over HTTP against the fake GitHub (which serves the Checks and review API), and a

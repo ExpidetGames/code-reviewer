@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which listed VMs are ours (#364). The reaper may stop a VM only when it has exactly the shape of one the
 // Sandbox-Launcher (#329) or the capability probe's canary (#331) creates; the platform's own filter (a name prefix and

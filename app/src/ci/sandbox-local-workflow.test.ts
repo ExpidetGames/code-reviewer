@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how CI proves the privileged lane of the Sandbox-Launcher (#329-T09, T10): a job of its own runs
 // `make test-sandbox-local` on the runner's Docker daemon, which builds the `sandbox` target and runs the Launcher's

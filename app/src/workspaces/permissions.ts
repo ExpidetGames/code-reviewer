@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What each role may do in a workspace (docs/decisions/0001-editions-setup-and-accounts.md, section 2.6).
 // The one matrix of the app, as pure functions: every route, page and service asks here, and the table in

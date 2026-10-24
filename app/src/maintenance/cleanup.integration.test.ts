@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the cleanup of old rows against a real SQLite file: counters whose window is over and
 // verification links that expired or were used a week ago go, everything that still has an effect stays,

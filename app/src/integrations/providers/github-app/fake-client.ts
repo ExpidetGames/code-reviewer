@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An in-memory GithubAppClient for unit tests of the provider: no HTTP, no GitHub. It answers from
 // plain data and records every call. (The real client is tested against the fake GitHub API.)

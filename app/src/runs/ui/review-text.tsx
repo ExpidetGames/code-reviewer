@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The text of a posted review (a comment written in Markdown with a little HTML), shown readably and safely. It is text from
 // outside: nothing of it becomes markup. It is cut into blocks (headings, lists, quotes, code, paragraphs) and every block is

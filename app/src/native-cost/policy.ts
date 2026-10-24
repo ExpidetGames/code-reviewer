@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cost policy of a native job (#553), as the claim hands it to the runner (`dynamic.cost`, `DynamicCostPolicy` in
 // contracts/runner-api.v1.json). Pure: the answers of the price service go in, a policy or a refusal comes out.

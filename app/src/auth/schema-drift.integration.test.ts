@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the tables created by our migrations are the tables Better Auth expects. Better
 // Auth can compute the migration it would run for its configuration; after our migrations that plan

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Verify and expand upload-pack objects under hard cumulative bounds.
 
 Git index-pack is deliberately not invoked: its expansion precedes post-fetch quota checks.

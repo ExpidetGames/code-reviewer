@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/billing/top-ups/:id/check ("Check payment"): asks the payment provider what became of a top-up of this
 // workspace and applies the answer like a webhook would have, once. It repairs a lost webhook and makes the success page reliable.

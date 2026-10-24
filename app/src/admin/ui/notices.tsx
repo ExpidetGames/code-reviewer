@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The notices of the portal. The warning of a rule that cannot work yet comes from the shared rule
 // copy (#169), so the wizard and the portal say the same thing, and it has one owner that both the

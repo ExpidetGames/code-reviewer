@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The HTTP answer of GET /api/health, apart from the route file so a test can call it without a request.
 import "server-only";

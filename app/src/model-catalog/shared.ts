@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the catalog routes of the admin portal (#429): the catalog on the server's
 // database, the capability checks against the provider's own address (src/llm/shared.ts), and the audit line of a change

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The names a workspace has: the display name a person types, and the slug in its address (`/w/<slug>`).
 // Pure functions. A name is shown in pages and put into mails (the subject and the text of an

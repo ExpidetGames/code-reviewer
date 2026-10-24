@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #507: the migration of the memory of the start credit. One new, empty table; an account is granted once (the primary key),
 // the account id is a plain number (the check), and the workspace id is not a foreign key, so the row outlives the workspace.

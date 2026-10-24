@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The `manual` adapter (ADR 0006, P10; #497): prepaid billing with no payment provider, for a self-hosting operator. It
 // has no checkout (`{ kind: "none" }`: the workspace page says "ask your operator to add credit") and no webhook (the

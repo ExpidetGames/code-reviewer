@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // A payment that was started and has not been confirmed (ADR 0006, 2.13; #505): the amount, when it was started and, where the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Rules that hold for every GitHub Actions file of the repository, the hosted deployment pipeline (#403) first:
 // every third-party action is pinned to a commit (and every action of the pipeline, GitHub's own included, because

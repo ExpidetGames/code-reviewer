@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing review rows of the admin page (#603): the events the webhook recorded as money that moved (or claimed to) and
 // changed nothing in the ledger (`BILLING_REVIEW_OUTCOMES`, `billing_webhook_events`). The service lists them with what an

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The entitlements that apply to ONE workspace right now: its own row, else the instance default, else none
 // (`resolveEntitlements`, src/workspaces/entitlements.ts), with the key mode that applies (`applyWorkspaceKeyMode`, #496): the

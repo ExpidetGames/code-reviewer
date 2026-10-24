@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The queues the running server uses tell the check run reconciler about every change of a job, after the change was
 // made (#405): the runner side (claim, result, release, cancel, a heartbeat that learns of a supersede or an end) and

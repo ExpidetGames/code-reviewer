@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the app_settings table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts). The only code that reads or writes it. One row per setting of a workspace,

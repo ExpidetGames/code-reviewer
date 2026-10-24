@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the runner API on the running server (#614): the collaborators that fail closed when left out are really passed. A
 // claim that finds no `providerPins` cannot adopt the address of a selection made before pins existed (#588), so the line that

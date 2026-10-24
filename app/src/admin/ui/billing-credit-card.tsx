@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The manual credit and correction (#504, ADR 0006, P10): find a workspace by name, see its balance and its recent journal

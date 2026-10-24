@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A clock a test moves by hand: `sleep` resolves when `advance` has moved time far enough, or when its
 // signal aborts. Nothing here reads the real time, so a five minute deadline takes no time in a test.

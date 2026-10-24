@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Merging the instance admin with an imported operator (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.5). In an existing installation the person who runs the instance exists twice after the short

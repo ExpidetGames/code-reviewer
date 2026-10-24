@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Setup → Sign-up (#181): who may sign up, one form. A rule that cannot work yet is shown above it
 // through the shared attention region, so the notice has one owner (notices.tsx). Instance admin only.

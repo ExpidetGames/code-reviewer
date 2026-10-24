@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Limits: one field, folded into the instance section (#181). The old deep link stays working and
 // leads to it. Instance admin only: anybody else gets the 404 of a page that does not exist.

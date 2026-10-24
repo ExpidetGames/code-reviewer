@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A workspace as a customer leaves it, for the tests of its deletion (#658): the same rows in the integration test of the
 // deletion and in the tests of the locks it takes, so they cannot drift apart.

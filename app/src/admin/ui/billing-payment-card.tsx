@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The payment adapter and the Stripe credentials (#504, ADR 0006, 2.14). The adapter is `manual` (no payment provider: the

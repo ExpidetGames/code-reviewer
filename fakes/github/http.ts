@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Small helpers shared by the parts of the fake GitHub: answering and reading HTTP messages.
 import type { IncomingMessage, ServerResponse } from "node:http";

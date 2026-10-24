@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The billing details of the workspace (ADR 0006, 2.13; #505): the legal name and address that go on the receipt, and an optional

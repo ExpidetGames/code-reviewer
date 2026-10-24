@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The catalog of providers and models a workspace on its own key chooses from, on the running server's database (#555).
 import "server-only";

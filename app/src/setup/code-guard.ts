@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which setup code store the running app uses (#321). A server keeps the code in the memory of its one
 // process, as it always did; a serverless deployment keeps it in the database, because the next request

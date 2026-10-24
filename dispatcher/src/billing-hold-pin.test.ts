@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The App holds money for the longest a VM can live: the job timeout plus the VM margin (#498, app/src/billing/hold.ts).
 // The App cannot read the Dispatcher's settings, so it carries their defaults as constants; this test pins them from the

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The passthrough proxy of one job (#550): authenticate, swap the key, relay, count.
 

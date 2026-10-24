@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Test helper, not a test: runs the real runner entry point with PR-Agent's `handle_request`
 replaced by a double, so a test can start the runner as a real process without any network.

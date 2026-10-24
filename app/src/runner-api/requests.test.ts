@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the checks on what a runner sends: the job id in the path, the runner id header and the
 // bodies of heartbeat and complete. A refusal names fields and reasons, never the values.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Escapes instruction-shaped framing in tool-result text, matched on a normalised copy (#243).
 

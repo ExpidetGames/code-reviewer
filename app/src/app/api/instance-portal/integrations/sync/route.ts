@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/integrations/sync: reads the installations and repositories from GitHub now (the "Sync from
 // GitHub" button), for the instance admin only. Not signed in is 401, signed in but not an admin is a 404

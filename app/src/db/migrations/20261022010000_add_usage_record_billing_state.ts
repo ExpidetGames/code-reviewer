@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #605: whether the money of a run is still to be settled. No amount is held at the claim any more, so the journal no
 // longer says which jobs were claimed with billing on; this column does. `open` is written by a claim that passed the

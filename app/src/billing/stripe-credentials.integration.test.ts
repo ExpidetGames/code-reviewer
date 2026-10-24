@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: the Stripe client of the instance, made from the key the admin stored (#504) when a top-up needs it.
 import { describe, expect, it } from "vitest";

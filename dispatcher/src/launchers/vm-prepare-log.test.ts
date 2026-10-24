@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import { STDERR_TAIL_MAX_CHARS, stderrTail } from "./vm-prepare-log.ts";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the plan handoff on the running server: the real database, the instance setting and the shared
 // counters. The route files and the pages call these only.

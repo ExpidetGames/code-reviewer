@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pauses of the inline retries of a wake-up (`INLINE_RETRY_DELAYS_MS`, #395) for a test lane that has to give a
 // Dispatcher it starts itself more time than a slow runner may need. Honoured only with

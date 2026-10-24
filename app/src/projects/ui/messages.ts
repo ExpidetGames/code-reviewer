@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for everything that can go wrong when a person activates a project or runs the sync.
 // The routes answer with stable codes; this is where a code becomes a sentence (the UI translates

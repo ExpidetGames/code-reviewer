@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which engine a Kysely connection speaks. Almost nothing in the app needs to know: the schema, the
 // query builder and the codecs are the same on both. The one exception is the claim of a job, whose

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of the catalog data routes of the admin portal and the HTTP status of each (#429). The page
 // translates a code to copy (src/admin/ui/catalog-messages.ts), never the other way round. A code never contains a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the project configuration for the serverless platform (app/vercel.json) and the build
 // output that depends on the runtime mode (#319): the region, a cron that calls a route that exists and

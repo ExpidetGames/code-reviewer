@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limits on the endpoints that can be guessed or made to send mail: sign-up, the mail that carries
 // a verification link, and the use of a link. Counted in the shared `rate_limits` table (docs/decisions/

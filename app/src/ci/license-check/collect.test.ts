@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: the readers of what pnpm and uv print and of the lockfiles. The real files are read in
 // policy.test.ts.
@@ -9,6 +9,7 @@ import {
   parsePythonInstalled,
   parseUvLock,
   UV_LICENSES_ARGS,
+  withoutFirstParty,
 } from "./collect.ts";
 
 describe("parsePnpmLicenses", () => {
@@ -128,5 +129,21 @@ describe("the uv command", () => {
   it("never syncs the environment, so the check cannot install packages or use the network", () => {
     expect(UV_LICENSES_ARGS).toContain("--no-sync");
     expect(UV_LICENSES_ARGS).toContain("--locked");
+  });
+});
+
+describe("withoutFirstParty", () => {
+  // #677: the runner is our own proprietary package; its license is no business of the allow list.
+  it("drops the runner package under any spelling of its name and keeps every dependency", () => {
+    const packages = [
+      { ecosystem: "python" as const, name: "Code_Reviewer.Runner" },
+      { ecosystem: "python" as const, name: "pr-agent" },
+      { ecosystem: "npm" as const, name: "code-reviewer-runner" },
+    ];
+
+    expect(withoutFirstParty(packages).map((entry) => entry.name)).toEqual([
+      "pr-agent",
+      "code-reviewer-runner",
+    ]);
   });
 });

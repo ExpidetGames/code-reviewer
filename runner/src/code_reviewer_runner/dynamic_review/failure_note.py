@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The short note a failed Dynamic run leaves in the summary comment of its pull request (#299).
 

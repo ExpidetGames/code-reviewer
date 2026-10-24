@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down whether an email and password sign-up is open right now, as pure logic: email with password
 // has to be on, and a rule that names emails or domains stays closed while the instance cannot verify

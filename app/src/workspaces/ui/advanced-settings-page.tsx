@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Advanced sub-page of the workspace settings (#658): only the deletion of the workspace, and only for an Owner (the page
 // and the route answer a person without that role as if it did not exist, so nothing here checks the role again). What it held

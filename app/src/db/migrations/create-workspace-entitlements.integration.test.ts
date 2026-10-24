@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #271-T07: the entitlements migration adds the table to a database made by the previous release's
 // migrations and changes no existing row. A workspace without a row stays unlimited.

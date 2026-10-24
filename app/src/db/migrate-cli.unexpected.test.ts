@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm migrate` ends EVERY failure with one line and exit code 1 (#319), also one that is not a
 // DatabaseError: the dedicated lock connection of the advisory lock fails with raw `pg` errors, or

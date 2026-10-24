@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The names of the registered providers, taken out of a text a member of a workspace on the operator's key can read (#435,
 // ADR 0005, 2.17). Used where a result is stored (`runner-api/report.ts`) and where a run is read (`runs/run-view.ts`), so a

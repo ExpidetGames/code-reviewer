@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a person does in a multi-tenant instance before anything else: sign up with email and password, create a
 // workspace of their own and connect a GitHub installation to it through GitHub's installation page and

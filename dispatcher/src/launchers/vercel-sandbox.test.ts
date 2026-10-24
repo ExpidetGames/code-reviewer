@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";

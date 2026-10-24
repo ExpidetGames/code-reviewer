@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The command line of the backup, for a Coolify scheduled task, a manual run and the restore guide:
 //

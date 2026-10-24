@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Stock OpenCode probe, not a production adapter. No real model or credential access."""
 
 import contextlib

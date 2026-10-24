@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The access a job of a workspace gets for a catalog provider (#555), assembled over a real database: only the key of that
 // provider is revealed, a provider without a key fails with `no_key`, and the keys of the catalog providers are masked in a

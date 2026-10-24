@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Asking for a password reset link by mail (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.3
 // and 2.7). Offered only while the instance can send mail and email with password sign-in is on; without

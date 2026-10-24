@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which Dynamic provider and model a project save leaves a project with when the provider is a catalog provider (#555), and
 // whether the save has to put that pair to the catalog. Pure. A catalog provider has no built-in model and no model metadata

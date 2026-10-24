@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sign-up rule as pure logic (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.5): which addresses a rule lets in, how an address is read, and that anything that is not

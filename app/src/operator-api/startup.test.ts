@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the one line the start logs about the operator API: whether it is on, and when a token is set but not
 // usable, why (the variable name and the rule, never the value).

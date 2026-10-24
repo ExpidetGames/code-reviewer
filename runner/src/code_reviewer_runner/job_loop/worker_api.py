@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The Worker's side of the Worker API (`contracts/worker-api.v1.json`, #323).
 

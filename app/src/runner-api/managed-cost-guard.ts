@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rule that a managed Dynamic run never settles with an unknown cost (#553; epic #489: "the managed key is never used
 // with an unknown price"). On the managed key we pay, so the price is known before the job starts (the claim carries the

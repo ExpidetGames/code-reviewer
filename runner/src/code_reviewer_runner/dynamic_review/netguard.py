@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """The engine user's network boundary: it may reach its job's model proxy and nothing else (#197).
 
 The engine runs as a dedicated unprivileged user in the runner container. Tool denial is not a

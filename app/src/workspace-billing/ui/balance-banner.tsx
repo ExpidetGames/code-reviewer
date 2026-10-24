@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The banner on the pages of a workspace for an Owner and an Admin while the balance is low, zero or below zero (#506, ADR 0006,
 // D9): what is the matter, the balance, and a link to the billing page. A Member never gets one; the pull request notice of the

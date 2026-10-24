@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the notices of refused reviews of ONE workspace (the table `refusal_notices`; the factory takes the
 // workspace id, see ../workspace-scope.ts): the record that a pull request got the notice in a period

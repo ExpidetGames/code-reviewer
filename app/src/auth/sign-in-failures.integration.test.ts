@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that a sign in which goes wrong ends on the login page with an error code and leaves
 // nothing behind: no user, no session. Covers a forged or missing state, a callback address that

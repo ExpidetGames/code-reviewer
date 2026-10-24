@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The license check: every dependency of the lockfiles must carry a license from the allow list of
 // license-policy.json, or one that the policy grants to that package by name. The inputs are plain

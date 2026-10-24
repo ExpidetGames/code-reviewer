@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The estimated cost of one review with the model (and the fallback model), and the warnings of the
 // cost guard (src/review-settings/cost.ts): above the customer's warning level, a model without a known

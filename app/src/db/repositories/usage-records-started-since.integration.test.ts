@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: how many reviews a workspace started after a moment (every usage record reserved later, whatever became of it), the read
 // of the hidden hourly brake, on SQLite and on Postgres.

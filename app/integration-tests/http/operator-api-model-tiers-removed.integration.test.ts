@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #434-T09: the operator API no longer has `/model-tiers` (ADR 0005, decision C1: a documented breaking change of the
 // operator API, `contracts/README.md`). A client that still calls it gets the answer of any path the API does not have;

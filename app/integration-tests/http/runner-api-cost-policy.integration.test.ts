@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cost policy of a native job at claim time (#553), on both ways a job reaches a runner: the legacy claim and the Worker
 // API's first fetch (the Dispatcher's claim runs the checks too, before any VM starts).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // "Link my GitHub account": starts GitHub's authorization of the signed-in person (the user authorization

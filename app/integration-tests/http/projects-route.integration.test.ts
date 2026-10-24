@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who may switch a project on or off: the access proxy (real Better Auth, real database)
 // in front of the handler of `PUT /api/repositories/:id/project`. A request without a session gets

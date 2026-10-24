@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins the permission matrix of the workspace roles (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.6), table driven: every action against every role, and every action on a member against

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The state of the fake Stripe and the things that happen to it: customers, Checkout sessions, payment intents, charges,
 // refunds, disputes, webhook endpoints and the events they make. The objects are copies of the fixtures with the fields

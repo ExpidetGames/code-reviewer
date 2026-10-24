@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin's decisions about catalog models (#549, part B), on both engines: whether a model is enabled for the managed
 // key (one row per model, changed in place) and the append-only history of its price confirmations, the latest of which

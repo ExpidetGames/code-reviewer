@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The removal of the stored keys, at the end of the "LLM" page (#658; it was on "Advanced" before): one danger zone
 // for each provider that has a key (#426), for an Admin or an Owner (`manage_llm_key`). All providers are rendered, so a

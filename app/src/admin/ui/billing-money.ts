@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The decimals the billing page shows and takes (#504): dollars to micro-USD (1 USD = 1,000,000) and back, the factor A to parts
 // per 10,000 and back, and whole numbers. No floating point touches an amount: a text is split at its decimal point and read as

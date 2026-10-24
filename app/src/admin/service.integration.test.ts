@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the instance settings service against a real SQLite file: every change of a setting is
 // validated, recorded with the admin and the time, and shown back; the rules for the sign-in methods

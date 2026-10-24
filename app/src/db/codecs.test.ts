@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the portable column conventions: JSON as text, booleans as integers 0 and 1, and
 // timestamps as ISO 8601 text in UTC. These helpers are the only place that knows the encodings.

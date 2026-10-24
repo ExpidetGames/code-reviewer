@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake App for the Dispatcher and the Worker (#318): it speaks the Dispatcher API (claim, release,
 // version under /api/runners/v1) and the Worker API (job details, heartbeat, result under

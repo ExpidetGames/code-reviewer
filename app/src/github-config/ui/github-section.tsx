@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub App page of the admin portal (#182): the App's status with the addresses to enter on
 // GitHub (shown directly, they are what the person came for), the two ways to connect it behind one

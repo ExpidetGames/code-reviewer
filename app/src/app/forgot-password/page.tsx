@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where somebody who forgot their password asks for a link by mail. Public. It exists only while the
 // instance can send mail and email with password sign-in is on (the state of the instance, read at request

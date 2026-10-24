@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" check against the fake LLM over real HTTP: an accepted key, a rejected one (401), an address
 // where nothing answers, a provider that is slow or redirects, the key kept out of every message in every

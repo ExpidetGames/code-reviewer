@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: Stripe's webhooks end to end, on SQLite and on Postgres: the fake Stripe makes the events of a payment, a refund and a
 // dispute, they are signed the way Stripe signs them and posted to the real handler (`POST /api/billing/webhook`) with the

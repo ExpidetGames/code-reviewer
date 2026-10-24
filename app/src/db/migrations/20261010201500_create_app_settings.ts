@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Settings of the whole instance, one row per setting, the value as JSON text. The first one is
 // `review_defaults`: the global default values of the review settings, holding only the fields

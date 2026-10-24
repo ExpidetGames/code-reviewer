@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/workers/v1/jobs/:id (#320): the Worker fetches its job. This is where the secrets of a split
 // claim are created: the same checks and the same step 4 as the legacy claim (`checkJob`, then

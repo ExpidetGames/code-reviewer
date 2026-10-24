@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET and PUT /api/w/:workspace/billing/monthly-limit: read and set the optional monthly total limit of the workspace (ADR 0006,
 // 2.9; #499). An Owner or an Admin (`manage_billing`); a missing path while billing is off; same site only for a change. A

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The measure of the infrastructure of a job (#493): the VM the Dispatcher reported, the end the App learned (or the
 // bounded backstop), the VM of the final claim that counts, and the wall clock of a job without a VM. On SQLite and,

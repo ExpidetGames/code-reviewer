@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The addresses of a workspace: which paths name a workspace, which slug they name, and that an odd spelling
 // can only fail to name one.

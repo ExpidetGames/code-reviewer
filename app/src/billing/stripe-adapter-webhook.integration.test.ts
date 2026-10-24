@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: the Stripe adapter's webhook and its lookup of a top-up, against the fake Stripe (fakes/stripe): the events the fake makes
 // for a payment, a refund and a dispute are signed the way Stripe signs them, verified over the exact bytes with the stored secret

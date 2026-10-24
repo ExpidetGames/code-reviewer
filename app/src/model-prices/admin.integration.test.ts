@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The catalog price routes of the admin portal (#549), end to end over a real database, the real access proxy and the real
 // handlers: only an instance admin gets in, every change comes from this site and is JSON, enabling, confirming and

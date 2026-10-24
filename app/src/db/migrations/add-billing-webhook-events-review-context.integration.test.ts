@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: whose payment a reviewed webhook event is. The row of an event that an operator has to look at carried only the
 // provider's reference; it now carries the workspace id and the intent id when the application could attribute the event.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Deleting a workspace completes the check runs of its waiting reviews on GitHub (#658), against the fake GitHub through the real
 // App provider: a review that waited shows "Waiting" on its pull request, the deletion removes the job, so nothing else would

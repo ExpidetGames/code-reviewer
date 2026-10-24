@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `users.email_conflict`: the verified primary email of a user's GitHub account when another account
 // already has it (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5). An imported user's

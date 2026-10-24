@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #262: the default Dynamic Review model was spelled `deepseek-v4.1-flash`, but the name is sent as it
 // is to OpenRouter, which serves `deepseek/deepseek-v4.1-flash`. A project (or the workspace review

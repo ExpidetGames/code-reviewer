@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The usage of a real Claude Messages API answer for the unit tests (not a test file; #534)."""
 

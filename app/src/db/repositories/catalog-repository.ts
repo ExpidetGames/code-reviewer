@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the model_catalog_entries table: the operator's list of the models that workspaces on the operator's key
 // may use (#425, src/model-catalog/README.md). Instance level: the table is configuration, not customer data, and no

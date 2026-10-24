@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which items stand between an instance and a billing that can be on (ADR 0006, 2.14): the rates for every adapter, and for
 // Stripe also the two credentials and a passing connection check. Pure.

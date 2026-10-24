@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Sandbox-Launcher (#316, #329): starts the Worker of one job as our hardened container inside a fresh
 // Sandbox VM. Vercel's firewall is not part of the security boundary; everything security-relevant comes from

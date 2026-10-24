@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where `docker run` executes for the Sandbox-Launcher (#329): inside one fresh Sandbox VM. It is a
 // `ContainerHost` (container.ts), so the flags come from the one hardened container spec; what it adds is the

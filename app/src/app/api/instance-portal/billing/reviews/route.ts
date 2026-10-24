@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/admin/billing/reviews?state=&page=: the billing review rows (events that moved money and changed nothing in the
 // ledger), open or resolved, newest first, 25 to a page, for the instance admin only (#603). Not signed in is 401, signed in

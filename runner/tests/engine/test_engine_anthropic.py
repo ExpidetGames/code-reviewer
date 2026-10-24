@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A Diff job on the Anthropic provider (#511): the real PR-Agent and LiteLLM, run through the real
 job entry point, against the fake LLM speaking the Claude Messages API.

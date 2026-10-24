@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The report of a VM start by the Dispatcher (#493): `POST /api/runners/v1/jobs/{id}/vm`, authenticated with the
 // dispatcher credential and the per-job credential in the body (the Worker, which holds only the second, cannot call

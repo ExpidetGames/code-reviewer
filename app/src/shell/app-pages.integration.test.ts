@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who sees the pages inside the app frame (Projects, Runs, Settings): a visitor without a
 // session is sent to the login page and gets neither navigation nor user data, from the proxy and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The app's own 404 (#633): every address the app does not know, and every page that says it is not
 // there for this person (a workspace they are not a member of, the admin portal for anybody but the

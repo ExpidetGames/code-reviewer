@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a member of a workspace sees of a catalog entry (#425, ADR 0005, 2.6): the name the operator chose and what it
 // serves, never the provider or the model id. The type has no such member and `toMemberEntry` copies the listed fields

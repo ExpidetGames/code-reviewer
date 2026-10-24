@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/runs?repository=<id>&status=<status>: the list of runs the Runs page polls.
 // Protected: the proxy lets a member of the workspace through (anybody else gets the answer of a path that

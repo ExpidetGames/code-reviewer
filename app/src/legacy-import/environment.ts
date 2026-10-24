@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the environment of an installation from before accounts says, read once for the import of that
 // installation (docs/decisions/0001-editions-setup-and-accounts.md, section 2.11). The only place that knows

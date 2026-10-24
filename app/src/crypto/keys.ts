@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Key derivation: one key per purpose, derived from `APP_SECRET` with HKDF-SHA256. No code uses the
 // secret itself as a key (the one exception is Better Auth, which is given the secret as it is so

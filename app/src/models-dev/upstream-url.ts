@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The address models.dev states for a provider (`api`) decides where a real key is sent, so it is untrusted data too
 // (#548, part C). Three rules, and the state they keep per provider:

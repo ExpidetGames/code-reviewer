@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The balance of the workspace in US dollars, what running reviews hold (only while something is held), and, when reviews are
 // paused for want of credit, why and what to do about it (#505, ADR 0006, 2.5). A balance above zero starts reviews, even by one

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Prepare exact endpoint evidence and a sanitized per-job tree, without launching an engine."""
 
 import json

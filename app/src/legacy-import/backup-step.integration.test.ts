@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The backup that comes before the update (docs/decisions/0001-editions-setup-and-accounts.md, section 2.11,
 // point 1): an installation of the release before accounts is backed up before the migrations touch it, the

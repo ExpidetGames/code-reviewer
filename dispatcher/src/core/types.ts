@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the Dispatcher core: what a Trigger hands in, what a Launcher must offer and what the
 // core answers. Platform-free: no Node module, no platform SDK (checked by platform-free.test.ts).

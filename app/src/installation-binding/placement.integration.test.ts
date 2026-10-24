@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where an installation that nobody linked may go without a person binding it (docs/decisions/0001-editions-setup-
 // and-accounts.md, section 2.9): nowhere in a multi-tenant instance, and in a single-tenant one only the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake Launcher: it starts nothing and records what it was asked to start, so the core, the
 // Triggers and the entry points are tested without a sandbox or a container. A test scripts a launch

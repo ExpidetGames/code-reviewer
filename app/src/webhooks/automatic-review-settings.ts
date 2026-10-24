@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the trigger policy gets the settings of a project from: the repository row of the delivery,
 // then the review settings service (project over global over built-in). Kept apart from `shared.ts`

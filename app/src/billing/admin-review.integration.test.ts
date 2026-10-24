@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The list of billing review rows in the admin portal, over a real database, the real proxy and the real data routes (#603):
 // the rows an operator has to look at with what is needed to act on them, closing a row with a note and the admin as the

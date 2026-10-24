@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the runner's provider registry (#424, ADR 0005 2.4): what the OpenRouter entry carries,
 how an id is checked, and that the runner advertises exactly its registry."""

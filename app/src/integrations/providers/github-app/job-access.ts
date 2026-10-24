@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a job may do on GitHub and how a failed attempt to get that is reported. The token itself is
 // minted by `client.mintInstallationToken` (the one place that does it) and wrapped by the provider.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Fetches the pinned, unmodified OpenCode release into a directory and verifies it (#197).
 

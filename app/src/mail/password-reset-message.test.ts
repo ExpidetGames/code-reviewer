@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the password reset mail: the link comes from the configured public address and holds the token
 // in the query, the message says what the link does and for how long, and it holds nothing else that is

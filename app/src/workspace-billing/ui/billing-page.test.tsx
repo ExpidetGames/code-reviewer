@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // #505: the billing page of a workspace. What a person sees of the balance and why reviews are paused, the top-up with its

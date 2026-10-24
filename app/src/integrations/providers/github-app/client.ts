@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A small GitHub client for the app: authenticates as the app (JWT) and as an installation (token),
 // lists installations and their repositories, reads pull requests and permissions. Everything it

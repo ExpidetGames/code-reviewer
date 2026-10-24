@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down what the identity patch relies on in the installed, real PR-Agent: the chain from the
 review tool to `_resolve_user_login` that decides whether a comment is PR-Agent's own. The tests

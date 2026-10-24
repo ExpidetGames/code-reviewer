@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A test of an older migration says "it changes no existing row": it reads the rows of a table before the migration and again
 // after every later one and expects the same. A migration that comes later and adds a nullable column to a table makes every

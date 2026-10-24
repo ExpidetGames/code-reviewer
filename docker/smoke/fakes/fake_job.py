@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Test helper of docker/smoke/compose.sh, never part of a deployment: stands in for PR-Agent as the
 job process of the runner (`PR_AGENT_COMMAND`). It reads the job from stdin like the real one, writes

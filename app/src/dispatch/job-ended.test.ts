@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it, vi } from "vitest";
 import { createJobEndedReaction, JOB_ENDED_BUDGET_MS } from "./job-ended.ts";

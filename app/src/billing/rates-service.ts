@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rates of billing as an instance setting (ADR 0006, D2/D3, #494): the one place that writes A, B, the Diff AI
 // reserve and the numbers next to them (the start credit, the low-balance threshold, the hourly brake; #504) into

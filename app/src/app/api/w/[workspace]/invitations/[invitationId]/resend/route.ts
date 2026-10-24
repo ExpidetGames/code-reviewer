@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/invitations/:invitationId/resend: mails a new link for an open invitation and stops
 // the old one (only while the instance has a mail server: a link without one is shown once). Same rights as

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The start-up warning about the runner token: names what is wrong with RUNNER_TOKEN (not set, too
 // short, or with white space or control characters inside). A production start never gets this far

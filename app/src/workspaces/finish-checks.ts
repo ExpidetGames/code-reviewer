@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check runs a deleted workspace leaves behind (#658). A review that waited in the queue shows "Waiting" on its pull
 // request through a check run (src/check-runs/README.md); the deletion removes the job, so nothing would ever complete that

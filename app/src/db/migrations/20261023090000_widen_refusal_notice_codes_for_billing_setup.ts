@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #632: a review refused because billing is switched on but its setup is not complete (`billing_rates_incomplete`) gets a
 // notice on its pull request, keyed by the head like the balance's, so such a refusal is never silent. The check on

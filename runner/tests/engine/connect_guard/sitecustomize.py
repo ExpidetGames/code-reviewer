@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Loaded by the interpreter of the job process in the engine suite (through PYTHONPATH).
 

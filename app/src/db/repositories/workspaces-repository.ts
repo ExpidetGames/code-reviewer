@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the workspaces table: the owners of customer data. Instance level (it is the table that
 // scoping starts from, so it takes no workspace). It also answers the questions that start from a user

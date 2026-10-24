@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether a user has a GitHub identity linked. "GitHub only" is refused unless the acting admin has one
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.3), or they could not sign in again once

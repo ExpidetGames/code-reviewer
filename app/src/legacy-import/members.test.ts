@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who becomes a member when an existing installation is imported: the rules of the earlier allow list, applied once,
 // with the organization check as a function the test gives. Pure logic, no database and no network.

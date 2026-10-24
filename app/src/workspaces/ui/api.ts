@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the workspace pages make to the app's own routes (src/workspaces/http.ts): rename, change a
 // role, remove a member or leave, invite, revoke, resend, create a workspace, accept an invitation. The

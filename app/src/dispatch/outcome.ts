@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What an answer of the Dispatcher (or the lack of one) means for the dispatch of a job: acknowledged,
 // look again later, or stop. Pure: the answer, the failures so far and the clock come in, the new state of

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub data routes of the admin portal with real requests through the real proxy, the real handlers,
 // a real database, the real Better Auth and the fake GitHub: who may call them, what a request must look like,

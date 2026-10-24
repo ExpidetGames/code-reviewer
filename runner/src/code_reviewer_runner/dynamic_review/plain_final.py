@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The turns of a Dynamic Review that ends as plain JSON text (#552, spike #547).
 

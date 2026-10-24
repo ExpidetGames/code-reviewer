@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server: the LLM access of a workspace on the server's database, with the master key
 // and the legacy variables from the process environment as they are right now (read on every call, never

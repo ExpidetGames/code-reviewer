@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What the job loop answers when a Dynamic job process asks whether it still holds its job (#260).
 

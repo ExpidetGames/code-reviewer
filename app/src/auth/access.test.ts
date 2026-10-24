@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which paths need a session and what an unauthenticated request gets back. The rule is
 // default deny: only the paths on the public list are open, everything else, including paths that

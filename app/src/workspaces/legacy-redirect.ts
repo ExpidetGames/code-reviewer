@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The old addresses of the pages (`/projects`, `/runs/<id>`, `/settings`, from before the workspace was in the
 // address) still work as bookmarks: they lead to the same page in the first workspace of the signed in

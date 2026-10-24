@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The try-lock of the cron sweep (#328): at most one holder of a key at any moment, a second caller is told
 // "not acquired" at once instead of waiting, and the key is free again however the holder ended. On SQLite

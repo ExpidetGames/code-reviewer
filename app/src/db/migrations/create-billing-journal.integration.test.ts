@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #495: the balance journal migration. The database itself refuses an update or a delete of an entry and an entry that
 // breaks the sign or the parts of its type (the repository restates both, so a direct write cannot get around it), and

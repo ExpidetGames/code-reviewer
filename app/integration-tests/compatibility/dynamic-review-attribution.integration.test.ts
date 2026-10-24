@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #198-T07: the packaged default skill and the fixed core carry exact, immutable upstream
 // provenance, and every notice the adapted licenses require is present. The asset is the one the app

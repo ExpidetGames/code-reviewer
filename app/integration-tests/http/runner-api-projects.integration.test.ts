@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the runner API and the job queue are wired to the projects and the settings (CR-46):
 // the claim only hands out jobs of repositories with an active project, deactivating a project

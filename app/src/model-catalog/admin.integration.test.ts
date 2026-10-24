@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The model catalog in the admin portal (#429), end to end over a real database, the real access proxy and the real data
 // routes, with the capability checks answered by the fake LLM: only an instance admin gets in, every change comes from

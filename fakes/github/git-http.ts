@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Git part of the fake GitHub: the smart HTTP upload-pack of a repository the test registered, so that
 // the runner's own Git transport (`dynamic_review/transport.py`: `GET <repo>.git/info/refs?service=git-upload-pack`

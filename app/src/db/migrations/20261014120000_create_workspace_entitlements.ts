@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `workspace_entitlements`: what an operator allows ONE workspace (the key it reviews with, the limits per
 // period, a suspension; src/workspaces/README.md, "Entitlements"). One row per workspace; no row means "use the

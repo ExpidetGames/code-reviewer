@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down how failures inside PR-Agent become stable error codes. PR-Agent swallows its own
 exceptions and only logs them, so the runner reads the exception off the log record and walks its

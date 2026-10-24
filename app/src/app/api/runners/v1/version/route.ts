@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/runners/v1/version: the version and features of this app, for a Dispatcher (#322).
 import { withRunnerApi } from "../../../../../runner-api/shared.ts";

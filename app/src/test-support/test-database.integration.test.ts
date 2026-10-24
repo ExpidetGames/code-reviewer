@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the database helper the integration tests stand on: each test gets its own migrated
 // copy of the template, copies share nothing, and nothing is left on disk afterwards.

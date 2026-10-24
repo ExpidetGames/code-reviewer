@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the projects table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts; a project belongs to the workspace of its repository). The only code that

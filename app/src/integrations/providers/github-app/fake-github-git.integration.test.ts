@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the Git part of the fake GitHub (fakes/github/git-http.ts) over real HTTP with the real Git
 // client: the smart HTTP upload-pack of a repository the test registered, the pull request refs, and what

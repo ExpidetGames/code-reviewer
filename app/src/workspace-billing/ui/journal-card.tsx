@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The journal of the workspace's money (ADR 0006, 2.5, 2.7; #505): credit added, the start credit, what each review was charged

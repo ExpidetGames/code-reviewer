@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a project starts with (#656): Dynamic Review, the review kind new projects default to, but only where a Dynamic
 // Review of this workspace can run its first review. That takes two things: the instance has turned Dynamic Review on

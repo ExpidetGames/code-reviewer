@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The hint at the top of the workspace pages while reviews have no LLM access: it replaces the global
 // banner about the `LLM_*` variables (docs/decisions/0001-editions-setup-and-accounts.md, section 2.8). Nothing

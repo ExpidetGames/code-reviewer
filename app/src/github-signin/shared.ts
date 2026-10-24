@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The linking of a GitHub identity on the running server: the real database, the credentials of the GitHub
 // App's user authorization as the admin saved them (read per call), and the master key from the

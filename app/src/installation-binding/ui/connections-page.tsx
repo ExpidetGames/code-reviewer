@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The content of the Connections page of a workspace (#176): the GitHub installations linked to it, what an
 // Owner or Admin can do (connect GitHub, link an existing installation, disconnect, and the requests the

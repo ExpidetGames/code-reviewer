@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505-T13: the billing page of a workspace is made of client components, so none of its files may carry a colour literal (every
 // colour is a token of theme.css) or reach server-only code: the database, the billing module, the secrets. The scan reads the real

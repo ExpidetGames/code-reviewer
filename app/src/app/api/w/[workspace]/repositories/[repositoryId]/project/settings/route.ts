@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT|DELETE /api/w/:workspace/repositories/:repositoryId/project/settings: the review settings a
 // project overrides. Every member reads and changes them (the role matrix, src/workspaces/permissions.ts), except that

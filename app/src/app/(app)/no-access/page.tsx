@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where somebody who is signed in but belongs to no workspace is sent (docs/decisions/0001-editions-setup-
 // and-accounts.md, section 2.6). It shows no data and has what the person needs:

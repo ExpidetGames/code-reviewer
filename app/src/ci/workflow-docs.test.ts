@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that AGENTS.md and the README describe the same GitHub issue workflow as
 // CONTRIBUTING.md (issue `#n`, branch `<n>-<slug>` from `development`, pull request into
@@ -59,9 +59,8 @@ describe("AGENTS.md", () => {
     expect(text).toContain("`// #123-T03`");
   });
 
-  it("asks for the test case mapping table from maintainers and agents only", () => {
+  it("asks for the test case mapping table from maintainers and agents", () => {
     expect(text).toMatch(/Maintainers and agents add a test case mapping/);
-    expect(text).toMatch(/optional/);
   });
 
   it("sends agents to the GitHub issue instead of a story", () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Smoke test of the Docker Compose stack (compose.yml).
 # Usage: docker/smoke/compose.sh [<app image> [<runner image>]]

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance settings service of the admin portal (docs/decisions/0001-editions-setup-and-
 // accounts.md, sections 2.3 and 2.7): typed reads and writes of the instance-level settings (tenancy,

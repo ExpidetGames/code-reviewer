@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how an error of the mail library becomes a stable code with a sentence that is safe to show
 // the admin: the classes of failure, and that neither the password nor a raw server reply that carries

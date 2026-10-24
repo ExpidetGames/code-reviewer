@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The tenant isolation of every data route of a workspace, through the real route files with the wiring the
 // running server uses (the database opened at start, the services, the workspace access); only the session

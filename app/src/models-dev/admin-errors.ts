@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes of the admin portal's data routes for the models.dev catalog and the HTTP status of each (#554): the
 // confirmation of a changed provider address and "fetch now". The page translates a code to copy, never the other way

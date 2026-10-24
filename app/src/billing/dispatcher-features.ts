@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the App knows of its Dispatchers (ADR 0006, 2.11; #498, the gate of the review of #524). Billable minutes of a hosted job
 // come from the VM the Dispatcher reports (`vm_lifecycle`). A Dispatcher of an earlier release reports nothing, and the job

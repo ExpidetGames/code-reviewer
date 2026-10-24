@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the billing page: one sentence for every stable code the billing routes answer (the codes are the contract, the
 // sentences are what the page shows), for every refused field and for every item that keeps billing from being switched on.

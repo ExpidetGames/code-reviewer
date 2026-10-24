@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The call the LLM access page makes to the key mode route of its workspace (src/llm/key-mode-http.ts). Browser side; nothing throws:
 // a failure is a stable code the page translates (key-mode-messages.ts). The workspace is the one in the address, never in a body.

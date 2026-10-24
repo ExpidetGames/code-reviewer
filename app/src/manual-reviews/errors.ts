@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of starting a review by hand. A caller (the route, a test) branches on
 // `code`, never on the message; the UI translates codes to copy.

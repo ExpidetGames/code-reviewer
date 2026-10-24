@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The provider string a tenant wrote in its own settings, made safe to log, to keep in a job's error detail and to show
 // (#432, binding comment of #459). In own mode the resolver's `llm_provider_unsupported` echoes the raw value, which is

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the supported-provider file (`contracts/opencode-providers.v1.json`, #548): the four wire families the
 // pinned OpenCode speaks to a provider with a static key, the header each family carries the key in, and the stable

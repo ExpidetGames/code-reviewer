@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The signed in user as the pages and the route handlers see them. Who may use the instance is decided
 // when the account is made (the first-run setup, the sign-up rule, an invitation) and by the two gates in

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #507-T02 and #507-T04 with real OS processes on one SQLite file: two app instances meet billing at the same moment, for one
 // workspace or for two workspaces of one GitHub account, and exactly one start credit is written. better-sqlite3 blocks its

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/workers/v1/jobs/:id/heartbeat: the Worker extends the lease of the job it holds.
 import { withWorkerApi } from "../../../../../../../runner-api/shared.ts";

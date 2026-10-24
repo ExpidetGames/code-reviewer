@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // For the tests that hold a lock on one connection and start a second one that must wait for it: the name that finds a backend
 // in `pg_stat_activity`, and the wait until that backend waits on a lock, so the test releases the holder at a moment it can

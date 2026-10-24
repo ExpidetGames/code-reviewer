@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Bounded smart HTTP framing: large ref advertisements stay within the preparation envelope."""
 
 from collections.abc import Generator

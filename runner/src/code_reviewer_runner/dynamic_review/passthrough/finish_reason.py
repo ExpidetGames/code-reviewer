@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Why a call ended, as the provider's answer states it, in the words of the chat protocol (#578).
 

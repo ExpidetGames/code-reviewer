@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads the GitHub App settings from the environment. The only place that knows the variable names.
 // Problems are reported by variable name, never by value; the private key and the webhook secret are

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where a visitor creates an account with an email address and a password. Public. Whether the sign-up
 // is open is the state of the instance (the rule, the mail server, the ways to sign in), read at request

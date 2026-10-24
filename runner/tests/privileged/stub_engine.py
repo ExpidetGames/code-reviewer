@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A stand-in for the engine process, run as the dedicated user by the privileged suite (#197).
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the setup gate answers: the setup in place of a page, 503 setup_required with no
 // caching, a 404 for the page and the API of a setup that is over, and a refusal (not an open door)

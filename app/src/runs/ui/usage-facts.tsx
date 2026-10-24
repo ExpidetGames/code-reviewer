@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a run consumed, as the facts of the Runs pages say it (the detail page of a workspace and the job view of
 // the admin portal): the model, the tokens and calls, the cost (not on a managed quality level, #283) and why a

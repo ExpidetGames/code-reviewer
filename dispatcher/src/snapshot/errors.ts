@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes of the golden snapshot pipeline (#330). A caller (the CLI, the workflow, a test) branches
 // on `code`; the text of an error never carries a value of the environment, a token or the output of the VM.

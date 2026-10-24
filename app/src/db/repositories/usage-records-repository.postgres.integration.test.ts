@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The usage records on Postgres behave like the SQLite ones (#272-T10): the claim reserves, the completion
 // settles, a job that ends without reporting is voided, the checks of the table refuse the same direct writes,

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Test helper of docker/smoke/compose.sh, never part of a deployment: a stand-in for the app's runner
 API that hands out exactly one job and prints every report it receives.

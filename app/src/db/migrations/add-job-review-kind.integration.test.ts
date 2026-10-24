@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195-T03: the queue migration adds `review_kind` with a `diff` backfill and widens the automatic
 // per-head uniqueness to the kind. It must run on a database made by the previous release's

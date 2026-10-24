@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the webhook_deliveries table against a real SQLite file: the first request with a
 // delivery id claims it, a delivery that succeeded is a duplicate, one that was turned away or failed

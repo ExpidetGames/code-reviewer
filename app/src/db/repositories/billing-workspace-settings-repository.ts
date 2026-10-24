@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings ONE workspace makes for its own billing (table `billing_workspace_settings`; the factory takes the workspace id,
 // see ../workspace-scope.ts; ADR 0006, 2.9; #499; src/billing/README.md): today the optional monthly total limit in

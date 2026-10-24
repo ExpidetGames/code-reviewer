@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What an operator does with the `manual` adapter (ADR 0006, P10, 2.12; #497): grant credit by hand, or correct a balance,
 // for any workspace. No payment provider is involved. Each call writes one journal entry with the provider `manual`, the

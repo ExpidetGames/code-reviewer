@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Applies the retention rule to a backup directory: lists it, asks `planRotation` what goes, and
 // deletes exactly that. Anything that is not a backup file is neither listed nor touched.

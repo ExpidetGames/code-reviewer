@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/backup/status: whether backups are scheduled and how the last one went. This is about the
 // instance, not about a workspace, so it is for the people who run the instance: the instance admin. A

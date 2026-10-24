@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the check runs and pull request reviews of the GitHub client against the fake GitHub over real HTTP
 // (#405): which token each call uses (one repository, the least permissions, switched off afterwards), what is

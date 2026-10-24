@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What a native job is made of around the proxy (#550): the output cap, the engine's config, the
 transport switch and the code for a model the provider has retired.

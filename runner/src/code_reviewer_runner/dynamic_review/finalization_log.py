@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The finalization line of a native run (#578; the format of the live checklist, spike #547 7.1).
 

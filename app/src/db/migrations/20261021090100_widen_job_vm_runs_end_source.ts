@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #498 (the gate of the review of #524): a hosted job must never measure 0 minutes silently. Two more ways an end is learned,
 // both flagged in `job_vm_runs.end_source` so an audit can tell them from a measured VM: `app_stop_unreported` (the answer

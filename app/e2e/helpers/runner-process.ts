@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starts the real runner (the job loop, `code-reviewer-runner`) as a process of its own, polling an
 // app under test, and stops it again. Every job it claims runs the real PR-Agent through the real

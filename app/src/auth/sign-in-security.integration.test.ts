@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the security properties of a finished sign in: how the session cookie is set, that no
 // secret (client secret, GitHub access token, session token) leaks into logs, responses or

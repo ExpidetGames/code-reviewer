@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The entry a job is told about its model (#548, part E): built from one stored provider and one stored model, checked
 // against `contracts/job-model-entry.v1.json`, secret free, and refused for a provider or model that must not reach a job.

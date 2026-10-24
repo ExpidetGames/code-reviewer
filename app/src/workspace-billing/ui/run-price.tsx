@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a review cost, as the Runs list and the run detail say it (ADR 0006, 2.5; #505): the final AI price and the final
 // infrastructure price, nothing else. A review on the workspace's own key has the infrastructure price alone, and a review that

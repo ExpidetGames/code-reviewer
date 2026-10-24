@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Binding GitHub installations to workspaces in a real browser (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.9), in a multi-tenant instance against the fake GitHub: the owner of an organization

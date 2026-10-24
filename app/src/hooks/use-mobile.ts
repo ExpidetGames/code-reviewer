@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Tells the shadcn Sidebar whether the viewport is narrow enough for the mobile Sheet drawer.
 // Our own implementation of the standard media-query hook (shadcn's `use-mobile` is the reference);
-// it stays Apache-2.0 and is not one of the copied components under `src/components/ui/`
+// it stays ours and is not one of the copied components under `src/components/ui/`
 // (app/AGENTS.md, "shadcn/ui").
 import { useSyncExternalStore } from "react";
 

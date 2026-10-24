@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";

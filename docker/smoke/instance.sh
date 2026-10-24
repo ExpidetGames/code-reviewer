@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Smoke test of a running Code Reviewer instance, reached over HTTP(S). It needs nothing but curl and
 # no secret: it only sends requests that a healthy instance must refuse or answer without a session.

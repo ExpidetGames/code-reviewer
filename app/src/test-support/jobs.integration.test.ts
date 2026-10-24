@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The job queue fixture with a supplied (Postgres) database has no file to open: reading its
 // `databasePath` must fail loudly instead of handing a child process an empty path.

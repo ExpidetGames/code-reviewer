@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The jobs of every workspace for the instance admin (#541), against a real SQLite file: two workspaces,
 // a list across both with the names of the workspace and the repository, one job by its id, and nothing

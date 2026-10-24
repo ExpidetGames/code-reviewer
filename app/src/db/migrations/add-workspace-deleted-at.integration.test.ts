@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #658: a deleted workspace stays as a tombstone because the billing journal points at it, and `deleted_at` is what marks it
 // (a nullable column, so no existing row changes and the version that is still running keeps working on the same database).

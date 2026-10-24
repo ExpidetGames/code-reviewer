@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The review settings service: what the routes, the claim of the runner API and the webhook intake
 // use to read and change the settings. It validates input, keeps the layers apart (the global

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The committed override file (#549, part A): `contracts/model-overrides.v1.json`, the few fields models.dev lacks or gets
 // wrong in a way that is a code matter, each with a reason. The app image holds `app/` only, so it reads an identical copy.

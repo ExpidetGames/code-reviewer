@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """`code-reviewer-worker --once` and the Worker host against the fake App of `fakes/dispatcher-app/`
 (#323): real processes, real HTTP on loopback, the Worker API with the bodies of the contract

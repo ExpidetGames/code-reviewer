@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator API as one function of its collaborators (`createOperatorApi`). The route files only call
 // `withOperatorApi` (shared.ts); tests build the API with a real database. The order is the contract, and each

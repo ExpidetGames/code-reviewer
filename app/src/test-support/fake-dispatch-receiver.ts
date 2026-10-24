@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A stand-in for the Dispatcher's `POST /dispatch` (#326), as a `fetch` function: no socket, no network. It
 // verifies every request with the reference verifier of the shared signing vectors

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the limit on email and password sign in attempts against the real shared counters:
 // about 5 attempts per 15 minutes per email address, the same for an address nobody owns, a

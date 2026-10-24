@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: `POST /api/w/:workspace/billing/top-ups` as the app wires it (guard, adapter, access, limit, body, service), over a
 // real database, the real matrix of roles and the fake Stripe.

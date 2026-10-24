@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the setup gate decision for a fresh installation, an existing installation and a set up
 // instance. The rule is default closed while the setup is open: only what is listed passes.

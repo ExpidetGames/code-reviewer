@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Integration tests that need a real Postgres run only when one is configured: set
 // `TEST_DATABASE_URL` to a Postgres URL (CI does, with a service container; a developer starts a

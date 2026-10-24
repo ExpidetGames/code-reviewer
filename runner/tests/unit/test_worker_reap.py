@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """`worker-reap` (#324): the engine-user sweep of the image, for the launchers.
 

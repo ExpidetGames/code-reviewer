@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The binding of installations to workspaces assembled for integration tests (src/installation-binding/): a real
 // SQLite file, the fake GitHub on a loopback port as github.com and api.github.com, the GitHub App saved in

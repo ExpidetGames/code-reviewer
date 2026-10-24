@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down docker/sandbox/vm-prepare.sh as a file (#325, spike #317 finding F1): the host
 // preparation a Sandbox VM needs so that `docker run` with the memory and pids limits of the hardened

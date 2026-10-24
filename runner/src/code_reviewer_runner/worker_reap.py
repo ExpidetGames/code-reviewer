@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """`worker-reap` (#324): ends what the engine user still runs. For the launchers of the image.
 

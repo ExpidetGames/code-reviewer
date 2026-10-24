@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The own-mode resolver takes the key of the provider a job is for, assembled over a real database (#426): a key
 // of one provider is never handed to a job of another, and every provider's key is masked in a result.

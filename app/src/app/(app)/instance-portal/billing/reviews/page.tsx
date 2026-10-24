@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Payment reviews: the billing events that moved money (or claimed to) and changed nothing in the ledger, open or resolved,
 // newest first, with the repairs next to each (#603, ADR 0006). Instance admin only. The state and the page are in the address

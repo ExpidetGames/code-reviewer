@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Stable error codes of the integrations layer. Callers branch on `code`, never on the message.
 export const INTEGRATION_ERROR_CODES = [

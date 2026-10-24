@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the setup code store with a fake clock: expiry after 60 minutes, about five attempts per
 // minute for the whole process, the lock after ten wrong attempts until a new code is issued, and

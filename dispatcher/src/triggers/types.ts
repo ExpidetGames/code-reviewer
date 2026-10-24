@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Hono } from "hono";
 import type { DispatcherCore, Logger } from "../core/types.ts";

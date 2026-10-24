@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The balance journal of ONE workspace (tables `billing_journal_entries` and `billing_balances`; the factory takes the
 // workspace id, see ../workspace-scope.ts; ADR 0006, 2.7; src/billing/README.md). One USD balance per workspace, in

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #203: the `/ask`, `/improve` and `/describe` commands were removed; only `/review` remains. This
 // data migration makes an existing database match that product:

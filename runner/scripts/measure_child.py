@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Runs a command, or several copies of it at once, and reports the peak memory and the duration of
 each (CR-13). Standard library only, so it also runs inside the runner image.

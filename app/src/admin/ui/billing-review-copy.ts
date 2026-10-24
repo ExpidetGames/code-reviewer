@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the billing review page (#603): what each outcome means for the operator, what the object of a row is called,
 // and what "Check payment" found. The outcomes are the codes of `BILLING_REVIEW_OUTCOMES`; an unknown one is shown as its code.

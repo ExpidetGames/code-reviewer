@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #277-T06 with real OS processes on one SQLite file: two app instances claim at the same moment, and the
 // last unit of a limit goes to exactly one of them. better-sqlite3 blocks its thread, so only separate

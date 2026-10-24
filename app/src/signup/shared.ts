@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sign-up and the email verification on the running server: the real database, Better Auth's password
 // hash and session lookup, and the mail sender of the instance. Handlers are built per request, so the

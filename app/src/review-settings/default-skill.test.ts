@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the shipped default-skill seam (#194, completed by #198): the identity the app exposes
 // must match the text, the text must be the one canonical asset the app and the runner share

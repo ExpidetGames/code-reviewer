@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check run and the review verdict of the GitHub App provider with an in-memory client (#405): which scopes
 // the provider asks for (the checks permission and the pull request permission, never both in one token), that an

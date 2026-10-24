@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The form of one provider's card on the "LLM access" sub-page, for an Admin or an Owner: the API key,

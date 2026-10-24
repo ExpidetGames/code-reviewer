@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The billing page of a workspace, `/w/:ws/settings/billing` (ADR 0006, 2.5; #505): the balance, adding credit, the payments on

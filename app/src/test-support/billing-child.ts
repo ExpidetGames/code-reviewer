@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A program the balance journal tests run as a separate OS process (node runs this file directly, TypeScript types are
 // stripped): another app instance reserving holds on the same SQLite file. Prints "ready", waits for a line

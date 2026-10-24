@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down that no credential of a job is found anywhere after a run: not on stdout or stderr, not
 in the log tail, not in a posted comment or the new text of the pull request, not in a file the job

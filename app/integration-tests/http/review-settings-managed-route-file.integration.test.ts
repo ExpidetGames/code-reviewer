@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The review settings of a workspace on the operator's key through the real route files and the real
 // `reviewSettingsServiceFor` (#283): the key mode is read from the entitlements of the workspace in the database, the

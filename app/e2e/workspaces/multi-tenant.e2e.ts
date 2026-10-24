@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Workspaces in a multi-tenant instance in a real browser: a person who signs up is asked to create a
 // workspace and becomes its Owner; they create a second one (a name that is taken gets a numbered address)

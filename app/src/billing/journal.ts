@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the balance journal (ADR 0006, 2.7; #495): the entry types, the sign each one carries, the stable
 // error codes, and the rules an entry satisfies before it is written. Money is an integer in micro-USD (millionths of a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the Sandbox target of runner/Dockerfile (#324): the Worker image of the hosted
 // deployment. It is the Dynamic image's Worker layers plus labels, so it keeps the pins, the user

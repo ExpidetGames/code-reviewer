@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the ways to sign in the admin switched off are really off at the HTTP interface: a
 // refused way never reaches Better Auth and is not counted by the sign-in limit, sign out always works,

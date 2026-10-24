@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the first-run setup: the one setup code store of the process
 // (kept on globalThis, because the instrumentation, the proxy and the route bundles do not share

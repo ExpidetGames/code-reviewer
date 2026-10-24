@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The static nft rules hold for a supervisor that cannot change them (#244, #197-T04/T09).
 

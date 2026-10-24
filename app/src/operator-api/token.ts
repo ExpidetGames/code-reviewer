@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The credential of the operator API: one bearer token, `OPERATOR_API_TOKEN`. It follows the strength rules of
 // `RUNNER_TOKEN` (at least 32 characters, no white space or control characters) and must differ from the

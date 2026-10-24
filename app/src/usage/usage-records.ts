@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of usage records (src/usage/README.md): what one run consumed, kept per job so limits, the usage
 // page and the operator API can count it. Pure: no database, no clock. The table is `usage_records`, the

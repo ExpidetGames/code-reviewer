@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The two buttons of a request on the Approvals page: approve (links the installation to the workspace) and deny.

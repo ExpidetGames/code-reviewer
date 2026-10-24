@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A tiny validator for the `config` JSON of an integration, so every provider can declare its
 // fields in a few lines and report one error per field (the UI shows them next to the inputs).

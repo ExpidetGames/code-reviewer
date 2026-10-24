@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // Creates a workspace (multi-tenant instances): a name, and the person becomes its Owner and lands in it.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dispatcher's calls to the App: the Dispatcher API (claim, release, version under /api/runners/v1,
 // with the dispatcher credential) and the heartbeat of the Worker API (with the per-job credential).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes the model catalog answers with when a change is refused (#425). The admin portal translates them to
 // copy; nothing branches on a message. Names that ADR 0005 (2.8) fixed keep their spelling, the rest follows the

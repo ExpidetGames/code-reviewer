@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Setup → Sign-in (#181): the ways to sign in, one form. Instance admin only.
 import type { Metadata } from "next";

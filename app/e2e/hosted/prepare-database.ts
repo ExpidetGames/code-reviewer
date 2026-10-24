@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Not a journey: the first step of the hosted lane's app server (#332), run by the web server command of
 // playwright.hosted.config.ts before `pnpm migrate`. Drops and makes the lane's database on the Postgres server the run

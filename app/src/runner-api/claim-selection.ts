@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of the claim that chooses what a job runs on (#432, ADR 0005, 2.8): it builds the input of `resolveModelSelection` from what the claim knows (the effective entitlements,
 // the options of the project for the job's pinned kind, the providers of the caller), reads the catalog for a job on the

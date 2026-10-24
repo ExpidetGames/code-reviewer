@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/sign-up: creates an account with email and password when the sign-up rule lets the address in.
 // Public on purpose (the visitor has no session yet); the answer never says whether an address has an

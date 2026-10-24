@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the rule "the last Owner cannot leave" when two Owners leave at the same moment: two real
 // processes, each with its own connection to one database file, start together (a lock held in the test's

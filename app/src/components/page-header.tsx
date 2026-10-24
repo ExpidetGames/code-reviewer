@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The heading block at the top of a page: the one `h1` of the page, an optional breadcrumb, an
 // optional one-line description the title cannot carry, and the page's primary actions on the right.
-// Apache-2.0 (our own composition); the primitives it uses live under `components/ui/`.
+// proprietary (our own composition); the primitives it uses live under `components/ui/`.
 //
 // The look is the design board's page header (#633): a 36px title with the one text gradient of the
 // design (hero-from to hero-to, clipped to the text), an 18px muted lead, the actions aligned to the

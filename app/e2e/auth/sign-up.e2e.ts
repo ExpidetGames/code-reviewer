@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Signing up and verifying an address in a real browser against a production build with a mail outbox: a
 // visitor creates an account, cannot sign in before the address is confirmed, reads the link from the

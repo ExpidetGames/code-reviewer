@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The routes of the models.dev catalog in the admin portal (#554), end to end over a real database, the real access proxy
 // and the real handlers: only an instance admin gets in, every change comes from this site and is JSON, the confirmation of

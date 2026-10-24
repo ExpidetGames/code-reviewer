@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Money on the billing page of a workspace (#505). Amounts arrive as whole micro-USD (1 USD = 1,000,000) and leave as text;
 // a typed top-up amount comes back as whole US cents, the unit the top-up route takes. Pure and free of server code, because the

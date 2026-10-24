@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #434-T10: the managed model tiers are gone (ADR 0005, decision C1). A model is chosen as a catalog entry, and nothing
 // reads the old tier data any more. This scan keeps it that way: no source file of the repository mentions a tier

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The admission of a request to the passthrough proxy (#550): decided before a byte is reserved.
 

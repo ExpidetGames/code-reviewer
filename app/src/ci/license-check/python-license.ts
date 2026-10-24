@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Turns what the metadata of an installed Python package says about its license into one SPDX
 // expression. Modern packages carry a License-Expression. Older ones have a free-text License field

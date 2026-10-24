@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the handler behind `PUT /api/repositories/:id/project`: it asks for the user first, checks
 // the request, calls the service and answers with a stable error code. The user check is injected so

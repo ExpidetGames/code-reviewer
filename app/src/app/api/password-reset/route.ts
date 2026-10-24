@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/password-reset: sets a new password with a reset link. Public on purpose (the token in the
 // link is the credential, see src/auth/password-reset-http.ts). The command `admin reset-password` and,

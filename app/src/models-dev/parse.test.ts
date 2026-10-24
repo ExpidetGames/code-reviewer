@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reading a models.dev body (#548, part A): untrusted data, validated by a strict tolerant schema, filtered to the
 // supported providers and to models with tool calling, and reduced to the fields a job needs.

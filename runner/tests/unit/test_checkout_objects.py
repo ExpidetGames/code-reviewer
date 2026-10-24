@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Adversarial packs cannot make expansion or delta copying bypass the preparation quota."""
 
 import hashlib
