@@ -103,6 +103,15 @@ export interface WorkspacesTable {
   created_by: string | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
+  /**
+   * When the workspace was deleted (#658), or null; the row then is a tombstone (src/db/repositories/workspaces-repository.ts).
+   * Never written on insert (the column defaults to null), so a workspace can be made on the schema of the release before.
+   */
+  deleted_at: ColumnType<
+    string | null,
+    string | null | undefined,
+    string | null
+  >;
 }
 
 /** A user's membership of a workspace, with a role (a WorkspaceRole, src/workspaces/roles.ts). */
@@ -495,6 +504,11 @@ export interface JobCheckRunsTable {
   next_attempt_at: string;
   /** The stable code of the last failure or of the reason the row was dropped. */
   last_code: string | null;
+  /**
+   * The body of the review comment the run posted, read once after the run ended (#657); null until then. An empty
+   * string: the comment was looked for and could not be read.
+   */
+  review_comment: string | null;
   created_at: string;
   updated_at: string;
 }

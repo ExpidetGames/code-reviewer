@@ -5,7 +5,7 @@
 
 const MESSAGES: Readonly<Record<string, string>> = {
   access_denied:
-    "You cancelled the sign in at GitHub. Sign in again if you want to use Code Reviewer.",
+    "You cancelled the sign in at GitHub. Sign in again if you want to use code-review.com.",
   state_mismatch:
     "The sign in could not be matched to its start. Please start again.",
   state_not_found:
@@ -23,7 +23,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   github_email_unverified:
     "GitHub reports no verified primary email address for your account. Verify one in your GitHub settings and sign in again.",
   email_not_allowed:
-    "The email address of your GitHub account is not allowed to sign up on this Code Reviewer instance.",
+    "The email address of your GitHub account is not allowed to sign up on this code-review.com instance.",
   signup_closed:
     "Signing up is closed on this instance until its admin has set it up. Ask an admin for help.",
   email_exists_unverified:

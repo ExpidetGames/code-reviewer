@@ -172,6 +172,33 @@ valid. Two families sit side by side and only the one that matches the workspace
 - The model a provider other than the default would use when no
   layer sets one is the claim's business (#432): the views show the model of the layers.
 
+## The four sections of the settings form (#656)
+
+`ui/settings-form.tsx` shows its fields in four sections, as tabs: **Review** (the review kind and its skill, the review
+verdict, then the review options), **LLM** (`ui/llm-fieldset.tsx`), **Trigger** (`ui/when-fieldset.tsx`: when the reviewer
+starts) and **Limits** (`ui/limits-fieldset.tsx`: the cost limit of a review, and for a Diff Review the token budget with its
+cost estimate). The workspace defaults page (Settings, Review defaults) is the same form without the project-only fields, so it has
+the same sections. A refused save opens the first section with a problem and focuses its first marked field; a problem in a field
+the selected kind does not show opens Review, where the note about it is.
+
+- **LLM** has two dropdowns and nothing else, in both key modes: a provider, then a model of that provider (`ui/model-select.tsx`;
+  a saved model the provider no longer lists stays in the list). On the workspace's own key the providers are the registry's and the
+  catalog providers it holds a key for, and choosing a provider takes its default model with it; the models of a catalog provider
+  are fetched (`native-providers/ui/api.ts`). On the operator's key the one provider is the product name and the models are the
+  entries of the catalog by the names the operator gave them (never a vendor or a model id, ADR 0005). The provider and its model
+  are one choice: one origin badge, and "Reset to default" takes both back. The fallback model has no field any more (it was stored
+  and never used); a stored value is kept.
+- **Limits** holds `maxCostCents` (#656), the level the cost estimate warns above, typed in dollars (a leading `$` and `.5` are fine)
+  and stored in whole cents. It is a review setting like the others: a project value over the workspace default over the standard
+  level (`REVIEW_COST_LIMIT_USD`). **It only warns:** it does not cap what a review costs; enforcing it is #666, and the copy
+  ("Cost warning per review") changes then. An empty field on a project follows the workspace default and the field says which one
+  that is. It is validated like the other fields (`validate.ts`, 1 cent to 100 dollars; `ui/messages.ts` names the range) and sets
+  the level the Diff cost estimate warns above (`cost.ts` `costLimitUsdOf`).
+- **New projects start as Dynamic Review** where the instance has Dynamic Review on and a Dynamic review of the workspace can
+  resolve a model: on the operator's key a usable instance default entry of Dynamic Review exists, on the workspace's own key a
+  key is stored for the default provider. Otherwise they start as Diff Review, so the first review is not refused
+  (`projects/new-project-settings.ts`, read in the transaction that creates the project row); projects that exist keep their kind.
+
 ## The settings form: provider, model and catalog entry (#433)
 
 `ui/settings-form.tsx` is one form for the workspace defaults and for a project. What the Model card (Diff Review) and
@@ -446,7 +473,7 @@ workspace name, the read-only instance, tenancy and member facts and the one "Ne
 `/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/plan` shows what the operator allows
 the workspace and what it has used (#282, listed only for a workspace with entitlements); `/w/:workspace/settings/advanced` holds the
 destructive actions (removing the key, resetting every default). A project has its own settings page
-(`/w/:workspace/projects/:repositoryId`) next to its "Review now" page (#174). The form
+(`/w/:workspace/projects/:repositoryId`). The form
 (`ui/settings-form.tsx`) shows the value in force and where it comes from (built-in, global, this project);
 changing a field sets it for the layer, "Reset to default" takes it back; a save sends only the fields that
 are set and replaces the layer. Since #174 it is three cards (Model, Review, When to review, from

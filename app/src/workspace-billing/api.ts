@@ -8,7 +8,11 @@ import {
   type FetchLike,
   type RequestResult,
 } from "../ui/json-request.ts";
-import type { BillingProfileFormView, JournalPageView } from "./view.ts";
+import type {
+  BillingProfileFormView,
+  InvoiceListView,
+  JournalPageView,
+} from "./view.ts";
 
 /** What the profile form sends: the content only. The business confirmation goes with the first top-up. */
 export type BillingProfileInput = Omit<
@@ -34,6 +38,8 @@ export type WorkspaceBillingApi = {
     cents: number | null,
   ): Promise<RequestResult<{ monthlyLimitCents: number | null }>>;
   journal(cursor: string): Promise<RequestResult<JournalPageView>>;
+  /** The invoices of the workspace's own payments (Owner and Admin). */
+  invoices(): Promise<RequestResult<InvoiceListView>>;
 };
 
 export function createWorkspaceBillingApi(
@@ -56,6 +62,7 @@ export function createWorkspaceBillingApi(
       requestJson(fetchImpl, "PUT", `${base}/monthly-limit`, {
         monthlyLimitCents: cents,
       }),
+    invoices: () => requestJson(fetchImpl, "GET", `${base}/invoices`),
     journal: (cursor) =>
       requestJson(
         fetchImpl,

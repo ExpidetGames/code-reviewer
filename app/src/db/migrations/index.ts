@@ -73,6 +73,9 @@ import { migration as addUsageRecordBillingState } from "./20261022010000_add_us
 import { migration as addBillingWebhookEventsResolution } from "./20261022020000_add_billing_webhook_events_resolution.ts";
 import { migration as createBillingNotifications } from "./20261022030000_create_billing_notifications.ts";
 import { migration as widenRefusalNoticeCodesForBillingSetup } from "./20261023090000_widen_refusal_notice_codes_for_billing_setup.ts";
+import { migration as addJobCheckRunsReviewComment } from "./20261023120000_add_job_check_runs_review_comment.ts";
+import { migration as addWorkspaceDeletedAt } from "./20261023150000_add_workspace_deleted_at.ts";
+import { migration as addJobsSupersededByIndex } from "./20261023160000_add_jobs_superseded_by_index.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -157,6 +160,10 @@ const migrations: Record<string, Migration> = {
   "20261022030000_create_billing_notifications": createBillingNotifications,
   "20261023090000_widen_refusal_notice_codes_for_billing_setup":
     widenRefusalNoticeCodesForBillingSetup,
+  "20261023120000_add_job_check_runs_review_comment":
+    addJobCheckRunsReviewComment,
+  "20261023150000_add_workspace_deleted_at": addWorkspaceDeletedAt,
+  "20261023160000_add_jobs_superseded_by_index": addJobsSupersededByIndex,
 };
 
 export const migrationProvider: MigrationProvider = {

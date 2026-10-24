@@ -47,7 +47,21 @@ export function stripeApiBaseUrlOf(env: Env): string {
   return url.origin;
 }
 
+/**
+ * The one origin, besides Stripe's own hosts, whose invoice links the app shows (#659): the fake Stripe's, and only where the
+ * address above is the fake's. Undefined in production, where the address is always Stripe's own.
+ */
+export function stripeLinkOriginOf(env: Env): string | undefined {
+  const address = stripeApiBaseUrlOf(env);
+  return address === STRIPE_API_ADDRESS ? undefined : new URL(address).origin;
+}
+
 /** The address of the running server: the process environment, read when it is asked for. */
 export function stripeApiBaseUrl(): string {
   return stripeApiBaseUrlOf(process.env);
+}
+
+/** The origin of the invoice links of the running server (`stripeLinkOriginOf` on the process environment). */
+export function stripeLinkOrigin(): string | undefined {
+  return stripeLinkOriginOf(process.env);
 }

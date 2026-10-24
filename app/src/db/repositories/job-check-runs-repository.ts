@@ -100,6 +100,13 @@ export type JobCheckRunsRepository = {
    * for changes made earlier stands.
    */
   lastReviewEventOfPullRequest(jobId: string): Promise<ReviewEvent | null>;
+  /**
+   * The body of the review comment the run posted (#657), kept so the run page can show it; an empty string says it was
+   * looked for and could not be read. Written once: a body that is there stays, whatever the row's state.
+   */
+  recordReviewComment(jobId: string, body: string): Promise<void>;
+  /** The kept review comment of the job: null when none was kept yet, "" when it could not be read. */
+  reviewCommentOf(jobId: string): Promise<string | null>;
   /** Ends the sync: the lease is over and the failures are forgotten. `settled`: the job ended and all is done. */
   finish(jobId: string, outcome: { settled: boolean }): Promise<void>;
   /**
@@ -284,6 +291,26 @@ export function createJobCheckRunsRepository(
           updated_at: formatTimestamp(now()),
         })
         .execute();
+    },
+
+    async recordReviewComment(jobId, body) {
+      await db
+        .updateTable("job_check_runs")
+        .set({ review_comment: body })
+        .where("workspace_id", "=", workspaceId)
+        .where("job_id", "=", jobId)
+        .where("review_comment", "is", null)
+        .execute();
+    },
+
+    async reviewCommentOf(jobId) {
+      const row = await db
+        .selectFrom("job_check_runs")
+        .select("review_comment")
+        .where("workspace_id", "=", workspaceId)
+        .where("job_id", "=", jobId)
+        .executeTakeFirst();
+      return row?.review_comment ?? null;
     },
 
     async lastReviewEventOfPullRequest(jobId) {

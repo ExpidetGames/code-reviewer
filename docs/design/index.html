@@ -382,7 +382,7 @@ em,i,cite{font-style:normal}
 <li><a href="#cat-1">1. Sign in and sign up</a><ul><li><a href="#s-A1">Sign in</a></li><li><a href="#s-A2">Sign in, error</a></li><li><a href="#s-A3">Sign up</a></li><li><a href="#s-A4">Sign up, check inbox</a></li><li><a href="#s-A5">Forgot password</a></li><li><a href="#s-A6">Set a new password</a></li><li><a href="#s-A7">Confirm email address</a></li><li><a href="#s-A8">Invitation</a></li></ul></li>
 <li><a href="#cat-2">2. First run setup</a><ul><li><a href="#s-B1">Setup code</a></li><li><a href="#s-B2">Setup step 1, usage</a></li><li><a href="#s-B3">Setup step 2, who may sign up</a></li><li><a href="#s-B4">Setup step 3, admin account</a></li></ul></li>
 <li><a href="#cat-3">3. Start and invitations</a><ul><li><a href="#s-C1">No workspace yet</a></li><li><a href="#s-C2">Invitations</a></li><li><a href="#s-C3">Create a workspace</a></li><li><a href="#s-C4">GitHub result</a></li></ul></li>
-<li><a href="#cat-4">4. Projects</a><ul><li><a href="#s-D1">Projects</a></li><li><a href="#s-D2">Projects, empty</a></li><li><a href="#s-D3">Project settings</a></li><li><a href="#s-D4">Review now</a></li><li><a href="#s-D5">Projects, balance banner</a></li></ul></li>
+<li><a href="#cat-4">4. Projects</a><ul><li><a href="#s-D1">Projects</a></li><li><a href="#s-D2">Projects, empty</a></li><li><a href="#s-D3">Project settings</a></li><li><a href="#s-D4">Start a review</a></li><li><a href="#s-D5">Projects, balance banner</a></li></ul></li>
 <li><a href="#cat-5">5. Runs</a><ul><li><a href="#s-E1">Runs</a></li><li><a href="#s-E2">Runs, empty</a></li><li><a href="#s-E3">Run detail</a></li><li><a href="#s-E4">Run detail, failed</a></li></ul></li>
 <li><a href="#cat-6">6. Connections and members</a><ul><li><a href="#s-F1">Connections</a></li><li><a href="#s-G1">Members</a></li><li><a href="#s-G2">Members, confirm dialog</a></li></ul></li>
 <li><a href="#cat-7">7. Workspace settings</a><ul><li><a href="#s-H1">Settings, General</a></li><li><a href="#s-H2">Settings, Review defaults</a></li><li><a href="#s-H3">Settings, LLM access</a></li><li><a href="#s-H4">Settings, Plan</a></li><li><a href="#s-H5">Settings, Advanced</a></li><li><a href="#s-H6">Settings, Billing</a></li><li><a href="#s-H7">Settings, Billing, member view</a></li></ul></li>
@@ -440,8 +440,8 @@ em,i,cite{font-style:normal}
 <tbody>
 <tr><td><strong>Signed out</strong></td><td>Only the sign in and sign up pages. Every other address leads to Sign in. Before the first setup everything leads to the setup wizard.</td></tr>
 <tr><td><strong>Member</strong></td><td>See projects, runs and members. Start a review by hand. Change the settings of a single project. Read the balance and the journal.</td></tr>
-<tr><td><strong>Admin</strong></td><td>Everything a member can, plus: switch projects on or off, change review defaults, connect GitHub and sync, manage the LLM key, add credit and set a monthly limit, invite and revoke Members, remove Members, use the danger zones.</td></tr>
-<tr><td><strong>Owner</strong></td><td>Everything an Admin can, plus: change roles, rename the workspace, invite any role, remove anyone.</td></tr>
+<tr><td><strong>Admin</strong></td><td>Everything a member can, plus: switch projects on or off, change review defaults, connect GitHub and sync, manage the LLM key, add credit and set a monthly limit, invite and revoke Members, remove Members, reset the review defaults and remove a stored key (at the end of those pages).</td></tr>
+<tr><td><strong>Owner</strong></td><td>Everything an Admin can, plus: change roles, rename the workspace, delete the workspace (Settings, Advanced), invite any role, remove anyone.</td></tr>
 <tr><td><strong>Instance admin</strong></td><td>Sees the Admin entry in the user menu and the whole <code>/admin</code> area. For everybody else <code>/admin</code> is a 404.</td></tr>
 </tbody></table>
 <div class="prose" style="margin-top:24px"><p>Two instance settings change what is shown: <strong>single or multi tenant</strong> (one workspace, or people can create more) and <strong>billing on or off</strong> (Billing replaces the Plan tab, a balance banner appears, runs show a price). A workspace can also use <strong>our models</strong> (managed key) or <strong>its own provider key</strong>; managed workspaces never see provider or model names.</p></div>
@@ -702,10 +702,10 @@ em,i,cite{font-style:normal}
 <div class="frame" style="aspect-ratio: 1280 / 2000"><div class="screen-host" data-tpl="D3" data-w="1280" role="img" aria-label="Mockup of the screen Project settings"></div></div>
 </article>
 <article class="screen" id="s-D4">
-<header><span class="sid">D4</span><h4>Review now</h4></header>
-<p class="purpose">Start a review of an open pull request by hand, drafts included. Results: started (with a link to the run), or the same review is already waiting. Works only while the project is active.</p>
-<dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/projects/&lt;repository&gt;/review</code></dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/projects/[repositoryId]/review/page.tsx</code></dd></dl>
-<div class="frame" style="aspect-ratio: 1280 / 900"><div class="screen-host" data-tpl="D4" data-w="1280" role="img" aria-label="Mockup of the screen Review now"></div></div>
+<header><span class="sid">D4</span><h4>Start a review</h4></header>
+<p class="purpose">Start a review of an open pull request by hand, drafts included. The play button in the Review column of the project list opens a dialog with the open pull requests; the title and the Start review button stay in view while the list scrolls. Results: started (with a link to the run), or the same review is already waiting. The button is disabled, with the reason as a tooltip, while the project is not active.</p>
+<dl class="facts"><dt>Address</dt><dd>A dialog on <code>/w/&lt;workspace&gt;/projects</code>, no page of its own.</dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/manual-reviews/ui/start-review-dialog.tsx</code></dd></dl>
+<div class="frame" style="aspect-ratio: 1280 / 900"><div class="screen-host" data-tpl="D4" data-w="1280" role="img" aria-label="Mockup of the screen Start a review"></div></div>
 </article>
 <article class="screen" id="s-D5">
 <header><span class="sid">D5</span><h4>Projects, balance banner</h4></header>
@@ -727,13 +727,13 @@ em,i,cite{font-style:normal}
 </article>
 <article class="screen" id="s-E3">
 <header><span class="sid">E3</span><h4>Run detail</h4></header>
-<p class="purpose">One run: summary, timings, usage and cost, the log, and the call trace (sizes, counts and times only, never paths or text). Cost is hidden from members of managed workspaces. While billing is on, the summary has a Price row.</p>
+<p class="purpose">One run: a Summary (the facts, the cost and the duration) and the Findings, the review the run posted on GitHub, shown as readable text with a link to open it there. No log, call trace or timings: those are in the admin portal. The cost is the price while billing is on, and is hidden from members of managed workspaces while billing is off. A run that posted nothing says so.</p>
 <dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/runs/&lt;id&gt;</code></dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/runs/[id]/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 1500"><div class="screen-host" data-tpl="E3" data-w="1280" role="img" aria-label="Mockup of the screen Run detail"></div></div>
 </article>
 <article class="screen" id="s-E4">
 <header><span class="sid">E4</span><h4>Run detail, failed</h4></header>
-<p class="purpose">A failed run shows the reason as a sentence and the stable error code.</p>
+<p class="purpose">A failed run shows the reason as a sentence and the stable error code. The Findings say that nothing was posted.</p>
 <dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/runs/&lt;id&gt;</code></dd><dt>Who sees it</dt><dd>All members.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/runs/[id]/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 1000"><div class="screen-host" data-tpl="E4" data-w="1280" role="img" aria-label="Mockup of the screen Run detail, failed"></div></div>
 </article></section>
@@ -781,8 +781,8 @@ em,i,cite{font-style:normal}
 </article>
 <article class="screen" id="s-H5">
 <header><span class="sid">H5</span><h4>Settings, Advanced</h4></header>
-<p class="purpose">Destructive workspace actions in danger zones: remove a stored key, reset every default. Each asks for confirmation.</p>
-<dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/settings/advanced</code></dd><dt>Who sees it</dt><dd>Admins and Owners.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/settings/advanced/page.tsx</code></dd></dl>
+<p class="purpose">One danger zone: Delete workspace. It asks for the name of the workspace to be typed, and is refused while the workspace still has unused credit.</p>
+<dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/settings/advanced</code></dd><dt>Who sees it</dt><dd>Owners only. For everybody else the tab is not listed and the address is a 404.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/settings/advanced/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 800"><div class="screen-host" data-tpl="H5" data-w="1280" role="img" aria-label="Mockup of the screen Settings, Advanced"></div></div>
 </article>
 <article class="screen" id="s-H6">
@@ -1167,10 +1167,10 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <table class="tbl" aria-label="Repositories">
 <thead><tr><th>Name</th><th>Installation</th><th>Status</th><th>Last run</th><th>Review</th></tr></thead>
 <tbody>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/code-reviewer</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-ok"><i class="ic ic-check"></i>Succeeded</span><span class="sub">21 Oct 2026, 08:14 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/code-reviewer: on"></span>On</div></td></tr>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/landing</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-fail"><i class="ic ic-x"></i>Failed</span><span class="sub">20 Oct 2026, 17:41 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/landing: on"></span>On</div></td></tr>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/billing-service</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-neutral">Inactive</span></td><td class="muted">No run yet</td><td><div class="sw"><span class="switch" role="img" aria-label="Review itegro/billing-service: off"></span>Off</div></td></tr>
-<tr><td><a class="lnk" href="#s-D3"><b>itegro/legacy-api</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-warn"><i class="ic ic-warn"></i>Unavailable</span></td><td class="muted">18 Oct 2026, 11:02 UTC</td><td><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/legacy-api: on"></span>On</div><span class="sub">It was on and resumes if the repository comes back.</span></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/code-reviewer</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-ok"><i class="ic ic-check"></i>Succeeded</span><span class="sub">21 Oct 2026, 08:14 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="row"><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/code-reviewer: on"></span>On</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/code-reviewer"><i class="ic ic-play"></i></button></div></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/landing</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Active</span></td><td><span class="badge b-fail"><i class="ic ic-x"></i>Failed</span><span class="sub">20 Oct 2026, 17:41 UTC · <a class="lnk" href="#s-E1">All runs</a></span></td><td><div class="row"><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/landing: on"></span>On</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/landing"><i class="ic ic-play"></i></button></div></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/billing-service</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-neutral">Inactive</span></td><td class="muted">No run yet</td><td><div class="row"><div class="sw"><span class="switch" role="img" aria-label="Review itegro/billing-service: off"></span>Off</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/billing-service" disabled><i class="ic ic-play"></i></button></div></td></tr>
+<tr><td><a class="lnk" href="#s-D3"><b>itegro/legacy-api</b></a><span class="sub"><a class="lnk" href="#">On GitHub</a></span></td><td>itegro-gmbh</td><td><span class="badge b-warn"><i class="ic ic-warn"></i>Unavailable</span></td><td class="muted">18 Oct 2026, 11:02 UTC</td><td><div class="row"><div class="sw"><span class="switch on" role="img" aria-label="Review itegro/legacy-api: on"></span>On</div><button class="btn btn-g sm" type="button" aria-label="Start a review of itegro/legacy-api" disabled><i class="ic ic-play"></i></button></div><span class="sub">It was on and resumes if the repository comes back.</span></td></tr>
 </tbody></table>
 </div>
 <p class="hint">Members see the switches read only: Only Admins and Owners can switch a project on or off.</p>
@@ -1203,8 +1203,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <aside class="side"><a class="cur" href="#s-D1" aria-current="page">Projects</a><a href="#s-E1">Runs</a><hr><a href="#s-F1">Connections</a><a href="#s-G1">Members</a><a href="#s-H1">Settings</a></aside>
 <main class="main">
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-D1">Projects</a><i class="ic ic-right sm"></i><span>itegro/code-reviewer</span><i class="ic ic-right sm"></i><span>Settings</span></nav>
-<div class="ph"><div class="t"><h1>itegro/code-reviewer <span class="badge b-ok"><i class="ic ic-check"></i>Active</span></h1></div><div class="acts"><a class="btn btn-s" href="#s-D4">Review now</a></div></div>
-<nav class="tabs" aria-label="Project"><a class="cur" href="#s-D3" aria-current="page">Settings</a><a href="#s-D4">Review now</a></nav>
+<div class="ph"><div class="t"><h1>itegro/code-reviewer <span class="badge b-ok"><i class="ic ic-check"></i>Active</span></h1></div></div>
 
 <form class="col" aria-label="Review settings" style="gap: 24px">
 <section class="card"><h2>Review kind</h2>
@@ -1268,22 +1267,19 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="shell">
 <aside class="side"><a class="cur" href="#s-D1" aria-current="page">Projects</a><a href="#s-E1">Runs</a><hr><a href="#s-F1">Connections</a><a href="#s-G1">Members</a><a href="#s-H1">Settings</a></aside>
 <main class="main">
-<nav class="bc" aria-label="Breadcrumb"><a href="#s-D1">Projects</a><i class="ic ic-right sm"></i><span>itegro/code-reviewer</span><i class="ic ic-right sm"></i><span>Review now</span></nav>
-<div class="ph"><div class="t"><h1>itegro/code-reviewer <span class="badge b-ok"><i class="ic ic-check"></i>Active</span></h1></div></div>
-<nav class="tabs" aria-label="Project"><a href="#s-D3">Settings</a><a class="cur" href="#s-D4" aria-current="page">Review now</a></nav>
-<div class="alert a-ok" role="status"><i class="ic ic-check"></i><p>Started: review for pull request #482. <a class="lnk" href="#s-E3">View the run</a></p></div>
-<form class="card" aria-label="Start a review now">
-<div class="row between"><h2>Open pull requests</h2><button class="btn btn-s sm" type="button"><i class="ic ic-redo sm"></i>Refresh list</button></div>
-<p>Start a review for an open pull request by hand. It does not wait for new commits and works for drafts too.</p>
+<div class="ph"><div class="t"><h1>Projects</h1></div></div>
+<div class="card" role="dialog" aria-label="Start a review">
+<h2>Start a review</h2>
+<p>Pick an open pull request of itegro/code-reviewer.</p>
 <div class="fieldset"><span class="label">Pull request</span>
 <div class="opt on"><span class="dot"></span><div class="grow"><b>#482 Add retry to the webhook handler</b><span>by anna-keller</span></div><a class="lnk sm" href="#">GitHub</a></div>
 <div class="opt"><span class="dot"></span><div class="grow"><b>#479 Scope the run query to the workspace <span class="badge">Draft</span></b><span>by tobias-brandt</span></div><a class="lnk sm" href="#">GitHub</a></div>
 <div class="opt"><span class="dot"></span><div class="grow"><b>#474 Update the Docker Compose guide</b><span>by mira-vogel</span></div><a class="lnk sm" href="#">GitHub</a></div>
 </div>
-<div class="row"><button class="btn btn-p" type="button">Review now</button></div>
-</form>
-<div class="alert a-warn"><i class="ic ic-warn"></i><p>Reviews can be started by hand only while the project is active.</p></div>
-<p class="hint">The warning replaces the form when the project is inactive. With no open pull requests the card says: There are no open pull requests in this repository. Open one on GitHub, then refresh the list.</p>
+<div class="row"><button class="btn btn-p" type="button">Start review</button><button class="btn btn-s" type="button"><i class="ic ic-redo sm"></i>Refresh list</button></div>
+<div class="alert a-ok" role="status"><i class="ic ic-check"></i><p>Started: review for pull request #482. <a class="lnk" href="#s-E3">View the run</a></p></div>
+</div>
+<p class="hint">With no open pull requests the dialog says: There are no open pull requests in this repository. Open one on GitHub, then refresh the list. For a project that is not active the play button is disabled; its tooltip says: Switch the project on to start a review.</p>
 </main>
 </div>
 </div></template>
@@ -1353,33 +1349,15 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <main class="main">
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-E1">Runs</a><i class="ic ic-right sm"></i><span>itegro/code-reviewer #481</span></nav>
 <div class="ph"><div class="t"><h1>itegro/code-reviewer #481</h1><div class="row"><span class="badge b-ok"><i class="ic ic-check"></i>Succeeded</span><span class="hint">The review was published.</span></div></div><div class="acts"><a class="btn btn-s" href="#s-E1">All runs</a></div></div>
-<div class="grid2">
 <section class="card"><h2>Summary</h2>
-<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/code-reviewer</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#481 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Diff Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd><dt>Price</dt><dd>AI $1.50<br>Infrastructure $0.13</dd><dt>Started by</dt><dd>Push to the branch</dd><dt>Commit</dt><dd class="mono">5937da9</dd></dl></section>
-<section class="card"><h2>Timings</h2>
-<dl class="dl"><dt>Created</dt><dd>21 Oct 2026, 08:14:02 UTC</dd><dt>Started</dt><dd>21 Oct 2026, 08:14:05 UTC</dd><dt>Finished</dt><dd>21 Oct 2026, 08:17:17 UTC</dd><dt>Duration</dt><dd>3 min 12 s</dd><dt>Lost attempts</dt><dd>0</dd></dl></section>
-</div>
-<section class="card"><h2>Diagnostics</h2>
-<dl class="dl"><dt>Usage</dt><dd>184,203 tokens in 11 model calls</dd><dt>Cost</dt><dd>$0.42</dd><dt>Stopped early</dt><dd>No</dd><dt>Review comment</dt><dd><a class="lnk" href="#">Open the comment on GitHub</a></dd><dt>Superseded by</dt><dd class="muted">Not applicable</dd></dl>
-<div class="row between"><h3 style="font-size: 18px; line-height: 28px">Log</h3><button class="btn btn-g sm" type="button"><i class="ic ic-copy sm"></i>Copy log</button></div>
-<div class="pre">08:14:05 claim job 481
-08:14:06 clone itegro/code-reviewer at 5937da9
-08:14:21 diff 14 files, 612 lines
-08:14:22 model call 1 of 11
-08:17:09 review ready, 6 findings
-08:17:16 comment posted
-08:17:17 done</div>
-<p class="hint">The log was shortened: only the end of it is shown.</p></section>
-<section class="card"><h2>Call trace</h2>
-<p class="hint">What each call of this review was: sizes, counts and times only, never paths, arguments or text.</p>
-<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Model calls">
-<thead><tr><th>#</th><th>Started</th><th class="num">Prompt</th><th class="num">Cache read</th><th class="num">Output</th><th class="num">Cost</th><th>Ended</th><th class="num">Tools</th></tr></thead>
-<tbody><tr><td>1</td><td>08:14:22</td><td class="num">41,880</td><td class="num">0</td><td class="num">1,204</td><td class="num">$0.14</td><td>08:14:51</td><td class="num">3</td></tr>
-<tr><td>2</td><td>08:14:52</td><td class="num">43,210</td><td class="num">41,880</td><td class="num">2,116</td><td class="num">$0.07</td><td>08:15:40</td><td class="num">2</td></tr></tbody></table></div>
-<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Tool calls">
-<thead><tr><th>#</th><th>Tool</th><th>Result</th><th class="num">Repeat</th></tr></thead>
-<tbody><tr><td>1</td><td class="mono">read_file</td><td>Ok</td><td class="num">4</td></tr><tr><td>2</td><td class="mono">search</td><td>Ok</td><td class="num">2</td></tr></tbody></table></div>
-</section>
+<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/code-reviewer</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#481 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Diff Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd><dt>Cost</dt><dd>AI $1.50<br>Infrastructure $0.13</dd><dt>Duration</dt><dd>3 min 12 s</dd><dt>Started by</dt><dd>Push to the branch</dd><dt>Commit</dt><dd class="mono">5937da9</dd></dl></section>
+<section class="card"><h2>Findings</h2>
+<h3 style="font-size: 16px; line-height: 24px">PR Reviewer Guide</h3>
+<h4 style="font-size: 14px; line-height: 24px">P1 - Missing check for an empty list</h4>
+<p>The loop in <span class="code">collect()</span> reads the first item without checking that the list has one.</p>
+<h4 style="font-size: 14px; line-height: 24px">P2 - The error is swallowed</h4>
+<p>The catch block returns without logging, so a failed upload leaves no trace.</p>
+<p><a class="lnk" href="#">Open the review on GitHub</a></p></section>
 </main>
 </div>
 </div></template>
@@ -1391,20 +1369,10 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-E1">Runs</a><i class="ic ic-right sm"></i><span>itegro/landing #57</span></nav>
 <div class="ph"><div class="t"><h1>itegro/landing #57</h1><div class="row"><span class="badge b-fail"><i class="ic ic-x"></i>Failed</span><span class="hint">The run ended without a review.</span></div></div><div class="acts"><a class="btn btn-s" href="#s-E1">All runs</a></div></div>
 <div class="alert a-err" role="alert"><i class="ic ic-warn"></i><div class="body"><span class="at">The run took longer than the time limit, so it was stopped.</span><p>Error code: <span class="code">run_timeout</span></p></div></div>
-<div class="grid2">
 <section class="card"><h2>Summary</h2>
-<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/landing</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#57 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Dynamic Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd></dl></section>
-<section class="card"><h2>Timings</h2>
-<dl class="dl"><dt>Created</dt><dd>20 Oct 2026, 17:41 UTC</dd><dt>Started</dt><dd>20 Oct 2026, 17:41 UTC</dd><dt>Finished</dt><dd>20 Oct 2026, 17:56 UTC</dd><dt>Duration</dt><dd>15 min</dd><dt>Lost attempts</dt><dd>1</dd></dl></section>
-</div>
-<section class="card"><h2>Diagnostics</h2>
-<dl class="dl"><dt>Usage</dt><dd>Not available</dd><dt>Review comment</dt><dd class="muted">Not yet</dd></dl>
-<h3 style="font-size: 18px; line-height: 28px">Log</h3>
-<div class="pre">17:41:03 claim job 57
-17:41:09 agent started
-17:55:58 time limit reached
-17:56:00 stopped</div>
-<p class="hint">No log available is shown when the runner sent none.</p></section>
+<dl class="dl"><dt>Project</dt><dd><a class="lnk" href="#s-D3">itegro/landing</a></dd><dt>Pull request</dt><dd><a class="lnk" href="#">#57 on GitHub</a></dd><dt>Command</dt><dd><span class="code">/review</span></dd><dt>Review kind</dt><dd>Dynamic Review</dd><dt>Model</dt><dd class="mono">anthropic/claude-sonnet-5-5</dd><dt>Cost</dt><dd><span class="muted">Not charged</span></dd><dt>Duration</dt><dd>15 min</dd></dl></section>
+<section class="card"><h2>Findings</h2>
+<p class="muted">Nothing was posted for this run.</p></section>
 </main>
 </div>
 </div></template>
@@ -1509,8 +1477,6 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <section class="card"><h2>Plan</h2>
 <p>The plan of this workspace is managed on an operator configured page. You arrive there as an Owner or Admin of this workspace, with a link that works once and for five minutes.</p>
 <div><button class="btn btn-s" type="button">Manage plan <i class="ic ic-ext sm"></i></button></div></section>
-<section class="card"><h2>Instance</h2>
-<dl class="dl"><dt>Tenancy</dt><dd>Single tenant</dd><dt>Members</dt><dd>3</dd><dt>GitHub</dt><dd>Set up</dd></dl></section>
 </main>
 </div>
 </div></template>
@@ -1547,6 +1513,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="row"><button class="btn btn-p" type="button">Save review defaults</button><button class="btn btn-g" type="button">Discard changes</button><span class="hint">Last saved 20 Oct 2026, 16:02 UTC by Anna Keller.</span></div>
 <p class="hint">Members see the form read only: Only Admins and Owners can change these values.</p>
 </form>
+<div class="danger"><div class="t"><b>Reset every default</b><span>Every review default goes back to the built in value; projects that set their own keep theirs.</span></div><button class="btn btn-d" type="button">Reset every default…</button></div>
 </main>
 </div>
 </div></template>
@@ -1586,6 +1553,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <p>LLM access for this workspace is provided by this instance. Reviews do not use a key of this workspace, so there is nothing to enter here.</p>
 <div class="alert a-warn"><i class="ic ic-warn"></i><p>The access is not available at the moment, so reviews cannot run. Contact the administrator of this instance.</p></div>
 <p class="hint">Members see: Only an Admin or an Owner of the workspace can change it.</p></section>
+<div class="danger"><div class="t"><b>Remove the OpenRouter key</b><span>Reviews of this workspace stop until a new key is saved. This cannot be undone.</span></div><button class="btn btn-d" type="button">Remove the key…</button></div>
 </main>
 </div>
 </div></template>
@@ -1624,11 +1592,8 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <nav class="bc" aria-label="Breadcrumb"><a href="#s-H1">Settings</a><i class="ic ic-right sm"></i><span>Advanced</span></nav>
 <div class="ph"><div class="t"><h1>Advanced</h1></div></div>
 <nav class="tabs" aria-label="Settings"><a href="#s-H1">General</a><a href="#s-H2">Review defaults</a><a href="#s-H3">LLM access</a><a href="#s-H4">Plan</a><a class="cur" href="#s-H5" aria-current="page">Advanced</a></nav>
-<section class="card"><h2>Danger zone</h2>
-<div class="danger"><div class="t"><b>Remove the OpenRouter key</b><span>Reviews of this workspace stop until a new key is saved. This cannot be undone.</span></div><button class="btn btn-d" type="button">Remove the key…</button></div>
-<div class="danger"><div class="t"><b>Reset every default</b><span>Every review default goes back to the built in value; projects that set their own keep theirs.</span></div><button class="btn btn-d" type="button">Reset every default…</button></div>
-</section>
-<p class="hint">Members see: Only an Admin or an Owner of this workspace can remove the key or reset the defaults. The confirm dialogs read: Remove the key? [Cancel] [Yes, remove it] and Reset every review default? [Cancel] [Yes, reset every default].</p>
+<div class="danger"><div class="t"><b>Delete workspace</b><span>Removes this workspace with its projects, runs, settings and keys, and disconnects its GitHub installations. This cannot be undone.</span></div><button class="btn btn-d" type="button">Delete workspace…</button></div>
+<p class="hint">The confirm dialog reads: Delete Itegro? Everyone loses access, pending reviews are cancelled and the GitHub installations are released. Billing records are kept for the books. Field: Type Itegro to confirm. [Cancel] [Delete this workspace], the button stays disabled until the name matches. A workspace with unused credit answers: This workspace still has unused credit, so it cannot be deleted yet. Contact support and we will sort the credit out with you first.</p>
 </main>
 </div>
 </div></template>
@@ -1675,6 +1640,14 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="field"><label for="vat">VAT ID (optional)</label><input class="input err" id="vat" value="DE12345"><span class="ferr"><i class="ic ic-warn sm"></i>This does not look like a VAT ID of that country.</span></div></form>
 <div class="row"><button class="btn btn-s" type="button">Save billing details</button><span class="status">Billing details saved.</span></div></section>
 
+<section class="card"><h2>Invoices</h2>
+<div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Invoices">
+<thead><tr><th>Date</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+<tbody>
+<tr><td>20 Oct 2026, 15:30 UTC<span class="sub">INV-0007</span></td><td class="num">$25.00</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Paid</span></td><td class="num"><a class="lnk" href="#">View <i class="ic ic-ext sm"></i></a> · <a class="lnk" href="#">Download PDF</a></td></tr>
+<tr><td>2 Oct 2026, 09:12 UTC<span class="sub">INV-0003</span></td><td class="num">$100.00</td><td><span class="badge b-ok"><i class="ic ic-check"></i>Paid</span></td><td class="num"><a class="lnk" href="#">View <i class="ic ic-ext sm"></i></a> · <a class="lnk" href="#">Download PDF</a></td></tr>
+</tbody></table></div>
+<p class="hint">Owners and Admins only; Members do not see this card. Empty: No invoices yet. If Stripe cannot be reached: The invoices could not be loaded right now. Try again in a moment. [Try again]. The links open the invoice page and the PDF at the payment provider in a new tab. The card is absent when billing has no checkout (manual adapter).</p></section>
 <section class="card"><h2>Journal</h2>
 <div class="card flush tscroll" style="background: var(--page)"><table class="tbl" aria-label="Journal">
 <thead><tr><th>When</th><th>Entry</th><th class="num">Amount</th></tr></thead>

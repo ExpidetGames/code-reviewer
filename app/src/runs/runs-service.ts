@@ -10,7 +10,7 @@ import type { LastRun, LastRunSource } from "../projects/ui/list-view.ts";
 import type { RunPriceView } from "../workspace-billing/view.ts";
 import { isRunStatus } from "./run-status.ts";
 import {
-  toRunDetailView,
+  toCustomerRunDetailView,
   toRunRowView,
   type RunDetailSnapshot,
   type RunsFilter,
@@ -105,12 +105,13 @@ export function createRunsService(deps: {
       return {
         generatedAt: answeredAt.toISOString(),
         run: withPrice(
-          toRunDetailView(
+          toCustomerRunDetailView(
             stored.job,
             stored.project,
             answeredAt,
             deps.redact,
             stored.onManagedKey,
+            stored.reviewComment,
           ),
           prices,
         ),

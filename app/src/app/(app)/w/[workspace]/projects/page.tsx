@@ -32,7 +32,7 @@ export default async function ProjectsPage({
     <>
       <PageHeader
         title="Projects"
-        description="The repositories Code Reviewer watches."
+        description="The repositories code-review.com watches."
         actions={
           // The synchronization of the workspace: it reads the workspace's own connections, for an Owner or
           // an Admin (the instance admin's synchronization of everything is a route of the admin portal).
@@ -44,6 +44,7 @@ export default async function ProjectsPage({
         workspaceSlug={workspace.slug}
         canManage={canManage}
         canConnect={canConnect}
+        canStartReview={can(role, "start_review")}
         canManageLlmKey={can(role, "manage_llm_key")}
         user={user}
       />
@@ -56,6 +57,7 @@ async function ProjectsContent({
   workspaceSlug,
   canManage,
   canConnect,
+  canStartReview,
   canManageLlmKey,
   user,
 }: {
@@ -63,6 +65,7 @@ async function ProjectsContent({
   workspaceSlug: string;
   canManage: boolean;
   canConnect: boolean;
+  canStartReview: boolean;
   canManageLlmKey: boolean;
   user: { isInstanceAdmin: boolean };
 }) {
@@ -85,6 +88,7 @@ async function ProjectsContent({
       audience={configAudienceOf(user)}
       canManage={canManage}
       canConnect={canConnect}
+      canStartReview={canStartReview}
       llmNotice={llmNotice}
       data={data}
     />

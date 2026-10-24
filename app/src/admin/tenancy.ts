@@ -4,7 +4,7 @@
 // 2.3):
 //
 // - single to multi is always allowed; the workspace and its members stay as they are;
-// - multi to single is allowed only while at most one workspace exists. With none, the default
+// - multi to single is allowed only while at most one workspace exists (a deleted one, #658, is not one). With none, the default
 //   workspace is created and the acting admin becomes its Owner; with one, it stays as it is. With
 //   more, the change is refused with the number of workspaces and nothing changes.
 //
@@ -53,11 +53,9 @@ export async function changeTenancy(
     if (current === tenancy) return { ok: true, changed: false } as const;
 
     if (tenancy === "single") {
-      const row = await trx
-        .selectFrom("workspaces")
-        .select((eb) => eb.fn.countAll<number>().as("count"))
-        .executeTakeFirstOrThrow();
-      const count = Number(row.count);
+      // A deleted workspace (#658) is a tombstone, not a workspace: it is not counted, and with only tombstones left the
+      // default workspace is made.
+      const count = await workspaces.count();
       if (count > 1)
         return { ok: false, error: "too_many_workspaces", count } as const;
       if (count === 0) {

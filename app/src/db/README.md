@@ -580,6 +580,14 @@ the one instance-level reader, `billing-notification-directory-repository.ts`, o
 request. No column changes and every row survives, so the release that is still running is not affected; its `down` deletes the notices of that code first. See
 `src/refusal-notices/README.md`, "An incomplete billing setup (#632)".
 
+### A deleted workspace (#658)
+
+`20261023150000_add_workspace_deleted_at` adds the nullable `workspaces.deleted_at` (ISO 8601 UTC text): when the workspace was deleted. Deleting removes the
+customer data and keeps the `workspaces` row as an anonymised tombstone (name "Deleted workspace", slug `deleted-<id>`), because the append-only billing journal
+points at it. No row is touched, so a workspace that exists before is alive and the release that is still running is not affected; its `down` drops the column.
+Every reader of the table leaves a tombstone out through `NOT_DELETED` / `isDeleted` (`repositories/workspaces-repository.ts`); `getIncludingDeleted` is the one
+way to read it. See `src/workspaces/README.md`, "Deleting a workspace (#658)".
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):

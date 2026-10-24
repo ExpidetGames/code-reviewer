@@ -14,6 +14,7 @@ and can belong to several. The decision is in `docs/decisions/0001-editions-setu
 | `access-runtime.ts`, `access-response.ts`            | The running server's side: `requireWorkspace(slug)` for pages, `withWorkspace(slug, action, handler)` for data routes, `withSignedIn(handler)` for routes that are not about one workspace; the JSON answers of a refusal                                                                                                                                                                                                                                                                      |
 | `create-workspace.ts`, `names.ts`, `limits.ts`       | Creating a workspace for a person (multi-tenant only, the limit of workspaces per user, the slug), and the rules for names (length, characters, the slug, line-safe text for mails)                                                                                                                                                                                                                                                                                                            |
 | `members.ts`                                         | Changing roles, removing a member or leaving, renaming; the last Owner rule, under a lock                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `delete-workspace.ts`                                | Deleting a workspace (Owner, typed name, refusals, one transaction); see "Deleting a workspace"                                                                                                                                                                                                                                                                                                                                                                                                |
 | `invitations.ts`                                     | Creating, resending, revoking and accepting invitations; the list of what waits for a verified address                                                                                                                                                                                                                                                                                                                                                                                         |
 | `rate-limits.ts`                                     | The limits on creating invitations, accepting them and creating workspaces, in the shared `rate_limits` table                                                                                                                                                                                                                                                                                                                                                                                  |
 | `http.ts`, `assemble.ts`, `shared.ts`, `acceptor.ts` | The handlers of the routes, how the services are put together over a database (the same code serves requests and tests), the wiring of the running server, and the account that accepts, as the database has it                                                                                                                                                                                                                                                                                |
@@ -59,7 +60,7 @@ with the session they hold.
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Member | See projects, runs, settings and the members; start reviews; change the settings of a project; leave                                                                                      |
 | Admin  | Also switch projects on and off (which repositories are reviewed), change the review defaults, manage connections and the LLM key; invite, revoke and remove Members; see the invitations |
-| Owner  | Also invite with any role, revoke any invitation, change roles, remove Admins and Owners, rename the workspace                                                                            |
+| Owner  | Also invite with any role, revoke any invitation, change roles, remove Admins and Owners, rename the workspace and delete it (#658)                                                       |
 
 `permissions.ts` is the matrix, `permissions.test.ts` pins it. Two judgments are written down here because
 the decision record leaves them to this issue: switching a project on or off needs an Admin (it is "which
@@ -82,6 +83,55 @@ person is an Owner of; default 10, changed on the Limits page of the admin porta
 makes the slug from the name (a taken one gets `-2`, `-3`) and the person its Owner. A name is 1 to 80
 characters without control or formatting characters (they end up in mails and pages). Counted per person
 (10 per hour).
+
+## Deleting a workspace (#658)
+
+`DELETE /api/w/:workspace` with `{ "confirmName": "<the name>" }`, for an Owner (`delete_workspace`), from the one card of
+Settings → Advanced (the page and its tab exist for an Owner only; for anybody else they are the 404 page). `delete-workspace.ts`
+decides inside one transaction, from the database: the person is an Owner now, the typed name is the workspace's, and then
+the refusals, each with a stable code and the data untouched: `balance_positive` (unused credit: a deletion would destroy
+money paid in, so the person is told to contact support for a payout), `balance_negative` (an open amount is settled first),
+`review_running` (a job is running, a superseded run still drains under its lease, or a reservation is open) and `payment_open`
+(a top-up checkout started within `PENDING_TOP_UP_WINDOW_MS`, three days, that is neither `paid` nor `failed`, `pending` or
+`expired`: a delayed payment method can still succeed after its checkout page expired).
+
+The locks (Postgres; SQLite has one writer): the Dynamic gate, shared (a claim holds it exclusively from its start to its commit,
+so a claim in flight is waited for and none starts meanwhile; the gate is also what keeps a claim from waiting for rows this
+deletion holds, because a claim takes its job row before the workspace row and the deletion the other way round); the
+workspace row; the repositories and the waiting, running and superseded jobs (`FOR UPDATE`, by id: a writer that sets a job
+running without the gate is waited for as well); the balance row last. A top-up and an operator's manual credit read the
+workspace row `FOR SHARE` before they write the journal, so a deletion in flight ends before they read it (they then credit
+nobody) and one that starts later waits for them (and then refuses on the balance). The delete of the jobs rides on the index
+`jobs_superseded_by` (`20261023160000_add_jobs_superseded_by_index`): without it every deleted job scanned the table for a job
+that still points at it, 13 s for 20 000 jobs while the gate was held (1.7 s with it; `delete-workspace-scale.integration.test.ts`).
+After the waits the deletion reads the state again, so a claim that committed is seen as `review_running`.
+
+Then `WorkspaceErasure` (`db/repositories/workspace-erasure-repository.ts`, scoped to the workspace) removes everything
+the customer owns: members, invitations, link requests, connections (every GitHub installation, disconnected or not, is
+released: the connection row goes, so another workspace can link it, and it is noted as unclaimed; nothing is sent to GitHub
+for that, the App stays installed there until the person removes it), repositories, projects, all jobs with their queue entries,
+comments, check runs, dispatches, claimed keys, VM runs, usage records and refusal notices (waiting jobs are cancelled by going:
+no runner can claim them), the settings, stored keys, entitlements, hand-over tokens, and the billing limit and notification
+state. After the commit the check runs of the waiting reviews are completed on GitHub (`finish-checks.ts`: conclusion
+`neutral`, "The workspace was deleted."), best effort: a connection that cannot be reached is one log line
+(`CHECK_RUN_NOT_COMPLETED`), never a failed deletion.
+
+What stays, and why: the **`workspaces` row**, anonymised (name "Deleted workspace", slug `deleted-<id>`, `created_by` null; the
+old address is free again) and marked with `deleted_at`, because the **billing journal** is append-only (the database refuses an
+update and a delete) and holds a foreign key to it; the journal, the cached balance and the top-up intents are what the books
+need (amounts, minutes, provider references, no names or addresses); the start credit memory, so a deleted workspace cannot earn
+the credit twice; and the payment provider's **customer reference** on a billing profile that is emptied (legal name, address,
+VAT ID and confirming user erased; a profile that never reached the provider is removed), which a refund or dispute of an earlier
+payment may need. The provider is the merchant of record and keeps the invoices (`docs/billing.md`).
+
+A tombstone is told from a workspace by `deleted_at` (migration `20261023150000_add_workspace_deleted_at`, nullable, additive).
+One helper serves every reader: `isDeleted` for a workspace in memory, `NOT_DELETED` for a query
+(`db/repositories/workspaces-repository.ts`). `get`, `findDefault`, `count`, `search`, `listPage`, a member's workspaces and
+the rename ignore a tombstone, so the instance admin's counts and tenancy change, the operator's search, lookup and credit, and
+the operator API (list, entitlements, usage) do not see it; `getIncludingDeleted` is for the readers that explain money which
+belongs to one. A payment that arrives for a deleted workspace credits nobody (`workspace_deleted`, a payment review), and no
+balance mail is made or sent for it. Sessions belong to users, not workspaces: nobody is signed out; the person's next page is
+the start page, which leads to another workspace of theirs or to `/no-access`.
 
 ## Invitations
 
@@ -236,7 +286,7 @@ claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key
 
 ## Not here
 
-Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. A GitHub App installation
+Transferring data, SSO and teams below the workspace are out of scope. A GitHub App installation
 is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
 rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
 (`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is

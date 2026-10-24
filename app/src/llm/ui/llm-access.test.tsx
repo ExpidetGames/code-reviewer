@@ -4,7 +4,7 @@
 // Pins down the "LLM access" section: an Admin or an Owner gets the form (provider, write-only key,
 // save, test); a Member is only told whether reviews have a key; nothing on the page holds the key;
 // changing the provider asks for the key again; the hint "LLM not configured" links to the section and
-// is gone while a key works. Removing the key is a destructive action of the "Advanced" sub-page
+// is gone while a key works. Removing the key is a destructive action at the end of the LLM access page, not of the form
 // (`remove-workspace-key.tsx`).
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -300,7 +300,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
     ).toBe(true);
   });
 
-  it("offers no removal: removing the key is a destructive action of the Advanced sub-page", () => {
+  it("offers no removal: removing the key is a destructive action at the end of the page, not of the form", () => {
     section({ keyStatus: CONFIGURED, summary: WORKS });
 
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
@@ -439,7 +439,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
       screen.queryByRole("button", { name: /save key|test key|remove key/i }),
     ).toBeNull();
     expect(container.textContent).toContain(
-      "LLM access for this workspace is provided by this instance.",
+      "The LLM for this workspace is provided by this instance.",
     );
     expect(container.textContent).toContain("does not use a key of its own");
     // The key of the workspace is stored and ignored: nothing of it is shown while it is not used.
@@ -459,7 +459,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
     });
 
     expect(member.container.textContent).toContain(
-      "LLM access for this workspace is provided by this instance.",
+      "The LLM for this workspace is provided by this instance.",
     );
     expect(member.container.textContent).not.toContain(
       "Only an Admin or an Owner",
@@ -483,7 +483,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
 
         expect(screen.queryByLabelText("API key")).toBeNull();
         expect(container.textContent).toContain(
-          "LLM access for this workspace is provided by this instance.",
+          "The LLM for this workspace is provided by this instance.",
         );
         expect(container.textContent).toContain(
           "not available at the moment, so reviews cannot run",
@@ -508,7 +508,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
       <LlmAccessNotice workspaceSlug="acme" summary={UNAVAILABLE} canManage />,
     );
 
-    expect(screen.getByText("LLM access is not available")).toBeTruthy();
+    expect(screen.getByText("LLM is not available")).toBeTruthy();
     expect(container.textContent).toContain("administrator of this instance");
     expect(screen.queryByRole("link")).toBeNull();
     expect(container.textContent).not.toMatch(/Add a key|add one/);
@@ -528,7 +528,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
         />,
       );
 
-      expect(screen.getByText("LLM access is not available")).toBeTruthy();
+      expect(screen.getByText("LLM is not available")).toBeTruthy();
       expect(screen.queryByRole("link")).toBeNull();
       expect(container.textContent).not.toMatch(/sk-|APP_SECRET/);
       unmount();
@@ -628,7 +628,7 @@ describe("one card per provider (#426)", () => {
       });
 
       expect(container.textContent).toContain(
-        "LLM access for this workspace is provided by this instance.",
+        "The LLM for this workspace is provided by this instance.",
       );
       expect(screen.queryAllByRole("form")).toHaveLength(0);
       expect(screen.queryByRole("region", { name: "OpenRouter" })).toBeNull();

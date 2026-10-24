@@ -31,7 +31,7 @@ import {
   stripeWebhookSecretFromSecrets,
 } from "./stripe-credentials.ts";
 import { createStripeClient } from "./stripe-client.ts";
-import { stripeApiBaseUrl } from "../stripe-endpoints.ts";
+import { stripeApiBaseUrl, stripeLinkOrigin } from "../stripe-endpoints.ts";
 import { createActiveAdapterResolver } from "./active-adapter.ts";
 import { incompleteBillingItems, isBillingOn } from "./enabled.ts";
 import type { BillingMissingItem } from "./readiness.ts";
@@ -41,6 +41,8 @@ import {
   type MonthlyLimitRoute,
 } from "./monthly-limit-http.ts";
 import { createMonthlyLimitService } from "./monthly-limit-service.ts";
+import { createInvoicesRoute, type InvoicesRoute } from "./invoices-http.ts";
+import { createInvoicesService } from "./invoices-service.ts";
 import { createJournalRoute, type JournalRoute } from "./journal-http.ts";
 import { createProfileRoute, type ProfileRoute } from "./profile-http.ts";
 import { createBillingProfileService } from "./profile-service.ts";
@@ -76,6 +78,7 @@ function publicAddress(): string {
  * when a top-up, a webhook or a check needs them (never at startup).
  */
 export function getBillingAdapterRegistry() {
+  const linkOrigin = stripeLinkOrigin();
   return createAdapterRegistry([
     manualAdapter,
     createStripeAdapter({
@@ -83,6 +86,8 @@ export function getBillingAdapterRegistry() {
         secrets: getSecretStore,
         baseUrl: stripeApiBaseUrl(),
       }),
+      // Only a test stack that points the app at a loopback fake gets that fake's links; in production this is undefined.
+      ...(linkOrigin === undefined ? {} : { allowedLinkOrigin: linkOrigin }),
       webhookSecret: stripeWebhookSecretFromSecrets({
         secrets: getSecretStore,
       }),
@@ -161,6 +166,21 @@ export function getJournalRoute(): JournalRoute {
   return createJournalRoute({
     guard: { isOn: () => isBillingOn(db), notFound },
     service: getWorkspaceBillingService(),
+  });
+}
+
+/** The handler of `GET /api/w/:workspace/billing/invoices`, wired to the running server (#659). */
+export function getInvoicesRoute(): InvoicesRoute {
+  const db = getDatabase();
+  return createInvoicesRoute({
+    guard: { isOn: () => isBillingOn(db), notFound },
+    service: createInvoicesService({
+      db,
+      activeAdapter: createActiveAdapterResolver(
+        db,
+        getBillingAdapterRegistry(),
+      ),
+    }),
   });
 }
 

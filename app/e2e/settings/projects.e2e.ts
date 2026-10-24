@@ -15,6 +15,7 @@ import {
   type GithubAccount,
 } from "../helpers/github-fake";
 import { e2eEnv } from "../helpers/e2e-env";
+import { chooseOption, openSection } from "../helpers/settings-form";
 
 const account: GithubAccount = {
   id: 7300002,
@@ -144,20 +145,26 @@ test.describe("the project list and the settings pages", () => {
     await signInThroughTheForm(page, account);
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
 
-    await page
-      .getByLabel("Model", { exact: true })
-      .fill("anthropic/claude-sonnet-5.5");
-    await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
+    await openSection(page, "LLM");
+    await chooseOption(page, "Model", "anthropic/claude-sonnet-5.5");
+    await openSection(page, "Limits");
+    await expect(
+      page.getByText(/is above the warning level of \$0\.10/),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
     await page.reload();
 
-    await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
       "anthropic/claude-sonnet-5.5",
     );
-    await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
+    await openSection(page, "Limits");
+    await expect(
+      page.getByText(/is above the warning level of \$0\.10/),
+    ).toBeVisible();
   });
 
   // CR-34-T14
@@ -168,6 +175,7 @@ test.describe("the project list and the settings pages", () => {
     // The project page is visited first: Next keeps it mounted (hidden) while the person is
     // elsewhere and shows it again later, which must not bring back the old value.
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
+    await openSection(page, "Limits");
     const budget = () =>
       page
         .getByLabel("Token budget", { exact: true })
@@ -193,6 +201,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Review defaults" }),
     ).toBeVisible();
+    await openSection(page, "Limits");
     await budget().fill("60000");
     await page.getByRole("button", { name: "Save review defaults" }).click();
     await expect(
@@ -207,6 +216,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: REPOSITORY }),
     ).toBeVisible();
+    await openSection(page, "Limits");
     await expect(budget()).toHaveValue("60000");
     await expect(
       page
@@ -214,6 +224,7 @@ test.describe("the project list and the settings pages", () => {
         .getByText("Global default"),
     ).toBeVisible();
     await page.reload();
+    await openSection(page, "Limits");
     await expect(budget()).toHaveValue("60000");
   });
 
@@ -279,6 +290,7 @@ test.describe("the project list and the settings pages", () => {
       expect(await overflow()).toBeLessThanOrEqual(0);
 
       await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
+      await openSection(page, "Limits");
       await expect(
         page.getByLabel("Token budget", { exact: true }),
       ).toBeVisible();
@@ -286,4 +298,69 @@ test.describe("the project list and the settings pages", () => {
       expect(await overflow()).toBeLessThanOrEqual(0);
     });
   });
+
+  // #655: the Review column holds the switch and the play button side by side; at the widths of a
+  // small laptop and a tablet, in both colour schemes, they stay inside their cell and the table
+  // does not need a sideways scroll.
+  for (const width of [1024, 768]) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      test.describe(`at ${String(width)}px, ${colorScheme}`, () => {
+        test.use({ viewport: { width, height: 800 }, colorScheme });
+
+        test("the switch and the play button fit the Review column", async ({
+          page,
+        }, testInfo) => {
+          await signInThroughTheForm(page, account);
+          const row = page.getByRole("row").filter({ hasText: REPOSITORY });
+          await expect(row).toBeVisible();
+          const cell = row.getByRole("cell").last();
+          const play = cell.getByRole("button", {
+            name: `Start a review of ${REPOSITORY}`,
+          });
+          await expect(play).toBeVisible();
+          await expect(cell.getByRole("switch")).toBeVisible();
+
+          const [cellBox, playBox, switchBox] = await Promise.all([
+            cell.boundingBox(),
+            play.boundingBox(),
+            cell.getByRole("switch").boundingBox(),
+          ]);
+          expect(cellBox).not.toBeNull();
+          expect(playBox).not.toBeNull();
+          expect(switchBox).not.toBeNull();
+          const right = (box: typeof cellBox) =>
+            (box?.x ?? 0) + (box?.width ?? 0);
+          expect(right(playBox)).toBeLessThanOrEqual(right(cellBox));
+          expect(right(switchBox)).toBeLessThanOrEqual((playBox?.x ?? 0) + 1);
+          // One line: the two controls sit side by side.
+          expect(
+            Math.abs((playBox?.y ?? 0) - (switchBox?.y ?? 0)),
+          ).toBeLessThan(24);
+
+          // The page never scrolls sideways; the table itself fits at 1024px and scrolls inside its
+          // card (not the page) on a narrower window.
+          const sideways = await page.evaluate(() => ({
+            page:
+              document.documentElement.scrollWidth >
+              document.documentElement.clientWidth,
+            table: (() => {
+              const container = document.querySelector(
+                '[data-slot="table-container"]',
+              );
+              return container
+                ? container.scrollWidth > container.clientWidth
+                : false;
+            })(),
+          }));
+          expect(sideways.page).toBe(false);
+          expect(sideways.table).toBe(width < 1024);
+          await page.screenshot({
+            path: testInfo.outputPath(
+              `projects-${String(width)}-${colorScheme}.png`,
+            ),
+          });
+        });
+      });
+    }
+  }
 });

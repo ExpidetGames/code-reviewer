@@ -155,7 +155,7 @@ describe("the setup code form", () => {
     const form = screen.getByRole("form", { name: "Setup code" });
     const heading = screen.getByRole("heading", {
       level: 1,
-      name: "Set up Code Reviewer",
+      name: "Set up code-review.com",
     });
 
     expect(form.contains(heading)).toBe(false);

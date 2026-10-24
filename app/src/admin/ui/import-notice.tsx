@@ -35,7 +35,7 @@ const GROUP_COPY: Record<NotImportedGroup, string> = {
   github_app:
     "The GitHub App was not imported. Enter it under Integrations (the one-click setup or the manual form).",
   llm_key:
-    "The LLM key was not imported. Enter it in the settings of the workspace, under LLM access.",
+    "The LLM key was not imported. Enter it in the settings of the workspace, under LLM.",
   allowed_organization:
     "The allowed organization could not be read, so no member was admitted through it.",
 };

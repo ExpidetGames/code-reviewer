@@ -2,87 +2,24 @@
 
 // The frame of the workspace settings area (#178): the sub-nav with one link per sub-page and the
 // shared heading. The settings index ("General", at `/settings`) is the area root and carries no
-// breadcrumb; the sub-pages show `Settings / <page>` (epic #165 breadcrumb rule). The current link
-// carries `aria-current="page"`, which the styling turns into an underline as well, so the location
-// is never shown by colour alone. One source (`SETTINGS_SECTIONS`) feeds the links and the headings.
-import { PILL_LINK_CLASS } from "@/components/pill-link";
-import Link from "next/link";
+// breadcrumb; the sub-pages show `Settings / <page>` (epic #165 breadcrumb rule). The links are
+// `settings-nav.tsx`; one source (`SETTINGS_SECTIONS`, `settings-sections.ts`) feeds them and the headings.
 import type { ReactNode } from "react";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
-import { PLAN_NAV_LABEL, PLAN_PAGE_TITLE } from "../../copy/plan-usage.ts";
 import { PageHeader } from "../../components/page-header.tsx";
 import { workspacePath } from "../paths.ts";
+import { SettingsNav } from "./settings-nav.tsx";
 import {
-  BILLING_NAV_LABEL,
-  BILLING_PAGE_TITLE,
-} from "../../workspace-billing/messages.ts";
+  SETTINGS_SECTIONS,
+  type SettingsSection,
+} from "./settings-sections.ts";
 
-export const SETTINGS_SECTIONS = [
-  { segment: "", label: "General", title: "General" },
-  {
-    segment: "review-defaults",
-    label: "Review defaults",
-    title: "Review defaults",
-  },
-  { segment: "llm", label: "LLM access", title: "LLM access" },
-  // Only listed while the workspace has entitlements (`showPlan`); the page itself exists for everybody.
-  { segment: "plan", label: PLAN_NAV_LABEL, title: PLAN_PAGE_TITLE },
-  // Only listed while billing is on (`showBilling`), and then instead of the Plan page (#505).
-  { segment: "billing", label: BILLING_NAV_LABEL, title: BILLING_PAGE_TITLE },
-  { segment: "advanced", label: "Advanced", title: "Advanced" },
-] as const;
-
-export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["segment"];
-
-/** The address of a settings sub-page: the index lives at `/settings`, the others below it. */
-export function settingsSectionHref(
-  workspaceSlug: string,
-  segment: SettingsSection,
-): string {
-  return workspacePath(
-    workspaceSlug,
-    segment === "" ? "/settings" : `/settings/${segment}`,
-  );
-}
-
-export function SettingsNav({
-  workspaceSlug,
-  current,
-  showPlan = false,
-  showBilling = false,
-}: {
-  workspaceSlug: string;
-  current: SettingsSection;
-  /** The workspace has entitlements (#282): the Plan page is listed. An unlimited workspace has no entry. */
-  showPlan?: boolean;
-  /** Billing is on (#505): the Billing page is listed, and the Plan page is not (the Billing page takes its place). */
-  showBilling?: boolean;
-}) {
-  return (
-    <nav aria-label="Settings sections">
-      <ul className="flex flex-wrap items-center gap-1">
-        {SETTINGS_SECTIONS.filter((section) => {
-          if (section.segment === "plan") return showPlan && !showBilling;
-          if (section.segment === "billing") return showBilling;
-          return true;
-        }).map((section) => {
-          const active = section.segment === current;
-          return (
-            <li key={section.segment || "general"}>
-              <Link
-                href={settingsSectionHref(workspaceSlug, section.segment)}
-                aria-current={active ? "page" : undefined}
-                className={PILL_LINK_CLASS}
-              >
-                {section.label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
-  );
-}
+export { SettingsNav } from "./settings-nav.tsx";
+export {
+  SETTINGS_SECTIONS,
+  settingsSectionHref,
+  type SettingsSection,
+} from "./settings-sections.ts";
 
 /**
  * One settings sub-page: the one `h1` of the page, the breadcrumb below the index, the sub-nav and
@@ -93,6 +30,7 @@ export function SettingsScreen({
   current,
   showPlan = false,
   showBilling = false,
+  showAdvanced,
   children,
 }: {
   workspaceSlug: string;
@@ -101,6 +39,8 @@ export function SettingsScreen({
   showPlan?: boolean;
   /** Billing is on (#505), so the sub-nav lists the Billing page instead of the Plan page. */
   showBilling?: boolean;
+  /** Lists the Advanced page. Left out, the settings layout decides (the Owner sees it, #658). */
+  showAdvanced?: boolean;
   children: ReactNode;
 }) {
   const section = SETTINGS_SECTIONS.find((item) => item.segment === current);
@@ -129,6 +69,7 @@ export function SettingsScreen({
           current={current}
           showPlan={showPlan}
           showBilling={showBilling}
+          {...(showAdvanced === undefined ? {} : { showAdvanced })}
         />
         {children}
       </div>

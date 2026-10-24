@@ -8,6 +8,7 @@
 // address changes (a page that stays mounted behind another one, Cache Components).
 import Link from "next/link";
 import { Button } from "../../components/button.tsx";
+import { ProductName } from "../../components/brand.tsx";
 import {
   Empty,
   EmptyContent,
@@ -102,7 +103,8 @@ export function RunsPageContent({
             <h2>This filter is not valid</h2>
           </EmptyTitle>
           <EmptyDescription>
-            The project or status in the address is not one Code Reviewer knows.
+            The project or status in the address is not one <ProductName />{" "}
+            knows.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>

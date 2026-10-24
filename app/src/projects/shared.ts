@@ -5,6 +5,7 @@
 // jobs of the repository.
 import "server-only";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { newProjectSettings } from "./new-project-settings.ts";
 import { getDatabase } from "../db/startup.ts";
 import { createJobProjectHooks } from "../jobs/project-hooks.ts";
 import type { ProjectHooks } from "./hooks.ts";
@@ -18,7 +19,15 @@ export function getProjectHooks(workspaceId: string): ProjectHooks {
 /** The project service of one workspace. */
 export function projectServiceFor(workspaceId: string): ProjectService {
   return createProjectService({
-    projects: createProjectsRepository(getDatabase(), workspaceId),
+    projects: createProjectsRepository(
+      getDatabase(),
+      workspaceId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      newProjectSettings,
+    ),
     hooks: getProjectHooks(workspaceId),
   });
 }

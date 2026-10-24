@@ -122,11 +122,7 @@ export function ProjectSettingsPageContent({
   ];
   return (
     <>
-      <ProjectPageHeader
-        workspaceSlug={workspaceSlug}
-        row={data.row}
-        active="settings"
-      />
+      <ProjectPageHeader workspaceSlug={workspaceSlug} row={data.row} />
       <div className="flex flex-col gap-6">
         <NeedsAttention notices={notices} />
         {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and

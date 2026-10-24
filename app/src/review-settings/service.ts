@@ -584,6 +584,11 @@ export function createReviewSettingsService(deps: {
   builtIn: () => ReviewSettings;
   /** The project-only defaults of the instance (Diff Review, the shipped Dynamic model). */
   dynamicDefaults?: () => ProjectDynamicSettings;
+  /**
+   * What a project that is created now starts with (#656), so the page of a repository without a project shows
+   * the kind it will get. Default: nothing.
+   */
+  newProjectSettings?: () => Promise<ProjectSettings>;
   /** The shipped default skill; the seam #198 replaces with the attributed asset. */
   defaultSkill?: () => DefaultReviewSkill;
   /** What reacts to a settings change; #195 cancels waiting reviews on a kind change. */
@@ -680,12 +685,12 @@ export function createReviewSettingsService(deps: {
 
   /** The project-only settings of a project, with their sources, defaults and limits. */
   function dynamicView(
-    project: StoredProject | undefined,
+    settings: ProjectSettings | undefined,
     managed: boolean,
   ): ProjectDynamicView {
     const defaults = dynamicDefaults();
     const shipped = defaultSkill();
-    const overrides = parseDynamic(project?.settings);
+    const overrides = parseDynamic(settings);
     const effective = resolveProjectDynamicSettings({
       builtIn: defaults,
       project: overrides,
@@ -761,10 +766,13 @@ export function createReviewSettingsService(deps: {
   async function projectView(
     repositoryId: string,
     project: StoredProject | undefined,
+    /** What a project that does not exist yet would start with (#656): the page shows the settings it will get. */
+    startingSettings?: ProjectSettings,
   ): Promise<ProjectSettingsView> {
     const builtIn = deps.builtIn();
     const global = (await readGlobal()).overrides;
-    const overrides = parseReview(project?.settings);
+    const stored = project?.settings ?? startingSettings;
+    const overrides = parseReview(stored);
     const effective = resolveReviewSettings({
       builtIn,
       global,
@@ -773,7 +781,7 @@ export function createReviewSettingsService(deps: {
     const managed = await operatorsModels();
     const inherited = resolveReviewSettings({ builtIn, global }).settings;
     // The catalog is read for a workspace on the operator's key only (#430-T06).
-    const selection = catalogSelectionOf(project?.settings);
+    const selection = catalogSelectionOf(stored);
     return {
       ...(await viewOf(effective, overrides)),
       repositoryId,
@@ -781,7 +789,7 @@ export function createReviewSettingsService(deps: {
       active: project?.active ?? false,
       inherited: managed ? withoutModelFields(inherited) : inherited,
       dynamic: {
-        ...dynamicView(project, managed),
+        ...dynamicView(stored, managed),
         providerAddress: await providerAddressOf(project, managed),
       },
       catalogChoices: managed ? await catalogChoices(catalog, selection) : null,
@@ -796,7 +804,13 @@ export function createReviewSettingsService(deps: {
   ): Promise<ProjectSettingsView> {
     const entry = await projects.find(repositoryId);
     if (entry === undefined) throw notFound();
-    return projectView(repositoryId, entry.project ?? undefined);
+    return entry.project === null || entry.project === undefined
+      ? projectView(
+          repositoryId,
+          undefined,
+          (await deps.newProjectSettings?.()) ?? {},
+        )
+      : projectView(repositoryId, entry.project);
   }
 
   /**

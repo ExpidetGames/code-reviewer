@@ -196,7 +196,7 @@ export function CatalogProvidersCard({
         {orphaned.map((entry) => (
           <p key={entry.provider} className="text-sm text-muted-foreground">
             A key is saved for {entry.provider}, which is not available now.
-            Reviews cannot use it. It can be removed under Advanced.
+            Reviews cannot use it. It can be removed at the end of this page.
           </p>
         ))}
       </CardContent>

@@ -117,7 +117,6 @@ const PROTECTED_ROUTES = [
   "/w/[workspace]/members",
   "/w/[workspace]/projects",
   "/w/[workspace]/projects/[repositoryId]",
-  "/w/[workspace]/projects/[repositoryId]/review",
   "/w/[workspace]/runs",
   "/w/[workspace]/runs/[id]",
   "/w/[workspace]/settings",
@@ -168,6 +167,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/invitations/accept",
   // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/api/w/[workspace]",
+  "/api/w/[workspace]/billing/invoices",
   "/api/w/[workspace]/billing/journal",
   "/api/w/[workspace]/billing/monthly-limit",
   "/api/w/[workspace]/billing/profile",
@@ -200,7 +200,11 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]/runs/[id]",
 ] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
-const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
+const OUTSIDE_THE_PROXY = [
+  "/favicon.ico",
+  "/icon.svg",
+  "/apple-icon.png",
+] as const;
 
 async function createGuardedApp() {
   const harness = await createAuthHarness();

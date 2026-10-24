@@ -119,7 +119,22 @@ export type RunsSnapshot = {
   limited: boolean;
 };
 
-export type RunDetailSnapshot = { generatedAt: string; run: RunDetailView };
+/**
+ * One run as a member of the workspace sees it (#657): the facts and the review that was posted, without the log and the
+ * call trace, which only the admin portal shows (`RunDetailView`). Neither leaves the server for a customer.
+ */
+export type CustomerRunDetailView = Omit<RunDetailView, "log" | "callTrace"> & {
+  /**
+   * The text of the review comment the run posted on GitHub (the Findings), cleaned like the log; null when none was kept
+   * (a run that posted nothing, a comment that could not be read, a run from before the text was kept). Untrusted text.
+   */
+  reviewText: string | null;
+};
+
+export type RunDetailSnapshot = {
+  generatedAt: string;
+  run: CustomerRunDetailView;
+};
 
 /**
  * A link to GitHub, only when it points to github.com over https (no other host, no credentials, no
@@ -370,6 +385,31 @@ export function toRunDetailView(
     callTrace: traceView(job, onManagedKey),
     costHidden: onManagedKey,
   };
+}
+
+/**
+ * The detail of a run for a member: `toRunDetailView` without the log and the call trace, with the review comment the run
+ * posted. The text is cleaned and redacted like the log, and on the operator's key it never names its provider.
+ */
+export function toCustomerRunDetailView(
+  job: Job,
+  project: string,
+  now: Date,
+  redact: (text: string) => string = (text) => text,
+  onManagedKey = false,
+  reviewComment: string | null = null,
+): CustomerRunDetailView {
+  // Left out here, so neither is ever part of what a member's browser receives.
+  const full = toRunDetailView(job, project, now, redact, onManagedKey);
+  const detail = Object.fromEntries(
+    Object.entries(full).filter(
+      ([key]) => key !== "log" && key !== "callTrace",
+    ),
+  ) as Omit<RunDetailView, "log" | "callTrace">;
+  const redacted =
+    reviewComment === null ? "" : redact(cleanLog(reviewComment)).trim();
+  const text = onManagedKey ? maskProvidersInText(redacted) : redacted;
+  return { ...detail, reviewText: text === "" ? null : text };
 }
 
 function traceView(job: Job, onManagedKey: boolean): RunnerCallTrace | null {

@@ -383,6 +383,25 @@ test.describe("the billing journeys of a review", () => {
       banner.getByRole("link", { name: "Go to billing" }),
     ).toHaveAttribute("href", BILLING_PAGE);
 
+    // A project that was switched on starts as Dynamic Review where the instance has it on (#656-T02); this journey starts with
+    // a Diff Review.
+    await page.goto("/w/default/projects");
+    await page
+      .getByRole("link", { name: REPOSITORY.fullName, exact: true })
+      .click();
+    await expect(
+      page.getByRole("radio", { name: "Dynamic Review" }),
+    ).toBeChecked();
+    await page.getByRole("radio", { name: "Diff Review" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await page
+      .getByRole("alertdialog", { name: "Switch to Diff Review?" })
+      .getByRole("button", { name: "Switch to Diff Review" })
+      .click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
+
     // A Diff review on our key: two prices on the run and in the journal, and the balance is the credit minus them.
     const diffJob = await review(request, "diff", DIFF_COST_USD);
     expect(diffJob.llm.apiKey).toBe(OPERATOR_KEY);
@@ -579,14 +598,15 @@ test.describe("the billing journeys of a review", () => {
     await signInAsAdmin(page);
     // The Owner saves a key and chooses it, as the key mode journey does.
     await page.goto("/w/default/settings/llm");
+    // The key forms are there while the own key is selected, not while our models are (#656).
+    const card = page.getByRole("region", { name: "Which key reviews use" });
+    await card.getByRole("radio", { name: /Use my own provider key/ }).click();
     const form = page.getByRole("form", { name: "OpenRouter LLM key" });
     await form.getByLabel("API key").fill(OWN_KEY);
     await form.getByRole("button", { name: "Save key" }).click();
     await expect(
       form.getByText(`A key is saved (ends in ${OWN_KEY.slice(-4)})`),
     ).toBeVisible();
-    const card = page.getByRole("region", { name: "Which key reviews use" });
-    await card.getByRole("radio", { name: /Use my own provider key/ }).click();
     await card.getByRole("button", { name: "Save choice" }).click();
     await expect(card.getByText("The choice is saved.")).toBeVisible();
 

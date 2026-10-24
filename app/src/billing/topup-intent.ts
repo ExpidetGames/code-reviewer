@@ -16,6 +16,14 @@ export const TOPUP_INTENT_STATES = [
 ] as const;
 export type TopUpIntentState = (typeof TOPUP_INTENT_STATES)[number];
 
+/**
+ * How long a top-up that was started and not paid can still be paid: the provider redelivers for three days, and a checkout
+ * is open for a day (a delayed method takes a few more). A payment that arrives inside it is credited
+ * (src/billing/apply-event.ts), a refund or dispute we cannot place waits for it, and a workspace is not deleted while it runs
+ * (src/workspaces/delete-workspace.ts).
+ */
+export const PENDING_TOP_UP_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
 export const TOPUP_INTENT_ERROR_CODES = [
   /** The amount is not a whole micro-USD amount from 10 to 500 USD. */
   "amount_out_of_range",

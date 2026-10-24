@@ -48,6 +48,7 @@ import {
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const account: GithubAccount = {
@@ -59,8 +60,8 @@ const account: GithubAccount = {
 const INSTALLATION_ID = 9500101;
 const WIDGETS = { id: 9600101, fullName: "dynamic-journey/widgets" };
 const OWNER = { login: account.login, id: account.id };
-// The model name a person types into the project's settings; the engine asks the fake LLM for it.
-const MODEL = "vendor/agent-e2e";
+// A model of the list the project settings offer (#656); the engine asks the fake LLM for it.
+const MODEL = "deepseek/deepseek-v4-pro";
 const TITLE = "Add a user handler";
 const BODY = "Shows a user by the name in the request.";
 const FINDING_TITLE = "SQL text is built from the user name";
@@ -167,9 +168,8 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     const dynamic = page.getByRole("radio", { name: "Dynamic Review" });
     if (!(await dynamic.isChecked())) {
       await dynamic.click();
-      await page
-        .getByLabel("Dynamic Review model", { exact: true })
-        .fill(MODEL);
+      await openSection(page, "LLM");
+      await chooseOption(page, "Model", MODEL);
       await page.getByRole("button", { name: "Save review settings" }).click();
       await page
         .getByRole("alertdialog")
@@ -179,9 +179,10 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     }
     await page.reload();
     await expect(dynamic).toBeChecked();
-    await expect(
-      page.getByLabel("Dynamic Review model", { exact: true }),
-    ).toHaveValue(MODEL);
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
+      MODEL,
+    );
     await context.close();
   });
 
@@ -333,19 +334,23 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
       detail.getByText("Dynamic Review", { exact: true }),
     ).toBeVisible();
     await expect(detail.locator('[data-slot="run-model"]')).toHaveText(MODEL);
-    const usage = await detail
-      .getByText(/\d[\d,]* tokens in \d+ model calls?/)
-      .innerText();
-    const [, tokens, calls] =
-      /([\d,]+) tokens in (\d+) model call/.exec(usage) ?? [];
-    expect(Number(calls)).toBeGreaterThanOrEqual(2);
-    expect(Number(calls)).toBeLessThanOrEqual(first.length);
-    // The fake LLM reports 100 + 20 tokens for every answer; the page shows what the proxy summed.
-    expect(Number((tokens ?? "").replaceAll(",", ""))).toBe(
-      120 * Number(calls),
-    );
+    // The tokens and calls are no longer on the page (#657): the data route of the run still carries what the proxy summed.
+    const runId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    const stored = (await (
+      await page.request.get(`/api/w/default/runs/${runId}`)
+    ).json()) as { run: { usage: { totalTokens: number; aiCalls: number } } };
+    const { totalTokens: tokens, aiCalls: calls } = stored.run.usage;
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(calls).toBeLessThanOrEqual(first.length);
+    // The fake LLM reports 100 + 20 tokens for every answer; the data shows what the proxy summed.
+    expect(tokens).toBe(120 * calls);
+    // The Findings show what the review posted: the finding of the comment. The app reads the comment right after the run
+    // ended and the page asks again until the text is there.
     await expect(
-      detail.getByRole("link", { name: "Open the comment on GitHub" }),
+      detail.getByRole("region", { name: "Findings" }),
+    ).toContainText(FINDING_TITLE, { timeout: 60_000 });
+    await expect(
+      detail.getByRole("link", { name: "Open the review on GitHub" }),
     ).toHaveAttribute("href", summary?.htmlUrl ?? "missing");
     expect(summary?.htmlUrl).toMatch(
       /^https:\/\/github\.com\/dynamic-journey\/widgets\/pull\/\d+#issuecomment-\d+$/,

@@ -4,7 +4,7 @@
 // the fake Stripe (`fakes/stripe`): billing is switched on with the Stripe adapter the way the operator does it, then an Owner of the
 // default workspace saves the billing details, ticks the business confirmation, pays $25 at the (fake) checkout and sees the payment
 // on its way until the webhook credits it; a second payment whose webhook is lost is credited once by "Check payment", and the
-// webhook that arrives afterwards changes nothing; with billing off the page is gone and the plan page is the old one.
+// webhook that arrives afterwards changes nothing; each payment leaves an invoice in the Invoices card (#659); with billing off the page is gone and the plan page is the old one.
 //   - A person never leaves the app's pages: the payment page is a stub the journey serves for the checkout address, and the buyer
 //     "pays" over the control API of the fake, which then delivers its signed events to the app's real webhook route.
 import { expect, test, type Page } from "@playwright/test";
@@ -139,6 +139,19 @@ test.describe("the billing page of a workspace", () => {
     await expect(journal.getByText("Credit added").first()).toBeVisible();
     await expect(journal.getByText("+$25.00")).toBeVisible();
 
+    // #659-T01, T02: the payment left an invoice, and the card lists it with its amount, status and the two links (it asked again
+    // when the balance changed, so no reload is needed).
+    const invoices = page.getByRole("region", { name: "Invoices" });
+    const invoiceRow = invoices.getByRole("row").nth(1);
+    await expect(invoiceRow).toContainText("$25.00");
+    await expect(invoiceRow).toContainText("Paid");
+    await expect(
+      invoiceRow.getByRole("link", { name: /^View / }),
+    ).toHaveAttribute("href", /\/i\/pi_/);
+    await expect(
+      invoiceRow.getByRole("link", { name: /^Download PDF / }),
+    ).toHaveAttribute("href", /\/i\/pi_[A-Za-z0-9_]+\/pdf$/);
+
     // The business confirmation is given once: the next payment does not ask again.
     await page.goto("/w/default/settings/billing");
     await expect(
@@ -182,6 +195,10 @@ test.describe("the billing page of a workspace", () => {
     // One row more than before the payment: the late webhook did not credit it a second time.
     await expect(journal.getByRole("row")).toHaveCount(rowsBefore + 1);
     await expect(journal.getByRole("row").nth(1)).toContainText("+$10.00");
+    // #659-T02: the newest invoice is the one of this payment.
+    await expect(
+      page.getByRole("region", { name: "Invoices" }).getByRole("row").nth(1),
+    ).toContainText("$10.00");
   });
 
   // #505-T09
