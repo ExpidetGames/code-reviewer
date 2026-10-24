@@ -19,16 +19,28 @@ export type InstanceWordException = {
 
 const WORD = /\binstances?\b/i;
 
-/** A token with a joiner in it (`instance_settings`, `/instance-portal/x`, `is_instance_admin`): an identifier, not prose. */
-const TECHNICAL_TOKEN = /[\w./@:[\]-]*[_/@:[\]-][\w./@:[\]-]*/g;
+/**
+ * Whether a chunk of text without whitespace is an identifier or a path and not a word of prose: a route or file path
+ * (`/instance-portal/x`, `/api/[id]`), a URL, a dotted name (`instance.settings.read`) or a key joined by a colon
+ * (`billing-top-up:instance`). A word that only touches punctuation is prose (`instance:`, `single-instance`,
+ * `server/instance`, `[instance]`, `instance.`).
+ */
+function isTechnicalChunk(chunk: string): boolean {
+  const bare = chunk.replace(/^["'`(<]+/, "");
+  return bare.startsWith("/") || bare.includes("://") || /\w[.:]\w/.test(bare);
+}
 
 /**
- * Whether the text says the word in prose, after the technical tokens are taken out. The bare lowercase word alone is a
+ * Whether the text says the word in prose, after the technical chunks are taken out. The bare lowercase word alone is a
  * code value (the `"instance"` scope of a rate limit); a label that says it starts with a capital.
  */
 export function saysInstance(text: string): boolean {
   if (/^instances?$/.test(text)) return false;
-  return WORD.test(text.replace(TECHNICAL_TOKEN, " "));
+  const prose = text
+    .split(/(\s+)/)
+    .map((chunk) => (isTechnicalChunk(chunk) ? " " : chunk))
+    .join("");
+  return WORD.test(prose);
 }
 
 /** Every string literal, template literal part and JSX text of the file that says the word. */

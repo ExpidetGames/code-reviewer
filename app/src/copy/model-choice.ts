@@ -16,6 +16,9 @@ export const MODEL_CHOICE_BILLED_NOTE = `Billed via ${PRODUCT_NAME}`;
 /** The option of the provider dropdown that takes the choice back, so the default of code-review.com applies (#675: it is not a provider, so it does not carry the name). */
 export const MODEL_CHOICE_DEFAULT_OPTION = "Default";
 
+/** The provider dropdown while the entry in force is not in the list any more (#675): it is neither the default nor a provider. */
+export const MODEL_CHOICE_UNAVAILABLE_OPTION = "Unavailable option";
+
 /** The one sentence under the heading. */
 export const MODEL_CHOICE_HINT = `How reviews of this kind are done. ${PRODUCT_NAME} takes care of the rest.`;
 

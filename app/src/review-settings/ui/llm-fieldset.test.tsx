@@ -14,7 +14,9 @@ import {
   MODEL_CHOICE_DEFAULT_OPTION,
   MODEL_CHOICE_LOCKED_BADGE,
   MODEL_CHOICE_MANAGE_PLAN,
+  MODEL_CHOICE_NONE_CHOSEN,
   MODEL_CHOICE_NONE_OFFERED,
+  MODEL_CHOICE_UNAVAILABLE_OPTION,
   MODEL_CHOICE_BILLED_NOTE,
   MODEL_CHOICE_PER_PROJECT_NOTE,
   MODEL_CHOICE_RETIRED_BADGE,
@@ -77,6 +79,7 @@ async function renderManaged(
   user: User,
   initial = managedModel(),
   section: SectionName | null = "LLM",
+  billingOn = true,
 ) {
   const { api, save } = fakeApi();
   render(
@@ -84,6 +87,7 @@ async function renderManaged(
       workspaceSlug="acme"
       initial={initial}
       dynamicReviewEnabled
+      billingOn={billingOn}
       api={api}
     />,
   );
@@ -370,6 +374,93 @@ describe("an entry the plan does not include, or that is retired", () => {
     await chooseKind(user, "Dynamic Review");
     expect(screen.queryByText(MODEL_CHOICE_CHOSEN_UNAVAILABLE)).toBeNull();
     expect(modelDropdown().textContent).toBe("Explorer");
+  });
+});
+
+describe("a provider whose entries the plan does not include, and a chosen entry that is no longer listed", () => {
+  const LOCKED_ONLY: CatalogChoices = {
+    diff: [
+      ...CHOICES.diff.slice(0, 1),
+      {
+        id: "ent-locked",
+        name: "Locked",
+        description: null,
+        providerLabel: "Lockedlabs",
+        available: false,
+        reason: "CATALOG_ENTRY_NOT_ALLOWED",
+      },
+    ],
+    dynamic: [],
+  };
+
+  // #675-F1
+  it("does not offer a provider none of whose entries can be chosen", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user, managedModel({ choices: LOCKED_ONLY }));
+
+    expect(await providersOffered(user)).toEqual([
+      MODEL_CHOICE_DEFAULT_OPTION,
+      "Anthropic",
+    ]);
+  });
+
+  // #675-F1
+  it("keeps the provider of a chosen entry that the plan no longer includes, and never turns the saved choice into the default", async () => {
+    const user = userEvent.setup();
+    const { save } = await renderManaged(
+      user,
+      managedModel({
+        choices: LOCKED_ONLY,
+        selection: { diff: "ent-locked", dynamic: null },
+      }),
+    );
+
+    expect(providerDropdown().textContent).toBe("Lockedlabs");
+    expect(await providersOffered(user)).toContain("Lockedlabs");
+    await openSection(user, "Review");
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "12");
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save.mock.calls[0]?.[0]).toEqual({ maxFindings: 12 });
+  });
+
+  // #675-F2
+  it("says the chosen model is unavailable, not Default, when the saved entry is not listed any more", async () => {
+    const user = userEvent.setup();
+    const { save } = await renderManaged(
+      user,
+      managedModel({ selection: { diff: "ent-gone", dynamic: null } }),
+    );
+
+    expect(providerDropdown().textContent).toBe(
+      MODEL_CHOICE_UNAVAILABLE_OPTION,
+    );
+    expect(screen.getByText(MODEL_CHOICE_CHOSEN_UNAVAILABLE)).toBeTruthy();
+    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+    await user.click(screen.getByRole("button", SAVE));
+    expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe("what the default option stands for, and the billing note while billing is off", () => {
+  // #675-F5
+  it("says under the default option that the default of code-review.com applies", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user);
+
+    expect(screen.getByText(MODEL_CHOICE_NONE_CHOSEN)).toBeTruthy();
+    await chooseOption(user, providerDropdown(), "OpenAI");
+    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+  });
+
+  // #675-F5
+  it("shows no billing note while billing is off", async () => {
+    const user = userEvent.setup();
+    await renderManaged(user, managedModel(), "LLM", false);
+
+    expect(providerDropdown()).toBeTruthy();
+    expect(screen.queryByText(MODEL_CHOICE_BILLED_NOTE)).toBeNull();
   });
 });
 

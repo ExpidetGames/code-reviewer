@@ -26,6 +26,13 @@ const MAKER_NAMES: Readonly<Record<string, string>> = {
   nvidia: "NVIDIA",
   moonshotai: "Moonshot AI",
   "z-ai": "Z.ai",
+  minimax: "MiniMax",
+  openrouter: "OpenRouter",
+  ai21: "AI21",
+  allenai: "Ai2",
+  nousresearch: "Nous Research",
+  "bytedance-seed": "ByteDance Seed",
+  "stepfun-ai": "StepFun",
 };
 
 /** `acme-labs` becomes `Acme Labs`; a name nobody listed is still readable. */
@@ -37,8 +44,10 @@ function capitalised(id: string): string {
     .join(" ");
 }
 
+/** A router marks the maker of a "latest" alias with a leading `~` (`~anthropic/claude-sonnet-latest`); the maker is the same. */
 function nameOfMaker(id: string): string {
-  return MAKER_NAMES[id.toLowerCase()] ?? capitalised(id);
+  const maker = id.replace(/^~+/, "").toLowerCase();
+  return MAKER_NAMES[maker] ?? capitalised(maker);
 }
 
 /**

@@ -15,9 +15,13 @@ export const PLAN_NO_LIMITS = "No limits apply to this workspace.";
 export const PLAN_UNREADABLE =
   "The limits of this workspace cannot be read right now, so reviews are not started. Contact the operator.";
 
-/** The workspace reviews with the operator's key. */
+/** The workspace reviews with the operator's key and billing is on. */
 export const PLAN_MANAGED =
   "The models for your reviews are provided and billed via code-review.com.";
+
+/** The same while billing is off (#675): nothing is billed. */
+export const PLAN_MANAGED_UNBILLED =
+  "The models for your reviews are provided by code-review.com.";
 
 export const PLAN_PAUSED_TITLE = "Reviews are paused";
 /** No reason is given on purpose. */

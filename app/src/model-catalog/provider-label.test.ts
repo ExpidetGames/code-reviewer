@@ -24,6 +24,15 @@ describe("the provider label of a catalog entry", () => {
     ["meta-llama/llama-4-maverick", "Meta"],
     ["mistralai/mistral-large", "Mistral AI"],
     ["acme-labs/deep-thinker-4", "Acme Labs"],
+    ["minimax/minimax-m2", "MiniMax"],
+    ["openrouter/auto", "OpenRouter"],
+    ["ai21/jamba-large", "AI21"],
+    ["allenai/olmo-3", "Ai2"],
+    ["nousresearch/hermes-4", "Nous Research"],
+    ["bytedance-seed/seed-1.6", "ByteDance Seed"],
+    ["stepfun-ai/step-3", "StepFun"],
+    ["~anthropic/claude-sonnet-latest", "Anthropic"],
+    ["~moonshotai/kimi-latest", "Moonshot AI"],
   ])(
     "is the maker of %s for a model that goes through OpenRouter",
     (modelId, label) => {

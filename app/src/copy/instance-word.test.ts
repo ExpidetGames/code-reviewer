@@ -67,11 +67,6 @@ const EXCEPTIONS: readonly InstanceWordException[] = [
     reason: "the start-up error about the database configuration",
   },
   {
-    path: "app/src/crypto/app-secret.ts",
-    text: "master key of the instance",
-    reason: "the start-up error about a missing environment variable",
-  },
-  {
     path: "app/src/secrets/names.ts",
     text: "is already a secret name of the instance",
     reason: "a programming error thrown while the secret registry is built",
@@ -135,10 +130,29 @@ describe("the word instance", () => {
       "/api/instance-portal/billing/workspaces/[id]",
       "select value from instance_settings where key = 'x'",
       "__instance_default__",
+      "billing-top-up:instance",
+      "isInstanceAdmin",
+      "instance.settings.read",
+      "https://example.com/instance/x",
       "instance",
     ])
       expect(saysInstance(token)).toBe(false);
-    for (const prose of ["Instance", "Instances", "on this instance."])
+  });
+
+  // #675-F3
+  it("counts the word in prose, also next to a colon, a slash, a hyphen or a bracket, and in the plural", () => {
+    for (const prose of [
+      "Instance",
+      "Instances",
+      "on this instance.",
+      "Problem with this instance: try again",
+      "Instance: foo",
+      "this instance/server",
+      "single-instance setup",
+      "[instance]",
+      "all instances",
+      "Set up the instance, then sign in",
+    ])
       expect(saysInstance(prose)).toBe(true);
   });
 });
