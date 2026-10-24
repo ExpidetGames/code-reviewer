@@ -189,6 +189,9 @@ ASSUMED_DENSITY = 3.0
 WRAP_UP_RESERVE_SECONDS = 150.0
 WRAP_UP_RESERVE_FRACTION = 0.25
 STOPPED_EARLY_COST = "cost_limit"
+# #666: the cost limit that stopped the run is the project's own (`llm.maxCostUsd`), not the
+# operator's.
+STOPPED_EARLY_PROJECT_COST = "project_cost_limit"
 STOPPED_EARLY_TIME = "time_limit"
 STOPPED_EARLY_TOKENS = "token_limit"
 # The adapter asks the model for its answer this much before the clock reserve starts (a share of
@@ -266,6 +269,10 @@ class DynamicLimits:
 
     deadline_seconds: float = TOTAL_DEADLINE_SECONDS
     max_cost_usd: Decimal = MAX_COST_USD
+    # What `stoppedEarly` says when `max_cost_usd` is what stops the run: `cost_limit`, or
+    # `project_cost_limit` when the project's limit is the smaller one (#666,
+    # `effective_cost_limit`).
+    cost_stop_reason: str = STOPPED_EARLY_COST
     max_tool_result_bytes: int = MAX_TOOL_RESULT_BYTES
     max_returned_bytes: int = MAX_RETURNED_BYTES
     max_input_bytes: int = MAX_INPUT_BYTES
@@ -297,6 +304,18 @@ def max_cost_from_environment(raw: str | None) -> Decimal:
     if not Decimal(0) < limit <= MAX_COST_USD_CEILING:
         raise invalid
     return limit
+
+
+def effective_cost_limit(operator: Decimal, project: Decimal | None) -> tuple[Decimal, str]:
+    """The cost limit of a run and the reason it names when it stops the run (#666).
+
+    The project's limit (`llm.maxCostUsd` of the job, set by the customer) only ever narrows the
+    operator's: the smaller one is the limit. When the two are equal the project's is named, since
+    it is the one the customer can change. Without a project limit the operator's applies unchanged.
+    """
+    if project is None or project > operator:
+        return operator, STOPPED_EARLY_COST
+    return project, STOPPED_EARLY_PROJECT_COST
 
 
 @dataclass(frozen=True)
@@ -952,7 +971,11 @@ class BudgetLedger:
             if recovery or marked:
                 reason = None
             elif self._overshot:
-                reason = STOPPED_EARLY_TOKENS if self._overshot_by_tokens else STOPPED_EARLY_COST
+                reason = (
+                    STOPPED_EARLY_TOKENS
+                    if self._overshot_by_tokens
+                    else self.limits.cost_stop_reason
+                )
             elif can_wrap_up:
                 reason = self._wrap_up_reason(held, cost, priced, allowance)
             else:
@@ -1015,7 +1038,7 @@ class BudgetLedger:
     def _cost_refusal(self) -> RefusedForFinal:
         """The error of a call the cost limit cannot hold. Call with the lock held."""
         if self._above_wire:
-            self._refusal_reason = STOPPED_EARLY_COST
+            self._refusal_reason = self.limits.cost_stop_reason
         return RefusedForFinal(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
 
     def try_reserve_final_retry(
@@ -1200,7 +1223,7 @@ class BudgetLedger:
         if _SUM.add(held, _SUM.multiply(_SUM.add(cost, after), RESERVE_MARGIN)) > (
             self.limits.max_cost_usd
         ):
-            return STOPPED_EARLY_COST
+            return self.limits.cost_stop_reason
         return self._wrap_up_for_tokens(priced, allowance)
 
     def _wrap_up_for_tokens(self, priced: int, allowance: int) -> str | None:

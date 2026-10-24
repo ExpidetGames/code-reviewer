@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -59,6 +60,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    effective_cost_limit,
     max_cost_from_environment,
 )
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
@@ -312,7 +314,9 @@ def _run_diff_job(
                 patches.callback(apply_require_parameters_patch(provider=provider))
             # The cost of the run is what the provider states for every answer (#274), or, for a
             # provider that states none, what its usage costs by the price list (#511).
-            meter, undo_meter = install_cost_meter(superseded=superseded, provider=provider)
+            meter, undo_meter = install_cost_meter(
+                superseded=superseded, provider=provider, max_cost_usd=job.llm.max_cost_usd
+            )
             patches.callback(undo_meter)
             patches.callback(lambda: _log_cache_use(capture, meter.cache_tally))
             if meter_slot is not None:
@@ -406,6 +410,10 @@ def _run_diff_job(
         except BaseException as error:  # SystemExit and friends from a library included
             capture.add(_ERROR_LEVEL, "ERROR", "handle_request raised", error)
             code = classify_failure(capture.exceptions, capture.error_messages)
+            if meter.limit_reached:
+                # A request was refused at the project's cost limit (#666): that is the cause,
+                # whatever PR-Agent made of the refusal.
+                code = ErrorCode.COST_LIMIT_REACHED
             usage = probe.usage()
             return _failure(
                 code or ErrorCode.UNKNOWN,
@@ -438,6 +446,11 @@ def _run_diff_job(
         if error_code in (None, ErrorCode.UNKNOWN) and (failed_flag or failure_comment):
             error_code = ErrorCode.COMMAND_FAILED
         error_code = error_code or ErrorCode.UNKNOWN
+    if meter.limit_reached and not ok and truncation is None:
+        # #666: PR-Agent met the refusal at the project's cost limit and made some failure of its
+        # own of it (a failure comment, no review posted); the limit is the cause. A review that
+        # was posted, cut to GitHub's size, keeps its own code.
+        error_code = ErrorCode.COST_LIMIT_REACHED
     log_tail, log_truncated = capture.snapshot()
     # A failed command reports usage only when it reached the model.
     reported = usage if ok else probe.usage()
@@ -460,20 +473,27 @@ DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
 
 
 def dynamic_ledger(
-    capabilities: DynamicCapabilities, environment: Mapping[str, str], deadline: float
+    capabilities: DynamicCapabilities,
+    environment: Mapping[str, str],
+    deadline: float,
+    project_max_cost_usd: Decimal | None = None,
 ) -> BudgetLedger:
     """The ledger of one Dynamic run, from trusted runner configuration only (#290).
 
     The window and the unit costs are the model's (its descriptor, and a model without unit costs
     is refused); the cost limit is the operator's (`RUNNER_DYNAMIC_MAX_COST_USD`, up to a ceiling
-    in code). Nothing of the job takes part: the project's Diff "Token budget" (`llm.maxTokens`)
-    is not the window of a Dynamic run, and neither the claim nor the repository can name a limit.
+    in code). The project's own cost limit (`llm.maxCostUsd` of the job, #666) can only narrow it:
+    the run is held to the smaller of the two. Nothing else of the job takes part: the project's
+    Diff "Token budget" (`llm.maxTokens`) is not the window of a Dynamic run, and the repository
+    cannot name a limit.
     """
     # A model that cannot serve the run at all is named first, then one that cannot be priced.
     capabilities.check_required()
+    max_cost, stop_reason = effective_cost_limit(
+        max_cost_from_environment(environment.get(DYNAMIC_MAX_COST_VARIABLE)), project_max_cost_usd
+    )
     limits = DynamicLimits(
-        deadline_seconds=deadline,
-        max_cost_usd=max_cost_from_environment(environment.get(DYNAMIC_MAX_COST_VARIABLE)),
+        deadline_seconds=deadline, max_cost_usd=max_cost, cost_stop_reason=stop_reason
     )
     # A cost that cannot be priced cannot be bounded before it is spent: a model without unit
     # costs (only the default model has them built in) does not run, and nothing is assumed.
@@ -710,7 +730,7 @@ def _run_dynamic_job(
     if isinstance(deadline, JobResult):
         return deadline
     try:
-        ledger = dynamic_ledger(capabilities, environment, deadline)
+        ledger = dynamic_ledger(capabilities, environment, deadline, job.llm.max_cost_usd)
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
     # From here on every failure says what the model calls so far cost (nothing before the first).

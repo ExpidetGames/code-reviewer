@@ -114,6 +114,38 @@ describe("the job options of a claimed job", () => {
     expect(options.env).toStrictEqual({});
   });
 
+  // #666-T01
+  it.each(["diff", "dynamic"] as const)(
+    "carries the effective cost limit of the project in a %s job",
+    async (kind) => {
+      const value = {
+        ...resolved(kind),
+        ...resolveReviewSettings({
+          builtIn: builtInReviewSettings("diff-model"),
+          global: { maxCostCents: 100 },
+          project: { maxCostCents: 250 },
+        }),
+      };
+      const source = createReviewSettingsJobOptionsSource({
+        settings: () => ({ resolveForRepository: async () => value }),
+      });
+
+      const options = await source.optionsFor(job(kind));
+
+      expect(options.llm?.maxCostCents).toBe(250);
+    },
+  );
+
+  // #666-T02
+  it.each(["diff", "dynamic"] as const)(
+    "carries no cost limit in a %s job when none is set",
+    async (kind) => {
+      const options = await sourceFor("diff").optionsFor(job(kind));
+
+      expect(options.llm?.maxCostCents ?? null).toBeNull();
+    },
+  );
+
   // #434-T03
   it("carries no model tier for either kind: the catalog entry is the only choice", async () => {
     const legacy = ["model", "Tier"].join("");

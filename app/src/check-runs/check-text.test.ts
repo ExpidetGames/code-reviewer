@@ -190,6 +190,18 @@ describe("the check run of a finished review", () => {
     expect(check.summary).toMatch(/incomplete/);
   });
 
+  // #666-T01
+  it("says that a review stopped at the cost limit of its project may be incomplete, and where to change it", () => {
+    const check = describeCheck(
+      subject({ status: "succeeded", stoppedEarly: "project_cost_limit" }),
+    );
+
+    expect(check.conclusion).toBe("success");
+    expect(check.summary).toMatch(/cost limit set for this project/);
+    expect(check.summary).toMatch(/incomplete/);
+    expect(check.summary).toMatch(/Limits in the project settings/);
+  });
+
   // #553-R07
   it("says that a review stopped at its token limit may be incomplete, and still succeeds", () => {
     const check = describeCheck(
@@ -243,6 +255,18 @@ describe("the check run of a job that did not finish", () => {
     });
     expect(check.summary).toContain("The AI provider refused the API key.");
     expect(check.summary).toContain("`llm_auth`");
+  });
+
+  // #666-T04
+  it("says that a Diff Review stopped at the cost limit of its project, and where to change it", () => {
+    const check = describeCheck(
+      subject({ status: "failed", errorCode: "cost_limit_reached" }),
+    );
+
+    expect(check.conclusion).toBe("neutral");
+    expect(check.summary).toContain("cost limit set for this project");
+    expect(check.summary).toContain("Limits in the project settings");
+    expect(check.summary).toContain("`cost_limit_reached`");
   });
 
   // #499-T13

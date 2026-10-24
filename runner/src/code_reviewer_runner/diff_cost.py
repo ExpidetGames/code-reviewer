@@ -80,6 +80,11 @@ class CostMeterError(Exception):
     """PR-Agent does not have the function the meter was written for."""
 
 
+class CostLimitReachedError(Exception):
+    """A model request was refused because what the run cost has reached the project's cost limit
+    (#666). Nothing was sent."""
+
+
 _field = usage_field
 
 # What a call is priced with: the model the request named and the usage of its answer. The meter
@@ -155,8 +160,14 @@ def _chunk_usage(chunk: Any) -> Any:
 class DiffCostMeter:
     """What the provider charged for the model calls of one Diff run. One instance per run."""
 
-    def __init__(self, charge_of: ChargeOf = _stated_charge) -> None:
+    def __init__(
+        self, charge_of: ChargeOf = _stated_charge, max_cost_usd: Decimal | None = None
+    ) -> None:
         self._charge_of = charge_of
+        # #666: the project's cost limit. A request is only sent while what the run has cost so far
+        # is below it; one call is never cut short, so the last one may end above the limit.
+        self._max_cost_usd = max_cost_usd
+        self._limit_reached = False
         self._lock = threading.Lock()
         self._total = Decimal(0)
         self._priced = 0
@@ -177,6 +188,27 @@ class DiffCostMeter:
             if self._total > MAX_RUN_COST_USD:
                 return None
             return self._total
+
+    def refuse_over_limit(self) -> bool:
+        """True (and remembered) when the charges of the answers so far have reached the limit.
+
+        Only priced answers count: a run with an unpriced call has no cost to hold to the limit,
+        and a request is never refused on a guess. A request in flight is not counted either, so
+        the check is made before a request is sent, when none is.
+        """
+        if self._max_cost_usd is None:
+            return False
+        with self._lock:
+            if self._total < self._max_cost_usd:
+                return False
+            self._limit_reached = True
+            return True
+
+    @property
+    def limit_reached(self) -> bool:
+        """True when a request was refused because the cost had reached the limit (#666)."""
+        with self._lock:
+            return self._limit_reached
 
     @property
     def answered_calls(self) -> int:
@@ -239,6 +271,7 @@ def install_cost_meter(
     superseded: SupersedeSignal = PROCESS_SIGNAL,
     *,
     provider: LlmProviderSpec | None = None,
+    max_cost_usd: Decimal | None = None,
 ) -> tuple[DiffCostMeter, Callable[[], None]]:
     """Wrap PR-Agent's `acompletion`. Returns the meter and a function that undoes the wrapping.
 
@@ -247,6 +280,10 @@ def install_cost_meter(
 
     `provider` is the provider of the job: it decides what a call cost. Without one the charge is
     the `usage.cost` of the answer.
+
+    `max_cost_usd` is the project's cost limit (#666): once the answers so far cost that much, a new
+    request is refused with `CostLimitReachedError` before anything is sent (as for a superseded
+    run, and before the meter hears of it). A request in flight finishes and is counted as always.
 
     Once the run is superseded (#396) a new request is refused with `SupersededError` before
     anything is sent
@@ -261,12 +298,14 @@ def install_cost_meter(
     if not inspect.iscoroutinefunction(original):
         raise CostMeterError(f"{_HANDLER_MODULE}.{_FUNCTION} is not a coroutine function")
 
-    meter = DiffCostMeter(_stated_charge if provider is None else charge_by(provider))
+    meter = DiffCostMeter(_stated_charge if provider is None else charge_by(provider), max_cost_usd)
 
     @wraps(original)
     async def metered(*args: Any, **kwargs: Any) -> Any:
         if superseded.is_set():
             raise SupersededError("the run was superseded; no further model request is sent")
+        if meter.refuse_over_limit():
+            raise CostLimitReachedError("the cost limit of the project is reached; nothing is sent")
         meter.begin()
         if _carries_a_retry(kwargs):
             # Requests we cannot count one by one: the call is handed on unchanged and stays open.
