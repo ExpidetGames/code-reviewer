@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance admin's side of the binding (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.3 and
 // 2.9): a request exists when a person asked to link an installation and the role of their GitHub account in the

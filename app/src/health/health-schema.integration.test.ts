@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The health answer in serverless mode (#319): a database that is behind this version's migrations is a
 // 503 with a stable code, and nothing is migrated, created or ended on the way. In server mode the answer

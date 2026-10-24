@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the catalog screens (#554): every stable code a route can answer with has a sentence, the guard's codes
 // are those the fetch records, and a code the page does not know is never shown as it is.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who may change the review settings: the access proxy (real Better Auth, real database)
 // in front of the handlers of `PUT /api/review-settings` and of the project settings routes. A request

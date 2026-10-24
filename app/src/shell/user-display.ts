@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the user menu shows about the signed in person, and the avatars of members and installations (#638).
 // The name is whatever GitHub gave us, so it is untrusted text: these functions only produce plain strings,

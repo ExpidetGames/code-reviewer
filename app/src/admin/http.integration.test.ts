@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the admin data route end to end over a real database and the real proxy: what it shows, what
 // a change does and what it answers when a change is refused, that a request from another site is

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `--from <models.dev api.json> --write` derives the supported-provider file from a saved models.dev body and
 // `runner/opencode-pin.json` and writes `contracts/opencode-providers.v1.json` and its identical copy in

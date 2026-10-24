@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The mail sender of the running server. Looked up on every call, never remembered: whether the instance
 // can send mail, and with which server, is the admin's setting and can change at any time. Mail is never

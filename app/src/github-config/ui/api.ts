@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the GitHub section of the admin portal makes to its own data routes (src/github-config/http.ts).
 // Browser side; nothing throws, a failure is a stable code the page translates (messages.ts).

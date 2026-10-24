@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment node
 // The project settings page decides what its form is handed. A workspace on the operator's key never gets a

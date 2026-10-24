@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the admin portal: the settings service on the server's database,
 // the secret store, the mail server settings and the facts the portal shows. Server code only.

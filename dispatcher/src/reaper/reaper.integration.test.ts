@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The reaper through the composed Dispatcher: the cron route over HTTP-shaped requests, the real App client talking to the
 // fake App over loopback, and the fake Sandbox service. No real platform: nothing here reaches the internet.

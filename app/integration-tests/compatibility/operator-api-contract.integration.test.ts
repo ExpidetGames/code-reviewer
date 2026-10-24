@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the app and contracts/operator-api.v1.json describe the same API: what the app really answers
 // (through the real API) is valid against the file, what the app accepts as a body is what the file allows for

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The neutral findings of a Dynamic Review (`contracts/dynamic-review/schema.v1.json`), and the
 semantic checks the schema cannot express (#195).

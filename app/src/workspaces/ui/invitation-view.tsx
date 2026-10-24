@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the page of a valid invitation shows: who is invited and where to, exactly once, and the one
 // action that fits who is looking. Opening the link accepts nothing; only the button behind a session

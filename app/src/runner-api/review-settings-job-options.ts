@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The job options of the running server: the review settings of the job's repository, the project's
 // overrides over the global defaults over the built-in values (CR-25), turned into the fields of a job

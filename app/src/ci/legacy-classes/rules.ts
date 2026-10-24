@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The removed class names of the legacy stylesheet (#165, cleanup #185). This module finds one of
 // them in a class context of a source file: a `className=`/`class=` attribute, the first string of a

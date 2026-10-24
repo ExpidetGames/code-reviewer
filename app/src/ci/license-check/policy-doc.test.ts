@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: THIRD_PARTY_LICENSES.md and license-policy.json say the same. The policy is what the CI
 // scan enforces; the document is what readers (and the attribution duties) rely on. Both are

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing page of a workspace, end to end (#505-T03, T04, T11), on the app of the billing journeys of the admin portal against
 // the fake Stripe (`fakes/stripe`): billing is switched on with the Stripe adapter the way the operator does it, then an Owner of the

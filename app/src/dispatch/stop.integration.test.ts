@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stop call of the dispatch webhook against a real database and a stand-in for the Dispatcher (#487): which jobs get
 // a signed `POST /stop` (only those whose wake-up a Dispatcher acknowledged), what the call is, how a failure is

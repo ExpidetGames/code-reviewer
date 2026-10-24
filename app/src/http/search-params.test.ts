@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins the shared reader for one page search param: a single non-empty string is the value, and a
 // repeated, empty or missing parameter counts as absent.

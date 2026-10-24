@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497-T13: the structure of the webhook route. It makes no outbound call (the sources that run in it do not even import
 // a way to make one; the behavior is in webhook-handler.integration.test.ts), every status and log line comes from an

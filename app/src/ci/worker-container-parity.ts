@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Translates a compose service into the shape of the hardened container spec
 // (contracts/worker-container.v1.json) so that the two can be compared (#325). Anything in the

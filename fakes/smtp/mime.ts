@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads a mail message the way a mailbox does, as far as the tests need: the headers (unfolded, names in
 // lower case, every occurrence kept), the subject with encoded words decoded, and the plain text and the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down, through the real handler, that the endpoints Better Auth offers beyond the GitHub
 // sign in cannot be used: a signed in person cannot rewrite their own profile (which would let them

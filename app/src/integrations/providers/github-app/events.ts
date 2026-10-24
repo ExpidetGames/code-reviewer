@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Translates a verified GitHub delivery into what it means for the app (an IntegrationEvent). Reads
 // only the fields listed in `webhook-fields.ts`. A genuine delivery of no interest is `ignored` with a

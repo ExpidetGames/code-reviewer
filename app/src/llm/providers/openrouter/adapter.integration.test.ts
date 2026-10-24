@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #423-T05: the two network operations of the adapter against the fake LLM over real HTTP, as the key-test and
 // model-capabilities suites exercise them, but reached through the registry (the way every caller now does).

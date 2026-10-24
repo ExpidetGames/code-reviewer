@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { afterEach, describe, expect, it } from "vitest";
 import { createAppClient } from "./app-client.ts";

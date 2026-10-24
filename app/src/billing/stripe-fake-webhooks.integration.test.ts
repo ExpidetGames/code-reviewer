@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The webhook side of the fake Stripe API (fakes/stripe): the events a payment, a refund and a dispute make, their
 // signed delivery (duplicate, reordered, delayed, every fault of the signature) and the buyer helper, checked with the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The price book (#549): what the ledger prices a managed run from, in BigInt micro-USD per million tokens. It is built
 // from the models.dev row (decimal strings, tiers) and the override file, and a book an admin types is validated here.

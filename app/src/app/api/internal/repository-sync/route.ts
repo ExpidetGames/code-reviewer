@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/internal/repository-sync: the daily sync with GitHub, called by the platform's cron in
 // serverless mode (404 anywhere else). Public for the session guard: CRON_SECRET is the credential.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `POST /api/admin/approvals/:id` { "decision": "approve" | "deny" }: the instance admin
 // decides a request to link an installation (src/installation-binding/approvals.ts). Order, as for every route of

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The body of the notice (#281) and its hidden marker. The body takes the code, the period and the instance's
 // link and nothing else, so no part of a pull request (title, branch, description, comments) and no figure can

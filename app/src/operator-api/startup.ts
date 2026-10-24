@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one start line about the operator API: whether it is on. It names the variable and, for a token that is set
 // but unusable, the rule it breaks; it never contains a token. An instance that never set the variable gets the

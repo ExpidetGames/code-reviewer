@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sign-up rules for a GitHub sign-in as pure logic: the rule is applied to the verified
 // primary email only, a missing or unverified one is refused, a fail-closed rule refuses everybody, and a

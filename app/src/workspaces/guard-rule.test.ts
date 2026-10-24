@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the rule that a workspace address is only ever served for a member of that workspace, by the
 // code that serves it and not only by the proxy: every page below `/w/<slug>` asks `requireWorkspace(...)`

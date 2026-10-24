@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the job queue: what a job is and what goes in and out. Everything here is plain
 // data; the rules live in job-status.ts, job-input.ts and job-queue.ts.

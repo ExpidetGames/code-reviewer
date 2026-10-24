@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The providers the app supports, as far as a client component may know them: data and pure rules, nothing that
 // talks to the network. `LLM_PROVIDERS` and `LlmProvider` (src/llm/config.ts) are derived from this list. To

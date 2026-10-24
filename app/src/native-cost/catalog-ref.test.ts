@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The minimal map from what a job selected to the models.dev catalog (#553, the id mapping #549 left here): a registry slug
 // (`^[a-z][a-z0-9_]{1,31}$`, a secret name per provider) and a model id name a catalog model by providerId and modelId.

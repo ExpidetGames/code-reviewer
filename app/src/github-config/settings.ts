@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub App of the instance as the admin enters it (docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.4 and 2.7), and the rules for what is accepted. The non-secret part is stored as the instance

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the change of the tenancy against a real SQLite file (docs/decisions/0001-editions-setup-
 // and-accounts.md, section 2.3): single to multi is always allowed; multi to single only while at most

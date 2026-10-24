@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "Review defaults" sub-page of the workspace settings (#178): the form for the global defaults
 // every project inherits (reusing the settings form of #174 in its global mode, where there is no

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin portal assembled for integration tests: an instance set up through the real first-run setup
 // (so the instance admin is made by the same code as in production), the real Better Auth, the setup

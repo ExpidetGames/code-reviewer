@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The capability descriptor a Dynamic job carries (#279): what the provider's public model metadata
 // (src/llm/model-capabilities.ts) says the job's model can do, in the shape of `DynamicModelCapabilities`

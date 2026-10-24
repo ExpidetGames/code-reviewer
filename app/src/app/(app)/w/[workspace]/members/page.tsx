@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
 import { Badge } from "@/components/ui/badge";

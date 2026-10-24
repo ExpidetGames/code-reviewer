@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The application Button of the redesign: a thin wrapper over the copied shadcn Button
 // (`@/components/ui/button`) that narrows the public surface to this project's variants and sizes,

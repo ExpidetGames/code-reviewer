@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The entitlements of a workspace against a real SQLite file: a row round-trips, a reset of the period
 // never goes backwards (and a repeat is harmless), a suspension is set and cleared together with its code,

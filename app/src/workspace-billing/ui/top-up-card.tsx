@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // Adding credit (ADR 0006, P7, D3; #505): five preset amounts and another amount from $10 to $500, the business confirmation at the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the status handler: the user is asked for first and nothing is read for a caller without
 // a session, the answer is never cached, and a broken setting is a stable error code.

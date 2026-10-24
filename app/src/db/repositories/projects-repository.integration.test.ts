@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the projects table against a real SQLite file: activating a repository creates its one
 // project, deactivating keeps the row and its settings, activating again reuses the row, a repository

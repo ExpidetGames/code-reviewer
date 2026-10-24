@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The sign-up rule (#181): everyone, a list of emails or allowed email domains, as one card with one

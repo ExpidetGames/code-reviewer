@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The Advanced sub-page of the workspace settings (#658): one action, Delete workspace, confirmed by typing the name of the

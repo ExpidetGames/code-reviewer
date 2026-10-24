@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how CI proves the Dynamic runner image (#202): a job of its own builds the `dynamic`
 // target of runner/Dockerfile and runs the smoke test in `dynamic` mode (the exact pinned engine and

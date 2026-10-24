@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The first thing the privileged Dynamic e2e lane does inside Playwright (#253): the preflight. Whatever the
 // lane needs and does not have is named and the run stops, so nothing below ever skips or half runs. The

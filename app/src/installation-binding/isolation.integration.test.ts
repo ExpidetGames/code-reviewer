@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Repositories of one customer never reach another (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.9): two workspaces each link their own installation, and the deliveries of GitHub, the synchronization and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: the migrations of the monthly limit and the hidden brake, on SQLite and on Postgres: the table of the settings a workspace
 // makes for itself, and the two indexes the claim's limit queries use.

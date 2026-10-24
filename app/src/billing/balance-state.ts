@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The states a balance can be in for the notifications of #506, and nothing else (no database, no mail), so the repositories and
 // the pages share one reading. A balance is `empty` at zero or below (a review starts with any balance above zero, #605, so

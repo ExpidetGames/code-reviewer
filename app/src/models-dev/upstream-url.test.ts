@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The address models.dev gives for a provider decides where a real key is sent (#548, part C), so it is untrusted
 // too: https only, no credentials, and nothing that is, or resolves to, a private, loopback or link-local address.

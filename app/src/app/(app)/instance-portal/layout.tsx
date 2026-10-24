@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The frame of the admin portal: the navigation between its sections, on the same shadcn Sidebar as
 // the workspace (own provider and trigger, so it becomes the Sheet drawer on a narrow screen). The

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Finds the VMs of one job (#487). The App tells the Dispatcher that a job's claim has ended; the Dispatcher stops the
 // VMs it created for that job and nothing else. The job id is a UUID the route has already validated, and it is used

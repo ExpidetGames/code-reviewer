@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

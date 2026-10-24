@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The password reset on the running server: the real database and Better Auth's password hash.
 import "server-only";

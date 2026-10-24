@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The setup code of a serverless deployment, kept in the database so every instance sees the same
 // code and the same counters (#321). Every test here makes "another instance" by building a second

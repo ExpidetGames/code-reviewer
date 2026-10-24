@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake Stripe of the billing journeys (`fakes/stripe`, started by playwright.config.ts) and the admin routes that point billing
 // at it, the way an operator would in the admin portal: the Stripe adapter, an API key, a webhook endpoint at the app, the rates, the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The own-key selection of a catalog model for Dynamic Review (#555): the provider is a catalog provider by its slug, the model
 // is the project's (a catalog provider has no built-in model), and the caller must be able to run a catalog model. A Diff job

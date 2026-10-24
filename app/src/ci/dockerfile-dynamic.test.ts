@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the two images of runner/Dockerfile (#202): the default target is the PR-Agent-only
 // runner and carries nothing of the engine; the `dynamic` target adds the pinned OpenCode, `nft`, a

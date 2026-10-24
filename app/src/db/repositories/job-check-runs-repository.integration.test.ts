@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The record of the check runs and review verdicts of the jobs of a workspace against a real SQLite file (#405):
 // one row per job, taken by one caller at a time, retried a bounded number of times, and never changed once

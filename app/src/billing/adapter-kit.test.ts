@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497-T14: the adapter test kit runs for the manual adapter (no webhook) and for the fake adapter (with one).
 import { describe, expect, it } from "vitest";

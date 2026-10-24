@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator API has no way to the operator's LLM keys (#427, and #276 before it): whoever holds its token must not
 // hold the keys. Behavior is pinned in integration-tests/http/operator-api.integration.test.ts; this finds the file

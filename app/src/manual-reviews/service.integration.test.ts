@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down listing the open pull requests of a project and starting a command for one of them,
 // with the real service, the real GitHub App provider and client against the fake GitHub, the real

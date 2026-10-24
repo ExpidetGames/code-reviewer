@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the pages whose address can carry an invitation link send `Referrer-Policy: no-referrer`
 // (a header, so it holds before the page has loaded anything), and that the page of the invitation also asks

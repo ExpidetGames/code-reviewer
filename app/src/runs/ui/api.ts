@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the runs pages make to the app's own routes while they poll: the list
 // (`GET /api/w/:workspace/runs`, src/runs/http.ts) and one run (`GET /api/w/:workspace/runs/:id`). The

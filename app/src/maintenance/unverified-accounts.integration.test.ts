@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the expiry of sign-ups that never verified their address, against a real SQLite file: the
 // account, its password account and its pending links go after a week; everything that is more than such a

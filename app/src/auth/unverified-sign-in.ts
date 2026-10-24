@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An email and password sign in is refused, with a session never opened, for an account whose address is
 // not verified while the instance can send mail (docs/decisions/0001-editions-setup-and-accounts.md,

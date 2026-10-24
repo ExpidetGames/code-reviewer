@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reading one value of a page's search params (Next.js gives a `string`, an array for a repeated
 // parameter, or `undefined`). A value that is not a single non-empty string counts as absent, so a

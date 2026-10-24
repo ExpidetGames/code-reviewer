@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The entry types of the balance journal are one `as const` set that the table check, the repository and the types
 // share (#495), and the rules an entry must satisfy before it is written (ADR 0006, 2.7).

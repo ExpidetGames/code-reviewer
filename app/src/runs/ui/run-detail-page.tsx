@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The content of the page of one run. `loadRunDetailPage` gathers the data from the service (passed
 // in), `RunDetailPageContent` renders it. An id nobody has gives `not_found`: the page then shows

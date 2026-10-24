@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake GitHub: one HTTP server that speaks every part of GitHub that Code Reviewer talks to, so
 // the tests of the sign in and the tests of the GitHub integration share one fake and one address.

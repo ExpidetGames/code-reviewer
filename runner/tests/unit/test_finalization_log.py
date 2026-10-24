@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The one finalization line of a native run (#578; the format of the live checklist in
 `docs/spike/547-plain-json-final.md`, 7.1): how the review was ended, as stable names and numbers,

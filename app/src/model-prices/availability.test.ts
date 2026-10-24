@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether the managed key, which we pay, may use a model (#549, #553): the admin enabled it, the price is confirmed (and
 // still is), the provider's address is trusted, and the override file does not block or retire it. Pure.

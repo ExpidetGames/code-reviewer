@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Canned model answers that satisfy the output contract of the review tool (the same answer as
 // runner/tests/engine/canned.py). It carries a marker text so a test can tell one answer from

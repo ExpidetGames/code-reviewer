@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two database engines a models.dev catalog test runs on (SQLite always; Postgres when TEST_DATABASE_URL is set,
 // otherwise its cases are skipped), each with a migrated database.

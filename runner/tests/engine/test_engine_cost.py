@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the cost a Diff run reports (#274): the real PR-Agent and LiteLLM, run through the real
 job entry point against the OpenRouter-shaped fake LLM. The cost is the sum of the `usage.cost` the

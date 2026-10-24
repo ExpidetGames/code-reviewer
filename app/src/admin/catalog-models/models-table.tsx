@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models of one page of the catalog (#554): name and id, the state and the warnings (with words, not only colour), the
 // price with its status, the provider and what the managed key says about the model, and the actions of the row. Every

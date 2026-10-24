@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the sign in and the GitHub integration run against one and the same fake GitHub:
 // one server, one address for `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE_URL`, no second fake.

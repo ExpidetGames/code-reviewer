@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starts the Dispatcher of the hosted lane (#332) as a process of its own and gives the journeys what they need to
 // steer and to look at it. The process is `dispatcher/src/test-support/hosted-e2e-main.ts`: the real Node entry and the

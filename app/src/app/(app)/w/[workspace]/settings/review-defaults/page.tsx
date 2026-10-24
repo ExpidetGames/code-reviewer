@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
 import { getDatabase } from "@/db/startup";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the catalog screens do with text and numbers (#554): prices from micro-USD to exact dollars without a float, the
 // visible cut of a long string, and the check that a link is https before it is rendered as one.

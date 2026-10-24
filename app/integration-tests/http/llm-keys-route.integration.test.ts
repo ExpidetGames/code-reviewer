@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The per-provider routes of the LLM keys of a workspace, `/api/w/:workspace/llm-keys/:provider` (#426), through
 // the real route files with the wiring the running server uses. The old `/llm-key` routes stay as an alias for

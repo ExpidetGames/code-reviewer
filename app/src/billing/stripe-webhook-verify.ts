@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Verifies the `Stripe-Signature` header of a webhook (ADR 0006, 2.13): `t=<unix seconds>,v1=<hex>[,v1=<hex>][,v0=...]`,
 // where each `v1` is the HMAC-SHA256 of `<t>.<raw body>` made with the secret of the webhook endpoint (`whsec_...`).

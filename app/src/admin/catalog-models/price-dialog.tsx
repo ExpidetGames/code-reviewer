@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The price of one catalog model (#554): what it is today (models.dev plus the override file), what an admin confirmed

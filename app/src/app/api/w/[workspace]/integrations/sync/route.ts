@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/integrations/sync: reads the connections of the workspace from GitHub now (an Owner or
 // Admin). It concerns the workspace's own connections only and answers `{ added, errors }` for them; the

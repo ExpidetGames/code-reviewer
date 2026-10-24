@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502 (note N7 of the review of #527): a review of a billing event can be closed. `resolveReview` turns an open review into
 // a resolved one, once, and says whether it did; the event keeps its outcome and its id stays final. On SQLite and Postgres.

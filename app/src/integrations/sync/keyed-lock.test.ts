@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the lock that orders work on the same installation: jobs with one key run one after the
 // other in the order they were asked for, jobs with different keys do not wait for each other, a

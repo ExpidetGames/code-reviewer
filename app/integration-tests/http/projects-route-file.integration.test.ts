@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route file `PUT /api/w/:workspace/repositories/:repositoryId/project` with the wiring the
 // running server uses: the dynamic segments, the database opened at start, the project service and the

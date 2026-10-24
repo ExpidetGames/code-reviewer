@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The catalog as the admin portal uses it (#429): the rules stay in the catalog service (service.ts); this adds what only
 // the portal needs. The view of every entry with the number of projects that use it, the confirmation before the model

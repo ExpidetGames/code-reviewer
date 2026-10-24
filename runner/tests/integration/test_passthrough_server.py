@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The passthrough proxy on a real loopback socket against the generic fakes of `fakes/wire` (#550).
 

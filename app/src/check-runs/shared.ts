@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check run service on the running server (#405): the real database, the integration registry and the stored
 // settings of the project. The queues (`src/jobs/shared.ts`) call `checkNotifier` after the response of the request

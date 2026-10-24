@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #423-T06: adding a provider means adding an adapter. The one real provider is named only inside its own
 // adapter folder; every other source file reads it from the registry. The scan reads the real source files,

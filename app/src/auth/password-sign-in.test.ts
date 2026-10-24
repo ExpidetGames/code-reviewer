@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the login form sorts what happens into four answers: the limit first, then only a
 // 4xx answer of Better Auth means "wrong credentials"; a server problem is logged under its own

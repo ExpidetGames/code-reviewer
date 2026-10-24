@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: `GET` and `PUT /api/w/:workspace/billing/profile` as the app wires them (guard, same site, access, body, service), over a
 // real database and the real matrix of roles. An Owner and an Admin keep the billing profile of the workspace (`manage_billing`);

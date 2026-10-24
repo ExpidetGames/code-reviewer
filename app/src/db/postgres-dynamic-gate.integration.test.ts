@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195: gate disable preserves running execution and serializes with lease transitions on PostgreSQL.
 // Real queries are paused after execution through a Kysely observer, never replaced or mocked.

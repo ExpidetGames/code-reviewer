@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the project list shows while GitHub has given the workspace no repository: one title, one
 // sentence on what will appear here, and one primary action. The install walkthrough sits behind a

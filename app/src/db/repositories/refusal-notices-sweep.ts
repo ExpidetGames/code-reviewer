@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The notices of refused reviews that are due to be posted again (#281), for the cron sweep (#328) that serves the
 // whole instance. Instance level on purpose, like the sweep of usage records: it reads the rows of every workspace,

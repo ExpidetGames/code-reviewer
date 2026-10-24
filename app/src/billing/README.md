@@ -7,7 +7,7 @@ earlier subscription design (plans, plan versions, prices with a payment provide
 before it reached a release (#491); the model catalog, the providers and `modelAccess` of epic #420 are unaffected.
 
 This file is for developers. The people who run an instance have their own guides: `docs/billing.md` (the hosted
-operator), `docs/billing-self-hosting.md` (a self-hoster) and `docs/billing-terms-checklist.md` (the points for the terms).
+operator) and `docs/billing-terms-checklist.md` (the points for the terms).
 Every source file here imports `"server-only"` (`server-only.test.ts`).
 
 ## Billing end to end

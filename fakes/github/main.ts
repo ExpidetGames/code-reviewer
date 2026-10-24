@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starts the fake GitHub as its own process, for the Playwright journeys and later the Docker test
 // stack. Configuration comes from the environment; the values are dummies shared with the app under

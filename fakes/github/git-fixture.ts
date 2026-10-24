@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A small real Git repository for the tests that need Git objects: made with the Git command line, with
 // a fixed identity and fixed dates, so the same files and messages always give the same commit names. The

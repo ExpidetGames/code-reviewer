@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of the project service. A caller (the route, a test) branches on `code`,
 // never on the message; the UI translates codes to copy.

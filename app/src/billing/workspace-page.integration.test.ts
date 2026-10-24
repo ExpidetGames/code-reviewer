@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: the data of the billing page of a workspace (ADR 0006, 2.5), over a real database. The balance, what running reviews
 // hold, the journal page with its signs and its cursor, the state when reviews are paused, what an Owner or an Admin gets and a

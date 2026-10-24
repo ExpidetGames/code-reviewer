@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a notice is recorded under (the `period_start` column of `refusal_notices`, #281). A limit or a suspension is decided
 // for a period, and the notice is one per pull request and period. A refusal for the balance (#498) has no period: it

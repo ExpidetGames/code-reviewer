@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // #506: the banner an Owner or an Admin sees on the pages of the workspace while the balance is low, zero or below zero.

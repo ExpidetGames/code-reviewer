@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """IPv6 off, and proven off, for the fallback egress ruleset (#345).
 
 The fallback ruleset is an `ip`-family table: it confines the engine user's IPv4 and sees no IPv6

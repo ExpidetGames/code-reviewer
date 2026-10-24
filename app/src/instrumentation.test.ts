@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the start of the server: the LLM options are checked, a wrong one only warns and the rest of
 // the start (backup of an old database, database, import, setup code, sync) goes on in this order. The

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the hold of the fake LLM (fakes/llm, #332): while it is on, a chat completion is recorded when it
 // arrives and answered only when the hold is lifted, so a journey can have a review that is in progress and end the

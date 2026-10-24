@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // Forgetting a saved Stripe credential (#504), in a confirmed danger zone below the cards: only while billing is off (a removed

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the server does about the setup when it starts (called from src/instrumentation.ts, after the
 // migrations): while the instance is not set up, every start of a process prints a fresh setup code

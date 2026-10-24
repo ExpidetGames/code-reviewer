@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who reaches the admin portal, with real requests through the real proxy and the real data
 // route over a real database and the real Better Auth: a visitor without a session is sent to the

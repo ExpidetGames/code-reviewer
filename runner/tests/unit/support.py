@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Helpers shared by the unit tests that run PR-Agent's real settings code (not a test file)."""
 

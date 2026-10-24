@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Two unique indexes on `accounts`, which holds the login identities of a user (docs/decisions/0001-editions-
 // setup-and-accounts.md, section 2.6):

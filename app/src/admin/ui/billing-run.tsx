@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // What every card of the billing page does when a button is pressed (#504): one call to the data route, a sentence for the

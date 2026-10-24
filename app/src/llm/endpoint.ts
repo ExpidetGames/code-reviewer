@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The address the app talks to when it checks an LLM key (the "test key" button) or reads a model's metadata. It is the provider's own API
 // and nothing a person can choose: there is no field for an address, no per-workspace setting, nothing from a

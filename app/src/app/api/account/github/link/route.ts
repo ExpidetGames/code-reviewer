@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/account/github/link: starts the linking of a GitHub account to the signed-in account (the "Link
 // GitHub" button of the account page) and answers the address of GitHub's authorization page. Protected: the

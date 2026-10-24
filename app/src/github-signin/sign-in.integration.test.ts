@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Signing in with GitHub through the GitHub App's user authorization, end to end through the real Better
 // Auth handler and the fake GitHub, against a real SQLite file: who is created, who is linked, who is

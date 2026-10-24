@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: the license check against the policy, with made-up dependencies. The real policy and the
 // real lockfiles are covered by policy.test.ts and by the CI job.

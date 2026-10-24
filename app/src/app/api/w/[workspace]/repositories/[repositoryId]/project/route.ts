@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // PUT /api/w/:workspace/repositories/:repositoryId/project: switches the project of a repository on or off.
 // Which repositories are reviewed is managed by Admins and Owners. Protected like every workspace route

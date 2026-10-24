@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Runtime guards for the normalized types. The key sets are exact on purpose: a provider that
 // copies a raw platform object into a RepoRef, ReviewTrigger or GitAccess is caught here instead of

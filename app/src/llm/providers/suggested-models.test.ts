@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models a form suggests for a review kind (#532): a provider may suggest fewer models for Dynamic Review than for
 // Diff Review, and what the form offers for a kind is what the save and the claim accept for it.

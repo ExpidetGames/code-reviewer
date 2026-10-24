@@ -15,7 +15,7 @@ If no automated test applies, say why (for example a purely visual change or doc
 ## Test cases
 
 <!--
-Optional for contributors, expected from maintainers. If the issue has a "Test cases" table, map each
+If the issue has a "Test cases" table, map each
 case to the test that proves it, or say why it is manual or not applicable. Delete this section if the
 issue has no such table.
 -->

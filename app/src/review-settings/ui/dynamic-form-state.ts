@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The project-only part of the settings form (#200): the review kind, the Dynamic model and the review
 // skill. Pure functions over the form state, no React. The skill is either the shipped default (shown

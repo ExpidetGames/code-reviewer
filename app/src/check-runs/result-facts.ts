@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the check run and the verdict of a review read from the result its job stored (#405): the link to the
 // review comment, the findings left open and why a Dynamic review stopped early. The result was checked when the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Not a journey: the first thing the privileged Dynamic e2e lane does with its app (#253). The app starts
 // without a database, so it is a new instance that waits for the first-run setup; this sets it up through

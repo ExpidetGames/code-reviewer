@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import { CATALOG_ROUTE_ERROR_CODES } from "../../model-catalog/admin-errors.ts";

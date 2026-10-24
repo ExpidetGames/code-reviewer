@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Shared setup of the review settings integration tests: a real SQLite file with one repository, and
 // the service on top of it. Not product code.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scheduled check of the journal (#626, #510 item 7): `verify()` of every workspace that has a journal, once a day while billing is on,
 // in bounded steps that resume where the last one stopped. A pass that finds the cache and the journal apart (or a hold that nobody

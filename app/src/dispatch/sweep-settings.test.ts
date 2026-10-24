@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings of the cron sweep (#328): the give-up is on by default only where the app wakes a Dispatcher, a
 // value that cannot be used keeps the default instead of disabling a bound, and the cap is optional.

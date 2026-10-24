@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: the migration of the billing profile, on SQLite and on Postgres. One row per workspace, nothing else is touched.
 import { sql } from "kysely";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `users.org_checked_at`: when the user's membership in the allowed GitHub organization was last
 // confirmed (ISO 8601 text in UTC), or NULL when it never was. The access rule trusts a confirmation

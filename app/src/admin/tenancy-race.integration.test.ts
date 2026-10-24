@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the race the switch to single-tenant has with the creation of a workspace: two real
 // processes, each with its own connection to one database file, start together. However they

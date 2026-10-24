@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the account page shows about the signed-in person: their address (and whether it is still the placeholder
 // of an imported user, or collides with another account), and the GitHub account linked to theirs.

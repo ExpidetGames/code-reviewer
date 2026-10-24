@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the portal and the account page know about GitHub identities, read from the tables Better Auth keeps:
 // the GitHub account linked to a user, and the users whose placeholder address could not be replaced

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The facts a sign-up decision rests on, read from the database and the mail sender when it matters (never
 // remembered): the sign-up rule, which ways to sign in are on, and whether the instance can send mail.

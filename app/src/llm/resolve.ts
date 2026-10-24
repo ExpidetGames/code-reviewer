@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which LLM access a job of a workspace gets (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.8). The workspace's key mode, from its entitlements (src/workspaces/entitlements.ts), decides whose key it

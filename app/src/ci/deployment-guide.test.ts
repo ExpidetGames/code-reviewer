@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Keeps docs/deployment-coolify.md, the guide for deploying Code Reviewer on Coolify, in step with the
 // files and the code it describes: every variable of .env.example is explained, the table of settings
@@ -26,7 +26,6 @@ const guide = read("docs/deployment-coolify.md");
 const readme = read("README.md");
 const envExample = read(".env.example");
 const coolifySource = read("compose.coolify.yml");
-const publishWorkflow = read(".github/workflows/publish-images.yml");
 
 type Service = {
   environment?: Record<string, string>;
@@ -281,20 +280,12 @@ describe("the Coolify guide and the Compose file", () => {
       expect(guide, name).toContain(`\`${name}\``);
   });
 
-  // CR-39-T06
-  it("names the images and the tags that the publish workflow pushes to GHCR", () => {
-    const published = [
-      ...publishWorkflow.matchAll(/^\s+(?:APP|RUNNER)_IMAGE:\s*(\S+)/gm),
-    ].map((match) => match[1]);
-
-    expect(published).toHaveLength(2);
-    for (const image of published) expect(guide).toContain(image as string);
-    for (const tag of ["sha-", "development", "latest"])
-      expect(publishWorkflow).toContain(tag);
-    expect(guide).toContain("sha-<first 7 characters of the");
-    expect(guide).toContain("`development`");
-    expect(guide).toContain("`latest`");
-    expect(guide).toContain("**private**");
+  // #677 (was CR-39-T06): no image is published, so the guide names no image to pull
+  it("says that no image is published and names no GHCR image", () => {
+    expect(guide).toContain("No image of the project is published");
+    expect(guide).not.toMatch(/docker login ghcr\.io/);
+    expect(guide).not.toContain("ghcr.io/expidetgames");
+    expect(guide).not.toContain("sha-<first 7 characters of the");
   });
 
   // CR-39-T06
@@ -390,7 +381,6 @@ describe("the runner in the Coolify guide", () => {
 
     for (const [file, text] of [
       ["the guide", guide],
-      ["README.md", readme],
       [".env.example", envExample],
       ["app/.env.example", read("app/.env.example")],
     ] as const) {
@@ -562,17 +552,23 @@ describe("the Coolify guide as a document", () => {
 });
 
 describe("the root README and the Coolify guide", () => {
-  // CR-39-T02
-  it("links to the deployment guide and to the backup README", () => {
-    expect(readme).toContain("](docs/deployment-coolify.md)");
-    expect(readme).toContain("](app/src/backup/README.md)");
+  // #677: the README is for the team of a hosted service; it offers no way to run it elsewhere.
+  it("does not offer the Coolify guide or a Compose quickstart, and says the service is not self-hostable", () => {
+    expect(readme).not.toContain("](docs/deployment-coolify.md)");
+    expect(readme).not.toContain("](docs/deployment-large.md)");
+    expect(readme).not.toMatch(/docker compose up/);
+    expect(readme).not.toMatch(/docker login ghcr\.io/);
+    expect(readme).toMatch(/cannot be\s+self-hosted/);
   });
 
-  it("lists the Coolify Compose file in the repository layout", () => {
-    expect(readme).toContain("`compose.coolify.yml`");
+  it("calls the Compose files fixtures of the team, in the repository layout", () => {
+    expect(readme).toContain("`compose*.yml`");
+    expect(readme).toMatch(/test and development fixtures/);
   });
 
-  it("no longer leaves the decision on how the server gets the images open", () => {
-    expect(readme).not.toContain("is decided with the deployment ticket");
+  it("marks the guide as an internal reference that is not a supported way to run the service", () => {
+    expect(guide.slice(0, 700)).toContain(
+      "Internal reference, not a supported way to run code-review.com",
+    );
   });
 });

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195 finding 2: the claim preparation must follow the **claimed job's pinned kind**, never the
 // project's current kind. A settings save can run after the atomic claim but before `optionsFor`

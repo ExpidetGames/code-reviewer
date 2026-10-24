@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the model catalog (#425, ADR 0005, 2.6): the
 // operator's list of models that workspaces on the operator's key may use. An entry has a free **name** that members see

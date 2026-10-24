@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The journeys of the normal Playwright lane share one fake GitHub, which keys its accounts, installations and
 // repositories by id: a second writer of an id silently replaces the first (fakes/github/oauth.ts), so two journeys

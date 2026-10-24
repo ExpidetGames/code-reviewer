@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the project settings form of a workspace on its own key is given about the models.dev catalog (#555): the catalog providers
 // the workspace holds a key for (the other providers are chosen on the LLM access page, where the key is entered), the provider the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The old address of the setup. The three settings are their own sub-pages now (#181), so this keeps
 // the deep link working and sends it to the instance section. Instance admin only: anybody else gets

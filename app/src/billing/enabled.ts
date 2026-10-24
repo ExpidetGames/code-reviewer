@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether billing is on (ADR 0006, principle 1, 2.14). Every billing route, page and sweep step asks this first: while it is
 // false they are inert, a route answers the 404 of a path that does not exist, no billing table is read and nobody is

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #432: a project provider next to a workspace model of another provider is refused when the settings are saved, with
 // the rule the claim applies (`modelProviderMismatch`), and the layers the claim resolves a model from are handed on

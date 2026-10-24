@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Deleting a workspace against a claim that is in flight, on Postgres with two connections (#658): a claim sets the job
 // `running` and its transaction has not committed yet, so no other connection can see that. The deletion must wait for it and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The signed single-use state of the round trips through GitHub: it works once, for the person and the
 // session that started it, for its purpose only, until it expires, and a forged value is worthless.

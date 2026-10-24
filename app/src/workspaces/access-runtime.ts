@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The access to a workspace on the running server: the session of the request and the memberships in the
 // server's database, for the pages (`requireWorkspace`) and the data routes (`withWorkspace`). Both start

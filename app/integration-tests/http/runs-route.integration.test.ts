@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who may read the runs and what they get: the access proxy (real Better Auth, real
 // database) in front of the handlers of `GET /api/runs` and `GET /api/runs/:id`. A request without a

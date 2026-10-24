@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the billing page of a workspace knows (#505): plain data the server works out and the browser renders. This is the
 // boundary between the journal, the profile and the settings and the person looking at them. Amounts are whole micro-USD

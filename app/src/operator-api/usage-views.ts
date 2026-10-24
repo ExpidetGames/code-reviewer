@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the operator API says about usage: named fields only, built one by one so that a column added to the table
 // later never reaches the outside by accident. No pull request, repository, branch, title or person is in a

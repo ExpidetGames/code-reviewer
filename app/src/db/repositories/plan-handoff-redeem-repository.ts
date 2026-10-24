@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The redemption of a handoff token and the clean-up of the old ones, for the operator API (#284). Instance level on
 // purpose: the external service holds only the token, so there is no workspace to scope to before the token is looked

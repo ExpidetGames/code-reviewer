@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What the generic fakes of `fakes/wire` state as usage, in the runner's counts (#550, #551). Not a
 test file; the unit, integration and engine tests of the passthrough proxy share it."""

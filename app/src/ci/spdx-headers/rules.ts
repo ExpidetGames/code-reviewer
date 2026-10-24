@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The SPDX license header of the source files: which files carry it, what it looks like in each
 // language, and how it is added. The same rules serve the check (spdx-headers.test.ts) and the
@@ -7,13 +7,15 @@
 // Node runs this file as it is (type stripping), see cli.ts: relative imports with the .ts
 // extension and no TypeScript-only runtime syntax.
 
-export const SPDX_IDENTIFIER = "Apache-2.0";
+// Our own code is proprietary and source-visible (LICENSE). SPDX has no identifier for that, so the
+// header uses a LicenseRef; the text it refers to is the LICENSE file of the repository.
+export const SPDX_IDENTIFIER = "LicenseRef-Proprietary";
 export const MIT_IDENTIFIER = "MIT";
 export const SPDX_HEADER_TEXT = `SPDX-License-Identifier: ${SPDX_IDENTIFIER}`;
 
 // Copied shadcn/ui components (epic #165) keep their real license: MIT plus a provenance line
-// instead of Apache-2.0. Every file below this folder may carry MIT; every other file must stay
-// Apache-2.0. The check, the writer and their tests share this one rule.
+// instead of the proprietary header. Every file below this folder may carry MIT; every other file
+// must carry LicenseRef-Proprietary. The check, the writer and their tests share this one rule.
 export const SHADCN_COMPONENT_PREFIX = "app/src/components/ui/";
 
 /** The license identifier the file at `path` must carry. */
@@ -122,8 +124,9 @@ export type HeaderProblem = (typeof HEADER_PROBLEMS)[number];
 
 /**
  * The one rule for "has the right header", used by the check, the command and the test: null when
- * the first lines carry the identifier this file requires (`Apache-2.0`, or `MIT` below the copied
- * shadcn components), otherwise why not. Without a path the required identifier is `Apache-2.0`.
+ * the first lines carry the identifier this file requires (`LicenseRef-Proprietary`, or `MIT` below the
+ * copied shadcn components), otherwise why not. Without a path the required identifier is
+ * `LicenseRef-Proprietary`.
  */
 export function headerProblem(
   content: string,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to `job_dispatches` (#326): where the signed wake-up call of each job stands. Instance level, like
 // the lease side of the queue: the sender and the sweep serve the whole instance and work from a job id they

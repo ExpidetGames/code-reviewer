@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the plan page says about a workspace (#282): the resolved entitlements and the counted usage of the current
 // period, reduced to what a member may see. Pure: no database, no clock. This is the boundary to the browser, so

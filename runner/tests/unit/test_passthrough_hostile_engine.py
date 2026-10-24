@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A hostile engine against the relay (#550, B2/B3/B4 and the settlement of errors).
 

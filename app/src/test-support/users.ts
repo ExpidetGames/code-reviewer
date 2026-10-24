@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Users, passwords and GitHub identities written straight into a test database, the way an import or the
 // first-run setup leaves them. Better Auth owns these tables in the app; a test that needs a user in a certain

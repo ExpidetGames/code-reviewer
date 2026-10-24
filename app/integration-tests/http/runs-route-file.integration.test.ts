@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route files `GET /api/w/:workspace/runs` and `GET /api/w/:workspace/runs/:id` with the
 // wiring the running server uses: the database opened at start, the runs service and the workspace access.

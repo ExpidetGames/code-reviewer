@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #428: which catalog entries a workspace on the operator's key may use (src/workspaces/README.md, "Entitlements";
 // ADR 0005, 2.9). A nullable JSON text column `model_access` on `workspace_entitlements`: `{"catalogEntries":[...]}`,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Generated from contracts/runner-api.v1.json. Do not edit: change the schema and run `make generate-contracts`.
 // `make verify` fails while this file differs from what the schema generates.

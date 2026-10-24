@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator API against a real database: the credential, the stored and effective entitlements of a workspace,
 // the default, removal, the refusals and what the answers and logs may contain. The format is checked against the

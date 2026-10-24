@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the plan page may say about a workspace (#282): the view is built from the resolved entitlements and
 // the counted usage, and only counts, one whole percentage, a label, flags and a start date leave it. The cost

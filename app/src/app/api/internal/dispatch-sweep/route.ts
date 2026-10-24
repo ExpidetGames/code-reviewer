@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/internal/dispatch-sweep: the once-a-minute sweep of a hosted deployment (lapsed leases, resends,
 // the give-up, the hourly cleanup), called by the platform's cron in serverless mode (404 anywhere else).

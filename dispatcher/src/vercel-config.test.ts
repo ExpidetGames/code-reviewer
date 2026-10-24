@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Vercel project settings of the Dispatcher (vercel.json, #329). `maxDuration` is set here on purpose, as high as a
 // Pro team can (it was sized for the supervision of a job's whole life, which the Dispatcher no longer holds, #487; the

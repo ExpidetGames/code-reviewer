@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Launcher of an entry point that has no real Launcher yet (the Sandbox-Launcher #329, the
 // Docker-Launcher #334): it advertises no engine, so the Dispatcher claims nothing and answers every

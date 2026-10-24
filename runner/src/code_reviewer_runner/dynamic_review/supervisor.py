@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """The production preparation of one Dynamic job: the root supervisor's side of the boundary (#197).
 
 The job process runs as root in the Dynamic runner container (`compose.dynamic.yml`). For one job it

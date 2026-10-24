@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the check run of a review says for each state of its job (#405). Pure: the status of the job and a few
 // facts of its result go in, what GitHub shows comes out. The check is NEVER red (the maintainer's rule): the

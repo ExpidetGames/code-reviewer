@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the handlers behind the review settings routes: the user is asked for first, a change is
 // checked for where it comes from, its content type, size and shape, the answer carries the settings

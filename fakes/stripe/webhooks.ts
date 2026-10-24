@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The webhook side of the fake Stripe: signs a body the way Stripe does and plans what Stripe's delivery would send to
 // the app's webhook route (duplicate, reordered, delayed, a signature that is stale, wrong, missing or malformed).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: starting a top-up: the checks in their order, the intent that is written first, the customer made from the profile
 // and the Checkout Session, over a real database and the fake Stripe.

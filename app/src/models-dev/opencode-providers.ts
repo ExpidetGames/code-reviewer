@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The providers of models.dev that the pinned OpenCode can drive with a static key and a bundled SDK
 // (`contracts/opencode-providers.v1.json`, derived by src/ci/opencode-providers/ and tied to `runner/opencode-pin.json`).

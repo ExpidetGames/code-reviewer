@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" button of the LLM access settings (docs/decisions/0001-editions-setup-and-accounts.md, issue
 // #104): one cheap call to the provider that says whether the key is accepted, and the class of the failure when

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: which files carry the SPDX license header, what it looks like per language, and how it is
 // added without disturbing the first line that some files must keep (a shebang, a Dockerfile syntax
@@ -163,15 +163,15 @@ describe("addHeader", () => {
 
 describe("findHeader", () => {
   it("finds the identifier near the top of the file", () => {
-    expect(findHeader("// SPDX-License-Identifier: Apache-2.0\n\nx\n")).toBe(
-      "Apache-2.0",
-    );
+    expect(
+      findHeader("// SPDX-License-Identifier: LicenseRef-Proprietary\n\nx\n"),
+    ).toBe("LicenseRef-Proprietary");
     expect(findHeader("#!/bin/sh\n# SPDX-License-Identifier: MIT\n\nx\n")).toBe(
       "MIT",
     );
-    expect(findHeader("/* SPDX-License-Identifier: Apache-2.0 */\n")).toBe(
-      "Apache-2.0",
-    );
+    expect(
+      findHeader("/* SPDX-License-Identifier: LicenseRef-Proprietary */\n"),
+    ).toBe("LicenseRef-Proprietary");
   });
 
   it("finds nothing when the file has no header", () => {
@@ -180,7 +180,9 @@ describe("findHeader", () => {
 
   it("does not look further down than the first lines, where a mention in the code would be a false hit", () => {
     expect(
-      findHeader("a\nb\nc\nd\n// SPDX-License-Identifier: Apache-2.0\n"),
+      findHeader(
+        "a\nb\nc\nd\n// SPDX-License-Identifier: LicenseRef-Proprietary\n",
+      ),
     ).toBeNull();
   });
 });
@@ -201,6 +203,20 @@ describe("headerProblem", () => {
   });
 });
 
+describe("the proprietary license (#677)", () => {
+  it("names the header LicenseRef-Proprietary", () => {
+    expect(SPDX_HEADER_TEXT).toBe(
+      "SPDX-License-Identifier: LicenseRef-Proprietary",
+    );
+  });
+
+  it("rejects the Apache-2.0 header that the project used before, so a stale header cannot come back", () => {
+    expect(
+      headerProblem("// SPDX-License-Identifier: Apache-2.0\n\nexport {};\n"),
+    ).toBe("HEADER_OTHER_LICENSE");
+  });
+});
+
 describe("the copied shadcn/ui components keep MIT", () => {
   const MIT = `// SPDX-License-Identifier: ${MIT_IDENTIFIER}\n\nexport {};\n`;
 
@@ -213,7 +229,7 @@ describe("the copied shadcn/ui components keep MIT", () => {
   });
 
   // #166-T03
-  it("rejects Apache-2.0 below app/src/components/ui/", () => {
+  it("rejects the proprietary header below app/src/components/ui/", () => {
     expect(
       headerProblem(
         `// ${SPDX_HEADER_TEXT}\n\nexport {};\n`,
@@ -223,7 +239,7 @@ describe("the copied shadcn/ui components keep MIT", () => {
   });
 
   // #166-T03
-  it("adds MIT only below app/src/components/ui/ and Apache-2.0 elsewhere", () => {
+  it("adds MIT only below app/src/components/ui/ and LicenseRef-Proprietary elsewhere", () => {
     expect(
       addHeader(
         "export {};\n",

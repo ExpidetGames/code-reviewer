@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the structure of the engine workflow (.github/workflows/engine.yml), the one definition
 // of the engine suite job that ci.yml and nightly.yml call: what it runs, that the suite runs

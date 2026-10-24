@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the log capture: PR-Agent logs through loguru, the runner owns the only sink, keeps
 a short redacted tail for the result and collects the exceptions that error records carry."""

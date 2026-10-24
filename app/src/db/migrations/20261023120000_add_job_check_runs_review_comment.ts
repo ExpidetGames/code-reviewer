@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #657: the text of the review comment a run posted on GitHub, kept so the run detail can show what was posted (the
 // Findings). The runner posts the comment itself and reports only its link; the app reads the comment once, right after

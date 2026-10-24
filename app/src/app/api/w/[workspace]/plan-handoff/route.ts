@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/plan-handoff: the "Manage plan" button. An Owner or an Admin is sent to the page the
 // operator configured for this instance, with a single-use token that says who they are (src/plan-handoff/README.md).

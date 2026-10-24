@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The rates and numbers of billing (#504, ADR 0006, D2, D3, D9, D10): the factor A of the AI cost on our models, the rate per

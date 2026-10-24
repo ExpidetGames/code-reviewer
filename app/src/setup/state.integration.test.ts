@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the setup state is read from the two explicit markers and from whether users exist,
 // against a real SQLite file: a database from before the markers, the combinations of the existing

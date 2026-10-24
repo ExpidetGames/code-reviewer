@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The usage records of a workspace against a real SQLite file: reserving once per job, settling or voiding
 // once, the counting reads and the cursor page. Isolation between workspaces is in

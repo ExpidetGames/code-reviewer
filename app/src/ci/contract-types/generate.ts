@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // TypeScript types of the contract schemas (contracts/*.v1.json), generated into the two projects that
 // speak them, so neither imports the other's source (#318). The schemas are the source; the generated
@@ -67,7 +67,7 @@ async function typesOf(name: string, contracts: string): Promise<string> {
     }),
   );
   const header = [
-    "// SPDX-License-Identifier: Apache-2.0",
+    "// SPDX-License-Identifier: LicenseRef-Proprietary",
     "",
     `// Generated from contracts/${file}. Do not edit: change the schema and run \`${REGENERATE_COMMAND}\`.`,
     "// `make verify` fails while this file differs from what the schema generates.",

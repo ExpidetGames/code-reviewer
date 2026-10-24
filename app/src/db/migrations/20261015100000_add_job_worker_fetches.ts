@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #320: how many times the Worker of a claim fetched the job details (at most three per claim). The
 // counter is on the job row, next to the lease token it belongs to, and the claim resets it, so a job

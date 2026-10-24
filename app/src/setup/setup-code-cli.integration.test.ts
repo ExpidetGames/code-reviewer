@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm setup-code` against a real (SQLite) database (#321): it writes a code the app's store accepts, a
 // second run replaces it, and it refuses on an instance that is set up. The Postgres connection of the

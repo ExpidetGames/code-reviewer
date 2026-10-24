@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The price of a run and the hold of a job (ADR 0006, 2.4, 2.6, 2.8 and D6): one pure module that turns the facts of a run
 // into the two amounts the customer sees. No database, no clock, no network, and no floating point on an amount: every

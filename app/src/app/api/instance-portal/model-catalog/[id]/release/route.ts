@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/model-catalog/:id/release (#429): draft or retired to released, after the provider's metadata vouches for the model.
 // For the instance admin only. Not signed in is 401, signed in but not an admin is a 404 (src/admin/access.ts); the

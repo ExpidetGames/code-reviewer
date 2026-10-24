@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/github/check: asks GitHub what the configured App is granted and answers the permissions
 // it lacks of the ones the manifest asks for. The instance admin only; limited per admin and for the

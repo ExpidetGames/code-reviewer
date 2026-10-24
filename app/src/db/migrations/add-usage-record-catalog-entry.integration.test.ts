@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #432-T20: the migration adds three nullable columns to `usage_records` of a database made by the previous release's
 // migrations. Every existing record stays as it is (the new columns read NULL, `model_tier` is untouched); an app of the

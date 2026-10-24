@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: the delivery of the balance mails, on SQLite and on Postgres, with the fake mail sender (no real mail is sent): who
 // gets one (Owners and Admins, never Members), what it says, that a failing mail server fails nothing but the delivery itself,

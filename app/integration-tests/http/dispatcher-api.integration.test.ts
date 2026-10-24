@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what a Dispatcher (#316) does with the runner API through the real handlers and a real SQLite
 // file (#322): claiming exactly one job by its id, the pool cap, giving a job back with `release`, and

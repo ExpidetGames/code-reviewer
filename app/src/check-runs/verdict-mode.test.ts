@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which verdict mode a project's stored settings give (#405): its own choice when it is one this version knows,
 // otherwise the default. A project without a row, with old settings or with a value from a newer version never

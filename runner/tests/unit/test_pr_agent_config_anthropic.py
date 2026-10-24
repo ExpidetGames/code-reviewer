@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """How a job on the Anthropic provider becomes PR-Agent configuration (#511): the model name LiteLLM
 routes by, the address it is given (without the version path it adds itself), the key as a typed

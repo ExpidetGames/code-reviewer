@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The detail page of one run for a member (#657): a status banner, a Summary (the facts, with the cost and the duration) and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Models of the settings form for the tests of the LLM section (#656): a project of a workspace on its own key and one of
 // a workspace on the operator's key, whose views carry no provider and no model (ADR 0005). `leak` plants a sentinel where

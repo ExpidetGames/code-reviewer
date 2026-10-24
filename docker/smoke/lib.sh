@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Shared helpers of the smoke tests (docker/smoke/app.sh, runner.sh and compose.sh). Sourced,
 # not executed. The smoke tests need a Docker daemon and fail loudly without one; they never skip.
@@ -235,8 +235,8 @@ assert_image_ships_license_files() {
   [ "$listing" = "LICENSE NOTICE THIRD_PARTY_LICENSES.md " ] ||
     fail "/licenses in $image holds '$listing', expected exactly LICENSE, NOTICE and THIRD_PARTY_LICENSES.md"
   label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}' "$image")
-  [ "$label" = "Apache-2.0" ] ||
-    fail "$image has the label org.opencontainers.image.licenses='$label', expected Apache-2.0"
+  [ "$label" = "LicenseRef-Proprietary" ] ||
+    fail "$image has the label org.opencontainers.image.licenses='$label', expected LicenseRef-Proprietary"
   printf '    /licenses: LICENSE, NOTICE, THIRD_PARTY_LICENSES.md; label licenses=%s\n' "$label"
 }
 

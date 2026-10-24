@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts the Dispatcher together: the core (over a Launcher), one Trigger and GET /health on a Hono app.
 // Nothing here knows the platform: the entry points (index.ts for Vercel, node.ts for a Node process)

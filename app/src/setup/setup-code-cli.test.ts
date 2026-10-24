@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm setup-code` (#321) without a database: what it refuses before it touches anything, and, with a
 // stand-in for the database, where the code goes. The code is shown on the terminal of the operator and

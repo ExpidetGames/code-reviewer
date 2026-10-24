@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Sends a key only to an address that is public at the moment of the connection (#548, #550, #555). The check made when
 // the catalog is stored (`checkUpstreamUrl`) is a verdict of one moment: a name can resolve elsewhere a minute later (DNS

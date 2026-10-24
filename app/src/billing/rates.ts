@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rates of billing (ADR 0006, 2.4 and D2/D3): the factor A of the operator's key, the rate B per started minute for
 // each review kind, and the AI reserve of a Diff review. Pure: the bounds, the validation with its stable codes, and

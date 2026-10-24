@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of what happens between two sweeps on the running server (#395): nothing in poll mode (the default and
 // every long-lived server), the reaction to a job that ended and the repair work of other requests in webhook mode,

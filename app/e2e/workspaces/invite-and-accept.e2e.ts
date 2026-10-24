@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Workspaces, roles and invitations in a real browser against a production build, single-tenant and without
 // a mail server (so an invitation is a link that is shown once): the Owner invites a colleague and copies the

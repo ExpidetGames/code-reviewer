@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The port between the Sandbox-Launcher (#329) and the Sandbox platform: the few things a job's VM needs.
 // The Launcher never imports the platform SDK; `vercel-sandbox.ts` adapts the SDK to this port and

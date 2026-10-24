@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET and PUT /api/operator/v1/entitlements/default: the entitlements of every workspace without a row of its own.
 // Bearer token; absent (404) until `OPERATOR_API_TOKEN` is set. See src/operator-api/README.md.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How long a run took, from its times. Pure: the current time is passed in, so a running run's
 // duration is a function of the clock the caller hands over (the server's time of answering, which is

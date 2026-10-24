@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The form of a price correction (#554): dollars per million tokens typed as decimals become whole micro-USD without a
 // float, a field that is not a price is named, tiers must go up, and a reason is required. The book it makes is exactly

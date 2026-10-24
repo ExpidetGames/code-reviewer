@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Gives a Launcher the `probe` that `POST /probe` calls, the deploy canary (#331, #479). Only that: `capabilities` and
 // `launch` are the Launcher's own, so a Dynamic job is never held back by a probe and never starts a canary VM. The

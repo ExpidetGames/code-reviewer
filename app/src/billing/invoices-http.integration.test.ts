@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #659: `GET /api/w/:workspace/billing/invoices` as the app wires it (guard, access, service), over a real database, the real
 // matrix of roles and the fake Stripe: an Owner and an Admin read the invoices of their own workspace's customer, a Member is

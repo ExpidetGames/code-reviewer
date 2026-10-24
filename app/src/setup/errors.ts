@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of the first-run setup and the HTTP status of each. The UI translates a
 // code to copy (ui/messages.ts), never the other way round. A code never contains a digit of the

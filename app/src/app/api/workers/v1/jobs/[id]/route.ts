@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/workers/v1/jobs/:id: the Worker fetches the job it holds (the per-job credential is the bearer).
 import { withWorkerApi } from "../../../../../../runner-api/shared.ts";

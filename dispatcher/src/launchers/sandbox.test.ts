@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { FakeSandboxService } from "../../../fakes/sandbox/service.ts";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the wiring of the privileged Dynamic e2e lane (#253): the CI job that runs it, the scripts that
 // arrange its namespaces, its own Playwright configuration, and the rules it keeps (a private port pair, one

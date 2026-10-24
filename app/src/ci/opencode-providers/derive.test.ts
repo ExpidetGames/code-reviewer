@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The derivation of the supported-provider file (#548): which models.dev providers the pinned OpenCode can drive with a
 // static key, with which wire family, and which are left out and why.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How often the billing switch is read on the hot paths of a claim (#496): the claim reads it once, in the transaction that decides
 // the key mode, and hands the answer on; the checks that follow (the runner's claim, the Worker's fetch) read the key mode the claim

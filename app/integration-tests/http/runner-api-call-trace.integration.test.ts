@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The per-call trace of a Dynamic Review (#541) from the runner to the Runs view, through the real runner API
 // over a real SQLite file: it is stored with the result of the job and read back as the page shows it, a job

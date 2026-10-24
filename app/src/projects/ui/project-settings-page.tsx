@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings page of one project (#174): the review settings form and nothing else. The page shares
 // its heading, its trail and the segmented navigation with the manual-review page

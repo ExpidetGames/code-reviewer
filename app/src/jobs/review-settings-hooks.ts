@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195: what the job queue does when a project's review kind changes. #194 calls
 // `ReviewSettingsHooks.onProjectSettingsChanged` in the transaction that wrote the settings; when the

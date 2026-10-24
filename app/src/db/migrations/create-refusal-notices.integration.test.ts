@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #281: the refusal notices migration adds an empty table to a database made by the previous release's migrations
 // and changes no existing row, and the table holds the dedupe and the checks the repository relies on.

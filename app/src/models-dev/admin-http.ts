@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind the data routes for the models.dev catalog in the admin portal (#554), with their collaborators
 // passed in so the route files only wire the real ones and tests wire fakes. Paths as the admin sees them (the proxy

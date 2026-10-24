@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The Anthropic (Claude API) model list of the runner (#511): ids, limits, the flags that decide
 which request parameters a model takes, and the prices that every call is costed with.

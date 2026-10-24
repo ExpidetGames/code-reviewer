@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Stripe reads a form body into nested parameters: `a[b]=c` is an object, `a[0]=x` and `a[]=x` are a list. This is the same
 // reading, with strings as the only leaves (as at Stripe, a number arrives as text), and the same refusal of a key it

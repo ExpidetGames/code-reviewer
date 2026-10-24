@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/workers/v1/jobs/:id/result: the Worker delivers the result of the job it holds.
 import { withWorkerApi } from "../../../../../../../runner-api/shared.ts";

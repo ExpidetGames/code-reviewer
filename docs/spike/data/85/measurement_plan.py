@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Offline CR-50 follow-up plan and blinded captures; never calls a model or GitHub."""
 
 import argparse

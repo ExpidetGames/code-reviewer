@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The registry of the LLM providers the runner can talk to (#424, ADR 0005 2.4).
 

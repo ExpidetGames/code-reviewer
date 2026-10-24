@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of what happens between two sweeps on the running server (#395): the reaction to a job that ended and
 // the repair work of the requests that touch the database. Both exist only while the dispatch webhook is on

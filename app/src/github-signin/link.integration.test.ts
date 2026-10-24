@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Linking a GitHub identity to the signed-in account, and the one merge the decision record defines: the
 // instance admin links the GitHub identity of an imported operator who has no other credential, and the two

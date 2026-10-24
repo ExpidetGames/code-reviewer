@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195: the engines a runner can advertise and the review kinds each engine can run. A claim carries
 // the engines of the calling runner (`contracts/runner-api.v1.json`, `ClaimRequest`); an empty legacy

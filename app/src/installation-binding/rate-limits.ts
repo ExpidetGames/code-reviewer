@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limits of the binding of an installation (docs/decisions/0001-editions-setup-and-accounts.md, sections
 // 2.9 and 2.10): the shared counters of the database (src/db/repositories/rate-limits-repository.ts), never

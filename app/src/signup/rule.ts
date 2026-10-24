@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sign-up rule as pure logic (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5):
 // which email addresses a rule lets in. There are exactly three rules, `everyone`, a list of emails

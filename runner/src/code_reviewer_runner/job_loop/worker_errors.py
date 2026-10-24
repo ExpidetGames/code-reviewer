@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Why a Worker could not start its job (#323). The codes are stable: they are logged, the
 Dispatcher's launcher may read them from the log, and an operator searches for them. The message of

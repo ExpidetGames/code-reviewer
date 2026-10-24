@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the call trace tables say (#541): the headings, the words for why a call ended, and the notes. The
 // words describe numbers and stable names only; the trace holds no text from the repository or the model.

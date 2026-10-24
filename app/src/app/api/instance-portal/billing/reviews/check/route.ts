@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/billing/reviews/check: "Check payment" for the top-up a billing review row belongs to, asked by the instance
 // admin (#603): the payment provider is asked what became of the payment and the answer is applied like a webhook. The logic

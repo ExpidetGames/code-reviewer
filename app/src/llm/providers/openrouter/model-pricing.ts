@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a model costs, as a small static table. Data only: the model comparison ticket (CR-44) keeps
 // it up to date together with the recommended default model.

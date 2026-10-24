@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the retention rule: 7 daily and 4 weekly backups, counted in days and weeks that have a
 // backup (a gap in the history never deletes the history), with the newest backup and everything

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Loopback-only smart HTTP Git fake, backed by real upload-pack and dummy authentication."""
 
 import base64

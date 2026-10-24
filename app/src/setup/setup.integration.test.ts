@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The first-run setup end to end below the browser: a real database, the real sign in, the real
 // setup gate and session check in front of the two setup routes, and a code store with a clock the

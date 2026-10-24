@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The job view of the admin portal (#541): the newest runs of every workspace in one table, and one run
 // with its facts, what it consumed and the tables of its calls. The operator looks at what a run did, so the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/llm-keys/:provider/test (#427): asks the provider whether the operator's key is accepted (the
 // "Test" button of the admin page "LLM keys"), with the key typed into the field or, when it is empty, the stored one.

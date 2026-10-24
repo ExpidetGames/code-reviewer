@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `POST /api/integrations/sync`, the "Sync from GitHub" button. It runs the
 // process-wide sync (src/integrations/README.md, "Synchronization") and answers with how many

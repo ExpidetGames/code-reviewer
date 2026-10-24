@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm setup-code`: makes the first-run setup code of a serverless deployment (#321). A server prints its
 // code in its own log when it starts; a serverless instance has no log the operator reads and no memory

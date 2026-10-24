@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the runner as a real process: the job goes in on stdin, exactly one line of JSON comes
 out on stdout, nothing leaks to either stream, and the environment, argv and working directory stay

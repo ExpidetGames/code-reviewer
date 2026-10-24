@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A price book as a table (#554): every amount the book states in dollars per million tokens, with where it comes from
 // (models.dev, the override file or an admin's correction), so an admin reads what they are about to confirm. A field the

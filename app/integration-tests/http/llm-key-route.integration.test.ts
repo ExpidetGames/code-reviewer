@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The routes of the LLM key of a workspace through the real route files, with the wiring the running server
 // uses (the database opened at start, the secret store, the workspace access); only the session lookup and

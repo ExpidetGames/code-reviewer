@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down `contracts/job-model-entry.v1.json` (#548) from the app's side, the writer: the example is valid, the entry is
 // closed, and the rules the engine imposes on the entry (both limits or neither, a status it does not drop, `npm` always

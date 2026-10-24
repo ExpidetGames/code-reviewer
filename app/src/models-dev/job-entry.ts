@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The entry a job is told about its model (#548, part E): a pure function of one stored provider and one stored model.
 // The result is what `contracts/job-model-entry.v1.json` describes and is checked once more against the same rules here

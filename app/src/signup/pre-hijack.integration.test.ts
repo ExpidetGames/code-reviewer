@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that nobody can take over an account by signing up with another person's address first. Two
 // people sign up with one address (the attacker's mail goes to the owner's inbox, like the owner's own),

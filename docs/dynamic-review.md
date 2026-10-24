@@ -1279,8 +1279,8 @@ whole process group and removes its temporary directory.
 ## The opt-in runner (`compose.dynamic.yml`)
 
 `compose.dynamic.yml` is an override file that adds a second runner, `runner-dynamic`, next to the
-Diff runner of `compose.yml`. It builds the `dynamic` target from the checkout (the Dynamic image is
-not published to GHCR):
+Diff runner of `compose.yml`. It builds the `dynamic` target from the checkout (no image is
+published):
 
 ```sh
 docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait

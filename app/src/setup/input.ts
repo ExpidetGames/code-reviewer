@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Validation of what the wizard sends: the tenancy, the sign-up rule with its entries, and the admin
 // account. The server is the only judge (the form shows the reasons it gets back). Problems are

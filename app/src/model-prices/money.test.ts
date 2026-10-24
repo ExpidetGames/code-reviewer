@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Prices as whole numbers (#549): USD per million tokens, written as the exact decimal strings models.dev gives, become
 // BigInt micro-USD per million tokens. No float is ever part of it.

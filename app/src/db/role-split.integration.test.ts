@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two roles of the hosted deployment guide (docs/deployment-vercel.md, section 2), proven against a real Postgres (#333):
 // the SQL of the guide is taken out of the guide itself and run as written (only the role names, the database name and the

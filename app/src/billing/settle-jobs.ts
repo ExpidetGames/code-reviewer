@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settlement of a job (ADR 0006, 2.6 and 2.8; #498, reworked by #605). Called from the transaction that ENDS jobs, with the
 // ids of the jobs whose usage record just reached its end: it prices each run (`classifyOutcome`, `priceRun`, the minutes of

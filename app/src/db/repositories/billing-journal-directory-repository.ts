@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which workspaces have a billing journal (#626), for the scheduled check of the journal (src/billing/journal-check.ts). Instance
 // level on purpose, like the other sweeps: it asks across workspaces, only reads and returns workspace ids and nothing else; what is

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What the native finalization remembers for the log line (#578): the class of the problem with
 the message that ended the turn, whether the one repair was asked for, and what it returned."""

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The page without a token on it: a signed out visitor who opens it, or a signed in account that still
 // has to confirm its address. One line says what to do; the longer explanation (how long a link lives,

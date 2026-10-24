@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two database engines a billing test runs on (SQLite always; Postgres when TEST_DATABASE_URL is set, otherwise its
 // cases are skipped), with a migrated database each and the one workspace the cases write to.

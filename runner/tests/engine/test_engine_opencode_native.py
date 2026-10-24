@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The pinned OpenCode against a plain key swapping relay, one test per claim of #546 (#544).
 

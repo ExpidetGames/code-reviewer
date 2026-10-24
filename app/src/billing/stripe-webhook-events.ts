@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What Stripe is told when the admin page creates the webhook endpoint (#504): the address path of our route and the event
 // types the Stripe adapter (#502) turns into normalized events (README, "The adapter seam": payments, refunds and disputes).

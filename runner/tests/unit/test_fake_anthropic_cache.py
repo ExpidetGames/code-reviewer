@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The prompt cache of the Anthropic fake (#539): the rules of the Claude docs, as the fakes keep
 them. A test of the wire is only worth what the fake it runs against knows, so the fake's rules

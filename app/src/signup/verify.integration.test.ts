@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the verification link and the request for a new one through the real route handlers, the
 // real counters and a real SQLite file: a link verifies once, every way a link can be wrong is refused

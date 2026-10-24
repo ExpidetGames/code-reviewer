@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The mail server of the instance as it is stored (docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.3 and 2.7): the settings in `instance_settings` (key `smtp`), the password in the encrypted

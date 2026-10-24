@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub App manifest (docs/decisions/0001-editions-setup-and-accounts.md, section 2.4): what the
 // admin portal posts to GitHub so that creating the App is one click, and the list of what the App

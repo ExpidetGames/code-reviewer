@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down compose.dynamic.yml as a file (#202): the opt-in second runner for Dynamic Review. It is
 // an override file like compose.build.yml, so nothing in compose.yml, compose.coolify.yml or

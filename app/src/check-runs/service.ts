@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check run and the review verdict of a review job (#405, README.md in this folder). The App, not the Worker,
 // makes GitHub match the job: it holds the installation token and sees every way a job ends (a result, a release, a

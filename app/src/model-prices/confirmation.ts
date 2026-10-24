@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What an admin's confirmation of a price is (#549, part B): one row of the append-only history, the latest of which
 // counts. Types only.

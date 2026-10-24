@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The generic layer that applies a normalized billing event to the journal (ADR 0006, 2.12 and 2.13; #497). An adapter
 // reads a provider and never touches the journal; this function is the only place where an event becomes money, the same

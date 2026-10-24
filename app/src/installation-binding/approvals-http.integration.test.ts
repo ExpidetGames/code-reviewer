@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who reaches the decision on a request to link an installation, with real requests through the real proxy and
 // the real route over a real database and the real Better Auth (docs/decisions/0001-editions-setup-and-

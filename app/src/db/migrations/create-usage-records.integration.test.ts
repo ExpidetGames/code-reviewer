@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #272: the usage records migration adds the table to a database made by the previous release's
 // migrations and changes no existing row. The table starts empty: jobs that ran before it have no record.

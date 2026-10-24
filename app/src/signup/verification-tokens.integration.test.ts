@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the verification token against a real SQLite file: random and long enough, only its hash is
 // stored, valid for 24 hours, used once (also when two requests race), bound to the address and to the

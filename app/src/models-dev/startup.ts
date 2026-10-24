@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a long-lived server (Docker Compose, Coolify, a process) does about the models.dev catalog (#548): ask the service
 // at the start and then every hour whether a fetch is due. The service keeps the day (the last success is in the database),

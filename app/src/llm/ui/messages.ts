@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the codes of the LLM key routes (the UI translates a code to copy, never the other way round).
 // No sentence here contains a value; a provider's own words only ever appear as the `detail` the server cleaned.

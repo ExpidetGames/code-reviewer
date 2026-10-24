@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key mode at the claim (#496): the admission and the check of the balance work with the key mode that applies. While billing is
 // off that is the entitlement's, whatever the workspace chose (nothing changes for a self-hoster); while billing is on it is the

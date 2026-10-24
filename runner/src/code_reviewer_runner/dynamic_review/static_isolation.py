@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """The network setup of the Dynamic runner container, done once at start, and the end of NET_ADMIN.
 
 The engine's nft rules (`netguard.py`) depend on three values only: the engine user and two

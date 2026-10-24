@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An in-process double of the Sandbox platform for the Sandbox-Launcher (#329). It speaks the port of
 // dispatcher/src/launchers/sandbox-service.ts, which it matches structurally: this file imports nothing from the

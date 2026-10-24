@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what happens when syncs and deliveries overlap in time. GitHub's answer is slowed down
 // (it reflects the moment the request arrived and reaches the app later), so a sync that is not

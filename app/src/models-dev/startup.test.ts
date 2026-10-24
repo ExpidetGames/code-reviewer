@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // When the daily models.dev fetch runs on a long-lived server (#548): in production at the start and at every tick,
 // one run at a time, never elsewhere; a failing run is logged by its code and does not stop the timer. The service decides

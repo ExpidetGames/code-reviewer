@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 #
 # Image of the Code Reviewer runner (Python, uv). Build context: the repository root, because the
 # image also carries LICENSE, NOTICE and THIRD_PARTY_LICENSES.md from there
@@ -83,7 +83,7 @@ RUN python /fetch/scripts/fetch_opencode.py --dest /engine-tools --allow-unpinne
 # ---- runtime-base: Python, the venv and nothing else (no uv, no compiler, no sources) ----
 FROM ${PYTHON_IMAGE} AS runtime-base
 LABEL org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="LicenseRef-Proprietary"
 # LITELLM_LOCAL_MODEL_COST_MAP makes LiteLLM use its bundled price list instead of fetching it from
 # GitHub when it is imported (the runner sets it for every job as well).
 ENV PATH="/opt/venv/bin:${PATH}" \
@@ -101,7 +101,7 @@ RUN apt-get update \
 # write config files (PR-Agent, git) work; the job working directories live under /tmp.
 RUN groupadd --system --gid 10001 runner \
     && useradd --system --uid 10001 --gid runner --create-home --home-dir /home/runner --shell /usr/sbin/nologin runner
-# The license of the project and of its dependencies travel with the image (Apache-2.0, section 4).
+# The license of the project and of its dependencies travel with the image (the third party notices need it).
 # html2text (GPL-3.0) is part of the venv below, with its license text in its dist-info.
 COPY --from=licenses / /licenses/
 COPY --from=builder /opt/venv /opt/venv

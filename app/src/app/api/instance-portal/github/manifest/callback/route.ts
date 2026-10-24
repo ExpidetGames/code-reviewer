@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/admin/github/manifest/callback: where GitHub sends the browser back after the App was created,
 // with a one-time code and the state it was given. The state must be signed, unused, unexpired and bound to

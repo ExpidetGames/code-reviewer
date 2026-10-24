@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Round 2 of the security review of the passthrough proxy (#550): the smaller holes.
 

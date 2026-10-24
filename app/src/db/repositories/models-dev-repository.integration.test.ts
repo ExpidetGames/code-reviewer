@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stored models.dev catalog (#548) on both engines: rows round-trip, an upsert keeps `first_seen_at`, nothing is ever
 // deleted, and the state of the last fetch is one row that a failure changes without touching the catalog.

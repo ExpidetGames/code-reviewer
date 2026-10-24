@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The provider and the catalog entry a project selects (#430, ADR 0005, 2.7), against a real database and a real
 // model catalog: what is stored beside what, what a workspace on its own key and one on the operator's key may write,

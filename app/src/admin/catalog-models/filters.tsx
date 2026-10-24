@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The filters of the catalog page (#554): a plain GET form, so the filters are in the address, work without script and
 // are reached with the keyboard. The provider select lists every provider of the catalog (about two hundred), which a

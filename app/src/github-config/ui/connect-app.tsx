@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // "Connect the App" (#182): the two ways to connect GitHub are alternatives, so only the chosen one

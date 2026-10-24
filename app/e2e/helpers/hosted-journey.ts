@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the journeys of the hosted lane (#332) have in common: the shape of a pull request of the fake GitHub, the Runs
 // page, and the check that no credential of the lane is anywhere a person or a log could see it.

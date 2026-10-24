@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The key mode card with the settings of the own key below it (#656): the key forms are shown while "Use my own provider

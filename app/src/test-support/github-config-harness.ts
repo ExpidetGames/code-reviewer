@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub integration of the admin portal assembled for integration tests: a real SQLite file, the
 // encrypted secret store and the credential store on it, the service with a clock, and the fake GitHub on a

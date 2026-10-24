@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rewrite in next.config.ts that serves the setup page in place of the page the setup gate
 // marked (src/setup/paths.ts). The proxy builds no address, so a client's `X-Forwarded-Proto` cannot

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Everything a test of the webhook route needs: the sync harness (a real SQLite file, the fake
 // GitHub API, the real GitHub App provider behind a registry), the delivery record, a recording

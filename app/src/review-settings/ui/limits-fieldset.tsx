@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Limits" section of the settings form (#656, #666): the cost a review may reach before it stops, and (for a Diff Review) how

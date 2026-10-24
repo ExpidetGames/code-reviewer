@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the entitlements of ONE workspace (the table `workspace_entitlements`; the factory takes the
 // workspace id, see ../workspace-scope.ts): at most one row, which says what an operator allows the

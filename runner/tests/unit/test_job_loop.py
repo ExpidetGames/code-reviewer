@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the rules of the job loop with a clock, a runner API and processes that the test
 controls: slots, heartbeats, outcomes, back-off, shutdown and what is reported when. Real processes

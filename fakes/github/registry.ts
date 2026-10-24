@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub Apps the fake knows about, shared by its parts: the one that was registered when the fake
 // started (`appId`, `publicKeyPem`, `clientId`, `clientSecret`) and the ones created through the manifest

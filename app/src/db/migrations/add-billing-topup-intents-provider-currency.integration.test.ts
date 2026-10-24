@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: the currency of the amount the buyer was charged is pinned on the top-up intent next to it, so a refund or dispute in
 // another currency is not taken for a share of the payment. The column is new and nullable and no row is touched: an intent

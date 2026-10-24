@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls made with a person's own GitHub token (the binding of an installation to a workspace): whose token
 // it is, which installations it can use (every page), and the person's role in an organization. A 401 is "the

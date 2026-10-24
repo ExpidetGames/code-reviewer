@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #284: the plan handoff tokens migration adds an empty table to a database made by the previous release's migrations
 // and changes no existing row, and the table keeps only what the redemption relies on.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One request for the models.dev body (#548). The body is untrusted: it is read with a size cap before anything parses
 // it (a body that grows without end is cut at the cap, a body that announces more is refused at once), under a time

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Two app instances starting on one Postgres must import an existing installation exactly once. The
 // guard inside the import transaction locks the `import_state` row, which a plain read does not: this

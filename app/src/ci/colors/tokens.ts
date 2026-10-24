@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reading `app/src/app/theme.css` for the tests: the declaration blocks of the light, system-dark
 // and explicit-dark states, resolution of `var()` references, and the WCAG contrast ratio. Kept

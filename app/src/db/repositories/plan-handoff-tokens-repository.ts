@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the handoff tokens of ONE workspace (the table `plan_handoff_tokens`; the factory takes the workspace id,
 // see ../workspace-scope.ts): the single-use tokens with which an Owner or Admin is handed over to the

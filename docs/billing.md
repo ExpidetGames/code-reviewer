@@ -1,4 +1,4 @@
-# Billing: guide for the operator of a hosted instance
+# Billing: guide for the operator of the hosted service
 
 Billing lets an instance charge for reviews. It is **prepaid pay-as-you-go**: a workspace tops up a balance in US
 dollars and every review takes its price from that balance. There are no plans and no subscriptions. Payments go through
@@ -7,14 +7,12 @@ Stripe Managed Payments, Stripe is the merchant of record, and the app keeps a j
 This guide is for the person who runs the hosted instance and owns the Stripe account. It tells you what billing does,
 what to set up in Stripe, how to set the rates, in which order to go live, and how to run it afterwards.
 
-- If you run your own instance and do not want to sell anything, read [Billing for self-hosters](billing-self-hosting.md).
-  Billing is off by default and a self-hoster who never switches it on sees no change.
 - The points your terms must carry are in [Billing: checklist for the terms](billing-terms-checklist.md).
 - The design and its reasons are in the decision record
   [0006](decisions/0006-prepaid-billing-via-stripe-managed-payments.md). The code is described in
   `app/src/billing/README.md`.
 - The hosted deployment itself (the webhook route must be reachable) is in [Deploy on Vercel](deployment-vercel.md),
-  section 3.6. The Compose deployment is in [Deploy with Coolify](deployment-coolify.md).
+  section 3.6. 
 
 **Every number in this guide is made up.** They are examples to show the arithmetic. The real rates are your decision.
 They are never in the repository, and they are not in this guide.

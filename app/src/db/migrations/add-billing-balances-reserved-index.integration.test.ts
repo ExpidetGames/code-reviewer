@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #591: the sweep of stranded holds asks which workspaces have something reserved. `billing_balances_reserved` is a partial
 // index of the balance rows with `reserved_micro_usd > 0`, so that read grows with the holds that are open and not with the

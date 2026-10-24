@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The startup self-check against the real kernel, users and pinned engine (#202-T01, T09).
 

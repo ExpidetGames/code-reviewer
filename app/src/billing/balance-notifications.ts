@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether a workspace has to be told about its balance (ADR 0006, D9; #506). Called inside the transaction of every journal
 // write, right after the balance row changed (so the balance row's lock is held: two writers of one workspace never decide at

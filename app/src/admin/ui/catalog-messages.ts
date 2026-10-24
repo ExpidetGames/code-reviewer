@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for what the catalog data routes answer: one sentence per stable code (src/model-catalog/admin-errors.ts) and
 // for the problems of the fields of the form. The codes are the contract, these sentences are only what the page shows.

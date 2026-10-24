@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the tenancy question, shared by the first-run wizard and the admin Setup → Instance
 // page (#181). Both asked the same question with different words; the words live here once, like the

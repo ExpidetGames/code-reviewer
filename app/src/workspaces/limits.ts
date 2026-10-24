@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limit on the workspaces one user may own (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.3, "Instance limits"). The admin sets it on the Limits page; nothing saved means the default.

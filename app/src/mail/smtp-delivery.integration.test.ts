@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down one delivery over the real protocol against the fake SMTP server: the three security modes, the
 // certificate check and its explicit opt-out, the refusal to drop encryption quietly, every class of failure,

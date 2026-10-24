@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The runner API serves the whole instance: a runner is handed the oldest due job of ANY workspace,
 // with the credentials of that job's own connection, and the answer has the same shape as ever.

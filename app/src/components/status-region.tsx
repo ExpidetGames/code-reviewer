@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The polite live region for a result message ("2 new repositories.", "Saved."). shadcn has no
-// equivalent; this is a small Apache-2.0 app component. `role="status"` plus `aria-live="polite"`
+// equivalent; this is a small app component. `role="status"` plus `aria-live="polite"`
 // means a screen reader announces the change without stealing focus. While it is empty it stays in
 // the DOM (so the next message is announced) but out of the flow, so it adds no gap to a stacked page.
 import type { ReactNode } from "react";

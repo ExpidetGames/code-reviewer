@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497: the generic billing webhook handler behind `POST /api/billing/webhook`, on SQLite and on Postgres, with the fake
 // adapter. It checks the signature through the adapter, applies the one normalized event in one transaction and answers a

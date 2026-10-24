@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #659: the role check of the invoices service stands on its own. The route resolves the role first (invoices-http.integration.test.ts);
 // this is the second lock, for a caller that reaches the service without that check.

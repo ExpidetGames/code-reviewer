@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The golden snapshot pipeline (#330): a builder VM installs Docker, builds the Worker image from the commit's
 // tarball (the spike's registry-free path), stops the daemon cleanly and snapshots; a second VM, created from

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A fake SMTP server (RFC 5321, the part a mail client uses), on loopback, for the tests of the app's mail
 // sender and the browser journeys. It keeps every message it accepts, like a mailbox, so a test reads what

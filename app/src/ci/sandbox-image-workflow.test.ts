@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how CI proves the Sandbox image and the entry modes of the runner image (#324): a job of
 // its own builds the `sandbox` target (and the `dynamic` one, to compare their layers) and runs the
@@ -93,11 +93,8 @@ describe("the CI job of the Sandbox image", () => {
   });
 
   // #324-T09
-  it("is part of the aggregate check and is not published", () => {
+  it("is part of the aggregate check (no image is published, see images-workflow.test.ts)", () => {
     expect(job("ci-passed").needs).toContain("image-runner-sandbox");
-    expect(read(".github/workflows/publish-images.yml")).not.toContain(
-      "sandbox",
-    );
   });
 
   it("is built and smoke tested by make test-images as well", () => {

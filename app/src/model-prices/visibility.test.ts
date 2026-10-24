@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Nothing of the catalog prices is served to a workspace (#549, Epic #489, principle 2 of #420): a member never sees a raw
 // provider price, a provider name or a model id of the catalog. Only the admin portal's own routes and pages, the service

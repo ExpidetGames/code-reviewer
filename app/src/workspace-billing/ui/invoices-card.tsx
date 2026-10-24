@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The invoices of the workspace (#659), for an Owner and an Admin: one row per invoice the payment provider issued for a top-up,

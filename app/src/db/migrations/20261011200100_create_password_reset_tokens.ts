@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `password_reset_tokens`: single-use links that let somebody set a new password (docs/decisions/0001-
 // editions-setup-and-accounts.md, sections 2.3 and 2.7). The token is 256 random bits and travels in

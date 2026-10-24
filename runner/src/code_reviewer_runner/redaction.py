@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Secret redaction for everything the runner lets out: logs, stdout, stderr and the result.
 

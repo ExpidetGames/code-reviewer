@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the password reset by mail end to end over a real database, the real Better Auth, the real
 // SMTP sender and the fake SMTP server: the mail with the link reaches the server, the answer is the same

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `users.is_instance_admin`: the instance admin flag (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.3), a user flag that is separate from the roles in a workspace. 1 for the

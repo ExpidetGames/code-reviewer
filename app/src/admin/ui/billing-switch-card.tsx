@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The switch of billing and the statement of what it does (#504, ADR 0006, 2.14). Billing is off until the admin switches it
