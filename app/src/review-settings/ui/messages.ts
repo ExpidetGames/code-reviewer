@@ -138,7 +138,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   DYNAMIC_MODEL_UNKNOWN: () =>
     `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
   MODEL_MANAGED_BY_INSTANCE: () =>
-    "This instance provides the AI models for this workspace. Choose from the listed options instead.",
+    "code-review.com provides the AI models for this workspace. Choose from the listed options instead.",
   PROVIDER_UNKNOWN: () => CHOOSE_PROVIDER,
   CATALOG_ENTRY_UNKNOWN: () => "This choice does not exist. Choose another.",
   CATALOG_ENTRY_NOT_RELEASED: () =>
@@ -159,7 +159,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     "There is no provider address to confirm right now. Choose the provider and a model from the catalog first.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
-    "This workspace reviews with its own AI key, so the choices of this instance cannot be used. They can be chosen once the AI access comes from this instance.",
+    "This workspace reviews with its own AI key, so the code-review.com choices cannot be used. They can be chosen once the workspace is billed via code-review.com.",
 };
 
 function hasIssueCopy(code: string): code is ReviewSettingIssueCode {

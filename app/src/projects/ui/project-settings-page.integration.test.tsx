@@ -429,14 +429,14 @@ describe("the Review kind card of the settings page of a project", () => {
         .getByRole("radio", { name: "Diff Review" })
         .getAttribute("aria-checked"),
     ).toBe("true");
-    expect(screen.getByText("Not enabled on this instance yet.")).toBeTruthy();
+    expect(screen.getByText("Not enabled yet.")).toBeTruthy();
   });
 
   it("does not say anything about the gate when the instance has Dynamic Review enabled", async () => {
     const { data } = await readyPage({ dynamicReviewEnabled: true });
 
     expect(data.dynamicReviewEnabled).toBe(true);
-    expect(screen.queryByText(/Not enabled on this instance/)).toBeNull();
+    expect(screen.queryByText(/Not enabled yet/)).toBeNull();
   });
 
   it("stores a switch to Dynamic Review with its model and skill, shows them after a reload, and resets the skill to the shipped default", async () => {

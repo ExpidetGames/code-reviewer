@@ -14,7 +14,7 @@ export const SIGN_UP_RULE_OPTIONS: ReadonlyArray<{
   {
     value: "everyone",
     title: "Everyone",
-    text: "Anyone who can reach this instance can create an account.",
+    text: "Anyone who can reach this server can create an account.",
   },
   {
     value: "emails",

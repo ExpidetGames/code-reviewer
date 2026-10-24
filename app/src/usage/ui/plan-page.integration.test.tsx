@@ -139,7 +139,7 @@ describe("the plan page file", () => {
     expect(markup).toContain("62 % of the usage limit used");
     expect(markup).toContain("1 finished review could not be measured");
     expect(markup).toContain("not exact");
-    expect(markup).not.toContain("provided by this instance");
+    expect(markup).not.toContain("billed via code-review.com");
     expect(markup).not.toMatch(/6200000|10000000|6\.2|\$|USD/);
   });
 

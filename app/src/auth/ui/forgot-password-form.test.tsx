@@ -66,7 +66,7 @@ describe("the form that asks for a reset link", () => {
   it.each([
     [422, "invalid_input", "Enter a valid email address."],
     [429, "rate_limited", "Too many requests for this address"],
-    [404, "not_available", "not available on this instance"],
+    [404, "not_available", "not available here"],
     [503, "unavailable", "not available right now"],
   ])("shows a sentence for %i %s", async (status, code, sentence) => {
     await ask(answer(status, { error: code }));

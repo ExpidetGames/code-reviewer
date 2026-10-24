@@ -10,7 +10,7 @@ is empty.
 | File                                                                                 | Role                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `entries.ts`                                                                         | Pure: the statuses and the move between them, the kinds, `CatalogEntry`, `CatalogDefaults`, the checks of a name (`checkEntryName`, `nameKeyOf`, `nameRevealsModel`) and a description  |
-| `member.ts`                                                                          | `MemberCatalogEntry`, the typed view of an entry for a member (no provider, no model id), and `toMemberEntry`                                                                           |
+| `member.ts`                                                                          | `MemberCatalogEntry`, the typed view of an entry for a member (no provider id, no model id; only the label of the provider), and `toMemberEntry`                                        |
 | `errors.ts`                                                                          | `CATALOG_ERROR_CODES`, the stable codes of a refused change                                                                                                                             |
 | `service.ts`                                                                         | `createCatalogService`: create, update, release, retire, remove, `usedByProjects`, the defaults, `checkModel`, `summary`, the member view and `allCatalogModelIds`                      |
 | `admin-service.ts`, `admin-view.ts`, `admin-errors.ts`, `admin-http.ts`, `shared.ts` | The admin portal's side (#429): the view with the number of projects per entry, the confirmation before a change of model, the route handlers, their codes and statuses, and the wiring |
@@ -74,9 +74,9 @@ instead of using an entry that cannot serve. There is no workspace level default
 
 ## What a member sees
 
-`MemberCatalogEntry` is `id`, `name`, `description`, `kinds`, `status`, `sortOrder` and has no `provider` or `modelId`.
+`MemberCatalogEntry` is `id`, `name`, `description`, `providerLabel`, `kinds`, `status`, `sortOrder` and has no `provider` or `modelId`. `providerLabel` (#675, `provider-label.ts`) is the name of the maker of the model (Anthropic, OpenAI, Google, ...; for a model that goes through OpenRouter the maker in the model id), which the provider dropdown of a workspace on the code-review.com key shows; it is never the product name.
 `memberEntries()` lists the released and the retired entries (a project may still have a retired one chosen; a draft is
-never shown), and the repository selects only those columns, so the provider and the model id are not even read.
+never shown), and the repository returns only those columns and the label: the provider and the model id are read to make the label and do not leave the repository.
 `allCatalogModelIds()` gives the model id of every entry of every status: with the models of a job, the ids to mask in
 anything a member reads.
 

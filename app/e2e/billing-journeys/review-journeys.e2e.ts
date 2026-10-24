@@ -337,7 +337,7 @@ test.describe("the billing journeys of a review", () => {
     const entries = await seedCatalog(e2eEnv.catalogAdminDatabasePath, [
       {
         name: "Journey model",
-        modelId: "e2eproof/billing-journey-q7w8",
+        modelId: "acme-labs/e2eproof-billing-journey-q7w8",
         kinds: ["diff", "dynamic"],
       },
     ]);

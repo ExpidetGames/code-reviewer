@@ -16,7 +16,7 @@ export const TENANCY_OPTIONS: ReadonlyArray<{
   {
     value: "single",
     title: "Single-tenant",
-    text: "One team. The instance has one workspace, and you are its owner; it can only stay single-tenant while the instance has at most one.",
+    text: "One team. There is one workspace and you are its owner; it can only stay single-tenant while there is at most one.",
   },
   {
     value: "multi",

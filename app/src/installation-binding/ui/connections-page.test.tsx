@@ -210,9 +210,7 @@ describe("the buttons", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(false);
-    expect(screen.getByRole("note").textContent).toMatch(
-      /admin of the instance approves/,
-    );
+    expect(screen.getByRole("note").textContent).toMatch(/admin approves/);
   });
 
   // #103-IB-10
@@ -452,15 +450,13 @@ describe("the requests", () => {
     );
 
     const list = screen.getByRole("list", {
-      name: "Requests for the instance admin",
+      name: "Requests for the code-review.com admin",
     });
     const items = within(list).getAllByRole("listitem");
     expect(items[0]?.textContent).toMatch(
-      /Waiting for the admin of the instance/,
+      /Waiting for a code-review.com admin/,
     );
-    expect(items[1]?.textContent).toMatch(
-      /Denied by the admin of the instance/,
-    );
+    expect(items[1]?.textContent).toMatch(/Denied by a code-review.com admin/);
   });
 
   // #103-IB-15
@@ -468,7 +464,9 @@ describe("the requests", () => {
     renderPanel(data({ requests: null }), { canManage: false });
 
     expect(
-      screen.queryByRole("list", { name: "Requests for the instance admin" }),
+      screen.queryByRole("list", {
+        name: "Requests for the code-review.com admin",
+      }),
     ).toBeNull();
   });
 
@@ -477,7 +475,9 @@ describe("the requests", () => {
     renderPanel(data({ requests: [] }));
 
     expect(
-      screen.queryByRole("list", { name: "Requests for the instance admin" }),
+      screen.queryByRole("list", {
+        name: "Requests for the code-review.com admin",
+      }),
     ).toBeNull();
     expect(screen.getByText("No requests waiting.")).toBeTruthy();
   });

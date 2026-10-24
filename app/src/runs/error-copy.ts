@@ -41,7 +41,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   dispatch_unavailable:
     "No worker picked up this run within the time limit, so it was stopped. The service that starts workers may be down or fully busy. It will run again on the next push or review request.",
   dynamic_review_disabled:
-    "Dynamic Review is not switched on for this instance yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
+    "Dynamic Review is not switched on yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
   workspace_suspended:
     "Reviews are paused for this workspace, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan.",
   quota_exhausted:
@@ -53,7 +53,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   insufficient_balance:
     "The balance of this workspace is used up, so this run did not start and no AI model was used. Add credit to continue.",
   billing_rates_incomplete:
-    "This run did not start because the billing setup of this instance is not complete, and no AI model was used. Ask whoever runs this instance.",
+    "This run did not start because the billing setup is not complete, and no AI model was used. Ask whoever runs code-review.com.",
   billing_hold_released:
     "The credit held for this run was released before it could start, so it did not start and no AI model was used. It will run again on the next push or review request.",
   monthly_limit_reached:
@@ -61,15 +61,15 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   reviews_paused:
     "Reviews are paused for this workspace for a while, so this run did not start and no AI model was used. It will run again on the next push or review request.",
   billing_limits_unreadable:
-    "The spending limits of this workspace could not be checked, so this run did not start and no AI model was used. It will run again on the next push or review request. If this keeps happening, ask whoever runs this instance.",
+    "The spending limits of this workspace could not be checked, so this run did not start and no AI model was used. It will run again on the next push or review request. If this keeps happening, ask whoever runs code-review.com.",
   // A code of a job from before the catalog (#434): nothing ends a job with it any more (see HISTORIC_ERROR_CODES).
   managed_tier_unavailable:
     "The quality level chosen for this project was not available when this run was made, so it did not start and no AI model was used. Quality levels have since been replaced by review options, which a workspace Owner or Admin can choose in the review settings of the project.",
 
   managed_model_unavailable:
-    "The review option chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another option in the review settings of the project. If none is available, contact whoever runs this instance.",
+    "The review option chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another option in the review settings of the project. If none is available, contact whoever runs code-review.com.",
   llm_provider_unsupported:
-    "The AI provider chosen in the model settings of this project cannot be used for this run, so it did not start and no AI model was used. Check the model settings of the project, or ask whoever runs this instance.",
+    "The AI provider chosen in the model settings of this project cannot be used for this run, so it did not start and no AI model was used. Check the model settings of the project, or ask whoever runs code-review.com.",
 
   llm_model_unavailable:
     "The AI model chosen in the model settings of this project is not available any more, so this run did not start and no AI model was used. Choose another model in the review settings of the project.",

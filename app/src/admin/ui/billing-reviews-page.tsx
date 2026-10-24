@@ -43,13 +43,13 @@ export function BillingReviewsPage({
       <HelpDisclosure label="How this works">
         When Stripe tells this app about a payment, refund or dispute and the
         app cannot apply it as it is (the amount does not fit, or it belongs to
-        no top-up of this instance), nothing is credited or debited and the
-        event is listed here. Closing a row only records that you dealt with it:
-        it changes no money. To repair it, credit or correct the workspace by
-        hand (the entry is written to the journal with your name, once per row),
-        or use Check payment to ask Stripe about the top-up again. The list
-        holds ids and a reason, never the payment itself or anything about the
-        buyer; look the payment up in the Stripe dashboard.
+        no top-up of ours), nothing is credited or debited and the event is
+        listed here. Closing a row only records that you dealt with it: it
+        changes no money. To repair it, credit or correct the workspace by hand
+        (the entry is written to the journal with your name, once per row), or
+        use Check payment to ask Stripe about the top-up again. The list holds
+        ids and a reason, never the payment itself or anything about the buyer;
+        look the payment up in the Stripe dashboard.
       </HelpDisclosure>
 
       <nav aria-label="State of the rows" className="flex items-center gap-4">

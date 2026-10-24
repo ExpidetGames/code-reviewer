@@ -83,13 +83,13 @@ export function ManifestForm({
         Create the App with one click
       </h3>
       <p className="text-sm text-muted-foreground">
-        GitHub opens with everything filled in: the name, this instance&apos;s
-        address, the webhook, the permissions and the events. Press{" "}
+        GitHub opens with everything filled in: the name, the address of this
+        server, the webhook, the permissions and the events. Press{" "}
         <strong>Create GitHub App</strong> there and GitHub sends you back; the
         credentials are saved, encrypted.{" "}
         {tenancy === "single"
-          ? "On a single-tenant instance the App is created private: it can only be installed on the account that owns it."
-          : "On a multi-tenant instance the App is created public, so any account can install it."}
+          ? "With a single tenant the App is created private: it can only be installed on the account that owns it."
+          : "With several tenants the App is created public, so any account can install it."}
       </p>
       <div className="flex flex-col gap-2">
         <Label htmlFor={`${ids}-name`}>Name of the App</Label>

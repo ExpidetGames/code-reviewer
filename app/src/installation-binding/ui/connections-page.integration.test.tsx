@@ -132,7 +132,9 @@ describe("the Connections page", () => {
     expect(screen.getByRole("list", { name: "Installations" })).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
     expect(
-      screen.queryByRole("list", { name: "Requests for the instance admin" }),
+      screen.queryByRole("list", {
+        name: "Requests for the code-review.com admin",
+      }),
     ).toBeNull();
   });
 
@@ -168,9 +170,10 @@ describe("the Connections page", () => {
 
     expect(data.requests).toHaveLength(1);
     expect(
-      screen.getByRole("list", { name: "Requests for the instance admin" })
-        .textContent,
-    ).toMatch(/acme.*Waiting for the admin of the instance/);
+      screen.getByRole("list", {
+        name: "Requests for the code-review.com admin",
+      }).textContent,
+    ).toMatch(/acme.*Waiting for a code-review.com admin/);
     expect(await h.requests.listPending()).toHaveLength(1);
   });
 

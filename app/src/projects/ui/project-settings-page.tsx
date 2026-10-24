@@ -93,6 +93,7 @@ export function ProjectSettingsPageContent({
   llmNotice = null,
   keyedProviders,
   nativeCatalog,
+  billingOn = true,
   canConfirmProviderAddress = false,
   data,
   api,
@@ -107,6 +108,8 @@ export function ProjectSettingsPageContent({
   keyedProviders?: readonly string[];
   /** The models.dev catalog for the Dynamic provider and model of a workspace on its own key (#555); absent otherwise. */
   nativeCatalog?: NativeFormData;
+  /** Billing is on (#675): the LLM section of a workspace on the operator's key says its reviews are billed via code-review.com. */
+  billingOn?: boolean;
   /** The person may manage the workspace's LLM key, so they may confirm a new address of the project's catalog provider (#588). */
   canConfirmProviderAddress?: boolean;
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
@@ -135,6 +138,7 @@ export function ProjectSettingsPageContent({
           repositoryId={data.row.repositoryId}
           {...(keyedProviders === undefined ? {} : { keyedProviders })}
           {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
+          billingOn={billingOn}
           canConfirmProviderAddress={canConfirmProviderAddress}
           {...(api === undefined ? {} : { api })}
         />

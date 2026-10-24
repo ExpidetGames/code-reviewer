@@ -148,7 +148,7 @@ describe("the billing review rows", () => {
 
     const row = within(rowOf("evt_foreign"));
     expect(row.getByText("Refund re_9")).toBeTruthy();
-    expect(row.getByText(/No workspace of this instance/)).toBeTruthy();
+    expect(row.getByText(/No workspace is known/)).toBeTruthy();
     expect(row.queryByRole("button", { name: /Credit/ })).toBeNull();
     expect(row.queryByRole("button", { name: "Check payment" })).toBeNull();
     expect(

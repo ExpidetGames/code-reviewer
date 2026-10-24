@@ -301,10 +301,17 @@ describe.each(ENGINES)("the model catalog repository on $name", (engine) => {
           "id",
           "kinds",
           "name",
+          "providerLabel",
           "sortOrder",
           "status",
         ]);
-      expect(JSON.stringify(listed)).not.toMatch(/sentinel|openrouter/);
+      expect(listed.map((e) => e.providerLabel)).toEqual([
+        "Sentinel",
+        "Sentinel",
+      ]);
+      expect(JSON.stringify(listed)).not.toMatch(
+        /sentinel\/|openrouter|old-model/,
+      );
     },
   );
 

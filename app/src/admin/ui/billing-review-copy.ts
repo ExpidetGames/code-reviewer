@@ -13,7 +13,7 @@ const OUTCOME_COPY: Record<string, { title: string; reading: string }> = {
   intent_unresolved: {
     title: "No top-up of ours",
     reading:
-      "The event is about a payment, refund or dispute that belongs to no top-up of this instance, or whose top-up could not be found. It may belong to another product on the same Stripe account, or a payment may have been taken and not credited to anybody. Nothing was changed.",
+      "The event is about a payment, refund or dispute that belongs to no top-up of ours, or whose top-up could not be found. It may belong to another product on the same Stripe account, or a payment may have been taken and not credited to anybody. Nothing was changed.",
   },
   amount_conflict: {
     title: "Conflicting payment",

@@ -53,13 +53,12 @@ function InstanceAccessCard({
       <CardContent className="flex flex-col gap-2">
         {access === "settings_unreadable" ? (
           <p>
-            This instance cannot set up the LLM for this workspace at the
-            moment, so reviews cannot run. Contact the administrator of this
-            instance.
+            code-review.com cannot set up the LLM for this workspace at the
+            moment, so reviews cannot run. Contact the administrator.
           </p>
         ) : (
           <>
-            <p>The LLM for this workspace is provided by this instance.</p>
+            <p>The LLM for this workspace is billed via code-review.com.</p>
             <p className="text-sm text-muted-foreground">
               Reviews do not use a key of this workspace, so there is nothing to
               enter here: this workspace does not use a key of its own.
@@ -67,7 +66,7 @@ function InstanceAccessCard({
             {access === "key_unavailable" ? (
               <p>
                 The access is not available at the moment, so reviews cannot
-                run. Contact the administrator of this instance.
+                run. Contact the administrator.
               </p>
             ) : null}
           </>
@@ -78,7 +77,7 @@ function InstanceAccessCard({
 }
 
 const HOW_STORED =
-  "Reviews run with the API key of this workspace, and the provider bills that account. The key is stored encrypted on this server and is never shown again. The operator of this instance holds the key that encrypts it and can technically decrypt it.";
+  "Reviews run with the API key of this workspace, and the provider bills that account. The key is stored encrypted on this server and is never shown again. The operator of this server holds the key that encrypts it and can technically decrypt it.";
 
 const stateOf = (status: WorkspaceLlmKeyStatus) =>
   status.state === "configured"

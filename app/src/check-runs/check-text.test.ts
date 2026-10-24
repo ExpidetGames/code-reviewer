@@ -293,10 +293,8 @@ describe("the check run of a job that did not finish", () => {
       conclusion: "neutral",
       title: "Review did not finish",
     });
-    expect(check.summary).toContain(
-      "the billing setup of this instance is not complete",
-    );
-    expect(check.summary).toContain("whoever runs this instance");
+    expect(check.summary).toContain("the billing setup is not complete");
+    expect(check.summary).toContain("whoever runs code-review.com");
     expect(check.summary).toContain("`billing_rates_incomplete`");
   });
 

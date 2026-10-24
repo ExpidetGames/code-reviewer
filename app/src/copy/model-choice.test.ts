@@ -20,9 +20,14 @@ function allStrings(): string[] {
   return found;
 }
 
-/** The sentences about the plan have to say "plan"; everything else about it is scanned as usual. */
+/**
+ * The sentences about the plan have to say "plan"; everything else about it is scanned as usual. The one note that names
+ * the billing source (#675) has to say "billed"; it names no amount and no price.
+ */
 function withoutThePlanWord(text: string): string {
-  return text.replace(/\bplan\b/gi, "");
+  return text
+    .replace(choice.MODEL_CHOICE_BILLED_NOTE, "")
+    .replace(/\bplan\b/gi, "");
 }
 
 describe("the copy of the generic chooser", () => {
