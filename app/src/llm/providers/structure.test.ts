@@ -33,6 +33,8 @@ const PROVIDERS = [
         "the wire default of a caller that advertised no providers: what a previous-release runner can run (`DEFAULT_LLM_PROVIDERS`, #424)",
       "app/src/copy/member-copy-scan.ts":
         "the list of vendor words that copy for a member must never say, the provider's name among them",
+      "app/src/model-catalog/provider-label.ts":
+        "the display name of the maker `openrouter/...` model ids start with (`openrouter/auto`), which a member reads as the provider of a catalog entry (#675)",
       "app/src/review-settings/runner-settings.ts":
         "a comment that names PR-Agent's own key variable (the runner side of the provider, the next issue)",
       "app/src/ci/opencode-providers/derive.ts":
