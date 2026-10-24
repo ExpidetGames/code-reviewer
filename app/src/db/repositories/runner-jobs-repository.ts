@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The lease side of the job queue: handing jobs to runners, keeping their leases alive, finishing
 // and giving them back, and expiring what ran out. INSTANCE LEVEL, on purpose: runners serve the whole

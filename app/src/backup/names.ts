@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How backup files are named. The UTC time in the name is the only thing rotation reads, never the
 // file's modification time (a copy or a restore of the directory would change that).

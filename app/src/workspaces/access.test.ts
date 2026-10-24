@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The decision "may this request act in this workspace": a member with the right role does, everybody else
 // is told no in a way that does not say whether the workspace exists.

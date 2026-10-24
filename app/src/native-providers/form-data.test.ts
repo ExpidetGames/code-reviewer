@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the project settings form of a workspace on its own key is given about the catalog (#555): the catalog providers the
 // workspace holds a key for, the provider the project has now, the token cap and whether billing is on. A workspace on the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which calls of Better Auth's HTTP interface are passed on: only the sign in with email
 // and password and the three of the GitHub sign in. Everything else, including endpoints that exist

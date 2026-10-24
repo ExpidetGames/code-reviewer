@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What every adapter's key test does with an error answer of its provider: read a few kilobytes at most and
 // take the provider's own sentence out of it. Nothing here passes the sentence on; the caller cleans it

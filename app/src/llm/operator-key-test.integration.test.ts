@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "Test" button of the operator's keys in the admin portal (#427): the same one cheap call to the provider as
 // the workspace's button, with limits and counters of its own, so a workspace clicking its button cannot use up

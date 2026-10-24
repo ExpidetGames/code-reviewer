@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down compose.coolify.yml, the Compose file of the Coolify deployment, as a file: it is built
 // from the repository (nothing is pulled from the private GHCR packages), publishes no host port so

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of a payment's credit that a refund or dispute takes back (ADR 0006, 2.12 and 2.13; #497).
 //

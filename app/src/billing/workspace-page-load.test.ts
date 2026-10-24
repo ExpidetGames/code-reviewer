@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: what the page file of the billing page asks for before it renders: nothing while billing is off (the page does not
 // exist then), the data of the person's workspace while it is on, and what the payment page said on the way back.

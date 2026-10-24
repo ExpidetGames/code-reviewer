@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/billing/webhook-endpoint: makes sure the webhook endpoint of this app exists at Stripe and its signing
 // secret is stored (creates it, or adopts the one that exists), for the instance admin only. The logic is in

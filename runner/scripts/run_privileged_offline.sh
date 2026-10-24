@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Runs the privileged suite (pytest -m privileged, #197, #244) as the Dynamic runner would run: as
 # root with exactly the capabilities of compose.dynamic.yml (cap_add) and nothing else, with

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The daily fetch of the models.dev catalog (#548), end to end: fetch the body, parse it, judge the providers' addresses,
 // plan what to write, check the guard and apply the plan in one transaction. A fetch that fails, does not parse or would

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // WHETHER the notice of a refused review carries a link to the plan page (#281 built the address, #284 owns the
 // setting that turns it on): it does exactly while the instance has an operator-configured plan management page

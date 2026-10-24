@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who may change the members of a workspace, through the real service over a real SQLite file: nobody can
 // hand out a rank, an Admin cannot touch an Owner or another Admin, and the last Owner stays. Every refusal

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the operator API v1 that the code and contracts/operator-api.v1.json share. A test compares
 // these lists with the file; the file is the source of the format.

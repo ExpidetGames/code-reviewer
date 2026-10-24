@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What goes wrong between the app and a Worker in the hosted deployment, and what the app does about it (#332-T03 to T06),
 // with the real app, the real Dispatcher and the real Worker, and time passing where the real waits are minutes long

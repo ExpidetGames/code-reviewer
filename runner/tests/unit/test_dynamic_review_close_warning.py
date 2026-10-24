@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A survivor of the engine's user that cannot be ended is logged, not only seen at the next job.
 

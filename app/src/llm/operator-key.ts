@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator's own LLM keys (docs/decisions/0001-editions-setup-and-accounts.md, section 2.8, addendum; ADR 0005,
 // section 2.5): the keys an instance admin stores for the workspaces whose key mode is `managed`

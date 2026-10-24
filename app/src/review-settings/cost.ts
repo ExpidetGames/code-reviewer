@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cost guard: what a review is expected to cost with a model, and whether that is above the
 // limit the customer set. It only advises (the UI shows a warning); it never blocks a setting. The limit itself is

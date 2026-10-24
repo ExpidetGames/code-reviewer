@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The content of the Projects page: one "Needs attention" strip with the configuration hints and
 // the workspace's LLM hint, then the list of repositories. `loadProjectsPage` gathers the data from

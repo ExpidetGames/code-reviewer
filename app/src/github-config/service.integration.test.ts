@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub integration of the admin portal against the fake GitHub: the manifest flow (the state, the one
 // exchange of the code, the secrets at rest), the manual form (what is checked before anything is saved),

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A Dynamic job on a deployment whose container cannot prove its hardening (#332-T09, #479): the deploy canary of #331 is
 // the only proof a deployment has (#479), so the Dispatcher runs no probe when a job is dispatched. The canary here runs

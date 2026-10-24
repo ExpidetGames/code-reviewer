@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the request that leaves the process for a Diff job (#270): the real PR-Agent and
 LiteLLM, run through the real job entry point, send `provider.require_parameters: true` to the

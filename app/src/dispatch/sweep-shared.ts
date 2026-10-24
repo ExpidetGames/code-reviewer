@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sweep of the running server (#328): the real database, queue, dispatch service and settings from the
 // environment. The route (src/app/api/internal/dispatch-sweep) only calls this.

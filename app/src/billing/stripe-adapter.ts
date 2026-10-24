@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Stripe adapter (ADR 0006, 2.12 and 2.13; #501): the interface of `adapter.ts` over the Stripe client of #500, for
 // Stripe Managed Payments (Stripe is the seller of record and issues the buyer's invoice). It performs two actions at Stripe,

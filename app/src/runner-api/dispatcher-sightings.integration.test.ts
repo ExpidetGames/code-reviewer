@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #498 (the gate of the review of #524): the claim route notes which Dispatchers it serves, by the features a claim names.
 // A claim that names `worker_credential` is a Dispatcher's, and `vm_lifecycle` next to it says it reports its VMs.

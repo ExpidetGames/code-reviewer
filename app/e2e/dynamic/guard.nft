@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # The network guard of the privileged Dynamic e2e lane (#253). Loaded by runner/scripts/run_dynamic_e2e.sh
 # as root, in the lane's own network namespace, before anything else starts. The namespace has loopback

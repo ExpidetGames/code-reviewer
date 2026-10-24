@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The secrets of the instance, by name (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.7: the SMTP password, the credentials of the GitHub App and the operator's LLM keys). The name is the row id of the

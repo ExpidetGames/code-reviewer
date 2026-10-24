@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An HTTP request that keeps what Playwright's request API hides: the header names exactly as the
 // server wrote them (Playwright lower-cases them), as an observer sees them. The journeys that compare

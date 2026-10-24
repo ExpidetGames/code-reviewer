@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A destructive action at the bottom ("danger zone"): a Card with the destructive treatment and the
 // confirmation in an AlertDialog, which traps the focus and returns it to the opener on close. The
 // title is the card's one h2 and gives the card its accessible name (one h2 per card). The composition
-// is ours (Apache-2.0); Card and AlertDialog come from `components/ui/`.
+// is ours; Card and AlertDialog come from `components/ui/`.
 "use client";
 
 import { useId, type ReactNode } from "react";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind the routes of workspaces, members and invitations, through the real services over a
 // real SQLite file: how a request is read (same site, JSON only, a size limit, read once), what each route

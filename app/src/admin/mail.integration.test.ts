@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the mail server settings of the admin portal end to end over a real database, the real proxy and
 // the real data routes, with the fake SMTP server as the mail server: what an admin can save, read back and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pure part of the migration that turns the old managed model tiers into catalog entries (#434, ADR 0005, decision
 // C1; `20261018170000_migrate_model_tiers_to_catalog.ts`). No database, no clock, no secret. It does not import the tier

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // No test lane reaches the internet through the models.dev catalog (#548): an app under test (an e2e server, the hosted
 // sweep, the upgrade lane, a smoke container) starts the daily fetch on its own, so every environment that starts one

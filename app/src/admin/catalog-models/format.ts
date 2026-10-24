@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the catalog screens do with text and numbers (#554). Client safe. Every string from models.dev is untrusted text:
 // React escapes what is rendered, a long one is cut where it is shown, and an address becomes a link only after the check

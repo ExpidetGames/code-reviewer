@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Fixtures of the privileged suite (#197, #244): the production capability set, users and a job.
 

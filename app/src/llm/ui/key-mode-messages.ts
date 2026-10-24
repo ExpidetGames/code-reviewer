@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the key mode card (#496). One honest sentence for each choice about what is charged: no rate, no formula. The UI
 // translates a code to copy, never the other way round; no sentence contains a value.

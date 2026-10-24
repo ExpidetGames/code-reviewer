@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The body of the "Start a review" dialog of a project (#174, #655): it loads the open pull requests of

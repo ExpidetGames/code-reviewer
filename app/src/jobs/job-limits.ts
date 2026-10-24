@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The time and attempt limits of the queue. Defaults follow the project decisions; the queue takes
 // overrides so tests (and, later, the settings) can shorten them.

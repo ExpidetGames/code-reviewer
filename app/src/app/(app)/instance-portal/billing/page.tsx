@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Billing: the switch, the payment adapter and the Stripe credentials, the rates and numbers, and the manual credit (#504,
 // ADR 0006). Instance admin only. Opening this page changes nothing and calls nobody; billing stays off until the admin

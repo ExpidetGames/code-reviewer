@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The reader of the hosted lane's container records (app/e2e/helpers/hosted-containers.ts, #380) and the order the
 // `docker` stand-in writes them in. A journey polls the container list while a `docker run` is still writing its

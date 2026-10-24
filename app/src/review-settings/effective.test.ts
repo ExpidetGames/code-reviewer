@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the layers (built-in values, global defaults, project overrides) become the settings
 // of one review, and what the switches for triggers and commands mean.

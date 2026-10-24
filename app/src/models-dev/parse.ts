@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads a models.dev body (#548, part A). Everything in it is untrusted data (AGENTS.md): the body is parsed by a strict
 // but tolerant schema (a field it does not know is ignored, a model that does not fit is skipped and counted, never half

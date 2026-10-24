@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195-T10: the frozen neutral findings schema of Dynamic Review (contracts/dynamic-review) is version
 // one, bounded, authority-free and validated against its examples. The same file is checked from the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The lookup that lets the key service and the claim know a catalog provider by its slug (#555), next to the two providers of
 // the registry. Pure: the supported file is data.

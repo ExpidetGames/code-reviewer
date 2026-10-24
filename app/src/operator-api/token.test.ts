@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the token of the operator API: when it counts as usable, that the API is off otherwise,
 // and that the comparison works in constant time for any lengths and characters.

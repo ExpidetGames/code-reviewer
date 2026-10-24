@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What happens when the app server starts: open the database (creating the file if needed), bring
 // the schema to the latest version, and keep the connection for the rest of the process.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The frame of every signed in page. The frame itself is static; the user menu and the workspace switcher
 // need the session, so they stream in behind a <Suspense> boundary (Cache Components), and so does the page,

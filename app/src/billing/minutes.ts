@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Billable minutes (ADR 0006, 2.11; #493): the pure rules. A run's minutes are whole started minutes of the life of its
 // VM, from the moment the Dispatcher created it to its teardown, with no minimum charge beyond "a VM that exists costs

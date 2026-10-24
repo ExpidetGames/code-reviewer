@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The call trace of a run (#541) as two plain tables: the model calls with their tokens, cache use, output,
 // cost and why each ended, and the tool calls with the size of the result and whether the call repeated an

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind `GET /api/repositories/:repositoryId/pull-requests` (the pull requests a
 // person can pick) and `POST /api/repositories/:repositoryId/reviews` (start a command for one of

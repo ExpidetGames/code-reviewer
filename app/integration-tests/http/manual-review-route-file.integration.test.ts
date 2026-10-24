@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route files `GET /api/w/:workspace/repositories/:repositoryId/pull-requests` and
 // `POST /api/w/:workspace/repositories/:repositoryId/reviews` with the wiring the running server uses: the

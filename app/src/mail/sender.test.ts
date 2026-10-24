@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sender of an instance without a mail server: it says so, and a send is refused with a
 // stable code instead of throwing.

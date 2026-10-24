@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What other modules want to know about a project's review settings. #195 implements this hook to
 // cancel the project's waiting reviews when the review kind changes; this module has no idea what a

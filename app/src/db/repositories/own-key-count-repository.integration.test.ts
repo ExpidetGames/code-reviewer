@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How many workspaces hold a stored own LLM key of any provider: the number the instance admin reads before switching
 // billing on (#504). It counts workspaces, not keys, and returns a number only.

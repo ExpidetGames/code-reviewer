@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who owns a GitHub identity and who has an email address, read from the tables Better Auth keeps
 // (`users`, `accounts`). The sign in decision (decide.ts) asks these two questions and nothing else.

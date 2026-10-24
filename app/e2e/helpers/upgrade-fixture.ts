@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The installation that the journey of the update (e2e/upgrade/) starts from: five people who signed in with
 // GitHub before accounts existed, one connection to a GitHub installation with two repositories (one with an

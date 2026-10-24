@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes of the binding of an installation to a workspace. A page translates a code to copy
 // (ui/messages.ts), never the other way round, and no code carries a secret, a state, a token or the name of

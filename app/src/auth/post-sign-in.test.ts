@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down where the login form sends a person after a sign in: the page that says what is missing, or
 // the start page.

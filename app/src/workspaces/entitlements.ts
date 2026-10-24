@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What an operator allows a workspace: the key it reviews with, the limits per period and whether its
 // reviews are suspended (src/workspaces/README.md, "Entitlements"). The types and the one resolver that

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The picture of the backups that the status route serves: schedule, target, last scheduled run and
 // the newest backup found in the directory. Reads the directory each time, so it stays true after a

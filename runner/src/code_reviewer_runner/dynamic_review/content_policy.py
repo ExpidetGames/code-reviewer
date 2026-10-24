@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """OpenCode v1.19.0 discovery deny-list, applied before blob hydration/reads.
 
 Both config graphs, external plugins and compatible skills are covered. Source links and

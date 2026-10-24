@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The content of the Runs page: the filter toolbar, then the list. `loadRunsPage` gathers the data
 // from the services (passed in, so a test uses real ones against a test database), `RunsPageContent`

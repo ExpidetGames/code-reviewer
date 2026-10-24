@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195 finding 1: the operator owns the deadline after which a job no capable runner claims is
 // cancelled. A missing or unusable value must keep the default, so a typo never disables the bound.

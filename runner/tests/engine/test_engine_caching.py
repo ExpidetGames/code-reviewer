@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Prompt caching of a Diff job (#539): the real PR-Agent and LiteLLM, run through the real job
 entry point, against the fake LLM with the cache rules of the docs.

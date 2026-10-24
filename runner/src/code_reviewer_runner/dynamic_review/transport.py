@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Credential-private Git smart HTTP v0, and an offline file:// upload-pack seam.
 
 No credential subprocess, token URL, inherited proxy/config or implicit lazy fetch. The

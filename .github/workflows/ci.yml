@@ -631,10 +631,10 @@ jobs:
       - name: Check the SPDX headers
         run: pnpm spdx:check
 
-  # The container images (see publish-images.yml for how they reach GHCR). A pull request builds
-  # each image, starts it and checks what a unit test cannot (docker/smoke/*.sh). Nothing is
-  # pushed here: these jobs have no login and only the read-only token of the workflow. Pushes to
-  # development and main build the images in the publish workflow instead.
+  # The container images. A pull request builds each image, starts it and checks what a unit test
+  # cannot (docker/smoke/*.sh). Nothing is pushed anywhere: the source is visible but not licensed
+  # (LICENSE), so no image is published, and these jobs have no login and only the read-only token
+  # of the workflow. The hosted deployment builds what it runs from the repository.
   image-app:
     name: "Image: app build & smoke test"
     needs: changes

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The cost policy a claim hands a native job (#553): whose key it runs on, the price book the
 ledger prices from, and the token cap of an own key.

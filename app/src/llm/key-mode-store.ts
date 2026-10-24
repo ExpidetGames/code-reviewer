@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key mode a workspace chose for its reviews (#496): `managed` (our models) or `own` (its own provider key). One setting of the
 // workspace (`llm_key_mode` in `app_settings`, next to its review defaults), written by an Owner or an Admin through

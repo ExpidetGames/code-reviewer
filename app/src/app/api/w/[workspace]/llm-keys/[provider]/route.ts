@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT|DELETE /api/w/:workspace/llm-keys/:provider: the LLM key of the workspace for one provider (#426; ADR
 // 0005, section 2.5). Every member reads whether a key

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sync lock of the large topology (PG-12): on Postgres two app instances serialize on the same
 // installation through an advisory lock, so a reconciliation that runs at the same moment cannot

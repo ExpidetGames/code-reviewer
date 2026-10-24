@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The real pinned stock OpenCode as the dedicated user, behind the network rules (#197-T04/T09).
 

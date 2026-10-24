@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/repositories/:repositoryId/pull-requests: the open pull requests of a project, for
 // the picker of the start button. Every member may start a review, so every member may see the picker.

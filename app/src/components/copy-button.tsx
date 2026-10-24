@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The small "Copy" control of the admin's GitHub App addresses (#182 lead note, #185). It copies

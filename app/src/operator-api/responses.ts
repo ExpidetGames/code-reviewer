@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Every answer of the operator API is built here: JSON, `Cache-Control: no-store`, the version in the body, and
 // errors as `{ version, error: <code> }` (plus `field` for a refused entitlement field). There is no message

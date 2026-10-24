@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who may use the manual start: the access proxy (real Better Auth, real database) in
 // front of the handlers of `GET /api/repositories/:id/pull-requests` and

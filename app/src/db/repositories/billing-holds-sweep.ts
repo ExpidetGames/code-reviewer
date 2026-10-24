@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The holds that nobody released (#591; src/billing/README.md): a `reservation` of a job that has ended, whose settlement
 // nothing is going to write, and that has no `release`. Billing writes the release in the transaction that ends the job, so

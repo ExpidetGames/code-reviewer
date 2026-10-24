@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm setup-code` as the real program under plain Node, the way the script in package.json starts it
 // (#321): its refusals reach the right stream with the right exit code. Nothing here reaches a database.

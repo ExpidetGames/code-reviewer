@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the key mode a workspace chooses (#496): its route and what the LLM access page reads. Billing
 // on is the one condition: with billing off nothing here is asked.

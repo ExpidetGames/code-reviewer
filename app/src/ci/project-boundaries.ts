@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The projects of the repository (app, runner, dispatcher) never import each other's source (#318):
 // what they share is the contracts (JSON schemas, and the types generated from them into each project)

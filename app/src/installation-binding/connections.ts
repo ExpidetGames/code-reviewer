@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What it means to link an installation to a workspace, and to end that: the one place that creates, brings
 // back and disconnects a connection for the binding (docs/decisions/0001-editions-setup-and-accounts.md, section

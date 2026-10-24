@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Test helper, not a test: the fake App of `fakes/dispatcher-app/` (#318) as a process on loopback.
 

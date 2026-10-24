@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the operator API says about entitlements: named fields only. A stored row also carries who saved it, which
 // never leaves the app (a user id is personal data); the time of the last write does. The shapes are the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Makes the queues of the running server tell the check run reconciler about every change of a job (#405), after
 // the change was made: the way GitHub follows a job without a single caller having to know about it. The runner side

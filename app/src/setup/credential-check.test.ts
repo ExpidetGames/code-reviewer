@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the last check before the admin is created: the address and the password must be ones
 // the sign in of Better Auth accepts, and the hash must verify. Anything else, including a verifier

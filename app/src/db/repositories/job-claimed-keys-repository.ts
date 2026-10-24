@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the LLM keys that were handed to runners with the claim of a job (the table `job_claimed_keys`,
 // src/runner-api/claimed-keys.ts). Instance level, like the lease side of the queue: runners serve the whole

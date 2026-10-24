@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The build of this app as the version call reports it (`VersionResponse.appVersion`, for logs): the
 // `version` of app/package.json, which a bundle carries with it.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A project is a repository the instance reviews. The row is created the first time a repository is
 // activated and kept from then on: deactivating sets `active` to 0 and leaves the row (and its

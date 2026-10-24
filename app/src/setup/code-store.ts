@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The setup code and everything that protects it, kept in the memory of one process (a server; a serverless
 // deployment keeps it in the database, database-code-store.ts, #321)

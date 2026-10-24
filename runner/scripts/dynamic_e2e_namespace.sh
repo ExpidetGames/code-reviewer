@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # The root part of the privileged Dynamic e2e lane (#253), run by run_dynamic_e2e.sh inside
 # `unshare --net --mount --pid --fork --mount-proc`. Not meant to be started by hand. It is PID 1 of the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sweep's repair work, done by the requests that already touch the database (#395). The cron sweep runs
 // every two hours only; a webhook delivery, a Worker's heartbeat or its result is a moment at which the database

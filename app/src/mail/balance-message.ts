@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The text of the mails that tell an Owner or an Admin that the prepaid balance of their workspace is low or empty (ADR 0006, D9;
 // #506). Plain text and a small HTML alternative. A mail says what happened, the balance of THAT workspace and where to add

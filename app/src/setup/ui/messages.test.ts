@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the copy of the setup pages: every stable code of the server has a sentence, the
 // sentences name what to do (restart the app) where only that helps, and none of them can contain

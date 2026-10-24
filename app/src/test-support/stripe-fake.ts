@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake Stripe API (fakes/stripe) for the tests of the billing module: started on a free loopback port and closed after
 // the test, with a client of the app pointed at it. See fakes/README.md.

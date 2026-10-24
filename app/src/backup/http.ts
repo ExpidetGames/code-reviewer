@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind GET /api/backup/status: the picture of the backups for the people who run the
 // instance (schedule, target, last scheduled run, newest backup). It serves no backup file, no path

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one way a public JSON route reads its request: where the request comes from, then its content type,
 // then the body, read exactly once with a hard size limit, then parsed once. Everything the route does

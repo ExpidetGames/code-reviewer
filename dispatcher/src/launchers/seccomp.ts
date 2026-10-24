@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An optional rule for the Worker container (#325): deny the `socket` call for chosen address
 // families through a seccomp profile derived from Docker's default one. It is off unless a launcher

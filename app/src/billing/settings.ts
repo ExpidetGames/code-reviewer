@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance setting `billing_settings` (ADR 0006): the switch and the rates (src/billing/rates.ts). Pure: no database.
 // Read leniently: a stored value of an older shape (it also carried an environment, a client token and grace days) has

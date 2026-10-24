@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: a claim that is refused because the balance is empty tells the workspace once (the decision is made in the claim's
 // transaction, the mail goes out after it). On SQLite and, when TEST_DATABASE_URL is set, on Postgres. Made-up rates and the default

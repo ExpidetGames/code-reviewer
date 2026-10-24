@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the GitHub App webhook route does with a delivery, through the real handler with
 // the real GitHub App provider, a real SQLite file and the fake GitHub API: refusals happen before

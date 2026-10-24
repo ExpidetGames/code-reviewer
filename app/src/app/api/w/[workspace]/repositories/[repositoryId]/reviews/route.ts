@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/repositories/:repositoryId/reviews: starts a command (review, improve, describe,
 // ask) for an open pull request of a project. Every member may start a review. Protected like every

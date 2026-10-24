@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The content of the Members page (#177): one card for the members with what the viewer may do to them, and
 // (for an Admin or an Owner) one card for the invitations that holds the invite form, the waiting list and

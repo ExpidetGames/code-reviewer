@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Linking a GitHub identity to the signed-in account (docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.5 and 2.6), from the account's own page.

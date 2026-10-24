@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who becomes a member of the default workspace when an existing installation is imported (docs/decisions/
 // 0001-editions-setup-and-accounts.md, section 2.11): the users who PASS THE CURRENT ALLOW LIST at import time,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: a correction an operator writes by hand can take a balance below the threshold, and a credit can lift it out again. Both go
 // through the same journal write as everything else, so the decision is made there; the mail is sent after the write, by the hook

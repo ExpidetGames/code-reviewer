@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What `build_native_job` hands to the ledger, the proxy and the engine (#578), pinned one value at
 a time: each of these is a number or a switch that decides what a run may spend, and a mutation of

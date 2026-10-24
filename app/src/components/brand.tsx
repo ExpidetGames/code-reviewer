@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The brand of the app as the design board draws it (#633): the logo mark (a check between two code
 // brackets in a rounded tile, the tile in fg and the strokes in the page colour) next to the name in

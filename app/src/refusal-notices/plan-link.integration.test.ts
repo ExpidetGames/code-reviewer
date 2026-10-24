@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the notice of a refused review sends the Owners and Admins (#284 turns the link on): to the plan page of the
 // workspace in THIS app when the instance has an operator-configured plan management page, and nowhere otherwise. The

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Mail: the mail server (SMTP) and the test mail. Instance admin only. The cards and the danger zone
 // (#184); the page itself just stacks them.

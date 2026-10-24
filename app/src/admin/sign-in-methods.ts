@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The ways to sign in (docs/decisions/0001-editions-setup-and-accounts.md, section 2.3): email with
 // password and GitHub can each be switched off, but at least one stays on. GitHub can only be on while

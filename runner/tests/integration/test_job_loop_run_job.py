@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the job loop together with the real job entry point (`code_reviewer_runner.runner`):
 the loop starts it as a process, the runner builds its result around PR-Agent's code with

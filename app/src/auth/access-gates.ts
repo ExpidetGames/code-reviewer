@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two conditions, besides a valid session, that an email and password account has to meet before it
 // can use the app (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.5 and 2.6). Both are

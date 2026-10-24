@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The requests to link an installation seen from outside every workspace, for the instance admin who decides
 // them (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.3 and 2.9). INSTANCE LEVEL, on purpose:

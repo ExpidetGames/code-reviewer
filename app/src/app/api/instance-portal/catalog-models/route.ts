@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/admin/catalog-models (#549): the models of the models.dev catalog with their price status, the admin's decisions and whether the managed key may use them.
 // For the instance admin only. Not signed in is 401, signed in but not an admin is a 404 (src/admin/access.ts); the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which status changes a job may make. Every pair of statuses is checked, so a new status
 // or a new edge cannot slip in without this table changing with it.

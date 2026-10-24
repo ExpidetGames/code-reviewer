@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The `MailSender` of an instance with a mail server: reads the settings and the password from the store on
 // every call (so adding, changing or removing the mail server in the admin portal takes effect on the next

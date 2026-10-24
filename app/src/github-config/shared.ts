@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub integration on the running server: the credential store and the portal's service over the
 // server's database, with the master key from the environment. Server code only. Nothing is cached: every

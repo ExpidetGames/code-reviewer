@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of the Anthropic (Claude API, direct) adapter that is data and pure rules, safe for a client component to
 // import. The models, their prices and flags are `models.ts`; everything here is derived from that list.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /probe (#331): forces the capability probe and answers its report (`ProbeReport`,
 // contracts/probe-verdict.v1.json). For a deploy step that must block a release whose Dynamic canary fails: 200

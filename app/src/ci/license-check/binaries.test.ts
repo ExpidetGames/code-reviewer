@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #202-T06: the provenance and license audit of the prebuilt binaries that the Dynamic runner image
 // ships (OpenCode, ripgrep), with made-up pins, documents and snapshots. The real files are covered

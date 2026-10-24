@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The workspaces on the running server: the real database, the mail sender of the instance, the configured
 // public address of the app and the shared counters. Pages and routes ask for the services here; tests build

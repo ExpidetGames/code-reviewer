@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The text of the mail that carries a verification link. Plain text and a small HTML alternative. The
 // link is the only secret in it; the message never contains a password. The address of the link is built

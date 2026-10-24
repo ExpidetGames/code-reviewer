@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scheduled check of the journal (#626; go-live item of #510, epic #489). `verify()` of the journal repository compares, for one
 // workspace, the cached balance and the cached reserved money with what the journal adds up to, and counts the holds of jobs that

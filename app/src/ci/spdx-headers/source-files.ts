@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The source files of the repository: what git tracks or would track (not ignored), filtered by the
 // rules. Shared by the check (spdx-headers.test.ts) and the command that writes the headers.

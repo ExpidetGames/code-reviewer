@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Checks the body that starts a review by hand. The values come from the browser, so nothing here
 // trusts a type: every field is looked at as `unknown`. Since #203 only `/review` exists; it takes

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The addresses of a workspace (docs/decisions/0001-editions-setup-and-accounts.md, section 2.6): every
 // workspace page lives below `/w/<slug>` and every data route of it below `/api/w/<slug>`. The workspace is

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // "Check payment" (ADR 0006, 2.13; #502): the user-triggered repair of a lost webhook and the reliable success page. The person
 // asks, the adapter asks the payment provider what became of THIS top-up (the one outbound call of the feature, made in a user's

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the access proxy treats the files of the admin portal: the instance admin's request is
 // rewritten to them with a mark only this proxy knows, a request for them by their own address is marked

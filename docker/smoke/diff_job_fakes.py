@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Runs one Diff job through the real PR-Agent of an image, against the engine suite's fakes (#249).
 

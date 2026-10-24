@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A thin typed `fetch` client of the Stripe API (ADR 0006, 2.13; #500): the dozen endpoints the billing module uses, our
 // own schemas for the fields we read (stripe-schemas.ts), no SDK (few endpoints, easier to fake, no dependency; the same

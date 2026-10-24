@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether the database has every migration this version of the app ships. A serverless app never
 // migrates (that is `pnpm migrate`, run at deployment time, see migrate-cli.ts), so it needs a way to

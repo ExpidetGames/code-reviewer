@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down, in the built server, that the routes which carry their own authentication stay out of
 // the login protection: a request without a session reaches them and is answered by the route, not

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A labelled loading placeholder for a `<Suspense>` fallback (rulebook R51). The bare shadcn
 // `Skeleton` is a plain `div`; this wrapper gives it a name, so assistive technology announces what

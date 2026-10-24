@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/llm-catalog/:provider/models (#555): the listed models of a catalog provider, for the model picker of a
 // project on the workspace's own key. Protected like every workspace route: the workspace is the one in the address, for a member

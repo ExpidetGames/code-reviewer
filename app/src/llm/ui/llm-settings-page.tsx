@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "LLM access" sub-page content (#178): the settings frame and the key card. The page file only
 // wires the real key service; the form itself is `LlmAccessSection` (one form, "Save key" and

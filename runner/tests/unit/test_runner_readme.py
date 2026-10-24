@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down that the error codes documented in the runner README are exactly the codes the runner
 can report, so the documentation cannot drift from the single definition in `ErrorCode`."""

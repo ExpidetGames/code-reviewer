@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "how it works" text of a screen, behind a small disclosure: out of the way until it is asked
-// for, and reachable with Tab. shadcn has no equivalent; this is a thin Apache-2.0 wrapper over the
+// for, and reachable with Tab. shadcn has no equivalent; this is a thin wrapper over the
 // copied Collapsible, like the `InfoHint` over the Tooltip. The content stays in the DOM (forceMount)
 // and is hidden with the native `hidden` attribute, so a screen reader skips it while it is closed.
 // The look is the design board's disclosure (#633): a bordered box on the page ground, the question as

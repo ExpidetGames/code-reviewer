@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The backup job: one backup, then the rotation. This is what the scheduler in the app and the
 // command line (cli.ts, for a Coolify scheduled task or a manual run) both call.

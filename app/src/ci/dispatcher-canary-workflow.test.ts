@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the deploy canary workflow (.github/workflows/dispatcher-canary.yml, #331): it calls `POST /probe` of a
 // deployed Dispatcher and fails when the Dynamic canary does not pass, so a release pipeline can gate on it. It never

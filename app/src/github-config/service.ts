@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub integration of the admin portal (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.4): what the portal shows, and the three ways to change it.

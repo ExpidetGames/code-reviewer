@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The review verdict the app submits after a successful review (#405): REQUEST_CHANGES for blocking findings,
 // APPROVE otherwise, decided from the project's setting and the findings the runner reported. A Dynamic review has

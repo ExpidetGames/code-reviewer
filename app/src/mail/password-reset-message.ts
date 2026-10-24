@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The text of the mail that carries a password reset link. Plain text and a small HTML alternative. The link
 // is the only secret in it. It is built from the configured public address of the app, never from a request

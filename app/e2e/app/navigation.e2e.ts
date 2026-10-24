@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the frame around the signed in app in a real browser: the sidebar places load one after
 // the other inside the same frame and signing out lands on the login page, on a desktop window and on

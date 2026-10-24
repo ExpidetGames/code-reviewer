@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts a backup back as the live database. The app must be stopped: this replaces the file the app
 // has open. A database that another process still has open is refused (step 3).

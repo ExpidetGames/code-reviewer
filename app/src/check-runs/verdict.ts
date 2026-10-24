@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The review verdict the app submits after a successful review (#405): what it is, and the one line it says. Pure:
 // the project's setting and the findings the runner reported go in, a decision comes out. Never asks GitHub.

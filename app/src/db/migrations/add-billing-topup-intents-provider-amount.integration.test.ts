@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: the amount the buyer was charged (gross, in the provider's unit) is pinned on the top-up intent when the payment is
 // credited, so a refund or dispute event that names only its own amount is related to the whole payment. The column is new

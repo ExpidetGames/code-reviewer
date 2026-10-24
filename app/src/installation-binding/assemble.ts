@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts the binding together over one database and one set of collaborators. The running server (`shared.ts`)
 // and the integration tests (`src/test-support/binding-harness.ts`) both build it here, so a test runs the code

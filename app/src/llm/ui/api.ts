@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the settings page makes to the LLM key routes of its workspace (src/llm/http.ts). Browser side.
 // The key travels in the body of a save or a test and in nothing else: not in an address, not in a header the

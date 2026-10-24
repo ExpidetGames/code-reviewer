@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 # Experimental layer only; the binary is downloaded/checksummed before the offline test.
 ARG RUNNER_IMAGE=code-reviewer-runner:compose
 FROM ${RUNNER_IMAGE}

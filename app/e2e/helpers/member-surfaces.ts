@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Every surface a member of a workspace can read, collected the two ways a person meets them (#435): the routes read with
 // the person's session (the page as the server renders it, the same page as the Next.js payload a navigation fetches,

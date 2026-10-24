@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a person does once at an app of the hosted lane (#332) and what the journeys do to it all the time: sign in
 // as the instance admin (the lane's apps have no GitHub sign-in set up: the database is Postgres), install the GitHub

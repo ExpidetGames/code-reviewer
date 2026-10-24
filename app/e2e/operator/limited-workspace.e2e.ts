@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The whole chain an operator relies on, on the real app (#285, the last issue of #268): a workspace with limits on an
 // instance whose operator API is on runs, is refused, is told so on its pull request, is reset from outside, can be

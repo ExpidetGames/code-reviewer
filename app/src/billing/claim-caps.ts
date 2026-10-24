@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The monthly total limit and the hidden hourly brake at the claim (ADR 0006, 2.9; D10, D12; #499). They run inside the claim
 // transaction, while billing is on, after the entitlements and before the balance (`claim-billing.ts`). They act at the claim

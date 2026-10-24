@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the encrypted secret store against a real SQLite file: a value goes in encrypted and
 // comes back exactly, a copy of the stored ciphertext under another name is worthless, a value that

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The text files of the repository that git tracks or would track (not ignored), for the scans of the whole tree.
 import { execFileSync } from "node:child_process";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How the Messages API caches a prompt, for the fake LLM (#539). The Python twin is `anthropic_cache.py`; both keep
 // the rules of the prompt caching page of the Claude docs:

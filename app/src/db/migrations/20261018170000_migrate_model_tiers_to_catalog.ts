@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #434 (epic #420, ADR 0005, decision C1): the managed model tiers
 // become catalog entries, so that nothing changes for a workspace on the operator's key when the tiers are removed.

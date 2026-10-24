@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Which Claude models a Diff job on the Anthropic provider sends `temperature` to (#511).
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `GET /api/w/:workspace/billing/invoices` (#659), with its collaborators passed in so the route file only
 // wires the real ones in (`shared.ts`) and tests wire the real service over a test database. The order is the contract; each

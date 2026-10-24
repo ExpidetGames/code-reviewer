@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the setup_codes table: the first-run setup code of a serverless deployment, shared by every
 // instance (src/setup/database-code-store.ts). Instance level, and at most one row. Every change that two

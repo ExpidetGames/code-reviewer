@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the GitHub webhook payload subset that Code Reviewer reads: every recorded payload in
 // fakes/fixtures/github-webhooks has all the fields the parser lists as read (installation id,

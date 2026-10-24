@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the admin is told before billing is switched on (ADR 0006, 2.14; #504): every workspace is charged from a prepaid
 // balance, the workspaces choose their key mode, one without balance cannot start a review, the run quotas are not applied and

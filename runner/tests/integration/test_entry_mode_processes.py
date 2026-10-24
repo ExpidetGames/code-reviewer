@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The installed console scripts of the image as real processes (#324): `code-reviewer-runner`
 with each entry mode and `worker-reap`. `worker-once` runs against the fake App of

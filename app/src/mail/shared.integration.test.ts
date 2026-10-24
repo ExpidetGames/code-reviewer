@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sender of the running server: the SMTP_* variables of the environment have no effect, and a
 // mail server saved in the portal is used from the next call on.

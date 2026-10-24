@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dispatcher reports the VM it created to the App (#493): right after the Launcher created it, with the per-job
 // credential it holds during the launch, best effort with a bounded retry, and only to an App that lists the feature

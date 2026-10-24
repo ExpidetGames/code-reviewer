@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The registry of providers: a validated, closed list of adapters and the lookups every caller uses. Built once
 // at module load from the adapters named in `index.ts` (descriptors, client-safe) and `server.ts` (adapters with

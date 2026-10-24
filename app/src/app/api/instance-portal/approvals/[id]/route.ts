@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/approvals/:id { "decision": "approve" | "deny" }: the instance admin decides a request to link
 // an installation. Not signed in is 401, signed in but not an admin is a 404 (src/admin/access.ts); the proxy has

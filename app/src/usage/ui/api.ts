@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The call the plan page makes to the app's own route while it polls: `GET /api/w/:workspace/plan`
 // (src/usage/http.ts). The workspace is the one of the page that makes the call. Browser side; no secrets.

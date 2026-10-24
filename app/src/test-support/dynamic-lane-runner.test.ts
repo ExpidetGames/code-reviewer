@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the privileged Dynamic e2e lane starts the runner (#253): as root with exactly the
 // capabilities and no-new-privileges of compose.dynamic.yml, with the environment of that file, and with

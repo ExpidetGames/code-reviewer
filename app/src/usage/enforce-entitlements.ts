@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether a claimed job may run, given what an operator allows the workspace (src/workspaces/entitlements.ts)
 // and what it used in the period (src/usage/README.md, "Limits"). Pure: the usage is read through a small

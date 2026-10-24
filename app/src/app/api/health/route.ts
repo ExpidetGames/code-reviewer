@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Liveness for the container health check and the load balancer. Public (see src/auth/access.ts).
 import { connection } from "next/server";

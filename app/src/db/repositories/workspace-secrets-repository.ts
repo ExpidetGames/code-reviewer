@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the encrypted credentials of ONE workspace (the table `workspace_secrets`; the factory takes the
 // workspace id, see ../workspace-scope.ts). The module only moves rows: the encryption, the additional

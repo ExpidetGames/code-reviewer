@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Trigger" section of the review settings form (#174, #656): when the reviewer starts: the automatic triggers (a

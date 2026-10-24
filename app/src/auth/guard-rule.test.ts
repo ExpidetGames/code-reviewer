@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the rule that the proxy is not the only guard: a Server Function is a POST to the page
 // it lives on, so the proxy may let it through (a public page) or stop seeing it (a changed

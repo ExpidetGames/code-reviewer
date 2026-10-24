@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The notice of a refused review on the running server (#281): the service over the real database and registry,
 // and the hook the runner queue calls for every job its claim refused. The post runs after the response of the claim

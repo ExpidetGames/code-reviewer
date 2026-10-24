@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What ONE workspace has been told about its balance (table `billing_notifications`; the factory takes the workspace id, see
 // ../workspace-scope.ts; ADR 0006, D9; #506; src/billing/README.md, "Balance notifications"). One row for each kind, made by the

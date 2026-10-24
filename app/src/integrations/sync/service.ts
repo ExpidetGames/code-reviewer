@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Keeps the `integrations` and `repositories` tables in line with the platform: which connections
 // (GitHub App installations) exist and which repositories each one gives access to.

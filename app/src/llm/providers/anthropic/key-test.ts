@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" call to the Claude API: `GET /v1/models` lists the models the key can use and costs nothing (no
 // tokens). The rules are the ones of every adapter (src/llm/key-test.ts has the limits):

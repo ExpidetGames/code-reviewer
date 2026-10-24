@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The invitations page content (#179): while invitations wait, one compact list with one accessible
 // name (the workspace, its role, the expiry and Accept); while none do, exactly one empty state. The

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Prompt caching of a Diff job (#539): the typed settings the runner gives PR-Agent.
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin portal's data route, called the way a script of an operator would: sign in with email and
 // password, then change a setting with the session cookie. Used by a journey to put an app into a known

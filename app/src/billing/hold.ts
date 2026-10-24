@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a hold is made for (ADR 0006, 2.8 and D6; #498): the longest a job can occupy a VM, and the most its model cost can
 // be bounded to. Constants because the App cannot read the settings of a Dispatcher or of a runner; each is the default of

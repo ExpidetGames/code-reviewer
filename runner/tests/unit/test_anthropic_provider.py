@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The registry entry of the Anthropic provider (#511): what the runner needs to talk to the Claude
 API in a Diff run (LiteLLM) and what it advertises."""

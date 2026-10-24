@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the app can tell about its schema without changing it (#319): whether every migration it ships
 // has been applied. It is read-only: nothing is created, nothing is migrated, nothing ends the process.

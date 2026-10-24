@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The fetch of the catalog on the admin page (#554): when it last worked and how the last attempt ended (the stable code as

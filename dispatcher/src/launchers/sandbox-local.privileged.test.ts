@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The privileged lane of the Sandbox-Launcher (#329-T09, T10): the local mode of the Sandbox double with a REAL Docker
 // daemon and the REAL Worker image, against the fake App. It needs a daemon the user may use and an image built from

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the product name (#635): no page, text or mail of the app says the old name "Code Reviewer"
 // any more, it says "code-review.com". The scan reads the real source files of the app (every string,

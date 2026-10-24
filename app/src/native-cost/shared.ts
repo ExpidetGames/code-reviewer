@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the cost policy of a native job on the running server (#553): the price service and the instance settings on
 // the server's database. The claim imports this module and never the price module, which only the admin portal may use.

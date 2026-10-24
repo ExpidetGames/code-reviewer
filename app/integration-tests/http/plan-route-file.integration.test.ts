@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route file `GET /api/w/:workspace/plan` (#282) with the wiring the running server uses: the
 // database opened at start, the plan view and the workspace access. Only the session lookup and `connection()` are

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/runners/v1/jobs/:id/vm: a Dispatcher reports the VM it created for a claim (#493).
 import { withRunnerApi } from "../../../../../../../runner-api/shared.ts";

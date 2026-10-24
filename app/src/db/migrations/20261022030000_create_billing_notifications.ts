@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a workspace has been told about its balance (ADR 0006, D9; #506): one row for each workspace and kind, `low` (the
 // balance fell below the threshold the admin set) and `empty` (it reached zero or went below). `state` is `armed` while the

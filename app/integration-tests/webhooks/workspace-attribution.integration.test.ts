@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A webhook delivery is handled in the workspace its installation is linked to: the handler looks the
 // integration up by the installation id (in any workspace) and asks for the collaborators of the

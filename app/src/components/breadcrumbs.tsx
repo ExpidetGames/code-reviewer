@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The breadcrumb trail of a page below an area root (#179): a thin wrapper over the copied shadcn
 // breadcrumb so every screen marks its location the same way. The trail starts at the area root,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/invitations/accept  { "token": "..." } or { "invitationId": "..." }: accepts an invitation as
 // the signed in person. The token is the link; an id comes from the list of the invitations waiting for a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one sync service of the running server. The start-up sync, the webhook route and the button all
 // use it. It is kept on `globalThis` for the same reason as the database connection and the lock:

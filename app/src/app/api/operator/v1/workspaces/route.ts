@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/operator/v1/workspaces: a page of workspaces (id, slug, creation time). Public for the session guard:
 // the bearer token is the credential, and without `OPERATOR_API_TOKEN` the route does not exist. Every method is

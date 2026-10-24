@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where an invitation link lands. Public: whoever holds the link opens it, signed in or not. The link is the
 // credential of the page and the page only shows what the invitation is about (the workspace, the role, the

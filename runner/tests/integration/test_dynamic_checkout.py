@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Trusted preparation against real local Git objects, never GitHub or a model."""
 
 import os

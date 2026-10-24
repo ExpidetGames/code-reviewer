@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: the settlement of a finished job is where most crossings happen. The charge is written and the decision that the workspace is
 // to be told is made in the same transaction; a mail server that is down changes neither. On SQLite and, when TEST_DATABASE_URL is set,

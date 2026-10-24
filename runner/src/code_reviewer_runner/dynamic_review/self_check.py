@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """The startup self-check that decides whether this runner advertises `opencode` (#202).
 
 It runs once, in the root supervisor, after the one-time network setup (`static_isolation.py`) and

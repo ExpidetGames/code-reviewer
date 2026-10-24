@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How the pages call the app's own JSON routes (activate a project, save settings, run the sync).
 // One function so every call sends the same headers and every failure ends up as a stable code the

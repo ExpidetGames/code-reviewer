@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The optional monthly spending limit (ADR 0006, 2.9; #499, #505): an Owner or an Admin types a limit in US dollars, an empty field

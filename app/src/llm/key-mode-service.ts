@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key mode of a workspace for the code that serves a person (ADR 0006, P3, D4; #496): who may read and set it, what is accepted,
 // and the audit line of a change. Every member reads it; only an Owner and an Admin set it (`manage_llm_key`, the action of the

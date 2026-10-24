@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the data migration that removes /ask, /improve and /describe (#203) against a real
 // SQLite file: it cancels waiting removed commands with `command_removed` while keeping history and

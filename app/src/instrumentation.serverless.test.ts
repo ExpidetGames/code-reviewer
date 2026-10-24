@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the start of a serverless instance (#319): the settings are checked, and none of the work
 // of a long-lived server happens (migrations, the backup of an old database, the legacy import, the

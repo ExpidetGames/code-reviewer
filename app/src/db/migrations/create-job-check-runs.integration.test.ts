@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #405 (T36): the job check runs migration is expand only: it adds an empty table to a database made by the previous
 // release's migrations and changes no existing row, and the table holds the key and the checks the repository

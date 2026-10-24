@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: `GET` and `PUT /api/w/:workspace/billing/monthly-limit` as the app wires them (guard, access, body, service), over a real
 // database and the real matrix of roles. An Owner and an Admin set the workspace's monthly total limit (`manage_billing`); a

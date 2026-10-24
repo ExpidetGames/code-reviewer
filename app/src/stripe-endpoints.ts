@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one rule for the address the app sends its Stripe API key to (ADR 0006; #505). It is Stripe's own address: no setting of an
 // operator, no variable they need. The test stack points the app at the fake Stripe (`fakes/stripe`) through STRIPE_API_BASE_URL, and

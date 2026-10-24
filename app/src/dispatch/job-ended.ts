@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the app does the moment a job ends or is given back (#395), so that the normal flow never waits for the
 // cron sweep:

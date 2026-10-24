@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #434: the migration that turns the old managed model tiers into catalog entries, on SQLite and on Postgres. Every case
 // builds the database the previous release left (all migrations before this one), writes the old data into it as that

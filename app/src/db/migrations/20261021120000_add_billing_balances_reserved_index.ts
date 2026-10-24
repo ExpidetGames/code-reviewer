@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #591: the sweep of stranded holds (src/db/repositories/billing-holds-sweep.ts) asks which workspaces have money reserved,
 // every minute of a hosted deployment. A partial index of the balance rows with `reserved_micro_usd > 0` answers that from the

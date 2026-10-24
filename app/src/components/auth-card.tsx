@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The frame of the public auth pages (#170): a full-height centered column with one card at 34rem
 // and the action-named h1. The card, its surface and the type scale come from the component kit;

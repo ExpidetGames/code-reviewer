@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the structure of the nightly workflow (.github/workflows/nightly.yml): it runs the engine
 // suite on a schedule through the shared engine workflow, read-only and without secrets. It reads the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scan that keeps text from models.dev out of every place a browser would read it as markup or code (#554): the sinks
 // it knows, and the one place a link is allowed.

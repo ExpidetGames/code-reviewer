@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The usage endpoints of the operator API against a real database (#278): the feed of settled records of every
 // workspace, the same for one workspace, and the summary of a period. The credential, the order of the checks and

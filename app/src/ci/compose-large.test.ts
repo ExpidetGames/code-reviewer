@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down compose.large.yml as a file: the services of the large topology (Postgres, several app
 // replicas, several runners, a reverse proxy sketch), how they are wired, that no secret is written

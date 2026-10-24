@@ -1,35 +1,15 @@
 # Contributing to code-review.com
 
-Thank you for helping. code-review.com runs automatic code reviews on GitHub pull requests with
-[PR-Agent](https://github.com/qodo-ai/pr-agent) and adds a web UI to configure and inspect them.
-This guide explains how to get a change from an idea to a merged pull request.
+**External contributions are not accepted.** code-review.com is a proprietary hosted service of
+Itegro GmbH. The source is public for transparency only (see [`LICENSE`](LICENSE)); it is not an open
+source project, it cannot be self-hosted, and we do not review or merge pull requests from outside
+the team. Please do not open pull requests, and do not expect a reply to an unsolicited one. A
+contribution is only considered when Itegro GmbH has agreed to it in writing beforehand.
 
-By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems do
-not go into public issues: follow [SECURITY.md](SECURITY.md) instead.
+If you found a bug in the service, tell us through the support channel of the service. Security
+problems never go into public issues: follow [SECURITY.md](SECURITY.md).
 
-## Ways to contribute
-
-- **Report a bug or suggest a feature** with one of the [issue forms](https://github.com/ExpidetGames/code-reviewer/issues/new/choose).
-- **Pick up an issue.** Issues labeled
-  [`good first issue`](https://github.com/ExpidetGames/code-reviewer/labels/good%20first%20issue)
-  are small and well described; issues labeled
-  [`help wanted`](https://github.com/ExpidetGames/code-reviewer/labels/help%20wanted) are ones the
-  maintainers would like help with. Comment on the issue before you start, so that two people do
-  not do the same work.
-- **Improve the documentation**, including this file.
-
-For anything larger than a small fix, open or comment on an issue first and agree on the approach
-before you write the code. It saves you from building something that cannot be merged.
-
-### What a good issue looks like
-
-- One problem or one feature per issue, with a title that says what is wrong or wanted.
-- For a bug: the version or commit, how you run it (Docker Compose, Coolify, local development),
-  the steps to reproduce it, what you expected and what happened instead. The bug form asks for
-  exactly this.
-- For a feature: the problem you are trying to solve, before the solution you have in mind.
-- Logs only after you removed everything secret from them. Never paste API keys, tokens, private
-  keys, webhook secrets or `.env` files into an issue, a pull request or a comment.
+The rest of this file is the workflow of the team that develops the service.
 
 ## Set up the development environment
 
@@ -37,7 +17,7 @@ You need Node.js 24 or newer with pnpm 10 (`corepack enable` is enough), [uv](ht
 0.5 or newer, and `make`. Docker is only needed for the image and stack smoke tests below.
 
 ```sh
-git clone https://github.com/<your-account>/code-reviewer.git   # your fork
+git clone https://github.com/ExpidetGames/code-reviewer.git
 cd code-reviewer
 make install
 ```
@@ -91,8 +71,7 @@ pull requests that touch the matching parts:
 ## Branches, commits and pull requests
 
 1. **Find or open an issue** for the change. Every pull request is linked to one.
-2. **Fork the repository** (maintainers can work in branches of the repository itself) and branch
-   from `development`. Name the branch `<issue number>-<short-slug>`, for example
+2. **Work in a branch of the repository** (one worktree per issue) and branch from `development`. Name the branch `<issue number>-<short-slug>`, for example
    `123-fix-webhook-retry`.
 3. **Commit** in small steps, each one green. Use a plain imperative message that starts with the
    issue number: `#123: reject webhook deliveries with an old timestamp`.
@@ -125,24 +104,25 @@ issue for it.
 
 ## License
 
-code-review.com is licensed under the Apache License, Version 2.0 (the `LICENSE` file). By submitting a
-contribution you agree that it is licensed under the same terms (section 5 of the license). There
-is no CLA and no copyright assignment: you keep the copyright to your work, and you do not sign
-anything. Make sure you have the right to submit what you contribute, in particular that you did
-not copy code with an incompatible license.
+The repository is proprietary (the `LICENSE` file): Copyright (c) 2026 Itegro GmbH, all rights
+reserved. Work that the team does here belongs to Itegro GmbH under the terms of each person's
+agreement with it.
 
-Every source file starts with the line `SPDX-License-Identifier: Apache-2.0`, in the comment syntax of
-its language (`//` for TypeScript and JavaScript, `#` for Python, shell, Dockerfiles and the Makefile,
-`/* */` for CSS; after a shebang or the `# syntax=` line of a Dockerfile). Data and configuration
-files (JSON, YAML, TOML, lock files), Markdown, the license texts, `docs/` and `fakes/fixtures/` have
-none. A new source file without the header fails a unit test; `make fix-spdx-headers` adds it to every
-file that lacks it. The rules (which files count, how the header looks) are in
-`app/src/ci/spdx-headers/rules.ts`.
+Every source file starts with the line `SPDX-License-Identifier: LicenseRef-Proprietary`, in the
+comment syntax of its language (`//` for TypeScript and JavaScript, `#` for Python, shell,
+Dockerfiles and the Makefile, `/* */` for CSS; after a shebang or the `# syntax=` line of a
+Dockerfile). Data and configuration files (JSON, YAML, TOML, lock files), Markdown, the license
+texts, `docs/` and `fakes/fixtures/` have none. A new source file without the header fails a unit
+test; `make fix-spdx-headers` adds it to every file that lacks it. The rules (which files count, how
+the header looks) are in `app/src/ci/spdx-headers/rules.ts`.
 
 One documented exception: the shadcn/ui components copied into `app/src/components/ui/` keep their
 real license. They start with `// SPDX-License-Identifier: MIT` and a provenance line
-(`// Adapted from shadcn/ui (MIT), https://ui.shadcn.com`) instead of the Apache-2.0 header; the
-rule and `make fix-spdx-headers` know that folder. Do not "fix" those headers.
+(`// Adapted from shadcn/ui (MIT), https://ui.shadcn.com`) instead of the proprietary header; the
+rule and `make fix-spdx-headers` know that folder. Do not "fix" those headers. The same is true of text
+adapted from third party work that has its own license (the Dynamic Review skill, `contracts/dynamic-review/review-skill.md`,
+is adapted from Apache-2.0 sources and says so): never relabel it, and record its attribution in
+`NOTICE` and `THIRD_PARTY_LICENSES.md`.
 
 If you add a dependency, check its license. `make check-licenses` (part of `make verify`, and the CI
 job "Licenses: dependency check") fails when a package of `app/pnpm-lock.yaml` or `runner/uv.lock`

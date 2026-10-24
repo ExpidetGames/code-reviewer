@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Makes the database of an installation of the previous release (legacy-installation.ts) for a program that is
 // not a test: the image smoke test of the update (docker/smoke/upgrade.sh) and the journey of the update. Node

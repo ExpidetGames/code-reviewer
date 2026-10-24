@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down how a job becomes PR-Agent configuration: endpoints and model names go into the process
 environment as strings (the environment wins over a repository settings file); secrets, booleans,

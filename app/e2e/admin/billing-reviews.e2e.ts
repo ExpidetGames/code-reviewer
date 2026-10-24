@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The payment reviews of the admin portal, end to end (#603-T18), on the app of the billing journey (an instance of its own):
 // two events the webhook could not apply are waiting (a refused payment of the default workspace's top-up, and a refund of a

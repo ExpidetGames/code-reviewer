@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How long the claim of a run that a newer push superseded lasts, and why (#397). One place, and the contract file
 // (`SupersedeTiming` in contracts/runner-api.v1.json) states the same numbers for the Worker side (#399), which a test

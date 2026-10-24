@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rules for what may be stored as entitlements, shared by the repository of a workspace row and by the
 // instance default. Pure. A refusal carries a stable code (and the limit it concerns); callers branch on the

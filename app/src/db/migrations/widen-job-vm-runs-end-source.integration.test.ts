@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #498 (the gate of the review of #524): `job_vm_runs.end_source` takes two more values, `app_stop_unreported` and
 // `claim_wall_clock`. The rows of an existing database survive the change with their key, checks and index, and a source that

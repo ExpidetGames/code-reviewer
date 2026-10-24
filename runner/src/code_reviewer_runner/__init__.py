@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Code Reviewer runner: picks up review jobs from the app and runs PR-Agent."""
 

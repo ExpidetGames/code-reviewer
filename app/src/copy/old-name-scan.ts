@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scan for the old product name "Code Reviewer" in the text a source file can show or send (#635):
 // string literals, template literal parts and JSX text. Comments and identifiers are not text a customer

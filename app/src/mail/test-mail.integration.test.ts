@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the "send test mail" button: the mail goes to the admin's own address with the saved settings,
 // a failure comes back as a stable code with a safe sentence, the button is limited per admin and for the

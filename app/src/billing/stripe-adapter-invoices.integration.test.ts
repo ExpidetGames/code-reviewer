@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #659: the Stripe adapter lists the invoices of the workspace's customer, against the fake Stripe (fakes/stripe).
 import { describe, expect, it } from "vitest";

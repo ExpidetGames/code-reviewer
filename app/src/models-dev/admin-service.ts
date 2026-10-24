@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the admin portal does with the models.dev catalog besides the prices (#554): the providers with the state of their
 // addresses, the confirmation of an address that changed, and "fetch now".

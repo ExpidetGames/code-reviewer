@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The LLM key of a workspace in a real browser against a production build (the multi-tenant app, where a
 // workspace of its own changes nothing for the other journeys): the Owner of a new workspace is told that

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A database as the release before accounts left it, with the data of an installation that has been running for
 // a while: people who signed in with GitHub (their access tokens stored the way Better Auth stored them, encrypted

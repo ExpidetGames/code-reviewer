@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/model-catalog/check (#429): the "Check model" button, which asks the provider's metadata what release would ask and stores nothing.
 // For the instance admin only. Not signed in is 401, signed in but not an admin is a 404 (src/admin/access.ts); the

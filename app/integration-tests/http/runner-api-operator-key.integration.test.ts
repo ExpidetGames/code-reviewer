@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator's own LLM key on both ways a key reaches a runner (#276): the legacy claim, whose response carries
 // it, and the Worker API, where the first fetch of the job mints it with the per-job credential (#320). On both:

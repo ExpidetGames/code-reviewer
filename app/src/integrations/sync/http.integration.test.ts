@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the handler behind `POST /api/integrations/sync` (the "Sync from GitHub" button): a
 // signed in user runs the sync against the fake GitHub and learns how many repositories are new, a

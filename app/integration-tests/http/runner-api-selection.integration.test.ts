@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a job runs on, on both ways it reaches a runner (#432, ADR 0005, 2.8): the legacy claim and the Worker API's first
 // fetch. The resolver (`resolveModelSelection`) chooses provider, model and key before any key is loaded. A workspace on

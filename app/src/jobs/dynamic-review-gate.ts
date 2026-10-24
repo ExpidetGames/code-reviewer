@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195 rollout gate: Dynamic Review is not queued until the app/database marks it enabled
 // (instance-level, default off until #202 ships). Two reasons:

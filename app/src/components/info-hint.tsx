@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A small "?" next to a label that explains it in a tooltip. It is reachable with Tab, announces its
-// text through `aria-describedby` and closes on Escape. Apache-2.0 wrapper over the copied shadcn
+// text through `aria-describedby` and closes on Escape. Wrapper over the copied shadcn
 // Tooltip; a plain icon button must not be the only explanation, so the hint is announced, never
 // colour or image alone.
 "use client";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Deleting a workspace (#658), against a real database on SQLite and, with TEST_DATABASE_URL, on Postgres: the typed name
 // and the Owner role are needed, a positive balance refuses, everything of the workspace goes (checked over every table

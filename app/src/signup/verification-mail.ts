@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Sends a verification link to an account: makes the link, bound to the password it is to be used with
 // (verification-tokens.ts), and mails it. Never throws and never reports why a mail did not go out to the caller: the sign-up and

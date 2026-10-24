@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/billing/webhook: the one webhook URL of the payment provider the instance runs billing on. Public: no
 // session, the signature checked by the active adapter is the authentication. While billing is off, or when the active

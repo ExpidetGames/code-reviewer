@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The runner's copy of the Anthropic model list (#511): it must be the list the app offers and the
 contract file records, and every entry must be sane."""

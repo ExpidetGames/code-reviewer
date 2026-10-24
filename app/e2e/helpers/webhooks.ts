@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Deliveries to the webhook route of an app under test, signed like GitHub signs them. The payloads
 // are the fixtures of fakes/fixtures (reduced to the fields the app reads), patched to name the

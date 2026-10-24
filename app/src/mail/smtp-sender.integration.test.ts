@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the SMTP implementation of the mail-sender interface: it follows the settings in the store at
 // every call (adding, changing and removing the mail server), delivers through the real protocol to the fake

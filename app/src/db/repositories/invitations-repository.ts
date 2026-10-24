@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the invitations of ONE workspace (the table `invitations`, src/workspaces/invitations.ts). Created
 // for a workspace like every repository of customer data: a row of another workspace is simply not there.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the Claude Messages API refuses with a 400, for the TypeScript fake (#533). The Python fakes have a twin
 // (`anthropic_rules.py`) and both answer the same table of cases (`anthropic-rule-cases.json`). The flags that

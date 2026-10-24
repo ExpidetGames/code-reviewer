@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The invoices of a workspace (#659): what the payment provider issued for the top-ups of THIS workspace, for the billing page.
 // The invoices stay at the provider; the app keeps no copy and no reference, it asks when the page asks. The order, each step

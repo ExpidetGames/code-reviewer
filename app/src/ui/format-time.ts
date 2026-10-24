@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Times as text the server and the browser render the same way (UTC, no locale), so a page that is
 // rendered on the server and again in the browser does not differ between the two.

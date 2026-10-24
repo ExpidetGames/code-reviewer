@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starts what `vercel build` wrote for the Dispatcher the way the platform starts it (#416), and fails when it cannot
 // answer. `vercel build` alone only proves that the build succeeds: the function it emits is transpiled file by file, so

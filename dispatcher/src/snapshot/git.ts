@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two questions the snapshot decision asks git (#403). A commit is passed as a 40 character hex string and
 // nothing else, so it can never be read as an option.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: the Stripe adapter against the fake Stripe (fakes/stripe), which refuses what Managed Payments refuses.
 import { describe, expect, it } from "vitest";

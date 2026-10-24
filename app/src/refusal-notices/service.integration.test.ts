@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The notice a pull request gets when a review is refused for a limit or a suspension (#281), end to end on the
 // claim: a real queue and database, the real GitHub App provider and client against the fake GitHub, and the

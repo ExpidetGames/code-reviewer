@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to where the check runs and review verdicts of the jobs of ONE workspace stand (the table `job_check_runs`;
 // the factory takes the workspace id, see ../workspace-scope.ts): src/check-runs/README.md. One row per job. `take`

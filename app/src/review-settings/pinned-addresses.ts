@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The addresses the projects of one workspace pinned for a catalog provider (#588). Two readers hold to them: the key test of that
 // provider (a key is not tested at an address the workspace did not select) and the settings save (a pin another project of the

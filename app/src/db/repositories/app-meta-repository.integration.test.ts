@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the app_meta repository against a real SQLite file: reading a missing key, writing,
 // and replacing a value while moving the timestamp.

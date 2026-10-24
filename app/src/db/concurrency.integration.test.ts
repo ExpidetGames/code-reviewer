@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the database behaves next to a second connection or a second app instance: writes
 // wait for a lock that is released in time, fail clearly when it is not, and two instances starting

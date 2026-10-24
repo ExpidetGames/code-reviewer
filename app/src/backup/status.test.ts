@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The backup status of a Postgres instance: the app does not back up an external database, so the
 // status says backups are not applicable instead of showing a schedule or a target.

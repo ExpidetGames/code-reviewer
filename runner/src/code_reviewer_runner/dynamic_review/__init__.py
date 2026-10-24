@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Dynamic Review preparation, prompt assets, engine seam and publication (#196, #197, #198, #199).
 

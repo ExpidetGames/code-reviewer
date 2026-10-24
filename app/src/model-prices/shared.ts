@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the price routes of the admin portal (#549): the service on the server's database,
 // with the audit line of a write on the server's log, which is the operator's: it names the person, the provider, the model

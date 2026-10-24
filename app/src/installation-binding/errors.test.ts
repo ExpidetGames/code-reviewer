@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two sets of codes of the binding (the person's flow, the instance admin's decision) share some codes. A
 // client that branches on the HTTP status must get the same status for the same code on every route.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A fake OpenAI-compatible LLM endpoint (OpenRouter shaped, loopback only) for the tests that run
 // the real PR-Agent: it is reached through LiteLLM's real OpenRouter code path, which sends

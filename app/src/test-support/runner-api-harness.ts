@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Everything a test of the runner API needs: a real SQLite file with the job queue and one
 // integration (installation 4242, repositories acme/widgets and acme/gadgets), the fake GitHub behind

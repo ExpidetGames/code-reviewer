@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The reset of every review default at the end of the "Review defaults" page (#178; it was on "Advanced" before #658): it is

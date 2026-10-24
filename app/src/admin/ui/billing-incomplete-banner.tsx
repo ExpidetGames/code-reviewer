@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The banner of the admin portal while billing is switched on but its setup is not complete (#632). The claim refuses every
 // review of the instance then (`billing_rates_incomplete`), which no admin would notice on a page they do not open, so the frame

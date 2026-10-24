@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How the workspace billing page writes and reads money (#505): micro-USD integers in, text out, and a typed top-up amount back
 // to whole cents. No floating point touches an amount.

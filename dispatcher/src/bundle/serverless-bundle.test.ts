@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The serverless bundle (#327-T09): what Vercel builds from src/index.ts must hold no process spawning.
 // The bundle is made here with rolldown (in memory, nothing is written), the same way a platform bundler

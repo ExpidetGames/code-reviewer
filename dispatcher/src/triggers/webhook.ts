@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Webhook-Trigger: POST /dispatch, the signed wake-up call of the App
 // (contracts/dispatch-webhook.v1.json). It verifies, in the contract's order, the content type and the

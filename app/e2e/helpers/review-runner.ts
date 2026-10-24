@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A runner played by the journey's script (the billing journeys, #508): it asks the app for the next job over the runner API with the runner
 // token, as the real runner does, and reports the result it chooses. The money of a review is decided by the app's claim (the balance) and

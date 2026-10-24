@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: every source file of the repository starts with the SPDX license header. The rules (which
 // files count, in which comment syntax) are in rules.ts; `make fix-spdx-headers` writes the headers

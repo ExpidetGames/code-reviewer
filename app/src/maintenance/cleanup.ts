@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Removes rows nobody needs any more, so tables that an outsider can make grow stay small: the counters of
 // `rate_limits` (one per address, link or account that was ever counted), the verification links and the

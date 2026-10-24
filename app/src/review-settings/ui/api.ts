@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the settings form makes to the app's own routes (src/review-settings/http.ts): save the
 // defaults of the workspace or the overrides of one project, and reset a project to the defaults. The

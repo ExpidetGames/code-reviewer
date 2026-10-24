@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Made-up Stripe ids in the shape of the real ones (`cus_Qabc123`: a prefix, an underscore, letters and digits). The
 // `Fake` marker makes them impossible to mistake for a real object, and a counter per fake makes a run the same every

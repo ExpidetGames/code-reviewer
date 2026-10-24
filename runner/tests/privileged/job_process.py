@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """One Dynamic job in a process of its own, the way the entry point runs it (#197).
 

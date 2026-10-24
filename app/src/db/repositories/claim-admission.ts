@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admission of a claimed job (#277): inside the transaction of the queue's claim, after a job was taken and
 // before its usage record is reserved, it resolves the entitlements of the job's workspace and decides whether

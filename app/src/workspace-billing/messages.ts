@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the billing page of a workspace (ADR 0006, 2.5; #505). Fixed sentences: the UI translates the stable codes of the
 // routes, never the other way round. The page speaks of FINAL prices only: nothing here names a rate, a formula, a minute count,

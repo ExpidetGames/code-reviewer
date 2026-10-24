@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/mail/test: sends a test mail to the admin's own address with the saved mail server
 // settings, for the instance admin only. Not signed in is 401, signed in but not an admin is a 404

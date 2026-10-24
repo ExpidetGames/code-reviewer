@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which request paths belong to the admin portal: the pages below `/admin` and the data routes below
 // `/api/admin`. Those paths are not routes of the app: the files of the portal live below

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin's decisions about models of the models.dev catalog (#549, src/model-prices/README.md): two new tables, empty,
 // so no existing row is touched and an app of the previous release (which never reads them) keeps working on the same

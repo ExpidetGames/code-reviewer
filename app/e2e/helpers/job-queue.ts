@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Acts on the job queue of the app under test the way a runner does (claim, complete) and the way a
 // delivery does (enqueue), through the app's real queue code on its database file. The journeys never

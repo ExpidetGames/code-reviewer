@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a workspace on its own key may choose from the models.dev catalog, and what a claim serves of that choice (#555).
 // Server side: it reads the catalog tables (`src/models-dev/`, #548). The catalog is the instance's; what a workspace is

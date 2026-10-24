@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The choice of the key mode while billing is on (ADR 0006, P3, D4; #496): "Use our models" or "Use my own provider key", each with one

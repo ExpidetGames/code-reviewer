@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the billing routes: the real database, the adapters this instance has and the switch. This is the one place
 // that decides which adapters exist; the Stripe adapter joins the list with #501 and #502. It also holds the services of

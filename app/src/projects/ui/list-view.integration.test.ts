@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the project list is built from: the repositories of all installations as the sync
 // stored them (real SQLite, real provider against the fake GitHub), with the state of their

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The queues of the running server, on the connection opened at start. Per request code (the webhook
 // route, the runner API, the pages) asks for them here; tests build their own with `createJobQueue`

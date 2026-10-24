@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Launching the engine as the dedicated unprivileged user, and ending all that user runs (#197).
 
 The job process is the root supervisor: it prepared the read-only export (#196, `export_isolation`),

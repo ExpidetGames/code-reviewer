@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The last word of the hosted lane (#332-T10): after every journey has run, no credential is in any log of any
 // component, and no Worker connected to anything but loopback (the second test: the runner's connect guard recorded every

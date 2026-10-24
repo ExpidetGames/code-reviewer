@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The form of a price correction (#554). An admin types dollars per million tokens as decimals ("2.5", "0.003"); the route
 // takes whole micro-USD per million tokens as digit strings (src/model-prices/money.ts, price-book.ts). The conversion

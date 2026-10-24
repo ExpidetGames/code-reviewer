@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settlement of a job (#498, reworked by #605; ADR 0006, 2.6 and 2.8): no amount is held at the claim, so in the
 // transaction that ends the job the journal gets one `usage` entry with the AI and infrastructure parts, unless the outcome

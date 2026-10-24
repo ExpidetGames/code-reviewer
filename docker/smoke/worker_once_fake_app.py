@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Runs `worker-once` of an image against the fake App of `fakes/dispatcher-app/` (#324).
 

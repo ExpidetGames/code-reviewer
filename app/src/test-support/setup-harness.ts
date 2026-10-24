@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The first-run setup, assembled for integration tests: a real SQLite file, the real Better Auth
 // instance (email and password only), the real completion, the real route handlers, the real setup

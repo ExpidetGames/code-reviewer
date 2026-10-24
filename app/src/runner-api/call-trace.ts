@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The per-call trace of a Dynamic Review (#541), checked against `RunnerCallTrace` of
 // `contracts/runner-api.v1.json`: exactly the contract's shape or nothing. A runner sends it, the app

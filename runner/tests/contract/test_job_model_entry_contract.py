@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down `contracts/job-model-entry.v1.json` (#548) from the runner's side, the reader.
 

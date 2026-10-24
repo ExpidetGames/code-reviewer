@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The LLM key of a workspace over a real SQLite file: what a save accepts and refuses (the same rules as the
 // legacy variable), that an empty field keeps the stored key of that provider, that the

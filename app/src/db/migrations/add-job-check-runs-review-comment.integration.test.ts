@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #657: the review comment of a run is an empty, nullable column on the job check runs, so a row written the way the previous
 // release writes it (without the column) is still valid and reads as "no comment kept yet".

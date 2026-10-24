@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The claim of a Dynamic job on the workspace's own key with a model of the models.dev catalog (#555), through the real claim
 // with the real key service and catalog reader over a database filled with rows: the selection is resolved from the catalog

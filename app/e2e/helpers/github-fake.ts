@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Helpers for the journeys that sign in: add an account to the fake GitHub that Playwright started
 // next to the app, and walk through the sign in form the way a person does.

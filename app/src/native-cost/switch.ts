@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The switch of the native OpenCode providers (#578, design #544). Default off. The only thing it changes is whether the
 // two providers of the app's registry, which keep their wires until #556, take the native path: off, `catalogRefOf` never

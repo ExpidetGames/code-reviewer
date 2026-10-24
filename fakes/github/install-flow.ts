@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The installation page of the fake GitHub: what a person sees at `github.com/apps/<slug>/installations/new`
 // and where it sends them. The real page lets the person choose an account and the repositories and press

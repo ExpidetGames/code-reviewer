@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the validation of the mail server settings: each field has its own stable code, a value that
 // could break out of a mail header is refused wherever it would end up in one, and a refusal never contains

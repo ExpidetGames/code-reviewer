@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limits and the suspension of a workspace at claim (#277; src/usage/README.md, "Limits"), on SQLite and,
 // when TEST_DATABASE_URL is set, on Postgres. The check and the reservation of the usage record happen in

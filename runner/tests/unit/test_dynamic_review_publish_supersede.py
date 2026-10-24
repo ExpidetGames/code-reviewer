@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The Dynamic summary is not written once the run was superseded, checked right before the write
 (#396). The window between the decision and the write is as small as the one call allows; what

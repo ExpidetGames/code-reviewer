@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A catalog model as the admin portal sees it (#549, #554): the catalog row, the admin's decisions and the price with its
 // status and sources. For the instance admin only: it names the provider and the model and shows prices, none of which

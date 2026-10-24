@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the Worker API (#320) through the real handlers and a real SQLite file: the split claim
 // (a Dispatcher gets a per-job credential and no job input), the three Worker calls under

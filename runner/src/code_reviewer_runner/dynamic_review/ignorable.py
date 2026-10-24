@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Characters that render as nothing, ignored (never removed) when matching tool-result text (#243).
 

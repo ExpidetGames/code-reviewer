@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Keep the offline experiment fair and keep routing/usage out of blinded records."""
 
 import unittest

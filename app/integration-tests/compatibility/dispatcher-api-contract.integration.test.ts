@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the Dispatcher's side of the runner API (#322) against contracts/runner-api.v1.json: the
 // feature list the version call answers equals the file's `KnownAppFeature`, the checks on the release

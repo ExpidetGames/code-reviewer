@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #603: the resolution of a billing review. An operator closes a review row with a note, and the row keeps who did it, when,
 // why and, when the repair was a manual credit or correction, the journal entry that carries it. Four nullable columns, none

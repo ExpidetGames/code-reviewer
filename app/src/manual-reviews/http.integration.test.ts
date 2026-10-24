@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the handlers behind the two routes of the manual start: they ask for the user first,
 // check where the request comes from and what it carries, call the real service (real GitHub App

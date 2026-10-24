@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether a deployment needs a new golden snapshot (#403). The snapshot is stale when something that goes into the
 // Worker image changed between the commit it was built from and the commit being deployed, and it is missing when

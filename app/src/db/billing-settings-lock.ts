@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing settings live in one JSON setting that holds the switch and the rates, and a writer reads it, changes a
 // field and writes it back. A transaction advisory lock makes that read-modify-write one step on Postgres, so two writers

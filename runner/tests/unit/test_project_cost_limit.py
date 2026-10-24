@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The per-project cost limit (#666): `llm.maxCostUsd` of a job, enforced next to the operator's.
 

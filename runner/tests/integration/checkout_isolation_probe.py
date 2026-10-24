@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Root-supervised actual-uid probe, invoked by the integration test without real network."""
 
 import hashlib

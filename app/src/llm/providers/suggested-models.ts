@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models a form suggests for a review kind (#532): the provider's suggestions, narrowed to the ones that can serve
 // the kind when the provider says that not all of them can. Data and pure rules, safe for a client component to import.

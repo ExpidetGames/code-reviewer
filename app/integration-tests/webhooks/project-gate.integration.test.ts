@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the webhook route only starts work for a repository with an active project: a
 // signed pull request or comment command delivery for a repository without a project, with a

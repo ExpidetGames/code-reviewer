@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to where the infrastructure of the jobs of ONE workspace began and ended (the table `job_vm_runs`; the factory
 // takes the workspace id, see ../workspace-scope.ts): src/billing/README.md, "Billable minutes". It only measures: no

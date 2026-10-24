@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The local mode of the Sandbox double (#329): the port of dispatcher/src/launchers/sandbox-service.ts over the
 // Docker daemon of this machine. A "VM" is a temporary directory; the commands the Sandbox-Launcher runs in it run

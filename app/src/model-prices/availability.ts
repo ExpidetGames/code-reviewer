@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether the managed key, which we pay, may use a catalog model (#549; the claim of #553 asks it at claim time). A model is
 // selectable only if the admin has enabled it **and** its price is confirmed and still is: a price that models.dev or the

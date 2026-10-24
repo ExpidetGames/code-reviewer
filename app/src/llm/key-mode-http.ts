@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind `GET` and `PUT /api/w/:workspace/llm-key-mode` (ADR 0006, P3, D4; #496), with their collaborators passed in so
 // the route file only wires the real ones in (`key-mode-shared.ts`) and tests wire the real service over a test database. The order

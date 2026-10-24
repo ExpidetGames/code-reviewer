@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how installations and repositories are kept in line with GitHub: the real provider and
 // client talk over HTTP to the fake GitHub API, the tables are a real SQLite file. A failure of the

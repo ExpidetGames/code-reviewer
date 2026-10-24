@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The tone of each badge of the catalog screens (#554). The tone is never the only signal: every badge carries its words
 // (messages.ts). Colours come from the badge variants, which take them from the tokens of theme.css.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The old in-app deep link was `/w/:ws/settings#llm-access` (#178 review N3). The fragment never reaches

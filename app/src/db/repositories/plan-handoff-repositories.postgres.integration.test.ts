@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handoff tokens on Postgres behave like the SQLite ones (#284-T04, T05, T12): of several simultaneous
 // redemptions exactly one answers, a token whose person lost the role is used up and answers nothing, making a token

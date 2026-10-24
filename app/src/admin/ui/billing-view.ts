@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the billing routes answer and the billing page shows (#504): plain data, no secret. It lives beside the page, not in
 // `src/billing/`, because that module is server-only and a client component may not reach it. The service

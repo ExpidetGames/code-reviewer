@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: what a workspace was charged since a moment (the `usage` entries of the journal, AI plus infrastructure), the read of the
 // monthly limit. The count of started reviews, the read of the hourly brake, is in usage-records-started-since.integration.test.ts.

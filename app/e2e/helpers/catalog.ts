@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Fills the model catalog of the app under test the way the admin portal will, through the app's real catalog service
 // on its database file (src/test-support/e2e-catalog-child.ts). The journeys never write rows themselves.
