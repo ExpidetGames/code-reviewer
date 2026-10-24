@@ -1290,8 +1290,8 @@ const CONTROLS: Array<{
   },
   {
     name: "the name of an entry model without its vendor",
-    text: "model m-gamma-z1y2",
-    fails: "a control holds m-gamma-z1y2",
+    text: "model entryproof-m-gamma-z1y2",
+    fails: "a control holds entryproof-m-gamma-z1y2",
   },
   {
     name: "the operator's key",
