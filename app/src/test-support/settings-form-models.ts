@@ -212,6 +212,7 @@ export function untouchedGlobalView(): GlobalSettingsView {
     dynamic: dynamicView("diff", false),
     catalogChoices: null,
     catalogSelection: null,
+    followingProjects: 0,
   };
 }
 

@@ -43,7 +43,7 @@ import { noLimits } from "../workspaces/entitlements.ts";
  * Whether a Dynamic Review of a project that chose no model of its own would find one in this workspace: the one the
  * workspace default chose (#676), else the instance's.
  */
-async function dynamicReviewCanResolve(
+export async function dynamicReviewCanResolve(
   executor: Kysely<Database>,
   workspaceId: string,
   workspaceDefault: ReturnType<typeof parseStoredWorkspaceDynamic>,

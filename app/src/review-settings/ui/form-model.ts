@@ -55,6 +55,11 @@ export type SettingsFormModel = {
    * (#433); null for a workspace on its own key and for an answer of a server that does not know the catalog.
    */
   catalog: CatalogFormModel | null;
+  /**
+   * On the workspace defaults: how many projects store no review kind of their own and follow the default's (#676), for the
+   * confirmation of a change of the kind. Absent for a project and for an answer of a server from before.
+   */
+  followingProjects?: number;
   /** Who saved the global defaults last and when; null for a project or before the first save. */
   lastSaved: { at: string; by: string | null } | null;
   /**
@@ -84,6 +89,9 @@ export function modelFromGlobalView(
         ? null
         : { at: view.updatedAt, by: view.updatedBy },
     dynamic: view.dynamic,
+    ...(typeof view.followingProjects === "number"
+      ? { followingProjects: view.followingProjects }
+      : {}),
   };
 }
 

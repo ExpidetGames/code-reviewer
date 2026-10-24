@@ -18,6 +18,11 @@ export const REVIEW_SETTINGS_ERROR_CODES = [
   /** There is no such repository (unknown, or no longer listed by the platform and without a project). 404. */
   "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
   /**
+   * The workspace defaults were saved by somebody else since the form was loaded (#676). Nothing was stored; the person reloads the
+   * page and decides again. 409.
+   */
+  "REVIEW_SETTINGS_STALE",
+  /**
    * The save would write or move the address pinned for a catalog provider (#588) and the person may not manage the workspace's
    * LLM key; an Owner or Admin confirms it. Nothing was stored. 403.
    */
@@ -34,10 +39,11 @@ export type ReviewSettingsErrorCode =
 
 export const REVIEW_SETTINGS_ERROR_STATUS: Record<
   ReviewSettingsErrorCode,
-  400 | 403 | 404 | 413 | 415
+  400 | 403 | 404 | 409 | 413 | 415
 > = {
   PROVIDER_ADDRESS_CONFIRM_FORBIDDEN: 403,
   PROVIDER_ADDRESS_OTHER_PROJECT_PIN: 403,
+  REVIEW_SETTINGS_STALE: 409,
   REVIEW_SETTINGS_INVALID: 400,
   REVIEW_SETTINGS_REQUEST_INVALID: 400,
   REVIEW_SETTINGS_CROSS_SITE_REQUEST: 403,
@@ -50,6 +56,8 @@ export class ReviewSettingsError extends Error {
   readonly code: ReviewSettingsErrorCode;
   /** For `REVIEW_SETTINGS_INVALID`: which fields are wrong and why. Codes and field names only. */
   readonly issues: readonly ReviewSettingIssue[];
+  /** For a refusal that is about projects of the workspace: their names (repository full names), so the person knows where to look. */
+  readonly projects: readonly string[];
   /** The message names the code's meaning only, never a value from the request. */
   readonly safeMessage = true as const;
 
@@ -57,10 +65,12 @@ export class ReviewSettingsError extends Error {
     code: ReviewSettingsErrorCode,
     message: string,
     issues: readonly ReviewSettingIssue[] = [],
+    projects: readonly string[] = [],
   ) {
     super(message);
     this.name = "ReviewSettingsError";
     this.code = code;
     this.issues = issues;
+    this.projects = projects;
   }
 }

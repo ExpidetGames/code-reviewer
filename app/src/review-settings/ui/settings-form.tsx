@@ -221,14 +221,31 @@ function hiddenProblemOf(
 
 const UNCHANGED_TEXT = "No changes to save.";
 
+const SUMMARY_COMMENT_NOTE =
+  "The next review of such a project posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
+
+/** What a change of the kind of the workspace defaults does to the projects that follow it (#676). */
+function followersText(kind: ProjectReviewKind, following?: number): string {
+  if (following === undefined)
+    return `Every project that sets no review kind of its own switches to ${KIND_NAMES[kind]}. Their reviews that are still waiting are cancelled, and a review that is already running finishes. ${SUMMARY_COMMENT_NOTE}`;
+  if (following === 0)
+    return `No existing project follows this default, so nothing switches; projects that are added later start with ${KIND_NAMES[kind]}.`;
+  const who =
+    following === 1
+      ? "1 project follows this default and switches"
+      : `${String(following)} projects follow this default and switch`;
+  return `${who} to ${KIND_NAMES[kind]}. Their reviews that are still waiting are cancelled, and a review that is already running finishes. ${SUMMARY_COMMENT_NOTE}`;
+}
+
 function confirmText(
   kind: ProjectReviewKind,
   dynamicReviewEnabled: boolean,
   mode: SettingsFormModel["mode"],
+  following?: number,
 ): string {
   const base =
     mode === "global"
-      ? "Every project that sets no review kind of its own switches with its next review; reviews that are already waiting keep the kind they were queued for. The next review of such a project posts a new summary comment on the pull request; the findings of the current comment are not carried over."
+      ? followersText(kind, following)
       : "Reviews of this project that are still waiting are cancelled, and a review that is already running finishes. The next review posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
   const gateOff =
     mode === "global" ? GATE_OFF_WARNING_DEFAULTS : GATE_OFF_WARNING;
@@ -270,6 +287,16 @@ const workspaceDefaultOption = (entry: {
   providerLabel: string;
   name: string;
 }) => `${MODEL_CHOICE_DEFAULT_OPTION} (${entry.providerLabel} · ${entry.name})`;
+
+/** The projects a refusal names (repository names), as one sentence; none when it names none. */
+function projectsNote(details: Record<string, unknown> | undefined): string[] {
+  const names = details?.projects;
+  if (!Array.isArray(names)) return [];
+  const listed = names.filter(
+    (name): name is string => typeof name === "string",
+  );
+  return listed.length === 0 ? [] : [`Projects: ${listed.join(", ")}.`];
+}
 
 /** The requests one save makes: a project's travel in two groups, the defaults' in one set. */
 function planOf(model: SettingsFormModel, state: FormState) {
@@ -481,12 +508,20 @@ export function SettingsForm({
       let currentState = state;
       const notes: string[] = [];
       for (const [index, step] of steps.entries()) {
-        const result = await api.save(step.body);
+        // The defaults say which version of them this form was built from, so a save over newer ones is refused (#676).
+        const result =
+          currentModel.mode === "global"
+            ? await api.save(step.body, {
+                expectedUpdatedAt: currentModel.lastSaved?.at ?? null,
+              })
+            : await api.save(step.body);
         if (!result.ok) {
           const { fieldErrors, general } = splitIssues(result.issues);
-          const failure = [describeSaveFailure(result.code), ...general].join(
-            " ",
-          );
+          const failure = [
+            describeSaveFailure(result.code),
+            ...general,
+            ...projectsNote(result.details),
+          ].join(" ");
           const partial = index > 0;
           // After a saved first request, the card of the failed one says what was not saved.
           if (partial && step.cards.length === 1 && step.cards[0] === "kind")
@@ -1012,6 +1047,7 @@ export function SettingsForm({
                 confirming?.to ?? kind,
                 dynamicReviewEnabled,
                 model.mode,
+                model.followingProjects,
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -11,8 +11,14 @@ import {
 } from "../../ui/json-request.ts";
 
 export type SettingsApi = {
-  /** Replaces the whole set of the layer with these fields; the answer is the new view. */
-  save(settings: Record<string, unknown>): Promise<RequestResult<unknown>>;
+  /**
+   * Replaces the whole set of the layer with these fields; the answer is the new view. The workspace defaults say which
+   * version of them the form was built from (`expectedUpdatedAt`, #676), so a save over newer ones is refused.
+   */
+  save(
+    settings: Record<string, unknown>,
+    options?: { expectedUpdatedAt: string | null },
+  ): Promise<RequestResult<unknown>>;
   /** Removes every override of a project; only a project has this. */
   reset?: () => Promise<RequestResult<unknown>>;
 };
@@ -22,12 +28,14 @@ export function createGlobalSettingsApi(
   workspaceSlug: string,
 ): SettingsApi {
   return {
-    save: (settings) =>
+    save: (settings, options) =>
       requestJson(
         fetchImpl,
         "PUT",
         workspaceApiPath(workspaceSlug, "/review-settings"),
-        { settings },
+        options === undefined
+          ? { settings }
+          : { settings, expectedUpdatedAt: options.expectedUpdatedAt },
       ),
   };
 }

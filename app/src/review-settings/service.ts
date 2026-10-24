@@ -5,7 +5,9 @@
 // defaults in `app_settings`, the overrides of a project in `projects.settings`), computes the
 // settings a review of a project uses, and maps every refusal to a stable `ReviewSettingsError`.
 // All SQL is in the repositories.
+import type { Kysely } from "kysely";
 import type { AppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
+import type { Database } from "../db/schema.ts";
 import type {
   ProjectsRepository,
   ProjectSettings,
@@ -136,6 +138,11 @@ export type GlobalSettingsView = ViewBase & {
   /** For a workspace on the operator's key: the entries it may pick from per kind and the ones it has chosen (#676); else null. */
   catalogChoices: CatalogChoices | null;
   catalogSelection: CatalogSelection | null;
+  /**
+   * How many projects store no review kind of their own, so a change of the kind of the defaults reaches them (#676). The
+   * form says so before it asks to confirm such a change.
+   */
+  followingProjects: number;
 };
 
 export type ProjectSettingsView = ViewBase & {
@@ -238,17 +245,28 @@ export type ProjectSettingsSaved = ProjectSettingsView & {
  */
 export type ProjectSaveActor = { canManageLlmKey: boolean };
 
+/** What a save of the workspace defaults may bring besides the settings (#676). */
+export type GlobalSaveOptions = {
+  /**
+   * The `updatedAt` of the defaults the person saw (null: they were never saved). A save over defaults that were saved since
+   * is refused `REVIEW_SETTINGS_STALE` and stores nothing. Left out, the save replaces whatever is there.
+   */
+  expectedUpdatedAt?: string | null;
+};
+
 export type ReviewSettingsService = {
   getGlobalSettings(): Promise<GlobalSettingsView>;
   /**
    * Replaces the global defaults with the given fields (a field left out goes back to the built-in
    * value). Besides the Diff settings the set holds the review kind, the Dynamic provider and model, the catalog entries
    * of a workspace on the operator's key and the verdict (#676). A Dynamic model that is set is checked like a project's
-   * (#269). Throws `REVIEW_SETTINGS_INVALID`.
+   * (#269). When the kind becomes Dynamic Review, Dynamic Review must be able to run for the workspace, and a change of the kind
+   * cancels the waiting reviews of the projects that follow it. Throws `REVIEW_SETTINGS_INVALID` or `REVIEW_SETTINGS_STALE`.
    */
   updateGlobalSettings(
     input: unknown,
     actor: string,
+    options?: GlobalSaveOptions,
   ): Promise<GlobalSettingsSaved>;
   /**
    * The settings of a repository's project; a repository that was never activated shows the defaults
@@ -315,6 +333,22 @@ export type ResolvedProjectSettings = EffectiveReviewSettings & {
   dynamic: EffectiveProjectDynamic;
   modelLayers: ResolvedModelLayers;
 };
+
+function staleDefaults(): ReviewSettingsError {
+  return new ReviewSettingsError(
+    "REVIEW_SETTINGS_STALE",
+    "The defaults were saved by somebody else since they were read.",
+  );
+}
+
+/** What the Dynamic Review of a project that follows the defaults would run on, as one comparable text (#676). */
+function dynamicChoiceOf(layer: ProjectDynamicOverrides): string {
+  return JSON.stringify([
+    layer.dynamicProvider ?? null,
+    layer.dynamicModel ?? null,
+    layer.catalogEntryDynamic ?? null,
+  ]);
+}
 
 function notFound(): ReviewSettingsError {
   return new ReviewSettingsError(
@@ -661,6 +695,15 @@ export function createReviewSettingsService(deps: {
    * catalog, so such a choice is refused.
    */
   nativeCatalog?: NativeSelectionSource;
+  /**
+   * Whether a Dynamic Review of a project that chose nothing could run its first review with these workspace defaults: a key for
+   * its provider on the workspace's own key, a usable entry on the operator's (#676). Asked when the defaults would make
+   * Dynamic Review the kind. Without it nothing is asked, which is what a test of another behavior wants; the running server
+   * always passes the real one.
+   */
+  dynamicReady?: (
+    defaults: Omit<ProjectDynamicOverrides, "reviewSkill">,
+  ) => Promise<boolean>;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
@@ -819,6 +862,15 @@ export function createReviewSettingsService(deps: {
     };
   }
 
+  /** The projects that store no review kind of their own: the kind of the workspace defaults is theirs (#676). */
+  async function followingKind() {
+    return (await projects.list()).filter(
+      (entry) =>
+        entry.project !== null &&
+        parseDynamic(entry.project.settings).reviewKind === undefined,
+    );
+  }
+
   async function globalView(): Promise<GlobalSettingsView> {
     const builtIn = deps.builtIn();
     const global = await readGlobal();
@@ -836,6 +888,7 @@ export function createReviewSettingsService(deps: {
       dynamic: dynamicView(global.dynamic, managed),
       catalogChoices: managed ? await catalogChoices(catalog, selection) : null,
       catalogSelection: managed ? selection : null,
+      followingProjects: (await followingKind()).length,
     };
   }
 
@@ -986,7 +1039,10 @@ export function createReviewSettingsService(deps: {
     return undefined;
   }
 
-  const pinnedAddresses = createPinnedAddressReader(projects);
+  const pinnedAddresses = createPinnedAddressReader(
+    projects,
+    async () => (await readGlobal()).dynamic.reviewKind,
+  );
 
   /** The address the catalog trusts now for a provider, when it is a catalog provider it offers. */
   async function trustedNow(
@@ -1132,10 +1188,74 @@ export function createReviewSettingsService(deps: {
     }
   }
 
+  /**
+   * A project that holds a model of its own and no provider of its own chose that model for the provider the workspace default
+   * had then. A default with another provider would pair the model with a provider it was not chosen for, which no rule of
+   * the claim catches and every review of the project fails on (`model_invalid`). The save is refused and names the projects, so
+   * the person changes their models first (#676). Own key mode only, like the pairing rule.
+   */
+  async function refuseGlobalProviderChangeUnderProjectModels(
+    before: {
+      review: ReviewSettingsOverrides;
+      dynamic: ProjectDynamicOverrides;
+    },
+    after: {
+      review: ReviewSettingsOverrides;
+      dynamic: ProjectDynamicOverrides;
+    },
+  ): Promise<void> {
+    const defaultProvider = providers.defaultProvider.id;
+    const diffChanged =
+      (before.review.provider ?? defaultProvider) !==
+      (after.review.provider ?? defaultProvider);
+    const dynamicChanged =
+      (before.dynamic.dynamicProvider ?? defaultProvider) !==
+      (after.dynamic.dynamicProvider ?? defaultProvider);
+    if (!diffChanged && !dynamicChanged) return;
+    const issues: ReviewSettingIssue[] = [];
+    const names = new Set<string>();
+    for (const entry of await projects.list()) {
+      if (entry.project === null) continue;
+      const diff = parseReview(entry.project.settings);
+      const dynamic = parseDynamic(entry.project.settings);
+      if (
+        diffChanged &&
+        diff.model !== undefined &&
+        diff.provider === undefined
+      ) {
+        if (!issues.some((issue) => issue.field === "provider"))
+          issues.push({
+            field: "provider",
+            code: "PROJECT_MODEL_BOUND_TO_PROVIDER",
+          });
+        names.add(entry.repository.fullName);
+      }
+      if (
+        dynamicChanged &&
+        dynamic.dynamicModel != null &&
+        dynamic.dynamicProvider == null
+      ) {
+        if (!issues.some((issue) => issue.field === "dynamicProvider"))
+          issues.push({
+            field: "dynamicProvider",
+            code: "PROJECT_MODEL_BOUND_TO_PROVIDER",
+          });
+        names.add(entry.repository.fullName);
+      }
+    }
+    if (issues.length > 0)
+      throw new ReviewSettingsError(
+        "REVIEW_SETTINGS_INVALID",
+        "Some settings are not valid.",
+        issues,
+        [...names].sort(),
+      );
+  }
+
   return {
     getGlobalSettings: globalView,
 
-    async updateGlobalSettings(input, actor) {
+    async updateGlobalSettings(input, actor, options = {}) {
       const managed = await operatorsModels();
       if (managed)
         refuseModelFields(input, [
@@ -1147,6 +1267,11 @@ export function createReviewSettingsService(deps: {
       const requested = checkedWorkspace(input, providers);
       if (managed) await refuseUnfitEntries(requested.dynamic);
       const stored = await readGlobal();
+      // The person saw other defaults than the ones stored now: what they decided on may not hold (#676). Checked again in the
+      // write, which is the one that cannot race.
+      const expected = options.expectedUpdatedAt;
+      if (expected !== undefined && expected !== stored.updatedAt)
+        throw staleDefaults();
       // The Dynamic model of the save is put to the provider's metadata check like a project's (#269).
       const warnings = await checkDynamicModel(
         dynamicModelToCheck(
@@ -1176,12 +1301,61 @@ export function createReviewSettingsService(deps: {
           { review: stored.overrides, dynamic: stored.dynamic },
           { review, dynamic },
         );
+        await refuseGlobalProviderChangeUnderProjectModels(
+          { review: stored.overrides, dynamic: stored.dynamic },
+          { review, dynamic },
+        );
       }
-      await appSettings.set(
-        REVIEW_DEFAULTS_KEY,
-        { ...review, ...dynamic },
-        actor,
-      );
+      const kindBefore =
+        stored.dynamic.reviewKind ?? dynamicDefaults().reviewKind;
+      const kindAfter = dynamic.reviewKind ?? dynamicDefaults().reviewKind;
+      // Dynamic Review as the default switches every project that follows it, so it must be able to run (#676). Asked when the
+      // default becomes Dynamic Review, or while it is Dynamic Review and the model it runs on changes; an unrelated save
+      // of defaults that were set up when the key was there is not blocked by a key that was removed since.
+      if (
+        kindAfter === "dynamic" &&
+        deps.dynamicReady !== undefined &&
+        (kindBefore !== "dynamic" ||
+          dynamicChoiceOf(stored.dynamic) !== dynamicChoiceOf(dynamic)) &&
+        !(await deps.dynamicReady(dynamic))
+      )
+        throw new ReviewSettingsError(
+          "REVIEW_SETTINGS_INVALID",
+          "Some settings are not valid.",
+          [{ field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" }],
+        );
+      // The projects that follow the kind of the defaults switch with it: their waiting reviews were queued for the other
+      // engine and are cancelled in the transaction of the write, as after a project's own change. Running reviews finish.
+      const following =
+        kindBefore === kindAfter ||
+        hooks.onWorkspaceDefaultsKindChanged === undefined
+          ? []
+          : (await followingKind()).map((entry) => entry.repository.id);
+      const afterWrite =
+        following.length === 0
+          ? undefined
+          : (executor: Kysely<Database>) =>
+              hooks.onWorkspaceDefaultsKindChanged!(
+                {
+                  previousKind: kindBefore,
+                  nextKind: kindAfter,
+                  followingRepositoryIds: following,
+                },
+                executor,
+              );
+      const value = { ...review, ...dynamic };
+      if (expected === undefined)
+        await appSettings.set(REVIEW_DEFAULTS_KEY, value, actor, afterWrite);
+      else if (
+        !(await appSettings.setIfUnchanged(
+          REVIEW_DEFAULTS_KEY,
+          value,
+          actor,
+          expected,
+          afterWrite,
+        ))
+      )
+        throw staleDefaults();
       return { ...(await globalView()), warnings };
     },
 

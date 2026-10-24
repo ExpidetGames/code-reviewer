@@ -96,6 +96,18 @@ export const REVIEW_SETTING_ISSUE_CODES = [
    * the last daily fetch, or no longer listed. Never reported by the validation itself: it needs the catalog.
    */
   "MODEL_NOT_IN_CATALOG",
+  /**
+   * Dynamic Review cannot run for the workspace as the defaults would leave it: no key for the provider it would use, or no
+   * usable entry of the catalog (#676). Saving it as the default would switch every project that follows the default to reviews
+   * that fail. Never reported by the validation itself.
+   */
+  "DYNAMIC_REVIEW_NOT_READY",
+  /**
+   * Projects hold a model of their own next to no provider of their own, so the model was chosen for the provider the workspace
+   * default has now; a default with another provider would pair it with the wrong one (#676). The names of the projects travel
+   * beside the issue. Never reported by the validation itself.
+   */
+  "PROJECT_MODEL_BOUND_TO_PROVIDER",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];

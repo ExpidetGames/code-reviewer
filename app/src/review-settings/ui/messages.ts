@@ -157,6 +157,11 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   // #588: the address of a catalog provider cannot be confirmed when there is none.
   PROVIDER_ADDRESS_NOT_PINNABLE: () =>
     "There is no provider address to confirm right now. Choose the provider and a model from the catalog first.",
+  // #676: Dynamic Review as the workspace default needs a model to run on; say what is missing, not the setting.
+  DYNAMIC_REVIEW_NOT_READY: () =>
+    "Dynamic Review cannot run for this workspace yet, so projects could not use it as the default. Add the AI key it needs or choose an available option first.",
+  PROJECT_MODEL_BOUND_TO_PROVIDER: () =>
+    "Some projects chose a model of their own for the current provider. Change those models first, or keep the provider.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
     "This workspace reviews with its own AI key, so the code-review.com choices cannot be used. They can be chosen once the workspace is billed via code-review.com.",
@@ -198,6 +203,8 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository was not found. Reload the Projects page and try again.",
+  REVIEW_SETTINGS_STALE:
+    "These defaults were changed meanwhile — reload the page and decide again.",
   // #588: the address of a catalog provider is confirmed, moved or dropped by an Owner or Admin only.
   PROVIDER_ADDRESS_CONFIRM_FORBIDDEN:
     "The address of this provider changed. Only an Owner or Admin of the workspace can confirm it or change the provider of this project.",

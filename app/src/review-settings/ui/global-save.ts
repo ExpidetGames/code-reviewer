@@ -31,7 +31,10 @@ function sameRecord(
   );
 }
 
-/** The kind, Dynamic, catalog and verdict fields of the defaults as typed: those that differ from the shipped value. */
+/**
+ * The Dynamic, catalog and verdict fields of the defaults as typed: those that differ from the shipped value. The kind is not
+ * among them: it always travels (see `planGlobalSave`).
+ */
 function dynamicBody(
   model: SettingsFormModel,
   state: FormState,
@@ -40,8 +43,6 @@ function dynamicBody(
   const values = state.dynamic;
   const body: Record<string, unknown> = {};
   if (view === undefined || values === undefined) return body;
-  if (values.reviewKind !== view.defaults.reviewKind)
-    body.reviewKind = values.reviewKind;
   if (values.reviewVerdict !== view.defaults.reviewVerdict)
     body.reviewVerdict = values.reviewVerdict;
   if (model.managed) {
@@ -61,6 +62,7 @@ function dynamicBody(
 /** What the saved defaults hold of those fields, in the shape of `dynamicBody`. */
 function storedDynamic(model: SettingsFormModel): Record<string, unknown> {
   const stored: Record<string, unknown> = { ...model.dynamic?.overrides };
+  delete stored.reviewKind;
   if (model.managed && model.catalog !== null)
     for (const kind of PROJECT_REVIEW_KINDS) {
       const entry = model.catalog.selection[kind];
@@ -69,13 +71,18 @@ function storedDynamic(model: SettingsFormModel): Record<string, unknown> {
   return stored;
 }
 
-/** The request one save of the workspace defaults makes, or the problems that stop it before anything is sent. */
+/**
+ * The request one save of the workspace defaults makes, or the problems that stop it before anything is sent. The chosen review
+ * kind is always in it, Diff Review too: a save replaces the whole set, and a kind left out would be taken back, so projects
+ * and new projects would follow the shipped kind (Dynamic Review where it can run) while the page shows Diff Review.
+ */
 export function planGlobalSave(
   model: SettingsFormModel,
   state: FormState,
 ): ProjectSavePlan {
   const diff = diffPatch(state);
   const dynamic = dynamicBody(model, state);
+  const kind: ProjectReviewKind | undefined = state.dynamic?.reviewKind;
   // Every problem at once, so the form marks all of them.
   const dynamicChecked = validateWorkspaceSettingsPatch(dynamic);
   const issues = [
@@ -83,21 +90,31 @@ export function planGlobalSave(
     ...(dynamicChecked.ok ? [] : dynamicChecked.issues),
   ];
   if (issues.length > 0) return { ok: false, issues };
-  const body = { ...diff.raw, ...dynamic };
+  const body = {
+    ...diff.raw,
+    ...dynamic,
+    ...(kind === undefined ? {} : { reviewKind: kind }),
+  };
   const checked = validateWorkspaceSettingsPatch(body);
   if (!checked.ok) return { ok: false, issues: checked.issues };
 
+  const from = model.dynamic?.effective.reviewKind;
+  // The kind counts as changed when it differs from the one in force, or when the person chose one and none is stored yet.
+  const kindChanged =
+    kind !== undefined &&
+    (kind !== from ||
+      (state.dynamic?.kindChosen === true &&
+        model.dynamic?.overrides.reviewKind === undefined));
   const changed =
+    kindChanged ||
     !sameRecord(checked.value.review, model.overrides) ||
     !sameRecord(dynamic, storedDynamic(model));
-  const from = model.dynamic?.effective.reviewKind;
-  const to: ProjectReviewKind | undefined = state.dynamic?.reviewKind;
   return {
     ok: true,
     steps: changed ? [{ cards: ["diff", "kind"], body }] : [],
     kindChange:
-      from === undefined || to === undefined || from === to
+      from === undefined || kind === undefined || from === kind
         ? null
-        : { from, to },
+        : { from, to: kind },
   };
 }
