@@ -26,7 +26,6 @@ import type {
   ReviewSettingField,
 } from "../settings.ts";
 import type { SettingsFormModel } from "./form-model.ts";
-import { SuggestedModelsSelect } from "./suggested-models-select.tsx";
 import type { BooleanField, FormState, TextField } from "./form-state.ts";
 import type { ReviewCommand } from "../../integrations/types.ts";
 
@@ -152,17 +151,12 @@ export function SettingsTextField({
   value,
   onChange,
   inputMode,
-  list,
   placeholder,
-  suggestions,
 }: FieldBase & {
   value: string;
   onChange: (value: string) => void;
-  inputMode?: "numeric";
-  list?: string;
+  inputMode?: "numeric" | "decimal";
   placeholder?: string;
-  /** Models to pick from under the field (#532): the accessible name of the list and its entries. */
-  suggestions?: { label: string; models: readonly string[] };
 }) {
   const id = useId();
   const { hintId, errorId, describedBy } = ids(
@@ -186,16 +180,8 @@ export function SettingsTextField({
         aria-describedby={describedBy}
         onChange={(event) => onChange(event.target.value)}
         {...(inputMode === undefined ? {} : { inputMode })}
-        {...(list === undefined ? {} : { list })}
         {...(placeholder === undefined ? {} : { placeholder })}
       />
-      {suggestions === undefined ? null : (
-        <SuggestedModelsSelect
-          label={suggestions.label}
-          models={suggestions.models}
-          onPick={onChange}
-        />
-      )}
       <FieldEnding
         hint={hint}
         error={error}

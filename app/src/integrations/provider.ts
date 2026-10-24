@@ -110,6 +110,23 @@ export interface IntegrationProvider {
   ): Promise<"posted" | "already_there">;
 
   /**
+   * Only where a review is posted as a comment (#657): the body of the comment `commentId` below the pull request, so the
+   * run page can show what was posted. Only a comment the app itself wrote counts (anybody can write a comment): another
+   * author's, and a comment that is gone, answer null. The body is untrusted text. Rejects like `getPullRequest`; the
+   * message never holds a token or the body.
+   */
+  readReviewComment?(
+    integration: Integration,
+    repo: RepoRef,
+    commentId: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    body: string;
+    /** The repository and pull request the platform says the comment sits below; null when it names none. */
+    below: { repoFullName: string; number: number } | null;
+  } | null>;
+
+  /**
    * Only where the platform shows the progress of a review next to the pull request (#405; GitHub: a check run):
    * makes the check of the job or, with `known.checkRunId`, changes it, with a token of the app's own limited to
    * this repository and the permission to write checks (never the credentials of a job). `known.mayExist` says an

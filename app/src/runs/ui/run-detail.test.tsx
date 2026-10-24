@@ -1,24 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the detail page of a run: the facts, the comment link rules, the error sentence with its
-// code, the log notices, text from outside rendered as text, and the polling that stops at the last
-// state or goes on after a failed update.
+// Pins down the detail page of a run for a member (#657): the Summary with its cost and duration, the Findings (the review that
+// was posted), the sections that are gone (Diagnostics, Call trace, Timings), the error sentence with its code, text from
+// outside rendered as text, and the polling that stops at the last state or goes on after a failed update.
 import {
   act,
   cleanup,
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RunnerCallTrace } from "../../runner-api/contract.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
-import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
-import type { RunsApi } from "./api.ts";
+import type { CustomerRunDetailView, RunDetailSnapshot } from "../run-view.ts";
+import { RUNS_POLL, type RunsApi } from "./api.ts";
 import { DETAIL_POLL_FAILED_TEXT } from "./poll-messages.ts";
-import { LOG_SHORTENED_TEXT, NO_LOG_TEXT, RunDetail } from "./run-detail.tsx";
+import {
+  FINDINGS_NONE_TEXT,
+  FINDINGS_NOT_AVAILABLE_TEXT,
+  FINDINGS_NOT_POSTED_TEXT,
+  FINDINGS_WAITING_TEXT,
+} from "./findings-messages.ts";
+import { RunDetail } from "./run-detail.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -28,7 +34,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
+function detail(
+  overrides: Partial<CustomerRunDetailView> = {},
+): CustomerRunDetailView {
   return {
     id: "6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11",
     repositoryId: "repo-1",
@@ -54,15 +62,14 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     errorReason: null,
     commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
     commentMissing: false,
-    log: { text: "reviewed 3 files", truncated: false },
+    reviewText: null,
     supersededBy: null,
     usage: null,
-    callTrace: null,
     ...overrides,
   };
 }
 
-const snap = (run: RunDetailView): RunDetailSnapshot => ({
+const snap = (run: CustomerRunDetailView): RunDetailSnapshot => ({
   generatedAt: "2026-10-10T12:10:00.000Z",
   run,
 });
@@ -94,7 +101,7 @@ describe("the usage of a run", () => {
   };
 
   // #201-T27
-  it("names the review kind with the model that answered, and the tokens, calls and cost", () => {
+  it("names the review kind with the model that answered and the cost, without the tokens and calls", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
@@ -106,7 +113,7 @@ describe("the usage of a run", () => {
     const content = text(container);
     expect(content).toContain("Dynamic Review");
     expect(content).toContain("vendor/dynamic-model");
-    expect(content).toContain("12,900 tokens in 7 model calls");
+    expect(content).not.toContain("tokens");
     expect(content).toContain("$0.04");
   });
 
@@ -128,7 +135,9 @@ describe("the usage of a run", () => {
       );
 
       const content = text(container);
-      expect(content).toContain("Stopped early");
+      expect(
+        screen.getByRole("region", { name: "Findings" }).textContent,
+      ).toMatch(limit);
       expect(content).toMatch(limit);
       expect(content).toContain("may be incomplete");
     },
@@ -189,7 +198,7 @@ describe("the usage of a run", () => {
   });
 
   // #283-T07
-  it("shows no model and no cost for a run on a managed tier, and keeps the tokens and calls", () => {
+  it("shows no model and no cost for a run on a managed tier", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
@@ -207,7 +216,6 @@ describe("the usage of a run", () => {
     expect(screen.queryByText("Cost")).toBeNull();
     expect(container.querySelector('[data-slot="run-model"]')).toBeNull();
     expect(text(container)).not.toContain("Not available");
-    expect(text(container)).toContain("12,900 tokens in 7 model calls");
   });
 
   // #201-T29
@@ -245,7 +253,7 @@ describe("the usage of a run", () => {
 
 describe("the detail page", () => {
   // CR-35-T04
-  it("shows pull request, command, trigger, status, times, duration, comment link and log", () => {
+  it("shows pull request, command, trigger, status, duration and the link to the review", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
@@ -260,11 +268,9 @@ describe("the detail page", () => {
     expect(text(container)).toContain("/review");
     expect(text(container)).toContain("Automatic");
     expect(text(container)).toContain("0123456789ab");
-    expect(text(container)).toContain("2026-10-10 12:00 UTC");
     expect(text(container)).toContain("3 min 05 s");
-    expect(text(container)).toContain("reviewed 3 files");
     const link = screen.getByRole("link", {
-      name: "Open the comment on GitHub",
+      name: "Open the review on GitHub",
     });
     expect(link.getAttribute("href")).toBe(
       "https://github.com/acme/widgets/pull/7#issuecomment-9",
@@ -299,6 +305,92 @@ describe("the detail page", () => {
   });
 
   // #175-T03
+  // #657-T02
+  it("has a Summary and the Findings, and no Diagnostics, Call trace, Timings or log for a member", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            reviewKind: "dynamic",
+            usage: {
+              model: "vendor/dynamic-model",
+              totalTokens: 12_900,
+              aiCalls: 7,
+              costUsd: 0.04,
+              stoppedEarly: null,
+            },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(
+      screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent),
+    ).toEqual(["Summary", "Findings"]);
+    for (const gone of ["Diagnostics", "Call trace", "Timings", "Log"])
+      expect(screen.queryByRole("heading", { name: gone })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(container.querySelector("pre")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy log" })).toBeNull();
+    for (const term of ["Created", "Started", "Finished", "Lost attempts"])
+      expect(screen.queryByText(term)).toBeNull();
+  });
+
+  // #657-T03
+  it("shows the cost and the duration in the Summary", () => {
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            durationMs: 125_000,
+            usage: {
+              model: null,
+              totalTokens: 100,
+              aiCalls: 1,
+              costUsd: 0.42,
+              stoppedEarly: null,
+            },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const summary = screen.getByRole("region", { name: "Summary" });
+    expect(summary.textContent).toContain("Cost");
+    expect(summary.textContent).toContain("$0.42");
+    expect(summary.textContent).toContain("Duration");
+    expect(summary.textContent).toContain("2 min 05 s");
+  });
+
+  // #657-T03
+  it("counts a running run's duration as so far, and has none for a run that never started", () => {
+    const running = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ status: "running", durationMs: 30_000 }))}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(text(running.container)).toContain("so far");
+    running.unmount();
+
+    const waiting = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ status: "queued", durationMs: null }))}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(screen.getByText("Duration").nextElementSibling?.textContent).toBe(
+      "Not available",
+    );
+    waiting.unmount();
+  });
+
   it("groups the facts and keeps the status description behind the badge", async () => {
     render(
       <RunDetail
@@ -309,8 +401,7 @@ describe("the detail page", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Summary" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Timings" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Findings" })).toBeTruthy();
     expect(
       screen.queryByText(RUN_STATUS_PRESENTATION.succeeded.description),
     ).toBeNull();
@@ -325,31 +416,6 @@ describe("the detail page", () => {
     expect(document.getElementById(describedBy ?? "")?.textContent).toContain(
       RUN_STATUS_PRESENTATION.succeeded.description,
     );
-  });
-
-  it("copies the log and announces the result", async () => {
-    const writeText = vi.fn(async () => undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
-    render(
-      <RunDetail
-        workspaceSlug="acme"
-        initial={snap(
-          detail({ log: { text: "reviewed 3 files", truncated: false } }),
-        )}
-        api={apiAnswering([])}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy log" }));
-    await act(async () => {});
-
-    expect(
-      screen.getByRole("status", { name: "Copying the log" }).textContent,
-    ).toBe("Copied.");
-    expect(writeText).toHaveBeenCalledWith("reviewed 3 files");
   });
 
   // CR-35-T04
@@ -391,7 +457,7 @@ describe("the detail page", () => {
   });
 
   // #296-T11
-  it("shows the reason of a failed checkout in words, next to its code, with the log", () => {
+  it("shows the reason of a failed checkout in words, next to its code", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
@@ -407,10 +473,6 @@ describe("the detail page", () => {
               text: "The repository is larger to prepare than a Dynamic Review allows.",
               known: true,
             },
-            log: {
-              text: "checkout_incomplete [budget_preparation]: the pull request could not be prepared",
-              truncated: false,
-            },
           }),
         )}
         api={apiAnswering([])}
@@ -421,9 +483,6 @@ describe("the detail page", () => {
       "The repository is larger to prepare than a Dynamic Review allows.",
     );
     expect(screen.getByText("budget_preparation").tagName).toBe("CODE");
-    expect(screen.getByLabelText("Log of the run").textContent).toContain(
-      "[budget_preparation]",
-    );
   });
 
   // #296-T11
@@ -466,34 +525,8 @@ describe("the detail page", () => {
     expect(screen.getByText("flux_capacitor")).toBeTruthy();
   });
 
-  // CR-35-T10
-  it("says the log was shortened, and says when there is no log", () => {
-    const shortened = render(
-      <RunDetail
-        workspaceSlug="acme"
-        initial={snap(detail({ log: { text: "tail", truncated: true } }))}
-        api={apiAnswering([])}
-      />,
-    );
-    expect(text(shortened.container)).toContain(LOG_SHORTENED_TEXT);
-    expect(text(shortened.container)).toContain("tail");
-    shortened.unmount();
-
-    const empty = render(
-      <RunDetail
-        workspaceSlug="acme"
-        initial={snap(detail({ log: { text: "", truncated: false } }))}
-        api={apiAnswering([])}
-      />,
-    );
-    expect(text(empty.container)).toContain(NO_LOG_TEXT);
-    expect(empty.container.querySelector("pre")).toBeNull();
-  });
-
   // CR-35-T13
-  it("renders a log with HTML as plain text and runs no script", () => {
-    const log =
-      "<script>alert(1)</script><img src=x onerror=alert(1)>\n<b>bold</b>";
+  it("renders names and questions with HTML as plain text and runs no script", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
@@ -502,7 +535,6 @@ describe("the detail page", () => {
             project: "<script>alert(2)</script>",
             args: "<img src=y onerror=alert(3)>",
             command: "ask",
-            log: { text: log, truncated: false },
           }),
         )}
         api={apiAnswering([])}
@@ -511,8 +543,6 @@ describe("the detail page", () => {
 
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
-    expect(container.querySelector("b")).toBeNull();
-    expect(container.querySelector("pre")?.textContent).toBe(log);
     expect(text(container)).toContain("<script>alert(2)</script>");
     expect(text(container)).toContain("<img src=y onerror=alert(3)>");
   });
@@ -539,23 +569,85 @@ describe("the detail page", () => {
     expect(text(container)).toContain("review_state_truncated");
     expect(
       screen
-        .getByRole("link", { name: "Open the comment on GitHub" })
+        .getByRole("link", { name: "Open the review on GitHub" })
         .getAttribute("href"),
     ).toBe("https://github.com/acme/widgets/pull/7#issuecomment-9");
   });
 
-  // CR-35-T14
-  it("shows no comment link for a run without one, and says the link was not found", () => {
+  // #657-T04
+  it("shows what was posted for the run, readably", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
-        initial={snap(detail({ commentUrl: null, commentMissing: true }))}
+        initial={snap(
+          detail({
+            reviewText:
+              "## PR Reviewer Guide\n\n#### P1 - Missing check\n\n- The `null` case is not handled.",
+          }),
+        )}
         api={apiAnswering([])}
       />,
     );
 
-    expect(screen.queryByRole("link", { name: /comment/i })).toBeNull();
-    expect(text(container)).toContain("the link to its comment was not found");
+    const findings = screen.getByRole("region", { name: "Findings" });
+    expect(
+      within(findings).getByRole("heading", { name: "PR Reviewer Guide" }),
+    ).toBeTruthy();
+    expect(
+      within(findings).getByRole("heading", { name: "P1 - Missing check" }),
+    ).toBeTruthy();
+    expect(within(findings).getByRole("listitem").textContent).toContain(
+      "The null case is not handled.",
+    );
+    expect(container.querySelector("script")).toBeNull();
+    expect(
+      within(findings).getByRole("link", { name: "Open the review on GitHub" }),
+    ).toBeTruthy();
+  });
+
+  // #657-T04
+  it("says so for a run that posted no findings, and when the text is not available", () => {
+    const none = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ commentUrl: null }))}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(text(none.container)).toContain(FINDINGS_NONE_TEXT);
+    expect(screen.queryByRole("link", { name: /review on GitHub/ })).toBeNull();
+    none.unmount();
+
+    const unavailable = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(text(unavailable.container)).toContain(FINDINGS_NOT_AVAILABLE_TEXT);
+    unavailable.unmount();
+
+    const failed = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ status: "failed", commentUrl: null }))}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(text(failed.container)).toContain(FINDINGS_NOT_POSTED_TEXT);
+    failed.unmount();
+
+    const waiting = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({ status: "queued", commentUrl: null, durationMs: null }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(text(waiting.container)).toContain(FINDINGS_WAITING_TEXT);
   });
 
   it("shows a pull request address that is no web address as plain text", () => {
@@ -571,7 +663,7 @@ describe("the detail page", () => {
     expect(screen.getByText("#7")).toBeTruthy();
   });
 
-  it("links a replaced run to the newer one and shows lost attempts", () => {
+  it("links a replaced run to the newer one", () => {
     render(
       <RunDetail
         workspaceSlug="acme"
@@ -591,9 +683,10 @@ describe("the detail page", () => {
     );
 
     expect(
-      screen.getByRole("link", { name: "The newer run" }).getAttribute("href"),
+      screen
+        .getByRole("link", { name: "Replaced by a newer run" })
+        .getAttribute("href"),
     ).toBe("/w/acme/runs/newer-run");
-    expect(screen.getByText("Lost attempts")).toBeTruthy();
     expect(screen.getByText("Superseded")).toBeTruthy();
   });
 });
@@ -613,7 +706,6 @@ describe("polling the detail page", () => {
       finishedAt: null,
       durationMs: null,
       commentUrl: null,
-      log: { text: "", truncated: false },
     });
     const api = apiAnswering([
       {
@@ -638,7 +730,7 @@ describe("polling the detail page", () => {
     await pass(3000);
     expect(screen.getByText("Succeeded")).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: "Open the comment on GitHub" }),
+      screen.getByRole("link", { name: "Open the review on GitHub" }),
     ).toBeTruthy();
 
     await pass(60_000);
@@ -668,6 +760,37 @@ describe("polling the detail page", () => {
       screen.getByRole("status", { name: "Updating the run" }).textContent,
     ).toBe("");
     expect(screen.getByText("Succeeded")).toBeTruthy();
+  });
+
+  // #657-T04
+  it("keeps asking for a minute or two after a run ended until the text of its review arrives, then stops", async () => {
+    const justEnded = {
+      ...snap(detail()),
+      generatedAt: "2026-10-10T12:03:20.000Z",
+    };
+    const api = apiAnswering([
+      { ok: true, data: justEnded },
+      {
+        ok: true,
+        data: {
+          ...justEnded,
+          run: { ...justEnded.run, reviewText: "## Review\n\nA finding." },
+        },
+      },
+    ]);
+    render(<RunDetail workspaceSlug="acme" initial={justEnded} api={api} />);
+    expect(screen.queryByText("A finding.")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUNS_POLL.activeMs * 2);
+    });
+
+    expect(screen.getByText("A finding.")).toBeTruthy();
+    const asked = api.detail.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUNS_POLL.activeMs * 10);
+    });
+    expect(api.detail.mock.calls.length).toBe(asked);
   });
 
   it("does not ask at all for a run that is settled", async () => {
@@ -721,80 +844,6 @@ describe("polling the detail page", () => {
   });
 });
 
-describe("the call trace of a run", () => {
-  const callTrace: RunnerCallTrace = {
-    truncated: false,
-    modelCalls: [
-      {
-        index: 0,
-        tMs: 1200,
-        promptTokens: 14_600,
-        cacheRead: 0,
-        cacheWrite: 14_600,
-        completionTokens: 492,
-        costUsd: 0.0342,
-        finishReason: "stop",
-        final: false,
-        tools: [],
-      },
-    ],
-    toolCalls: [{ index: 0, name: "read", resultBytes: 100, isRepeat: false }],
-  };
-
-  // #541-T10
-  it("is shown in its own section of the detail page", () => {
-    render(
-      <RunDetail
-        workspaceSlug="acme"
-        initial={snap(detail({ reviewKind: "dynamic", callTrace }))}
-        api={apiAnswering([])}
-      />,
-    );
-
-    expect(screen.getByRole("region", { name: "Call trace" })).toBeTruthy();
-    expect(screen.getAllByRole("table")).toHaveLength(2);
-    expect(screen.getByText("$0.0342")).toBeTruthy();
-  });
-
-  // #541-T10
-  it("leaves out the cost of a call for a run on a managed quality level", () => {
-    const { container } = render(
-      <RunDetail
-        workspaceSlug="acme"
-        initial={snap(
-          detail({
-            reviewKind: "dynamic",
-            costHidden: true,
-            callTrace: {
-              ...callTrace,
-              modelCalls: [{ ...callTrace.modelCalls[0], costUsd: null }],
-            },
-          }),
-        )}
-        api={apiAnswering([])}
-      />,
-    );
-
-    expect(screen.getAllByRole("table")).toHaveLength(2);
-    expect(container.textContent).not.toContain("Cost");
-    expect(container.textContent).not.toContain("$");
-  });
-
-  // #541-T10
-  it("is not there for a run without a trace (an older runner, a Diff Review), and nothing fails", () => {
-    render(
-      <RunDetail
-        workspaceSlug="acme"
-        initial={snap(detail({ callTrace: null }))}
-        api={apiAnswering([])}
-      />,
-    );
-
-    expect(screen.queryByRole("region", { name: "Call trace" })).toBeNull();
-    expect(screen.queryByRole("table")).toBeNull();
-  });
-});
-
 describe("the price of a review on the detail page (#505)", () => {
   // #505-T05
   it("shows the AI price and the infrastructure price of a charged review", () => {
@@ -814,7 +863,7 @@ describe("the price of a review on the detail page (#505)", () => {
       />,
     );
 
-    expect(text(container)).toContain("Price");
+    expect(text(container)).toContain("Cost");
     expect(text(container)).toContain("AI");
     expect(text(container)).toContain("$1.50");
     expect(text(container)).toContain("Infrastructure");
@@ -857,7 +906,7 @@ describe("the price of a review on the detail page (#505)", () => {
   });
 
   // #505-T11
-  it("has no Price line without a price", () => {
+  it("has no Cost line without a price and without a reported cost", () => {
     const { container } = render(
       <RunDetail
         workspaceSlug="acme"
@@ -866,6 +915,6 @@ describe("the price of a review on the detail page (#505)", () => {
       />,
     );
 
-    expect(text(container)).not.toContain("Price");
+    expect(text(container)).not.toContain("Cost");
   });
 });

@@ -11,6 +11,7 @@ import {
   type ReadableSettingKey,
   type InstanceSettingValues,
 } from "../db/repositories/instance-settings-repository.ts";
+import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type {
   SmtpConfigStore,
@@ -362,10 +363,7 @@ export function createAdminService({
       const effective = effectiveSignInMethods(storedMethods, github);
       const signUp: SignUpRule =
         (rule?.value as SignUpRule | undefined) ?? CLOSED_RULE;
-      const count = await db
-        .selectFrom("workspaces")
-        .select((eb) => eb.fn.countAll<number>().as("count"))
-        .executeTakeFirstOrThrow();
+      const workspaceCount = await createWorkspacesRepository(db).count();
 
       return {
         tenancy: view(
@@ -414,7 +412,7 @@ export function createAdminService({
           ({ provider }) => provider === DEFAULT_LLM_PROVIDER,
         )?.status ?? { state: "not_configured" },
         modelCatalog: await catalogSummary(),
-        workspaceCount: Number(count.count),
+        workspaceCount: workspaceCount,
         githubConfigured: github,
         mailConfigured: mail,
         signUpRuleState: signUpRuleState({

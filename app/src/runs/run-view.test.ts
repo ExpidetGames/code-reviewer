@@ -10,6 +10,7 @@ import {
   readStoredResult,
   readStoredUsage,
   safeGithubUrl,
+  toCustomerRunDetailView,
   toRunDetailView,
   toRunRowView,
 } from "./run-view.ts";
@@ -817,5 +818,52 @@ describe("the call trace of a run", () => {
 
     expect(managed.callTrace).toBeNull();
     expect(JSON.stringify(managed)).not.toContain("end_turn");
+  });
+});
+
+describe("the detail of a run for a member (#657)", () => {
+  const OLD_COMMENT =
+    "## Review\u001b[31m\n\ncalling openrouter/some-model with sk-secret-1234";
+  const redact = (text: string) => text.replace(/sk-secret-\d+/, "[redacted]");
+
+  // #657-T02
+  it("is the detail of the admin without the log and the call trace", () => {
+    const stored = job({ result: { ok: true, logTail: "log text" } });
+
+    const member = toCustomerRunDetailView(stored, "acme/widgets", NOW);
+
+    expect(member).not.toHaveProperty("log");
+    expect(member).not.toHaveProperty("callTrace");
+    expect(member.id).toBe(stored.id);
+    expect(member.durationMs).toBe(50_000);
+  });
+
+  // #657-T04
+  it("carries the review text cleaned like a log and redacted, and null for none", () => {
+    const stored = job();
+
+    expect(
+      toCustomerRunDetailView(stored, "p", NOW, redact, false, OLD_COMMENT)
+        .reviewText,
+    ).toBe("## Review\n\ncalling openrouter/some-model with [redacted]");
+    for (const none of [null, "", "  \n "])
+      expect(
+        toCustomerRunDetailView(stored, "p", NOW, redact, false, none)
+          .reviewText,
+      ).toBeNull();
+  });
+
+  // #657-T04
+  it("never names the provider in the review text of a run on the operator's key", () => {
+    const view = toCustomerRunDetailView(
+      job(),
+      "p",
+      NOW,
+      redact,
+      true,
+      "calling openrouter/some-model",
+    );
+
+    expect(view.reviewText).toBe("calling [provider]/some-model");
   });
 });

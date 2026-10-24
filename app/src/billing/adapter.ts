@@ -233,7 +233,32 @@ export interface BillingAdapter {
     checkout: ProviderRef | null;
     payment: ProviderRef | null;
   }): Promise<TopUpLookupEvent | null>;
+  /**
+   * The newest invoices of THE customer the application stored for the workspace (`customer`, never a free filter), newest
+   * first, drafts left out (#659). The one outbound read of the billing page, made in a user's request. Absent when the
+   * provider issues no invoices the app can list (the `manual` adapter).
+   */
+  listInvoices?(input: { customer: ProviderRef }): Promise<InvoiceSummary[]>;
 }
+
+/**
+ * An invoice of the workspace as the provider shows it (#659): plain data for the billing page. The amount is the provider's
+ * own unit (cents of `currency`), the two addresses are the provider's hosted page and PDF, already checked to be web addresses.
+ * A draft is never listed.
+ */
+export type InvoiceSummary = {
+  /** The provider's id of the invoice: a stable key, nothing else. */
+  id: ProviderRef;
+  /** The invoice number the buyer sees, when there is one. */
+  number: string | null;
+  createdAt: string;
+  amount: ProviderAmount;
+  currency: string;
+  status: "paid" | "open" | "void" | "uncollectible";
+  /** The provider's page of the invoice, and its PDF. */
+  viewUrl: string | null;
+  downloadUrl: string | null;
+};
 
 /** What a lookup of a top-up may answer. */
 export type TopUpLookupEvent = Extract<
@@ -410,6 +435,8 @@ export const BILLING_EVENT_OUTCOMES = [
   "amount_rejected",
   /** The reference exists in the journal with another amount; nothing was changed. */
   "amount_conflict",
+  /** A payment arrived for a workspace that was deleted (#658); nothing was credited, an operator refunds it. */
+  "workspace_deleted",
   /** A signed event that is not a normalized event (an adapter bug or a provider change). Nothing was changed. */
   "event_invalid",
 ] as const;
@@ -426,6 +453,7 @@ export const BILLING_REVIEW_OUTCOMES = [
   "intent_unresolved",
   "amount_rejected",
   "amount_conflict",
+  "workspace_deleted",
   "event_invalid",
 ] as const satisfies readonly BillingEventOutcome[];
 export type BillingReviewOutcome = (typeof BILLING_REVIEW_OUTCOMES)[number];

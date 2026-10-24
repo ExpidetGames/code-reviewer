@@ -142,7 +142,9 @@ describe("the frame", () => {
     renderShell();
 
     expect(
-      screen.getByRole("link", { name: "Code Reviewer" }).getAttribute("href"),
+      screen
+        .getByRole("link", { name: "code-review.com" })
+        .getAttribute("href"),
     ).toBe("/");
   });
 

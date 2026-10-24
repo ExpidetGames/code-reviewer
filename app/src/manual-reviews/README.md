@@ -1,8 +1,7 @@
 # Manual start
 
 A person can start a review (`/review`, the only command since #203) for an open pull request of an
-active project from the project's review page ("Review now", `/w/:workspace/projects/:repositoryId/review`,
-#174). The job goes through the same queue as every other trigger, as a `manual` job with the login of
+active project from the play button of its row in the project list (#655, before: the "Review now" page of #174). The job goes through the same queue as every other trigger, as a `manual` job with the login of
 the person (`src/jobs/README.md`); the run shows up on the Runs page as "Started by <login>".
 
 | File                          | Role                                                                                                                               |
@@ -12,7 +11,8 @@ the person (`src/jobs/README.md`); the run shows up on the Runs page as "Started
 | `errors.ts`                   | `ManualReviewError` with the stable codes (`MANUAL_REVIEW_*`), their HTTP status and the field `issues`                            |
 | `http.ts`                     | The handlers behind the two routes: user first, then origin, content type and body, then the service                               |
 | `shared.ts`                   | The wiring of the running server (`getManualReviewService()`, for the workspace the signed-in user works in)                       |
-| `ui/start-review-panel.tsx`   | The client panel: loads the list, picks a pull request, sends, shows the answer and a link to the run                              |
+| `ui/start-review-dialog.tsx`  | The play button of a project row and the dialog it opens; mounts the panel only while open                                         |
+| `ui/start-review-panel.tsx`   | The dialog body: loads the list, picks a pull request, sends, shows the answer and a link to the run                               |
 | `ui/pull-request-list.tsx`    | The radio list of pull requests (number, title, author, draft); the empty state                                                    |
 | `ui/api.ts`, `ui/messages.ts` | The two calls of the panel; the sentence for every code                                                                            |
 
@@ -65,8 +65,8 @@ after `/review` in a comment is dropped the same way (the comment trigger).
 
 ## The panel
 
-The panel (`ui/start-review-panel.tsx`) is on the settings page of an active project, keyed on the
-repository. It loads the list in an effect, so with Cache Components (which keeps a page that was left
+The panel (`ui/start-review-panel.tsx`) is the body of the dialog of the play button (`ui/start-review-dialog.tsx`),
+mounted only while the dialog is open. It loads the list in an effect, so with Cache Components (which keeps a page that was left
 mounted but hidden) it asks again when the page is shown again. A failed load shows a sentence and
 "Try again"; a start that finds the pull request closed or gone says so and loads the list again. A
 second press while a request is on its way does nothing. Titles and names come from GitHub and are

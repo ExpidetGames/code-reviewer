@@ -19,6 +19,7 @@ import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createInvitationsRepository } from "./invitations-repository.ts";
 import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
+import { createWorkspaceErasureRepository } from "./workspace-erasure-repository.ts";
 import { createWorkspaceSecretsRepository } from "./workspace-secrets-repository.ts";
 import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
@@ -61,6 +62,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     profiles: createBillingProfilesRepository(db, workspaceId),
     limits: createBillingWorkspaceSettingsRepository(db, workspaceId),
     notifications: createBillingNotificationsRepository(db, workspaceId),
+    erasure: createWorkspaceErasureRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -1153,6 +1155,16 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "jobChecks.recordReviewComment",
+    run: (a, b) => a.jobChecks.recordReviewComment(b.job.id, "hijacked"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "jobChecks.reviewCommentOf",
+    run: (a, b) => a.jobChecks.reviewCommentOf(b.job.id),
+    expectAnswer: (answer) => expect(answer).toBeNull(),
+  },
+  {
     name: "jobChecks.finish",
     run: (a, b) => a.jobChecks.finish(b.job.id, { settled: true }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
@@ -1499,6 +1511,41 @@ const CASES: Case[] = [
     name: "notifications.rearm",
     run: (a) => a.notifications.rearm("low"),
     expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  // erasure (#658): A's scope reads nothing of B's (B has a queued job and a pending top-up intent) and erases only A.
+  {
+    name: "erasure.hasRunningJobs",
+    run: (a) => a.erasure.hasRunningJobs(new Date("2026-10-23T12:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "erasure.lockActiveJobs",
+    run: (a) => a.erasure.lockActiveJobs(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "erasure.openChecks",
+    run: (a) => a.erasure.openChecks(),
+    // Only A's own waiting check run, never B's.
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject([
+        { jobId: a.job.id, checkRunId: "check-a" },
+      ]),
+  },
+  {
+    name: "erasure.hasOpenPayment",
+    run: (a) => a.erasure.hasOpenPayment(new Date("2000-01-01T00:00:00.000Z")),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
+  {
+    name: "erasure.erase",
+    run: (a) =>
+      a.erasure.erase({
+        name: "Deleted",
+        slug: "deleted-a",
+        deletedAt: new Date("2026-10-23T12:00:00.000Z"),
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {

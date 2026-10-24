@@ -10,6 +10,7 @@ import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import { toInvitation, type Invitation } from "./invitations-repository.ts";
+import { NOT_DELETED } from "./workspaces-repository.ts";
 
 /** An invitation with the name of the workspace it is for (shown to the person who holds it). */
 export type InvitationWithWorkspace = Invitation & {
@@ -40,7 +41,8 @@ export function createInvitationDirectory(
       .select([
         "workspaces.name as workspace_name",
         "workspaces.slug as workspace_slug",
-      ]);
+      ])
+      .where(NOT_DELETED);
   }
   type Row = Awaited<ReturnType<ReturnType<typeof invitations>["execute"]>>[0];
   const toWithWorkspace = (row: Row): InvitationWithWorkspace => ({

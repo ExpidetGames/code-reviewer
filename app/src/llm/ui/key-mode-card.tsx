@@ -3,7 +3,8 @@
 "use client";
 // The choice of the key mode while billing is on (ADR 0006, P3, D4; #496): "Use our models" or "Use my own provider key", each with one
 // sentence about what is charged. An Owner or an Admin saves it; a Member sees it read-only. The own key needs a stored key (the
-// server refuses otherwise, and the option says so); the key forms stay on the page whichever is chosen, so the key can be saved first.
+// server refuses otherwise, and the option says so). The own-key settings below follow the choice (#656): they are shown while "Use my own
+// provider key" is selected, so the key can be saved first, and hidden while "Use our models" is.
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../../components/button.tsx";
@@ -52,6 +53,7 @@ export function KeyModeCard({
   canManage,
   keyMode,
   hasOwnKey,
+  onSelect,
   api = browserLlmKeyModeApi(workspaceSlug),
 }: {
   workspaceSlug: string;
@@ -61,6 +63,8 @@ export function KeyModeCard({
   keyMode: KeyMode;
   /** A key of the workspace's own is stored for some provider. */
   hasOwnKey: boolean;
+  /** Called with the option that is selected (saved or not), so the page can show what belongs to it. */
+  onSelect?: (keyMode: KeyMode) => void;
   /** Only tests pass this: a function cannot cross from the server component that renders the card, so the card makes its own. */
   api?: LlmKeyModeApi;
 }) {
@@ -103,6 +107,7 @@ export function KeyModeCard({
           value={selected}
           onValueChange={(value) => {
             setSelected(value as KeyMode);
+            onSelect?.(value as KeyMode);
             setSaved(false);
             setProblem(null);
           }}
@@ -110,14 +115,14 @@ export function KeyModeCard({
           className="flex flex-col gap-3"
         >
           {OPTIONS.map(({ mode, label, text }) => {
-            // Keeping the own key is always possible; picking it needs a stored key.
-            const needsKey = mode === "own" && !hasOwnKey && keyMode !== "own";
+            // The own key can be selected to reach the key form; saving the choice needs a stored key.
+            const needsKey = mode === "own" && selected === "own" && !hasOwnKey;
             return (
               <div key={mode} className="flex items-start gap-3">
                 <RadioGroupItem
                   value={mode}
                   id={`${id}-${mode}`}
-                  disabled={!canManage || needsKey}
+                  disabled={!canManage}
                   className="mt-1"
                 />
                 <FieldLabel
@@ -150,7 +155,9 @@ export function KeyModeCard({
               <Button
                 type="button"
                 variant="secondary"
-                disabled={selected === keyMode}
+                disabled={
+                  selected === keyMode || (selected === "own" && !hasOwnKey)
+                }
                 loading={pending}
                 loadingLabel={SAVE_CHOICE_LOADING}
                 onClick={() => void save()}

@@ -16,6 +16,7 @@ import type {
   ConfigAudience,
   ConfigStatus,
 } from "../../config-status/status.ts";
+import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import type { ProjectService } from "../service.ts";
 import type { ProjectsApi } from "./api.ts";
 import {
@@ -54,9 +55,11 @@ export function ProjectsPageContent({
   audience = "member",
   canManage = true,
   canConnect = canManage,
+  canStartReview = true,
   llmNotice = null,
   data,
   api,
+  manualReviewApi,
 }: {
   /** The workspace of the page. */
   workspaceSlug: string;
@@ -66,10 +69,14 @@ export function ProjectsPageContent({
   canManage?: boolean;
   /** Whether the person may connect GitHub (an Admin or an Owner). */
   canConnect?: boolean;
+  /** Whether the person may start a review by hand (the play button of a row, #655). */
+  canStartReview?: boolean;
   /** The workspace's LLM notice, built by the page (it needs the server's summary); merged into the one strip. */
   llmNotice?: AttentionNotice | null;
   data: ProjectsPageData;
   api?: ProjectsApi;
+  /** Only tests pass this: the calls of the play button's dialog. */
+  manualReviewApi?: ManualReviewApi;
 }) {
   // One attention region for the whole page (#173): the configuration hints and the workspace's LLM
   // hint are rows of the same strip instead of two separate notice regions.
@@ -84,6 +91,7 @@ export function ProjectsPageContent({
         workspaceSlug={workspaceSlug}
         canManage={canManage}
         canConnect={canConnect}
+        canStartReview={canStartReview}
         view={data.list}
         activationBlocked={
           data.config.githubApp.configured
@@ -93,6 +101,7 @@ export function ProjectsPageContent({
               : ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS
         }
         {...(api === undefined ? {} : { api })}
+        {...(manualReviewApi === undefined ? {} : { manualReviewApi })}
       />
     </>
   );

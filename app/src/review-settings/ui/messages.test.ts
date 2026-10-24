@@ -46,6 +46,21 @@ describe("the copy for a problem with one setting", () => {
     expect(describeIssue("maxTokens", "TOO_SMALL")).toMatch(/8,000/);
   });
 
+  // #656-T04
+  it("names the range and the format of the cost warning in dollars", () => {
+    const { min, max } = REVIEW_SETTING_LIMITS.maxCostCents;
+    expect(`$${(min / 100).toFixed(2)} to $${String(max / 100)}`).toBe(
+      "$0.01 to $100",
+    );
+    for (const code of ["TOO_SMALL", "TOO_LARGE"] as const)
+      expect(describeIssue("maxCostCents", code)).toBe(
+        "Enter an amount from $0.01 to $100.",
+      );
+    expect(describeIssue("maxCostCents", "INVALID_TYPE")).toBe(
+      "Enter an amount in dollars with up to two decimals, like 0.50 or 2.",
+    );
+  });
+
   // CR-34-T06
   it("asks for a whole number where a number field holds something else", () => {
     expect(describeIssue("maxTokens", "INVALID_TYPE")).toBe(

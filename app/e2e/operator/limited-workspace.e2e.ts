@@ -54,7 +54,9 @@ import {
   type OperatorClient,
   type UsageItem,
 } from "../helpers/operator-api";
+import { PRODUCT_NAME } from "../../src/copy/product-name";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 // Workspace A, the limited one, and workspace B, on its own key. Each owns its account, organization, installation
@@ -549,6 +551,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   test("an Owner reads the review defaults without a model field, or a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
+    await openSection(page, "LLM");
     // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
     await expect(
       page.getByText(/chosen for each project, on the settings page/),
@@ -579,23 +582,34 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       page.getByRole("heading", { level: 1, name: REPO_A.fullName }),
     ).toBeVisible();
 
-    const diffChoice = page.locator('[data-field="catalogEntryDiff"]');
-    await expect(diffChoice).toBeVisible();
-    // Name and description of the entries that serve Diff Review, in the order of the catalog, and no Dynamic entry.
-    await expect(diffChoice.locator("[data-entry]")).toHaveCount(2);
-    await expect(diffChoice).toContainText(ENTRIES.quick.name);
-    await expect(diffChoice).toContainText(ENTRIES.quick.description);
-    await expect(diffChoice).not.toContainText(ENTRIES.explorer.name);
-    // No model field, no provider and no estimate on the managed form.
-    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
-    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
+    // The LLM section of a workspace on the operator's key: one provider, which names no vendor, and the entries of the
+    // catalog that serve Diff Review by the names the operator gave them, in the order of the catalog, and no Dynamic entry.
+    await openSection(page, "LLM");
+    await expect(
+      page.getByRole("combobox", { name: "Provider", exact: true }),
+    ).toHaveText(PRODUCT_NAME);
+    const diffModel = page.getByRole("combobox", { name: "Model" });
+    await diffModel.click();
+    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(
+      page.getByRole("option", { name: ENTRIES.quick.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.explorer.name }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // No model field, no estimate and no fallback on the managed form.
+    await expect(page.getByLabel("Fallback model")).toHaveCount(0);
     await expect(page.getByText("Estimated cost")).toHaveCount(0);
 
-    await diffChoice.getByRole("radio", { name: /^Thorough/ }).click();
+    await chooseOption(page, "Model", /^Thorough/);
+    await openSection(page, "Review");
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
-    const dynamicChoice = page.locator('[data-field="catalogEntryDynamic"]');
-    await expect(dynamicChoice.locator("[data-entry]")).toHaveCount(2);
-    await dynamicChoice.getByRole("radio", { name: /^Detective/ }).click();
+    await openSection(page, "LLM");
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(page.getByRole("option")).toHaveCount(3);
+    await page.keyboard.press("Escape");
+    await chooseOption(page, "Model", /^Detective/);
     await page.getByRole("button", { name: "Save review settings" }).click();
     await page
       .getByRole("alertdialog")
@@ -607,17 +621,16 @@ test.describe("a limited workspace on an instance with the operator API on", () 
 
     // Both choices are stored: a reload shows them, one per kind.
     await page.reload();
-    await expect(
-      page
-        .locator('[data-field="catalogEntryDynamic"]')
-        .getByRole("radio", { name: /^Detective/ }),
-    ).toBeChecked();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      "Detective",
+    );
+    await openSection(page, "Review");
     await page.getByRole("radio", { name: "Diff Review" }).click();
-    await expect(
-      page
-        .locator('[data-field="catalogEntryDiff"]')
-        .getByRole("radio", { name: /^Thorough/ }),
-    ).toBeChecked();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      "Thorough",
+    );
     // Nothing the operator keeps to itself is in the page: not a model id, not the provider.
     const html = await page.content();
     expect(html).not.toContain("entryproof");
@@ -865,8 +878,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     ).toHaveCount(0);
 
     // Every page and answer a member can read, and the same for the Owner.
-    const memberTexts = await collectViews(member, slugA, REPO_A.fullName);
-    const ownerTexts = await collectViews(ownerPage(), slugA, REPO_A.fullName);
+    const memberTexts = await collectViews(member, slugA, REPO_A.fullName, {
+      advanced: false,
+    });
+    const ownerTexts = await collectViews(ownerPage(), slugA, REPO_A.fullName, {
+      advanced: true,
+    });
     // What the browser shows once the pages are hydrated and have polled: the DOM and the visible text of the plan,
     // the runs, a run and the review defaults, for the member and for the Owner.
     const runIds = (
@@ -1009,7 +1026,8 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
       0,
     );
-    await expect(page.getByLabel("Model", { exact: true })).toBeVisible();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toBeVisible();
     await page.goto(`/w/${slugB}/settings/plan`);
     await expect(
       page.getByText(
@@ -1139,6 +1157,7 @@ async function collectViews(
   page: Page,
   slug: string,
   repository: string,
+  options: { advanced: boolean },
 ): Promise<Array<[string, string]>> {
   const texts: Array<[string, string]> = [];
   const read = async (path: string) => {
@@ -1153,7 +1172,6 @@ async function collectViews(
     `/w/${slug}/settings/review-defaults`,
     `/w/${slug}/settings/llm`,
     `/w/${slug}/settings/plan`,
-    `/w/${slug}/settings/advanced`,
     `/w/${slug}/projects`,
     `/w/${slug}/connections`,
     `/w/${slug}/members`,
@@ -1164,6 +1182,21 @@ async function collectViews(
     `/api/w/${slug}/review-settings`,
   ])
     await read(path);
+  // Advanced (the deletion of the workspace, #658) is the Owner's page; for a member it is the 404 page, in the browser (the
+  // page streams, so what the server sends first is the loading state) and without anything of the page in it.
+  if (options.advanced) await read(`/w/${slug}/settings/advanced`);
+  else {
+    await page.goto(`/w/${slug}/settings`);
+    await expect(
+      page.getByRole("navigation", { name: "Settings sections" }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Advanced" })).toHaveCount(0);
+    await page.goto(`/w/${slug}/settings/advanced`);
+    await expect(page.getByText("404", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Delete workspace…" }),
+    ).toHaveCount(0);
+  }
   // The project of the repository (its page and its settings), found by the link on the Projects page.
   const projects =
     texts.find(([name]) => name.endsWith("/projects"))?.[1] ?? "";
@@ -1172,7 +1205,6 @@ async function collectViews(
   if (repositoryId === undefined)
     throw new Error("The Projects page has no link to the project.");
   await read(`/w/${slug}/projects/${repositoryId}`);
-  await read(`/w/${slug}/projects/${repositoryId}/review`);
   await read(`/api/w/${slug}/repositories/${repositoryId}/project/settings`);
   await read(`/api/w/${slug}/repositories/${repositoryId}/pull-requests`);
   expect(projects, "the Projects page lists the repository").toContain(
@@ -1231,7 +1263,7 @@ async function renderedViews(
   await take(
     "the review defaults",
     `/w/${slug}/settings/review-defaults`,
-    page.getByLabel("Token budget", { exact: true }),
+    page.getByLabel("Most findings per review", { exact: true }),
   );
   return texts;
 }

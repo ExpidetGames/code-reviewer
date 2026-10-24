@@ -25,16 +25,6 @@ import {
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 
-/**
- * The pick list under a model field (#532). The same words are its visible placeholder and its accessible name, so a
- * person who hears the name and a person who sees the text get the same one, and each field has its own.
- */
-export const SUGGESTED_MODEL_PICK = {
-  model: "Pick a suggested model",
-  fallbackModel: "Pick a suggested fallback model",
-  dynamicModel: "Pick a suggested Dynamic Review model",
-} as const;
-
 const GENERIC_ISSUE = "This value is not valid.";
 const MODEL_FIELDS: readonly string[] = [
   "model",
@@ -47,6 +37,11 @@ const ENTRY_FIELDS: readonly string[] = [
   "catalogEntryDiff",
   "catalogEntryDynamic",
 ];
+/** After the Diff provider changed while a fallback model was stored: a fallback of another provider is invalid, so it went. */
+export const FALLBACK_REMOVED_NOTICE =
+  "The fallback model of the previous provider was removed.";
+/** Read after the name of a tab whose section holds a field with a problem ("LLM (has a problem)"). */
+export const TAB_PROBLEM_NOTE = "(has a problem)";
 const CHOOSE_PROVIDER = "Choose one of the listed providers.";
 const CHOOSE_OPTION = "Choose one of the listed options.";
 
@@ -60,6 +55,8 @@ function numberWithCommas(value: number): string {
   return value.toLocaleString("en-US");
 }
 
+const COST_RANGE = `Enter an amount from $${(REVIEW_SETTING_LIMITS.maxCostCents.min / 100).toFixed(2)} to $${String(REVIEW_SETTING_LIMITS.maxCostCents.max / 100)}.`;
+
 const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   UNKNOWN_FIELD: () => "This setting does not exist.",
   INVALID_TYPE: (field) => {
@@ -69,6 +66,8 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
       case "maxFindings":
       case "maxTokens":
         return "Enter a whole number.";
+      case "maxCostCents":
+        return "Enter an amount in dollars with up to two decimals, like 0.50 or 2.";
       case "allowedCommands":
         return "Choose from the listed commands.";
       case "extraInstructions":
@@ -90,6 +89,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     return "Enter a value.";
   },
   TOO_SMALL: (field) => {
+    if (field === "maxCostCents") return COST_RANGE;
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.min)} or more.`;
     if (field === "maxTokens")
@@ -97,6 +97,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     return "This value is too small.";
   },
   TOO_LARGE: (field) => {
+    if (field === "maxCostCents") return COST_RANGE;
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.max)} or less.`;
     if (field === "maxTokens")
@@ -118,7 +119,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     if (field === "allowedCommands") return "Only the command review exists.";
     if (field === "reviewKind") return "Choose Diff Review or Dynamic Review.";
     if (field === "reviewVerdict")
-      return "Choose Off, Blocking findings only or Any finding.";
+      return "Choose Off, Blocking findings or Any finding.";
     if (field === "dynamicModel")
       return `Use a model name as your provider spells it, for example ${DEFAULT_DYNAMIC_MODEL} (letters, digits and . _ : / + -, no spaces).`;
     if (MODEL_FIELDS.includes(field))

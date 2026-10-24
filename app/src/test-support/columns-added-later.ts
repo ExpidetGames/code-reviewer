@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// A test of an older migration says "it changes no existing row": it reads the rows of a table before the migration and again
+// after every later one and expects the same. A migration that comes later and adds a nullable column to a table makes every
+// row grow that column, which is no change to the row the older migration was about. So the rows are compared without the
+// columns added later, which must still hold their default (a migration that backfills would be a change, and fails here).
+// Add the column here when a migration adds one to a table that existing rows live in.
+const COLUMNS_ADDED_LATER: Record<string, readonly string[]> = {
+  // #658: when a workspace was deleted; null for every workspace that exists.
+  workspaces: ["deleted_at"],
+};
+
+/** `rows` of `table` without the columns that migrations after the one under test added; those columns must be null. */
+export function withoutColumnsAddedLater(
+  table: string,
+  rows: readonly unknown[],
+): unknown[] {
+  const added = COLUMNS_ADDED_LATER[table] ?? [];
+  if (added.length === 0) return [...rows];
+  return rows.map((row) => {
+    const copy = { ...(row as Record<string, unknown>) };
+    for (const column of added) {
+      if (column in copy && copy[column] !== null)
+        throw new Error(
+          `${table}.${column} was added by a later migration and must be null on an existing row.`,
+        );
+      delete copy[column];
+    }
+    return copy;
+  });
+}

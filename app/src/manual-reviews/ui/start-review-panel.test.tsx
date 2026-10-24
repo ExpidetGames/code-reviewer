@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the "Review now" panel with a stand-in for the routes: it loads the open pull requests,
+// Pins down the body of the "Start a review" dialog with a stand-in for the routes: it loads the open pull requests,
 // starts a review only for a picked pull request, shows every failure as a sentence (with "Try
 // again" for a failed load), tells a repeated start from a new one, and cannot be sent twice at
 // once. Since #203 there is no command selector and no question field: the only command is `/review`,
@@ -86,7 +86,7 @@ async function renderPanel(api: ManualReviewApi) {
   return user;
 }
 
-const button = () => screen.getByRole("button", { name: "Review now" });
+const button = () => screen.getByRole("button", { name: "Start review" });
 
 describe("loading the pull requests", () => {
   it("asks the route for the repository's pull requests and lists them", async () => {

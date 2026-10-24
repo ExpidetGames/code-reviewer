@@ -20,6 +20,11 @@ const OUTCOME_COPY: Record<string, { title: string; reading: string }> = {
     reading:
       "A payment arrived for a top-up that is credited already, or with another amount than the credit it made. Nothing was changed; the buyer may have paid twice.",
   },
+  workspace_deleted: {
+    title: "Paid after the workspace was deleted",
+    reading:
+      "A payment arrived for a top-up of a workspace that was deleted in the meantime (a delayed payment method can succeed days after the checkout began). Nothing was credited. Refund the payment at Stripe.",
+  },
   event_invalid: {
     title: "Event not readable",
     reading:

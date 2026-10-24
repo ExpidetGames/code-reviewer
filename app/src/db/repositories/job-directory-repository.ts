@@ -17,6 +17,7 @@ import {
 } from "./jobs-repository.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
+import { NOT_DELETED } from "./workspaces-repository.ts";
 
 /** One line of the admin's list: the listed fields only, never the result or the arguments. */
 export type DirectoryRunRow = {
@@ -73,6 +74,7 @@ export function createJobDirectoryRepository(
           "workspaces.slug as workspace_slug",
           "workspaces.name as workspace_name",
         ])
+        .where(NOT_DELETED)
         .orderBy("jobs.created_at", "desc")
         .orderBy("jobs.id", "desc")
         .limit(bound + 1)
@@ -107,6 +109,7 @@ export function createJobDirectoryRepository(
           "workspaces.name as workspace_name",
         ])
         .where("jobs.id", "=", id)
+        .where(NOT_DELETED)
         .executeTakeFirst();
       if (row === undefined) return undefined;
       return {

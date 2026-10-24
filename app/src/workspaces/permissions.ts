@@ -12,7 +12,7 @@
 //   (invite, remove, revoke; Members only), the hand-over to the plan page of the operator, and the billing
 //   profile and top-ups of the prepaid balance.
 // - Owner: everything an Admin can, plus Admins and Owners (invite, change roles, remove) and renaming the
-//   workspace.
+//   workspace and deleting it.
 //
 // Two rules sit outside the matrix because they depend on more than the role of the person who acts: the
 // last Owner cannot leave, be removed or be demoted (src/workspaces/members.ts), and a person cannot act on
@@ -49,6 +49,8 @@ export const WORKSPACE_ACTIONS = [
   "change_member_roles",
   /** Rename the workspace. */
   "rename_workspace",
+  /** Delete the workspace with everything in it (#658; src/workspaces/delete-workspace.ts). */
+  "delete_workspace",
 ] as const;
 export type WorkspaceAction = (typeof WORKSPACE_ACTIONS)[number];
 
@@ -70,6 +72,7 @@ export const MINIMUM_ROLE: Record<WorkspaceAction, WorkspaceRole> = {
   manage_invitations: "admin",
   change_member_roles: "owner",
   rename_workspace: "owner",
+  delete_workspace: "owner",
 };
 
 /** Whether `role` may do the action. */

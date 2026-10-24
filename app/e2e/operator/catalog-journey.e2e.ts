@@ -6,7 +6,7 @@
 //   - a person who is no admin gets the answer of a path that does not exist for the portal and its data routes (T05);
 //   - the instance admin saves the operator's key, adds three models in the portal (a draft stays a draft), releases two
 //     and sets the default of each kind (T01);
-//   - a managed workspace reviews on the default entry (T02); its Owner reads an Advanced page that names no provider;
+//   - a managed workspace reviews on the default entry (T02); its Owner reads an Advanced page (the deletion of the workspace) and the LLM access page that name no provider;
 //     the Owner picks another entry by name and the review runs with that entry's model on the operator's key; the
 //     Dynamic job of the same project is handed out with its entry's model, also on the operator's key (T02);
 //   - the provider answers with an error that names the model, the provider and the operator's key: nothing of it reaches
@@ -84,6 +84,7 @@ import {
 } from "../helpers/operator-api";
 import { rawRequest } from "../helpers/raw-request";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import {
   dynamicRunnerScript,
   type ClaimedDynamicJob,
@@ -156,7 +157,8 @@ const CATALOG_MODEL_IDS: string[] = Object.values(ENTRIES).map(
   (entry) => entry.model,
 );
 // What workspace O chooses for its project: its own model, not an entry of the catalog.
-const OWN_MODEL = "ownproof/own-model-k3j4";
+// A model of the list the dropdown offers for the provider: a workspace on its own key cannot type one (#656).
+const OWN_MODEL = "openai/gpt-5.4-mini";
 const UNKNOWN_ENTRY = "00000000-0000-4000-8000-000000000000";
 
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
@@ -584,8 +586,8 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     expect(runnerOutput()).not.toContain(OPERATOR_KEY);
   });
 
-  // #435-T06
-  test("@smoke the Advanced settings page of the Owner of a managed workspace names no provider", async () => {
+  // #435-T06, #658-T02
+  test("@smoke the Advanced and LLM pages of the Owner of a managed workspace name no provider", async () => {
     const page = ownerOfM();
     const catalog = await adminCatalog();
     const providers = forbiddenFor({
@@ -594,25 +596,39 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       providerLabels: catalog.providers.map((provider) => provider.label),
       keys: [],
     });
-    const path = `/w/${slugM}/settings/advanced`;
-    const surfaces = [
-      ...(await readAs(page, path, { marker: "Settings · Advanced" })).surfaces,
-      ...(
-        await readAs(page, path, {
-          headers: { RSC: "1" },
-          marker: slugM,
-          label: `${path} (RSC payload)`,
-        })
-      ).surfaces,
-      ...(await browse(page, path, { title: "Settings · Advanced" })),
-    ];
-    // The page is the one that holds the other danger zone, so it was read as the Owner and not as a shell.
-    await expect(
-      page.getByRole("button", { name: "Reset every default…" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: /Remove .*key/ }),
-    ).toHaveCount(0);
+    const surfaces: Surface[] = [];
+    for (const [path, title, check] of [
+      // The Owner's Advanced page holds the deletion of the workspace and nothing about keys or defaults.
+      [
+        `/w/${slugM}/settings/advanced`,
+        "Settings · Advanced",
+        () =>
+          expect(
+            page.getByRole("button", { name: "Delete workspace…" }),
+          ).toBeVisible(),
+      ],
+      [
+        `/w/${slugM}/settings/llm`,
+        "Settings · LLM",
+        () =>
+          expect(
+            page.getByRole("button", { name: /Remove .*key/ }),
+          ).toHaveCount(0),
+      ],
+    ] as const) {
+      surfaces.push(
+        ...(await readAs(page, path, { marker: title })).surfaces,
+        ...(
+          await readAs(page, path, {
+            headers: { RSC: "1" },
+            marker: slugM,
+            label: `${path} (RSC payload)`,
+          })
+        ).surfaces,
+        ...(await browse(page, path, { title })),
+      );
+      await check();
+    }
     expect(findLeaks(surfaces, providers)).toEqual([]);
   });
 
@@ -623,21 +639,30 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     test.setTimeout(240_000);
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
-    const diffChoice = page.locator('[data-field="catalogEntryDiff"]');
-    // Released entries by name and description, in the order of the catalog; the draft is not offered.
-    await expect(diffChoice.locator("[data-entry]")).toHaveCount(2);
-    await expect(diffChoice).toContainText(ENTRIES.small.description);
-    await expect(diffChoice).toContainText(ENTRIES.big.description);
-    await expect(diffChoice).not.toContainText(ENTRIES.draft.name);
-    await expect(diffChoice).toContainText("Default of this instance");
-    await diffChoice.getByRole("radio", { name: /^Big/ }).click();
+    await openSection(page, "LLM");
+    // Released entries by name, in the order of the catalog; the draft is not offered.
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(
+      page.getByRole("option", { name: ENTRIES.small.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.big.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.draft.name }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("option", { name: "Default of this instance" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await chooseOption(page, "Model", /^Big/);
     await save(page);
     await page.reload();
-    await expect(
-      page
-        .locator('[data-field="catalogEntryDiff"]')
-        .getByRole("radio", { name: /^Big/ }),
-    ).toBeChecked();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      "Big",
+    );
 
     await openRuns(page, slugM);
     await open(request, "M", 2);
@@ -663,10 +688,12 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
-    const dynamicChoice = page.locator('[data-field="catalogEntryDynamic"]');
-    await expect(dynamicChoice.locator("[data-entry]")).toHaveCount(2);
+    await openSection(page, "LLM");
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(page.getByRole("option")).toHaveCount(3);
+    await page.keyboard.press("Escape");
     // The instance default of Dynamic Review is Big; the Owner picks the other entry.
-    await dynamicChoice.getByRole("radio", { name: /^Small/ }).click();
+    await chooseOption(page, "Model", /^Small/);
     await save(page, "Switch to Dynamic Review");
 
     await open(request, "M", 3);
@@ -754,10 +781,10 @@ test.describe("the catalog from the admin portal to a member's run", () => {
 
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
-    const retiredEntry = page
-      .locator('[data-field="catalogEntryDiff"]')
-      .locator(`[data-entry="${entryId(ENTRIES.big.name)}"]`);
-    await expect(retiredEntry).toContainText("No longer available");
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toContainText(
+      `${ENTRIES.big.name} (No longer available)`,
+    );
     await expect(page.locator("[data-choice-unavailable]")).toBeVisible();
 
     await openRuns(page, slugM);
@@ -898,6 +925,12 @@ test.describe("the catalog from the admin portal to a member's run", () => {
 
       // The project chooses a provider and a model, not an entry: the catalog is nowhere on the page.
       await openProject(page, slugO, REPO_O.fullName);
+      // The project was switched on before the workspace had a key, so a Dynamic review could not have run on it: it starts as
+      // a Diff Review (#656-T02); this review is a Diff Review.
+      await expect(
+        page.getByRole("radio", { name: "Diff Review" }),
+      ).toBeChecked();
+      await openSection(page, "LLM");
       await expect(page.locator('[data-field="catalogEntryDiff"]')).toHaveCount(
         0,
       );
@@ -907,10 +940,11 @@ test.describe("the catalog from the admin portal to a member's run", () => {
       });
       await provider.click();
       await page.getByRole("option", { name: /^OpenRouter/ }).click();
-      await page.getByLabel("Model", { exact: true }).fill(OWN_MODEL);
+      await chooseOption(page, "Model", OWN_MODEL);
       await save(page);
       await page.reload();
-      await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+      await openSection(page, "LLM");
+      await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
         OWN_MODEL,
       );
 

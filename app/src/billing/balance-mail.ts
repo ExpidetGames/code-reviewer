@@ -14,7 +14,10 @@ import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingNotificationDirectory } from "../db/repositories/billing-notification-directory-repository.ts";
 import { createWorkspaceMembersRepository } from "../db/repositories/workspace-members-repository.ts";
-import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import {
+  createWorkspacesRepository,
+  isDeleted,
+} from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
   balanceMessage,
@@ -59,7 +62,14 @@ export type BalanceMailResult = { delivered: number; failed: number };
 
 type Outcome =
   | { delivered: true }
-  | { delivered: false; code: BalanceMailFailureCode; recipients: number };
+  /** Nobody is to be told: the workspace was deleted meanwhile (#658). Not a failure, so not counted and not logged. */
+  | { delivered: false; skipped: true }
+  | {
+      delivered: false;
+      skipped?: undefined;
+      code: BalanceMailFailureCode;
+      recipients: number;
+    };
 
 /** Mails every crossing that is due. Never throws. */
 export async function deliverDueBalanceMails(
@@ -84,9 +94,10 @@ export async function deliverDueBalanceMails(
       await directory.finish(
         due.workspaceId,
         due.kind,
-        outcome.delivered ? "delivered" : "failed",
+        outcome.delivered ? "delivered" : outcome.skipped ? "none" : "failed",
       );
       if (outcome.delivered) result.delivered += 1;
+      else if (outcome.skipped) continue;
       else {
         result.failed += 1;
         log(
@@ -114,7 +125,11 @@ async function deliverOne(
   // The balance may have been lifted between the decision and now: the mail would tell a workspace about a state it is out of.
   if (!kindsInStateOf(balanceMicroUsd, lowBalanceMicroUsd)[due.kind])
     return { delivered: false, code: "stale", recipients: 0 };
-  const workspace = await createWorkspacesRepository(db).get(due.workspaceId);
+  const workspace = await createWorkspacesRepository(db).getIncludingDeleted(
+    due.workspaceId,
+  );
+  if (workspace !== undefined && isDeleted(workspace))
+    return { delivered: false, skipped: true };
   const members = await createWorkspaceMembersRepository(
     db,
     due.workspaceId,

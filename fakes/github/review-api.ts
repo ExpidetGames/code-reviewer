@@ -359,6 +359,12 @@ export function createReviewApi(options: ReviewApiOptions): ReviewApi {
 
     // A comment is addressed by its id alone.
     const commentMatch = /^\/issues\/comments\/(\d+)$/.exec(rest);
+    if (commentMatch && method === "GET") {
+      if (!mayDo(["issues", "pull_requests"], "read")) return forbidden;
+      const comment = findComment(repository.fullName, Number(commentMatch[1]));
+      if (comment === undefined) return notFound;
+      return { status: 200, body: commentJson(repository, comment) };
+    }
     if (commentMatch && (method === "PATCH" || method === "DELETE")) {
       if (!mayDo(["issues", "pull_requests"], "write")) return forbidden;
       const comment = findComment(repository.fullName, Number(commentMatch[1]));

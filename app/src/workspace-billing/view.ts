@@ -99,3 +99,31 @@ export type RunPriceView =
     }
   /** The review was settled and nothing was charged (free because of an error on our side, or priced to nothing). */
   | { state: "not_charged" };
+
+/** The statuses an invoice of the list can have; a draft is never listed. */
+export const INVOICE_STATUSES = [
+  "paid",
+  "open",
+  "void",
+  "uncollectible",
+] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+/** One invoice of the workspace (Owner and Admin only): what the provider issued, and where to read and keep it. */
+export type InvoiceView = {
+  /** The provider's id of the invoice: a stable key, nothing else of it. */
+  id: string;
+  /** The number on the invoice, or null. */
+  number: string | null;
+  createdAt: string;
+  /** Whole cents of `currency` (the provider's own unit). */
+  amountMinor: number;
+  /** Three lower case letters. */
+  currency: string;
+  status: InvoiceStatus;
+  /** The provider's page of the invoice, and its PDF; null when it gave none. Plain http(s) addresses. */
+  viewUrl: string | null;
+  downloadUrl: string | null;
+};
+
+export type InvoiceListView = { invoices: InvoiceView[] };

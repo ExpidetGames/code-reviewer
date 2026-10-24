@@ -10,6 +10,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -25,9 +26,9 @@ const account: GithubAccount = {
   email: "model-choice-journey@example.test",
 };
 const REPOSITORY = "model-choice-journey/widgets";
-const DIFF_MODEL = "vendor/diff-e2e";
-// The model the fake LLM of the review kind journey vouches for, should it be up at the moment: the same answer either way.
-const AGENT_MODEL = "vendor/agent-e2e";
+const DIFF_MODEL = "openai/gpt-5.4-mini";
+// Both models are in the lists of the dropdowns; the fake LLM of the review kind journey vouches for the agent's, should it be up at the moment: the same answer either way.
+const AGENT_MODEL = "deepseek/deepseek-v4-pro";
 
 test.describe.configure({ mode: "serial" });
 
@@ -56,7 +57,8 @@ test.describe("the provider and model of a project on its own key", () => {
   }) => {
     await openProject(page);
 
-    // The Diff pair: the provider select next to the model, with the registered providers to pick.
+    // The Diff pair: the provider dropdown, then the model dropdown of that provider.
+    await openSection(page, "LLM");
     const provider = page.getByRole("combobox", {
       name: "Provider",
       exact: true,
@@ -68,17 +70,16 @@ test.describe("the provider and model of a project on its own key", () => {
       page.getByRole("option", { name: /^Anthropic/ }),
     ).toBeVisible();
     await page.getByRole("option", { name: /^OpenRouter/ }).click();
-    await page.getByLabel("Model", { exact: true }).fill(DIFF_MODEL);
+    await chooseOption(page, "Model", DIFF_MODEL);
 
     // The Dynamic pair, in the same save.
+    await openSection(page, "Review");
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
-    const agentProvider = page.getByRole("combobox", {
-      name: "Dynamic Review provider",
-    });
-    await expect(agentProvider).toContainText("OpenRouter");
-    await page
-      .getByLabel("Dynamic Review model", { exact: true })
-      .fill(AGENT_MODEL);
+    await openSection(page, "LLM");
+    await expect(
+      page.getByRole("combobox", { name: "Provider", exact: true }),
+    ).toContainText("OpenRouter");
+    await chooseOption(page, "Model", AGENT_MODEL);
     await page.getByRole("button", { name: "Save review settings" }).click();
     await page
       .getByRole("alertdialog")
@@ -89,14 +90,17 @@ test.describe("the provider and model of a project on its own key", () => {
     ).toBeVisible();
 
     await page.reload();
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
+      AGENT_MODEL,
+    );
     await expect(
-      page.getByLabel("Dynamic Review model", { exact: true }),
-    ).toHaveValue(AGENT_MODEL);
-    await expect(
-      page.getByRole("combobox", { name: "Dynamic Review provider" }),
+      page.getByRole("combobox", { name: "Provider", exact: true }),
     ).toContainText("OpenRouter");
+    await openSection(page, "Review");
     await page.getByRole("radio", { name: "Diff Review" }).click();
-    await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
       DIFF_MODEL,
     );
     await expect(

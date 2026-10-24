@@ -94,3 +94,21 @@ export function parseLimitCents(text: string): LimitAmount {
     return { ok: false, error: "limit_out_of_range" };
   return { ok: true, cents };
 }
+
+/**
+ * The amount of an invoice, in the provider's own unit (the cents of its currency): `$25.00`, `€25.00`, `¥2,500`. Invoices are
+ * issued in the currency the credit was priced in (US dollars); the provider's unit is kept so a currency with another number of
+ * decimals still reads right. A code the runtime does not know is shown as the amount and the code.
+ */
+export function formatInvoiceAmount(minor: number, currency: string): string {
+  try {
+    const format = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    });
+    const digits = format.resolvedOptions().maximumFractionDigits ?? 2;
+    return format.format(minor / 10 ** digits);
+  } catch {
+    return `${minor} ${currency.toUpperCase()}`;
+  }
+}

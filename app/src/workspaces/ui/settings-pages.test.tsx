@@ -3,10 +3,12 @@
 // @vitest-environment jsdom
 // Pins down the shape of the workspace settings sub-pages (#178): each is its own screen with the
 // settings sub-nav marking it, and no page stacks independent forms — one form on "General"
-// (rename), "Review defaults" and "LLM access", and "Advanced" only holds destructive actions, so no
-// form at all (issue target design: "actions only"). The behaviour of each form is pinned in its own
+// (rename), "Review defaults" and "LLM access", and "Advanced" only holds the deletion of the workspace
+// (#658), a dialog with its own form, so none on the page itself. The behaviour of each form is pinned in its own
 // file; this one pins the split.
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { openSection } from "../../test-support/settings-sections.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -65,8 +67,6 @@ const renders = [
         canRename
         canManageLlmKey
         audience="operator"
-        tenancy="multi"
-        memberCount={2}
         config={workingConfig()}
         llmSummary={WORKS}
       />
@@ -83,7 +83,7 @@ const renders = [
   },
   {
     key: "llm",
-    label: "LLM access",
+    label: "LLM",
     element: (
       <LlmSettingsPageContent
         workspaceSlug="acme"
@@ -100,12 +100,7 @@ const renders = [
     key: "advanced",
     label: "Advanced",
     element: (
-      <AdvancedSettingsPageContent
-        workspaceSlug="acme"
-        canManageKey
-        keys={[{ provider: "openrouter", configured: true }]}
-        canResetDefaults
-      />
+      <AdvancedSettingsPageContent workspaceSlug="acme" workspaceName="Acme" />
     ),
     forms: 0,
   },
@@ -125,15 +120,41 @@ describe("the workspace settings sub-pages", () => {
           .getAttribute("aria-current"),
         label,
       ).toBe("page");
-      expect(within(nav).getAllByRole("link")).toHaveLength(4);
+      // The Owner's navigation has Advanced (the Advanced page itself says so); the others have three links.
+      expect(within(nav).getAllByRole("link")).toHaveLength(
+        key === "advanced" ? 4 : 3,
+      );
       unmount();
     }
   });
 });
 
+describe("the review defaults page (#656)", () => {
+  // #656-T06
+  it("has the same sections as a project: Review, LLM, Trigger and Limits, and no setting of a single project", () => {
+    render(
+      <GlobalSettingsPageContent workspaceSlug="acme" data={GLOBAL_DATA} />,
+    );
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Review",
+      "LLM",
+      "Trigger",
+      "Limits",
+    ]);
+    expect(
+      screen.queryByRole("radiogroup", { name: "Review kind" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("radiogroup", { name: "Review verdict" }),
+    ).toBeNull();
+  });
+});
+
 describe("the review defaults of a workspace that uses the instance's key (#283)", () => {
   // #433-T02
-  it("shows a note about the choice per project instead of the model fields, and no model name", () => {
+  it("shows a note about the choice per project instead of the model fields, and no model name", async () => {
+    const user = userEvent.setup();
     const readable = withoutModelFields(BUILT_IN);
     render(
       <GlobalSettingsPageContent
@@ -150,6 +171,7 @@ describe("the review defaults of a workspace that uses the instance's key (#283)
       />,
     );
 
+    await openSection(user, "LLM");
     expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
     expect(screen.getByText(/chosen for each project/)).toBeTruthy();
     expect(screen.queryByLabelText("Model")).toBeNull();

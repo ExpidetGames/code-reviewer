@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Pins down starting a review by hand in a real browser, against a production build next to the
-// fake GitHub: a person opens the project, picks an open pull request and presses "Review now"; the
+// fake GitHub: a person presses the play button of the project row, picks an open pull request in the dialog and
+// presses "Start review"; the
 // run shows up on the Runs page as started by them and, once a runner (stood in for by the job
 // queue itself, because the runner is a separate program with its own tests) is done, as succeeded.
 // A second journey covers what goes wrong on the way: a pull request that was closed after the list
@@ -29,6 +30,9 @@ const account: GithubAccount = {
 };
 const INSTALLATION_ID = 9500001;
 const WIDGETS = { id: 9600001, fullName: "manual-journey/widgets" };
+// A repository with far more open pull requests than fit on a screen.
+const BUSY = { id: 9600002, fullName: "manual-journey/busy" };
+const BUSY_PULL_REQUESTS = 40;
 // The Runs page learns about runs within its polling interval.
 const POLL_WAIT = { timeout: 20_000 };
 
@@ -43,8 +47,13 @@ test.describe("starting a review by hand", () => {
         id: INSTALLATION_ID,
         account: GITHUB_APP_OWNER_ACCOUNT,
       },
-      [WIDGETS],
+      [WIDGETS, BUSY],
     );
+    for (let number = 1; number <= BUSY_PULL_REQUESTS; number++)
+      await addGithubPullRequest(request, BUSY.fullName, {
+        number,
+        title: `Busy change ${String(number)}`,
+      });
     await addGithubPullRequest(request, WIDGETS.fullName, {
       number: 12,
       title: "Add widget caching",
@@ -61,7 +70,7 @@ test.describe("starting a review by hand", () => {
     });
   });
 
-  /** Signs in, syncs, switches the repository on and opens its review page (#174). */
+  /** Signs in, syncs, switches the repository on and opens the dialog of its play button (#655). */
   async function openProject(page: import("@playwright/test").Page) {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
@@ -70,18 +79,18 @@ test.describe("starting a review by hand", () => {
       .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
       .click();
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
+    await openDialog(page);
+  }
+
+  async function openDialog(page: import("@playwright/test").Page) {
     await page
-      .getByRole("link", { name: WIDGETS.fullName, exact: true })
+      .getByRole("row")
+      .filter({ hasText: WIDGETS.fullName })
+      .getByRole("button", { name: `Start a review of ${WIDGETS.fullName}` })
       .click();
     await expect(
-      page.getByRole("heading", { level: 1, name: WIDGETS.fullName }),
+      page.getByRole("dialog", { name: "Start a review" }),
     ).toBeVisible();
-    // The settings page is the project's entry; the manual review panel is its own page since #174.
-    await page
-      .getByRole("navigation", { name: "Project" })
-      .getByRole("link", { name: "Review now" })
-      .click();
-    await expect(page).toHaveURL(/\/projects\/[^/]+\/review$/);
   }
 
   // CR-33-T16, #203-T16
@@ -89,6 +98,9 @@ test.describe("starting a review by hand", () => {
     page,
   }) => {
     await openProject(page);
+
+    // #655-T01: the project page has no Review now button; the list is the one way to start.
+    await expect(page.getByText("Review now")).toHaveCount(0);
 
     // Exactly the open pull requests are offered, drafts included; there is no command selector and
     // no question field any more.
@@ -101,13 +113,13 @@ test.describe("starting a review by hand", () => {
     await expect(page.getByRole("radio", { name: /#14/ })).toHaveCount(0);
     await expect(page.getByLabel("Command to run")).toHaveCount(0);
     await expect(page.getByLabel("Question")).toHaveCount(0);
-    const start = page.getByRole("button", { name: "Review now" });
+    const start = page.getByRole("button", { name: "Start review" });
     await expect(start).toBeDisabled();
 
     await page.getByRole("radio", { name: /#12 Add widget caching/ }).check();
     await start.click();
 
-    const notice = page.getByRole("status");
+    const notice = page.getByRole("dialog").getByRole("status");
     await expect(notice).toContainText("Started: review for pull request #12");
     await notice.getByRole("link", { name: "View the run" }).click();
     await expect(
@@ -162,22 +174,16 @@ test.describe("starting a review by hand", () => {
       .getByRole("navigation", { name: "Main" })
       .getByRole("link", { name: "Projects", exact: true })
       .click();
-    await page
-      .getByRole("link", { name: WIDGETS.fullName, exact: true })
-      .click();
-    await page
-      .getByRole("navigation", { name: "Project" })
-      .getByRole("link", { name: "Review now" })
-      .click();
+    await openDialog(page);
     await page.getByRole("radio", { name: /#13 Work in progress/ }).check();
-    await page.getByRole("button", { name: "Review now" }).click();
-    await expect(page.getByRole("status")).toContainText(
+    await page.getByRole("button", { name: "Start review" }).click();
+    await expect(page.getByRole("dialog").getByRole("status")).toContainText(
       "Started: review for pull request #13",
     );
 
     // The same review for the same pull request again is the run that is already there.
-    await page.getByRole("button", { name: "Review now" }).click();
-    await expect(page.getByRole("status")).toContainText(
+    await page.getByRole("button", { name: "Start review" }).click();
+    await expect(page.getByRole("dialog").getByRole("status")).toContainText(
       "already waiting or running",
     );
 
@@ -187,13 +193,60 @@ test.describe("starting a review by hand", () => {
       title: "Work in progress",
       state: "closed",
     });
-    await page.getByRole("button", { name: "Review now" }).click();
+    await page.getByRole("button", { name: "Start review" }).click();
     await expect(page.getByText(/closed or merged/)).toBeVisible();
     await expect(
       page.getByRole("radio", { name: /#13 Work in progress/ }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Review now" }),
+      page.getByRole("button", { name: "Start review" }),
     ).toBeDisabled();
+  });
+
+  // #655-T03
+  test("with many open pull requests only the list scrolls: the title and the actions stay in view", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+    const row = page.getByRole("row").filter({ hasText: BUSY.fullName });
+    await row.getByRole("switch", { name: `Review ${BUSY.fullName}` }).click();
+    await expect(row.getByText("Active", { exact: true })).toBeVisible();
+    await row
+      .getByRole("button", { name: `Start a review of ${BUSY.fullName}` })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Start a review" });
+    await expect(dialog).toBeVisible();
+
+    const last = dialog.getByRole("radio", {
+      name: new RegExp(`#${String(BUSY_PULL_REQUESTS)} `),
+    });
+    await expect(last).toBeAttached();
+    // The list is taller than the dialog (it scrolls), yet the dialog fits the window and so do its
+    // title and both actions, without scrolling the page or the dialog itself.
+    const scroller = dialog.getByTestId("pull-request-scroll");
+    const metrics = await scroller.evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+    await expect(dialog).toBeInViewport({ ratio: 1 });
+    await expect(
+      dialog.getByRole("heading", { name: "Start a review" }),
+    ).toBeInViewport({ ratio: 1 });
+
+    await last.check();
+    await expect(last).toBeInViewport();
+    const start = dialog.getByRole("button", { name: "Start review" });
+    await expect(start).toBeEnabled();
+    await expect(start).toBeInViewport({ ratio: 1 });
+    await expect(
+      dialog.getByRole("button", { name: "Refresh list" }),
+    ).toBeInViewport({ ratio: 1 });
+
+    await start.click();
+    await expect(dialog.getByRole("status")).toContainText(
+      `Started: review for pull request #${String(BUSY_PULL_REQUESTS)}`,
+    );
+    await expect(dialog).toBeInViewport({ ratio: 1 });
   });
 });

@@ -78,6 +78,53 @@ describe("activating a repository", () => {
     );
   });
 
+  // #656-T02
+  it("starts a new project with the settings the instance asks for (Dynamic Review)", async () => {
+    const { db, first, second, now } = await setup();
+    const workspaceId = await defaultWorkspaceId(db);
+    const projects = createProjectsRepository(
+      db,
+      workspaceId,
+      now,
+      undefined,
+      undefined,
+      undefined,
+      async () => ({ reviewKind: "dynamic" }),
+    );
+
+    const activated = await projects.activate(first.id);
+    const saved = await projects.updateSettingsWith(second.id, (stored) => ({
+      ...stored,
+      maxFindings: 7,
+    }));
+
+    expect(activated).toMatchObject({
+      project: { settings: { reviewKind: "dynamic" } },
+    });
+    expect(saved?.settings).toEqual({ reviewKind: "dynamic", maxFindings: 7 });
+  });
+
+  it("leaves a project that exists as it is when the instance asks for new settings", async () => {
+    const { db, first, now } = await setup();
+    const workspaceId = await defaultWorkspaceId(db);
+    const plain = createProjectsRepository(db, workspaceId, now);
+    await plain.activate(first.id);
+    await plain.deactivate(first.id);
+    const projects = createProjectsRepository(
+      db,
+      workspaceId,
+      now,
+      undefined,
+      undefined,
+      undefined,
+      async () => ({ reviewKind: "dynamic" }),
+    );
+
+    const again = await projects.activate(first.id);
+
+    expect(again).toMatchObject({ project: { settings: {} } });
+  });
+
   // CR-24-T06
   it("reuses the row of a deactivated project and keeps its settings", async () => {
     const { projects, first, db, rows } = await setup();

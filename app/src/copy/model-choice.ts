@@ -5,7 +5,15 @@
 // description the operator wrote, and nothing here names a model, a vendor, a price or a cost. A test scans every
 // string (`model-choice.test.ts`); the sentences about the plan are the one place where the word "plan" is needed.
 
+import { PRODUCT_NAME } from "./product-name.ts";
+
 export const MODEL_CHOICE_HEADING = "Quality";
+
+/** The one provider of a workspace on the operator's key (#656): the first dropdown names who runs the reviews, not a vendor. */
+export const MODEL_CHOICE_PROVIDER = PRODUCT_NAME;
+
+/** The option that takes the choice back, so the default of the instance applies. */
+export const MODEL_CHOICE_DEFAULT_OPTION = "Default of this instance";
 
 /** The one sentence under the heading. */
 export const MODEL_CHOICE_HINT =

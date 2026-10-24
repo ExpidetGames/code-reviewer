@@ -17,6 +17,8 @@ import {
   createInvitationService,
   type InvitationService,
 } from "./invitations.ts";
+import { createWorkspaceDeletion } from "./delete-workspace.ts";
+import type { CheckFinisher } from "./finish-checks.ts";
 import { createMembersService, type MembersService } from "./members.ts";
 import { createWorkspaceLimits, type WorkspaceLimits } from "./rate-limits.ts";
 
@@ -31,6 +33,8 @@ export type AssembleWorkspacesOptions = {
   newId?: () => string;
   newToken?: () => string;
   log?: (message: string) => void;
+  /** Completes the check runs of the reviews a deleted workspace had waiting; the running server passes the GitHub one. */
+  finishChecks?: CheckFinisher;
 };
 
 export type AssembledWorkspaces = {
@@ -63,6 +67,12 @@ export function assembleWorkspaces(
   const handlers = createWorkspaceRouteHandlers({
     members,
     invitations,
+    deletion: createWorkspaceDeletion({
+      db,
+      now,
+      log: options.log,
+      finishChecks: options.finishChecks,
+    }),
     async createWorkspace({ name, creatorId }) {
       const permission = await limits.createWorkspace(creatorId);
       if (!permission.allowed)

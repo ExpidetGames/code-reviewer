@@ -3,8 +3,6 @@
 import type { Metadata } from "next";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
-import { createInstanceSettingsRepository } from "@/db/repositories/instance-settings-repository";
-import { getDatabase } from "@/db/startup";
 import { getWorkspaceLlm } from "@/llm/shared";
 import {
   planHandoffErrorOf,
@@ -15,14 +13,12 @@ import { billingPageLinkedFor } from "@/billing/shared";
 import { planPageLinkedFor } from "@/usage/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
-import { getMembersService } from "@/workspaces/shared";
 import { GeneralSettingsPageContent } from "@/workspaces/ui/general-settings-page";
 
 export const metadata: Metadata = { title: "Settings · General" };
 
-// The settings index (#178), the area root: the workspace name (an Owner renames it), the read-only
-// instance, tenancy and member facts, and the one "Needs attention" strip. The other settings live on
-// the sub-pages (`review-defaults`, `llm`, `advanced`). The workspace is the one in the address, for a
+// The settings index (#178), the area root: the workspace name (an Owner renames it) and the one "Needs
+// attention" strip. The other settings live on the sub-pages (`review-defaults`, `llm`, `advanced`). The workspace is the one in the address, for a
 // member only.
 export default async function GeneralSettingsPage({
   params,
@@ -66,25 +62,16 @@ async function GeneralSettingsContent({
   planError: PlanHandoffErrorCode | null;
   user: { isInstanceAdmin: boolean };
 }) {
-  const [
-    config,
-    llmSummary,
-    tenancy,
-    members,
-    planManagementUrl,
-    showPlan,
-    showBilling,
-  ] = await Promise.all([
-    // Only the instance admin gets the names of the variables that are wrong.
-    getConfigStatusFor(user),
-    getWorkspaceLlm().summaryFor(workspaceId),
-    createInstanceSettingsRepository(getDatabase()).get("tenancy"),
-    getMembersService().list(workspaceId),
-    // Only asked for somebody the role lets through: a Member's page never reads the setting.
-    canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
-    planPageLinkedFor(workspaceId),
-    billingPageLinkedFor(),
-  ]);
+  const [config, llmSummary, planManagementUrl, showPlan, showBilling] =
+    await Promise.all([
+      // Only the instance admin gets the names of the variables that are wrong.
+      getConfigStatusFor(user),
+      getWorkspaceLlm().summaryFor(workspaceId),
+      // Only asked for somebody the role lets through: a Member's page never reads the setting.
+      canManagePlan ? getPlanManagementUrl() : Promise.resolve(null),
+      planPageLinkedFor(workspaceId),
+      billingPageLinkedFor(),
+    ]);
   return (
     <GeneralSettingsPageContent
       workspaceSlug={workspaceSlug}
@@ -96,8 +83,6 @@ async function GeneralSettingsContent({
       showPlan={showPlan}
       showBilling={showBilling}
       audience={configAudienceOf(user)}
-      tenancy={tenancy === "multi" ? "multi" : "single"}
-      memberCount={members.length}
       config={config}
       llmSummary={llmSummary}
     />

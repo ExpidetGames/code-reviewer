@@ -65,6 +65,17 @@ describePostgres("the job check runs on Postgres", () => {
     expect(taken[0]).toMatchObject({ created: true });
   });
 
+  // #657-T04
+  it("keeps the review comment of a job once", async () => {
+    const t = await setup();
+    await t.checks.take(t.job.id, LEASE);
+
+    await t.checks.recordReviewComment(t.job.id, "first");
+    await t.checks.recordReviewComment(t.job.id, "second");
+
+    expect(await t.checks.reviewCommentOf(t.job.id)).toBe("first");
+  });
+
   // #405-T15
   it("takes a failed sync again only after its back-off, and drops it when its attempts are used up", async () => {
     const t = await setup();

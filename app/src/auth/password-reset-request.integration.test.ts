@@ -56,7 +56,7 @@ async function start(
       security: "starttls",
       allowSelfSigned: true,
       senderAddress: "reviewer@example.com",
-      senderName: "Code Reviewer",
+      senderName: "code-review.com",
     });
   await portal.createUser({ ...PERSON, member: false });
 

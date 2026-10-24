@@ -332,11 +332,8 @@ test.describe("a pull request on its way to a review comment", () => {
       detail.getByText("The AI provider is limiting requests right now."),
     ).toBeVisible();
 
-    // The log of the run shows the error text of the model with the key blanked out, so the check
-    // for the key further down looks at text that really held it.
-    await expect(
-      detail.getByText("Incorrect API key provided: [REDACTED]"),
-    ).toBeVisible();
+    // The run page has no log (#657): neither the error text of the model nor the key is on it.
+    await expect(detail.getByText("Incorrect API key provided")).toHaveCount(0);
 
     // The model really was asked with the key (so the error text did quote it) ...
     const asked = fakeLlm().requests();
@@ -371,7 +368,7 @@ test.describe("a pull request on its way to a review comment", () => {
     });
     await signInThroughTheForm(page, account);
     await page.getByRole("link", { name: "Settings", exact: true }).click();
-    await page.getByRole("link", { name: "LLM access", exact: true }).click();
+    await page.getByRole("link", { name: "LLM", exact: true }).click();
     await expect(page).toHaveURL(/\/w\/default\/settings\/llm$/);
     const form = page.getByRole("form", { name: "OpenRouter LLM key" });
     await form.getByLabel("API key").fill(WORKSPACE_KEY);

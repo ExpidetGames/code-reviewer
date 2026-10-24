@@ -1,0 +1,18 @@
+{
+  "id": "in_FakeTemplate",
+  "object": "invoice",
+  "amount_due": 0,
+  "amount_paid": 0,
+  "amount_remaining": 0,
+  "created": 1700000000,
+  "currency": "usd",
+  "customer": null,
+  "hosted_invoice_url": null,
+  "invoice_pdf": null,
+  "livemode": false,
+  "metadata": {},
+  "number": null,
+  "payment_intent": null,
+  "status": "paid",
+  "total": 0
+}

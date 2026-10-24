@@ -9,6 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
+import { chooseOption, openSection } from "../helpers/settings-form";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -42,7 +43,7 @@ test.describe("the review kind of a project", () => {
   test.beforeAll(async ({ request }) => {
     // The model is checked for tool support when it is saved (#269); the app asks this fake.
     llm = await startLlmFake({ port: e2eEnv.modelLlmFakePort });
-    llm.setModel("vendor/agent-e2e", [
+    llm.setModel("deepseek/deepseek-v4-pro", [
       { supported_parameters: ["tools", "tool_choice"] },
     ]);
     await addGithubAccount(request, account);
@@ -83,9 +84,11 @@ test.describe("the review kind of a project", () => {
       page.getByText(/Reviews of this project fail until an instance admin/),
     ).toBeVisible();
     // The Diff-only controls are gone, the shipped skill is shown read-only.
+    await openSection(page, "Limits");
     await expect(page.getByLabel("Token budget", { exact: true })).toHaveCount(
       0,
     );
+    await openSection(page, "Review");
     const skill = page.getByLabel("Review skill", { exact: true });
     await expect(skill).toHaveJSProperty("readOnly", true);
     await expect(skill).toHaveValue(/Dynamic Review skill/);
@@ -93,9 +96,9 @@ test.describe("the review kind of a project", () => {
       page.getByText("Shipped default", { exact: true }),
     ).toBeVisible();
 
-    await page
-      .getByLabel("Dynamic Review model", { exact: true })
-      .fill("vendor/agent-e2e");
+    await openSection(page, "LLM");
+    await chooseOption(page, "Model", "deepseek/deepseek-v4-pro");
+    await openSection(page, "Review");
     await page.getByRole("button", { name: "Edit skill" }).click();
     await expect(skill).toBeFocused();
     await skill.fill(SKILL);
@@ -116,9 +119,9 @@ test.describe("the review kind of a project", () => {
 
     // Again, and confirm.
     await dynamic.click();
-    await page
-      .getByLabel("Dynamic Review model", { exact: true })
-      .fill("vendor/agent-e2e");
+    await openSection(page, "LLM");
+    await chooseOption(page, "Model", "deepseek/deepseek-v4-pro");
+    await openSection(page, "Review");
     await page.getByRole("button", { name: "Edit skill" }).click();
     await skill.fill(SKILL);
     await page.getByRole("button", { name: "Save review settings" }).click();
@@ -130,9 +133,11 @@ test.describe("the review kind of a project", () => {
 
     await page.reload();
     await expect(dynamic).toBeChecked();
-    await expect(
-      page.getByLabel("Dynamic Review model", { exact: true }),
-    ).toHaveValue("vendor/agent-e2e");
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
+      "deepseek/deepseek-v4-pro",
+    );
+    await openSection(page, "Review");
     await expect(skill).toHaveValue(SKILL);
     await expect(page.getByText("Custom skill", { exact: true })).toBeVisible();
 
@@ -153,9 +158,11 @@ test.describe("the review kind of a project", () => {
     await expect(
       page.getByText("Shipped default", { exact: true }),
     ).toBeVisible();
-    await expect(
-      page.getByLabel("Dynamic Review model", { exact: true }),
-    ).toHaveValue("vendor/agent-e2e");
+    await openSection(page, "LLM");
+    await expect(page.getByRole("combobox", { name: "Model" })).toHaveText(
+      "deepseek/deepseek-v4-pro",
+    );
+    await openSection(page, "Review");
 
     // Back to Diff Review: confirmed again, and the Diff cards return.
     await diff.click();
@@ -165,6 +172,7 @@ test.describe("the review kind of a project", () => {
       .getByRole("button", { name: "Switch to Diff Review" })
       .click();
     await expect(page.getByRole("status")).toContainText("Saved.");
+    await openSection(page, "Limits");
     await expect(
       page.getByLabel("Token budget", { exact: true }),
     ).toBeVisible();

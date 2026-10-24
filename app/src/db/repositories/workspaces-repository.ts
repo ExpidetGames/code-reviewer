@@ -5,8 +5,9 @@
 // rather than a workspace (which workspaces does this person belong to, in which role); the members of
 // one workspace are in workspace-members-repository.ts. See src/workspaces/README.md.
 import "server-only";
-import { sql, type Kysely } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
+import { databaseDriver } from "../driver.ts";
 import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
 import type { Database, WorkspacesTable } from "../schema.ts";
 
@@ -16,16 +17,32 @@ export type Workspace = {
   slug: string;
   createdBy: string | null;
   createdAt: string;
+  /** When the workspace was deleted (#658), or null. The readers below do not return a deleted one, except `getIncludingDeleted`. */
+  deletedAt: string | null;
 };
 
 /** A workspace a user belongs to, with the role they have in it. */
 export type Membership = { workspace: Workspace; role: WorkspaceRole };
 
 export type WorkspacesRepository = {
+  /** The workspace, or undefined when there is none or it was deleted (#658). */
   get(id: string): Promise<Workspace | undefined>;
-  /** The oldest workspace, which is the default one the migration made; undefined when there is none. */
+  /**
+   * The workspace as the row has it, a tombstone (name and address anonymised, `deletedAt` set) included. For the readers that
+   * explain money which belongs to a deleted workspace; every other reader uses `get`. With `lock` the row is read `FOR SHARE`
+   * on Postgres: a deletion that is in flight (it holds the row) is waited for and its result is what is read, so a credit that
+   * checks the workspace first cannot land in one that is being deleted.
+   */
+  getIncludingDeleted(
+    id: string,
+    options?: { lock?: boolean },
+  ): Promise<Workspace | undefined>;
+  /** The oldest workspace that is not deleted, which is the default one the migration made; undefined when there is none. */
   findDefault(): Promise<Workspace | undefined>;
-  /** Whether a workspace has this slug. */
+  /**
+   * Whether a workspace has this slug. A tombstone counts only with its own anonymised address, which is unique like every
+   * address; the address it had before is free again.
+   */
   slugExists(slug: string): Promise<boolean>;
   /** The workspaces the user is a member of, in the order they joined (then by id). */
   listForUser(userId: string): Promise<Membership[]>;
@@ -58,7 +75,7 @@ export type WorkspacesRepository = {
   ): Promise<void>;
   /** Whether the workspace has at least one Owner. */
   hasOwner(workspaceId: string): Promise<boolean>;
-  /** How many workspaces the instance has. */
+  /** How many workspaces the instance has (a deleted one, #658, is not one). */
   count(): Promise<number>;
   /**
    * The workspaces whose name holds the text (any case, `%` and `_` are plain characters), by name, at most `limit`; an
@@ -77,13 +94,30 @@ export type WorkspacesRepository = {
 
 export const DEFAULT_WORKSPACE_SLUG = "default";
 
-function toWorkspace(row: WorkspacesTable): Workspace {
+/**
+ * The address a deleted workspace keeps (#658): the row stays because the billing journal points at it, with its name and
+ * address anonymised (the address stays unique, so it carries the id). What marks it a tombstone is `deleted_at`, not this.
+ */
+export function deletedWorkspaceSlug(id: string): string {
+  return `deleted-${id}`;
+}
+
+/** Whether a workspace is a tombstone. The one test for a workspace in memory; `NOT_DELETED` is the same for a query. */
+export function isDeleted(workspace: { deletedAt: string | null }): boolean {
+  return workspace.deletedAt !== null;
+}
+
+/** The rows that are workspaces, not tombstones: the condition of every query that reads `workspaces` for a customer or an operator. */
+export const NOT_DELETED = sql<boolean>`workspaces.deleted_at is null`;
+
+function toWorkspace(row: Selectable<WorkspacesTable>): Workspace {
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    deletedAt: row.deleted_at,
   };
 }
 
@@ -107,11 +141,15 @@ export function createWorkspacesRepository(
         "workspaces.slug as slug",
         "workspaces.created_by as created_by",
         "workspaces.created_at as created_at",
+        "workspaces.deleted_at as deleted_at",
         "workspace_members.role as role",
-      ]);
+      ])
+      .where(NOT_DELETED);
   }
 
-  function toMembership(row: WorkspacesTable & { role: string }): Membership {
+  function toMembership(
+    row: Selectable<WorkspacesTable> & { role: string },
+  ): Membership {
     if (!isWorkspaceRole(row.role))
       throw new Error(`The database holds an unknown role "${row.role}".`);
     return { workspace: toWorkspace(row), role: row.role };
@@ -121,6 +159,7 @@ export function createWorkspacesRepository(
     const row = await db
       .selectFrom("workspaces")
       .selectAll()
+      .where(NOT_DELETED)
       .orderBy("created_at")
       .orderBy("id")
       .limit(1)
@@ -134,7 +173,16 @@ export function createWorkspacesRepository(
         .selectFrom("workspaces")
         .selectAll()
         .where("id", "=", id)
+        .where(NOT_DELETED)
         .executeTakeFirst();
+      return row === undefined ? undefined : toWorkspace(row);
+    },
+
+    async getIncludingDeleted(id, options) {
+      let query = db.selectFrom("workspaces").selectAll().where("id", "=", id);
+      if (options?.lock === true && databaseDriver(db) === "postgres")
+        query = query.forShare();
+      const row = await query.executeTakeFirst();
       return row === undefined ? undefined : toWorkspace(row);
     },
 
@@ -144,13 +192,14 @@ export function createWorkspacesRepository(
       const row = await db
         .selectFrom("workspaces")
         .select((builder) => builder.fn.countAll<string | number>().as("count"))
+        .where(NOT_DELETED)
         .executeTakeFirst();
       return Number(row?.count ?? 0);
     },
 
     async search(text, limit) {
       const escaped = text.toLowerCase().replace(/[\\%_]/g, "\\$&");
-      let query = db.selectFrom("workspaces").selectAll();
+      let query = db.selectFrom("workspaces").selectAll().where(NOT_DELETED);
       if (escaped !== "")
         query = query.where(
           sql<boolean>`lower(name) like ${`%${escaped}%`} escape '\\'`,
@@ -222,12 +271,13 @@ export function createWorkspacesRepository(
         .updateTable("workspaces")
         .set({ name })
         .where("id", "=", workspaceId)
+        .where(NOT_DELETED)
         .executeTakeFirst();
       return Number(result.numUpdatedRows) === 1;
     },
 
     async create(input) {
-      const row: WorkspacesTable = {
+      const row = {
         id: newId(),
         name: input.name,
         slug: input.slug,
@@ -235,7 +285,7 @@ export function createWorkspacesRepository(
         created_at: formatTimestamp(now()),
       };
       await db.insertInto("workspaces").values(row).execute();
-      return toWorkspace(row);
+      return toWorkspace({ ...row, deleted_at: null });
     },
 
     async addMember(workspaceId, userId, role) {
@@ -265,7 +315,7 @@ export function createWorkspacesRepository(
     },
 
     async listPage({ after, limit }) {
-      let query = db.selectFrom("workspaces").selectAll();
+      let query = db.selectFrom("workspaces").selectAll().where(NOT_DELETED);
       if (after !== undefined) query = query.where("id", ">", after);
       // One more than asked for tells whether another page follows.
       const rows = await query
