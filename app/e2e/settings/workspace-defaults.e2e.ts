@@ -24,14 +24,14 @@ import {
 import { chooseOption, openSection } from "../helpers/settings-form";
 
 const account: GithubAccount = {
-  id: 7800001,
+  id: 7850001,
   login: "defaults-owner",
   name: "Defaults Owner",
   email: "defaults-owner@example.test",
 };
 const ORG = {
   login: "defaults-org",
-  id: 7800101,
+  id: 7860001,
   type: "Organization",
 } as const;
 const REPOSITORY = "defaults-org/widgets";
@@ -51,8 +51,8 @@ test.describe("the review defaults of a workspace", () => {
     for (const model of [WORKSPACE_MODEL, SHIPPED_MODEL])
       llm.setModel(model, [{ supported_parameters: ["tools", "tool_choice"] }]);
     await addGithubAccount(request, account, null);
-    await addGithubInstallation(request, { id: 9800001, account: ORG }, [
-      { id: 9810001, fullName: REPOSITORY },
+    await addGithubInstallation(request, { id: 9850001, account: ORG }, [
+      { id: 9860001, fullName: REPOSITORY },
     ]);
     await setGithubAppSetupUrl(
       request,
