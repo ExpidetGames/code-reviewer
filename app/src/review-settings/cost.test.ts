@@ -86,6 +86,9 @@ describe("the limit the customer set", () => {
     expect(raised.warn).toBe(false);
     expect(none.limitUsd).toBe(REVIEW_COST_LIMIT_USD);
     expect(none.warn).toBe(true);
+    // #666: only a limit the customer set is enforced; the standard level only warns.
+    expect(raised.customLimit).toBe(true);
+    expect(none.customLimit).toBe(false);
   });
 });
 

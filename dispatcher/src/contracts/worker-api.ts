@@ -45,6 +45,10 @@ export type RunnerJobInput = {
      */
     maxTokens?: number;
     /**
+     * #666: the cost limit the customer set for a review of the project (the project's setting over the workspace default), in US dollars: a number above 0 and at most 100, in whole cents. Optional and additive, and sent only to a caller that named the claim feature `cost_limit`; a job without it is a job of today. A Dynamic Review is held to the smaller of this and the operator's own limit (`RUNNER_DYNAMIC_MAX_COST_USD`): it is wrapped up and delivers its review, and names `project_cost_limit` in `usage.stoppedEarly` when this limit is the one that stopped it. A Diff Review sends no further model request once what it has cost reaches this (one call is never cut short) and ends with `cost_limit_reached`. Both report and bill what the calls really cost.
+     */
+    maxCostUsd?: number;
+    /**
      * Models to try, in order, when the main model fails. Optional; the app does not send it in the MVP (no fallback chain is decided), the runner accepts it.
      *
      * @maxItems 5
@@ -522,11 +526,12 @@ export interface RunnerUsage {
    */
   costUsd: number | null;
   /**
-   * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit, its time limit or (#553, an own key whose price is not known) its token limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
+   * Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit (`cost_limit`, the operator's), the cost limit of its project (`project_cost_limit`, #666: `llm.maxCostUsd`, when that is the smaller one), its time limit or (#553, an own key whose price is not known) its token limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.
    */
-  stoppedEarly?: "cost_limit" | "time_limit" | "token_limit" | null;
+  stoppedEarly?:
+    "cost_limit" | "project_cost_limit" | "time_limit" | "token_limit" | null;
   /**
-   * #540: by how much, in US dollars, the cost of a Dynamic Review passed the operator's cost limit. The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
+   * #540: by how much, in US dollars, the cost of a Dynamic Review passed its cost limit (the operator's, or the project's when that is the smaller one, #666). The review is delivered nevertheless: the last normal call may cost more than expected and the final call that carries the answer is always made (the documented bound: the limit plus the excess of the last normal call plus the final call). Absent when the cost stayed within the limit or is not known.
    */
   limitExceededBy?: number;
   callTrace?: RunnerCallTrace;

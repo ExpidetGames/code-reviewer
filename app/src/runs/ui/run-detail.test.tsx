@@ -120,6 +120,8 @@ describe("the usage of a run", () => {
   // #293-T08
   it.each([
     ["cost_limit", /cost limit/],
+    // #666-T01
+    ["project_cost_limit", /cost limit set for this project/],
     ["time_limit", /time limit/],
     // #553-R07
     ["token_limit", /token limit/],

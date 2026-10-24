@@ -412,9 +412,11 @@ def test_a_dynamic_run_keeps_its_own_total_deadline_when_the_timeout_leaves_more
     deadlines: list[float] = []
     real = runner.dynamic_ledger
 
-    def spy(capabilities: Any, environment: Mapping[str, str], deadline: float) -> BudgetLedger:
+    def spy(
+        capabilities: Any, environment: Mapping[str, str], deadline: float, *rest: Any
+    ) -> BudgetLedger:
         deadlines.append(deadline)
-        return real(capabilities, environment, deadline)
+        return real(capabilities, environment, deadline, *rest)
 
     monkeypatch.setattr(runner, "dynamic_ledger", spy)
     script(monkeypatch)

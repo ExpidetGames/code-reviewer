@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The cost guard: what a review is expected to cost with a model, and whether that is above the
-// limit the customer set. It only advises (the UI shows a warning); it never blocks a setting.
+// limit the customer set. It only advises (the UI shows a warning); it never blocks a setting. The limit itself is
+// enforced where a review runs (#666, `docs/billing.md`, "The cost limit of a project"); without one of the customer's
+// own the estimate is held to `REVIEW_COST_LIMIT_USD`, which only warns.
 //
 // The estimate is deliberately simple: the price of the model (the provider's adapter, src/llm/providers/) times a typical
 // review. A typical review sends `TYPICAL_PROMPT_TOKENS` to the model and gets
@@ -23,7 +25,7 @@ import type {
 } from "../llm/providers/types.ts";
 import type { ReviewSettings } from "./settings.ts";
 
-/** The customer's limit: at most this many USD per review on average. Above it the UI warns. */
+/** The level the estimate warns above when the customer set no limit: at most this many USD per review on average. Never enforced. */
 export const REVIEW_COST_LIMIT_USD = 0.1;
 export const TYPICAL_PROMPT_TOKENS = 30_000;
 export const TYPICAL_COMPLETION_TOKENS = 3_000;
@@ -80,6 +82,8 @@ export type CostWarning = {
 
 export type ReviewCostGuard = {
   limitUsd: number;
+  /** True when `limitUsd` is the limit the customer set (#666: enforced), false for the standard warning level. */
+  customLimit: boolean;
   primary: ModelCostEstimate;
   /** The fallback model's estimate, or null without a fallback model. */
   fallback: ModelCostEstimate | null;
@@ -196,6 +200,8 @@ export function estimateReviewCost(
   }
   return {
     limitUsd: costLimitUsdOf(settings),
+    customLimit:
+      settings.maxCostCents !== null && settings.maxCostCents !== undefined,
     primary,
     fallback,
     warnings,

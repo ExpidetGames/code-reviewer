@@ -126,6 +126,11 @@ STOPPED_EARLY_NOTICES = {
         "> **This review stopped early** because it reached the cost limit set for a review. "
         "It may be incomplete."
     ),
+    # The project's own limit (#666): says where the customer can change it.
+    "project_cost_limit": (
+        "> **This review stopped early** because it reached the cost limit set for this project "
+        "(in its settings under Limits). It may be incomplete."
+    ),
     "time_limit": (
         "> **This review stopped early** because it reached its time limit. It may be incomplete."
     ),
