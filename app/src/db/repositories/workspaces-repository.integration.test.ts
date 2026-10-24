@@ -11,6 +11,7 @@ import { markWorkspaceDeleted } from "../../test-support/workspaces.ts";
 import type { Database } from "../schema.ts";
 import {
   createWorkspacesRepository,
+  DEFAULT_WORKSPACE_SLUG,
   isDeleted,
 } from "./workspaces-repository.ts";
 
@@ -292,7 +293,16 @@ for (const engine of BILLING_ENGINES) {
         const { db, workspaceId, otherWorkspaceId } = await engine.create();
         await insertUser(db, "member");
         const repository = createWorkspacesRepository(db);
+        // The three workspaces are made within the same millisecond now and then, and then the order of their ids, which are
+        // random, decides which is "the oldest": the default one is made older on purpose.
+        await db
+          .updateTable("workspaces")
+          .set({ created_at: "2026-10-01T00:00:00.000Z" })
+          .where("slug", "=", DEFAULT_WORKSPACE_SLUG)
+          .execute();
         const deletedId = (await repository.findDefault())?.id ?? "none";
+        expect(deletedId).not.toBe("none");
+        expect([workspaceId, otherWorkspaceId]).not.toContain(deletedId);
         await repository.addMember(deletedId, "member", "owner");
         await repository.addMember(workspaceId, "member", "member");
         await markWorkspaceDeleted(db, deletedId);
