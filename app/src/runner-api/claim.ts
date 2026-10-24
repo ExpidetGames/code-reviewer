@@ -833,10 +833,16 @@ export async function buildJobInput(
   // (the price book of the managed key, the token cap of an own key), so the job ends here, before any credential exists.
   if (cost !== null && !features.includes("dynamic_cost_policy"))
     return refuse("dynamic_engine_unavailable");
-  // #666: the same for the cost limit of the project, Diff or Dynamic. A runner that did not read `llm.maxCostUsd` would run
-  // without the bound the customer set, so the job ends here, before any credential exists.
-  if (llmOptions.maxCostCents !== undefined && !features.includes("cost_limit"))
-    return refuse("dynamic_engine_unavailable");
+  // #666: the cost limit of the project, Diff or Dynamic, goes only to a caller that reads `llm.maxCostUsd` (the job is a closed
+  // object). A caller without the feature is a runner or Worker image older than the app, which a release can briefly leave
+  // behind. The job is not refused for that: a refused review is worse than a project limit that is not kept for a short
+  // window, so it runs with the operator's own limit alone, and the log says so.
+  const sendProjectLimit = features.includes("cost_limit");
+  if (llmOptions.maxCostCents !== undefined && !sendProjectLimit)
+    deps.logger.info(
+      `[runner-api] job=${job.id} runs without its project cost limit: the runner does not name the claim feature cost_limit`,
+    );
+  const projectLimit = sendProjectLimit ? llmOptions.maxCostCents : undefined;
   const managed = selection.keyMode === "managed";
   const provider = deps.registry.resolve(integration.type);
 
@@ -935,7 +941,7 @@ export async function buildJobInput(
             model: selection.model,
             apiKey: llmAccess.apiKey,
             ...(maxTokens === null ? {} : { maxTokens }),
-            ...costLimitOf(llmOptions.maxCostCents),
+            ...costLimitOf(projectLimit),
           },
           env: options.env,
         }
@@ -967,7 +973,7 @@ export async function buildJobInput(
             model: selection.model,
             apiKey: llmAccess.apiKey,
             ...(maxTokens === null ? {} : { maxTokens }),
-            ...costLimitOf(llmOptions.maxCostCents),
+            ...costLimitOf(projectLimit),
           },
           env: {},
         };

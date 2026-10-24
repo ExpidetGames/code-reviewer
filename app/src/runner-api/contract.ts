@@ -39,8 +39,8 @@ export const CLAIM_FEATURES = [
   // #498: the caller is a Dispatcher that reports the VM it creates (`vm_lifecycle`, the App feature of the same name). The
   // App records that it has seen a Dispatcher with and without it: billing is not switched on while one without it claims.
   "vm_lifecycle",
-  // #666: the runner reads `llm.maxCostUsd` and enforces it next to the operator's own cost limit. A job that carries a
-  // project cost limit goes only to a caller that named it.
+  // #666: the runner reads `llm.maxCostUsd` and enforces it next to the operator's own cost limit. A project cost limit goes
+  // only to a caller that named it; any other caller runs the job without it.
   "cost_limit",
 ] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];

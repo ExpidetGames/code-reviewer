@@ -815,6 +815,10 @@ describe("the Limits section (#656)", () => {
     expect(field.textContent).toContain(
       "Leave empty to use the workspace default ($2.50).",
     );
+    // The instance may hold a lower limit, and the field does not say which.
+    expect(field.textContent).toContain(
+      "The instance may enforce a lower limit.",
+    );
     // No rate and no markup is named next to the limit.
     expect(field.textContent).not.toMatch(/rate|markup|per minute/i);
 
@@ -847,7 +851,7 @@ describe("the Limits section (#656)", () => {
   });
 
   // #666-T06
-  it("says that a Diff Review is one request that is never cut short, and a Dynamic Review is not told that", async () => {
+  it("says that a Diff Review checks the limit between requests, and a Dynamic Review is not told that", async () => {
     const user = userEvent.setup();
     const diff = render(
       <SettingsForm
@@ -860,7 +864,9 @@ describe("the Limits section (#656)", () => {
     const diffField = screen
       .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
-    expect(diffField.textContent).toContain("makes one request");
+    expect(diffField.textContent).toContain(
+      "checked between model requests, so a single request can exceed it",
+    );
     diff.unmount();
 
     render(
@@ -875,7 +881,7 @@ describe("the Limits section (#656)", () => {
     const dynamicField = screen
       .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
-    expect(dynamicField.textContent).not.toContain("makes one request");
+    expect(dynamicField.textContent).not.toContain("between model requests");
   });
 
   // #666-T06

@@ -28,9 +28,9 @@ export function describeCostLimit(cents: number): string {
 const NO_LIMIT = "No limit";
 
 /**
- * What the cost field does: a review stops when it reaches the amount. A Diff Review is one model request, which is never cut
- * short, so there the limit only keeps it from sending another one (#666). An empty field is the workspace default, or no
- * limit of the customer's own where there is none. No rate and no markup is named.
+ * What the cost field does: a review stops when it reaches the amount. A Diff Review checks it between model requests (#666),
+ * so a single request can exceed it. The instance may enforce a lower limit of its own, which the field does not show. An
+ * empty field is the workspace default, or no limit of the customer's own where there is none. No rate and no markup is named.
  */
 export function costLimitHint(
   mode: "project" | "global",
@@ -39,13 +39,14 @@ export function costLimitHint(
 ): string {
   const start = "A review stops when it reaches this amount.";
   const note = diff
-    ? " A Diff Review makes one request, which is never cut short, so the limit only stops it from sending another."
+    ? " For a Diff Review the limit is checked between model requests, so a single request can exceed it."
     : "";
+  const instance = " The instance may enforce a lower limit.";
   if (mode === "global")
-    return `${start}${note} Leave empty for no limit of your own.`;
+    return `${start}${note}${instance} Leave empty for no limit of your own.`;
   if (inherited === null || inherited === undefined)
-    return `${start}${note} Leave empty for no limit of your own; the workspace sets none.`;
-  return `${start}${note} Leave empty to use the workspace default (${describeCostLimit(inherited)}).`;
+    return `${start}${note}${instance} Leave empty for no limit of your own; the workspace sets none.`;
+  return `${start}${note}${instance} Leave empty to use the workspace default (${describeCostLimit(inherited)}).`;
 }
 
 export function LimitsFieldset({

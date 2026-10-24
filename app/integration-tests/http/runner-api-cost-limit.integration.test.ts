@@ -3,8 +3,9 @@
 // The cost limit of a project at claim time (#666): the review settings resolve `maxCostCents` (the project's value over the
 // workspace default over none), and the claim hands it to the runner as `llm.maxCostUsd`, on both ways a job reaches a runner
 // (the legacy claim and the Worker API's first fetch) and for both kinds of review. A runner that did not say it enforces the
-// limit (the claim feature `cost_limit`) never gets a job that carries one: the job ends before any credential exists, like a
-// job with a cost policy does (#553). A job without a limit is the job of today, byte for byte.
+// limit (the claim feature `cost_limit`) never gets the field (the job is closed): it runs with the operator's limit alone and the
+// log says so, since a refused review is worse than an unenforced limit while a release is rolling out. A job without a limit is
+// the job of today, byte for byte.
 import { describe, expect, it } from "vitest";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import {
@@ -105,41 +106,36 @@ describe.each([
     expect(Object.keys(body.job.input.llm)).not.toContain("maxCostUsd");
   });
 
-  // #666-T03
-  it("never goes to a runner that did not say it enforces the limit: the job ends before any credential exists", async () => {
+  // #666-T03: a refused review is worse than a limit that is not kept for the short window of a release, so the job runs with the
+  // operator's own limit and without the project's, and the log says so. It never carries a field the runner would refuse.
+  it("runs without the limit, and says so, on a runner that did not say it enforces it", async () => {
     const h = await start({ dynamic, project: 250 });
-    const [job] = await h.snapshotJobs();
 
-    const response = await h.claim(
+    const body = await h.claimed(
       claimOf(dynamic, dynamic ? ["dynamic_capabilities"] : []),
     );
 
-    expect(response.status).toBe(204);
-    expect(await h.queue.get(job!.id)).toMatchObject({
-      status: "failed",
-      errorCode: "dynamic_engine_unavailable",
+    expect(Object.keys(body.job.input.llm)).not.toContain("maxCostUsd");
+    expect(contract.check("ClaimResponse", body)).toStrictEqual({
+      valid: true,
+      errors: "",
     });
-    expect(h.issuedJobTokens()).toEqual([]);
+    expect(h.logLines().join("\n")).toContain(
+      `job=${body.job.id} runs without its project cost limit`,
+    );
   });
 
   // #666-T03: the hosted deployment: the Dispatcher claims the split answer, the Worker's own features decide at its fetch.
-  it("never goes to a Worker that did not say it enforces the limit, and goes to one that did", async () => {
-    const refused = await start({ dynamic, project: 250 });
-    const claim = await refused.claimedSplit({
+  it("runs on a Worker that did not say it enforces the limit without it, and sends it to one that did", async () => {
+    const without = await start({ dynamic, project: 250 });
+    const old = await without.startedWorker(undefined, undefined, {
       engines: claimOf(dynamic, []).engines,
     });
 
-    const without = await refused.worker.details(
-      claim.job.id,
-      claim.job.credential,
-    );
-
-    expect(without.status).not.toBe(200);
-    expect(await refused.queue.get(claim.job.id)).toMatchObject({
+    expect(Object.keys(old.details.job.input.llm)).not.toContain("maxCostUsd");
+    expect(await without.queue.get(old.jobId)).not.toMatchObject({
       status: "failed",
-      errorCode: "dynamic_engine_unavailable",
     });
-    expect(refused.issuedJobTokens()).toEqual([]);
 
     const accepted = await start({ dynamic, project: 250 });
     const started = await accepted.startedWorker("cost_limit", undefined, {

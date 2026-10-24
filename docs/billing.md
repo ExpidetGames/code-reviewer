@@ -101,9 +101,9 @@ A project (or the workspace default) can set a **cost limit per review** in whol
 Limits; #656). It is enforced where the review runs (#666), next to the instance's own limit
 (`RUNNER_DYNAMIC_MAX_COST_USD`, default 1.00 USD, which only the operator changes): a review is held to the **smaller** of the
 two. The claim sends the project's value as `llm.maxCostUsd`, only to a runner or Worker that named the claim feature
-`cost_limit`; a job that carries one and meets a caller without it ends `dynamic_engine_unavailable` before any credential
-exists, so an older runner never runs a job with a bound it cannot keep. No limit set means nothing is sent and the job is the
-job of before.
+`cost_limit`; a job that meets a caller without it runs without the field and under the operator's limit alone (the claim logs
+it), because a refused review is worse than a project limit that is not kept while a release rolls out. No limit set means
+nothing is sent and the job is the job of before.
 
 - **Dynamic Review.** The limit is the budget of the run: the run is wrapped up when a further call and a final one would not
   fit, delivers the review with the findings it has, and says so ("stopped early", on the pull request, the check run and the run
@@ -117,9 +117,7 @@ job of before.
   under the field (a large pull request, warned above the limit) is how a customer judges a model before choosing it. Nothing is
   refused at the start on an estimate: the estimate is a typical review, and a small pull request costs far less.
 - **Billing.** A stopped run is billed like any other run: what the calls really cost (the exact cost the runner reports, never
-  the limit), and for a Diff Review that ended `cost_limit_reached` in full like other failures after a model call. No hold is
-  made for the limit and none is released; the hold of a run stays the one of the kind (`app/src/billing/hold.ts`), which is
-  larger than any limit below the default.
+  the limit), and for a Diff Review that ended `cost_limit_reached` in full like other failures after a model call. Billing makes no reservation for the limit.
 - **An own key whose model has no known price** cannot be bounded in dollars (no cost is counted): the token cap of the instance
   still bounds it (#553), and the project's limit has nothing to compare.
 
