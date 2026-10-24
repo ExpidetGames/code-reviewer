@@ -668,6 +668,17 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "appSettings.setIfUnchanged",
+    run: async (a) =>
+      a.appSettings.setIfUnchanged(
+        "review_defaults",
+        { from: "A-changed" },
+        "a",
+        (await a.appSettings.get("review_defaults"))?.updatedAt ?? null,
+      ),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
+  {
     name: "appSettings.delete",
     run: (a) => a.appSettings.delete("review_defaults"),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
