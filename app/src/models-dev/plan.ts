@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Decides what one fetch writes (#548), as a pure function of the parsed body, the stored rows and the verdicts on the
 // providers' addresses. Nothing is deleted: a row that goes away upstream is written again with `unlistedAt` and keeps

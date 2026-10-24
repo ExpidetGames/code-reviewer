@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The read side of the jobs table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts) for the pages: the runs list, one run, and the latest run of each

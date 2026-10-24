@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cursor of the usage feed (#278): where a reader stopped in the settled records, as text the reader keeps
 // and hands back without looking inside. Opaque to the caller, validated here: a bounded base64url text that

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing profile of ONE workspace (table `billing_profiles`; the factory takes the workspace id, see
 // ../workspace-scope.ts; ADR 0006, 2.13; #501; src/billing/README.md): the business that buys credit, the confirmation

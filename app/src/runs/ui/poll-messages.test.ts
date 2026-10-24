@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the runs pages say when polling ends for good, including for a person who is no longer a member of the
 // workspace (the shared polling stops on `not_found`, #282 review).

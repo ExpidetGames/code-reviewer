@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """No execve gives back NET_ADMIN or SETPCAP: file capabilities, setuid (#250, #249).
 

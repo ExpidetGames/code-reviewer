@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down when a test that needs the operating system to deny a file operation is skipped: as
 // root outside CI it is skipped with a visible reason, for a non-root user it runs, and in CI it

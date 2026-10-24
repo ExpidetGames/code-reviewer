@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /github/connected: the "Setup URL" of the GitHub App, where GitHub sends the browser after an installation
 // (`?installation_id=&setup_action=&state=`). It is not a public path: the person has to be signed in, and the

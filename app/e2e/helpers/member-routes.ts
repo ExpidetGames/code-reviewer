@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The routes a member of a workspace can read, taken from the app router itself (#435): every page below `(app)` that is
 // not the instance portal, and every route of the workspace API (and the account and workspace-list routes) that

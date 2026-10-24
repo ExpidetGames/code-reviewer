@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The LLM access of a workspace, put together over a database: the key service of the workspace, the operator's
 // key, the access a job of the workspace gets (src/llm/resolve.ts: the key mode of its entitlements, or the workspace's choice while

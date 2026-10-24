@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down starting a review by hand in a real browser, against a production build next to the
 // fake GitHub: a person presses the play button of the project row, picks an open pull request in the dialog and

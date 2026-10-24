@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stop call of the dispatch webhook (#487): when the claim of a job ends, the App tells the Dispatcher that sent the
 // job's wake-up to stop the job's Sandbox VM. The Dispatcher holds no supervision after the hand-over and the VM never

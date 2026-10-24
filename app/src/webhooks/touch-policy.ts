@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which answers of the webhook route are a reason for the repair work of the requests that touch the database (#395:
 // release the leases that ran out, send what is due). A delivery the app does not use, a duplicate, one that was

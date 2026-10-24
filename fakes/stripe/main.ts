@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake Stripe API as a process of its own, for a journey that runs the app against it (`STRIPE_API_BASE_URL` of the app
 // is its address): loopback only (`STRIPE_FAKE_HOST`, if set, must be a loopback address); the port is `STRIPE_FAKE_PORT`; the key it accepts is `STRIPE_FAKE_API_KEY` (a dummy

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Runs: the newest runs of every workspace, for the instance admin (#541). Open one to see what it consumed and
 // the table of its calls. Instance admin only: anybody else gets the 404 of a page that does not exist.

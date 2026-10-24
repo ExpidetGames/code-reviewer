@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How the answer of a settings route becomes the model of the form, for a workspace on the operator's key (#283) and
 // for one that is not, including the answer of a server of the release before the quality choice.

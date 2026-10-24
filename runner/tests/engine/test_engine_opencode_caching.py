@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The real pinned OpenCode with a Claude model, behind the proxy, against a cache (#539).
 

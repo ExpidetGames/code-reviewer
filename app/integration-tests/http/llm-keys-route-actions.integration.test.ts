@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The role action each LLM key route file asks of `withWorkspace` (#426), pinned on its own: the handlers of
 // src/llm/http.ts are replaced by ones that answer 200 to everyone, so a Member is refused only if the route file

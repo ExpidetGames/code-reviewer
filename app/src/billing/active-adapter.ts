@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which adapter billing runs on (ADR 0006, 2.14; #497). The instance setting `billing_settings` names it in `adapter`; the
 // admin page sets it (#504); an instance that never chose runs on `manual`, the adapter that needs nothing.

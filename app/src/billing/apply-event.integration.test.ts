@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497: the generic application of normalized billing events to the journal, on SQLite and on Postgres. An adapter only
 // reads a provider; this layer decides what an event does: one transaction per event, idempotent per event id and per

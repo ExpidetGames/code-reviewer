@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the fake SMTP server (fakes/smtp) over a real socket: the greeting and the capabilities, a
 // delivery with its envelope, dot-stuffing and the parsing of an encoded message, STARTTLS and implicit

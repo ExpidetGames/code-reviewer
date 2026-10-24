@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Test helper, not a test: runs the real service of the job loop (signals, logging, event loop)
 with the job command of a test.

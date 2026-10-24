@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Runs the job phase of the privileged suite as the Dynamic runner is after its startup (#244).
 

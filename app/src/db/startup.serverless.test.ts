@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The lazy database of serverless mode (#319): nothing is opened at start, the first `getDatabase()`
 // opens the Postgres pool (which itself connects on the first query), later calls share it, and the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who may call a route the hosting platform's cron calls (`vercel.json` "crons"). The platform sends
 // `Authorization: Bearer <CRON_SECRET>`; the secret is the whole credential, so a missing or weak one

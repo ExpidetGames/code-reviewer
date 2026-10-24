@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the allow list is read from the environment and how a login is matched against it:
 // case-insensitive, whitespace tolerant, whole logins only, and fail closed when nothing is set.

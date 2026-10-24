@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings of the instance's mail server (docs/decisions/0001-editions-setup-and-accounts.md, sections
 // 2.3 and 2.7) and the rules for what the admin may enter. Pure functions: the store (smtp-config.ts) saves

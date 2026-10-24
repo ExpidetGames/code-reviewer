@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Concurrent settings changes on Postgres: two instances read-modify-write the same project, and no
 // update is lost. SQLite serializes them with its single write lock (`begin immediate`); Postgres

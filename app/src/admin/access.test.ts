@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Who counts as the instance admin for the portal and the instance-wide data routes: the admin flag
 // decides, whatever else is the matter with the account (an address still to verify, no workspace), and a

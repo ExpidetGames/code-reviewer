@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Every producer of jobs (the GitHub webhook, a comment, the start button) must queue through
 // `jobQueueFor` (src/jobs/shared.ts), because that is where the dispatch hook is attached (#326). A new

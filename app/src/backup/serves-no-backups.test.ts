@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that no HTTP route hands out a backup file. A backup holds sessions and stored tokens,
 // so the only way to get one is the server's volume. The checks are on the code of the routes and on

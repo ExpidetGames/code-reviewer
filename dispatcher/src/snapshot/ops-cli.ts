@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm snapshot:ops <decide|persist|exists|verify|cleanup>` (#403): the steps of the deployment pipeline that look after the
 // golden snapshot around a deployment, in one command so that the logic is testable apart from the workflow.

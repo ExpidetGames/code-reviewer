@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what keeps the Dispatcher buildable by the Vercel CLI (#412). The deployment runs `vercel build`, whose Hono
 // builder type-checks through a language service that finds `undici-types` (imported by @types/node for the global

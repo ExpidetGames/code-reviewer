@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: `GET /api/w/:workspace/billing/journal` as the app wires it (guard, access, query, service), over a real database and the
 // real matrix of roles. Every member reads the balance journal of their own workspace, page by page; nobody else does; billing

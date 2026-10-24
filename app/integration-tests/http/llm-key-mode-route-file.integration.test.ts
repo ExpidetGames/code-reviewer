@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route file `GET` and `PUT /api/w/:workspace/llm-key-mode` (#496) with the wiring the running server uses: the
 // database opened at start and the workspace access of the session. Only the session lookup and `connection()` are replaced (they

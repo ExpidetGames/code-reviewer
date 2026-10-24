@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The deletion of ONE workspace (#658; the factory takes the workspace id, see ../workspace-scope.ts). It is the only
 // code that removes a workspace's data as a whole, and every statement filters by that workspace, directly or through

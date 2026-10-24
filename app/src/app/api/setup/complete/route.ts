@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/setup/complete: finishes the first-run setup (creates the instance admin and stores the
 // choices). Public on purpose (the setup session from the code is the credential) and present only

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The call the model picker makes to the models route of its workspace (src/native-providers/models-http.ts). Browser side.
 // Nothing throws; a failure is a stable code.

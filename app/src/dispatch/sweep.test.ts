@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What one run of the sweep does when parts of it fail (#328): every step is tried, the ones that failed are named,
 // and nothing a failure said reaches the log. The steps against a real database are in sweep.integration.test.ts.

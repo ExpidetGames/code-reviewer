@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Checks what `enqueue` is given before anything is written. The values come from webhooks and
 // comments, so nothing here trusts a type annotation: every field is looked at as `unknown`.

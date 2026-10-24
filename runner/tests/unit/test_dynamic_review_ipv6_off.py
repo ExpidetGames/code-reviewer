@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """IPv6 is off, and provably so, where the fallback ruleset is in use (#345), without root.
 

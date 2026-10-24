@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/llm-key/test: the alias of /llm-keys/:provider/test for the default provider (#426); asks the provider whether the key is accepted (the "test key" button),
 // with the key typed into the field or, when it is empty, the stored one. An Admin or an Owner only

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" service as the running server wires it, over a database (src/llm/shared.ts passes the server's): counted in the
 // shared `rate_limits` table, connecting to the provider's own address only (src/llm/endpoint.ts), a catalog provider tested at the

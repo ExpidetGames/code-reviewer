@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The entitlements on Postgres behave like the SQLite ones: the same constraints refuse the same direct
 // writes, a reset of the period never goes backwards (also for the default), and a second writer cannot

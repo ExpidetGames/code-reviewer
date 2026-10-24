@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sweep of usage records (src/usage/README.md) for the instance level code that ends jobs: the lease side of
 // the queue (runner-jobs-repository.ts) and the switch-off of Dynamic Review (instance-settings-repository.ts).

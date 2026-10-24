@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the Dispatcher logs of a failed `vm-prepare.sh` (#473): the exit status and the end of its stderr, so that a
 // failure in a VM is diagnosable from the log without the platform's own text. The script is ours and writes short

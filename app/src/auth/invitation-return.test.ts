@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that only a link token is ever carried through the sign-in, and that it leads to the page of the
 // invitation and nowhere else.

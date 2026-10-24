@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the Docker Compose setup (compose.yml, compose.build.yml, .env.example) as files: which
 // services exist and how they are wired, that no secret is written in the compose file, and that
@@ -128,13 +128,11 @@ describe("compose services", () => {
     expect(service("runner").restart).toBe("unless-stopped");
   });
 
-  it("defaults to the images that CI publishes to GHCR", () => {
-    expect(service("app").image).toContain(
-      "ghcr.io/expidetgames/code-reviewer-app:development",
-    );
-    expect(service("runner").image).toContain(
-      "ghcr.io/expidetgames/code-reviewer-runner:development",
-    );
+  // #677: no image is published, so the default is the tag that compose.build.yml builds locally.
+  it("defaults to the images that compose.build.yml builds locally and to no registry", () => {
+    expect(service("app").image).toContain("code-reviewer-app:local");
+    expect(service("runner").image).toContain("code-reviewer-runner:local");
+    expect(JSON.stringify(compose)).not.toContain("ghcr.io");
   });
 
   // #118-T03 (the context is the repository root, so the images carry the license files)

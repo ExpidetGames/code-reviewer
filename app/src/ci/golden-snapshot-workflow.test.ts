@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the golden snapshot workflow (.github/workflows/golden-snapshot.yml, #330): it never runs for a pull
 // request, only one job holds the platform secrets and only one step of it reads them, and the commit is

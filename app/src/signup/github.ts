@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the sign-up rules say about a GitHub sign-in (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.5), as pure logic for the issue that moves the sign-in to the GitHub App: the rule is applied

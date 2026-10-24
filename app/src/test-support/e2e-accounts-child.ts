@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are stripped) to put
 // a user into the database of the app under test the way the import of an existing installation leaves one:

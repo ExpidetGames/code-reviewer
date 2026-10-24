@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settled usage records of EVERY workspace, in one ordered feed, for the operator API (#278). Instance level on
 // purpose (like integration-directory-repository.ts and runner-jobs-repository.ts): the operator serves many

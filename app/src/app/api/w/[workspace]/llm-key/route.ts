@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT|DELETE /api/w/:workspace/llm-key: the alias of /api/w/:workspace/llm-keys/:provider for the default
 // provider (#426; it was the only key slot before there were several providers). Every member reads whether a

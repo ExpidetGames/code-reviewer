@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key of a workspace for a catalog provider (#555), over a real SQLite file: stored and revealed exactly as the key of
 // a registry provider, one slot per provider, and a key of one provider is never used for another.

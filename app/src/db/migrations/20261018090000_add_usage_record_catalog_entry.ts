@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #432: what a run was given, in its usage record (ADR 0005, 2.8 step 5). Three nullable text columns on
 // `usage_records`: `catalog_entry_id` and `catalog_entry_name` (the entry a managed run used and its name as it was when the

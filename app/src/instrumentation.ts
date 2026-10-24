@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Runs once when the Next.js server starts and must finish before the server accepts requests.
 // The sign in, deployment and backup settings are checked and the database is opened and migrated here, so a missing

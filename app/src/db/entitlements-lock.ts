@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The default entitlements of the instance live in one JSON setting, so there may be no row to lock when two
 // writers set the period start at the same time. A transaction advisory lock covers that case on Postgres

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Every answer of the runner API is built here, so the headers and the shape of an error are the
 // same everywhere: `Cache-Control: no-store` (a claim carries credentials, and nothing a runner gets

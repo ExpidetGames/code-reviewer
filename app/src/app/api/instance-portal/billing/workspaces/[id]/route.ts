@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/admin/billing/workspaces/:id: the balance of a workspace and its recent journal entries, for the instance admin
 // only. The logic is in src/billing/admin-http.ts.

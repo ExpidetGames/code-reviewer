@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The text of the mail that carries an invitation link. Plain text and a small HTML alternative. The link is
 // the only secret in it. The address of the link is built from the configured public address of the app,

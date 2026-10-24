@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #491: the default entitlements belong to the operator whatever the billing switch says. A default that a database of
 // the removed billing design stored with `source: "billing"` reads without error and without the field.

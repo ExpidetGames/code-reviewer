@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The claim of a native Dynamic job on the runner's side (#578): the per-job model entry travels
 in `dynamic.modelEntry` next to the cost policy of #553, and the runner reads both as strictly as

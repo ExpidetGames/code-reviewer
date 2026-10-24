@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497-T14: the application half of the adapter test kit, for the fake adapter, on every engine. (The manual adapter has
 // no webhook, so it has no events to apply; its credits are tested in manual-credit.integration.test.ts.)

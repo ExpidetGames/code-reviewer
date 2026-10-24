@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Sandbox-Launcher against the local mode of the Sandbox double (fakes/sandbox/local.ts) with a stand-in
 // `docker` executable: real processes, real pipes, a real temporary directory per "VM". No Docker daemon is needed;

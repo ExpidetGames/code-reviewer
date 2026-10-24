@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """How the budget ledger carries the cost policy (#553): an unpriced run, the token cap of an own
 key, and what an unknown call books for each key.

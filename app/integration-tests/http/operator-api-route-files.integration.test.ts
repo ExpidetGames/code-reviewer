@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The real route files of the operator API with the wiring the running server uses: the token from the
 // environment, the database opened at start. Without a usable token every method of every route ends in Next.js's

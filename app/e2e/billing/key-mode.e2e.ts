@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The choice of the key mode on the LLM access page, end to end (#496-T09), on the app of the billing journeys of the admin portal: with
 // billing on, an Owner sees "Use our models" (the default) and "Use my own provider key" with one sentence each about what is charged,

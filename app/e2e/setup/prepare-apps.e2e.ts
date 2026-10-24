@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Not a journey: the first thing a run does. The apps under test start without a database, so each
 // one is a new instance that waits for the first-run setup and answers nothing else. This sets the

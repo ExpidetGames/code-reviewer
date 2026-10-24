@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which fields of a price differ between the confirmed one and the one now (#554): a stale price is shown with the fields that
 // moved, so the admin does not have to compare two tables by eye.

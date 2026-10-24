@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/admin/billing/workspaces?q=: workspaces by a part of their name, for the manual credit of the billing page, for the
 // instance admin only. The logic is in src/billing/admin-http.ts.

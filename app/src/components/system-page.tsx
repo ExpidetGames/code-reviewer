@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The frame of the two system states of the design board (#633): the page that is not found and the
 // page that failed. The floating nav pill with the brand alone (the page knows nothing of the session),

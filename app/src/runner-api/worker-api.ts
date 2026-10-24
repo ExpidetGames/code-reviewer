@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Worker API (#320, `/api/workers/v1`): what a Worker may do with the per-job credential and nothing
 // more. Three calls, all for the one job the credential was minted for:

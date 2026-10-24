@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The frame of the workspace settings area (#178): the sub-nav with one link per sub-page and the
 // shared heading. The settings index ("General", at `/settings`) is the area root and carries no

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Replay protection of the stop call (#487): the stop ids this instance has handled. A stop id is new for every stop,
 // and a call older than the clock window is refused before it gets here, so an id is remembered for twice the window.

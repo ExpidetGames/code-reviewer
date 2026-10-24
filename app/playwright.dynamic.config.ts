@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The privileged Dynamic e2e lane (#253): one fake GitHub and one app under test (a production build,
 // made once by runner/scripts/run_dynamic_e2e.sh before this runs), and the journeys of e2e/dynamic, which

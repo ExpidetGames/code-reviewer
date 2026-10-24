@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A whole native Dynamic job through `run_dynamic_job` with the real pinned OpenCode (#578).
 

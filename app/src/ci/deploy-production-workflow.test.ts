@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the production deployment of the hosted version (#403): .github/workflows/deploy-production.yml checks
 // that the run is current, migrates the database, decides whether the golden snapshot is rebuilt (and rebuilds it),

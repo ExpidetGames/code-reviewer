@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Writes the golden snapshot pair to Infisical, `prod` `/dispatcher` (#403), after a deployment is live, so that the
 // next deployment and Secret Sync know which snapshot production runs. It signs in with the machine identity of the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The runner carries the capability descriptor of the shipped default Dynamic model (#264) and applies
 // it only to that exact model id. The id lives in two places, the app's default setting and the

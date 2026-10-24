@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the email and password sign in of an account that has to verify its address: through the real
 // HTTP route and through the login form's function, with the real Better Auth, the real sign-up and a

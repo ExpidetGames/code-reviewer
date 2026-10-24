@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A small reader for SPDX license expressions, as found in package metadata:
 //   MIT    (MIT OR Apache-2.0)    Apache-2.0 AND LGPL-3.0-or-later    Apache-2.0 WITH LLVM-exception

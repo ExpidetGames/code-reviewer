@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down what the job entry point reports when the model or GitHub misbehave: a stable error
 code, a non-zero exit code, exactly one line of JSON on stdout, and no review where there is none.

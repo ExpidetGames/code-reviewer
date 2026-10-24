@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the data migration that moves the old default Dynamic model name (`deepseek-v4.1-flash`,
 // which OpenRouter does not serve) to its OpenRouter id (#262): a stored `dynamicModel` of the old

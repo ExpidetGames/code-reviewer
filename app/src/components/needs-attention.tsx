@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one attention region of a screen (#173): the notices a person has to act on, as up to
 // `maxRows` rows, and nothing while there is nothing to attend to. Built on the kit's alert look so

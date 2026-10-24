@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the database settings are read from the environment: the database URL (SQLite or
 // Postgres), the SQLite defaults and overrides, the pool size, and the refusal of values that

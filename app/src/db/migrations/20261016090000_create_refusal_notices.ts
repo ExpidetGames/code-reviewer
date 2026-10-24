@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `refusal_notices` (#281): the record that one pull request got the notice of a refused review in one period
 // (src/refusal-notices/README.md). One row per workspace, repository, pull request and period start, so a second

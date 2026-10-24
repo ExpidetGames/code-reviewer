@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of the fake GitHub that serves the Checks API and the pull request review API as a GitHub App uses
 // them (#405): creating and updating a check run, listing the check runs of a commit, submitting a review and

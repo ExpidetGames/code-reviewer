@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The real route file of the deletion of a workspace (#658) with the wiring the running server uses: the dynamic segment, the
 // database opened at start, the workspace access and the service on top of it. Only the session lookup and `connection()` are

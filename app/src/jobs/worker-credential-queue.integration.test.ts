@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The queue side of the per-job credential (#320), on SQLite and, when TEST_DATABASE_URL is set, on
 // Postgres: a claim made with `workerCredential` stores only the hash of the credential as the lease

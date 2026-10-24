@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the HMAC signing of values that travel through the browser: a signed value verifies for
 // its own purpose and secret only, and any change to it makes it fail.

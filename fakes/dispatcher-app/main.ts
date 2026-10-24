@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starts the fake App for the Dispatcher and the Worker as its own process, for the suites that cannot
 // call it in-process (the Python Worker tests, the journeys). Configuration comes from the environment;

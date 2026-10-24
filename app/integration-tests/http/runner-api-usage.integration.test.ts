@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The usage record of a job from the claim to the end (src/usage/README.md), through the real runner API over
 // a real SQLite file: the claim reserves it in its own transaction, the completion settles it from the result,

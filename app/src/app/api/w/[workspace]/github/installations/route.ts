@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/github/installations {}: starts the list of installations the person can link ("Link an
 // existing installation", an Owner or Admin) and answers the address of GitHub's authorization page. Protected

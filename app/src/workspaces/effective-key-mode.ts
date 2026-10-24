@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whose key a workspace's reviews run on (ADR 0006, P3, D4; #496). While billing is off the entitlements decide, as they always
 // did: a self-hoster who never switches billing on sees no change. While billing is on the WORKSPACE decides: the entitlement's

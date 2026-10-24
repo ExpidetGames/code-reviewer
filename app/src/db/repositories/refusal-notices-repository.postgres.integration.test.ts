@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The record of the notices of refused reviews on Postgres behaves like the SQLite one (#281-T08): one statement
 // takes the notice of a pull request and period, so several app instances at once get exactly one, a failed notice

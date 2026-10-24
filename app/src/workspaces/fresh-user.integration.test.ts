@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a person sees who has an account but no workspace, through the real proxy, the real Better Auth and a
 // real SQLite file: in a single-tenant instance, which has the one workspace its setup made, they see

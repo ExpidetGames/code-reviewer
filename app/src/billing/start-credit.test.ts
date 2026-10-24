@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which GitHub accounts a workspace's installations tie it to (#507, pure): the grant is per account, so what counts as an
 // account id decides who can be granted.

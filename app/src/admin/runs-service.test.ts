@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The runs the instance admin looks at (#541): the list of the newest jobs of every workspace and one job
 // with its usage and its call trace. A job is read by its id; the log of a run never leaves the server on this

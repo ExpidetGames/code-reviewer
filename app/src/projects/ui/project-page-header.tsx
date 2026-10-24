@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The header of the project page (#174): one h1 with the repository's full name and its state badge
 // and the trail `Projects / <project> / Settings`. A review is started from the project list (#655), not

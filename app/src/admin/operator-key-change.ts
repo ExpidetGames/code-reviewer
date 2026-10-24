@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a request to change an operator LLM key says, read into one provider and one change (#427). Two shapes
 // reach the settings route:

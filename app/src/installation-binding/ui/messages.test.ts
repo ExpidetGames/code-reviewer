@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the words of the binding: every code a page can be told has a sentence, a refusal is worded as one
 // and nothing worded here names another workspace, a token or an address of GitHub.

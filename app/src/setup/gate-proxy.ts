@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The setup gate as a step of the Next.js proxy (src/proxy.ts): it applies the decision of gate.ts
 // to a request. Returns a response when the request is answered here (the setup page in place of

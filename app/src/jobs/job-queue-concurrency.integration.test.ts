@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the queue when several callers work on one database file at the same moment. The other
 // callers are real OS processes (a second app instance, a second runner API handler), started

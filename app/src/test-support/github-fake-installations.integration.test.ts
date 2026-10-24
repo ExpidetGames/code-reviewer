@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the fake GitHub does for the binding of installations (fakes/github/README.md), because the
 // tests of the binding stand on it: the installation page and where it sends the browser, which installations

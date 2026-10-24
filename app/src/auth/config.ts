@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads the sign-in settings from the environment. The only place that knows the variable names.
 // A problem is reported with the variable names only, never with a value (they include secrets).

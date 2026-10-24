@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the billing page of a workspace makes to its own routes (#505). Browser side; nothing throws: a failure is a stable
 // code the page translates (`messages.ts`). The workspace is the one in the address of every call, never in a body.

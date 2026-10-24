@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The data of the balance banner (ADR 0006, D9; #506): for an Owner and an Admin (`manage_billing`), while billing is on and the
 // balance of THEIR workspace is low, zero or below zero. A Member gets null before anything is read; billing off gets null after

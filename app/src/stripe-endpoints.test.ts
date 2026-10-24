@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: the one rule for the address the app sends its Stripe API key to. It is Stripe's own address. The test stack
 // (`ALLOW_TEST_STRIPE_ENDPOINTS=true`) may point the app at the fake Stripe (`fakes/stripe`), and only at a loopback address over plain http:

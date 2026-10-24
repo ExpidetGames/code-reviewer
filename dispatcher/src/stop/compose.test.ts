@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stop route in the composed Dispatcher (#487): it is mounted with the signing keys of the deployment and the
 // platform's fleet when there is a golden snapshot (the same condition as the reaper), and does not exist otherwise.

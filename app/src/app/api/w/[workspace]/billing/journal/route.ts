@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/billing/journal: one page of the balance journal of the workspace, newest first (ADR 0006, 2.5; #505).
 // Every member of the workspace (`view`); a missing path while billing is off. Final prices only. The logic is in

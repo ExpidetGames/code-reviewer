@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: the key mode the billing page names, read from the summary of the workspace's LLM access.
 import { describe, expect, it } from "vitest";

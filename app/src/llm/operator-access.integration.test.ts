@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whose LLM key a job gets, assembled over a real database (src/llm/assemble.ts): the entitlements of the
 // workspace (or the instance default) decide, the operator's key serves `managed` workspaces only, and every

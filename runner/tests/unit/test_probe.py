@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The `probe` entry mode (#324): the startup self-check, then one line of JSON and exit.
 

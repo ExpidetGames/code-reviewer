@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing journeys that need a review to run (#508), end to end on the fakes: a real browser, the app, the fake Stripe (`fakes/stripe`), the
 // fake GitHub (webhooks in, pull request notices out) and a script that plays the runner over the runner API. The app is the one of the billing

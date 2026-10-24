@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The native path of one Dynamic job (#578, design #544): claim, entry, passthrough proxy, engine.
 

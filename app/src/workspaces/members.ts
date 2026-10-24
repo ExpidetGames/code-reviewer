@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Changing the members of a workspace (docs/decisions/0001-editions-setup-and-accounts.md, section 2.6):
 // giving a member another role, removing one (or leaving), and renaming the workspace. Every function

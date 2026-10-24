@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The notice a pull request gets when a review is refused for a limit or a suspension (#281). The claim has failed
 // the job already (src/usage/README.md, "Limits and suspension at claim"); this posts ONE short comment on the pull

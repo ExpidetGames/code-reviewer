@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scripting routes of the fake models.dev (#554), which the Playwright run uses over HTTP because the fake runs as a
 // process of its own there: health, the fixture to change, and the body `/api.json` answers from then on.

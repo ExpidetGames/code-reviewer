@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the manual rollback of the hosted deployment (.github/workflows/rollback-production.yml, #403): it runs
 // on demand from main only, in a queue of its own, takes the deployment to restore per project, checks with the

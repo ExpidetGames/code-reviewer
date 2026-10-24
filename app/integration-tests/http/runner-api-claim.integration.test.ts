@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down `POST /api/runners/v1/claim` through the real handler: a real SQLite file with the job
 // queue, the real GitHub App provider against the fake GitHub, and the API wired to both. It covers

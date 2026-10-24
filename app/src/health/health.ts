@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The answer of GET /api/health: the app is up and can read its database. Kept minimal on purpose;
 // the deployment ticket extends it. In serverless mode (`checkSchema`) it also says whether the

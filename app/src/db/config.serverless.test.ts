@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the database settings in serverless mode (#319): Postgres only, a small pool with a short
 // idle timeout, and the separate direct URL of the migration command. A refused value never repeats a

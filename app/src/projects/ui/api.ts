@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the project list makes to the app's own routes: switch a project on or off
 // (`PUT /api/w/:workspace/repositories/:id/project`, src/projects/http.ts) and run the sync by button

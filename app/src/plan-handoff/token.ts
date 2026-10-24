@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handoff token: 256 random bits as 43 base64url characters. It travels once, in the redirect to the
 // operator-configured page, and the database keeps only its SHA-256 hash.

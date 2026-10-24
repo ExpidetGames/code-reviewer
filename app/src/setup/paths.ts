@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The address of the first-run setup page and the request header with which the setup gate
 // (src/setup/gate-proxy.ts) marks a page request that has to be served from it. `next.config.ts`

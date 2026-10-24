@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The LLM keys of ONE workspace (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.7 and 2.8; ADR
 // 0005, section 2.5): what an Owner or an Admin enters in the workspace settings, "LLM access". There is one key per

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The hardened container spec (contracts/worker-container.v1.json, #316, #325) and the two compose
 // services that run the same container on a self-hosted installation must stay one definition. The

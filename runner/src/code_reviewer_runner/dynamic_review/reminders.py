@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Neutralises `<system-reminder>` text in tool results before the model sees it (#232).
 

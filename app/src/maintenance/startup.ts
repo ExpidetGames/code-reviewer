@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the production server does about old rows: clean up when it starts and then every hour
 // (cleanup.ts). Called from `src/instrumentation.ts`. Other environments (the dev server, tests) run no

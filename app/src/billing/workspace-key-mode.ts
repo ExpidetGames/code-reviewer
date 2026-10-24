@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whose key the reviews of a workspace run on, for the line of the billing page that points to the LLM access page (#505). It
 // reads the summary the LLM access gives (`WorkspaceLlmSummary`), so the page never decides a key mode of its own: the choice

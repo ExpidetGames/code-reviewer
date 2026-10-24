@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing switch written straight into a test database, for tests of code that runs only while billing is on. Billing is
 // on only when the adapter is ready (#504) and the claim refuses a job while a rate is missing (#498), so switching it on

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check run and the review verdict of review jobs (#405) end to end below the HTTP routes: a real database with
 // the job queue, the real GitHub App provider and client over HTTP against the fake GitHub, and the service the

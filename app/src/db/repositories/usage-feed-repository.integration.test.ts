@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance level page of settled usage records (the feed of the operator API) against a real SQLite file:
 // the order across workspaces, the bound of the safety lag and the hazard that the bound exists for.

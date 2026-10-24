@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the server says about the LLM when it starts: a wrong option is one warning with the
 // code and the variable name, the start goes on, and no value is printed.

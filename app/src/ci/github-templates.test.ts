@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the issue forms and the pull request template: GitHub only shows a form that parses
 // and has the keys it needs, the forms must apply the labels the project board relies on, and the
@@ -43,16 +43,15 @@ function field(issueForm: IssueForm, id: string): FormElement {
 }
 
 describe("issue form files", () => {
-  it("has exactly the bug, feature and question forms and the config", () => {
+  it("has exactly the bug and feature forms and the config (no question form: the service has its own support channel)", () => {
     expect(readdirSync(templateDir).sort()).toEqual([
       "bug_report.yml",
       "config.yml",
       "feature_request.yml",
-      "question.yml",
     ]);
   });
 
-  it.each(["bug_report.yml", "feature_request.yml", "question.yml"])(
+  it.each(["bug_report.yml", "feature_request.yml"])(
     "%s has a name, a description and a body with unique ids",
     (file) => {
       const issueForm = form(file);
@@ -74,10 +73,6 @@ describe("issue form files", () => {
   it("labels a feature request with type: feature", () => {
     expect(form("feature_request.yml").labels).toEqual(["type: feature"]);
   });
-
-  it("labels a question with question", () => {
-    expect(form("question.yml").labels).toEqual(["question"]);
-  });
 });
 
 describe("bug report form", () => {
@@ -89,12 +84,12 @@ describe("bug report form", () => {
     }
   });
 
-  it("offers the ways to run the project as deployment types", () => {
+  it("offers the hosted service and local development as places, and no way to run it elsewhere", () => {
     const options = JSON.stringify(field(bug, "deployment").attributes.options);
 
-    expect(options).toContain("Docker Compose");
-    expect(options).toContain("Coolify");
+    expect(options).toContain("Hosted service");
     expect(options).toContain("Local development");
+    expect(options).not.toMatch(/Docker Compose|Coolify|self-host/i);
   });
 
   it("asks for logs only after redaction and renders them as text", () => {
@@ -188,9 +183,8 @@ describe("pull request template", () => {
     expect(template).toMatch(/## Follow-ups/);
   });
 
-  it("has an optional test cases section with a case, test and status table", () => {
+  it("has a test cases section with a case, test and status table", () => {
     expect(template).toMatch(/## Test cases/);
-    expect(template).toMatch(/Optional for contributors/);
     expect(template).toContain("| Test case | Test file / name | Status |");
   });
 

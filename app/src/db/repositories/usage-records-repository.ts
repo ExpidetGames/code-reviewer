@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the usage records of ONE workspace (the table `usage_records`; the factory takes the workspace id, see
 // ../workspace-scope.ts): what each of its runs consumed (src/usage/README.md). The claim reserves a record, the

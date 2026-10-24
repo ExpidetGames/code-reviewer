@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dispatcher core: the platform-free part between a Trigger (which learns that a job exists) and a
 // Launcher (which starts its Worker). It claims, holds the per-job credential only while it hands the job

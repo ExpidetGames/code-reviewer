@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts the notice service together from a database: the repositories of the workspace of each refusal, the
 // registry that knows how to write to a platform, and the one thing the instance decides, where the plan page is.

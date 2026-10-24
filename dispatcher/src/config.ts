@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the operator configures, read from environment variables. A refusal names the variable and
 // never the value: two of them are secrets.

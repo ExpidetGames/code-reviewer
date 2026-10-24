@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Checks review settings that come from outside (a request body) or from storage. Pure: no database,
 // no environment. Every problem is reported as `{ field, code }` with a stable code; the message a

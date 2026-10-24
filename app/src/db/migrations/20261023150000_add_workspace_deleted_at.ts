@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #658: the mark of a deleted workspace. Deleting a workspace removes its data but keeps the `workspaces` row as a tombstone
 // (the billing journal and the top-up intents point at it), anonymised; `deleted_at` is when that happened and is what every

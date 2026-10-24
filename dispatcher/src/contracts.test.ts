@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dispatcher's own check of the shared contracts (contracts/README.md, "Who checks what"): the
 // examples are valid under the schemas, and what the Dispatcher accepts and refuses agrees with them.

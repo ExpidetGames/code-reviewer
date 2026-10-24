@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Late minutes (ADR 0006, 2.8 step 5; #498). A job settles when it ends, with the best end of its VM that the App knows then
 // (the confirmed stop, else the bounded backstop of #493). The answer to the App's stop call can arrive afterwards and

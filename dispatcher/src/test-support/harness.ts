@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the Dispatcher tests share: the fake App from fakes/dispatcher-app, a recording logger, dummy
 // settings and signed webhook requests. Dummy values only; nothing leaves loopback.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #539-T06: the fake LLM (fakes/llm) keeps the prompt cache rules of the Claude docs, the same ones as its Python twin
 // (`anthropic_cache.py`): breakpoints, the model's minimum length, lifetimes that a read renews, the look-back of 20

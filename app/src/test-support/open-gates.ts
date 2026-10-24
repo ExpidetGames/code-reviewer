@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access gates (src/auth/access-gates.ts) for tests that are about something else than the verified
 // address and the workspace: nobody has to verify, and everybody belongs to a workspace.

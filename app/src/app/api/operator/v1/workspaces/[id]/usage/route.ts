@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/operator/v1/workspaces/{id}/usage?after=&limit=&from=&to=: the settled usage records of one workspace.
 // Bearer token; absent (404) until `OPERATOR_API_TOKEN` is set. See src/operator-api/README.md.

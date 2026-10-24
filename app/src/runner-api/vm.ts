@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/runners/v1/jobs/:id/vm: the Dispatcher says that it created the VM of a claim (#493, src/billing/README.md,
 // "Billable minutes"). It proves the dispatcher credential in `Authorization` (checked by the caller) and the claim with

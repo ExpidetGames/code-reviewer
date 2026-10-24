@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The automatic reviews of CR-31, end to end up to the queue: a signed `pull_request` delivery goes
 // through the real webhook handler, the real GitHub App provider (against the fake GitHub), the real

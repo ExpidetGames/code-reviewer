@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which provider, model and catalog entry a job runs on, and whose key it will need (ADR 0005, 2.8, steps 1 to 4). It runs before any key is loaded: the key follows the
 // selection, not the other way round. Pure: no database, no clock, no environment, no network. Everything it needs is

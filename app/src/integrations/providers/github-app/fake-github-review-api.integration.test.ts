@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the part of the fake GitHub that a reviewer uses (fakes/github/review-api.ts) over real
 // HTTP, with installation tokens minted by the app's real client: the diff and the contents of a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Vitest setup file, loaded for every test file of the unit and integration projects.
 // It makes any TCP connection to a host other than loopback fail with NETWORK_GUARD_BLOCKED,

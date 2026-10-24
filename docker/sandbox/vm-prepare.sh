@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 #
 # Per-VM-start preparation of a Sandbox VM before the first `docker run` (#325, spike #317 finding
 # F1). Run it as root on EVERY start of a VM, before anything uses Docker: the golden snapshot

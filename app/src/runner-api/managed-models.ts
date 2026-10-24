@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which models a job's result must hide (`ReportDeps.managedModels`, report.ts). One function for the running server
 // (`shared.ts`) and the test harness, so that a test checks the code that runs.

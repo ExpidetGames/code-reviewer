@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `GET /api/w/:workspace/llm-catalog/:provider/models` (#555): the listed models of a catalog provider, for the
 // model picker of a project that runs Dynamic Review on the workspace's own key. Every member may read it (the project settings

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the login form sends a person who just signed in with email and password. Somebody who still has
 // to verify the address, or who belongs to no workspace, is sent straight to the page that says so. The

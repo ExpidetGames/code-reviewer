@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/github/manifest: starts the manifest flow that creates the GitHub App. Answers the
 // manifest and the address of GitHub's creation page (with a signed, single-use state bound to the admin's

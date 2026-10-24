@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: who sees the banner and when. Only an Owner or an Admin, only while billing is on and the balance of THEIR workspace is
 // low, zero or below zero; a Member and billing off see nothing, and nothing of billing is read for them.

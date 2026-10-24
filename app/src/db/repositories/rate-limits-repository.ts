@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the rate_limits table: shared counters with a window, so that every app instance counts
 // the same attempts. Instance level. The caller chooses the key (one counter per key) and the

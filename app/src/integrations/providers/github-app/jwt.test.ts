@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the app JWT: the claims GitHub requires and a signature only the app's key can make.
 import { createVerify } from "node:crypto";

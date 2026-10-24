@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator's own LLM key in the admin portal (#276), end to end over a real database, the real proxy and the
 // real data route: only an instance admin saves or removes it, it is write-only (the settings carry the status

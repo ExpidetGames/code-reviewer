@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the copy of the manual start: every code of the module has a sentence of its own that
 // never shows the code, and an unknown code gets the generic sentence.

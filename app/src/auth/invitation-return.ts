@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Carrying an invitation link through the sign-in and the sign-up. A person who opens an invitation link
 // without a session is sent to `/login?invitation=<token>` or `/sign-up?invitation=<token>`; after the

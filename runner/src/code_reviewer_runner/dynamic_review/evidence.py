@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Validated tracked trees and bounded exact endpoint evidence, independent of commit ancestry."""
 
 import difflib

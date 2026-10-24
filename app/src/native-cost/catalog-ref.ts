@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The minimal map from what a job selected to the models.dev catalog (#553; the mapping #549 left to the claim and #555).
 //

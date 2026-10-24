@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #434-T03 at the settings layer: the old quality level is no setting any more. Settings already stored with it are
 // read without it (the data stays in the row, unread: its removal is a later migration), and a request that still

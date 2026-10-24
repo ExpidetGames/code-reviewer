@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #425: the model catalog migration adds an empty table to a database made by the previous release's migrations and
 // changes no existing row; the table holds the checks and the unique name the repository relies on, on SQLite and on

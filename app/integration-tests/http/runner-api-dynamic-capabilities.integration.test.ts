@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The model capabilities a Dynamic claim carries (#279): the app reads the metadata of the job's model
 // when it builds the claim, puts the descriptor into `dynamic.capabilities` for a runner that said it

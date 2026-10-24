@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Addresses and dummy credentials shared by the Playwright configuration (which starts the app and
 // the fake GitHub) and the journeys. Nothing here is a secret: the values only have to match

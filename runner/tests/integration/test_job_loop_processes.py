@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the job loop with real processes and a real HTTP server on loopback: the loop starts
 `fake_job.py` (a stand-in for `code-reviewer-run-job`) once per job, with a minimal environment and

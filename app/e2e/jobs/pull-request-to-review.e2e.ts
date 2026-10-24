@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the whole path of a review in a real browser, against a production build: a signed
 // `pull_request` webhook reaches the app, the app queues a job, the REAL runner (the job loop, a

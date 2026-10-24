@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The cost meter of a Diff run against the real LiteLLM and a loopback server that answers like a
 provider (#274, review of PR #378).

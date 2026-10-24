@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Cumulative budgets with a deadline: raw transfer, then materialization, then exposure.
 
 A byte is counted once, in the budget of the resource it uses: the wire bytes against the

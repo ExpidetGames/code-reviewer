@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #320: the migration that adds the fetch counter of the Worker API must run on a database made by the
 // previous release's migrations, keep every job and give each one a count of 0, and leave the default

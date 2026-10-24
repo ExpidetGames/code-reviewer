@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A row action that may not be undone (remove a member, leave, revoke an invitation): it opens an
 // AlertDialog that names what will happen and only runs the call on the confirming button (#177, R23

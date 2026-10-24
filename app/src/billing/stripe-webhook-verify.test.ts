@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";

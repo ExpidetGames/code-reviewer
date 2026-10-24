@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The runs page of the instance admin (#541) lists the newest jobs of every workspace, ordered by
 // `(created_at, id)`. Without an index on that order every call sorts all jobs of the instance; with it

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reading and saving the instance setting `plan_management_url` (README.md). The one place both writers use (the
 // admin portal and the operator API), so what is stored is always what `checkPlanManagementUrl` accepts; the reader

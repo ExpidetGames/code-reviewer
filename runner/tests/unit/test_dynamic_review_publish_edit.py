@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The re-read after an ambiguous edit recognises only the bot's own byte-for-byte write (#255)."""
 

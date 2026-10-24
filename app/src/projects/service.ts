@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The project service: what the routes, the webhook intake and the UI use to turn a repository into
 // a project and back. It validates its input, maps a refusal to a stable `ProjectError` code and lets

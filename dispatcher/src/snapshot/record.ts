@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The record a successful run leaves: what the Dispatcher is configured with (#330). Nothing in it is secret.
 import { z } from "zod";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: the billing profile service: who may read and write the profile, and what it hands out.
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the queues of the running server hand to the check run service (#405): the work runs after the response, and
 // within the time a request has left. A webhook, a runner request and a worker request live 60 seconds, and the

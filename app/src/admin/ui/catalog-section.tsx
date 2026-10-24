@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The model catalog on the LLM page (#429, ADR 0005, 2.6): the models that workspaces on the key of the instance may

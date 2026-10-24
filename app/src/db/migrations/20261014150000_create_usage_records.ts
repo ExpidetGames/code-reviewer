@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `usage_records`: what each run consumed, one row per job (src/usage/README.md). It is written when a runner
 // claims the job (`reserved`) and settled or voided when the job ends; limits, the usage page and the operator API

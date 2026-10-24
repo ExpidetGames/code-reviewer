@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How the key of a workspace and a selection know a **catalog provider** (#555): a provider of
 // `contracts/opencode-providers.v1.json` that is not one of the two of the registry. The registry (`src/llm/providers/`) is a

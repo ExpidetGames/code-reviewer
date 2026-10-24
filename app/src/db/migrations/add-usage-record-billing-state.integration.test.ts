@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #605: the usage records say whether the money of a run is still to be settled. The column is nullable, so a record written
 // the way the previous release writes it (without the column) is still valid and is never billed, the table refuses a state

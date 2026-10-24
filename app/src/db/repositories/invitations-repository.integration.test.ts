@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The statements that end or change an invitation, against a real SQLite file: each one only touches an
 // invitation that is still open, and accepting only one that has not expired, so a rule broken in the code

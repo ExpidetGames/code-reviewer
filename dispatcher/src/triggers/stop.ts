@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /stop (#487): the signed call by which the App tells the Dispatcher that a job's claim has ended, so that the
 // Dispatcher stops that job's Sandbox VM. The Dispatcher does not supervise a Worker after the hand-over, and the VM

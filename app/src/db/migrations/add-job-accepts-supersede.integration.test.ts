@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #397-T14: the two migrations of the supersede (the flag of the claim and the wider reason of a usage record) run
 // on a database made by the previous release's migrations: every job gets the flag 0, every usage record keeps its

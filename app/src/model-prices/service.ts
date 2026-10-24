@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin's decisions about catalog models (#549): whether a model is enabled for the managed key, and whether its price
 // is confirmed. A model is selectable on the managed key only when both hold (`availability.ts`), and a price that models.dev

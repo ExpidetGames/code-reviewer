@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The logic behind the settings form, without React. The form holds what a person typed as text (a
 // number field can hold "abc") plus, per field, whether the person set it for this layer at all: a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the review settings service against a real SQLite file: the global defaults and the
 // overrides of a project are two layers that are combined when they are read, a change of the global

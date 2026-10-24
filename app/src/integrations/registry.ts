@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Maps an integration type to its provider. The only module (besides the providers themselves) that
 // is allowed to import a provider implementation; everything else asks the registry or uses the

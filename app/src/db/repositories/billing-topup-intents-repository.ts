@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The top-up intents of ONE workspace (table `billing_topup_intents`; the factory takes the workspace id, see
 // ../workspace-scope.ts; ADR 0006, 2.13; src/billing/README.md). An intent is written before any checkout exists; it is

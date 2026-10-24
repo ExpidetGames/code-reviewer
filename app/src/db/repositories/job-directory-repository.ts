@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The jobs of every workspace, for the instance admin's job view (#541). Instance level on purpose
 // (`scoping.test.ts`, `README.md` "Workspace scoping"): the operator who runs the instance looks at a

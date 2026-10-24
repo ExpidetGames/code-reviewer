@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that every stable code a settings field or a save can fail with has copy that says what
 // to do, never shows the raw code, and names the limit where there is one.

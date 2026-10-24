@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pages that show runs ask for the newest job of a repository (the last run on the project list)
 // and for the newest jobs of one repository (the filtered list). Both read `(repository_id,

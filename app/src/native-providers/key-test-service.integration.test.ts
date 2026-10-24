@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" service for a catalog provider (#555): the same limits as for the registry's providers, and the answers
 // verified, not verified and rejected. The provider's side is a stub; nothing leaves the process.

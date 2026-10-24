@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Deleting a workspace (#658). One transaction, decided from the database inside it (like every change of the members,
 // src/workspaces/members.ts), so a caller that forgets a check still cannot delete: the person must be an Owner of this

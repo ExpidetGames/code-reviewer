@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server: the real database and the model of the instance. The webhook
 // intake and the claim of the runner API get the settings of a project from here.

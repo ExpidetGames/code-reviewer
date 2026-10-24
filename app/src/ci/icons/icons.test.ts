@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The app draws its icons with Phosphor (`@phosphor-icons/react`), as the design board and the landing
 // page do (#636). The scan reads the real source files, so an import of the former icon set added

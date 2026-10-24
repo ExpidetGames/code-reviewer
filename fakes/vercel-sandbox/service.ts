@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A double of the Sandbox platform for automated tests (#330, to be extended by the Sandbox-Launcher, #329).
 // It runs in the test process and speaks the port of dispatcher/src/snapshot/service.ts, which it

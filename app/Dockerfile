@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 #
 # Image of the Code Reviewer web app (Next.js 16, standalone output).
 # Build context: the repository root, because the image also carries LICENSE, NOTICE and
@@ -43,7 +43,7 @@ FROM ${NODE_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="Code Reviewer app" \
       org.opencontainers.image.description="Web app and API of Code Reviewer" \
       org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="LicenseRef-Proprietary"
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
@@ -65,7 +65,7 @@ RUN groupadd --system --gid 10001 app \
     && mkdir /data /backups \
     && chown app:app /data /backups
 
-# The license of the project and of its dependencies travel with the image (Apache-2.0, section 4).
+# The license of the project and of its dependencies travel with the image (the third party notices need it).
 COPY --from=licenses --chown=root:root / /licenses/
 
 WORKDIR /srv/app

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #650: the app's icons are the code-review.com icon, not the create-next-app default. The files
 // are served by Next.js as they are (file conventions favicon, icon, apple-icon), so the test reads

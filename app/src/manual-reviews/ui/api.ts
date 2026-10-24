@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the start panel makes to the app's own routes: load the open pull requests
 // (`GET /api/w/:workspace/repositories/:id/pull-requests`) and start a command

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A fake GitHub for the engine suite: the REST and GraphQL calls PR-Agent's GitHub provider makes.
 

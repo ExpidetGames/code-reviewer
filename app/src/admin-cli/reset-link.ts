@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Makes a password reset link for an account, straight in the database (docs/decisions/0001-editions-
 // setup-and-accounts.md, section 2.3: a lost admin password without a mail server). Having shell access

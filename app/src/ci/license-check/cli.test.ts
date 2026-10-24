@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: the command that the CI job runs, with made-up data instead of pnpm and uv.
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whose key a job runs on, as far as the CLAIM can know it (#498): whether the balance can be zero depends on it (the operator's
 // key costs AI plus minutes, the workspace's own key the minutes only, ADR 0006, 2.8). It is the key mode of the effective

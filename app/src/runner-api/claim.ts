@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/runners/v1/claim: hands the next job to a runner, with everything it needs to run it.
 //

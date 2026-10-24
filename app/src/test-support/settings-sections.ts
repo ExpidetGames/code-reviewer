@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Test helpers for the settings form with its four sections (#656): a section is a tab, and a dropdown is a Radix select.
 import { screen } from "@testing-library/react";

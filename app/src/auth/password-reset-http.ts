@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `POST /api/password-reset` { token, password }: sets a new password with a reset
 // link (password-reset.ts). Public on purpose: the token in the link is the credential, 256 random bits

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that docker/smoke/compose.sh starts from a clean environment: every variable the compose
 // files it uses read is unset before the script exports its own dummy settings, so a value in the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the claim asks about the cost of a native job (#553), end to end over a real database on both engines, with the
 // catalog filled by the real fetch against the models.dev fake and the real price service: the managed key (we pay) gets a

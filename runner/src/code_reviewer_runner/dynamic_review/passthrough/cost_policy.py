@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The cost policy of a native job (#553): whose key pays, what prices the ledger uses, and what
 bounds a run whose price is not known.

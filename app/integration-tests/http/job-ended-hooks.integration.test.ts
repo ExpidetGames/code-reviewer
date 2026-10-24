@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the runner API and the Worker API tell the server when a job ends or a call touches the database (#395),
 // through the real handlers and a real SQLite file: the end of a job (a result, a job given back by a Worker or

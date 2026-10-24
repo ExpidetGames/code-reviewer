@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Billing at the claim (ADR 0006, 2.8; #498, reworked by #605): inside the claim transaction, after the admission checks, a job
 // starts when the balance of its workspace is above zero and is refused otherwise. NOTHING is held: with a hold, ten dollars

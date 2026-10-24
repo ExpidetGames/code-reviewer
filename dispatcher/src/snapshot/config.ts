@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the golden snapshot pipeline can be told (#330). Every value ends up in a shell script that runs as
 // root in the builder VM, so each one is checked against a narrow pattern before any script is written; a

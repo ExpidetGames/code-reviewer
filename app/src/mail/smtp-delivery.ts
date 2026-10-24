@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One delivery of one message to the configured mail server, with nodemailer. A single attempt (no queue,
 // no retry): a transport is made for the message and closed afterwards, so nothing lingers between sends

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are stripped;
 // `--conditions=react-server` lets `server-only` pass) to fill the model catalog of the app under test the way the

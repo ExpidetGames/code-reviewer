@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for everything that can go wrong when a person loads the pull requests or starts a
 // command. The routes answer with stable codes; this is where a code becomes a sentence (the UI

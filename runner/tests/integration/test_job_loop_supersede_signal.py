@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The job host tells a real job process that its run was superseded (#396): `SIGUSR1` to the
 leader, once, and never to a process that has ended. A signal that comes before the process has

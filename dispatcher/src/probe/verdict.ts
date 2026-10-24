@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the Worker image's `probe` mode prints (contracts/probe-verdict.v1.json, runner/README.md) and how the
 // Dispatcher reads it. The output comes from a container that runs next to hostile pull request content, so it

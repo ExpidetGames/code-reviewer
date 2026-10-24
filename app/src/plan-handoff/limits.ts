@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limit on "Manage plan": counted per person and workspace in the shared `rate_limits` table, so every app
 // instance counts the same clicks (docs/decisions/0001-editions-setup-and-accounts.md, section 2.10). The window is at

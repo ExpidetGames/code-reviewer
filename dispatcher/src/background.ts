@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The work that goes on after a Trigger has answered. On the platform this is `waitUntil`; in a Node
 // process it is this tracker, which a graceful shutdown waits for.

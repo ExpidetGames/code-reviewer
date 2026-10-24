@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """#198-T07: the runner package ships the canonical default skill and the license notices, byte for
 byte. The canonical sources (`contracts/dynamic-review/review-skill.md` and the three repository

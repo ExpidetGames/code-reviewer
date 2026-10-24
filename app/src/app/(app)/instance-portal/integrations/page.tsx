@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Integrations index of the admin portal (#182): the status of every service the instance works
 // with, one card each, with the link to the page that owns it. The GitHub App page is a route of its

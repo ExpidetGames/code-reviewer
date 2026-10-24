@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The `vercel` entry: Vercel builds a Hono app from a default export of this file with no further
 // configuration. The Launcher is the Sandbox-Launcher (#329) when a golden snapshot is configured

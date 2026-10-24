@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Binding a GitHub App installation to a workspace (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.9). One GitHub App serves many workspaces and anybody may install it, so the app has to decide which

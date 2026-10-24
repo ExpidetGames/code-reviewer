@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The license policy of the repository: license-policy.json at the repository root. One file holds
 // the allow list and every documented exception, so the CI check, its tests and

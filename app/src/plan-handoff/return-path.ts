@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where people land in this app: the refusal notice links here, and the operator's page sends the person back here
 // after the handover (`HandoffRedeemResponse` in contracts/operator-api.v1.json). It is a fixed path built from the

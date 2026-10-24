@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Prices as whole numbers (#549). A price is USD per million tokens, as models.dev states it (an exact decimal string).
 // The app holds it as BigInt micro-USD per million tokens, the unit of `src/billing/` (one micro-USD is a millionth of a

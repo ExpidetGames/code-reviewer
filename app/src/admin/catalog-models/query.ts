@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The filters of the catalog page (#554) live in its address, so a search can be shared, the back button works, and the
 // server renders the page it was asked for: there are 200 providers and thousands of models, so the page lists one filtered

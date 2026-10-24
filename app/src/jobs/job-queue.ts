@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The job queue of ONE workspace: the door through which jobs are created, dropped and read. It
 // checks input (job-input.ts) and leaves every query to the jobs repository, which holds the rules

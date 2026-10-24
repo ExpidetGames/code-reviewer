@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/verify-email { token }: verifies the address a link was made for. Public on purpose (the token
 // in the link is the credential); attempts are counted per link that exists (src/signup/http.ts).

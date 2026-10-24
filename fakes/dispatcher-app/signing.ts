@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The reference signer and verifier of the dispatch webhook (contracts/dispatch-webhook.v1.json), shared
 // by the tests of every TypeScript project that touches it. The real sender (the app) and the real

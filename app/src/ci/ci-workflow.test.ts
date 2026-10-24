@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the structure of the CI workflow (.github/workflows/ci.yml) so that a refactor cannot
 // quietly drop a check, swallow a failure, widen permissions or unpin an action. It reads the

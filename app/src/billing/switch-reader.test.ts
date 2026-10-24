@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // There is one reader of the billing switch (#504-T15, #491-T10): `enabled.ts` reads the stored setting and decides whether
 // billing is on. The files that read the stored setting for another purpose are named here, so a new one is noticed: the

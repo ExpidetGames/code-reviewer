@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The repositories each integration can see (for a GitHub App: the repositories of an installation).
 // A repository that disappears from the platform is marked inactive, never deleted, because

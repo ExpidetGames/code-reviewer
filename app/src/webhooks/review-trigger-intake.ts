@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the webhook route hands a review trigger over. The route knows nothing about jobs: it
 // translates a delivery into a `ReviewTrigger` and calls the intake. The intake of the running app

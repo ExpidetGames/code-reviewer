@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the shared rate limit counters against a real SQLite file: attempts are counted per key
 // inside a window, a new window starts the count again, keys do not share a counter, and attempts

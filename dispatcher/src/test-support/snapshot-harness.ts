@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the golden snapshot tests share: a Sandbox double scripted for a successful run, and the standard
 // input of a run. Dummy values only.

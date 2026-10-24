@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/github/connect {}: starts "Connect GitHub" (an Owner or Admin) and answers the address
 // of the App's installation page on GitHub, with the signed state of the round trip. Protected like every

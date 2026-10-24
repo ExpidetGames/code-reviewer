@@ -1,5 +1,10 @@
 # Deploying Code Reviewer, the large topology
 
+> **Internal reference, not a supported way to run code-review.com.** The source is visible but not
+> licensed for use, copying or hosting, and the service cannot be self-hosted (`LICENSE`, #677). This
+> guide stays only because `compose.large.yml` and its test still exist; both are candidates for
+> removal together with the self-host mode.
+
 The small topology (`compose.yml`) runs the app and the runner on one machine with SQLite. This guide
 is for the large one: an **external Postgres**, **several app instances** and **several runners**,
 behind a reverse proxy. The product is identical; only the topology and the database differ
@@ -22,8 +27,7 @@ external Postgres but runs the App as functions, is described in [`deployment-ve
   runtime: the app and the runner are stateless except for the database).
 - A reverse proxy that terminates TLS and forwards to `app:3000`, with a health check on
   `/api/health`.
-- The images from GHCR (private: `docker login ghcr.io` first) or built from this checkout
-  (`compose.build.yml`).
+- The images built from this checkout (`compose.build.yml`); no image is published.
 
 ## 2. Start it
 

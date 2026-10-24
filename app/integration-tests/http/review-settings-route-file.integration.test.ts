@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route files of the review settings with the wiring the running server uses: the
 // dynamic segments, the database opened at start, the service on top of it and the workspace access. Only

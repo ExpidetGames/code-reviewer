@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The mail-sender interface (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.3 and 2.5).
 // Everything that sends a mail (the verification link today; the password reset, the test mail and the

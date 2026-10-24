@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Cutting the real key out of the few things of the provider's that reach the engine (#550, T10).
 

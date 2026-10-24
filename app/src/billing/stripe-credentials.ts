@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Stripe client of the instance, made from the API key the instance admin stored (#504) at the moment a top-up needs it,
 // never at startup and never while billing is off. The environment (`test` or `live`) is the one the key's prefix says, and the

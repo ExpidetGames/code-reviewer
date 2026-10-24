@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The nft rules that confine the engine user to its model proxy (#197), as text and as a decision.
 

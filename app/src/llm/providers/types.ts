@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a provider of LLM access has to bring (ADR 0005,
 // section 2.4). Adding a provider means adding one adapter in its own folder and listing it in the registry

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Helpers for the first-run setup. A new instance prints its setup code in the log of the app and
 // nowhere else, so the journeys read it from the log file the app's output is redirected to

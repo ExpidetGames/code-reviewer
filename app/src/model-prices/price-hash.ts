@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The hash of a reference price (#549): a confirmation keeps the hash of the price it was made against (models.dev plus
 // the override file), and the price counts as changed when today's hash differs. It is also what the portal hands the

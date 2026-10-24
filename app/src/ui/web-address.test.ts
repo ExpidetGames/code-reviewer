@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which repository addresses the list may turn into a link: web addresses only.
 import { describe, expect, it } from "vitest";

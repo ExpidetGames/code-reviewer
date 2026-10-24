@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the helper script of the manual real run: the App JWT it creates, the guard that keeps
 it on the sandbox repository, and that it never prints the installation token or the LLM key, not

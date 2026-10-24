@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the check run and the verdict read from the result a job stored (#405). The result was checked when it was
 // reported, but rows of earlier releases and rows changed by hand exist, so every field is checked again and

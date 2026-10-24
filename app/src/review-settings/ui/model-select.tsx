@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The model dropdown of the LLM section (#656): a list to choose from, never a field to type in. It sits under the provider

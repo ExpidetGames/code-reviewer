@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: the decision whether a workspace is told about its balance, on SQLite and on Postgres. The decision is made in the
 // transaction of every journal write, under the lock of the balance row: a drop into the low or the empty state arms one mail,

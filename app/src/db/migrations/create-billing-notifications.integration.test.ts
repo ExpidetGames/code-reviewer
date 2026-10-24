@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: the migration of the balance notifications, on SQLite and on Postgres: one row for each workspace and kind (`low` or
 // `empty`), its state (`armed` or `sent`) and the state of the mail that goes with a crossing.

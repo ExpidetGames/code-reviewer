@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/billing/check: a harmless call to Stripe with the stored API key, for the instance admin only (the
 // connection check of the billing page). The logic is in src/billing/admin-http.ts.

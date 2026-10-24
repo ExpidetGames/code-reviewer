@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pure rules of the catalog selection (#430): why an entry may not be chosen, what the picker lists, and that the
 // names of the settings are the ones the catalog counts the projects by.

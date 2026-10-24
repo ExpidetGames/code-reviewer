@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings of the cron sweep (#328), read from the environment on every run: the one place that knows the
 // variable names. Never fails: a value that cannot be used keeps the default, so a typo cannot disable the

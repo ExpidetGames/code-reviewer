@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The queue tells its owner which jobs lost their running claim (#487), so that the Dispatcher can be told to stop their
 // VMs: a result, a failure, a cancel, a job given back, a superseded run's report, a lease that ran out (in the expiry

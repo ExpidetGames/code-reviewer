@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The read side of the plan page of a workspace (#282): the entitlements that apply to it (#271) and what its runs
 // consumed since `periodStart` (#272), through the same repositories and the same period rule as the claim (#277),

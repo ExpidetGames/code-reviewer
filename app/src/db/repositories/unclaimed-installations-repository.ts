@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Installations of the GitHub App that no workspace has linked (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.9). INSTANCE LEVEL: an unclaimed installation belongs to nobody, which is the point.

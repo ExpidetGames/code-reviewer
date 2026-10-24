@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether an address can be reached by Stripe from the internet: `https`, no credentials, and a host that is neither a
 // loopback, a private, a link-local nor a local name. A webhook endpoint is registered with the app's own address

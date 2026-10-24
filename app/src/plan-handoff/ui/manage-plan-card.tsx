@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "Manage plan" card of the General settings and of the plan page (#284, #282): one plain form that posts to the handoff route of the
 // workspace (src/plan-handoff/http.ts), whose answer is a redirect to the operator-configured page. It is rendered

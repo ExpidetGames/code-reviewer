@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Test helper, not a test: a stand-in for `code-reviewer-run-job` that the job loop starts as a
 real process. It reads the job from stdin like the real one and does what the scenario says.

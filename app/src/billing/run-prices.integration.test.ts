@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: the price of a review as the Runs pages show it (ADR 0006, 2.5): the final AI price and the final infrastructure price of a
 // charged review, "not charged" for a settled review that cost nothing, and nothing for a review that is still open or that was

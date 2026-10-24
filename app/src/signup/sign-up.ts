@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sign-up with email and password (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.5
 // and 2.6). An account is created only when the sign-up is open (`signUpAvailability`), the address

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing profile of a workspace, as input (ADR 0006, 2.13; #501): the legal name and address of the business that
 // buys credit and an optional VAT ID. Pure: it validates what a person typed and says which FIELD is wrong with a stable

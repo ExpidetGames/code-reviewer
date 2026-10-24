@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The credentials of a claim (#320). A legacy claim hands the runner a lease token, a split claim
 // (`worker_credential`) hands the Dispatcher a per-job credential that only the Worker uses. Both are

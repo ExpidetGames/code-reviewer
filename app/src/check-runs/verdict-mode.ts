@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The verdict mode a project's stored settings give (#405): its own choice when this version knows it, otherwise the
 // default. The same reading the settings page uses (`parseStoredProjectDynamicOverrides`), so what a person sees is

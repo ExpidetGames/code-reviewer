@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/invitations  { "email": "...", "role": "admin" | "member" | "owner" }: invites a
 // person. An Owner invites with any role, an Admin Members only; the service decides from the role the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a long-lived server (Docker Compose, Coolify, a process) does about the check runs of its jobs (#405): look
 // for the jobs whose GitHub state is behind now and then every minute (a lease that ran out, a timeout, a give-up, a

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The smallest passthrough that fits #544: swap the key, relay the bytes, keep a copy (#546).
 

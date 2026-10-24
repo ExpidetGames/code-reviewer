@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The banner of the GitHub result page: what a connect flow ended with, in words, in the alert tone
 // that matches the outcome. An outcome that is neither a failure nor a success is information: the

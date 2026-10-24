@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the schema bootstrap: a missing file is created and fully migrated, a second start
 // changes nothing, a failing migration leaves no trace, and the migrated schema follows the

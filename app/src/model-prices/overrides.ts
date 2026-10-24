@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The override file (#549, part A): `contracts/model-overrides.v1.json`, a short committed list of the fields models.dev
 // lacks or gets wrong in a way that is a code matter. Per provider and model: the price of a 1-hour cache write

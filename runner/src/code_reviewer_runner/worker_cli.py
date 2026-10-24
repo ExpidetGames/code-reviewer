@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Command line entry point of the Worker: `code-reviewer-worker --once` (#323).
 

@@ -1,6 +1,7 @@
 # Third party licenses
 
-code-review.com is licensed under the Apache License, Version 2.0 (see `LICENSE` and `NOTICE`).
+code-review.com itself is proprietary and its source is visible but not licensed for use (see
+`LICENSE`); third party software keeps the licenses of its authors, which this file records.
 This file lists the third party software that the project depends on, the license notices that
 those licenses require us to keep, and the result of the last license review of the dependencies.
 
@@ -18,7 +19,7 @@ image smoke tests check that they are there and identical to the files of the re
 
 - Package: pr-agent 0.47.0 (pinned in `runner/pyproject.toml`)
 - Source: https://github.com/qodo-ai/pr-agent
-- License: MIT, compatible with distributing it as part of an Apache-2.0 project. The MIT
+- License: MIT, which allows use in a proprietary product. The MIT
   license only asks that the copyright notice and the permission text are preserved, which is done
   below.
 
@@ -55,7 +56,7 @@ match the license shipped in the new release.
 - License: MIT. Unlike the dependencies above, shadcn/ui components are **copied into the
   repository** under `app/src/components/ui/` (that is how shadcn/ui is used), so the MIT notice
   must travel with them. Each copied file keeps a `// SPDX-License-Identifier: MIT` header with a
-  provenance line; every other source file stays Apache-2.0 (`app/src/ci/spdx-headers/rules.ts`).
+  provenance line; every other source file carries `LicenseRef-Proprietary` (`app/src/ci/spdx-headers/rules.ts`).
 - Components copied so far (27, all under `app/src/components/ui/`): `alert`, `alert-dialog`,
   `avatar`, `badge`, `breadcrumb`, `button`, `card`, `checkbox`, `collapsible`, `dialog`,
   `dropdown-menu`, `empty`, `field`, `input`, `label`, `progress`, `radio-group`, `select`,
@@ -80,7 +81,7 @@ bg-transparent`), because Tailwind's preflight reset is only enabled with the le
   keep their upstream default variants (`default`/`outline`).
 - Every copy imports the local class-name helper as `@/lib/utils` (`cn`), not as an npm package.
 - `app/src/lib/utils.ts` (`cn`) and `app/src/hooks/use-mobile.ts` (`useIsMobile`) follow shadcn/ui's
-  helpers but are short compositions of our own that stay Apache-2.0; they are not copied
+  helpers but are short compositions of our own (proprietary like the rest of the code); they are not copied
   components.
 
 ```text
@@ -128,7 +129,7 @@ its version and its source commit.
 - Package: OpenCode 1.19.0 (tag `v1.19.0`, pinned in `runner/opencode-pin.json`)
 - Source: https://github.com/anomalyco/opencode, source commit
   `733b2c627e5aec39cb33cc22373bdce33053ef2c`
-- License: MIT, compatible with distributing it as part of an Apache-2.0 project. The release
+- License: MIT, which allows use in a proprietary product. The release
   executable is used unmodified (no patch, no fork, no plugin); the MIT license only asks that the
   copyright notice and the permission text are preserved, which is done below. The license file of
   the pinned commit is https://github.com/anomalyco/opencode/blob/733b2c627e5aec39cb33cc22373bdce33053ef2c/LICENSE.
@@ -214,7 +215,8 @@ match the license shipped in the new release, and regenerate the OpenCode snapsh
 The fixed core and the default review skill of Dynamic Review adapt text from other projects. The
 adapted passages are small, carry their provenance in the source (`runner/src/code_reviewer_runner/dynamic_review/`
 and `contracts/dynamic-review/review-skill.md`), and are listed here with the exact source revision
-and the modifications, as the Apache-2.0 license requires.
+and the modifications, as the Apache-2.0 license of those sources requires. Those passages stay
+under Apache-2.0 (the files say so); the rest of the repository is proprietary.
 
 ### OpenAI Codex
 
@@ -273,7 +275,7 @@ allow a new license or a new exception, change both.
 
 ### Allowed licenses
 
-Permissive licenses, compatible with distributing this project under Apache-2.0. A dependency
+Permissive licenses, which allow use in a proprietary product. A dependency
 whose license expression is satisfied by these needs no entry anywhere:
 `0BSD`, `Apache-2.0`, `BlueOak-1.0.0`, `BSD-2-Clause`, `BSD-3-Clause`, `CC0-1.0`, `CNRI-Python`,
 `ISC`, `MIT`, `MIT-0`, `PSF-2.0`, `Python-2.0`, `TCL`.
@@ -313,7 +315,9 @@ were read from the npm registry when the entries were added and are judged like 
 | `fsevents`                 | MIT                                      | File watching on macOS only, an optional dependency of watchers                                            |
 | `lightningcss-*`           | MPL-2.0                                  | lightningcss binaries for other platforms                                                                  |
 
-No package of the app uses a license that conflicts with distributing this project under Apache-2.0.
+No package of the app uses a license that conflicts with running it as a proprietary hosted service.
+The weak copyleft exceptions above (LGPL, MPL) are used unmodified; they are not a problem because
+the images and the build output are never given to a third party (see "Copyleft and distribution").
 
 ### Runner (`runner/`)
 
@@ -342,8 +346,9 @@ the exceptions:
 | `httpx2-jsfetch` | BSD-3-Clause | Pyodide (emscripten) only |
 | `win32-setctime` | MIT          | Windows only              |
 
-Our own source code stays under Apache-2.0: Apache-2.0 is compatible with the GPL-3.0 in one
-direction, and we do not copy or modify any of these packages.
+Our own source code is not linked with these packages: PR-Agent imports them at runtime and we do
+not copy or modify any of them. The service runs them on its own servers and does not hand the
+runner image to anyone (see "Copyleft and distribution").
 
 `html2text` 2024.2.26 (GPL-3.0, https://github.com/Alir3z4/html2text) is installed unmodified from
 PyPI into the runner image. It is pure Python (a `py3-none-any` wheel), so its complete source code
@@ -402,10 +407,20 @@ packages inside OpenCode (`runner/opencode-bundled-licenses.json`, reviewed 2026
   and the license disclaims implied warranties of merchantability, fitness for a particular purpose
   and non-infringement; the licensor is not liable for any damages arising from its use.
 
+## Copyleft and distribution
+
+The exceptions above include weak and strong copyleft packages (LGPL: sharp/libvips, python-gitlab,
+PyGithub; MPL-2.0; GPL-3.0: html2text). They are acceptable only because code-review.com is a hosted
+service: the container images, the Vercel build output and the sandbox snapshots stay on the
+operator's own infrastructure and are never given to a customer or published, so the distribution
+duties of those licenses (source offer, relinking) are not triggered. The images are therefore not
+published to a public registry. If an image or a build were ever delivered to anyone outside Itegro
+GmbH, review these exceptions again first.
+
 ## Updating this file
 
 The scan catches a new license by itself. When it fails, decide whether the license is acceptable
-for a project under Apache-2.0 (permissive ones are; copyleft ones need a reason and usually a
+for a proprietary hosted service (permissive ones are; copyleft ones need a reason and usually a
 different dependency). If it is acceptable, add it to `license-policy.json` and to the matching
 table or list here, with a note, and update the date above. Run the full review again when
 dependencies change in a way that adds many packages (a new direct dependency, a PR-Agent upgrade).

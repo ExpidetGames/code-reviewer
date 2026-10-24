@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The engine user's nft rules as such, against the real kernel (#197-T04, #197-T09, #345).
 

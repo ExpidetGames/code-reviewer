@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/setup/code: exchanges the setup code for a setup session. Public on purpose (the code is
 // the credential) and present only while the instance is not set up: the setup gate in src/proxy.ts

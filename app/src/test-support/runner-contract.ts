@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The contracts (contracts/runner-api.v1.json by default, contracts/operator-api.v1.json, worker-api, dispatch-webhook, worker-container) as validators, for tests that check a real
 // answer or request against the file. The file is read from disk, not copied: it is the one source.

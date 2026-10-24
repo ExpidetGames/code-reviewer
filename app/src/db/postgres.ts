@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Postgres side of the connection: Kysely's Postgres dialect over the `pg` driver's pool
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.1). The pool size comes from the

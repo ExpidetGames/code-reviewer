@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Progressing HTTP input must not extend the absolute preparation deadline."""
 
 import io

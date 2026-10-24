@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #496: `GET` and `PUT /api/w/:workspace/llm-key-mode` as the app wires them (guard, access, body, service), over a real database and
 // the real matrix of roles. An Owner and an Admin (`manage_llm_key`) choose whose key the workspace's reviews run on; a Member reads

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the app remembers about its last scheduled backup, for the status route. Held in the memory
 // of the server process (a restart forgets it; the directory itself still shows the newest backup).

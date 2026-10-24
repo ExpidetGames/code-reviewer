@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The address a project pins for its catalog provider (#588, needs a security review). The catalog's address is trusted on first
 // sight (#548); what a project does with its own key is held to the address it saw when it selected the provider. Pure: the

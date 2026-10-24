@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The import of an existing installation (docs/decisions/0001-editions-setup-and-accounts.md, section 2.11): the
 // data of the instance moves into the new model once, in ONE transaction that also sets `import_state` to

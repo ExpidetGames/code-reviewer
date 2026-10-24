@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key test of a catalog provider (#555): the "test key" button for a provider that has no adapter of its own. It uses the
 // generic adapter built from the catalog row (`src/models-dev/generic-adapter.ts`): one cheap authenticated read of the

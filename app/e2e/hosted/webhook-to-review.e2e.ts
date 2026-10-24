@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The whole hosted flow of a review on fakes (#332-T01, T07): a signed `pull_request` webhook reaches the real app (serverless
 // mode, Postgres), the app queues the job and wakes the real Dispatcher with a signed call, the Dispatcher claims

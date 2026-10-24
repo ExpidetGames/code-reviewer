@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/runners/v1/jobs/:id/release: a Dispatcher gives a claimed job back because it could not
 // start the Worker (#322). It proves the dispatcher credential in `Authorization` (checked by the

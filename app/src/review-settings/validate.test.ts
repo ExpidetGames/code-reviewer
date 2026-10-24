@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which review settings are accepted: every field's range and format, that all problems of
 // a request are reported at once with a stable code per field, that no value is echoed back, and

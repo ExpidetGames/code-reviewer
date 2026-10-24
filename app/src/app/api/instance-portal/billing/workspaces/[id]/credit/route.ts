@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/billing/workspaces/:id/credit: a manual credit or a signed correction of the balance of a workspace with a
 // required note, written through the manual adapter with the admin as the actor, for the instance admin only. The logic is in

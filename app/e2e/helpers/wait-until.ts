@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 /** Waits for a condition, looking every 100 ms; fails with `what` when it does not hold in time. */
 export async function waitUntil(

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The test-stack wrapper of the job entry point hands the lease descriptor on (#260).
 

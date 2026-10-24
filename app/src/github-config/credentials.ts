@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The credentials of the instance's GitHub App (docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.4, 2.7 and 2.10): the one place that reads and writes them, and so the one loader that

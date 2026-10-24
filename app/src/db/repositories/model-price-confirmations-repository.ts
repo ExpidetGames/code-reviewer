@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin's price confirmations of catalog models (#549, src/model-prices/README.md): an append-only history, and the
 // latest row of a model is the one that counts. Instance level: configuration of the installation, not customer data. The

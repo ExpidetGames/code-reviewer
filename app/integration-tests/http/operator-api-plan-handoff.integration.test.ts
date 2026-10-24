@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator API of the plan handoff (#284) against a real database: redeeming the token an Owner or Admin was
 // handed over with, and the setting of the operator-configured page. The format is checked against the contract file in

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the verification mail: the link comes from the configured public address, and the message
 // holds the link and nothing else that is secret.

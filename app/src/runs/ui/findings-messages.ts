@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the Findings of a run say around the review text: the heading, the link to the comment, and the sentences for a run
 // that has no text to show.

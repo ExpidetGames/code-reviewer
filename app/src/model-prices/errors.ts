@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes the price confirmation answers with when a request is refused (#549). The admin portal translates them
 // to copy (#554); nothing branches on a message. A code never contains a model id, a price or a provider answer.

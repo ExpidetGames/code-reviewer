@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sign-up with email and password through the real route handler, the real Better Auth
 // password hash, the real counters and a real SQLite file: who may sign up, what is created, what is sent,

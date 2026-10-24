@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A fake models.dev (loopback only) for the tests of the app's catalog fetch (#548): `GET /api.json` answers the trimmed
 // fixture of `fakes/fixtures/models-dev/` (a real copy, see its README) or whatever a test scripts instead: another body,

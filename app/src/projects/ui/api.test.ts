@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the calls the project list makes: which route, which method and which body, for
 // activating, deactivating and running the sync. The routes themselves are proven where they live.

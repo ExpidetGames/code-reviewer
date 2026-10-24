@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #511-T28: the fake LLM (fakes/llm) speaks the Anthropic Messages API the way the Claude API does: the key in
 // `x-api-key`, the version header, answers in the Messages shape with a usage of input, output and cache

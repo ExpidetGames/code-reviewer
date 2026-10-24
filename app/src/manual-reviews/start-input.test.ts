@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which bodies may start a review by hand: since #203 the only command is `/review`, and
 // it takes no text. Every problem is reported per field, and a supplied question is refused (not

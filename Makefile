@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Entry points for developers and agents. Every target is a thin wrapper around the commands
 # of app/package.json, dispatcher/package.json and runner/pyproject.toml; see TESTING.md for what each
@@ -83,7 +83,7 @@ generate-contracts:
 check-contracts:
 	$(APP) contracts:check
 
-# Adds `SPDX-License-Identifier: Apache-2.0` (in the comment syntax of the language) to every source file
+# Adds `SPDX-License-Identifier: LicenseRef-Proprietary` (in the comment syntax of the language) to every source file
 # that lacks it; changes nothing else and can be run at any time. Which files count is in
 # app/src/ci/spdx-headers/rules.ts.
 fix-spdx-headers:

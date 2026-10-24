@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET, PUT and DELETE /api/operator/v1/workspaces/{id}/entitlements: read, replace or remove the entitlements of a
 // workspace. Bearer token; absent (404) until `OPERATOR_API_TOKEN` is set. See src/operator-api/README.md.

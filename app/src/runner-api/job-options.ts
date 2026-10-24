@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the per-repository options of a job come from: the review settings of its project (CR-25,
 // `review-settings-job-options.ts`). The claim asks once per job, so the options can differ per

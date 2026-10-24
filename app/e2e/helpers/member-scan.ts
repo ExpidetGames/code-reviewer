@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The privacy search of the catalog journey (#435): everything a member of a managed workspace can read is collected as
 // named texts and searched for what only the operator may know: every model id of the catalog (and the parts of it),

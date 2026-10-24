@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the connections page and the approvals page make to the app's own routes (src/installation-binding/
 // http.ts, approvals-http.ts). Browser side; no secrets: an answer holds an address on GitHub (the installation

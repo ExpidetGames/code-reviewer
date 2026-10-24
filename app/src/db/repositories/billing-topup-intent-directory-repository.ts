@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Finds a top-up intent from what a provider event names, before the workspace is known (the webhook route and the
 // application of an event have only the event). Instance level on purpose: it only reads, every answer names its

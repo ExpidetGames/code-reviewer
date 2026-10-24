@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The General sub-page of the workspace settings (#178): the rename (an Owner; everybody else reads
 // the name), the plan hand-over, and the one "Needs attention" strip of the area (the configuration hints plus

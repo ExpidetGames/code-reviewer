@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Deleting a workspace holds the Dynamic gate (shared) for the whole transaction, and a claim waits for it (#658). The deletion of the
 // jobs was quadratic while `jobs.superseded_by` had no index (the foreign key's check scanned the table once per deleted job: 13.6 s

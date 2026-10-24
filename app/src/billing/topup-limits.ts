@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limit on starting a top-up: every start can make a customer and a Checkout Session at Stripe, so a person who is
 // signed in cannot ask for them without end. Counted per person and workspace in the shared `rate_limits` table, so every

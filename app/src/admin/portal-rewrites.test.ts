@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two rewrites in next.config.ts that make a request for the files of the portal by their own address
 // answer as a path that does not exist (src/admin/paths.ts). Whether the answers really are the same is

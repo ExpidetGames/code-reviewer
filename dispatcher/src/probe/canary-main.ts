@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm probe:canary --url <dispatcher>`: the command of the deploy canary (canary.ts), for a step of the release
 // pipeline. The credential is `RUNNER_TOKEN` in the environment.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497: the top-up intents (a repository of one workspace), the directory that finds an intent before the workspace is
 // known, and the record of provider events, on SQLite and on Postgres.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #434: the differential test. The database is the one the previous release left behind: the operator configured the
 // managed tiers (a model for each tier and kind), and projects chose a tier (`modelTier` in their settings, or in the

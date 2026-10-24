@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the status route tells the people who run the instance: whether backups are
 // scheduled, whether the target works right now, how the last scheduled run went, and which backup

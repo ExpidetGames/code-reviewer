@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Keeps docs/deployment-vercel.md (the guide for the hosted deployment on Vercel) and docs/dispatcher.md in step
 // with the files and the code they describe (#333). The App table of the guide is checked against the CODE, not only

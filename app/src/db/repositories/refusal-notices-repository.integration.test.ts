@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The record of the notices of refused reviews of a workspace against a real SQLite file (#281): one row per pull
 // request and period, taken once, retried a bounded number of times, and never changed once posted. Isolation

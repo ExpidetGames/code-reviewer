@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A workspace on its own key uses a provider of the models.dev catalog for Dynamic Review, in a real browser (#555-T10): the
 // Owner searches the providers on the LLM access page, saves a key for one that is neither OpenRouter nor Anthropic, picks its

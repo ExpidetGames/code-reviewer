@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The measure of a job without a VM (#493): where billing is on, the wall clock of a job on a runner (a self-hosted
 // runner, Compose) is recorded when its claim ends. Billing off: nothing is read and nothing is written. A job that a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down when an email and password sign in is refused for an unverified address: only after the
 // password was right, never for the instance admin, never for a verified account, and only while the

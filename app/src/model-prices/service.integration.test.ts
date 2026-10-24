@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin's price confirmation and enablement of catalog models (#549), end to end over a real database on both engines,
 // with the catalog filled by the real fetch against the models.dev fake: a confirmation is kept and compared with today's

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the balance journal of the app under test says about itself (the journal invariant of the billing journeys, #508-T10): its own
 // `verify()` on the app's database file, through src/test-support/e2e-billing-journal-child.ts. It only reads.

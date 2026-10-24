@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #603: who closed a billing review, when, why and with which journal entry. The row of an event under review gains four
 // nullable columns for the resolution and an index for the list of reviews; no row is touched, so a review resolved before
