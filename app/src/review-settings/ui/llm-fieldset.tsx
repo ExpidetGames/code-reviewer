@@ -3,9 +3,10 @@
 "use client";
 // The "LLM" section of the settings form (#656): a provider dropdown, then a model dropdown, and nothing else, in both key
 // modes. A workspace on its own key picks one of its providers (the registry's and the catalog providers it holds a key for)
-// and then one of the models of that provider; one on the operator's key sees the one provider "Our models" and the entries
-// of the catalog by the names the operator gave them (never a vendor or a model id, ADR 0005). The model list follows the
-// provider. The section is for one review kind: the one the form has selected.
+// and then one of the models of that provider; one on the code-review.com key picks the name of a model provider
+// (#675) and then one of the entries of the catalog by the names the operator gave them (never a model id, ADR
+// 0005), with a small note that the reviews are billed via code-review.com. The model list follows the provider. The section
+// is for one review kind: the one the form has selected.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert } from "../../components/ui/alert.tsx";
 import { alertVariants } from "../../components/ui/alert.tsx";
@@ -19,12 +20,14 @@ import {
 } from "../../components/ui/select.tsx";
 import Link from "next/link";
 import {
+  MODEL_CHOICE_BILLED_NOTE,
   MODEL_CHOICE_CHOSEN_UNAVAILABLE,
   MODEL_CHOICE_DEFAULT_OPTION,
   MODEL_CHOICE_LOCKED_BADGE,
+  MODEL_CHOICE_NONE_CHOSEN,
   MODEL_CHOICE_NONE_OFFERED,
-  MODEL_CHOICE_PROVIDER,
   MODEL_CHOICE_RETIRED_BADGE,
+  MODEL_CHOICE_UNAVAILABLE_OPTION,
 } from "../../copy/model-choice.ts";
 import type { NativeModelView } from "../../native-providers/catalog.ts";
 import {
@@ -69,16 +72,18 @@ export type OwnLlmChoice = {
 /** The choice of a workspace on the operator's key: one entry of the catalog for the review kind. */
 export type ManagedLlmChoice = {
   choices: readonly CatalogChoice[];
-  /** The id of the entry in force, or null: none, the default of the instance applies. */
+  /** The id of the entry in force, or null: none, the default of code-review.com applies. */
   value: string | null;
   error: string | undefined;
   /** `null` takes the choice back. */
   onChange: (id: string | null) => void;
-  /** The text of the option that takes the choice back, when the default is an entry the workspace chose (#676). */
+  /** The text of the provider dropdown's "Default" option, when the default is an entry the workspace chose (#676): it names what the default resolves to. */
   defaultLabel?: string;
 };
 
-const DEFAULT_OPTION = "__instance_default__";
+const DEFAULT_OPTION = "__default__";
+/** The provider dropdown while the saved entry is not in the list any more. */
+const UNAVAILABLE_OPTION = "__unavailable__";
 
 function useCatalogModels(
   workspaceSlug: string,
@@ -218,63 +223,120 @@ function badgeOf(choice: CatalogChoice): string | undefined {
     : MODEL_CHOICE_LOCKED_BADGE;
 }
 
+/**
+ * The names of the model providers of the entries, once each, in the order of the entries. A provider none of whose entries can
+ * be chosen is left out (picking it would have nothing to choose and would drop the saved choice), unless it is the provider of
+ * the entry in force, which stays shown.
+ */
+function providersOf(
+  choices: readonly CatalogChoice[],
+  inForce: CatalogChoice | undefined,
+): string[] {
+  const offered = choices.filter(
+    (entry) =>
+      entry.available || entry.providerLabel === inForce?.providerLabel,
+  );
+  return [...new Set(offered.map((entry) => entry.providerLabel))];
+}
+
 function ManagedChoice({
   workspaceSlug,
   choice,
   disabled,
   fieldName,
+  billingOn,
 }: {
   workspaceSlug: string;
   choice: ManagedLlmChoice;
   disabled: boolean;
   fieldName: string;
+  billingOn: boolean;
 }) {
-  const chosenUnavailable =
-    choice.value !== null &&
-    choice.choices.find((entry) => entry.id === choice.value)?.available !==
-      true;
-  const options: ModelOption[] = [
-    {
-      id: DEFAULT_OPTION,
-      label: choice.defaultLabel ?? MODEL_CHOICE_DEFAULT_OPTION,
-    },
-    ...choice.choices.map((entry) => {
-      const note = badgeOf(entry);
-      return {
-        id: entry.id,
-        label: entry.name,
-        ...(note === undefined ? {} : { note }),
-        disabled: !entry.available && entry.id !== choice.value,
-      };
-    }),
-  ];
+  const chosen = choice.choices.find((entry) => entry.id === choice.value);
+  const chosenUnavailable = choice.value !== null && chosen?.available !== true;
+  const providers = providersOf(choice.choices, chosen);
+  // An entry in force that the list does not hold any more is neither the default nor a provider.
+  const gone = choice.value !== null && chosen === undefined;
+  const provider =
+    chosen?.providerLabel ?? (gone ? UNAVAILABLE_OPTION : DEFAULT_OPTION);
+  const entries = choice.choices.filter(
+    (entry) => entry.providerLabel === provider,
+  );
+  const chooseProvider = (label: string) => {
+    if (label === DEFAULT_OPTION) return choice.onChange(null);
+    const first = choice.choices.find(
+      (entry) => entry.providerLabel === label && entry.available,
+    );
+    choice.onChange(first?.id ?? null);
+  };
+  const options: ModelOption[] = entries.map((entry) => {
+    const note = badgeOf(entry);
+    return {
+      id: entry.id,
+      label: entry.name,
+      ...(note === undefined ? {} : { note }),
+      disabled: !entry.available && entry.id !== choice.value,
+    };
+  });
   return (
     <>
-      <div data-field="provider" className="flex flex-col gap-2">
-        <FieldLabel>Provider</FieldLabel>
-        <Select value="managed">
-          <SelectTrigger className="w-full" aria-label="Provider">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="managed">{MODEL_CHOICE_PROVIDER}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
       {choice.choices.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {MODEL_CHOICE_NONE_OFFERED}
         </p>
       ) : (
-        <ModelSelect
-          name={fieldName}
-          label="Model"
-          value={choice.value ?? DEFAULT_OPTION}
-          options={options}
-          onChange={(id) => choice.onChange(id === DEFAULT_OPTION ? null : id)}
-          error={choice.error}
-          disabled={disabled}
-        />
+        <>
+          <div data-field="provider" className="flex flex-col gap-2">
+            <FieldLabel>Provider</FieldLabel>
+            <Select
+              value={provider}
+              onValueChange={chooseProvider}
+              disabled={disabled}
+            >
+              <SelectTrigger className="w-full" aria-label="Provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_OPTION}>
+                  {choice.defaultLabel ?? MODEL_CHOICE_DEFAULT_OPTION}
+                </SelectItem>
+                {gone ? (
+                  <SelectItem value={UNAVAILABLE_OPTION} disabled>
+                    {MODEL_CHOICE_UNAVAILABLE_OPTION}
+                  </SelectItem>
+                ) : null}
+                {providers.map((label) => (
+                  <SelectItem key={label} value={label}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {provider === DEFAULT_OPTION ? (
+            // With a default entry of the workspace the option names what it resolves to; the sentence would contradict it.
+            choice.defaultLabel === undefined ? (
+              <p className="text-sm text-muted-foreground">
+                {MODEL_CHOICE_NONE_CHOSEN}
+              </p>
+            ) : null
+          ) : gone ? null : (
+            <ModelSelect
+              name={fieldName}
+              label="Model"
+              value={choice.value ?? ""}
+              options={options}
+              onChange={choice.onChange}
+              error={choice.error}
+              disabled={disabled}
+            />
+          )}
+          {billingOn ? (
+            <p className="text-sm text-muted-foreground">
+              {MODEL_CHOICE_BILLED_NOTE}
+            </p>
+          ) : null}
+        </>
       )}
       {choice.choices.some(
         (entry) => entry.reason === "CATALOG_ENTRY_NOT_ALLOWED",
@@ -310,6 +372,7 @@ export function LlmFieldset({
   own,
   managed,
   managedFieldName,
+  billingOn = true,
   catalogApi,
 }: {
   workspaceSlug: string;
@@ -319,6 +382,8 @@ export function LlmFieldset({
   managed?: ManagedLlmChoice;
   /** The setting a managed choice edits, for the `data-field` of its dropdown. */
   managedFieldName?: string;
+  /** Billing is on: the managed choice says the reviews are billed via code-review.com (#675). Nothing is billed while it is off. */
+  billingOn?: boolean;
   /** Only tests pass this. */
   catalogApi?: CatalogModelsApi;
 }) {
@@ -338,6 +403,7 @@ export function LlmFieldset({
           choice={managed}
           disabled={disabled}
           fieldName={managedFieldName ?? "catalogEntryDynamic"}
+          billingOn={billingOn}
         />
       ) : null}
     </SettingsCard>

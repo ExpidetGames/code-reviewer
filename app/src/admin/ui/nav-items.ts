@@ -28,7 +28,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "Setup",
     items: [
-      { href: "/admin/setup/instance", label: "Instance", exact: false },
+      { href: "/admin/setup/instance", label: "General", exact: false },
       { href: "/admin/setup/sign-up", label: "Sign-up", exact: false },
       { href: "/admin/setup/sign-in", label: "Sign-in", exact: false },
     ],

@@ -6,8 +6,8 @@
 // provider); this one stores, reads and guards what only the database can keep true on several app instances: a name is
 // unique whatever its case, a status moves only from the status the caller saw, and a draft is the only entry deleted.
 //
-// Two reads are written for the privacy of the model. `listMemberEntries` selects only the columns a member may see, so
-// the provider and the model id are not even read. `countProjectsUsing` answers one number per entry for the operator's
+// Two reads are written for the privacy of the model. `listMemberEntries` returns the columns a member may see and the
+// label of the model provider (#675); the provider id and the model id are read only to make that label and do not leave it. `countProjectsUsing` answers one number per entry for the operator's
 // "used by" and for the confirmation of a change of model, and returns no row, project or workspace.
 import "server-only";
 import { randomUUID } from "node:crypto";
@@ -22,6 +22,7 @@ import {
   type CatalogStatus,
 } from "../../model-catalog/entries.ts";
 import type { MemberCatalogEntry } from "../../model-catalog/member.ts";
+import { providerLabelOf } from "../../model-catalog/provider-label.ts";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { readEntitlements } from "../../workspaces/entitlements-validation.ts";
 import type { Database, ModelCatalogEntriesTable } from "../schema.ts";
@@ -109,6 +110,8 @@ type MemberRow = Pick<
   | "id"
   | "name"
   | "description"
+  | "provider"
+  | "model_id"
   | "serves_diff"
   | "serves_dynamic"
   | "status"
@@ -148,6 +151,10 @@ function toMember(row: MemberRow): MemberCatalogEntry {
     id: row.id,
     name: row.name,
     description: row.description,
+    providerLabel: providerLabelOf({
+      provider: row.provider,
+      modelId: row.model_id,
+    }),
     kinds: kindsOf(row),
     status: statusOf(row),
     sortOrder: row.sort_order,
@@ -368,6 +375,8 @@ export function createCatalogRepository(
           "id",
           "name",
           "description",
+          "provider",
+          "model_id",
           "serves_diff",
           "serves_dynamic",
           "status",

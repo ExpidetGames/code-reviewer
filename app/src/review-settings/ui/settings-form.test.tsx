@@ -827,7 +827,7 @@ describe("the Limits section (#656)", () => {
     );
     // The instance may hold a lower limit, and the field does not say which.
     expect(field.textContent).toContain(
-      "The instance may enforce a lower limit.",
+      "code-review.com may enforce a lower limit.",
     );
     // No rate and no markup is named next to the limit.
     expect(field.textContent).not.toMatch(/rate|markup|per minute/i);

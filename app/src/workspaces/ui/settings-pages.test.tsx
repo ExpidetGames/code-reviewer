@@ -8,7 +8,10 @@
 // file; this one pins the split.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { openSection } from "../../test-support/settings-sections.ts";
+import {
+  chooseOption,
+  openSection,
+} from "../../test-support/settings-sections.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -157,6 +160,15 @@ describe("the review defaults of a workspace that uses the instance's key (#283)
 
     await openSection(user, "LLM");
     expect(screen.queryByText(/chosen for each project/)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe(
+      "Default",
+    );
+    expect(screen.getByText("Billed via code-review.com")).toBeTruthy();
+    await chooseOption(
+      user,
+      screen.getByRole("combobox", { name: "Provider" }),
+      "OpenAI",
+    );
     expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
     expect(screen.queryByLabelText("Fallback model")).toBeNull();
     expect(document.body.innerHTML).not.toContain(BUILT_IN.model);

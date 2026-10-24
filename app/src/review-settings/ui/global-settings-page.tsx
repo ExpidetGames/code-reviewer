@@ -33,6 +33,7 @@ export function GlobalSettingsPageContent({
   canEdit = true,
   showPlan = false,
   showBilling = false,
+  billingOn = true,
   keyedProviders,
   data,
   api,
@@ -46,6 +47,8 @@ export function GlobalSettingsPageContent({
   showPlan?: boolean;
   /** Billing is on (#505): the settings navigation lists the Billing page instead of the Plan page. */
   showBilling?: boolean;
+  /** Billing is on: the managed model choice says the reviews are billed via code-review.com (#675). */
+  billingOn?: boolean;
   /** The providers that have a stored key in the workspace (#433): the form warns about a chosen one that has none. */
   keyedProviders?: readonly string[];
   data: GlobalSettingsPageData;
@@ -71,6 +74,7 @@ export function GlobalSettingsPageContent({
           workspaceSlug={workspaceSlug}
           readOnly={!canEdit}
           dynamicReviewEnabled={data.dynamicReviewEnabled}
+          billingOn={billingOn}
           initial={data.model}
           {...(keyedProviders === undefined ? {} : { keyedProviders })}
           {...(api === undefined ? {} : { api })}

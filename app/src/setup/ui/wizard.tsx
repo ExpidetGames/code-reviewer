@@ -307,7 +307,7 @@ export function Wizard({
     return (
       <div className="flex flex-col gap-6">
         <StepHeading id={headingId} step={1}>
-          How is this instance used?
+          How will it be used?
         </StepHeading>
         <form
           aria-labelledby={headingId}
@@ -422,8 +422,7 @@ export function Wizard({
         className="flex flex-col gap-4"
       >
         <FieldDescription>
-          The admin runs this instance and signs in with this email address and
-          password.
+          The admin runs it and signs in with this email address and password.
         </FieldDescription>
         <Field>
           <FieldLabel htmlFor={`${ids}-email`}>Email address</FieldLabel>

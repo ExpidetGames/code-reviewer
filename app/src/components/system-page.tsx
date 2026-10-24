@@ -19,7 +19,7 @@ export const NOT_FOUND_COPY = {
 export const ERROR_COPY = {
   title: "Something went wrong",
   description:
-    "Reload the page and try again. If it keeps happening, tell the admin of this instance.",
+    "Reload the page and try again. If it keeps happening, tell the admin.",
   retry: "Try again",
   back: "Back to the start page",
 } as const;

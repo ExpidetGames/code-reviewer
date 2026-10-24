@@ -122,7 +122,7 @@ describe("the configuration hints", () => {
     const { container } = render(<ConfigNotices status={broken} />);
 
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
-    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).toContain("Ask your admin");
     expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_|private key/i);
     expect(describeConfigNotices(broken)).toHaveLength(1);
   });

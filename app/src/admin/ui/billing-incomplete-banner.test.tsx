@@ -18,7 +18,7 @@ describe("the banner of an incomplete billing setup", () => {
     const banner = screen.getByRole("region", {
       name: /Billing is switched on but not complete/,
     });
-    expect(banner.textContent).toMatch(/every review .* is refused/i);
+    expect(banner.textContent).toMatch(/every review is refused/i);
     expect(
       within(banner)
         .getAllByRole("listitem")

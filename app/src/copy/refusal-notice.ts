@@ -81,6 +81,6 @@ export const NOTICE_TRY_AGAIN_LATER = "Please try again later.";
  * workspace can act, so it points to no page.
  */
 export const NOTICE_BILLING_SETUP_INCOMPLETE =
-  "Reviews cannot start because the billing setup of this instance is not complete.";
+  "Reviews cannot start because the billing setup is not complete.";
 export const NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE =
-  "Please contact whoever runs this instance.";
+  "Please contact whoever runs code-review.com.";

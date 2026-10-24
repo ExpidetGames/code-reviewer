@@ -34,7 +34,7 @@ export function resolveAppSecret(env: Env): AppSecretResolution {
   if (secret === undefined)
     return {
       ok: false,
-      problem: `${APP_SECRET_VARIABLE} is not set (it is the master key of the instance: openssl rand -base64 32)`,
+      problem: `${APP_SECRET_VARIABLE} is not set (it is the master key of the server: openssl rand -base64 32)`,
     };
   if (secret.length < MIN_APP_SECRET_LENGTH)
     return {

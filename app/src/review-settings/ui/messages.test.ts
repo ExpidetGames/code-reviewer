@@ -183,7 +183,7 @@ describe("the copy for a problem with one setting", () => {
     );
 
     expect(text).toMatch(/own AI key/);
-    expect(text).toMatch(/once the AI access comes from this instance/);
+    expect(text).toMatch(/once the workspace is billed via code-review.com/);
   });
 
   // #433-T07

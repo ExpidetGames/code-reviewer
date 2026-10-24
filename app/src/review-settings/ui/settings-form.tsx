@@ -30,6 +30,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../../components/ui/tabs.tsx";
+import { MODEL_CHOICE_DEFAULT_OPTION } from "../../copy/model-choice.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import {
   CATALOG_FIELD_OF_KIND,
@@ -264,8 +265,11 @@ function splitIssues(issues: readonly RequestIssue[]): {
   return { fieldErrors, general };
 }
 
-/** The option of a project that chooses no entry while the workspace defaults choose one (#676). */
-const workspaceDefaultOption = (name: string) => `${name} (global default)`;
+/** The "Default" option of a project that chooses no entry while the workspace defaults choose one (#676): it names the provider and the entry it resolves to. */
+const workspaceDefaultOption = (entry: {
+  providerLabel: string;
+  name: string;
+}) => `${MODEL_CHOICE_DEFAULT_OPTION} (${entry.providerLabel} · ${entry.name})`;
 
 /** The requests one save makes: a project's travel in two groups, the defaults' in one set. */
 function planOf(model: SettingsFormModel, state: FormState) {
@@ -282,6 +286,7 @@ export function SettingsForm({
   dynamicReviewEnabled = false,
   keyedProviders,
   nativeCatalog,
+  billingOn = true,
   canConfirmProviderAddress = false,
   providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
@@ -313,6 +318,8 @@ export function SettingsForm({
    * then offers those providers next to the registry's and the model is picked from a list. The Diff provider is not affected.
    */
   nativeCatalog?: NativeFormData;
+  /** Billing is on (#675): a workspace on the operator's key is told its reviews are billed via code-review.com. Unknown counts as on. */
+  billingOn?: boolean;
   /**
    * The person may manage the workspace's LLM key (`manage_llm_key`, Owner and Admin): only they confirm a new address of the
    * project's catalog provider (#588); the route refuses anyone else. Unknown counts as no.
@@ -774,23 +781,24 @@ export function SettingsForm({
     const field = CATALOG_FIELD_OF_KIND[kind];
     const choices = model.catalog?.choices[kind] ?? [];
     const followed = model.catalog?.workspaceSelection?.[kind] ?? null;
-    const followedName =
+    const followedEntry =
       followed === null
         ? undefined
-        : choices.find((entry) => entry.id === followed)?.name;
+        : choices.find((entry) => entry.id === followed);
     return (
       <LlmFieldset
         workspaceSlug={workspaceSlug}
         disabled={disabled}
         managedFieldName={field}
+        billingOn={billingOn}
         managed={{
           choices,
           value: state.dynamic.catalogEntries[kind],
           error: errors[field],
           onChange: (id) => edit(setCatalogEntry(state, kind, id), field),
-          ...(followedName === undefined
+          ...(followedEntry === undefined
             ? {}
-            : { defaultLabel: workspaceDefaultOption(followedName) }),
+            : { defaultLabel: workspaceDefaultOption(followedEntry) }),
         }}
       />
     );

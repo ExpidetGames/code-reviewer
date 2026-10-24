@@ -270,11 +270,10 @@ export function GithubSection({
         {tenancy === "multi" && !signInReady ? (
           <Alert variant="warning" role="note">
             <AlertDescription>
-              <strong>&quot;Connect GitHub&quot; is unavailable.</strong> On a
-              multi-tenant instance workspaces connect their installations with
-              the user authorization of the App, and its client id and secret
-              are not configured. Until they are, no workspace can connect
-              GitHub.
+              <strong>&quot;Connect GitHub&quot; is unavailable.</strong> With
+              several tenants, workspaces connect their installations with the
+              user authorization of the App, and its client id and secret are
+              not configured. Until they are, no workspace can connect GitHub.
             </AlertDescription>
           </Alert>
         ) : null}

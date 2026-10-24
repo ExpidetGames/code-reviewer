@@ -82,7 +82,7 @@ test.describe("signing up", () => {
     await signInThroughTheForm(page, ADDRESS, PASSWORD);
     await expect(page).toHaveURL(/\/no-access$/);
     await expect(
-      page.getByText("Ask an admin of this instance for an invitation."),
+      page.getByText("Ask an admin for an invitation."),
     ).toBeVisible();
 
     // The data stays out of reach for an account without a workspace.
