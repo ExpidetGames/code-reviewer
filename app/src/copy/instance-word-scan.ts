@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scan for the word "instance" in the text a source file can show or send (#675): string literals, template
 // literal parts and JSX text. Nothing the customer or the admin reads says "instance"; where the managed key or the

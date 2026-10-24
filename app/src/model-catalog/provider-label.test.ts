@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #675-T01: the name of the model provider a member reads next to an entry of the catalog. It is the maker of the model,
 // never the router the key goes through and never the product name.

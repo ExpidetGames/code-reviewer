@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the wording of #675: no page, text, mail, notice or error message of the app says "instance". Where the
 // managed key or the billing is meant it says "billed via code-review.com" or "code-review.com key"; elsewhere it

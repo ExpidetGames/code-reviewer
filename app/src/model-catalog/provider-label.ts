@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The name of the model provider a member reads next to an entry of the catalog (#675). A workspace on the code-review.com key
 // picks a provider and then a model like any other workspace, so the provider is the maker of the model, never the product
