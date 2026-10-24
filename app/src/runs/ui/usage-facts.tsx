@@ -28,6 +28,8 @@ export function costText(costUsd: number): string {
 export const STOPPED_EARLY_TEXT: Record<StoppedEarly, string> = {
   cost_limit:
     "The review reached the cost limit and was wrapped up; it may be incomplete.",
+  project_cost_limit:
+    "The review reached the cost limit set for this project and was wrapped up; it may be incomplete. You can change the limit under Limits in the project settings.",
   time_limit:
     "The review reached its time limit and was wrapped up; it may be incomplete.",
   token_limit:

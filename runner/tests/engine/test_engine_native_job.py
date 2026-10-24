@@ -184,6 +184,27 @@ def test_a_job_at_its_cost_limit_ends_with_a_review_and_not_with_the_cost_guard(
         assert "final_call=exempt" in job.result.log_tail
 
 
+# #666-T01 (native path): the operator's limit is 5.00 USD, the project's 0.10: the job ends with a
+# review at the project's limit and names it, exactly as #578-T16 does for the operator's.
+def test_a_job_at_its_projects_cost_limit_ends_with_a_review_that_names_that_limit(
+    tmp_path: Path,
+) -> None:
+    with full_job(
+        tmp_path,
+        many_reads,
+        cost=MANAGED,
+        limit="5.00",
+        project_limit=0.10,
+        react=answer_when_asked_twice,
+    ) as job:
+        assert_a_native_review(job)
+        usage = job.result.usage
+        assert usage is not None
+        assert usage.stopped_early == "project_cost_limit"
+        assert job.publisher.calls[0].stopped_early == "project_cost_limit"
+        assert "final_call=exempt" in job.result.log_tail
+
+
 # #578-T25: a provider that states something nobody can price ends a managed run with the code that
 # bills as our fault, and nothing is published
 def test_a_managed_job_with_an_unpriceable_usage_ends_dynamic_accounting_failed(

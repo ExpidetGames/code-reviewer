@@ -167,6 +167,43 @@ test.describe("the project list and the settings pages", () => {
     ).toBeVisible();
   });
 
+  // #666-T06
+  test("a person sets a cost limit per review, finds it and its wording after a reload, and takes it away again", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+    await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
+    await openSection(page, "Limits");
+    const limit = () =>
+      page
+        .getByLabel("Cost limit per review (USD)", { exact: true })
+        .filter({ visible: true });
+    const field = () => page.locator("[data-field]", { has: limit() });
+
+    await expect(field()).toContainText(
+      "A review stops when it reaches this amount.",
+    );
+    await limit().fill("0.75");
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
+    await page.reload();
+
+    await openSection(page, "Limits");
+    await expect(limit()).toHaveValue("0.75");
+    await expect(page.getByText(/the limit is \$0\.75/)).toBeVisible();
+
+    await limit().fill("");
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Saved." }),
+    ).toBeVisible();
+    await page.reload();
+    await openSection(page, "Limits");
+    await expect(limit()).toHaveValue("");
+  });
+
   // CR-34-T14
   test("a person changes a global default and the project they opened before, which has no value of its own for it, shows the new one", async ({
     page,

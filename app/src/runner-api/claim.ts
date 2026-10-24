@@ -41,6 +41,7 @@ import type {
 } from "../integrations/types.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
+import { REVIEW_SETTING_LIMITS } from "../review-settings/settings.ts";
 import { withClaimedKeyMode } from "../workspaces/effective-key-mode.ts";
 import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
@@ -262,7 +263,7 @@ export type Checked = {
   llm: Extract<LlmAccessResult, { ok: true }>;
   command: ReviewCommand;
   options: JobOptions;
-  llmOptions: { maxTokens?: number };
+  llmOptions: { maxTokens?: number; maxCostCents?: number };
   /** The Dynamic options of a Dynamic job; null for a Diff job. */
   dynamic: DynamicReviewOptions | null;
   /** #553: the cost policy of a native Dynamic job (`dynamic.cost`); null for every other job. */
@@ -322,13 +323,26 @@ const PLATFORM_OF: Record<IntegrationType, GitPlatform> = {
 };
 
 /**
- * The token budget a project chose, as the job takes it: a null is left out (the runner refuses a `maxTokens` that is not
- * a whole number). Null when the value is one the runner would refuse. The model is not here: the provider and model of a
- * job are chosen by the resolver (`selectModel`), which also checks the model id.
+ * The token budget and the cost limit a project chose, as the job takes them: a null is left out (the runner refuses a
+ * `maxTokens` that is not a whole number, and a `maxCostUsd` outside its range). Null when a value is one the runner would
+ * refuse. The model is not here: the provider and model of a job are chosen by the resolver (`selectModel`), which also
+ * checks the model id.
  */
-function llmOptionsOf(options: JobOptions): { maxTokens?: number } | null {
-  const { maxTokens } = options.llm ?? {};
-  const chosen: { maxTokens?: number } = {};
+function llmOptionsOf(
+  options: JobOptions,
+): { maxTokens?: number; maxCostCents?: number } | null {
+  const { maxTokens, maxCostCents } = options.llm ?? {};
+  const chosen: { maxTokens?: number; maxCostCents?: number } = {};
+  if (maxCostCents !== undefined && maxCostCents !== null) {
+    const { min, max } = REVIEW_SETTING_LIMITS.maxCostCents;
+    if (
+      !Number.isInteger(maxCostCents) ||
+      maxCostCents < min ||
+      maxCostCents > max
+    )
+      return null;
+    chosen.maxCostCents = maxCostCents;
+  }
   if (maxTokens !== undefined && maxTokens !== null) {
     if (
       !Number.isInteger(maxTokens) ||
@@ -339,6 +353,11 @@ function llmOptionsOf(options: JobOptions): { maxTokens?: number } | null {
     chosen.maxTokens = maxTokens;
   }
   return chosen;
+}
+
+/** #666: `llm.maxCostUsd` of a job from the limit in whole cents: exact to the cent, and nothing for no limit. */
+function costLimitOf(cents: number | undefined): { maxCostUsd?: number } {
+  return cents === undefined ? {} : { maxCostUsd: cents / 100 };
 }
 
 /** `/review` takes no arguments; it is the only command a claim may hand out (#203). */
@@ -814,6 +833,16 @@ export async function buildJobInput(
   // (the price book of the managed key, the token cap of an own key), so the job ends here, before any credential exists.
   if (cost !== null && !features.includes("dynamic_cost_policy"))
     return refuse("dynamic_engine_unavailable");
+  // #666: the cost limit of the project, Diff or Dynamic, goes only to a caller that reads `llm.maxCostUsd` (the job is a closed
+  // object). A caller without the feature is a runner or Worker image older than the app, which a release can briefly leave
+  // behind. The job is not refused for that: a refused review is worse than a project limit that is not kept for a short
+  // window, so it runs with the operator's own limit alone, and the log says so.
+  const sendProjectLimit = features.includes("cost_limit");
+  if (llmOptions.maxCostCents !== undefined && !sendProjectLimit)
+    deps.logger.info(
+      `[runner-api] job=${job.id} runs without its project cost limit: the runner does not name the claim feature cost_limit`,
+    );
+  const projectLimit = sendProjectLimit ? llmOptions.maxCostCents : undefined;
   const managed = selection.keyMode === "managed";
   const provider = deps.registry.resolve(integration.type);
 
@@ -912,6 +941,7 @@ export async function buildJobInput(
             model: selection.model,
             apiKey: llmAccess.apiKey,
             ...(maxTokens === null ? {} : { maxTokens }),
+            ...costLimitOf(projectLimit),
           },
           env: options.env,
         }
@@ -943,6 +973,7 @@ export async function buildJobInput(
             model: selection.model,
             apiKey: llmAccess.apiKey,
             ...(maxTokens === null ? {} : { maxTokens }),
+            ...costLimitOf(projectLimit),
           },
           env: {},
         };

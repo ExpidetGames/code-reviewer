@@ -182,7 +182,7 @@ describe("the usage of a run", () => {
   });
 
   // #293-T08
-  it.each(["cost_limit", "time_limit"])(
+  it.each(["cost_limit", "project_cost_limit", "time_limit"])(
     "reads that a run stopped early (%s), and takes any other value as a complete run",
     (stoppedEarly) => {
       expect(

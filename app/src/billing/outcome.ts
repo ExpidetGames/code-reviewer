@@ -35,6 +35,7 @@ export const AI_COST_FAILURE_CLASS = "charged" as const;
 export const AI_COST_FAILURE_CODES = [
   "command_failed",
   "dynamic_budget_exceeded",
+  "cost_limit_reached",
   "dynamic_policy_violation",
   "llm_bad_request",
   "llm_context_length_exceeded",
@@ -174,6 +175,9 @@ export const ERROR_CODE_CLASSES = {
   dynamic_policy_violation: AI_COST_FAILURE_CLASS,
   dynamic_budget_exceeded: AI_COST_FAILURE_CLASS,
   dynamic_model_features_unsupported: "charged",
+  // A Diff Review that stopped sending model requests at the cost limit of its project (#666): it used the model, so in full,
+  // like the Dynamic Review that was stopped at its budget.
+  cost_limit_reached: AI_COST_FAILURE_CLASS,
   checkout_incomplete: "charged",
   // Replaced by a newer push; it reported what it used. In full.
   superseded: "charged",

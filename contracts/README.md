@@ -269,6 +269,18 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
   cap, which only a new app sends. `fakes/fixtures/dynamic-review-job-cost-managed.json` and `-cost-own.json` are validated by
   both suites; the price book is the form of `fakes/fixtures/price-books.json`.
 
+- #666 adds the optional `llm.maxCostUsd` (the cost limit of the project in US dollars, a number above 0 and at most 100, whole cents),
+  the claim feature `cost_limit`, the `stoppedEarly` value `project_cost_limit` and the error code `cost_limit_reached` (a Diff Review that
+  sent no further request at the limit). The job is closed, so the rule is the one of `cost`: the **app** never sends `llm.maxCostUsd`
+  unless the caller (a runner's claim, or a Worker's details request) named `cost_limit`. Unlike `cost`, a job that meets a caller
+  without it is **not** refused: it runs without the field, under the operator's own limit alone, and the app logs
+  `runs without its project cost limit`. The reason is the rollout: `deploy-production.yml` builds the golden snapshot and runs the canary on the staged
+  Dispatcher first, but it promotes the App before the Dispatcher, and the Worker image only goes live with the Dispatcher's pair, so
+  for the minutes between the two promotions the live App can meet a Worker that does not know `cost_limit` (and a self-hosted
+  runner is upgraded on its own schedule). A refused review is worse than a project limit that is not kept for that window. A job of
+  a project without a limit is the job of before, byte for byte. It applies to both kinds of review, which is why the field sits in
+  `llm` next to `maxTokens` and not in `dynamic.limits`.
+
 - #578 adds the optional `DynamicReview.modelEntry` (`DynamicModelEntry`: the `JobModelEntry` of `job-model-entry.v1.json`, which holds
   no key). It travels with `cost` (`dependentRequired`), so it is sent only to a caller that named `dynamic_cost_policy`, and the
   rule is the one of `cost`: `RunnerJobInput` is closed, the **app** never sends the field to a caller without the feature, and an old

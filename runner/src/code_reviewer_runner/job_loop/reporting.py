@@ -49,7 +49,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 # Why a wrapped-up run stopped: the values of `RunnerUsage.stoppedEarly` in the runner API
 # contract. The app never approves a review that carries one.
-STOPPED_EARLY_REASONS = ("cost_limit", "time_limit", "token_limit")
+STOPPED_EARLY_REASONS = ("cost_limit", "project_cost_limit", "time_limit", "token_limit")
 
 Result = dict[str, Any]
 

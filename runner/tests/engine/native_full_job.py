@@ -84,7 +84,12 @@ CATALOG_ENTRY: dict[str, Any] = {
 }
 
 
-def job_for(family: Family, cost: Mapping[str, Any], entry: dict[str, Any] | None = None) -> Job:
+def job_for(
+    family: Family,
+    cost: Mapping[str, Any],
+    entry: dict[str, Any] | None = None,
+    max_cost_usd: float | None = None,
+) -> Job:
     entry = ENTRIES[family] if entry is None else entry
     model = entry["model"]
     return parse_job(
@@ -130,7 +135,13 @@ def job_for(family: Family, cost: Mapping[str, Any], entry: dict[str, Any] | Non
                     "token": "dummy-installation-token-0123456789",
                     "botLogin": "code-reviewer[bot]",
                 },
-                "llm": {"provider": entry["provider"], "model": model, "apiKey": REAL_KEY},
+                "llm": {
+                    "provider": entry["provider"],
+                    "model": model,
+                    "apiKey": REAL_KEY,
+                    # #666: the cost limit of the project, when the test sets one.
+                    **({} if max_cost_usd is None else {"maxCostUsd": max_cost_usd}),
+                },
             }
         )
     )
@@ -197,6 +208,7 @@ def full_job(
     react: Reaction | None = None,
     usage_fault: UsageFault | None = None,
     entry: dict[str, Any] | None = None,
+    project_limit: float | None = None,
 ) -> Generator[FullJob]:
     """Run one whole native job to its result. `entry`: the provider and model of the claim when
     they are not the registry's (the family names the wire the fake speaks)."""
@@ -278,7 +290,7 @@ def full_job(
         root.setLevel(logging.DEBUG)
         try:
             result = runner.run_dynamic_job(
-                job_for(family, cost, entry),
+                job_for(family, cost, entry, project_limit),
                 None,
                 0.0,
                 environment,

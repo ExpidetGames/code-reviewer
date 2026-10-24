@@ -66,6 +66,9 @@ class ErrorCode(StrEnum):
     DYNAMIC_POLICY_VIOLATION = "dynamic_policy_violation"
     DYNAMIC_BUDGET_EXCEEDED = "dynamic_budget_exceeded"
     DYNAMIC_ACCOUNTING_FAILED = "dynamic_accounting_failed"
+    # A Diff run stopped at the cost limit of its project (#666): the cost so far reached it, so no
+    # further model request was sent. What the calls cost is reported and billed as usual.
+    COST_LIMIT_REACHED = "cost_limit_reached"
     DYNAMIC_MODEL_FEATURES_UNSUPPORTED = "dynamic_model_features_unsupported"
     # The job is not ours any more (its lease was lost, or it was cancelled), or that could not be
     # confirmed right before the summary would have been written (#260). Nothing was written.

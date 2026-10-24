@@ -86,7 +86,10 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   key; `dynamic_review/passthrough/cost_policy.py`) and, next to it, `dynamic.modelEntry` (#578): a job with both is native and
   runs through the passthrough proxy and the plain-final engine path (`dynamic_review/native_job.py`, `docs/dynamic-review.md`,
   "The native path of a job"); a job that carries a cost policy but no entry would reach the legacy wire and is refused
-  with `dynamic_config_invalid`. A runner that cannot run a
+  with `dynamic_config_invalid`. It names `cost_limit` too (#666): it reads `llm.maxCostUsd` (the cost limit of the project) and holds a
+  Dynamic run to the smaller of that and `RUNNER_DYNAMIC_MAX_COST_USD` (`stoppedEarly: project_cost_limit` when the project's is
+  the smaller), and a Diff run sends no further model request once its calls cost that much (`diff_cost.py`, the result code
+  `cost_limit_reached`). A runner that cannot run a
   kind is never handed such a job by the app; a Dynamic job that arrives anyway is refused locally and
   never run by PR-Agent.
 - **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
@@ -358,7 +361,7 @@ input and the boundaries around it (the epic's binding decision). Modules:
   in depth, not a security boundary: #196 strips the discovery inputs from the export.
 - `dynamic_review/budget.py` holds the limits and the ledger shared by the proxy and the adapter. The
   one budget is an operator cost limit in USD (#290: default 1.00, `RUNNER_DYNAMIC_MAX_COST_USD`, a
-  ceiling of 20 in the code); the technical limits stay (600 s, 64 KiB per result, 4 MiB cumulative
+  ceiling of 20 in the code), narrowed by the project's own limit when the job carries one (#666, `effective_cost_limit`); the technical limits stay (600 s, 64 KiB per result, 4 MiB cumulative
   content, the byte caps). Every call is reserved before it is sent (the cost it is expected to have from
   what the run showed: cached prefix, observed output, #540), every tool
   part is counted, and a missing or oversized answer fails closed; a call without `usage.cost` ends
@@ -616,6 +619,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `checkout_incomplete` | The checkout for a Dynamic Review could not be prepared completely. The result carries a stable `errorReason` (a `CheckoutReason`, listed in `contracts/runner-api.v1.json` as `KnownCheckoutReason`), the log tail starts with `checkout_incomplete [<reason>]` and the runner's `finished:` line names it |
 | `dynamic_policy_violation` | The Dynamic Review would have broken a hard policy (a tool, a path or an output rule) and was stopped |
 | `dynamic_budget_exceeded` | The Dynamic Review used more than its allowed budget |
+| `cost_limit_reached` | A Diff Review sent no further model request because what its calls cost had reached the cost limit of its project (#666, `llm.maxCostUsd`); usage and cost are reported as usual |
 | `dynamic_accounting_failed` | The Dynamic Review's model usage could not be established or accounted for (an answer without usage, or a call the provider's price list cannot price, #511) |
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires (a forced tool choice, #511), or OpenRouter found no provider that supports every parameter of a request (404, #270); there is no fallback model or provider |
 | `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |
