@@ -119,8 +119,8 @@ A job the claim refuses because billing is switched on but its setup is not comp
 credential, the connection check or the link to the terms is missing, `src/billing/readiness.ts`) gets a notice too. This is the
 operator's side, but it refuses **every** review of the instance, so it must never be silent on the pull request (it was until
 #632: the job failed and nobody heard of it). The notice is keyed by the head like the balance's (`head:<commit id>`), so the same head
-is told once and a new push again. Its text is "No review ran for this change.", "Reviews cannot start because the billing setup of this
-instance is not complete." and "Please contact whoever runs this instance.": it names no missing item, no amount and no setting, and it
+is told once and a new push again. Its text is "No review ran for this change.", "Reviews cannot start because the billing setup is not
+complete." and "Please contact whoever runs code-review.com.": it names no missing item, no amount and no setting, and it
 points to no page, because nobody in the workspace can complete it (`noticeLinkKind`). The claim is the app's in both runtime modes (a
 runner polls it, or a Dispatcher claims a job by its id), so both get the notice. The check of `refusal_notices.code` took the code with
 migration `20261023090000_widen_refusal_notice_codes_for_billing_setup`. The operator sees the same state as a banner on every page of the
