@@ -38,6 +38,7 @@ const ORG = {
 const REPOSITORY = "defaults-org/widgets";
 const WORKSPACE_MODEL = "deepseek/deepseek-v4-pro";
 const SHIPPED_MODEL = "deepseek/deepseek-v4.1-flash";
+const KEY = "sk-or-v1-e2e-defaults-key-0123456789abcdefabcd";
 
 test.describe.configure({ mode: "serial" });
 
@@ -138,6 +139,20 @@ test.describe("the review defaults of a workspace", () => {
     await page.getByRole("radio", { name: "Any finding" }).click();
     await openSection(page, "LLM");
     await chooseOption(page, "Model", WORKSPACE_MODEL);
+
+    // Dynamic Review as the default of every project needs a key to run on: without one the save is refused (#679 review).
+    await page.getByRole("button", { name: "Save review defaults" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Switch to Dynamic Review" })
+      .click();
+    await expect(
+      page.getByText(/Dynamic Review cannot run for this workspace yet/),
+    ).toBeVisible();
+    const stored = await page.request.put(`/api/w/${slug}/llm-key`, {
+      data: { provider: "openrouter", apiKey: KEY },
+    });
+    expect(stored.ok()).toBe(true);
 
     await page.getByRole("button", { name: "Save review defaults" }).click();
     const dialog = page.getByRole("alertdialog", {
