@@ -399,7 +399,11 @@ function managedModel(
     ...model(overrides),
     managed: true,
     cost: null,
-    catalog: { choices: { diff: [], dynamic: [] }, selection },
+    catalog: {
+      choices: { diff: [], dynamic: [] },
+      selection,
+      workspaceSelection: null,
+    },
   };
 }
 

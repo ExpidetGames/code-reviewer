@@ -25,6 +25,11 @@ import {
 export type CatalogFormModel = {
   choices: CatalogChoices;
   selection: CatalogSelection;
+  /**
+   * The entry per kind the workspace default selects (#676), which a project that selects none follows; `null` in the
+   * model of the workspace defaults themselves.
+   */
+  workspaceSelection: CatalogSelection | null;
 };
 
 export type SettingsFormModel = {
@@ -46,17 +51,17 @@ export type SettingsFormModel = {
    */
   managed: boolean;
   /**
-   * The entries of the catalog a project of such a workspace chooses from (#433); null for a workspace on its own
-   * key, for the workspace defaults (no workspace-level default entry, decision C3) and for an answer of a server
-   * that does not know the catalog.
+   * The entries of the catalog a project (and, since #676, the workspace defaults) of such a workspace chooses from
+   * (#433); null for a workspace on its own key and for an answer of a server that does not know the catalog.
    */
   catalog: CatalogFormModel | null;
   /** Who saved the global defaults last and when; null for a project or before the first save. */
   lastSaved: { at: string; by: string | null } | null;
   /**
-   * The project-only review kind, Dynamic model and skill (#194); absent for the global defaults,
-   * which cannot hold them. Since #200 the project form edits them: it sends a project-only field
-   * only when the person changed it, so a stale form cannot overwrite a newer value, and a
+   * The review kind, Dynamic provider and model and verdict (#194), and the skill of a project. Since #676 the
+   * workspace defaults hold all of them but the skill, so the model of the global form has them too: there `overrides`
+   * are what the workspace set and `defaults` the built-in values. Since #200 the project form edits them: it sends a
+   * project-only field only when the person changed it, so a stale form cannot overwrite a newer value, and a
    * `reviewSkill` of `null` (or `""`) clears the skill override.
    */
   dynamic?: ProjectDynamicView;
@@ -73,19 +78,27 @@ export function modelFromGlobalView(
     sources: view.sources,
     cost: view.cost,
     managed: view.modelManagedByInstance,
-    catalog: null,
+    catalog: catalogOf(view),
     lastSaved:
       view.updatedAt === null
         ? null
         : { at: view.updatedAt, by: view.updatedBy },
+    dynamic: view.dynamic,
   };
 }
 
-/** The catalog view of a project; an answer of a server from before #430 carries neither part. */
-function catalogOf(view: ProjectSettingsView): CatalogFormModel | null {
+/** The catalog view of a layer; an answer of a server from before #430 carries neither part. */
+function catalogOf(
+  view: Pick<GlobalSettingsView, "catalogChoices" | "catalogSelection"> &
+    Partial<Pick<ProjectSettingsView, "catalogWorkspaceSelection">>,
+): CatalogFormModel | null {
   const { catalogChoices, catalogSelection } = view;
   if (!catalogChoices || !catalogSelection) return null;
-  return { choices: catalogChoices, selection: catalogSelection };
+  return {
+    choices: catalogChoices,
+    selection: catalogSelection,
+    workspaceSelection: view.catalogWorkspaceSelection ?? null,
+  };
 }
 
 export function modelFromProjectView(

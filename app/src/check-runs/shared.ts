@@ -6,6 +6,7 @@
 // never a timer), and the sweep, the opportunistic maintenance of a hosted deployment and the timer of a long-lived
 // server call `getCheckRunService().reconcileDue()` for what no request named. Never delays or fails a request.
 import "server-only";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createJobCheckRunsRepository } from "../db/repositories/job-check-runs-repository.ts";
 import { listJobsWithCheckWork } from "../db/repositories/job-check-runs-sweep.ts";
@@ -15,6 +16,7 @@ import { createRunnerJobsRepository } from "../db/repositories/runner-jobs-repos
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
+import { REVIEW_DEFAULTS_KEY } from "../review-settings/settings.ts";
 import type { CheckNotifier } from "./notifying-queues.ts";
 import { createCheckRunService, type CheckRunService } from "./service.ts";
 import { reviewVerdictOf } from "./verdict-mode.ts";
@@ -39,6 +41,11 @@ export function getCheckRunService(): CheckRunService {
       reviewVerdictOf(
         (await createProjectsRepository(db, workspaceId).get(repositoryId))
           ?.settings,
+        (
+          await createAppSettingsRepository(db, workspaceId).get(
+            REVIEW_DEFAULTS_KEY,
+          )
+        )?.value,
       ),
     registry: integrationRegistry,
     now: () => new Date(),

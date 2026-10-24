@@ -5,7 +5,7 @@
 // dropdown of the entries of the catalog by the names the operator gave them. What a member may see and what a request
 // may carry: never a provider or a model id. Ported from the chooser tests of before the dropdowns (#433-T02, T03, T04,
 // T06), with the same expectations.
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -14,7 +14,6 @@ import {
   MODEL_CHOICE_LOCKED_BADGE,
   MODEL_CHOICE_MANAGE_PLAN,
   MODEL_CHOICE_NONE_OFFERED,
-  MODEL_CHOICE_PER_PROJECT_NOTE,
   MODEL_CHOICE_PROVIDER,
   MODEL_CHOICE_RETIRED_BADGE,
 } from "../../copy/model-choice.ts";
@@ -37,6 +36,7 @@ import { SettingsForm } from "./settings-form.tsx";
 afterEach(cleanup);
 
 const SAVE = { name: "Save review settings" };
+const SAVE_DEFAULTS = { name: "Save review defaults" };
 const FALLBACK_REMOVED =
   "The fallback model of the previous provider was removed.";
 type User = ReturnType<typeof userEvent.setup>;
@@ -110,15 +110,55 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
     ]);
   });
 
-  // #433-T02
-  it("shows a note, and no dropdown of entries, on the workspace defaults: an entry is chosen per project", async () => {
+  // #676-T01
+  it("offers the same entries on the workspace defaults and saves the chosen one as the default", async () => {
     const user = userEvent.setup();
-    await renderManaged(user, managedModel({ mode: "global" }));
+    const { save } = await renderManaged(
+      user,
+      managedModel({ mode: "global" }),
+    );
 
-    expect(screen.getByText(MODEL_CHOICE_PER_PROJECT_NOTE)).toBeTruthy();
-    expect(screen.queryByLabelText("Model")).toBeNull();
-    await openSection(user, "Limits");
-    expect(screen.getByLabelText("Token budget")).toBeTruthy();
+    expect(modelDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
+    expect(await offered(user)).toEqual([
+      MODEL_CHOICE_DEFAULT_OPTION,
+      "Quick look",
+      "Thorough",
+      labelOf("Premium", MODEL_CHOICE_LOCKED_BADGE),
+    ]);
+    await chooseOption(user, modelDropdown(), "Thorough");
+    await chooseKind(user, "Dynamic Review");
+    await chooseOption(user, modelDropdown(), "Detective");
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+    // A change of the kind of every project is confirmed first.
+    await user.click(
+      await screen.findByRole("button", { name: "Switch to Dynamic Review" }),
+    );
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      reviewKind: "dynamic",
+      catalogEntryDiff: "ent-thorough",
+      catalogEntryDynamic: "ent-detective",
+    });
+  });
+
+  // #676-T02
+  it("names the entry the workspace defaults choose as the option a project follows", async () => {
+    const user = userEvent.setup();
+    await renderManaged(
+      user,
+      managedModel({
+        workspaceSelection: { diff: "ent-thorough", dynamic: null },
+      }),
+    );
+
+    expect(modelDropdown().textContent).toBe("Thorough (global default)");
+    expect(await offered(user)).toEqual([
+      "Thorough (global default)",
+      "Quick look",
+      "Thorough",
+      labelOf("Premium", MODEL_CHOICE_LOCKED_BADGE),
+    ]);
   });
 
   // #433-T02
@@ -395,7 +435,7 @@ describe("what a workspace on the operator's key may see and send", () => {
     await user.click(screen.getByRole("button", SAVE));
     await user.click(await screen.findByRole("button", { name: /^Switch to/ }));
 
-    expect(save).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0]?.[0]).toEqual({
       reviewKind: "dynamic",
       catalogEntryDiff: "ent-thorough",

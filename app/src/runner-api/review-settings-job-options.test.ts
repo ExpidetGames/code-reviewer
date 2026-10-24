@@ -19,7 +19,7 @@ import { createReviewSettingsJobOptionsSource } from "./review-settings-job-opti
 
 const NO_LAYERS = {
   diff: { workspace: {}, project: {} },
-  dynamic: { project: {} },
+  dynamic: { workspace: {}, project: {} },
 };
 
 function resolved(projectKind: ProjectReviewKind) {
@@ -186,7 +186,10 @@ describe("the job options of a claimed job", () => {
                 workspace: { provider: "p", model: "workspace-model" },
                 project: { model: "project-model" },
               },
-              dynamic: { project: { model: "dynamic-project-model" } },
+              dynamic: {
+                workspace: { provider: "p", model: "dynamic-workspace-model" },
+                project: { model: "dynamic-project-model" },
+              },
             },
           }),
         }),
@@ -204,7 +207,11 @@ describe("the job options of a claimed job", () => {
     );
     expect((await source("diff").optionsFor(job("dynamic"))).selection).toEqual(
       {
-        layers: { project: { model: "dynamic-project-model" } },
+        // #676-T03: the workspace default of the Dynamic provider and model travels apart from the project's.
+        layers: {
+          workspace: { provider: "p", model: "dynamic-workspace-model" },
+          project: { model: "dynamic-project-model" },
+        },
         entryId: "mce_dynamic",
       },
     );

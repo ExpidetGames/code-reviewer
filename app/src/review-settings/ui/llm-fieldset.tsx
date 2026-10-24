@@ -74,6 +74,8 @@ export type ManagedLlmChoice = {
   error: string | undefined;
   /** `null` takes the choice back. */
   onChange: (id: string | null) => void;
+  /** The text of the option that takes the choice back, when the default is an entry the workspace chose (#676). */
+  defaultLabel?: string;
 };
 
 const DEFAULT_OPTION = "__instance_default__";
@@ -232,7 +234,10 @@ function ManagedChoice({
     choice.choices.find((entry) => entry.id === choice.value)?.available !==
       true;
   const options: ModelOption[] = [
-    { id: DEFAULT_OPTION, label: MODEL_CHOICE_DEFAULT_OPTION },
+    {
+      id: DEFAULT_OPTION,
+      label: choice.defaultLabel ?? MODEL_CHOICE_DEFAULT_OPTION,
+    },
     ...choice.choices.map((entry) => {
       const note = badgeOf(entry);
       return {
@@ -305,18 +310,15 @@ export function LlmFieldset({
   own,
   managed,
   managedFieldName,
-  note,
   catalogApi,
 }: {
   workspaceSlug: string;
   disabled: boolean;
-  /** Exactly one of `own`, `managed` and `note` is given. */
+  /** Exactly one of `own` and `managed` is given. */
   own?: OwnLlmChoice;
   managed?: ManagedLlmChoice;
   /** The setting a managed choice edits, for the `data-field` of its dropdown. */
   managedFieldName?: string;
-  /** Instead of the dropdowns: what to do about the model here (the workspace defaults hold no choice of the catalog). */
-  note?: ReactNode;
   /** Only tests pass this. */
   catalogApi?: CatalogModelsApi;
 }) {
@@ -338,7 +340,6 @@ export function LlmFieldset({
           fieldName={managedFieldName ?? "catalogEntryDynamic"}
         />
       ) : null}
-      {note}
     </SettingsCard>
   );
 }

@@ -8,6 +8,7 @@ import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { EntitlementsData } from "../../workspaces/entitlements.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
+import { createAppSettingsRepository } from "./app-settings-repository.ts";
 import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
 import {
@@ -383,6 +384,51 @@ describe.each(ENGINES)("the model catalog repository on $name", (engine) => {
         .where("id", "=", "p2")
         .execute();
       expect(await countOf(created.id)).toBe(1);
+    },
+  );
+
+  // #676-T06
+  it_(
+    "counts a project that follows the entry the workspace defaults select, and one that selects its own instead",
+    async () => {
+      const database = await engine.open();
+      const fixture = await createJobQueueFixture({ database });
+      const workspaceId = await defaultWorkspaceId(database);
+      const repository = createCatalogRepository(database, () => T0);
+      const chosen = await repository.insert(
+        entry({ kinds: ["diff", "dynamic"] }),
+        null,
+      );
+      const own = await repository.insert(
+        entry({ name: "Own", nameKey: "own", kinds: ["diff", "dynamic"] }),
+        null,
+      );
+      const put = (id: string, repositoryId: string, settings: unknown) =>
+        database
+          .insertInto("projects")
+          .values({
+            id,
+            repository_id: repositoryId,
+            active: 1,
+            settings: JSON.stringify(settings),
+            created_at: T0.toISOString(),
+            updated_at: T0.toISOString(),
+          })
+          .execute();
+      const none: CatalogDefaults = { diff: null, dynamic: null };
+      const countOf = async (id: string) =>
+        (await repository.countProjectsUsing(none)).get(id) ?? 0;
+      await put("p1", fixture.repositoryId, {});
+      await put("p2", fixture.otherRepositoryId, { catalogEntryDiff: own.id });
+      await createAppSettingsRepository(database, workspaceId).set(
+        "review_defaults",
+        { catalogEntryDiff: chosen.id, reviewKind: "dynamic" },
+        null,
+      );
+
+      // p1 follows the entry of the defaults; p2 chose its own entry for Diff Review, so it does not.
+      expect(await countOf(chosen.id)).toBe(1);
+      expect(await countOf(own.id)).toBe(1);
     },
   );
 

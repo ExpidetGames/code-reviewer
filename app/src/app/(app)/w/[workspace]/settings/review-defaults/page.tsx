@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { getDatabase } from "@/db/startup";
+import { isDynamicReviewEnabled } from "@/jobs/dynamic-review-gate";
 import { getWorkspaceLlm } from "@/llm/shared";
 import { keyedProvidersFor } from "@/review-settings/ui/keyed-providers";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
@@ -26,6 +28,7 @@ export default async function ReviewDefaultsSettingsPage({
   const [data, showPlan, showBilling] = await Promise.all([
     loadGlobalSettingsPage({
       settings: reviewSettingsServiceFor(workspaceId),
+      dynamicReviewEnabled: () => isDynamicReviewEnabled(getDatabase()),
     }),
     planPageLinkedFor(workspaceId),
     billingPageLinkedFor(),

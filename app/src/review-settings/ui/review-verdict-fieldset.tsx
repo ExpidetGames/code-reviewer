@@ -7,6 +7,7 @@
 // the kind that is selected. Saved with the Review kind card (one project-only request). The text is short (#656):
 // one line per choice and one note.
 import { useId } from "react";
+import { Badge } from "../../components/ui/badge.tsx";
 import { FieldDescription, FieldLabel } from "../../components/ui/field.tsx";
 import {
   RadioGroup,
@@ -18,6 +19,7 @@ import {
   type ProjectReviewKind,
   type ReviewVerdictMode,
 } from "../settings.ts";
+import { FOLLOWS_DEFAULT_BADGE } from "./review-kind-fieldset.tsx";
 import { SettingsCard } from "./settings-fields.tsx";
 
 export const VERDICT_NAMES: Record<ReviewVerdictMode, string> = {
@@ -52,6 +54,7 @@ export function ReviewVerdictFieldset({
   error,
   disabled,
   onChange,
+  followsDefault = false,
 }: {
   value: ReviewVerdictMode;
   /** The review kind selected in the form: the note says what blocking means for it. */
@@ -60,11 +63,18 @@ export function ReviewVerdictFieldset({
   error: string | undefined;
   disabled: boolean;
   onChange: (mode: ReviewVerdictMode) => void;
+  /** The project has no verdict of its own: it follows the defaults of the workspace (#676). */
+  followsDefault?: boolean;
 }) {
   const ids = useId();
   const errorId = `${ids}-error`;
   return (
     <SettingsCard title="Review verdict" disabled={disabled}>
+      {followsDefault ? (
+        <Badge variant="neutral" className="self-start">
+          {FOLLOWS_DEFAULT_BADGE}
+        </Badge>
+      ) : null}
       <RadioGroup
         value={value}
         onValueChange={(next) => {

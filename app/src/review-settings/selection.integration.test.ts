@@ -517,7 +517,7 @@ describe("the views of a workspace on the operator's key", () => {
   });
 
   // #430-T08
-  it("show no catalog to a workspace on its own key, and none in the workspace defaults", async () => {
+  it("show no catalog to a workspace on its own key, in a project or in the workspace defaults", async () => {
     const own = await start({ managed: false });
     const entry = await own.catalog.entry();
     await own.projects.updateSettingsWith(own.first.id, () => ({
@@ -532,7 +532,8 @@ describe("the views of a workspace on the operator's key", () => {
     expect(view.catalogSelection).toBeNull();
     expect(JSON.stringify(view)).not.toContain(entry.id);
     expect(view.effective.model).toBe("vendor/own-model");
-    expect(Object.keys(global)).not.toContain("catalogChoices");
+    expect(global.catalogChoices).toBeNull();
+    expect(global.catalogSelection).toBeNull();
   });
 });
 

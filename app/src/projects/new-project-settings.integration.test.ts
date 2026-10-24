@@ -2,6 +2,7 @@
 
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -55,6 +56,19 @@ async function storeKey(
     null,
   );
   expect(saved.ok).toBe(true);
+}
+
+/** The review defaults the workspace saved (#676): the kind, and where it matters the Dynamic provider and entry. */
+async function saveDefaults(
+  db: Kysely<Database>,
+  workspaceId: string,
+  defaults: Record<string, unknown>,
+) {
+  await createAppSettingsRepository(db, workspaceId).set(
+    "review_defaults",
+    defaults,
+    null,
+  );
 }
 
 async function chooseManaged(db: Kysely<Database>, workspaceId: string) {
@@ -219,6 +233,104 @@ describe("the settings a new project starts with", () => {
       await storeKey(db, workspaceId, DEFAULT_PROVIDER);
 
       expect(await newProjectSettings(db, workspaceId)).toEqual({});
+    });
+  });
+});
+
+// #676-T05
+describe("the settings a new project starts with, when the workspace chose a default kind", () => {
+  it("follows a default of Diff Review: no kind is stored, not even where Dynamic Review could run", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, { reviewKind: "diff" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({});
+  });
+
+  it("follows a default of Dynamic Review where it can run, and stores no kind so a later change of the default reaches it", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, { reviewKind: "dynamic" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({});
+  });
+
+  it("starts on Diff Review when the default is Dynamic Review and no Dynamic model resolves, the safety of #664", async () => {
+    const { db, workspaceId } = await start();
+    await saveDefaults(db, workspaceId, { reviewKind: "dynamic" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "diff",
+    });
+  });
+
+  it("starts on Diff Review while the instance has not turned Dynamic Review on", async () => {
+    const { db, workspaceId } = await start({ dynamicOn: false });
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, { reviewKind: "dynamic" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "diff",
+    });
+  });
+
+  it("judges the Dynamic model the workspace chose: a key of that provider is the one that counts", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, {
+      reviewKind: "dynamic",
+      dynamicProvider: OTHER_PROVIDER,
+      dynamicModel: "claude-sonnet-5-5",
+    });
+    const withoutKey = await newProjectSettings(db, workspaceId);
+    await storeKey(db, workspaceId, OTHER_PROVIDER);
+    const withKey = await newProjectSettings(db, workspaceId);
+
+    expect(withoutKey).toEqual({ reviewKind: "diff" });
+    expect(withKey).toEqual({});
+  });
+
+  it("judges the entry the workspace chose on the operator's key, not the instance's", async () => {
+    const { db, workspaceId } = await start();
+    await chooseManaged(db, workspaceId);
+    // The instance default serves Dynamic Review, but the workspace chose an entry that does not.
+    await addEntry(db);
+    const unfit = await createCatalogRepository(db).insert(
+      {
+        name: "Diff only",
+        nameKey: "diff only",
+        description: null,
+        provider: "openrouter",
+        modelId: "acme/diff-only-1",
+        kinds: ["diff"],
+        sortOrder: 1,
+      },
+      null,
+    );
+    await createCatalogRepository(db).setStatus(
+      unfit.id,
+      "draft",
+      "released",
+      null,
+    );
+    await saveDefaults(db, workspaceId, {
+      reviewKind: "dynamic",
+      catalogEntryDynamic: unfit.id,
+    });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "diff",
+    });
+  });
+
+  it("reads the defaults of this workspace only", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    const other = await addWorkspace(db, "other");
+    await saveDefaults(db, other, { reviewKind: "diff" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "dynamic",
     });
   });
 });

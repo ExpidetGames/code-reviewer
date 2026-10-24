@@ -129,24 +129,24 @@ migration: it is one more key of `projects.settings`.
 Additive fields of the same settings JSON (ADR 0005, 2.7): no table, no migration, every setting stored before them stays
 valid. Two families sit side by side and only the one that matches the workspace's key mode is used.
 
-| Field                                     | Layers                          | Meaning                                                                                                      |
-| ----------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `provider`                                | workspace default and project   | The provider of the Diff `model`. Absent: the default provider (`openrouter`), so legacy JSON resolves to it |
-| `dynamicProvider`                         | project only (`null` clears it) | The provider of `dynamicModel`                                                                               |
-| `catalogEntryDiff`, `catalogEntryDynamic` | project only (`null` clears it) | Managed mode: the opaque id of the catalog entry for that kind. **No workspace default** (decision C3)       |
+| Field                                     | Layers                                           | Meaning                                                                                                                                                                            |
+| ----------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                | workspace default and project                    | The provider of the Diff `model`. Absent: the default provider (`openrouter`), so legacy JSON resolves to it                                                                       |
+| `dynamicProvider`                         | workspace default and project (`null` clears it) | The provider of `dynamicModel` (the registry's providers at the workspace; a catalog provider is a project's, #676)                                                                |
+| `catalogEntryDiff`, `catalogEntryDynamic` | workspace default and project (`null` clears it) | Managed mode: the opaque id of the catalog entry for that kind. A project that selects none follows the workspace default entry (#676; it was "no workspace default", decision C3) |
 
 - **Validation** (`validate.ts`, pure, stable codes, no value echoed): a provider must be in the registry
   (`PROVIDER_UNKNOWN`); a model is held to the model-id rule of the provider the same request names (`provider` for
   `model` and `fallbackModel`, `dynamicProvider` for `dynamicModel`), else the default provider's. An entry id is only
-  checked for its shape (`INVALID_TYPE`, `EMPTY`, `TOO_LONG`, `INVALID_FORMAT`); `dynamicProvider` and the entries are
-  unknown fields of the workspace defaults.
+  checked for its shape (`INVALID_TYPE`, `EMPTY`, `TOO_LONG`, `INVALID_FORMAT`). Since #676 the workspace defaults take
+  `dynamicProvider` and the entries too (`validateWorkspaceSettingsPatch`).
 - **The entry checks** (`catalog-selection.ts`, the service, managed workspaces only): the entry must exist
   (`CATALOG_ENTRY_UNKNOWN`), be released (`CATALOG_ENTRY_NOT_RELEASED`: a draft or a retired one), serve the kind of the
   setting (`CATALOG_ENTRY_KIND_MISMATCH`) and be allowed by the plan (`CATALOG_ENTRY_NOT_ALLOWED`, `modelAccess` of
   #428), in that order. Every refused kind is named. A model name is never an entry id: it is refused like any
   other id that is no entry.
 - **Who may write what.** A workspace on the operator's key may not write `provider`, `model`, `fallbackModel`,
-  `dynamicProvider` or `dynamicModel` (also not to the workspace defaults): `MODEL_MANAGED_BY_INSTANCE`, as for the models
+  `dynamicProvider` or `dynamicModel` (the workspace defaults included): `MODEL_MANAGED_BY_INSTANCE`, as for the models
   before. A workspace on its own key never reads the catalog, so it **may not select an entry**: the write is refused
   `CATALOG_ENTRY_OWN_KEY_MODE` (decided against "stored inactive": an entry would be stored unchecked and the catalog
   would have to be read to check it); `null` is allowed, it clears an entry stored while the workspace was managed.
@@ -177,8 +177,9 @@ valid. Two families sit side by side and only the one that matches the workspace
 `ui/settings-form.tsx` shows its fields in four sections, as tabs: **Review** (the review kind and its skill, the review
 verdict, then the review options), **LLM** (`ui/llm-fieldset.tsx`), **Trigger** (`ui/when-fieldset.tsx`: when the reviewer
 starts) and **Limits** (`ui/limits-fieldset.tsx`: the cost limit of a review, and for a Diff Review the token budget with its
-cost estimate). The workspace defaults page (Settings, Review defaults) is the same form without the project-only fields, so it has
-the same sections. A refused save opens the first section with a problem and focuses its first marked field; a problem in a field
+cost estimate). The workspace defaults page (Settings, Review defaults) is the same form (#676): it has the same sections, the
+kind, the verdict, the Dynamic provider and model (a catalog entry per kind on the operator's key) as workspace defaults, and no
+review skill (the skill stays a project's). A refused save opens the first section with a problem and focuses its first marked field; a problem in a field
 the selected kind does not show opens Review, where the note about it is.
 
 - **LLM** has two dropdowns and nothing else, in both key modes: a provider, then a model of that provider (`ui/model-select.tsx`;
@@ -209,7 +210,7 @@ the Review kind card (Dynamic Review) show depends on the key mode of the worksp
 | Key mode | Per review kind                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Sent when changed                                                                                                                                                         |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | own      | a **provider select** (`ui/provider-select.tsx`: the registered providers, `llmProviderDescriptors`) next to the **model** field, with the suggested models of the chosen provider as its datalist (one `<datalist>` per provider and review kind) and as a list to pick from under the field (`ui/suggested-models-select.tsx`); a provider may suggest fewer models for Dynamic Review (`dynamicSuggestedModels`, `suggestedModelsFor`): Anthropic leaves out the models a Dynamic Review cannot use (#532); the cost estimate of Diff Review prices the model with the chosen provider's table (`cost.ts`, `estimateReviewCost(settings, prices?, providers?)`) | `provider`, `model`, `fallbackModel` (Diff group, workspace defaults and project); `dynamicProvider`, `dynamicModel` (project, `null` when put back to the shipped value) |
-| managed  | the **catalog chooser** (`ui/model-choice.tsx`): a radio list of the entries of `catalogChoices[kind]` in the order of the view (`sort_order`), label = name, text = description, nothing else; the project's selection comes from `catalogSelection`. The workspace defaults show a note instead (no workspace-level default entry, decision C3)                                                                                                                                                                                                                                                                                                                  | `catalogEntryDiff`, `catalogEntryDynamic` (project-only; `null` takes the choice back)                                                                                    |
+| managed  | the **catalog chooser** (`ui/model-choice.tsx`): a radio list of the entries of `catalogChoices[kind]` in the order of the view (`sort_order`), label = name, text = description, nothing else; the project's selection comes from `catalogSelection`. The workspace defaults choose an entry per kind as well (#676), and a project that chooses none follows it                                                                                                                                                                                                                                                                                                  | `catalogEntryDiff`, `catalogEntryDynamic` (project-only; `null` takes the choice back)                                                                                    |
 
 - **Locked and unusable entries.** An entry that the plan does not allow is listed disabled with "Not included in your plan"
   and a link "Manage plan" to the plan page of the workspace (`/w/<slug>/settings/plan`, which exists for every workspace;
@@ -352,12 +353,45 @@ object), `403 REVIEW_SETTINGS_CROSS_SITE_REQUEST`, `413 REVIEW_SETTINGS_BODY_TOO
 `415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (there is no such
 repository, or the platform no longer lists it and it has no project). The settings pages (below) call these routes from the browser.
 
+## Workspace defaults of the project-only settings (#676)
+
+The `review_defaults` JSON of `app_settings` (the sparse set of the workspace defaults) holds, next to the Diff settings,
+`reviewKind`, `dynamicProvider`, `dynamicModel`, `catalogEntryDiff`, `catalogEntryDynamic` and `reviewVerdict`. No table, no
+column, no migration: they are more keys of the same JSON, and a set stored before simply lacks them.
+
+- **Inheritance** is the one of every other setting: project value over workspace default over built-in value
+  (`resolveProjectDynamicSettings({ builtIn, workspace, project })`, `sources` say `project`, `global` or `built_in`). The view
+  of a project (`ProjectDynamicView.defaults`) carries what applies while the project sets nothing, which is the workspace
+  default where there is one, so "Reset to default" and a field put back to the default follow it; `catalogWorkspaceSelection`
+  names the workspace's entry per kind for the entry chooser. The view of the workspace defaults (`GlobalSettingsView.dynamic`,
+  `catalogChoices`, `catalogSelection`) has the shape of a project's, with the shipped values below it.
+- **A save of the defaults replaces the whole set** (Diff and the new fields alike); a field left out is inherited again, and
+  `{}` removes them all. The form sends the fields that differ from the shipped value (`ui/global-save.ts`). What the other key
+  mode stored stays stored, as for a project: the own-key models while on the operator's key, the entries while on the own key.
+  The Dynamic model is put to the provider's metadata check like a project's (#269); the entries are checked like a project's.
+- **Registry providers only.** The Dynamic provider of the defaults is one of the registry (`PROVIDER_UNKNOWN` for a catalog
+  provider, #555): the address a project pins for a catalog provider (#588) is a project's, so choosing a catalog provider stays a
+  per-project choice. `confirmProviderAddress` and `reviewSkill` are unknown fields of the defaults.
+- **A provider and a model of different layers** are paired by the rule of the claim (`modelProviderMismatch`): a project provider
+  next to a workspace model of another provider, and a workspace change that would newly pair them, are refused
+  `MODEL_PROVIDER_MISMATCH` on `dynamicProvider` / `dynamicModel`, as for the Diff model (#432).
+- **The claim** gets `modelLayers.dynamic = { workspace, project }` and the resolved catalog entry (`runner-api/review-settings-job-options.ts`).
+- **The kind a job is pinned to** is the project's, else the workspace default, else Diff, read inside the enqueue transaction
+  (`jobs/review-kind.ts`). A change of the default does not cancel reviews that are waiting: they keep the kind they were queued
+  for (a project's own kind change still cancels them, #195). The verdict follows the same order (`check-runs/verdict-mode.ts`),
+  and the model catalog counts a project that follows the default entry as using it (`countProjectsUsing`).
+- **New projects** (`projects/new-project-settings.ts`): a workspace default of Diff gives a project that follows it (nothing
+  stored). A default of Dynamic does too where a Dynamic Review can run its first review, judged with the Dynamic provider and
+  model (or entry) the workspace chose; where it cannot, the project starts on Diff Review (stored), the safety of #664. With no
+  default the behaviour of #664 is unchanged.
+
 ## The project-only settings: review kind, Dynamic model and skill (#194)
 
 A project also selects the one review kind it runs (#193). These fields live in the same
-`projects.settings` JSON as the Diff overrides but are **project-only**: the global defaults and the
-built-in layer never hold them (`validateReviewSettingsPatch` reports them as `UNKNOWN_FIELD`), so a
-review kind can never become a workspace-wide default.
+`projects.settings` JSON as the Diff overrides. Since #194 they were project-only; since #676 the workspace defaults hold
+the **review kind, the Dynamic provider and model, the catalog entries and the verdict** as well (below, "Workspace defaults of
+the project-only settings"). The **review skill** stays a project's (`validateWorkspaceSettingsPatch` reports it as
+`UNKNOWN_FIELD`).
 
 | Field          | Meaning                                                                               | Default                        |
 | -------------- | ------------------------------------------------------------------------------------- | ------------------------------ |

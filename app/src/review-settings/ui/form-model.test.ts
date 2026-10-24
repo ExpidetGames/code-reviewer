@@ -102,7 +102,11 @@ describe("the form model of an answer", () => {
     });
 
     expect(model?.managed).toBe(true);
-    expect(model?.catalog).toEqual({ choices, selection });
+    expect(model?.catalog).toEqual({
+      choices,
+      selection,
+      workspaceSelection: null,
+    });
   });
 
   // #433-T02

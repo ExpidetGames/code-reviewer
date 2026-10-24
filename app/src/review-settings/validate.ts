@@ -479,6 +479,92 @@ export function validateProjectSettingsPatch(
 }
 
 /**
+ * What a save of the workspace defaults carries (#676): the Diff settings and the fields that used to be project-only (kind,
+ * Dynamic provider and model, catalog entries, verdict; the skill stays a project's). Like the Diff group, the whole set is replaced, so a field
+ * that is left out (or `null`) is not set and every project inherits the layer below.
+ */
+export type WorkspaceSettingsPatch = {
+  review: ReviewSettingsOverrides;
+  dynamic: Omit<ProjectDynamicOverrides, "reviewSkill">;
+};
+
+export type WorkspaceValidationResult =
+  | { ok: true; value: WorkspaceSettingsPatch }
+  | { ok: false; issues: ReviewSettingIssue[] };
+
+/**
+ * Validates the workspace defaults. The fields are the ones of a project, except the skill and the address a project pins for a
+ * catalog provider: the workspace default offers the providers of the registry only (a catalog provider is a per-project
+ * choice), so `confirmProviderAddress` and `reviewSkill` are unknown and a catalog provider is `PROVIDER_UNKNOWN`. A `null`
+ * clears, which on a whole set means: not set.
+ */
+export function validateWorkspaceSettingsPatch(
+  input: unknown,
+  providers: ProviderLookup = llmProviderDescriptors,
+): WorkspaceValidationResult {
+  const result = validateProjectSettingsPatch(input, providers);
+  const issues = result.ok ? [] : [...result.issues];
+  if (isPlainObject(input))
+    for (const field of [CONFIRM_PROVIDER_ADDRESS, "reviewSkill"])
+      if (Object.hasOwn(input, field))
+        issues.push({ field, code: "UNKNOWN_FIELD" });
+  if (!result.ok) return { ok: false, issues };
+  const provider = result.value.dynamic.dynamicProvider;
+  if (typeof provider === "string" && providers.find(provider) === undefined)
+    issues.push({ field: "dynamicProvider", code: "PROVIDER_UNKNOWN" });
+  if (issues.length > 0) return { ok: false, issues };
+  return {
+    ok: true,
+    value: {
+      review: result.value.review,
+      dynamic: setFieldsOf(result.value.dynamic),
+    },
+  };
+}
+
+/** The fields of a project-only patch that carry a value; a `null` (clear) is a field that is not set. */
+function setFieldsOf(
+  patch: ProjectDynamicPatch,
+): Omit<ProjectDynamicOverrides, "reviewSkill"> {
+  const set: Omit<ProjectDynamicOverrides, "reviewSkill"> = {};
+  if (patch.reviewKind !== undefined) set.reviewKind = patch.reviewKind;
+  if (typeof patch.dynamicModel === "string")
+    set.dynamicModel = patch.dynamicModel;
+  if (typeof patch.dynamicProvider === "string")
+    set.dynamicProvider = patch.dynamicProvider;
+  for (const field of PROJECT_CATALOG_FIELDS) {
+    const entry = patch[field];
+    if (typeof entry === "string") set[field] = entry;
+  }
+  if (typeof patch.reviewVerdict === "string")
+    set.reviewVerdict = patch.reviewVerdict;
+  return set;
+}
+
+/**
+ * Reads the kind, Dynamic model and verdict of the stored workspace defaults (#676). Like a stored project it drops a
+ * field this version would not accept, and, because only the registry's providers can be saved, a catalog provider and the
+ * address pinned for one (both a project's business), so a hand-edited set cannot send a key to an address nobody confirmed.
+ */
+export function parseStoredWorkspaceDynamic(
+  stored: unknown,
+  providers: ProviderLookup = llmProviderDescriptors,
+): Omit<ProjectDynamicOverrides, "reviewSkill"> {
+  const overrides = parseStoredProjectDynamicOverrides(stored, providers);
+  delete overrides.dynamicProviderAddress;
+  delete overrides.reviewSkill;
+  if (
+    overrides.dynamicProvider !== undefined &&
+    providers.find(overrides.dynamicProvider) === undefined
+  ) {
+    delete overrides.dynamicProvider;
+    // A catalog model id belongs to the provider that was dropped.
+    delete overrides.dynamicModel;
+  }
+  return overrides;
+}
+
+/**
  * Reads the project-only fields of a stored layer. Like `parseStoredOverrides`, a field this version
  * would not accept is dropped (so the shipped default applies) instead of failing a review. An
  * explicit `null` (or blank) skill, or a `null` model, reads as "no override".

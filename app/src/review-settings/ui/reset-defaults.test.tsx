@@ -11,28 +11,16 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => undefined, replace: () => undefined }),
 }));
 
-import { estimateReviewCost } from "../cost.ts";
-import { builtInReviewSettings, type ReviewSettingField } from "../settings.ts";
+import { untouchedGlobalView } from "../../test-support/settings-form-models.ts";
 import { modelFromGlobalView } from "./form-model.ts";
 import { GlobalSettingsPageContent } from "./global-settings-page.tsx";
 import { ResetReviewDefaults } from "./reset-defaults.tsx";
 
 afterEach(cleanup);
 
-const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 const DATA = {
-  model: modelFromGlobalView({
-    overrides: {},
-    effective: BUILT_IN,
-    sources: Object.fromEntries(
-      Object.keys(BUILT_IN).map((field) => [field, "built_in"]),
-    ) as Record<ReviewSettingField, "built_in">,
-    cost: estimateReviewCost(BUILT_IN),
-    modelManagedByInstance: false,
-    builtIn: BUILT_IN,
-    updatedAt: null,
-    updatedBy: null,
-  }),
+  model: modelFromGlobalView(untouchedGlobalView()),
+  dynamicReviewEnabled: true,
 };
 
 describe("resetting every review default", () => {

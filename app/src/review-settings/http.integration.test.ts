@@ -400,18 +400,31 @@ describe("the project-only settings over HTTP", () => {
     });
   });
 
-  // #405-T28
-  it("cannot become a workspace default: the global route refuses the verdict mode", async () => {
+  // #676-T01
+  it("is a workspace default: the global route stores the verdict mode and shows it as the default of a project", async () => {
     const app = await setup();
 
     const response = await app.putGlobal({
       settings: { reviewVerdict: "any" },
     });
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "reviewVerdict", code: "UNKNOWN_FIELD" }],
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      dynamic: {
+        overrides: { reviewVerdict: "any" },
+        effective: { reviewVerdict: "any" },
+      },
+    });
+    const project = await app.handlers.getProject(
+      new Request(`${URL_BASE}${app.projectPath}`),
+      app.first.id,
+    );
+    expect(await project.json()).toMatchObject({
+      dynamic: {
+        effective: { reviewVerdict: "any" },
+        defaults: { reviewVerdict: "any" },
+        sources: { reviewVerdict: "global" },
+      },
     });
   });
 
@@ -435,18 +448,51 @@ describe("the project-only settings over HTTP", () => {
     expect((await app.projects.get(app.first.id))?.settings).toEqual({});
   });
 
-  // #194-T05
-  it("cannot become a workspace default: the global route refuses a project-only field", async () => {
+  // #676-T07
+  it("keeps the review skill a project's: the global route refuses it, and the address a project pins", async () => {
     const app = await setup();
 
     const response = await app.putGlobal({
-      settings: { reviewKind: "dynamic" },
+      settings: { reviewSkill: "my skill", confirmProviderAddress: true },
     });
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       error: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "reviewKind", code: "UNKNOWN_FIELD" }],
+      issues: [
+        { field: "confirmProviderAddress", code: "UNKNOWN_FIELD" },
+        { field: "reviewSkill", code: "UNKNOWN_FIELD" },
+      ],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #676-T07
+  it("offers the providers of the registry only as the Dynamic default: a catalog provider is a project's choice", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({
+      settings: { dynamicProvider: "zhipuai", dynamicModel: "glm-4.5" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "dynamicProvider", code: "PROVIDER_UNKNOWN" }],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #676-T07
+  it("names an unknown review kind of the defaults", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({ settings: { reviewKind: "both" } });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewKind", code: "INVALID_FORMAT" }],
     });
     expect(await app.appSettingRows()).toEqual([]);
   });
