@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Sentences that several message modules used to repeat word for word (#169). Each one has exactly one
 // owner here; the feature modules import it and never write the words again. The copy-ownership test

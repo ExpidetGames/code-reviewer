@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A bounded wait for a row lock on Postgres. A write that must not run beside the daily models.dev fetch reads the
 // provider's row `FOR UPDATE` first, the lock the fetch holds while it writes (#548); without a bound it would wait for

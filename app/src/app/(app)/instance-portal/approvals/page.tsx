@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Approvals: the requests to link a GitHub installation to a workspace that wait for the instance admin (the role
 // of the person in the organization could not be read), and the installations nobody has linked. Instance admin

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The per-call trace of a Dynamic Review (#541): numbers and enums, never content.
 

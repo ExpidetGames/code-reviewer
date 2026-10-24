@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #605-T04 with real OS processes on one SQLite file: two app instances claim at the same moment on a balance of one cent and
 // both jobs start, because nothing is held (before #605 the last of a balance went to exactly one of them, #498-T05).

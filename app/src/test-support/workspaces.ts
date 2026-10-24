@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Workspaces for tests. Every test database starts with no workspace (like a fresh installation), so
 // a test that stores customer data asks for the default workspace first; a test about isolation adds

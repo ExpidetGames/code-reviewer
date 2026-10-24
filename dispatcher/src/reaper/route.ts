@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/cron/reap-sandboxes: the platform's cron calls it (`vercel.json` "crons") and the reaper stops the Sandbox VMs
 // that outlived their purpose (#364). `CRON_SECRET` of this project is the whole credential: the platform sends it as

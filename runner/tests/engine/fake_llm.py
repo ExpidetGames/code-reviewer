@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A fake LLM endpoint for the engine suite (OpenRouter shaped and Anthropic's Messages API, on
 loopback only).

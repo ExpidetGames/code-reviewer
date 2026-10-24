@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #166-T02: `app/src/app/theme.css` is the one place with the app's colors. This test parses it:
 // every token exists for light and for dark, the "system" state (prefers-color-scheme) and the

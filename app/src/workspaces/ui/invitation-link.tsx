@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // What the person who invited is told about the link (#177: two short lines and Copy): it was mailed, or

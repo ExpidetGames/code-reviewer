@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The token cap of an own key above the wire (#553 with #552).
 

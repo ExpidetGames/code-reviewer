@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The body of Setup → Sign-up (#181): the notice of a sign-up rule that cannot work yet (one owner,
 // `notices.tsx`, rendered through the shared `NeedsAttention`), and nothing above the form while the

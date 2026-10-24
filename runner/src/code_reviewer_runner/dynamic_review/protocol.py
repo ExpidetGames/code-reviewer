@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Bounded packet framing and explicit shallow, size-filtered wants; no Git client side effects."""
 
 import re

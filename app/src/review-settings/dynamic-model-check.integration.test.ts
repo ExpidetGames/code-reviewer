@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Saving a Dynamic model asks the provider's model metadata whether it supports tool calling (#269): an
 // unsupported or unknown model is refused on its field and nothing is stored, a provider that cannot be asked

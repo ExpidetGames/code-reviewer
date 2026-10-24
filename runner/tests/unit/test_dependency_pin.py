@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down that PR-Agent is installed from exactly one version everywhere it is declared: the
 dependency in pyproject.toml, the locked version in uv.lock, the version the identity patch was

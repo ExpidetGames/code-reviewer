@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key test of a catalog provider (#555): the generic adapter's cheap authenticated read, answered as a class. The
 // requests go through an injected fetch; nothing leaves the process.

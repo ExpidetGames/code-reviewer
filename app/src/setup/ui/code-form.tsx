@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The form that asks for the setup code (what every page shows while the instance is not set up and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment node
 import { describe, expect, expectTypeOf, it } from "vitest";

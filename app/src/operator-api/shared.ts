@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the operator API on the running server: the real database and the token from the environment.
 // The route files call `withOperatorApi` only. If the API cannot be set up (the database was not opened, say),

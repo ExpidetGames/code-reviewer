@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195: a job is queued for one review kind (`diff` for PR-Agent, `dynamic` for the read-only agent),
 // pinned at enqueue time from the project's settings. A runner that cannot run a kind must never be

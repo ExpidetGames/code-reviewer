@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the journey of the update from the previous release (e2e/upgrade/) needs to play the operator: the
 // database of the previous release, the environment of the previous release and of the new one, and the app

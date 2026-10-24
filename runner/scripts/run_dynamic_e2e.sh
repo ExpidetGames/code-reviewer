@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # The privileged Dynamic e2e lane (#253, #201-T01): the journey of a pull request through the real app,
 # the real Dynamic runner as root and the real pinned OpenCode as its engine user, against the loopback

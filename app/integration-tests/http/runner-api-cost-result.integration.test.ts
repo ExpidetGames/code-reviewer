@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a Dynamic result without a known cost settles as (#553), through the real runner API over a real database.
 //

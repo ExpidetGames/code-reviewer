@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `job_claimed_keys`: the LLM key a runner was handed with the claim of a job, encrypted, so that any app
 // instance can still mask it in the result of the job after the key was rotated (docs/decisions/0001-

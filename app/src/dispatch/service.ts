@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The dispatch webhook as a service (#326): wakes the Dispatcher for a job that was queued, and keeps the
 // state of that call in `job_dispatches` so a call that failed is made again.

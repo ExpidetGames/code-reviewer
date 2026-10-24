@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The start of a serverless instance, called from `src/instrumentation.ts` when the runtime mode is
 // serverless (src/runtime/mode.ts). Every cold start of every instance runs this, so it only CHECKS

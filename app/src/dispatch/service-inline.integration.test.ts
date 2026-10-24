@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the dispatch does inside the request, without the sweep (#395): the bounded retries of a call that failed,
 // and the jobs that were told "not now" being sent when a slot frees. On SQLite and, when TEST_DATABASE_URL is set,

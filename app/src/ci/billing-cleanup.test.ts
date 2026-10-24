@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #491: the subscription design with plans is gone (ADR 0006 replaces it with prepaid billing). This scan keeps the repository
 // free of it, and keeps the billing switch to one reader. The name is built from parts, so that this file does not carry it.

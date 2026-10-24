@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the job view of the admin portal says (#541): the headings of the list and of one run, and the notes
 // for an empty list, a cut list and a run without a call trace. The table of the calls has its own copy

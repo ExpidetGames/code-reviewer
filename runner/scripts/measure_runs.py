@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Measures the memory and duration of runner processes against the sandbox pull requests (CR-13).
 

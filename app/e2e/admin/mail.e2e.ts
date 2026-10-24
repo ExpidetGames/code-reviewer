@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The mail page in a real browser against a production build and the fake SMTP server: the admin of an
 // instance without a mail server finds no "forgot your password" option, configures the mail server in the

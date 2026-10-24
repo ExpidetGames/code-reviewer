@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The exact end of a password reset link: it works up to the last millisecond and not at 30:00. The
 // link is checked twice, by the look before the slow part of the reset (`expires_at <= now` refuses) and

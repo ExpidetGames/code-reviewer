@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the server checks about sign in when it starts: the settings must be complete, otherwise
 // every page would fail later with a less helpful message. Called from `src/instrumentation.ts`.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down what the reviewer is given from the verified preparation (#197, wiring of #196)."""
 

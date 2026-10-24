@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What a call of an own key counts against the token cap when its cost is unknown (#553, review of
 PR #577).

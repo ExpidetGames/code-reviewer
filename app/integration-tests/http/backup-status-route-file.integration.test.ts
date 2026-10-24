@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route file `GET /api/backup/status` behind the proxy: the status of the backups is the
 // instance admin's alone, so the route asks for the admin itself (the second guard; the proxy in front is

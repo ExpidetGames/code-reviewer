@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import { boundProviderText, MAX_PROVIDER_TEXT_CHARS } from "./provider-text.ts";

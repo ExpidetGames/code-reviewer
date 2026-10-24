@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The overview of the portal (#180): the screen's one "Needs attention" region first — stored
 // credentials that cannot be read, a sign-up rule that cannot work yet, addresses that could not be

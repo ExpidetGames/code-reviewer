@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The links to the operator's terms and privacy statement (#626): which text is accepted as one, and how the stored setting reads.
 import { describe, expect, it } from "vitest";

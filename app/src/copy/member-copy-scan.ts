@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scan for words that must never reach a member of a workspace that reviews on the operator's key: a model, a
 // vendor, a price or a cost. The copy of the catalog chooser (`model-choice.ts`, #283, #433) is held to it by its test, and

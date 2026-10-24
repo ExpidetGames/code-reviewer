@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The cost of an Anthropic call, worked out from the usage the call reports (#511).
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models.dev catalog in the admin portal, from the first fetch to a price that moved (#554-T10), on an app of its own
 // that fetches from the fake models.dev (`fakes/models-dev`, no network): the admin fetches the empty catalog, a new model

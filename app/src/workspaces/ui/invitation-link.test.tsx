@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins the invitation-link block (#177, review of #215): the block that holds the link is a static

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #498: a refusal for the balance gets a notice too, so the check on `refusal_notices.code` takes two more codes
 // (`insufficient_balance`, `balance_negative`). The rows of an existing database survive the change, with their dedupe and

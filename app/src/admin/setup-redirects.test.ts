@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the redirects of the split setup (#181): the old `/admin/setup` and `/admin/limits`
 // addresses keep working and lead to the instance section. The pages are what the proxy's rewrite

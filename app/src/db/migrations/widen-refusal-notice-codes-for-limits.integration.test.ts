@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: a review refused for the monthly limit or the hourly brake gets a notice too, so the check on `refusal_notices.code`
 // takes two more codes (`monthly_limit_reached`, `reviews_paused`). The rows of an existing database survive the change, with

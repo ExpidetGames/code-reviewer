@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET and PUT /api/w/:workspace/llm-key-mode: whose key the reviews of the workspace run on while billing is on, our models or its own
 // provider key (ADR 0006, P3, D4; #496). Every member reads the choice; an Owner or an Admin (`manage_llm_key`) sets it. A missing path

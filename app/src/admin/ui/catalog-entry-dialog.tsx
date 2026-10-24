@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The dialog that adds or edits one catalog entry (#429): name (with the warning that members see it), description,

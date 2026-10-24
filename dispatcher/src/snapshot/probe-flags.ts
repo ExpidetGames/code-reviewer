@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The flags of the self-check probe container (#330): the arguments of `docker run` that the shared renderer of
 // the hardened container spec (#325) makes for the Sandbox variant, never flags written here. That is the

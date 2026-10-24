@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { Suspense } from "react";
 import { balanceBannerFor } from "@/billing/shared";

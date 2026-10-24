@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The generic provider adapter (#548, part D, #423): any provider of the supported file resolves to an adapter built from
 // the catalog rows, not from code per provider: the descriptor (id, name, wire family, key header, address), the model

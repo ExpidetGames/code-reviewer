@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the "Review kind" card of a project's settings in a real browser (#200): the person
 // chooses Dynamic Review, reads that the instance has not enabled it yet, edits the model and the review

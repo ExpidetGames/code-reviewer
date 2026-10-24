@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "LLM" section of the settings form (#656): a provider dropdown, then a model dropdown, and nothing else, in both key

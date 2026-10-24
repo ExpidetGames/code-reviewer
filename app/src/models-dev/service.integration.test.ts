@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A fetch against the models.dev fake and a real database, on both engines (#548): a first fetch fills the tables, a
 // second with a changed price updates, a vanished model is unlisted and comes back, a failed or implausible fetch keeps the

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The `Upstream` seam over plain http on loopback, for the integration and engine tests (#550).
 

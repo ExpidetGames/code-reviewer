@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the wizard: three steps in order, each step one named form with the heading outside it

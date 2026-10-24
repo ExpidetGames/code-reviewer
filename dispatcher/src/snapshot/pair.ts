@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The golden snapshot pair (#403): which snapshot the Dispatcher creates job VMs from, the id of the Worker image
 // inside it, and the commit it was built from. Nothing in it is secret. It lives in three places that must agree,

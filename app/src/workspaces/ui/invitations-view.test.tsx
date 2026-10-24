@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins the invitations page (#179): one list with one accessible name while invitations wait, and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of the OpenRouter adapter that is data and pure rules, safe for a client component to import. The
 // only file besides its siblings that names the provider; everything else in the app reads it through the

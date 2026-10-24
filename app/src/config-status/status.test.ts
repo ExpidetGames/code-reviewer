@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the pages may know about the instance's configuration: the GitHub App status comes
 // from the credentials the server read (`githubAppStatusOf`), never from the environment, and the

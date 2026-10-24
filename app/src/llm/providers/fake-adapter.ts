@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A second provider that exists only in tests (#423): it proves that nothing in the registry or in its
 // users assumes the one real provider. Never imported by production code.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The minutes a late end of a VM may settle at (#498, #493): a stop answer that arrives late is our error, so it never adds
 // charge beyond the backstop the settlement already used, while a real end that is earlier credits the customer.

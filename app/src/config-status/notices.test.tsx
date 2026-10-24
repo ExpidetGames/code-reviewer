@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the configuration hints the pages show: nothing while everything works, a visible hint

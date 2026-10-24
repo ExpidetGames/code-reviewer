@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """#198-T07: the built runner distributions (wheel and sdist) ship the fixed core, the canonical
 default skill and the three license notices, including their attribution. The build is offline: no

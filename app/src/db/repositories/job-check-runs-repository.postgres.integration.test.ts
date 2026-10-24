@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The check run record of the jobs on Postgres behaves like the SQLite one (#405-T16, T36): one statement makes the
 // row of a job and one takes it, so several app instances at once get exactly one sync, a failed sync is taken again

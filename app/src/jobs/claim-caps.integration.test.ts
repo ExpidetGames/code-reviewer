@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The monthly total limit and the hidden hourly brake at claim (#499; ADR 0006, 2.9; src/billing/README.md, "Limits"), on SQLite
 // and, when TEST_DATABASE_URL is set, on Postgres. Both act at the claim only, in the claim's transaction, after the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // PUT|DELETE /api/admin/model-catalog/:id (#429): changes an entry (the model behind a released entry only with a confirmation), deletes a draft.
 // For the instance admin only. Not signed in is 401, signed in but not an admin is a 404 (src/admin/access.ts); the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the page of the billing review rows makes to its own data routes (src/billing/admin-http.ts, #603). Browser side;
 // nothing throws, a failure is a stable code the page translates (billing-messages.ts). The list itself is read by the server

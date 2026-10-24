@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the codes of the binding (the UI translates a code to copy, never the other way round): what
 // the connections page and the result page say after a flow, what a failed call says, and how the approval

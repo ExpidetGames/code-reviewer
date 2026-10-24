@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the import of an existing installation reads and writes about users (src/legacy-import/): the people
 // who signed in before accounts existed, with the GitHub identity and the stored GitHub token of each, and the

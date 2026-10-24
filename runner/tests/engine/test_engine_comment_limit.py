@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down what happens when a review is as long as GitHub allows a comment to be (65,536
 characters; the fake refuses longer ones with a 422 like GitHub does).

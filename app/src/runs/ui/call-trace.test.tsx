@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the table view of the call trace of a run (#541): one row per model call and per tool call,

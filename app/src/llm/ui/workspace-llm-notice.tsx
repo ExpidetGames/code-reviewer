@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The hint "LLM not configured" for the workspace of a page, loaded from the running server. A server
 // component for the pages that show the hint; the hint itself is `LlmAccessNotice`.

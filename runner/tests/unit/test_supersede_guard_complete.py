@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The write guard covers every way the pinned PR-Agent writes to GitHub (#396).
 

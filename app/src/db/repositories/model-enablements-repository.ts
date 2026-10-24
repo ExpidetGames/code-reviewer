@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether the admin enabled a catalog model for the managed key (#549, src/model-prices/README.md). Instance level: this is
 // configuration of the installation, not customer data, and no workspace owns a row. One row per model, changed in place;

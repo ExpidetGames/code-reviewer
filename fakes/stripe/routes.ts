@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The endpoints of the fake Stripe API: the ones the app's client calls (app/src/billing/stripe-client.ts), with Stripe's
 // habits where the sandbox showed them: a parameter that is not known is refused (`Received unknown parameter: x`), a

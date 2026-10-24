@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the claim guard of the projects: an active project lets the job run, anything else cancels it.
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where a verification link lands, and where an account that still has to verify its address is sent.
 // Public. With a token (the link) it shows the button that verifies; without one it explains and offers a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rules for the names of a workspace: the length and the characters of the display name, the slug made
 // from it, and the line-safe text that goes into mails.

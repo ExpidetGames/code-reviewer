@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Verifies the signature of the dispatch webhook (contracts/dispatch-webhook.v1.json): the Dispatcher's
 // own implementation, proven against the shared vectors (contracts/dispatch-signing-vectors.json) and the

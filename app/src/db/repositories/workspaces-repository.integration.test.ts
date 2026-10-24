@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The workspaces table and the questions that start from a user: the oldest workspace is the default, a
 // workspace a user does not belong to answers like one that does not exist, and the memberships come back

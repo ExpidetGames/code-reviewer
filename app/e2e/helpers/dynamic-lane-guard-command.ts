@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The last word of the network guard of the privileged Dynamic e2e lane (#253): prints the counters and exits
 // 1 when anything of the lane reached for something that is not on loopback, whatever test it was. Run as

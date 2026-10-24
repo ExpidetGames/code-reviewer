@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Checks a SQLite file with `PRAGMA integrity_check`, the same check for a fresh backup and for a
 // backup that is about to be restored.

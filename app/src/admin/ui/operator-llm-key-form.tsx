@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The operator's own LLM keys (#276, #427; docs/decisions/0001-editions-setup-and-accounts.md, section 2.8): the keys

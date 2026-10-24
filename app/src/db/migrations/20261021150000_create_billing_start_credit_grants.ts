@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The memory of the start credit (ADR 0006, 2.16, D11; #507): one row for each GitHub account that was ever granted it. The
 // start credit is tied to the account of the installation, not to the workspace, so deleting a workspace and creating it again,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Invitations (docs/decisions/0001-editions-setup-and-accounts.md, section 2.6): how a person is brought
 // into a workspace. The rules, all enforced here and not in the pages or routes in front of this module:

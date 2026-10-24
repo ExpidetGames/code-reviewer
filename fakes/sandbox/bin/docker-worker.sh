@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 #
 # A stand-in for the `docker` executable for the hosted end-to-end journeys (#332): it takes the `docker run` the
 # Sandbox-Launcher renders (the real flags of the hardened container spec, the image id, the entry mode) and runs the

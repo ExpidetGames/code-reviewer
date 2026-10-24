@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The engine's ripgrep is the one the startup self-check verified, never a PATH lookup (#202).
 

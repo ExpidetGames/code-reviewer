@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The reaper (#364): stops the Sandbox VMs of ours that outlived their purpose. The App's signed stop
 // (`POST /stop`, #487) ends a job's VM when the job ends, and the Launcher stops the VM of a launch that failed before the

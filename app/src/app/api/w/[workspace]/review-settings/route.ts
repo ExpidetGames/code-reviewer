@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT /api/w/:workspace/review-settings: the default values of the review settings of the workspace.
 // Every member reads them; changing them needs an Admin or an Owner (they decide what every project of the

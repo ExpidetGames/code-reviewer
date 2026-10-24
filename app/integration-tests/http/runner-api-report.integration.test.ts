@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down `POST /api/runners/v1/jobs/:id/heartbeat` and `/complete` through the real handler and a
 // real SQLite file: what a holder of a job may do, what happens to a runner that lost its job, what a

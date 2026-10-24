@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reading the signed in user from request headers: asks Better Auth (which checks the session row
 // and its expiry in the database) and then the gates (a verified address, a workspace). The proxy and

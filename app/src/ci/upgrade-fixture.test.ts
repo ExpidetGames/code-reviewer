@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The database that docker/smoke/upgrade.sh puts into the image's volume (docker/smoke/fixtures/previous-release.sql)
 // is the previous release's, frozen as a text dump. It must stay exactly that: the migrations it records are the

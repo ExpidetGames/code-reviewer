@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of the fake GitHub that a reviewer reads and writes: the files and the diff of a pull
 // request, its commits, the contents of files, and the comments below it. These are the calls the

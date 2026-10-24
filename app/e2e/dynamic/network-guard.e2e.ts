@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Proves that the network guard of the privileged Dynamic e2e lane (#253) sees every kind of process
 // (e2e/dynamic/guard.nft is in the kernel of the lane's network namespace). For each user of the lane, a real

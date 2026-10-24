@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/billing/reviews/resolve: closes a billing review row with a required note and the admin as the actor,
 // optionally after a manual credit or correction of the workspace of the row (once per row), for the instance admin only

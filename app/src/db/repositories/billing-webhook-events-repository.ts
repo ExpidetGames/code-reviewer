@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The record of provider events, by `(provider, event id)` (table `billing_webhook_events`; ADR 0006, 2.12). The first
 // idempotency layer: an event id is claimed inside the transaction that applies it, so two deliveries of one event, even

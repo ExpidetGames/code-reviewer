@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the GitHub App provider with an in-memory client: the shared conformance suite, how
 // webhook deliveries are verified and translated, who may trigger a command, and the job access it

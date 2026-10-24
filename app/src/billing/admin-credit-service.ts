@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The manual credit and correction of the admin page (ADR 0006, P10; #504): find a workspace by name, see its balance and its
 // recent entries, and write a credit or a signed correction with a required note. The write is the manual adapter's

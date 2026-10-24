@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: what a verified Stripe event becomes. Pure: a parsed JSON value and the environment of the stored key come in, a
 // normalized event (or a refusal to read the body) comes out. Nothing is asked of Stripe and nothing is stored.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/operator/v1/handoff/redeem { token }: who a handoff token of "Manage plan" was made for, once.
 // Bearer token; absent (404) until `OPERATOR_API_TOKEN` is set. See src/operator-api/README.md.

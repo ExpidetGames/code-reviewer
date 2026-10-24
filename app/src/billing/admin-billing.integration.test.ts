@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing page of the admin portal end to end over a real database, the real proxy and the real data routes, with the
 // fake Stripe as the payment provider (#504): what an admin can save and read back, how the switch is judged, the connection

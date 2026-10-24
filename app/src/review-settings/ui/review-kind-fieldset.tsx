@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Review kind" card of a project's settings form (#200): exactly one of Dynamic Review and Diff

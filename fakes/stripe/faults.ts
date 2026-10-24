@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Scripted bad days of the fake Stripe API. A rule says which requests it hits (method and path), what happens and how
 // many times; the first rule with tries left that matches a request is used up by it. Stripe has idempotency keys, so

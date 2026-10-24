@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Takes secrets out of what a runner reports before it is stored. The runner redacts its own
 // output (that is the first line of defense); this is the second one, for a runner that got it

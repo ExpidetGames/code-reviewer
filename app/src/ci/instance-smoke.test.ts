@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down docker/smoke/instance.sh, the smoke test of a running instance (health, login page,
 // webhook with a wrong signature, runner API without a token). The script is run for real, as a

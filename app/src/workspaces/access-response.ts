@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a data route answers when a request may not act in a workspace (access.ts). One answer per reason,
 // `{ "error": <code> }` with `Cache-Control: no-store`:

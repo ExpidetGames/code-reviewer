@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the wiring of the hosted lane (#332): the CI job that runs it, its own Playwright configuration, the
 // Worker's container as the privileged lane makes it, and the rules the lane keeps (no skip, no retry, no secret, a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A lock that is tried, not waited for: the cron sweep (#328) runs once a minute on whichever serverless
 // instance the platform picks, and a run that finds another one still working must skip, not queue up behind it.

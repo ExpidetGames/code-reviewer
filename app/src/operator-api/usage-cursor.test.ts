@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import { MAX_USAGE_CURSOR_LENGTH, USAGE_SAFETY_LAG_MS } from "./contract.ts";

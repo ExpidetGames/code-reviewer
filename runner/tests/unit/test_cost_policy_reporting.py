@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A run that stopped at the token cap of an own key says so (#553): the same fact as a run that
 stopped at its cost limit or its time (#293), with a reason of its own."""

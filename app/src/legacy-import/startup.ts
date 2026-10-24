@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The import on the running server: called from src/instrumentation.ts after the migrations. It wires the
 // import (import.ts) to the server's database, the master key and GitHub, and turns its outcome into the log

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Dynamic Review on the models that refuse a forced tool choice or cannot run without thinking
 (#533).

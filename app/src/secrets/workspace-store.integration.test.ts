@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the encrypted secret store of a workspace against a real SQLite file: the LLM key goes in
 // encrypted and comes back exactly, a ciphertext copied to another workspace or another name is worthless,

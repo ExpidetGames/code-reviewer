@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Lets a test run something between two statements of a transaction: a Kysely plugin that awaits a callback after a query has
 // answered, before the caller sees the answer. The callback does its work on another connection of the same database (a

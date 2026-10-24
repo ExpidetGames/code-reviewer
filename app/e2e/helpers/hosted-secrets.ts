@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the hosted lane (#332) knows that no log, page or record may hold, besides the dummies of the environment: the
 // per-job credentials (the stand-in keeps a copy of every start document, `docker-worker.sh`, `E2E_STDIN_COPY_DIR`), the

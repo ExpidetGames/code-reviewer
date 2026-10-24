@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "Test" button of the operator's keys in the admin portal (#427): one cheap call to the provider that says
 // whether the key is accepted (`checkLlmKey`, the call the workspace's button makes through the provider's adapter).

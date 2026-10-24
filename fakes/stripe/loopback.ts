@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake Stripe API never touches a network: it listens on, and delivers webhooks to, the loopback of this machine only.
 

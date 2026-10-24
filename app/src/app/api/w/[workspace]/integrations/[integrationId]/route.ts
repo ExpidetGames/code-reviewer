@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // DELETE /api/w/:workspace/integrations/:integrationId: ends a connection of the workspace (an Owner or Admin).
 // The connection and its repositories are switched off; projects, runs and the link of the installation to the

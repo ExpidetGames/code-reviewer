@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What stands between an instance and a billing that can be on (ADR 0006, 2.14): the rates for every adapter (A, both B and
 // the Diff AI reserve), and for Stripe also the API key, the webhook secret, a passing connection check and the link to the terms. The same list

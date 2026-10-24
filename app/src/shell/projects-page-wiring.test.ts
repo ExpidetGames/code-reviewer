@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the Projects page hands the play button's permission to the list (#655): the page
 // asks `can(role, "start_review")` and passes the answer on as `canStartReview`. Every real role may

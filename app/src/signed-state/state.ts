@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Signed, single-use `state` values for a round trip through the browser and GitHub (see README.md). The
 // value that travels is signed and names a nonce; the nonce is a row in `signed_states` that is used up

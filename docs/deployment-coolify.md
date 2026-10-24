@@ -1,5 +1,11 @@
 # Deploying Code Reviewer on Coolify
 
+> **Internal reference, not a supported way to run code-review.com.** The source is visible but not
+> licensed for use, copying or hosting, and the service cannot be self-hosted (`LICENSE`, #677). This
+> guide stays only because `compose.coolify.yml` and its CI checks still exist; both are candidates for
+> removal together with the self-host mode. Do not publish or hand out this guide as an installation
+> manual.
+
 This guide takes a team from an empty Coolify server to the first real review on one of its own
 repositories. Plan for about two hours, most of it waiting for DNS, the build and GitHub. It is written
 against Coolify's current documentation (links in each step); the first deployment with the customer is
@@ -56,7 +62,7 @@ started with the rest, but idle until an instance admin turns Dynamic Review on,
 | Question | Decision | Why |
 |---|---|---|
 | Coolify resource type | **Git repository, build pack "Docker Compose"**, file `/compose.coolify.yml` | The Compose file lives in the repository, so a deployment is always "this commit". Compose gives the two containers, the two volumes and the health check in one definition. ([Coolify: Docker Compose](https://coolify.io/docs/applications/builds/docker-compose)) |
-| How the images get to the server | **Coolify builds both images from the repository** with its own GitHub App access. The published images on GHCR are not used. | No registry credential on the server, see below. |
+| How the images get to the server | **Coolify builds both images from the repository** with its own GitHub App access. No image is published. | No registry credential on the server, see below. |
 | Branch | `main` | `main` holds released versions; `development` is the integration branch. |
 | Domain | One domain on the service `app`, `https://<domain>:3000` | The proxy terminates TLS; the `:3000` is the port inside the container. |
 | Storage | Two named volumes: `data` (the SQLite database) and `backups` | Both survive redeploys. They live in the Compose file. |
@@ -64,34 +70,21 @@ started with the rest, but idle until an instance admin turns Dynamic Review on,
 | Instances | **Exactly one** app instance | [Section 10](#10-one-app-instance-only). |
 | Updates | Push or merge to `main` (automatic or manual deploy), or press Redeploy | [Section 11](#11-updates-and-rollback). |
 
-### Why build from the repository and not pull from GHCR
+### Why build from the repository
 
-CI publishes both images to GHCR on every push to `development` and `main` (workflow
-`.github/workflows/publish-images.yml`): `ghcr.io/expidetgames/code-reviewer-app` and
-`ghcr.io/expidetgames/code-reviewer-runner`, each with the tags `sha-<first 7 characters of the
-commit>`, plus `development` (moves with the branch `development`) or `latest` (moves with the branch
-`main`). The packages are **private**, so a server can pull them only with a registry login. That is
-possible in Coolify (Registries, then *Log in*, preset GHCR), but it was not chosen:
+No image of the project is published to a registry (#677): the source is visible but not licensed for
+use or hosting, and a public image would let anybody run the service. Earlier, CI pushed private
+images to GHCR; that workflow is gone. The server therefore builds both images from the repository:
 
-- It needs a GitHub personal access token with `read:packages`, stored on the server in Docker's
-  `config.json`, where it is encoded, not encrypted
-  ([Coolify: Docker registries](https://coolify.io/docs/applications/builds/docker-registries)). That is
-  one more long lived credential tied to a person.
-- A token that expires or is revoked breaks every pull from `ghcr.io` on that server, including
-  Coolify's own helper image
-  ([Coolify: expired token](https://coolify.io/docs/troubleshoot/docker/expired-github-personal-access-token)).
 - Coolify needs read access to this repository anyway (its GitHub App), so building from the repository
-  adds no new credential and no new place where access can lapse.
+  adds no registry credential and no new place where access can lapse.
 - The Dockerfiles are the ones CI builds and smoke tests on every pull request, so the images are not
   different, only built on the server. A failed build does not replace the running application
   ([Coolify: deployments](https://coolify.io/docs/applications/deployments/overview)).
 
 The price: a deployment takes a few minutes of CPU and memory on the server (the first one longest; Docker's
-layer cache makes later ones shorter), and nothing starts from the exact image CI pushed. If the build
-load is a problem, Coolify can build on a separate
-[build server](https://coolify.io/docs/troubleshoot/server/crash-during-build). If the team later
-prefers GHCR, it needs a variant of `compose.coolify.yml` with `image:` lines instead of `build:` and the
-registry login above; the tags to pin are the ones named in this section.
+layer cache makes later ones shorter). If the build load is a problem, Coolify can build on a separate
+[build server](https://coolify.io/docs/troubleshoot/server/crash-during-build).
 
 ## 3. The GitHub things, and the order
 
@@ -345,8 +338,7 @@ What to know:
 
 Billing is off by default and needs nothing from this guide: no variable, no new port, no change to the Compose files. If you
 never switch it on, nothing changes. If you want a prepaid balance for your workspaces, the switch is in the admin portal, menu
-**Billing**. Read [`billing-self-hosting.md`](billing-self-hosting.md) (the `manual` adapter, what changes when it is on) or, if you
-take payments with Stripe, [`billing.md`](billing.md). The Stripe webhook needs the address in `BETTER_AUTH_URL` to be reachable
+**Billing**; the guide is [`billing.md`](billing.md). The Stripe webhook needs the address in `BETTER_AUTH_URL` to be reachable
 from the internet over https, and a rate limit on `POST /api/billing/webhook` in the proxy in front of the server is recommended.
 
 ## 8. Storage and backups
@@ -621,7 +613,7 @@ App ([`github-app.md`](github-app.md), webhook secret rotation).
 
 ## 11. Updates and rollback
 
-> **Release with check runs and review verdicts (#405).** Accept the new *Checks* permission of the GitHub App on each installation, and know that every existing project starts to submit a review verdict (`APPROVE` / `REQUEST_CHANGES`) after the update; set a project's *Review verdict* to `off` to keep it as it was. Details: [Updating to the release with check runs and review verdicts](../README.md#updating-to-the-release-with-check-runs-and-review-verdicts).
+> **Release with check runs and review verdicts (#405).** Accept the new *Checks* permission of the GitHub App on each installation, and know that every existing project starts to submit a review verdict (`APPROVE` / `REQUEST_CHANGES`) after the update; set a project's *Review verdict* to `off` to keep it as it was. The *Check the permissions* list on the Integrations page names a missing *Checks* ([`github-app.md`](github-app.md)).
 
 **Update.**
 

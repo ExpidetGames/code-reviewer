@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the fake LLM (fakes/llm) over real HTTP the way PR-Agent speaks to it through LiteLLM's
 // OpenRouter path: a canned answer per kind of prompt, the key of the request recorded, and errors

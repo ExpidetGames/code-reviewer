@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for what the GitHub data routes answer: one sentence per stable code (src/github-config/errors.ts,
 // the issue codes of settings.ts and the outcomes of the manifest flow and of the linking). The codes are the

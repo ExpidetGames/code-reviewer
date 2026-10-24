@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The model catalog as far as the selection settings of a project need it (#430, ADR 0005, 2.7): which entries a
 // workspace on the operator's key may pick from, and whether one may be chosen for a review kind. Everything here

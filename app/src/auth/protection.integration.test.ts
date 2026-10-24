@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who gets in: the access proxy in front of every route, driven with real requests
 // against a real Better Auth instance and a real SQLite file. Without a valid session a page sends

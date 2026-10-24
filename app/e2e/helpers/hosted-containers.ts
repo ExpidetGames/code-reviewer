@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads the records the `docker` stand-in of the hosted lane (fakes/sandbox/bin/docker-worker.sh) leaves for every
 // `docker run`. The stand-in writes `.name`, `.pid` and `.env` first and `run-<n>.args` last, by a rename (#380); the

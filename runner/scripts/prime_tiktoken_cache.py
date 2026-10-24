@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Downloads the tiktoken encoding PR-Agent counts tokens with into tiktoken's cache directory.
 

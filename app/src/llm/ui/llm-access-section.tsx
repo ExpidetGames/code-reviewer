@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "LLM access" sub-page of the workspace settings (#178, #426): one card per registered provider, each
 // with the write-only key form of that provider (an Admin or an Owner), or one card with whether reviews have a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The daily repository sync of a serverless deployment (#319): the platform's cron calls it with the
 // shared secret, it runs the same full sync the server runs at start, and it answers with counts only.

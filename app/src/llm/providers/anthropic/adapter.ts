@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The complete Anthropic (Claude API, direct) adapter: its descriptor and the two calls the server makes. Server
 // code only (it is listed in ../server.ts); a client component imports the descriptor.

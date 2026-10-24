@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #511-T12: the claim of a job whose provider is Anthropic (the real adapter, not a test double). A workspace on its own
 // key runs on the provider and model its project names with the key of that provider and no other; the model's

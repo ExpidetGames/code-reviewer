@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // #657-T04: the text of a posted review is shown readably (headings, lists, code, quotes) and safely: it is text from outside,

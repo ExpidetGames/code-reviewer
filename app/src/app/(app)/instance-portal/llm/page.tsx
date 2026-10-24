@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // LLM keys: the operator's own key of each provider, for the workspaces whose key mode is managed (#276, #427), and below
 // them the model catalog those workspaces choose from (#429). Instance admin only.

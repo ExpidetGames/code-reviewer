@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The part of each GitHub webhook payload that Code Reviewer reads, as data. `events.ts` checks a
 // payload against it before it reads anything, and the contract test checks the recorded payloads in

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the adapter knows about a model, answered from the list in `models.ts`: no network call, no credential.
 // Another provider's public metadata has to be asked; here the list is the source, so the answer cannot fail or

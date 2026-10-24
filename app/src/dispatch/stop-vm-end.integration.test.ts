@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The end of a VM's billable minutes (#493): when the Dispatcher's answer to the App's stop call names the VMs it is
 // stopping, the App's clock at that moment is their end (`app_stop_confirmed`). Any other answer, or none, leaves the end

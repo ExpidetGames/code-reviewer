@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The parts of the fake Stripe (fakes/stripe) that are pure: the reading of a form body, the shapes it is built from and
 // the signer. The server itself is exercised in src/billing/stripe-fake*.integration.test.ts.

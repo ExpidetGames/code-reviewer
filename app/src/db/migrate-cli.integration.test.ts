@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm migrate` against a real Postgres (#319): it applies the migrations over the direct connection
 // while holding a session advisory lock, so two deployments cannot migrate at once, and a failing

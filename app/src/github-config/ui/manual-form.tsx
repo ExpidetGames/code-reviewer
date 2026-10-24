@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The step-by-step way to connect GitHub: the six values of an App that was made by hand (docs/github-app.md),

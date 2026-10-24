@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The LLM section of a workspace on the operator's key (#433, #656, #675, ADR 0005): a provider dropdown that names the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How a project form becomes requests (#200). The settings API treats a request as follows (#194):
 // any Diff field replaces the whole Diff group, a request with only project-only fields keeps the

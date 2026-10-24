@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The account page: who you are here, your address, and the GitHub account linked to your account
 // (#179). Exactly two cards, Email and GitHub, each with one status badge and one line; the long

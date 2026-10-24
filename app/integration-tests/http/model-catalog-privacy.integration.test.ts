@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The model of a catalog entry is operator data (#432, ADR 0005, 2.17): a workspace on the operator's key selects an
 // entry and never sees which model backs it. This test makes entries with ids no other test uses, runs managed jobs of

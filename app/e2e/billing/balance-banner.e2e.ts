@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The balance banner of the workspace pages, end to end (#506-T10), on the app of the billing journeys of the admin portal: with billing
 // on, the Owner of the default workspace sees a warning above the pages of the workspace while the balance is below the threshold, an

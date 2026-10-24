@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The four tables Better Auth reads and writes through its Kysely adapter (users, sessions,
 // accounts, verifications), with the names and columns that src/auth/auth.ts maps its model to.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A tool schema reduced to what Anthropic's strict tool use accepts (#533).
 

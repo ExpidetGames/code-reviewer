@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The service of the billing review rows (#603) over a real database on SQLite and, when TEST_DATABASE_URL is set, Postgres,
 // with several requests in flight at once (every connection of the pool is its own): the journal holds at most one entry for a

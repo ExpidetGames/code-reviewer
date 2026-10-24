@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The setup session: what the browser holds after it entered the correct setup code. A signed cookie
 // (HMAC with a key derived for this purpose from the app secret), HttpOnly, SameSite=Strict, Secure

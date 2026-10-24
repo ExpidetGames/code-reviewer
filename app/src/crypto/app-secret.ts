@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `APP_SECRET`, the master key of the instance (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.1). `BETTER_AUTH_SECRET`, its old name, is accepted in its place when `APP_SECRET` is not

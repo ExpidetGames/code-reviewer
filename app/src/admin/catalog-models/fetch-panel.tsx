@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The fetch of the models.dev catalog (#554): when it last worked, when it was last tried, how it ended (the stable code,

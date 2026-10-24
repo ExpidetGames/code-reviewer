@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The repository of the model catalog (#425) on a real SQLite file and, when TEST_DATABASE_URL is set, on a real
 // Postgres: the same code, the same answers.

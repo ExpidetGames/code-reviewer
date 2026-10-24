@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The binding of installations on the running server: the real database, the registry, the process-wide
 // synchronization (whose lock the binding shares), the credentials of the GitHub App as the admin saved them

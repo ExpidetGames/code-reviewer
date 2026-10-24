@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down where PR-Agent 0.47.0 reads a repository's `.pr_agent.toml` from, as the runner
 configures it: the default branch of the repository, through the contents API without a ref. Not

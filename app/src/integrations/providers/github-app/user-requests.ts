@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls to GitHub that are made with the USER token of the GitHub App (the token a person gets from the App's
 // user authorization), for the binding of an installation to a workspace (docs/decisions/0001-editions-setup-and-

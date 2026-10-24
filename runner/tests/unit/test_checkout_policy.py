@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Checkout policy is applied to names and modes before any blob is read."""
 
 import pytest

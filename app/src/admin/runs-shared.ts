@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the job view of the admin portal (#541): the real database and the
 // secrets the app knows (to take them out of a view should one slip through). Pages ask for the service

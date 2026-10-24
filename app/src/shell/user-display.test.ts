@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the user menu shows about a person: the name or, without one, the login; at most
 // two initials that always fit the avatar circle; and only https avatar addresses on GitHub's avatar host,

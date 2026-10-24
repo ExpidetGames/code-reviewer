@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which golden snapshots survive a new build (#330): the newest `keep` (the current one and the previous
 // ones), plus every pinned id (the snapshot the Dispatcher is configured with, which can be older when a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the review routes answer and the review page shows (#603): plain data made of what the application stored about an
 // event it did not apply, never the provider's payload, a buyer or an amount the provider sent. It lives beside the page, not

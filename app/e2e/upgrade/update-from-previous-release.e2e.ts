@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The update of a running installation, end to end: the database and the environment of the previous release
 // (five people who signed in with GitHub, a connection with two repositories, finished reviews, the GitHub App,

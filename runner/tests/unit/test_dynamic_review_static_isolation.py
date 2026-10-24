@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The one-time network setup of the Dynamic runner and the end of NET_ADMIN (#244), without root.
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The extractor and the repair messages of the plain-JSON finalization (#552, spike #547).
 

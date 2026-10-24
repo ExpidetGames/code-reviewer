@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The shapes in fakes/fixtures/stripe/ (see its README): each object the fake makes starts as a copy of one.
 import { readFileSync } from "node:fs";

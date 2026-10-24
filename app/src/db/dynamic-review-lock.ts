@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance gate may have no row yet. A transaction advisory lock covers that case too:
 // Lock order: gate first, then a workspace-scoped repository/project (when needed), then jobs by id.

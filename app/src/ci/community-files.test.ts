@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the community files that GitHub looks for (CONTRIBUTING.md, CODE_OF_CONDUCT.md,
-// SECURITY.md): that they exist, that the Code of Conduct has a real way to report, that the
-// contribution guide names the commands and rules the project actually has, that their relative
-// links resolve and that the public files mention nothing internal.
+// Pins down the community files that GitHub looks for (CONTRIBUTING.md, SECURITY.md): that they
+// exist, that the contribution guide says that external contributions are not accepted and still
+// names the commands and rules the team actually has, that the security policy has a real way to
+// report, that their relative links resolve and that the public files mention nothing internal.
+// The project is proprietary (#677): there is no code of conduct for a community that does not exist.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,7 @@ function relativeLinks(text: string): string[] {
   return [...inline, ...definitions].map((match) => match[1] ?? "");
 }
 
-const files = ["CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md"] as const;
+const files = ["CONTRIBUTING.md", "SECURITY.md"] as const;
 
 describe.each(files)("%s", (file) => {
   const text = read(file);
@@ -65,23 +66,8 @@ describe("relativeLinks", () => {
 });
 
 describe("CODE_OF_CONDUCT.md", () => {
-  const text = read("CODE_OF_CONDUCT.md");
-
-  it("adopts the Contributor Covenant 2.1", () => {
-    expect(text).toContain("Contributor Covenant Code of Conduct");
-    expect(text).toContain("version 2.1");
-  });
-
-  it("names a working way to report instead of the template placeholder", () => {
-    expect(text).not.toContain("[INSERT CONTACT METHOD]");
-    expect(text).toContain(
-      "https://github.com/ExpidetGames/code-reviewer/security/advisories/new",
-    );
-  });
-
-  it("accepts conduct reports through the private reporting channel", () => {
-    expect(text).toMatch(/conduct reports are explicitly accepted/);
-    expect(text).toContain('start the title with "Code of conduct"');
+  it("does not exist, because the project has no community to set rules for", () => {
+    expect(existsSync(`${repoRoot}CODE_OF_CONDUCT.md`)).toBe(false);
   });
 });
 
@@ -93,6 +79,11 @@ describe("SECURITY.md", () => {
       "https://github.com/ExpidetGames/code-reviewer/security/advisories/new",
     );
     expect(text).toMatch(/do not (open|report)[^.]*public issue/i);
+  });
+
+  it("is about the hosted service and not about versions or images that somebody runs", () => {
+    expect(text).toContain("hosted service");
+    expect(text).not.toMatch(/published container images|compose\.yml/);
   });
 
   it("states supported versions, response times and the disclosure policy", () => {
@@ -122,18 +113,29 @@ describe("CONTRIBUTING.md", () => {
     expect(text).toContain("`development`");
   });
 
-  it("says contributions are under Apache-2.0 without a contributor license agreement", () => {
-    expect(text).toContain("Apache License, Version 2.0");
-    expect(text).toMatch(/no (CLA|contributor license agreement)/i);
+  it("says up front that external contributions are not accepted", () => {
+    const start = text.slice(0, 800);
+
+    expect(start).toContain("External contributions are not accepted");
+    expect(start).toContain("proprietary");
+    expect(start).toContain("LICENSE");
+    expect(start).toMatch(/in writing/i);
   });
 
-  it("points newcomers to the labels good first issue and help wanted", () => {
-    expect(text).toContain("good first issue");
-    expect(text).toContain("help wanted");
+  it("states the proprietary header and no longer an open source license or a contributor agreement", () => {
+    expect(text).toContain("SPDX-License-Identifier: LicenseRef-Proprietary");
+    expect(text).not.toMatch(/Apache License, Version 2\.0/);
+    expect(text).not.toMatch(/licensed under the same terms/i);
   });
 
-  it("links the code of conduct and the security policy", () => {
-    expect(text).toContain("CODE_OF_CONDUCT.md");
+  it("no longer invites anybody to pick up an issue or to fork", () => {
+    expect(text).not.toContain("good first issue");
+    expect(text).not.toContain("help wanted");
+    expect(text).not.toMatch(/Fork the repository|your fork/i);
+    expect(text).not.toContain("CODE_OF_CONDUCT.md");
+  });
+
+  it("links the security policy", () => {
     expect(text).toContain("SECURITY.md");
   });
 });

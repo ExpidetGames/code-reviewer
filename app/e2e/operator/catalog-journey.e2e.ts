@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Providers and the model catalog, from the admin portal to a member's run, and what no member may read on the way
 // (#435, the last issue of #420). On a new multi-tenant instance with the operator API on, through the real UI and the

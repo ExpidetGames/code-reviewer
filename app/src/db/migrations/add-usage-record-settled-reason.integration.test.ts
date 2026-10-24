@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #273: the usage records get a reason for a settlement without a report of the run. The column is nullable, so a
 // record written the way the previous release writes it (without the column) is still valid and has no reason, and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pure mapper of the tier migration (#434, `model-tiers-to-catalog.ts`): which catalog entries the old tier
 // configuration becomes, which are the instance defaults, and how a project's stored settings change. No database here;

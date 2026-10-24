@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how a stored integration type is turned into its provider, and that every way of not
 // finding one ends in a stable error code.

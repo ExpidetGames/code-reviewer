@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The billing page of the admin portal (#504, ADR 0006, 2.14): the switch with the statement of what it does, the payment

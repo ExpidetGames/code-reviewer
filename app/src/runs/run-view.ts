@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the pages and the polling endpoint know about a run: plain data worked out from a stored job.
 // This is the boundary between the database row and the browser. Only fields listed here leave the

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Lease loss, shutdown and timeout end a real job with a real engine user (#197-T07).
 

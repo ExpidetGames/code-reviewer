@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down secret redaction: the exact secrets of a job are replaced wherever they appear (also
 quoted or encoded), well known token shapes are replaced even when the runner does not know them,

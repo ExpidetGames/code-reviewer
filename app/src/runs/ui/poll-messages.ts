@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the runs pages say when a poll fails: the generic notice (the last data stays, the page keeps
 // trying), and the sentence for a failure that ends polling for good.

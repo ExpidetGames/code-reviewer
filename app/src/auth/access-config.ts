@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The allow list: who may use this instance. Read from `ALLOWED_GITHUB_LOGINS` (comma separated
 // GitHub logins) and `ALLOWED_GITHUB_ORG` (members of one GitHub organization). When both are set,

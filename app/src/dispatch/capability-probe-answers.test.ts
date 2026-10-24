@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the sender (#326) makes of a `503` with `Retry-After` and of a `200 not_capable` (#331). Since #479 the Dispatcher
 // runs no capability probe on a dispatch, so a `503` comes from a busy or failing Dispatcher or platform and

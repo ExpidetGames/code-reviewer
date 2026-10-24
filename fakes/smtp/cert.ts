@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A throwaway self-signed certificate for the fake SMTP server, made in memory every time the fake starts.
 // Node can parse certificates but cannot make one, and committing a private key (even a dummy) is not

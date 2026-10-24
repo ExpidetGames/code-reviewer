@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What went wrong with a mail server, as a stable code and a sentence that is safe to show the admin
 // (the test mail button, docs/decisions/0001-editions-setup-and-accounts.md, section 2.3). The mail

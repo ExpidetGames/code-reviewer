@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The fallback egress ruleset in the job phase, behind the production startup step (#345-T18).
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The proof that the privacy search of the catalog journey (#435) is not blind. The texts below carry a model id, a
 // provider and a key in the shapes a page or an answer really holds them, and the search has to reject every one. They

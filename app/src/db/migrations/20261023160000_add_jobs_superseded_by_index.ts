@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #658: an index on `jobs.superseded_by`. The column refers to `jobs.id`, so deleting a job makes the database look for a job that
 // still points at it; without an index that is a scan of the whole table for every deleted job, and deleting a workspace with

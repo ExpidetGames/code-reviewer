@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The structure test of workspace scoping (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.7: "a test fails when a repository function takes no workspace"). It reads the source of

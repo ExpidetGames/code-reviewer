@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The per-call trace of one Dynamic Review (#541): what each model call and each tool call was,
 as numbers and stable names, never as content.

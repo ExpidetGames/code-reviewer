@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for what the billing data routes answer: one sentence per stable code (src/billing/admin-errors.ts), per refused
 // field and per item that keeps billing from being switched on (src/billing/readiness.ts). The codes are the contract, these

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes of a models.dev fetch that did not change the catalog (#548). They are stored (`last_error` of the
 // fetch state), logged and shown by a caller; nothing the upstream said, and no address, is ever part of one.

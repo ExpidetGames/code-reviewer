@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the provider's public model metadata says about a model (#269): does it support the tool calling
 // Dynamic Review needs (`tools` and `tool_choice`), and which other capabilities does it list. The question

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the error codes of the workspace routes (the UI translates a code to copy, never the other
 // way round).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which fields of a price differ between the one an admin confirmed and the one now (#554), so that a stale price says what
 // moved. Pure. Client safe.

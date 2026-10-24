@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the composite action that loads the CI secrets from Infisical
 // (.github/actions/infisical-ci-secrets/action.yml, #403): production only, so the Infisical environment is

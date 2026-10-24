@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a signed in person without a workspace sees (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.6), as a component over plain data so it is tested without a server:

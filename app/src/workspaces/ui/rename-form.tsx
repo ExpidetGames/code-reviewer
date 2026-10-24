@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // Renames the workspace (an Owner; the address, the slug, stays). One form with one explicit save and

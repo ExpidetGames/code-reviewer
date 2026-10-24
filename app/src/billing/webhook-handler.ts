@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `POST /api/billing/webhook` (ADR 0006, 2.12; #497): generic, the same for every provider. It is a
 // function of its collaborators, so the route file only wires the real ones in (`shared.ts`) and tests wire fakes in.

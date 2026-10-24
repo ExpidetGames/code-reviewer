@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The startup of `worker-once` (#324): the same hardened sequence as every mode, before any job.
 

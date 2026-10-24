@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What the reviewer is given, taken from the verified preparation (#197, wiring of #196).
 

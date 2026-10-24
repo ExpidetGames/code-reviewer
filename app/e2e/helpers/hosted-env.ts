@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Addresses, files and dummy credentials of the hosted end-to-end lane (#332, playwright.hosted.config.ts and the
 // journeys of e2e/hosted/): the app in its serverless mode over Postgres, the Dispatcher as a process, and the loopback

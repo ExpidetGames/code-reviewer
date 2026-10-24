@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The scripts the golden snapshot pipeline runs in the VMs (#330), as pure functions of the configuration so
 // that a test can read, syntax check and (the scan) run them. Every one starts with `set -euo pipefail`.

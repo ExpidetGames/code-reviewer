@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The preflight of the privileged Dynamic e2e lane (#253): the first thing the lane does, before it
 // starts a server, a runner or a browser. The lane needs a root supervisor, the pinned OpenCode and `rg`

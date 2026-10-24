@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing page of the admin portal, end to end (#504-T16), on the app of the catalog admin journey (an instance of its
 // own): the admin opens the page and finds billing off with the statement of what switching it on does, saves a Stripe API key

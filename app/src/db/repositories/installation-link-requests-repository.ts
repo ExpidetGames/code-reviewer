@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the requests of ONE workspace to link an installation that the instance admin decides
 // (src/installation-binding/requests.ts). The factory takes the workspace id; see ../workspace-scope.ts. The

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one writer of the instance setting `billing_settings` (ADR 0006): reading it leniently and changing it as one step. A
 // change is a read-modify-write under the advisory lock of `db/billing-settings-lock.ts` in one transaction, so the rates

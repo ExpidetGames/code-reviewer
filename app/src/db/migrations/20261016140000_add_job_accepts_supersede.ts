@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #397: whether the holder of a claim understands that its run can be superseded (the feature `supersede` of
 // #396). A running job is superseded only when it is set, so a runner or Worker of an earlier release, which would

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The count of runs that settled without a known cost, per workspace and key mode (#385; src/usage/README.md,
 // "Counting unknown costs"), on SQLite and, when TEST_DATABASE_URL is set, on Postgres. The count is read from the

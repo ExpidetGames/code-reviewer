@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A section that a later issue fills (mail, integrations): a heading and a sentence on what will be
 // here. On the component kit (#185): the shadcn `Empty` block instead of the deleted legacy wrapper,

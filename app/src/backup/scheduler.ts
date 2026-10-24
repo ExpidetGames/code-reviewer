@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The daily timer inside the app. At the configured time of day (UTC) it runs the backup job, notes
 // how it went (for the status route) and arms the next day. A failing run never stops the schedule.

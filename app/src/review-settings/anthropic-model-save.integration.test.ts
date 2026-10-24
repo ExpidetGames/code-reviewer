@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Saving the models of the Anthropic provider (#532): what the form suggests for a kind is accepted when it is saved
 // (as the pair of provider and model), and a model that cannot serve a Dynamic Review is refused on its field. The

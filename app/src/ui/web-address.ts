@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A web address that is safe to put in a link: only http(s), never a `javascript:` or `data:` address.
 

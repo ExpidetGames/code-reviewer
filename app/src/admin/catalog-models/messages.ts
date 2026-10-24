@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the catalog screens of the admin portal say (#554). A stable code from a route becomes a sentence here, never the
 // other way round; every table is typed over the codes it translates, so a new code is a compile error until it has its

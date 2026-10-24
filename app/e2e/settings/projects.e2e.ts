@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the project list and the settings pages in a real browser, against a production build
 // next to the fake GitHub: a person syncs the repositories of an installation, switches one on,

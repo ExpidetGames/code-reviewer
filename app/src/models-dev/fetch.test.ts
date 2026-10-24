@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Fetching the body (#548): a size cap before parsing, a time limit, no redirect, and a stable code for each way it can
 // fail. Runs against the models.dev fake on loopback; nothing leaves the machine.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What the passthrough proxy asks of the budget ledger beyond the legacy path (#550).
 

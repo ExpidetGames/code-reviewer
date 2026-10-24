@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down, in a real browser, that the settings of a repository can be opened and saved before the
 // repository is activated: the project list links an inactive repository to its settings, the page

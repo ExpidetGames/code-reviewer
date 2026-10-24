@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the check run of a review says for each state of its job (#405): the status GitHub shows, a conclusion
 // that is never red, a title, and a summary made of fixed sentences, counts and the link to the review. Nothing a

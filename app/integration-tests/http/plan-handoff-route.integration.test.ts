@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/plan-handoff through the real route file, with the wiring the running server uses (the
 // database opened at start, the workspace access); only the session lookup and `connection()` are replaced, they

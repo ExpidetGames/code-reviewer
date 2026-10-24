@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """How the supervisor starts the engine as the dedicated user (#197), as far as it needs no root.
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The billing review rows of the admin portal (#603, ADR 0006): the events the webhook recorded as money that moved (or claimed

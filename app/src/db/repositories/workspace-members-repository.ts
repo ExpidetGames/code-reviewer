@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the members of ONE workspace (the table `workspace_members`): who belongs to it and with which
 // role. Created for a workspace like every repository of customer data (src/db/README.md, "Workspace

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sync that runs when the server starts: it fills the tables, and whatever goes wrong
 // (GitHub down, settings missing, no database) is logged and never stops the start.

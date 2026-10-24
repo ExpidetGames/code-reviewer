@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake SMTP server of the app's tests (fakes/smtp): a real SMTP server on a loopback port that keeps
 // what it is sent, closed after the test. The app's mail sender talks to it over the real protocol, so a

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The thinking blocks of a Dynamic run on a model that cannot run without thinking (#533).
 

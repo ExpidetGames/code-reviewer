@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin portal in a real browser against a production build: the instance admin signs in with email
 // and password and finds the sections and the checklist; a person signed in with GitHub who is not

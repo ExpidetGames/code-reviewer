@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The closed list of the codes a probe that gave no verdict can name (`ProbeFailure` of
 // contracts/probe-verdict.v1.json, a test holds the two equal): what the log, `POST /probe` and the deploy canary

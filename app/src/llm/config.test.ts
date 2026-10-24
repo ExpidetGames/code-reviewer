@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the instance's LLM defaults (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the one rule for an LLM
 // key that the key routes, the legacy import and the workspace settings share. A wrong optional

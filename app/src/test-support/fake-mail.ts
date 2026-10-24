@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A mail sender for tests (the double of src/mail/sender.ts): it keeps every message it is asked to
 // send in an outbox instead of sending it, can be switched to "not configured" (the instance without a

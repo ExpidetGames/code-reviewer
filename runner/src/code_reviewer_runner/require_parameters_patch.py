@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Makes every request of a Diff job carry the provider's require-parameters field (#270, #424).
 

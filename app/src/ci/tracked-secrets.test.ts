@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Scans every file that git tracks or would track (not ignored; documentation and examples included)
 // for private key blocks and the shapes of well-known access tokens. Test values in this repository are fixed dummies or are

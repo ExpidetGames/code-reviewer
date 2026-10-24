@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The engines file: the verdict of the startup self-check, kept for whatever starts Workers (#324).
 

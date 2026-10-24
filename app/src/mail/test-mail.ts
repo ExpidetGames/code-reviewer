@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "send test mail" button of the admin portal (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.3): one message to the admin's own address, with the saved settings, and the class of the failure

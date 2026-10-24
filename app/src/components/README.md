@@ -1,6 +1,6 @@
 # The component kit (epic #165)
 
-This folder is the app side of the shadcn/ui kit. It is Apache-2.0. The copied primitives live next
+This folder is the app side of the shadcn/ui kit. It is proprietary like the rest of the code. The copied primitives live next
 to it, under `ui/`, and keep their MIT header (see `THIRD_PARTY_LICENSES.md` and
 `app/src/ci/spdx-headers/rules.ts`).
 

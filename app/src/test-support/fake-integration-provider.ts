@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A stand-in for a real integration provider, so that jobs, the runner API and the UI can be built
 // and tested without GitHub. It speaks a small made-up "platform format" in its webhooks (see

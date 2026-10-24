@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The trigger policy for automatic reviews is a pure function: which pull request events start a
 // review, which wait, which are dropped. No database, no GitHub.

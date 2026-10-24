@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The migration that introduces workspaces (migrations 20261011160000 to 20261011160200): an
 // installation that holds data keeps every row and gets one default workspace, an empty one gets

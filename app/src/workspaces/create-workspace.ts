@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Creating a workspace on behalf of a user (docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.3 and 2.6). Only a multi-tenant instance lets users create workspaces; a single-tenant

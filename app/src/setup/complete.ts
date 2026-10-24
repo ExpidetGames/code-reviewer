@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Completion of the first-run setup (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.2, point 4): one transaction that creates the instance admin, stores the choices, creates or

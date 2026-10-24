@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The sub-navigation of the workspace settings (#178): one link per sub-page, the current one carries `aria-current="page"`,

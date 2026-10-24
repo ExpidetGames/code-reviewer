@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: the evaluation of SPDX license expressions, the form in which package metadata names
 // licenses ("MIT", "(MIT OR Apache-2.0)", "Apache-2.0 AND LGPL-3.0-or-later").

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Invitations by mail in a real browser against a production build and the fake SMTP server, in a
 // multi-tenant instance: a person signs up, confirms the address from the mail, creates a workspace and

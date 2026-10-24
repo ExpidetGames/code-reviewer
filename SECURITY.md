@@ -6,11 +6,8 @@ to us, and we are grateful for reports that follow this policy.
 
 ## Supported versions
 
-The project is still in development and has no stable release yet. Until it has one, only the
-current state of the `main` branch (and the images published from it) receives security fixes.
-
-Once releases exist, this table will list them. The rule will be: the latest release gets fixes,
-older releases do not.
+code-review.com is a hosted service: there are no versions for you to run. The service runs the
+current state of the `main` branch of this repository, and only that receives security fixes.
 
 | Version | Supported |
 |---|---|
@@ -55,12 +52,13 @@ describes the problem, the affected versions and the fix.
 
 ## Scope
 
-In scope: the code in this repository, the published container images, and the default
-configuration in `compose.yml`.
+In scope: the hosted service at code-review.com and the code in this repository that it runs. Please
+test only against your own account and your own repositories, never against other customers' data,
+and do not run denial-of-service tests.
 
 Out of scope: vulnerabilities in third party software that we only depend on (report those
-upstream, for example to the [PR-Agent](https://github.com/qodo-ai/pr-agent) project), missing
-hardening in a deployment that you run yourself, and findings that need a maintainer account or
-physical access to the machine.
+upstream, for example to the [PR-Agent](https://github.com/qodo-ai/pr-agent) project), copies of the
+code that someone runs outside the service (the source is not licensed for that, see
+[`LICENSE`](LICENSE)), and findings that need a maintainer account or physical access to the machine.
 
-For problems that are not security related, use the normal [issue forms](https://github.com/ExpidetGames/code-reviewer/issues/new/choose).
+For problems that are not security related, use the support channel of the service.

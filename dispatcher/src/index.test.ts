@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { REAP_PATH } from "./reaper/route.ts";

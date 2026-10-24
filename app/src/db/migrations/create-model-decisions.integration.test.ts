@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #549: the migration of the admin's model decisions is expand only: it adds two empty tables to a database made by the
 // previous release's migrations and changes no existing row, so an app of the previous release keeps working on it.

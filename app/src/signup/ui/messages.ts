@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the error codes of the sign-up and the email verification routes (the UI translates a code
 // to copy, never the other way round). Nothing here says whether an address has an account or is allowed:

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The golden snapshot pipeline's port (service.ts) over the Vercel Sandbox SDK (#330). The only file of the
 // pipeline that knows the platform. The SDK is handed in, so a test drives the adapter with a stand-in and

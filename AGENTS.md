@@ -1,6 +1,8 @@
 # AGENTS.md
 
-Rules for every agent (and human) working in this repository.
+Rules for every agent (and human) working in this repository. The repository is source-visible but
+proprietary (`LICENSE`): it is public for transparency only, code-review.com is a hosted service and
+not self-hostable, and external contributions are not accepted.
 
 ## What this is
 
@@ -34,8 +36,7 @@ and `CONTRIBUTING.md`.
   `#14: add runner skeleton`. **Never add a `Co-Authored-By` trailer.**
 - PR title: `<summary in English> (#<n>)`. The description has `Closes #<n>`, what changed, the checks
   run locally, and follow-ups. Maintainers and agents add a test case mapping table
-  (`Test case | Test file / name | Status`) covering every test case of the issue; for outside
-  contributors it is optional.
+  (`Test case | Test file / name | Status`) covering every test case of the issue.
 - Never run `git reset --hard`, `git clean`, `git stash`, `git checkout -- .` or force pushes on
   shared branches.
 
@@ -70,8 +71,9 @@ Run from the repository root.
 ## Code
 
 - English for code, comments, documentation and UI strings.
-- Every new source file starts with `SPDX-License-Identifier: Apache-2.0` in its language's comment syntax
-  (`make fix-spdx-headers` adds it; a unit test fails without it; `CONTRIBUTING.md`, section "License").
+- Every new source file starts with `SPDX-License-Identifier: LicenseRef-Proprietary` in its language's
+  comment syntax (`make fix-spdx-headers` adds it; a unit test fails without it; `CONTRIBUTING.md`,
+  section "License").
   Copied shadcn/ui components under `app/src/components/ui/` are the one exception: they keep
   `SPDX-License-Identifier: MIT` plus a provenance line (`app/src/ci/spdx-headers/rules.ts`); do not
   "fix" them.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the snapshot tooling reads from the Vercel API (#403): which golden snapshot pair a Dispatcher deployment
 // was started with. The deploy step puts the pair into the deployment's meta (`pair.ts`), so the live production

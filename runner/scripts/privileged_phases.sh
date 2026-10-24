@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # The phases of the privileged suite (#244), run by run_privileged_offline.sh with the
 # capabilities of compose.dynamic.yml, no-new-privileges, in the namespaces it sets up. Not meant

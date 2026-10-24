@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The job queue on Postgres: the partial unique index on running jobs per pull request exists on both
 // dialects, many runners never get the same job and never start two jobs of one pull request, and a

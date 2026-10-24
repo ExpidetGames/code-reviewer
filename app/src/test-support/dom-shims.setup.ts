@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // jsdom is missing a handful of browser APIs that the Radix primitives (Dialog, AlertDialog,
 // Tooltip, Tabs, Select, DropdownMenu) and the shadcn Sidebar touch. The component tests of the kit

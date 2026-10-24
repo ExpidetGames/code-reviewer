@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The route that lists the models of a catalog provider for the model picker of a project (#555): for a workspace on its own key
 // only. A workspace on the operator's key is told nothing: the answer is the one of a path that does not exist, so a member never

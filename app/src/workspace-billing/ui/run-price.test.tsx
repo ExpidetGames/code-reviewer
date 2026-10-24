@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // #505: how the price of a review reads on the Runs pages. Two final prices for a managed review, the infrastructure price alone

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The LLM key of a claim comes from the workspace of the job and from nowhere else (docs/decisions/0001-
 // editions-setup-and-accounts.md, sections 2.8 and 2.10): each workspace's job carries that workspace's key, a

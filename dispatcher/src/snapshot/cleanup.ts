@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which golden snapshots a deployment removes once it is live (#403), or discards when it did not get there. The
 // rule is a list of what to KEEP, never of what to delete: the snapshot the live Dispatcher deployment was started

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the security rules of the runner API through the real handler: nothing works without the
 // shared token, a refusal says nothing about how close a token was, and the git token and the LLM key

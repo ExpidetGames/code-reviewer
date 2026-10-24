@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How many workspaces hold a stored own LLM key (of any provider), shown to the instance admin who is about to switch billing
 // on (#504): once billing is on, each workspace chooses its key mode itself (ADR 0006, D4), and one that holds a key of its

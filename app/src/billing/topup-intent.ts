@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of a top-up intent (ADR 0006, 2.13; #497): the row the application writes BEFORE any checkout exists and
 // that alone maps a payment to a workspace. States, stable error codes and the shape the rest of the app sees.

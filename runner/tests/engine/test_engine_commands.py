@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down what the real PR-Agent posts for `/review` through the real job entry point against the
 fake GitHub and the fake LLM: who posts, where, and what the result JSON says. The removed commands

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the plan and usage page of a workspace (#282). Fixed sentences: nothing in them is an amount of
 // money, a price, a model, a reason for a pause or a name of a person. The plan label is the one operator-supplied

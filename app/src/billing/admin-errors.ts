@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of the billing data routes of the admin portal and the HTTP status of each. The page translates a
 // code to copy (src/admin/ui/billing-messages.ts), never the other way round. A code never contains a key, a secret or an

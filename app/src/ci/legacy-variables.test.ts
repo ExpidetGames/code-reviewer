@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Proves that no runtime source file of the app reads a legacy environment variable. The update of
 // an installation from before accounts imports `GITHUB_APP_*`, `LLM_PROVIDER` / `LLM_API_KEY` and

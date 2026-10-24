@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A secret that was read out of the store (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.7: never returned by an API, never logged, never in an error message). The value is a

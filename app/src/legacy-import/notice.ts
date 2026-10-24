@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one-time notice of the admin portal that the import of an existing installation leaves behind
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.11, point 7): what could not be migrated and

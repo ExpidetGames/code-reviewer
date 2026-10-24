@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The setup code of a serverless deployment, kept in the database (#321; docs/decisions/
 // 0001-editions-setup-and-accounts.md, section 2.2). The in-memory store (code-store.ts) cannot work there:

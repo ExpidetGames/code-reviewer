@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `--write` generates the contract types into app/src/contracts and dispatcher/src/contracts;
 // `--check` fails (exit 1, with the command to regenerate) while a committed file differs. Run by

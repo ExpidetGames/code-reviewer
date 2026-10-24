@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts the route handlers of the workspaces together over one database, one mail sender and one set of
 // counters. The running server (`shared.ts`) and the integration tests (`src/test-support/workspace-

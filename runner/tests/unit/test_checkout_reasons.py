@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Every checkout failure names a stable reason, so an operator can tell the failures apart."""
 
 import hashlib

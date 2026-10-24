@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { redirect } from "next/navigation";
 import { requireWorkspace } from "@/workspaces/access-runtime";

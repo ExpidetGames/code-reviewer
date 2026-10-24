@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // One billing review row (#603): what the application stored about an event it did not apply, in words an operator can act on,

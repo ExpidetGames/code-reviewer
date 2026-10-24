@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/w/:workspace/billing/top-ups: starts a top-up of the prepaid balance and answers the page of the payment provider
 // to send the buyer to. An Owner or an Admin (`manage_billing`); a missing path while billing is off or the active adapter has

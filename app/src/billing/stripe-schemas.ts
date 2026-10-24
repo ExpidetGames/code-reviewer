@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Our own schemas of the fields of Stripe's objects that the billing module reads (ADR 0006, 2.13; #500). Only what is
 // read is listed; a field that is not here is dropped, so a later change at Stripe cannot reach the app, and a field

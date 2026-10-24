@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195: the one resolver of a job's review kind, run **inside the enqueue transaction**. A job's kind
 // is decided when it is enqueued, from the project's stored settings, and never again. Resolving it

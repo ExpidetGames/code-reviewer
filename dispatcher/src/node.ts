@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The `node` entry: the same Dispatcher as a Node process (@hono/node-server) with a graceful shutdown.
 // The Docker-Launcher (#334) is wired in here; until then `noLauncher` advertises no engine. Run it with

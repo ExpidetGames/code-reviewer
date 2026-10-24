@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Other providers" card of the LLM access page (#555): the providers of the models.dev catalog a workspace on its own key may

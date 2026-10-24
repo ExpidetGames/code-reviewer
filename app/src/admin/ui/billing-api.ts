@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the billing page makes to its own data routes (src/billing/admin-http.ts). Browser side; nothing throws, a failure
 // is a stable code the page translates (billing-messages.ts).

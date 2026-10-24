@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the parts of the Dockerfiles and their ignore files that must not drift: runtime
 // versions that have to match the rest of the repository, digest pinning, the unprivileged user and

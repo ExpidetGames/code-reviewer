@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The first-run setup of a serverless deployment end to end below the browser (#321): the code is made
 // with `pnpm setup-code` and kept in the database, and every request may reach another instance. Each

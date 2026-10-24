@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of a request to link an installation that the instance admin decides (docs/decisions/0001-
 // editions-setup-and-accounts.md, section 2.9). Pure types and lists, shared by the tables, the services and the

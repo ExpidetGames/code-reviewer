@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dynamic provider of a project can be a catalog provider (#555); the Diff provider cannot until #558. Pure checks of the
 // shape: whether the model is in the catalog is the service's question.

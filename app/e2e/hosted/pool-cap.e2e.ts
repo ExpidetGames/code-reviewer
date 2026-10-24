@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pool cap of the hosted deployment (#332-T08): the Dispatcher claims for a pool of one. While the Worker of the first
 // job runs, the call for a second job claims nothing (the app enforces the cap at the claim, atomically), so no

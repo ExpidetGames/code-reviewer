@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models.dev catalog (#554): the fetch, the providers whose address needs a decision, and the models with their
 // state and price, filtered and paged in the address. Instance admin only: anybody else gets the 404 of a page that does

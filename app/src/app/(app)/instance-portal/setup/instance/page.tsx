@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Setup → Instance (#181): the tenancy and the workspace limit as two cards of one form. Instance
 // admin only.

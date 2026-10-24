@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts the GitHub App and the LLM key into the database of a test the way the admin portal and the workspace
 // settings do, for the tests of the route files: the server reads both from the database now (the variables of

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two calls to GitHub that are not made as an installed App: trading the one-time code of the manifest
 // flow for the credentials of the App that was just created (`POST /app-manifests/{code}/conversions`),

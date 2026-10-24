@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the answer of GitHub's "my membership in an organization" endpoint is read: only an
 // active membership of the configured organization counts, and every answer that is not a clear yes

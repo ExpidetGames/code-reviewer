@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The overview of the admin portal. Only the instance admin sees it: anybody else gets a 404 as if the
 // page did not exist (src/admin/access.ts).

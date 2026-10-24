@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the server says about the LLM access when it starts. The LLM key is a matter of each workspace now
 // (src/llm/resolve.ts), so an instance without `LLM_*` variables is normal and says nothing. What is reported is a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The suite every billing adapter must pass (#497; ADR 0006, 2.12). An adapter is only a reader of its provider: this kit
 // pins what the rest of the application relies on. `describeAdapterContract` (a unit suite) checks the adapter's id and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Saving the Dynamic provider and model of a project with a catalog provider (#555): the model must be in the catalog; a model
 // the catalog does not hold, or no longer lists, is refused with `MODEL_NOT_IN_CATALOG` on its field and nothing is stored.

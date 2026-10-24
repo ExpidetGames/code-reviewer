@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The runs the instance admin looks at (#541): the newest jobs of every workspace, and one job with what it
 // consumed and the trace of its calls. The admin is the operator who pays for the runs, so the cost is shown in

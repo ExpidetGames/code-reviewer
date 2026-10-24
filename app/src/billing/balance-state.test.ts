@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: where a balance stands against the threshold, the one reading the mails, the banner and the claim share.
 import { describe, expect, it } from "vitest";

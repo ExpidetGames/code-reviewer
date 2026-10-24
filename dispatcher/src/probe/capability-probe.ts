@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The canary probe of a Dispatcher instance (#331, #479): it runs the Worker image's `probe` mode somewhere that has
 // the real hardening (a canary VM, see launchers/sandbox-canary.ts) and reports what it found. It serves `POST /probe`,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the notice a pull request gets when a review is refused (#281). Fixed sentences, one set per
 // code: nothing in them comes from the pull request, and none says an amount, a figure, a reason or a name of

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Which way a job reaches its model (#550): the passthrough proxy, or the legacy wire.
 

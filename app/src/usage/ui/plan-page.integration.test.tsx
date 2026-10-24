@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The plan page file (#282) with the wiring the running server uses: the database opened at start, the workspace
 // access of the person in the address and the real view. Only the session lookup is replaced (it needs Next.js's

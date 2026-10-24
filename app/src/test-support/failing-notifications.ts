@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Failure injection for #506: a trigger that makes every write to `billing_notifications` fail, on SQLite and on Postgres. The
 // decision whether a workspace is told about its balance is a side effect of money writes; with this installed a test proves

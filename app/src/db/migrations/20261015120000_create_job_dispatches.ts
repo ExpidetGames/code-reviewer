@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `job_dispatches` (#326): where the signed wake-up call for a job stands, one row per job. It exists only
 // while the instance runs with `RUNNER_DISPATCH=webhook` (src/dispatch/README.md); in the default poll mode

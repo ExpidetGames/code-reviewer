@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a member of a workspace sees of a catalog entry (#425, ADR 0005, 2.6): the name the operator chose, what it serves
 // and, since #675, the name of the model provider (`providerLabel`), never the provider id or the model id. The

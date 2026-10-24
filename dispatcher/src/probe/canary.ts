@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The deploy canary (#331): a step of the release pipeline that calls `POST /probe` of a freshly deployed Dispatcher
 // and fails the release when the Dynamic-Worker's canary does not pass. It sends the dispatcher credential to

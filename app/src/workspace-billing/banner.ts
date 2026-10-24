@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the balance banner of the workspace pages knows (#506): plain data the server works out and the page renders, free of
 // server code like the rest of this folder. The banner is for Owners and Admins only and shows while the balance is low, zero or

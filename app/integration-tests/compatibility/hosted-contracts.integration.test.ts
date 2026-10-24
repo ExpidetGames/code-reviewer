@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the contracts of the hosted deployment (#316): the Worker API, the dispatch webhook, the
 // hardened container spec and the additions to the runner API (#318). The files in contracts/ are the

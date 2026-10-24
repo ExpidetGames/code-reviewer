@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """#202-T06: the audit of the third-party packages inside the pinned OpenCode binary.
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the whole job (a backup, then the rotation): old backups beyond the retention go, files
 // that are not backups stay, a failed backup deletes nothing, and the log says where the file is and

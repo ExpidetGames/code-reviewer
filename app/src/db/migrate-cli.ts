@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm migrate`: brings a Postgres database to the schema of this version, from outside the app. A
 // serverless app never migrates by itself (every cold start of every instance would try, and a failing

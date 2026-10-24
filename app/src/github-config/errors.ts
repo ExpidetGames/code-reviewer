@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of the GitHub data routes of the admin portal and the HTTP status of each. The
 // pages translate a code to copy (ui/messages.ts), never the other way round. A code never contains a

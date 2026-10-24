@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two notes at the foot of the billing page (ADR 0006, 2.5, 2.17; #505): whose key reviews run on, with the way to the LLM
 // access page where it is chosen, and who issues the invoices. The page promises nothing about VAT-compliant invoices: that waits

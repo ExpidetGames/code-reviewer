@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One signed dispatch request, as contracts/dispatch-webhook.v1.json describes it: the closed body and the
 // headers. Pure: the clock and the ids come in, nothing is sent here. The signature is the lower case hex

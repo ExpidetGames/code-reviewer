@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // PATCH /api/w/:workspace  { "name": "..." }: renames the workspace (an Owner; the address stays).
 // DELETE /api/w/:workspace  { "confirmName": "..." }: deletes it (an Owner who types its name, #658). Protected

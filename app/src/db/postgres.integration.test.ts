@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Postgres side of the database layer, against a real server: the migrations produce the same
 // schema as SQLite (parity), concurrent starts migrate exactly once behind the advisory lock, and a

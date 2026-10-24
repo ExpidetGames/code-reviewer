@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable error codes of the webhook route. A caller (GitHub's delivery log, a test) branches on
 // `error`, never on the status text; the response carries nothing else, so it can never echo the body,

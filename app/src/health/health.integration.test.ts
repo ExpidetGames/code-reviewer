@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the health answer: ok while the database can be read, an error when it cannot, and an
 // error (not a crash) when the app never opened its database.

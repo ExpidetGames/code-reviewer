@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Root-owned read-only exports and exclusive unprivileged job identities.
 
 This prepares a launch boundary. #197 owns the engine/proxy/whole-process supervision and

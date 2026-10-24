@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings a workspace makes for its own billing (ADR 0006, 2.9; #499): today the optional monthly total limit, in
 // micro-USD, or null for none (the default). One row per workspace, created by the first change; a workspace without a row

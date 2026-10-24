@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The price books the runner prices usage from (#551) are read from the same JSON as this reader's: one fixture file,
 // `fakes/fixtures/price-books.json`, holds books that must parse and books that must be refused, and

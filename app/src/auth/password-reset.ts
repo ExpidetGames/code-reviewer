@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Setting a new password with a reset link (docs/decisions/0001-editions-setup-and-accounts.md, sections
 // 2.3 and 2.7). The link carries a random 256 bit token; the database keeps its hash. A token works once

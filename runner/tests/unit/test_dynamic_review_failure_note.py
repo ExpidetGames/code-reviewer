@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The failure note in the persistent Dynamic summary comment (#299): content, update behaviour and
 the table that gives every note code its one fixed sentence."""

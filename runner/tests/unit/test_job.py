@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down how the runner validates the job it reads from stdin: the shape, the allowed commands,
 the pull request URL and the host it may point to. A bad job must be refused with a stable error

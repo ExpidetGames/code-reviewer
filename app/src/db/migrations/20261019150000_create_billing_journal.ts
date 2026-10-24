@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The balance journal of prepaid billing (ADR 0006, 2.7; #495): `billing_journal_entries`, one immutable row for each
 // thing that happened to a workspace's money, and `billing_balances`, the cache of their sum. Both are new and empty and

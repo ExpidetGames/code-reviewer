@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #505: where the notice of a refused review sends the Owners and Admins once billing exists. A refusal for the balance or the
 // monthly limit points to the billing page of the workspace while billing is on, and to the workspace settings (the old target)

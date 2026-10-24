@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The project settings form with the catalog (#555, #656): the Dynamic provider dropdown of the LLM section offers the catalog

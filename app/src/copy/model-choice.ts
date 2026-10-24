@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the chooser of a workspace that reviews on the code-review.com key (#283, #433, #675). Such a workspace picks
 // an entry of the catalog (ADR 0005) for each kind of review, never a model: an entry is shown by the name and the

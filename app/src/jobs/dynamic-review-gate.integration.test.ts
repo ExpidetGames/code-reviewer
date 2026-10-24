@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the display reader of the Dynamic Review gate (#200): the project settings page tells the
 // truth about the instance gate with a plain read, off while there is no row or the row says off.

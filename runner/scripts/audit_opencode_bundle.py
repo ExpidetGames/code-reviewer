@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Writes the snapshot of the npm packages that the pinned OpenCode binary may contain (#202).
 

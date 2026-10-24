@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Runs jobs one after the other per key, in the order they were asked for. Two syncs of the same
 // installation (a start-up sync and a webhook, say) must not interleave: each reads GitHub's current

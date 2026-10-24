@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #186: Registers a test that only proves anything while the operating system denies a file
 // operation because of directory permissions. A process running as root bypasses those checks, so

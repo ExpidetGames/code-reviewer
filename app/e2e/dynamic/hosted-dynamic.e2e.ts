@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The hosted deployment's Dynamic Review in the privileged lane (#332-T02, and the `worker-once` and `probe` modes end to
 // end that #324 and #331 left for it): the deploy canary passes first, then a signed `opened` webhook reaches the app

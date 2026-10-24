@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Approvals page of the admin portal (#183, docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.3 and 2.9): the requests to link an installation that wait for the instance admin, in

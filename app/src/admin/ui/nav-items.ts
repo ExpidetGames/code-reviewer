@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sections of the admin portal, grouped the way the sidebar shows them. One list feeds the
 // links and the active state. The Setup group holds the three sub-pages of the split (#181) and the

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The verdict of the startup self-check: engines and stable reasons, no value (#324)."""
 

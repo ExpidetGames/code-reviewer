@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cron sweep of a hosted deployment (#328) against a real database, the real queue and the stand-in for the
 // Dispatcher: lease expiry without any polling runner, the resends, the give-up with `dispatch_unavailable`,

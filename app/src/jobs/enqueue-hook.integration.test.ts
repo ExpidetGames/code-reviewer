@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The `onEnqueued` hook of the job queue (#326): called with the result once the enqueue committed, whatever
 // it returned (a new job or an existing one), never for a refused enqueue, and never able to fail or undo one.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the real route file `POST /api/admin/integrations/sync` (the instance admin's synchronization with
 // GitHub) with the wiring the running server uses: the database opened at start, the process-wide sync

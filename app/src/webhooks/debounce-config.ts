@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `REVIEW_DEBOUNCE_SECONDS` is retired (#395): a push no longer waits before its automatic review starts. The
 // variable has no effect; a server that still has it set says so once when it starts (`warnAboutDebounce`,

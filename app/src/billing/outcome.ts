@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // How a run's end bills (ADR 0006, 2.6 and D7): a pure mapping from the end state of a job and its stable codes to one of
 // three classes. Every terminal code of today is in a table, and a test fails when a code appears that has no class

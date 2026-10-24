@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub App's user authorization as a Better Auth provider (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.4): "Sign in with GitHub" is the user authorization of the same GitHub App that

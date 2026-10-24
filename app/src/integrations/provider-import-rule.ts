@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The import rule behind the integration boundary: platform specific code (a provider
 // implementation under src/integrations/providers/) is imported by the registry and by the provider's

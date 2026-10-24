@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The decision of a sign in with GitHub on the running instance: the pure rules (decide.ts) with the
 // facts they rest on read when the person arrives, never remembered: who owns the GitHub identity, who

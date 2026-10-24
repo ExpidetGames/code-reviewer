@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A native Dynamic job as the claim sends it (#578): the entry and the cost policy of the chosen
 model, and the key of the registry's provider. Not a test file."""

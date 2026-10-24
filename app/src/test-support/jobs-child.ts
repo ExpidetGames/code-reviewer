@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A program the job queue tests run as a separate OS process (node runs this file directly,
 // TypeScript types are stripped): a second app instance or runner API handler working on the same

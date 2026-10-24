@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The choice of the key mode on the LLM access page while billing is on (#496): "Use our models" and "Use my own provider key", each

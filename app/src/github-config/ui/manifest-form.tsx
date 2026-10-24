@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The one-click way to connect GitHub: the browser is sent to GitHub with a manifest, the admin presses

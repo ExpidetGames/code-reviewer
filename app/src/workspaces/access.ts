@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // "May this request act in this workspace?", as a pure decision over what the request is signed in as
 // (`SessionLookup`) and the memberships it is asked about. Every page and every data route below

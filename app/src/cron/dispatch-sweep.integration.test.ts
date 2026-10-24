@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sweep route of a hosted deployment (#328) against a real database: only the platform's cron may call it,
 // a call without the right secret changes nothing, and two runs that overlap do not both work. On SQLite and,

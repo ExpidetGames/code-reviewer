@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The runner side of the job queue: handing jobs to runners and finishing them. NOT scoped to a
 // workspace, on purpose: runners serve the whole instance (one shared token), so a claim hands out the

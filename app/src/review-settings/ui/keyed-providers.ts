@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which providers have a stored key in a workspace, as the plain list the settings form takes (#433). Kept out of the
 // client components so that a server page can call it. The statuses never hold the key, only whether there is one.

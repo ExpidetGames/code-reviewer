@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The token cap of a run on the workspace's own key (#553): when the price of the model is not known, the dollar limit of
 // #540 cannot bind, so the run is bound by the tokens it uses in all (prompt, cache and completion) and by its time. An

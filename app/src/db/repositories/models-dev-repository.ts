@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the models.dev catalog tables (#548, src/models-dev/README.md): the providers and models a job can use, and
 // the state of the last fetch. Instance level: this is configuration of the installation, not customer data, and no

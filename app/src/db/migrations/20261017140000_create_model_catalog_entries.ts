@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `model_catalog_entries` (#425, ADR 0005, 2.6): the operator's
 // list of the models that workspaces on the operator's key may use (src/model-catalog/README.md). The `name` is free

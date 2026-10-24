@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what a comment on a pull request does: a signed `issue_comment` delivery with `/review`
 // from a user with write access becomes a review job, through the real webhook handler, the real

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Runs the shell text of one step of a workflow or composite action, as GitHub would (`bash -e`), in a temporary
 // directory, with stand-ins for the programs it calls (`curl`, `vercel`, `gh`, `sleep`) first on the PATH. The tests

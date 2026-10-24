@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Gives an integration test its own real SQLite file: a copy of the migrated template built by the
 // global setup. Every file lives in a fresh temporary directory, is never shared between tests or

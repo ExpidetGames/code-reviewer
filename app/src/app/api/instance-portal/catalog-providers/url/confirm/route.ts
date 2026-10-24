@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/admin/catalog-providers/url/confirm (#554): trust the new address of a provider, the one the admin saw.
 // For the instance admin only. Not signed in is 401, signed in but not an admin is a 404 (src/admin/access.ts); the

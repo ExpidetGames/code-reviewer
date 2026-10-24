@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the validation of the wizard's request: the three choices, the entries of the sign-up
 // rule, the admin email and the password rule, each problem with its own stable code and field, and

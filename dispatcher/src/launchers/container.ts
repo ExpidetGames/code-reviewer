@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Renders the hardened Worker container spec (contracts/worker-container.v1.json, #316, #325) to
 // `docker run` arguments, and runs them through a host. One definition of the flags serves the

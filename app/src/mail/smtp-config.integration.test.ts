@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the stored mail server settings against a real SQLite file and the real secret store: the
 // password is encrypted at rest and never part of what is read back for a page, an empty password keeps the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Finds invitations of ANY workspace, for the two questions that start before the workspace is known: "what
 // does this link belong to?" (the person who opens it only holds the token) and "which invitations wait for

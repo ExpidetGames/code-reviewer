@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The email and password sign in as the login form runs it: the limit first (sign-in-limit.ts), then
 // Better Auth, and every outcome sorted into one of four answers the page can translate. Only a 4xx

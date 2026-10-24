@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/internal/dispatch-sweep, called every 2 hours by the platform's cron (`vercel.json`; a safety net, #395) in serverless
 // mode (#328): lapsed leases, resends, the give-up and the hourly cleanup of a deployment in which no process

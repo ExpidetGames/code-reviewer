@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Gathers the data the license check judges: the installed packages with their licenses (pnpm and
 // uv print them from the metadata they installed, no network) and the packages of the two
@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
 import type { InstalledPackage, LockedPackage } from "./check.ts";
+import { normalizeName, type Ecosystem } from "./policy.ts";
 import { pythonLicenseExpression } from "./python-license.ts";
 
 export const COLLECT_ERRORS = [
@@ -131,6 +132,30 @@ export type Collected = {
   locked: LockedPackage[];
 };
 
+// Our own packages. They are proprietary (LICENSE), which is no entry on the allow list and never
+// will be: the check is about the licenses of what we depend on, not about our own code. The runner
+// is the only one that the tools see as a package (uv installs it into its own environment and
+// lists it in uv.lock); the app and the dispatcher are the roots of their pnpm projects.
+export const FIRST_PARTY_PACKAGES: ReadonlyArray<{
+  ecosystem: Ecosystem;
+  name: string;
+}> = [{ ecosystem: "python", name: "code-reviewer-runner" }];
+
+/** The packages of the list without our own. */
+export function withoutFirstParty<
+  T extends { ecosystem: Ecosystem; name: string },
+>(packages: T[]): T[] {
+  return packages.filter(
+    (entry) =>
+      !FIRST_PARTY_PACKAGES.some(
+        (own) =>
+          own.ecosystem === entry.ecosystem &&
+          normalizeName(own.ecosystem, own.name) ===
+            normalizeName(entry.ecosystem, entry.name),
+      ),
+  );
+}
+
 function run(command: string, args: string[], cwd: string): string {
   return execFileSync(command, args, {
     cwd,
@@ -157,17 +182,17 @@ export function collectAll(repoRoot: string): Collected {
   const dispatcherDir = `${repoRoot}/dispatcher`;
   const runnerDir = `${repoRoot}/runner`;
   return {
-    installed: [
+    installed: withoutFirstParty([
       ...parsePnpmLicenses(run("pnpm", ["licenses", "list", "--json"], appDir)),
       ...parsePnpmLicenses(
         run("pnpm", ["licenses", "list", "--json"], dispatcherDir),
       ),
       ...parsePythonInstalled(run("uv", UV_LICENSES_ARGS, runnerDir)),
-    ],
-    locked: [
+    ]),
+    locked: withoutFirstParty([
       ...parsePnpmLock(readFileSync(`${appDir}/pnpm-lock.yaml`, "utf8")),
       ...parsePnpmLock(readFileSync(`${dispatcherDir}/pnpm-lock.yaml`, "utf8")),
       ...parseUvLock(readFileSync(`${runnerDir}/uv.lock`, "utf8")),
-    ],
+    ]),
   };
 }

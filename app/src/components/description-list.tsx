@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A dense term/description list (run facts, instance facts): a real `<dl>` so assistive technology
 // pairs each term with its value. Two columns on a wide screen, one on a narrow one, and the value
 // wraps instead of widening the page (a commit hash or a GitHub name is unbroken text). Ours
-// (Apache-2.0); the tables of `components/ui/table.tsx` cover lists that need columns and a header
+// (proprietary); the tables of `components/ui/table.tsx` cover lists that need columns and a header
 // instead.
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";

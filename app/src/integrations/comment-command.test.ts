@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how a comment is read as a command: since #203 only `/review` is a command. A comment
 // that starts with `/ask`, `/improve` or `/describe` (with or without text) is an ordinary comment,

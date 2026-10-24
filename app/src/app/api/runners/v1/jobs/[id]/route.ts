@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/runners/v1/jobs/:id: the status of a job, for a Dispatcher (#364).
 import { withRunnerApi } from "../../../../../../runner-api/shared.ts";

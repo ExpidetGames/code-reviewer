@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the pages talk to the app's own JSON routes: a success carries the data, every
 // failure becomes a stable code (the route's own, or one for a session that ended, a refused user, a

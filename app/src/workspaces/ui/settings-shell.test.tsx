@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The sub-navigation of the workspace settings and its Plan entry (#282): the entry exists only for a workspace

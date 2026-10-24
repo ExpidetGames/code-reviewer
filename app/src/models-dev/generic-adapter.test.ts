@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The generic provider adapter built from catalog data (#548, part D): descriptor, wire family, key header and model list
 // from the stored rows, and a best-effort key test per family. The requests are checked through an injected fetch; nothing

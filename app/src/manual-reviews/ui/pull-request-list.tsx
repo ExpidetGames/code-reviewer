@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pull requests a person can pick from (#174): one radio button per open pull request with number,
 // title and author, and the link to GitHub for the repositories whose address is allowed. Titles and

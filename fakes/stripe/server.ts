@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A fake Stripe API (loopback only, in memory) for the tests of the billing module of epic #489. It answers the endpoints
 // the app's client uses (customers with tax ids, Checkout sessions, payment intents, charges, refunds, webhook endpoints,

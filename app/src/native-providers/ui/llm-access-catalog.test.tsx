@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The LLM access section with the catalog providers (#555): the card comes after the two cards of the registry, for an Admin or

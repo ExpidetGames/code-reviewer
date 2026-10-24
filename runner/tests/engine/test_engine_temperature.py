@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down when a Diff job sends `temperature` (#477): the real PR-Agent and LiteLLM, run through
 the real job entry point, against the OpenRouter-shaped fake LLM.
