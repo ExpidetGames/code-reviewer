@@ -24,6 +24,7 @@ The rest of this file is for the team that develops the service.
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `docker/` | The smoke test of the Worker image (`docker/smoke/`) and the VM preparation script of the golden snapshot (`docker/sandbox/`) |
 | `fakes/` | Fake servers and fixtures used by the tests |
+| `website/` | The code-review.com landing page: Astro, its own pnpm project, hosted on Cloudflare, see [`website/README.md`](website/README.md) |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and the team |
 

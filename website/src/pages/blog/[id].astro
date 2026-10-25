@@ -1,0 +1,143 @@
+---
+import { render } from "astro:content";
+import { Image } from "astro:assets";
+import Base from "../../layouts/Base.astro";
+import Breadcrumbs from "../../components/Breadcrumbs.astro";
+import Faq from "../../components/Faq.astro";
+import PostCard from "../../components/PostCard.astro";
+import { authorOf, formatDate, getPosts, ogPath, postPath, readingTime, related, type Post } from "../../lib/blog";
+import { blogPosting, breadcrumbs, faqPage } from "../../lib/seo";
+
+export async function getStaticPaths() {
+  const posts = await getPosts();
+  return posts.map((post) => ({ params: { id: post.id }, props: { post, posts } }));
+}
+
+interface Props {
+  post: Post;
+  posts: Post[];
+}
+
+const { post, posts } = Astro.props;
+const { data } = post;
+const { Content, headings } = await render(post);
+const path = postPath(post);
+const toc = headings.filter((h) => h.depth === 2);
+const crumbs = [
+  { name: "Home", path: "/" },
+  { name: "Blog", path: "/blog/" },
+  { name: data.title, path },
+];
+const ogImage = ogPath(path);
+const schema = [
+  blogPosting({ ...data, path, image: ogImage, author: authorOf(post) }),
+  breadcrumbs(crumbs),
+  ...(data.faq.length ? [faqPage(data.faq)] : []),
+];
+---
+
+<Base
+  title={data.seoTitle ?? data.title}
+  description={data.description}
+  ogImage={ogImage}
+  type="article"
+  published={data.pubDate}
+  modified={data.updatedDate ?? data.pubDate}
+  schema={schema}
+>
+  <article class="mx-auto max-w-3xl px-6 pt-40 pb-12 md:px-8">
+    <Breadcrumbs items={crumbs} />
+    <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{data.title}</h1>
+    <p class="mt-4 text-sm text-muted">
+      {authorOf(post)}
+      {" · "}
+      <time datetime={data.pubDate.toISOString()}>{formatDate(data.pubDate)}</time>
+      {
+        data.updatedDate && (
+          <>
+            {" · updated "}
+            <time datetime={data.updatedDate.toISOString()}>{formatDate(data.updatedDate)}</time>
+          </>
+        )
+      }
+      {` · ${readingTime(post)} min read`}
+    </p>
+
+    {
+      data.cover && (
+        <Image src={data.cover} alt={data.coverAlt ?? ""} widths={[800, 1600]} sizes="(min-width: 768px) 768px, 100vw" class="mt-8 rounded-xl" loading="eager" />
+      )
+    }
+
+    {
+      data.summary && (
+        <aside class="mt-8 rounded-xl border border-line bg-surface p-5">
+          <p class="font-semibold">In short</p>
+          <p class="mt-1">{data.summary}</p>
+        </aside>
+      )
+    }
+
+    {
+      toc.length > 2 && (
+        <nav aria-label="Contents" class="mt-8 rounded-xl border border-line p-5 text-sm">
+          <p class="font-semibold">Contents</p>
+          <ol class="mt-2 list-decimal space-y-1 pl-5">
+            {toc.map((h) => (
+              <li>
+                <a href={`#${h.slug}`} class="hover:underline">
+                  {h.text}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )
+    }
+
+    <div class="prose prose-zinc mt-8 max-w-none dark:prose-invert prose-a:text-fg">
+      <Content />
+    </div>
+
+    {
+      data.faq.length > 0 && (
+        <section aria-labelledby="faq" class="mt-12">
+          <h2 id="faq" class="text-2xl font-semibold">Frequently asked questions</h2>
+          <div class="mt-4 flex flex-col gap-3">
+            <Faq items={data.faq} />
+          </div>
+        </section>
+      )
+    }
+
+    {
+      data.sources.length > 0 && (
+        <section aria-labelledby="sources" class="mt-12">
+          <h2 id="sources" class="text-2xl font-semibold">Sources</h2>
+          <ul class="mt-4 list-disc space-y-1 pl-5 text-sm">
+            {data.sources.map((s) => (
+              <li>
+                <a href={s.url} class="underline underline-offset-4 hover:no-underline" rel="noopener">
+                  {s.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+  </article>
+
+  {
+    posts.length > 1 && (
+      <section aria-labelledby="read-on" class="mx-auto max-w-6xl px-6 md:px-8">
+        <h2 id="read-on" class="text-2xl font-semibold">Read on</h2>
+        <div class="mt-6 grid gap-6 sm:grid-cols-3">
+          {related(post, posts).map((p) => (
+            <PostCard post={p} as="h3" />
+          ))}
+        </div>
+      </section>
+    )
+  }
+</Base>

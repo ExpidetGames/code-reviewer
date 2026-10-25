@@ -93,8 +93,10 @@ def test_path_component_and_depth_boundaries_are_exact() -> None:
         ],
         ".opencode/package.json",
         ".opencode/node_modules/payload.js",
-        ".claude/skills/x/SKILL.md",
-        ".agents/skills/x/SKILL.md",
+        # The skill trees are exported only as documents of a skill in a root tree (#701, see
+        # test_dynamic_review_repo_skills.py); a file straight in a tree is none.
+        ".claude/skills/SKILL.md",
+        ".agents/skills/SKILL.md",
     ],
 )
 def test_engine_discovery_inputs_are_omitted_at_every_depth(prefix: str, name: str) -> None:

@@ -45,6 +45,15 @@ describe("no color literal outside theme.css", () => {
     expect(isColorException("app/src/app/globals.css")).toBe(false);
   });
 
+  // #696
+  it("leaves the landing page below website/ out of the guard, and nothing else", () => {
+    expect(isColorException("website/src/styles/global.css")).toBe(true);
+    expect(isColorException("website/src/lib/og.ts")).toBe(true);
+    expect(isColorException("app/src/website/page.tsx")).toBe(false);
+    expect(isColorException("websites/theme.css")).toBe(false);
+    expect(isColorException("dispatcher/src/website/x.ts")).toBe(false);
+  });
+
   // #166-T01
   it("fails on a hex color added to a component and names its path", () => {
     const found = scanColors([

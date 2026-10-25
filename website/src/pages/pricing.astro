@@ -1,0 +1,78 @@
+---
+import Base from "../layouts/Base.astro";
+import ButtonLink from "../components/ButtonLink.astro";
+import Faq from "../components/Faq.astro";
+import Icon from "../components/Icon.astro";
+import PageHeader from "../components/PageHeader.astro";
+import Section from "../components/Section.astro";
+import SectionHeading from "../components/SectionHeading.astro";
+import TextLink from "../components/TextLink.astro";
+import { PRICING, PRICING_FAQ, PRICING_POINTS } from "../content/pricing";
+import { CTA } from "../content/nav";
+import { ogPath } from "../lib/blog";
+import { inline } from "../lib/inline";
+import { faqPage } from "../lib/seo";
+---
+
+<Base
+  title="Pricing for AI code review on GitHub | code-review.com"
+  description="Prepaid credit for code-review.com: top up in US dollars and pay per review, an AI part plus an infrastructure part. No subscription."
+  ogImage={ogPath("/pricing/")}
+  schema={[faqPage(PRICING_FAQ)]}
+>
+  <PageHeader id="pricing-title" lines={[...PRICING.headingLines]} lead={PRICING.lead} center />
+
+  <section aria-labelledby="plans-title" class="px-6 md:px-8">
+    <div class="mx-auto max-w-6xl">
+      <h2 id="plans-title" class="sr-only">{PRICING.plansHeading}</h2>
+      <ul class="mx-auto grid max-w-md grid-cols-1 gap-6 lg:max-w-4xl lg:grid-cols-2">
+        {
+          PRICING_POINTS.map((plan) => (
+            <li data-reveal="scroll" class="flex">
+              <article aria-labelledby={`plan-${plan.id}`} class="flex w-full flex-col rounded-2xl border border-line bg-surface p-6">
+                <h3 id={`plan-${plan.id}`} class="text-xl font-semibold text-fg">{plan.name}</h3>
+                <p class="mt-6 flex flex-col gap-1">
+                  <span class="text-3xl font-semibold tracking-tight text-fg">{plan.headline}</span>
+                  <span class="text-sm text-muted">{plan.note}</span>
+                </p>
+                <p class="mt-6 text-base text-muted" set:html={inline(plan.summary)} />
+                <ul class="mt-6 flex flex-col gap-3 text-base text-fg">
+                  {plan.features.map((feature) => (
+                    <li class="flex items-start gap-3">
+                      <Icon name="check" class="mt-0.5 shrink-0 text-fg" />
+                      <span set:html={inline(feature)} />
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div data-reveal="scroll" class="mt-10 flex justify-center">
+        <ButtonLink href={CTA.href} location="pricing">{PRICING.action}</ButtonLink>
+      </div>
+
+      <div data-reveal="scroll" class="mx-auto mt-8 flex max-w-hero flex-col gap-1">
+        <p class="text-center text-sm text-muted" set:html={inline(PRICING.vat)} />
+        <p class="text-center text-sm text-muted" set:html={inline(PRICING.ownKey)} />
+        <p class="text-center text-sm text-muted">
+          <Fragment set:html={inline(PRICING.business)} />{" "}
+          <TextLink href="/terms/">{PRICING.termsLink}</TextLink>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <Section id="faq" labelledBy="pricing-faq-title">
+    <div class="grid gap-12 md:grid-cols-3">
+      <div data-reveal="scroll">
+        <SectionHeading id="pricing-faq-title" class="md:sticky md:top-24">{PRICING.faqHeading}</SectionHeading>
+      </div>
+      <div class="flex flex-col gap-3 md:col-span-2">
+        <Faq items={PRICING_FAQ} />
+      </div>
+    </div>
+  </Section>
+</Base>

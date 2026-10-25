@@ -20,6 +20,7 @@ import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
 import { PRODUCT_NAME } from "../copy/product-name.ts";
 import { getDatabase } from "../db/startup.ts";
+import { captureLandingIdentityAtSignIn } from "../landing-identity/sign-in.ts";
 import { getMailSender } from "../mail/shared.ts";
 import type { Database } from "../db/schema.ts";
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
@@ -189,6 +190,14 @@ export function createAuth({
     // and nothing reads it afterwards (no organization check, no call on the person's behalf), so a database
     // copy would be a credential for nothing. Applies to a new account row and to every later sign in.
     databaseHooks: {
+      // The PostHog identity the landing page handed over (src/landing-identity/README.md): stored on the user at the
+      // first sign in that carries it. After the session exists (and after its transaction), for every way in.
+      session: {
+        create: {
+          after: (session, context) =>
+            captureLandingIdentityAtSignIn(db, session.userId, context),
+        },
+      },
       account: {
         create: {
           before: (account) =>

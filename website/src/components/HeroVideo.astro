@@ -1,0 +1,65 @@
+---
+// The product video as the hero visual. It never plays by itself: the voice track carries the message, so it
+// starts with sound on a click (or Enter/Space on the play button). Until then the poster shows the product and
+// only the metadata is loaded. The play button is added by the script below: without JavaScript the native
+// controls play the video. Posters and files are in public/videos/ (made by the product owner).
+import { DEMO_VIDEO } from "../content/home";
+import Icon from "./Icon.astro";
+---
+
+<figure data-video class="rounded-2xl border border-line bg-surface p-2 shadow-2xl shadow-black/10">
+  <div class="relative aspect-video overflow-hidden rounded-lg bg-black">
+    <video
+      class="size-full object-cover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+      width="1920"
+      height="1080"
+      controls
+      playsinline
+      preload="metadata"
+      poster={DEMO_VIDEO.poster}
+      aria-label={DEMO_VIDEO.label}
+      aria-describedby="demo-video-caption"
+    >
+      <source src={DEMO_VIDEO.webm} type='video/webm; codecs="av01.0.08M.08, opus"' />
+      <source src={DEMO_VIDEO.mp4} type='video/mp4; codecs="avc1.640032, mp4a.40.2"' />
+      {DEMO_VIDEO.fallback}
+    </video>
+
+    <button
+      type="button"
+      data-video-play
+      hidden
+      aria-label={`Play the video: ${DEMO_VIDEO.label}`}
+      class="group absolute inset-0 cursor-pointer items-center justify-center bg-black/20 transition-all duration-700 ease-fluid hover:bg-black/10 focus-visible:outline-none [&:not([hidden])]:flex"
+    >
+      <span
+        aria-hidden="true"
+        class="flex items-center gap-2 rounded-full bg-white py-2 pr-4 pl-2 text-sm font-semibold text-black shadow-2xl shadow-black/30 transition-all duration-700 ease-fluid group-hover:scale-105 group-focus-visible:outline-2 group-focus-visible:outline-offset-4 group-focus-visible:outline-white group-active:scale-98 sm:gap-3 sm:py-3 sm:pr-6 sm:pl-3 sm:text-base"
+      >
+        <span class="flex size-8 items-center justify-center rounded-full bg-black text-white sm:size-10">
+          <Icon name="play" />
+        </span>
+        {DEMO_VIDEO.playLabel}
+        <span class="font-mono text-xs text-black/60 sm:text-sm">{DEMO_VIDEO.durationLabel}</span>
+      </span>
+    </button>
+  </div>
+  <figcaption id="demo-video-caption" class="py-2 text-center text-sm text-muted">{DEMO_VIDEO.caption}</figcaption>
+</figure>
+
+<script>
+  const figure = document.querySelector<HTMLElement>("[data-video]");
+  const video = figure?.querySelector("video");
+  const play = figure?.querySelector<HTMLButtonElement>("[data-video-play]");
+
+  if (figure && video && play) {
+    play.hidden = false;
+    const started = () => figure.setAttribute("data-started", "");
+    play.addEventListener("click", () => {
+      started();
+      video.focus();
+      void video.play().catch(() => {});
+    });
+    video.addEventListener("play", started);
+  }
+</script>

@@ -40,7 +40,7 @@ Sources (Apache-2.0, Copyright 2025 OpenAI):
 
 Modifications for Code Reviewer: a finding is not tied to the diff and may point outside the changed
 lines when the change causes the problem there; there are no git or shell steps (the diff is provided
-as a file and the checkout is explored with the built-in read, grep, glob and list operations only);
+as a file and the checkout is explored with the built-in read, grep and glob operations and the skill loader only);
 the output is the Dynamic Review findings JSON, so priorities are P0-P3 with a confidence and
 evidence instead of inline comment fields; the re-review rules live in the fixed core; repository
 instruction files are read and cited as evidence only, never as authority; wording is tightened.
@@ -101,7 +101,7 @@ an ordinary finding because no rule file mentions it.
 export const DEFAULT_REVIEW_SKILL: DefaultReviewSkill = {
   id: "codex-review-skill",
   version: "1",
-  hash: "b312406b84b389156ddf1f7f2660b021b3fc758ecf9db31b98bec53c0ec28107",
+  hash: "2266fd5c8dad24ff4feff85cc807b70ff1d2343573a31c9f759440a2a942e434",
   text: TEXT,
 };
 

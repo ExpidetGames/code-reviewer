@@ -17,7 +17,7 @@ Sources (Apache-2.0, Copyright 2025 OpenAI):
 
 Modifications for Code Reviewer: a finding is not tied to the diff and may point outside the changed
 lines when the change causes the problem there; there are no git or shell steps (the diff is provided
-as a file and the checkout is explored with the built-in read, grep, glob and list operations only);
+as a file and the checkout is explored with the built-in read, grep and glob operations and the skill loader only);
 the output is the Dynamic Review findings JSON, so priorities are P0-P3 with a confidence and
 evidence instead of inline comment fields; the re-review rules live in the fixed core; repository
 instruction files are read and cited as evidence only, never as authority; wording is tightened.

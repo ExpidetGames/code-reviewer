@@ -11,6 +11,7 @@ import {
   userMenuButton,
   type GithubAccount,
 } from "../helpers/github-fake";
+import { landingIdentityOf } from "../helpers/landing-identity";
 
 const account: GithubAccount = {
   id: 7100001,
@@ -19,9 +20,19 @@ const account: GithubAccount = {
   email: "login-journey@example.test",
 };
 
+// An imported user (no landing identity yet): the first sign in with a link from the landing page gives it one. (The sign-up
+// of this app is closed, so a brand-new GitHub account could not be made here; that case is src/landing-identity/sign-in.integration.test.ts.)
+const visitor: GithubAccount = {
+  id: 7100002,
+  login: "landing-visitor",
+  name: "Landing Visitor",
+  email: "landing-visitor@example.test",
+};
+
 test.describe("signing in and out", () => {
   test.beforeAll(async ({ request }) => {
     await addGithubAccount(request, account);
+    await addGithubAccount(request, visitor);
   });
 
   // CR-18-T01
@@ -52,6 +63,27 @@ test.describe("signing in and out", () => {
     await expect(page.getByText(account.email ?? "")).toBeVisible();
     await expect(page.getByText("Verified", { exact: true })).toBeVisible();
     await expect(page.getByText(`@${account.login}`)).toBeVisible();
+  });
+
+  // #692-T04
+  test("a visitor who comes from the landing page keeps the PostHog identity on their account at the first sign in with GitHub", async ({
+    page,
+  }) => {
+    const distinctId = "0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
+    const sessionId = "0192f5f0-7c3e-7a52-9d1b-bbbbbbbbbbbb";
+
+    await page.goto(`/login?ph_did=${distinctId}&ph_sid=${sessionId}`);
+    await expect(page).toHaveURL(/\/login$/);
+    await page.getByRole("button", { name: "Sign in with GitHub" }).click();
+    await page
+      .getByRole("button", { name: `Authorize ${visitor.login}` })
+      .click();
+
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+    expect(await landingIdentityOf(visitor.email ?? "", "main")).toMatchObject({
+      distinctId,
+      sessionId,
+    });
   });
 
   // CR-18-T02

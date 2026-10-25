@@ -193,6 +193,15 @@ Migrations `20261012120000_create_signed_states`, `20261012120100_add_users_emai
 provider_id)` (a user has one identity per way to sign in), so linking a GitHub identity is safe when two requests
   race.
 
+### The landing page's PostHog identity on the user
+
+Migration `20261025140000_add_users_posthog_identity` (#692): `users.posthog_distinct_id`, `users.posthog_session_id` and
+`users.posthog_captured_at` (nullable text; the time is ISO 8601, UTC). A visitor of code-review.com who accepted tracking there
+brings the PostHog distinct id and session id to the sign-up; the app writes them once on the user (first touch, the time
+being what makes it once) and **never reads, shows or logs them**. They are the user's own row, not a workspace's data
+(`users` is global), so they go with the user and not with a workspace. Origin, rules, retention and the cookie that carries
+them across the GitHub redirect: `src/landing-identity/README.md`.
+
 ### Workspace secrets and the remembered keys of jobs
 
 Migrations `20261012140000_create_workspace_secrets` and `20261012140100_create_job_claimed_keys` (sections 2.7, 2.8

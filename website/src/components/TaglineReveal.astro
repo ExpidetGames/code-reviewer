@@ -1,0 +1,27 @@
+---
+// Tagline: every word lights up as it moves up the screen (CSS scroll-driven animation in global.css, so there is no script;
+// browsers without support show the whole text at once). Two sentences of two lines each: from `sm` up every line fits the
+// 680px cap at text-5xl and breaks where the thought breaks; on phones each sentence wraps balanced.
+import { TAGLINE_SENTENCES } from "../content/home";
+---
+
+<section aria-label="Our promise" class="px-6 py-24 md:px-8">
+  <p class="mx-auto max-w-hero text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
+    {
+      TAGLINE_SENTENCES.map((lines) => (
+        <span class="block text-balance">
+          {lines.map((line, lineIndex) => (
+            <span>
+              {line.split(" ").map((word) => (
+                <>
+                  <span class="tagline-word">{word}</span>{" "}
+                </>
+              ))}
+              {lineIndex < lines.length - 1 && <br class="hidden sm:block" />}
+            </span>
+          ))}
+        </span>
+      ))
+    }
+  </p>
+</section>

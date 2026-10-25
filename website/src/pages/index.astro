@@ -1,0 +1,234 @@
+---
+import Base from "../layouts/Base.astro";
+import ButtonLink from "../components/ButtonLink.astro";
+import Faq from "../components/Faq.astro";
+import HeroVideo from "../components/HeroVideo.astro";
+import Icon from "../components/Icon.astro";
+import Section from "../components/Section.astro";
+import SectionHeading from "../components/SectionHeading.astro";
+import TaglineReveal from "../components/TaglineReveal.astro";
+import TextLink from "../components/TextLink.astro";
+import { Image } from "astro:assets";
+import founders from "../assets/founders.webp";
+import { ABOUT } from "../content/about";
+import { FAQ, FAQ_HEADING } from "../content/faq";
+import { BENEFITS, DEMO_VIDEO, FINAL_CTA, HERO, PROBLEM, PROOF, RISK_REVERSAL, STEPS } from "../content/home";
+import { CTA, LINKS } from "../content/nav";
+import { inline } from "../lib/inline";
+import { ogPath } from "../lib/blog";
+import { absolute, faqPage } from "../lib/seo";
+import { DESCRIPTION, NAME, SITE_URL } from "../site";
+
+const card = "rounded-2xl border border-line bg-surface p-6";
+
+const schema = [
+  {
+    "@type": "SoftwareApplication",
+    name: NAME,
+    url: SITE_URL,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Web",
+    description:
+      "A hosted service that reviews GitHub pull requests with AI. Diff Review runs PR-Agent on each pull request, Dynamic Review runs OpenCode and reads your repository. Both post the review as a comment.",
+    publisher: { "@id": `${SITE_URL}/#organization` },
+  },
+  {
+    "@type": "VideoObject",
+    name: DEMO_VIDEO.name,
+    description: DEMO_VIDEO.description,
+    thumbnailUrl: [absolute(DEMO_VIDEO.posterJpg)],
+    contentUrl: absolute(DEMO_VIDEO.mp4),
+    uploadDate: DEMO_VIDEO.uploadDate,
+    duration: DEMO_VIDEO.duration,
+    inLanguage: "en",
+    publisher: { "@id": `${SITE_URL}/#organization` },
+  },
+  faqPage(FAQ),
+];
+---
+
+<Base
+  title="AI code review for GitHub pull requests | code-review.com"
+  description={DESCRIPTION}
+  ogImage={ogPath("/")}
+  schema={schema}
+>
+  <section aria-labelledby="hero-title" class="px-6 pt-24 pb-16 md:px-8 md:pb-24">
+    <div class="mx-auto flex max-w-6xl flex-col items-center pt-16 text-center md:pt-24">
+      <h1
+        id="hero-title"
+        data-reveal="load"
+        class="max-w-hero bg-linear-to-r from-hero-from to-hero-to bg-clip-text pb-2 text-4xl font-semibold tracking-tight text-transparent sm:text-6xl"
+      >
+        {
+          HERO.headlineLines.map((line, index) => (
+            <span>
+              {line}
+              {index < HERO.headlineLines.length - 1 && (
+                <>
+                  {" "}
+                  <br class="hidden sm:block" />
+                </>
+              )}
+            </span>
+          ))
+        }
+      </h1>
+      <p data-reveal="load" style="--reveal-delay: 100ms" class="mt-6 max-w-hero text-lg text-muted" set:html={inline(HERO.subheadline)} />
+      <div data-reveal="load" style="--reveal-delay: 200ms" class="mt-8 flex flex-col items-center gap-4">
+        <ButtonLink href={CTA.href} location="hero">
+          {CTA.primary}
+          <Icon name="arrowRight" size={16} />
+        </ButtonLink>
+        <p class="text-sm text-muted">
+          Prepaid credit, no subscription. <TextLink href="/pricing/">See how pricing works</TextLink>
+        </p>
+      </div>
+      <p data-reveal="load" style="--reveal-delay: 300ms" class="mt-8 flex flex-col items-center gap-2 text-sm text-muted sm:flex-row sm:gap-3">
+        <span>Nothing to install or run</span>
+        <span aria-hidden="true" class="hidden sm:inline">·</span>
+        <span>Built on <span class="whitespace-nowrap">PR-Agent</span> and OpenCode</span>
+        <span aria-hidden="true" class="hidden sm:inline">·</span>
+        <span>Made in Germany by Itegro GmbH</span>
+      </p>
+    </div>
+    <div data-reveal="load" style="--reveal-delay: 400ms" class="mx-auto mt-16 max-w-5xl">
+      <HeroVideo />
+    </div>
+  </section>
+
+  <Section labelledBy="problem-title">
+    <div class="grid gap-6 md:grid-cols-2 md:gap-16">
+      <div data-reveal="scroll">
+        <SectionHeading id="problem-title">{PROBLEM.heading}</SectionHeading>
+      </div>
+      <p data-reveal="scroll" class="text-lg text-muted" set:html={inline(PROBLEM.body)} />
+    </div>
+  </Section>
+
+  <Section id="benefits" labelledBy="benefits-title">
+    <div data-reveal="scroll">
+      <SectionHeading id="benefits-title">What you get</SectionHeading>
+    </div>
+    <ul class="mt-12 grid gap-4 md:grid-cols-2">
+      {
+        BENEFITS.map((benefit) => (
+          <li data-reveal="scroll" class:list={[card, "flex flex-col gap-4"]}>
+            <span aria-hidden="true" class="flex size-10 items-center justify-center rounded-lg border border-line bg-raised text-fg">
+              <Icon name={benefit.icon} />
+            </span>
+            <div>
+              <h3 class="text-lg font-semibold text-fg">{benefit.title}</h3>
+              <p class="mt-2 text-base text-muted" set:html={inline(benefit.body)} />
+            </div>
+          </li>
+        ))
+      }
+    </ul>
+  </Section>
+
+  <TaglineReveal />
+
+  <Section id="how-it-works" labelledBy="how-title">
+    <div data-reveal="scroll">
+      <SectionHeading id="how-title">Three steps to your first review</SectionHeading>
+    </div>
+    <ol class="mt-12 grid gap-4 md:grid-cols-3">
+      {
+        STEPS.map((step, index) => (
+          <li data-reveal="scroll" class:list={[card, "flex flex-col gap-4"]}>
+            <span aria-hidden="true" class="flex size-10 items-center justify-center rounded-full border border-line-strong text-base font-semibold text-fg">
+              {index + 1}
+            </span>
+            <div>
+              <h3 class="text-lg font-semibold text-fg">
+                <span class="sr-only">Step {index + 1}: </span>
+                {step.title}
+              </h3>
+              <p class="mt-2 text-base text-muted" set:html={inline(step.body)} />
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+  </Section>
+
+  <Section id="proof" labelledBy="proof-title">
+    <div data-reveal="scroll">
+      <SectionHeading id="proof-title">{PROOF.heading}</SectionHeading>
+    </div>
+    <ul class="mt-12 grid gap-4 md:grid-cols-2">
+      {
+        PROOF.items.map((item) => (
+          <li data-reveal="scroll" class:list={[card, "flex flex-col gap-4"]}>
+            <span aria-hidden="true" class="flex size-10 items-center justify-center rounded-lg border border-line bg-raised text-fg">
+              <Icon name={item.icon} />
+            </span>
+            <div class="flex flex-1 flex-col">
+              <h3 class="text-lg font-semibold text-fg" set:html={inline(item.title)} />
+              <p class="mt-2 flex-1 text-base text-muted" set:html={inline(item.body)} />
+              <TextLink href={LINKS[item.link]} class="mt-4 inline-flex w-max items-center gap-1 text-sm text-fg">
+                {item.linkLabel}
+                <Icon name="arrowUpRight" size={14} />
+              </TextLink>
+            </div>
+          </li>
+        ))
+      }
+    </ul>
+
+    <div data-reveal="scroll" class="mt-4 grid items-center gap-6 rounded-2xl border border-line bg-surface p-2 md:grid-cols-2 md:gap-8">
+      <Image
+        src={founders}
+        alt={ABOUT.photo.alt}
+        widths={[640, 1024, 1280]}
+        sizes="(min-width: 1152px) 560px, (min-width: 768px) 50vw, 100vw"
+        class="h-auto w-full rounded-lg"
+      />
+      <div class="flex flex-col gap-4 p-4 md:p-6">
+        <h3 class="text-2xl font-semibold tracking-tight text-fg">{PROOF.team.title}</h3>
+        <p class="text-base text-muted" set:html={inline(PROOF.team.body)} />
+        <div>
+          <ButtonLink href="/about/" variant="secondary">
+            {PROOF.team.linkLabel}
+            <Icon name="arrowRight" size={16} />
+          </ButtonLink>
+        </div>
+      </div>
+    </div>
+  </Section>
+
+  <Section id="faq" labelledBy="faq-title">
+    <div class="grid gap-12 md:grid-cols-3">
+      <div data-reveal="scroll">
+        <SectionHeading id="faq-title" class="md:sticky md:top-24">{FAQ_HEADING}</SectionHeading>
+      </div>
+      <div class="flex flex-col gap-3 md:col-span-2">
+        <Faq items={FAQ} />
+      </div>
+    </div>
+  </Section>
+
+  <Section labelledBy="final-cta-title">
+    <div data-reveal="scroll" class="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-16 text-center md:py-20">
+      <p class="inline-flex items-center gap-2 text-sm text-muted">
+        <Icon name="checkCircle" size={16} />
+        <span>
+          <strong class="font-semibold text-fg">{RISK_REVERSAL.title}</strong>{" "}
+          <Fragment set:html={inline(RISK_REVERSAL.body)} />
+        </span>
+      </p>
+      <h2 id="final-cta-title" class="mt-8 max-w-hero text-4xl font-semibold tracking-tight text-fg md:text-5xl">{FINAL_CTA.heading}</h2>
+      <p class="mt-4 max-w-hero text-lg text-muted" set:html={inline(FINAL_CTA.body)} />
+      <div class="mt-8 flex flex-col items-center gap-4">
+        <ButtonLink href={CTA.href} location="final-cta">
+          {CTA.primary}
+          <Icon name="arrowRight" size={16} />
+        </ButtonLink>
+        <p class="text-sm text-muted">
+          Prepaid credit, no subscription. <TextLink href="/pricing/">See how pricing works</TextLink>
+        </p>
+      </div>
+    </div>
+  </Section>
+</Base>
