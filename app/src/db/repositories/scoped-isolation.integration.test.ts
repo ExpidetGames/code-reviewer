@@ -486,7 +486,7 @@ type Case = {
   /** `repository.method`, which the completeness test compares with the repositories themselves. */
   name: string;
   /** What the call answers when workspace A asks for what belongs to B. */
-  run: (a: Repos, b: Seeded) => Promise<unknown>;
+  run: (a: Repos, b: Seeded, db: Kysely<Database>) => Promise<unknown>;
   /** Checks the answer: it is "not found" in the way that method says so, or holds only A's data. */
   expectAnswer: (answer: unknown, a: Seeded, b: Seeded) => void;
 };
@@ -640,6 +640,18 @@ const CASES: Case[] = [
   {
     name: "projects.list",
     run: (a) => a.projects.list(),
+    expectAnswer: (answer, a) =>
+      expect(answer).toEqual([
+        expect.objectContaining({
+          repository: expect.objectContaining({ id: a.repository.id }),
+        }),
+      ]),
+  },
+  {
+    name: "projects.listLocked",
+    // Locks and lists the repositories of A's workspace only, in the transaction it is given.
+    run: (a, _b, db) =>
+      db.transaction().execute((trx) => a.projects.listLocked(trx)),
     expectAnswer: (answer, a) =>
       expect(answer).toEqual([
         expect.objectContaining({
@@ -1736,7 +1748,7 @@ describe("two workspaces", () => {
       const { db, a, b, reposA } = await twoWorkspaces();
       const before = await rowsOf(db, b.workspaceId);
 
-      const answer = await testCase.run(reposA, b);
+      const answer = await testCase.run(reposA, b, db);
 
       testCase.expectAnswer(answer, a, b);
       expect(await rowsOf(db, b.workspaceId)).toEqual(before);
