@@ -1,0 +1,24 @@
+---
+// Questions and answers as native accordions (work without JavaScript). The page adds faqPage() to its structured data.
+import { inline } from "../lib/inline";
+import Icon from "./Icon.astro";
+
+interface Props {
+  items: readonly { q: string; a: string }[];
+}
+const { items } = Astro.props;
+---
+
+{
+  items.map(({ q, a }) => (
+    <div data-reveal="scroll">
+      <details class="group rounded-2xl border border-line bg-surface">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-6 py-4 text-lg font-semibold text-fg transition-all duration-700 ease-fluid hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg active:scale-98">
+          <h3 set:html={inline(q)} />
+          <Icon name="plus" class="shrink-0 text-muted transition-all duration-700 ease-fluid group-open:rotate-45" />
+        </summary>
+        <p class="px-6 pb-6 text-base text-muted" set:html={inline(a)} />
+      </details>
+    </div>
+  ))
+}

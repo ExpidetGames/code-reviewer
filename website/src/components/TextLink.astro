@@ -1,0 +1,13 @@
+---
+import type { HTMLAttributes } from "astro/types";
+import { LINK_CLASS } from "../lib/inline";
+
+interface Props extends Omit<HTMLAttributes<"a">, "class"> {
+  href: string;
+  location?: string;
+  class?: string;
+}
+const { href, location, class: className, ...rest } = Astro.props;
+---
+
+<a href={href} data-cta-location={location} class:list={[LINK_CLASS, className]} {...rest}><slot /></a>
