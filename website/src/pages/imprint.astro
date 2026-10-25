@@ -1,0 +1,107 @@
+---
+// Legal text drafted without a lawyer (October 2026). Have it reviewed by one before relying on it.
+// The company data is in src/content/company.ts. The German text is the binding one.
+import Base from "../layouts/Base.astro";
+import PageHeader from "../components/PageHeader.astro";
+import TextLink from "../components/TextLink.astro";
+import { COMPANY } from "../content/company";
+import { LEGAL_READY } from "../site";
+import { ogPath } from "../lib/blog";
+import { inline } from "../lib/inline";
+
+const phoneHref = `tel:${COMPANY.phone.replace(/[^+\d]/g, "")}`;
+const directors = COMPANY.managingDirectors.join(", ");
+
+type Row = { term: string; lines?: string[]; text?: string; link?: { href: string; label: string } };
+
+const de: Row[] = [
+  { term: "Geltungsbereich", text: "Dieses Impressum gilt für die Website code-review.com und für die Anwendung unter app.code-review.com." },
+  { term: "Anbieter", lines: [COMPANY.name, COMPANY.street, `${COMPANY.postalCode} ${COMPANY.city}`, COMPANY.countryDe] },
+  { term: "Vertreten durch die Geschäftsführer", text: directors },
+  { term: "Telefon", link: { href: phoneHref, label: COMPANY.phone } },
+  { term: "E-Mail", link: { href: `mailto:${COMPANY.email}`, label: COMPANY.email } },
+  { term: "Web", link: { href: COMPANY.web, label: "itegro-gmbh.de" } },
+  { term: "Registereintrag", lines: [`Registergericht: ${COMPANY.registerCourt}`, `Registernummer: ${COMPANY.registerNumber}`] },
+  { term: "Umsatzsteuer-Identifikationsnummer gemäß § 27a UStG", text: COMPANY.vatId },
+  {
+    term: "Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV",
+    lines: [COMPANY.contentResponsible, `c/o ${COMPANY.name}`, COMPANY.street, `${COMPANY.postalCode} ${COMPANY.city}`],
+  },
+  {
+    term: "Verbraucherstreitbeilegung",
+    text: "Wir sind nicht bereit und nicht verpflichtet, an Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teilzunehmen.",
+  },
+];
+
+const en: Row[] = [
+  { term: "Scope", text: "This imprint covers the website code-review.com and the application at app.code-review.com." },
+  { term: "Provider", lines: [COMPANY.name, COMPANY.street, `${COMPANY.postalCode} ${COMPANY.city}`, COMPANY.country] },
+  { term: "Represented by the managing directors", text: directors },
+  { term: "Phone", link: { href: phoneHref, label: COMPANY.phone } },
+  { term: "Email", link: { href: `mailto:${COMPANY.email}`, label: COMPANY.email } },
+  { term: "Web", link: { href: COMPANY.web, label: "itegro-gmbh.de" } },
+  { term: "Commercial register", lines: [`Register court: ${COMPANY.registerCourt}`, `Register number: ${COMPANY.registerNumber}`] },
+  { term: "VAT ID according to § 27a UStG", text: COMPANY.vatId },
+  {
+    term: "Responsible for the content according to § 18 (2) MStV",
+    lines: [COMPANY.contentResponsible, `c/o ${COMPANY.name}`, COMPANY.street, `${COMPANY.postalCode} ${COMPANY.city}`],
+  },
+  {
+    term: "Consumer dispute resolution",
+    text: "We are neither willing nor obliged to take part in dispute resolution proceedings before a consumer arbitration board.",
+  },
+];
+---
+
+<Base
+  title="Imprint (Impressum)"
+  description="Imprint (Impressum) of code-review.com and app.code-review.com: Itegro GmbH, Geretsried, Germany."
+  ogImage={ogPath("/imprint/")}
+  noindex={!LEGAL_READY}
+>
+  <article aria-labelledby="imprint-title">
+    <PageHeader
+      id="imprint-title"
+      lines={["Imprint (Impressum)"]}
+      lead="Who is behind code-review.com. The German version is the legally binding one; an English translation follows."
+    />
+    <div class="px-6 pb-16 md:px-8 md:pb-24">
+      <div class="mx-auto flex max-w-3xl flex-col gap-16">
+        {
+          [
+            { lang: "de", id: "impressum-de", title: "Impressum", note: "Angaben gemäß § 5 DDG", rows: de },
+            {
+              lang: "en",
+              id: "imprint-en",
+              title: "Imprint (English translation)",
+              note: "Information according to § 5 DDG. The German version above is the binding one.",
+              rows: en,
+            },
+          ].map((block) => (
+            <section lang={block.lang} aria-labelledby={block.id}>
+              <h2 id={block.id} class="text-2xl font-semibold tracking-tight text-fg">{block.title}</h2>
+              <p class="mt-2 text-base text-muted">{block.note}</p>
+              <dl class="mt-6">
+                {block.rows.map((row) => (
+                  <div class="grid gap-1 border-t border-line py-4 sm:grid-cols-3 sm:gap-6">
+                    <dt class="text-sm font-semibold text-fg" set:html={inline(row.term)} />
+                    <dd class="text-base text-muted sm:col-span-2">
+                      {row.link && <TextLink href={row.link.href}>{row.link.label}</TextLink>}
+                      {row.text && <Fragment set:html={inline(row.text)} />}
+                      {row.lines?.map((line, index) => (
+                        <>
+                          {index > 0 && <br />}
+                          {line}
+                        </>
+                      ))}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))
+        }
+      </div>
+    </div>
+  </article>
+</Base>

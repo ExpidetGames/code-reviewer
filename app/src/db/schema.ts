@@ -42,6 +42,15 @@ export interface UsersTable {
   org_checked_at: string | null;
   /** The GitHub organization that check was made for, or null. */
   org_checked_for: string | null;
+  /**
+   * The PostHog distinct id the landing page (code-review.com) handed over at the sign-up, or null (#692). Written once
+   * (the first touch), never changed, never shown or logged; the app does not use it (src/landing-identity/README.md).
+   */
+  posthog_distinct_id: string | null;
+  /** The PostHog session id that came with it, or null. */
+  posthog_session_id: string | null;
+  /** When the two above were stored (ISO 8601, UTC), or null. Non-null is what makes them first-touch only. */
+  posthog_captured_at: string | null;
   created_at: string;
   updated_at: string;
 }

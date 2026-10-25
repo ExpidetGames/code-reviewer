@@ -19,6 +19,7 @@ and `CONTRIBUTING.md`.
 | `runner/` | Python (uv): the worker that runs PR-Agent |
 | `dispatcher/` | TypeScript on Hono (pnpm): claims jobs and starts Workers (hosted deployment, #316) |
 | `fakes/` | Fake servers and fixtures shared by all test suites |
+| `website/` | The code-review.com landing page: Astro, its own pnpm project, deployed by Cloudflare (`website/README.md`, `website/AGENTS.md`) |
 | `TESTING.md` | The testing strategy; source of truth for tests |
 | `Makefile` | One entry point per task for all parts |
 

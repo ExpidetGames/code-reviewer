@@ -1,0 +1,13 @@
+# Path redirects (Cloudflare Workers static assets). Hostnames (www → code-review.com) cannot be matched here;
+# that is a Redirect Rule in the Cloudflare zone (README.md).
+# The legal pages of the former site were in German on these paths; the app and old links may still use them.
+/impressum /imprint/ 301
+/impressum/ /imprint/ 301
+/datenschutz /privacy/ 301
+/datenschutz/ /privacy/ 301
+/agb /terms/ 301
+/agb/ /terms/ 301
+# Addresses of the former Next.js site that have a new place.
+/sitemap.xml /sitemap-index.xml 301
+/og.png /og/index.png 301
+/icon.svg /favicon.svg 301

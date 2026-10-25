@@ -24,6 +24,7 @@ The rest of this file is for the team that develops the service.
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `compose*.yml`, `docker/` | Container stacks that CI and the local smoke tests build and start. They are test and development fixtures, not a way to run the service elsewhere |
 | `fakes/` | Fake servers and fixtures used by the tests |
+| `website/` | The code-review.com landing page: Astro, its own pnpm project, hosted on Cloudflare, see [`website/README.md`](website/README.md) |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and the team |
 

@@ -1,0 +1,28 @@
+---
+import { Image } from "astro:assets";
+import { formatDate, postPath, type Post } from "../lib/blog";
+
+interface Props {
+  post: Post;
+  /** Heading level, matching the page (h2 on overviews, h3 below an h2). */
+  as?: "h2" | "h3";
+}
+const { post, as: Heading = "h2" } = Astro.props;
+---
+
+<article class="flex flex-col overflow-hidden rounded-xl border border-line bg-surface">
+  {
+    post.data.cover && (
+      <Image src={post.data.cover} alt={post.data.coverAlt ?? ""} widths={[400, 800]} sizes="(min-width: 768px) 33vw, 100vw" class="aspect-[1200/630] object-cover" />
+    )
+  }
+  <div class="flex flex-1 flex-col gap-2 p-5">
+    <Heading class="text-lg font-semibold">
+      <a href={postPath(post)} class="hover:underline">{post.data.title}</a>
+    </Heading>
+    <p class="text-sm text-muted">{post.data.description}</p>
+    <time datetime={post.data.pubDate.toISOString()} class="mt-auto text-xs text-muted">
+      {formatDate(post.data.pubDate)}
+    </time>
+  </div>
+</article>

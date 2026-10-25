@@ -1,0 +1,20 @@
+// Cloudflare Worker mit Static Assets: liefert den statischen Astro-Build aus dist/ aus.
+// Nur /ingest/* (PostHog-Proxy) läuft durch den Worker; alles andere beantworten die Assets direkt,
+// inklusive dist/_headers und dist/_redirects.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Muss mit dem Namen des Workers im Cloudflare-Dashboard übereinstimmen.
+  "name": "code-review-landing",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-10-25",
+  "assets": {
+    "directory": "./dist",
+    // Nicht erweitern, außer für echte Serverrouten (z. B. "/api/*"): _headers gilt nicht für Worker-Antworten.
+    "run_worker_first": ["/ingest/*"],
+    // Unbekannte Pfade bekommen dist/404.html mit Status 404.
+    "not_found_handling": "404-page",
+    // seite/index.html wird unter /seite/ ausgeliefert (passt zu trailingSlash: "always").
+    "html_handling": "auto-trailing-slash"
+  },
+  "observability": { "enabled": true }
+}

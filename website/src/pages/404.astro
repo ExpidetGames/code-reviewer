@@ -1,0 +1,32 @@
+---
+import Base from "../layouts/Base.astro";
+import ButtonLink from "../components/ButtonLink.astro";
+import Icon from "../components/Icon.astro";
+import TextLink from "../components/TextLink.astro";
+---
+
+<Base title="Page not found" description="This page does not exist (any more). Go on from the home page or read the FAQ." noindex>
+  <section aria-labelledby="not-found-title" class="px-6 pt-24 pb-24 md:px-8">
+    <div class="mx-auto flex max-w-hero flex-col items-center pt-16 text-center md:pt-24">
+      <p data-reveal="load" class="font-mono text-sm text-muted">404</p>
+      <h1
+        id="not-found-title"
+        data-reveal="load"
+        style="--reveal-delay: 100ms"
+        class="mt-4 bg-linear-to-r from-hero-from to-hero-to bg-clip-text pb-2 text-4xl font-semibold tracking-tight text-transparent sm:text-6xl"
+      >
+        This page <br class="hidden sm:block" />
+        went undercover.
+      </h1>
+      <p data-reveal="load" style="--reveal-delay: 200ms" class="mt-6 text-lg text-muted">
+        We could not find it. Try the <TextLink href="/">home page</TextLink> or the <TextLink href="/#faq">FAQ</TextLink>.
+      </p>
+      <div data-reveal="load" style="--reveal-delay: 300ms" class="mt-8">
+        <ButtonLink href="/" variant="secondary">
+          <Icon name="arrowLeft" size={16} />
+          Back to the home page
+        </ButtonLink>
+      </div>
+    </div>
+  </section>
+</Base>
