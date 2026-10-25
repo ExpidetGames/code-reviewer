@@ -4,7 +4,7 @@ The code-review.com landing page: an Astro site built from the Itegro template (
 version in `package.json` under `itegroVorlage`). Hosting, tracking and PostHog follow the process "Landingpages"
 (`prozesse/landingpages/README.md` in `Itegro-GmbH/itegro-gmbh`). The rules of the repository root `AGENTS.md` apply
 too (issues, branches, commit messages, no secrets). This folder is its own pnpm project (not part of `app/`); it
-has its own CI workflow (`.github/workflows/website.yml`).
+has its own CI job (`website` in `.github/workflows/ci.yml`).
 
 ## Copy and product rules
 
@@ -35,7 +35,7 @@ Node 24 (`.nvmrc`), pnpm 10.33.0. Use your own port for `wrangler dev` (`--port`
 | --- | --- |
 | `src/site.ts` | Site settings: URL, name, description, publisher, `LEGAL_READY`, `SITE`, `CROSS_DOMAINS` |
 | `src/content/` | Copy as typed data; `privacy.ts` and `terms.ts` are the legal texts, `company.ts` the imprint data |
-| `src/pages/` | `/`, `/pricing/`, `/about/`, `/imprint/`, `/privacy/`, `/terms/`, 404, `llms.txt`, `robots.txt`, `rss.xml`, `og/*.png` |
+| `src/pages/` | `/`, `/pricing/`, `/about/`, `/imprint/`, `/privacy/`, `/terms/`, 404, `llms.txt`, `licenses.txt`, `robots.txt`, `rss.xml`, `og/*.png` |
 | `src/components/`, `src/layouts/Base.astro` | UI building blocks, head (SEO, Open Graph, JSON-LD), header and footer |
 | `src/lib/consent.ts`, `analytics.ts`, `cta.ts` | Klaro consent, PostHog modes, cross-domain ids, `cta_clicked` |
 | `worker/` | The Cloudflare Worker: only `/ingest/*` (PostHog proxy) |
@@ -83,6 +83,16 @@ The blog is scaffolded (`src/content/blog/`, `src/content.config.ts`) but empty,
 - No inline scripts (`<script is:inline>`, `onclick=…`): the CSP blocks them. A normal `<script>` in an Astro component is
   bundled as a file and is fine. Scripts are kept to the minimum (menu, video play button, tracking).
 - Colours only as the tokens in `src/styles/global.css`.
+
+### Third-party notices and sitemap
+
+- `/licenses.txt` (`src/pages/licenses.txt.ts`, linked in the footer) is generated at build time from `node_modules`: the license
+  text and copyright notices of every package whose code or files go to the browser (the `SHIPPED` list). Add a package there
+  when it ships to the browser; `pnpm check:export` fails for a dependency that is neither in `SHIPPED` nor in `BUILD_ONLY`
+  (`scripts/check-export.mjs`).
+- The sitemap has `lastmod` per page, taken from the last Git commit that touched the page's content (`astro.config.ts`,
+  `PAGE_SOURCES`; blog articles use their own dates). A shallow clone has no such dates; the build then leaves `lastmod` out
+  and the build check warns, so build with the full history (the CI job does).
 
 ### Source files
 

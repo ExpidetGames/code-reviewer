@@ -10,3 +10,4 @@
 # Addresses of the former Next.js site that have a new place.
 /sitemap.xml /sitemap-index.xml 301
 /og.png /og/index.png 301
+/icon.svg /favicon.svg 301

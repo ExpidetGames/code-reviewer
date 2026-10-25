@@ -31,8 +31,9 @@ Without `PUBLIC_POSTHOG_KEY` at build time the site has no consent banner, no tr
 `pnpm preview` (use `pnpm exec wrangler dev --port <free port>` after `pnpm build` on a shared machine). That sends
 real events to the PostHog main project.
 
-CI: `.github/workflows/website.yml` runs `pnpm install --frozen-lockfile` and `pnpm verify` for every change under
-`website/`. The heavy CI (`ci.yml`) skips app, runner and dispatcher jobs for such changes.
+CI: the job `website` of `.github/workflows/ci.yml` runs `pnpm install --frozen-lockfile` and `pnpm verify` for every
+change under `website/` and is part of the required check "All checks passed?". The heavy jobs of `ci.yml` (app, runner,
+dispatcher, images) skip such changes; the `licenses` job still runs, with the SPDX check and the scans of the whole tree.
 
 ## What is where
 

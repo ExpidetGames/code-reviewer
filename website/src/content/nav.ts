@@ -70,6 +70,7 @@ export const FOOTER_COLUMNS: {
       { label: "Imprint (Impressum)", href: "/imprint/" },
       { label: "Privacy policy", href: "/privacy/" },
       { label: "Terms of service", href: "/terms/" },
+      { label: "Software licenses", href: "/licenses.txt" },
       // Reopens the consent dialog; only rendered when analytics are built in. Without JavaScript it is a plain link.
       { label: "Cookie settings", href: "/privacy/#analytics", consent: true },
     ],

@@ -10,6 +10,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse } from "node-html-parser";
+import sharp from "sharp";
 
 const DIST = new URL("../dist/", import.meta.url).pathname;
 const SITE_TS = readFileSync(new URL("../src/site.ts", import.meta.url), "utf8");
@@ -132,7 +133,48 @@ for (const file of sitemaps) {
     else if (!exists(new URL(loc).pathname)) error("sitemap", `${loc} existiert nicht im Build`);
     if (noindexUrls.has(loc)) error("sitemap", `${loc} steht auf noindex, ist aber in der Sitemap`);
   }
+  // Änderungsdaten kommen aus der Git-Historie (astro.config.ts); in einem flachen Klon fehlen sie.
+  const urls = [...readFileSync(file, "utf8").matchAll(/<url>([\s\S]*?)<\/url>/g)];
+  for (const [, entry] of urls)
+    if (!/<lastmod>\d{4}-\d{2}-\d{2}/.test(entry)) warn("sitemap", `${entry.match(/<loc>([^<]+)/)?.[1]} ohne lastmod (flacher Git-Klon?)`);
 }
+
+// Vorschaubilder (dist/og/*.png): 1200×630, und der Rand (die Hälfte des Innenabstands von src/lib/og.ts) bleibt schwarz.
+// Läuft Text bis an den Rand, ist er abgeschnitten (so war es ohne box-sizing: border-box).
+for (const file of files(DIST).filter((f) => /\/og\/.+\.png$/.test(f))) {
+  const name = relative(DIST, file);
+  const { data, info } = await sharp(file).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  if (info.width !== 1200 || info.height !== 630) error(name, `${info.width}×${info.height}, erwartet 1200×630`);
+  const MARGIN = 40;
+  let touched = false;
+  for (let y = 0; y < info.height && !touched; y += 1)
+    for (let x = 0; x < info.width; x += 1) {
+      if (x >= MARGIN && x < info.width - MARGIN && y >= MARGIN && y < info.height - MARGIN) {
+        x = info.width - MARGIN - 1;
+        continue;
+      }
+      const i = (y * info.width + x) * info.channels;
+      if (data[i] > 24 || data[i + 1] > 24 || data[i + 2] > 24) {
+        touched = true;
+        break;
+      }
+    }
+  if (touched) error(name, `Inhalt reicht in den ${MARGIN}-Pixel-Rand: Text abgeschnitten?`);
+}
+
+// Lizenzhinweise: licenses.txt nennt jedes Paket, dessen Code oder Dateien im Browser landen (src/pages/licenses.txt.ts),
+// und jede Abhängigkeit aus package.json ist dort oder hier als reines Build-Werkzeug eingetragen.
+const BUILD_ONLY = new Set(["astro", "@astrojs/rss", "@astrojs/sitemap", "@tailwindcss/vite"]);
+const shippedSource = readFileSync(new URL("../src/pages/licenses.txt.ts", import.meta.url), "utf8");
+const shipped = [...shippedSource.matchAll(/^\s+name: "([^"]+)",$/gm)].map((m) => m[1]);
+const dependencies = Object.keys(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).dependencies ?? {});
+for (const name of dependencies)
+  if (!shipped.includes(name) && !BUILD_ONLY.has(name))
+    error("licenses.txt", `Abhängigkeit ${name} steht weder in SHIPPED (src/pages/licenses.txt.ts) noch in BUILD_ONLY (scripts/check-export.mjs)`);
+const licenses = existsSync(join(DIST, "licenses.txt")) ? readFileSync(join(DIST, "licenses.txt"), "utf8") : "";
+if (!licenses) error("licenses.txt", "fehlt im Build");
+for (const name of shipped) if (!licenses.includes(`${name} `)) error("licenses.txt", `${name} fehlt`);
+if (licenses && !/Copyright/i.test(licenses)) error("licenses.txt", "kein Copyright-Hinweis");
 
 for (const w of warnings) console.log(`Warnung: ${w}`);
 for (const e of errors) console.log(`Fehler:  ${e}`);
