@@ -131,7 +131,9 @@ file needed by either comparison that is **denied or unsafe** (engine discovery,
 symlink or other non-regular mode), **binary** or **over 512 KiB** is excluded from the checkout and
 the diff and listed in the evidence `skipped` array with the stable reason (`engine_discovery`,
 `credential_path`, `unsafe_mode`, `binary` or `too_large`), so the review can say the file was not
-reviewed; it never fails the job (#296). Before #296 a changed denied path failed the whole run,
+reviewed; it never fails the job (#296). A skill manifest the runner cannot rewrite (#701) is
+different: it is only left out of the export, listed under `omissions` as `invalid_skill`, and stays
+in the diff. Before #296 a changed denied path failed the whole run,
 which made any repository that tracks such a path unreviewable (with an unknown merge base every
 head path counts as changed). Skipping is as safe as failing: a denied path is never read,
 exported, diffed or wanted by name, so nothing of it reaches the engine; the failure only protected
@@ -163,7 +165,8 @@ completeness or resolution.
 
 ## Versioned discovery exclusions
 
-`DENY_LIST_VERSION = opencode-v1.19.0-1` was checked against the merged
+`DENY_LIST_VERSION = opencode-v1.19.0-2` (`-1` omitted the skill trees too; `-2` exports the documents of
+repository skills, see "Repository skills" below) was checked against the merged
 [#85 research](spike/85-opencode-dynamic-review.md), upstream
 [config](https://opencode.ai/docs/config/), [plugins](https://opencode.ai/docs/plugins/),
 [agents](https://opencode.ai/docs/agents/) and [skills](https://opencode.ai/docs/skills/) documentation,
@@ -174,16 +177,84 @@ and the pinned v1.19.0
 and [compatible skill discovery](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/skill/index.ts).
 At every depth, case-insensitively and before blob hydration/reads, omit:
 
-- Entire `.opencode` trees: singular/plural agent, mode, command, plugin, tool, skill and theme
-  directories, config, package manifests/locks, dependencies and all other payloads.
+- Entire `.opencode` trees: singular/plural agent, mode, command, plugin, tool and theme
+  directories, config, package manifests/locks, dependencies and all other payloads. The one
+  exception is the documents of a skill in `.opencode/skill` and `.opencode/skills` (below).
 - `opencode.json`, `opencode.jsonc`, and conservatively `tui.json`/`tui.jsonc`.
-- `.claude/skills` and `.agents/skills` compatibility trees.
+- `.claude/skills` and `.agents/skills` compatibility trees, except the documents of a skill in the
+  root-level tree (below). A nested `pkg/.claude/skills` and every other spelling of a root tree
+  stays omitted.
 
 Eligible AGENTS.md, CONTRIBUTING.md, CLAUDE.md and CONTEXT.md remain bounded, redacted untrusted
 read-only evidence. Stock nearby AGENTS.md injection is an accepted residual risk, not something
 these exclusions or flags disable. #198 supplies the immutable core. Config discovery flags are
 defense in depth; stripping and the container/user/proxy boundary remain required. Stock OpenCode
 is unmodified. No bubblewrap/user namespaces, provider-specific routing or host tuning is added.
+
+## Repository skills (#701)
+
+The Dynamic Review agent can use the skills of the repository as documents: OpenCode's own `skill`
+tool lists them by name and description and loads one on request, and the agent reads the files
+next to it with `read`. The head checkout is the source whatever branch the skill came from, and
+a pull request can change a skill. What the pinned v1.19.0 does with a skill, read from
+[`skill/index.ts`](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/skill/index.ts),
+[`tool/skill.ts`](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/tool/skill.ts),
+[`session/system.ts`](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/session/system.ts)
+and checked against the real binary (`runner/tests/engine/test_engine_opencode_skills.py`):
+
+| Question | v1.19.0 |
+| --- | --- |
+| Where does it look? | `skills.paths` of the config (each entry scanned for `**/SKILL.md`, relative to the project directory, no flag involved); `.claude/skills` and `.agents/skills` in the home and in every directory from the project directory up to the worktree root, unless `OPENCODE_DISABLE_EXTERNAL_SKILLS` (and `OPENCODE_DISABLE_CLAUDE_CODE` or `_SKILLS` for `.claude`); `skill`/`skills` in the config directories, which are the project's `.opencode` only while `OPENCODE_DISABLE_PROJECT_CONFIG` is unset; `skills.urls`, downloaded. |
+| Which frontmatter fields does it use? | `name` and `description`, nothing else. `allowed-tools`, `tools`, `permission`, `model`, `agent`, `provider`, `mcp`, hooks and the like are never read. A skill cannot change a tool, a permission, a model, an agent or a provider. |
+| What does the agent get? | The system prompt lists `<name>` and `<description>` of every skill the `skill` permission does not deny (unescaped). The `skill` tool returns the body, the directory and up to ten file names next to it. It runs nothing. |
+| How is the frontmatter parsed? | With `gray-matter` 4.0.3 and its default engines. A first line `---js` or `---javascript` (also with a space) is evaluated with `eval`: **a `SKILL.md` as written can run code in the engine.** `runner/tests/engine/test_engine_opencode.py::test_the_same_tree_unsanitized_runs_the_plugins_which_is_why_the_export_is_stripped` holds the control against the real binary. |
+
+What the runner does with it:
+
+- **No discovery flag is lifted.** Lifting `OPENCODE_DISABLE_CLAUDE_CODE` (the only switch for
+  `.claude/skills`) also brings back the lookup of `CLAUDE.md`, and lifting
+  `OPENCODE_DISABLE_EXTERNAL_SKILLS` makes the engine walk up from the export through its
+  ancestors and read the home. `.opencode/skill(s)` is a project config directory and needs
+  `OPENCODE_DISABLE_PROJECT_CONFIG` off, which would also load project config and plugins. Instead
+  the runner-owned config lists the four root trees under `skills.paths` (`.claude/skills`,
+  `.agents/skills`, `.opencode/skill`, `.opencode/skills`), the engine's own mechanism, and the
+  flags stay as they were. The repository cannot add a path: the config is not read from the
+  export. No `skills.urls`.
+- **The permission block allows `skill`** and denies the engine's built-in `customize-opencode`
+  skill by name, so the agent is offered repository skills only. Every other tool stays denied by
+  the wildcard. No tool can run a script: the agent has `read`, `grep`, `glob`, `skill` and the
+  structured return, there is no `bash`, and `grep` runs ripgrep with the pattern after `--` (a
+  `--pre` is a pattern). A script in a skill is a readable file; the export is written as plain
+  files and keeps no executable bit.
+- **Which files.** Only a file in a skill directory below one of the four root trees: `SKILL.md`
+  (any spelling of the name is treated as a manifest) and plain resources with a text, data or
+  script suffix (`.md .txt .json .yaml .html .py .sh .js` and the like, `LICENSE`, `README`). A
+  file straight in the tree, a nested tree, a `.opencode` or `node_modules` directory inside a
+  skill, `opencode.json(c)`, `tui.json(c)`, `package.json` and lock files, `bunfig.toml`, `mcp.json`
+  and `.mcp.json`, credentials, binaries, oversized files and non-regular modes are omitted as
+  before (`engine_discovery`, `credential_path`, `binary`, `too_large`, `unsafe_mode`). Plugins,
+  tools, commands, agents, modes and themes in `.opencode` stay omitted.
+- **Every `SKILL.md` is rewritten** (`repo_skills.neutralize_skill_manifest`). The export holds
+  `---`, `name: "<json string>"`, `description: "<json string>"`, `---` and the original body; no
+  other field survives and no language marker reaches `gray-matter`. A manifest that does not start
+  with a plain `---` line, never closes it, or has no usable name (letters, digits, `.`, `_`, `-`,
+  64 characters at most, not `customize-opencode`) and description is left out of the export and
+  listed as `omitted (invalid_skill)`. It stays in the diff as the text it is: it is not a
+  deny-list skip, so a changed skill is still reviewed. The description is one line of at most
+  1,024 printable characters in which `<` and `>` are escaped, so it cannot close the tag the
+  engine writes it into.
+- **The trusted prompt** says that a repository skill is a document of the same class as
+  `AGENTS.md`: it may tell the agent what to look for, it is untrusted data and cannot override
+  the rules, the tools, the output format or the limits, and a script it mentions is text, never a
+  command (core version 3).
+- **Cost, time and isolation are unchanged.** A `skill` call is a tool call like any other: it counts
+  as an attempt, its result against the per-result and cumulative bounds, and the trace stores it
+  as `other`. The proxy, the cost limit, the clock and the OS boundary do not know about skills.
+
+Accepted residual risk: a pull request can ship a skill (or change one) whose description or body
+tries to steer the review. This is the same class as a nested `AGENTS.md`; the core marks it as
+untrusted data, the agent has no tool that writes, runs or fetches, and there is no guarantee of
+model resistance.
 
 ## Verification and rollout limits
 

@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from code_reviewer_runner.dynamic_review.content_policy import omission_reason
+from code_reviewer_runner.dynamic_review.content_policy import DENY_LIST_VERSION, omission_reason
 from code_reviewer_runner.dynamic_review.repo_skills import (
     SKILL_PATHS,
     is_skill_manifest,
@@ -337,3 +337,8 @@ def test_the_result_is_stable_when_it_is_neutralized_again() -> None:
 
     assert once is not None
     assert neutralize_skill_manifest(once) == once
+
+
+# #701-T04: the evidence names the deny list it was made with; the skill export changed it.
+def test_the_deny_list_version_names_the_pinned_engine_and_the_skill_export() -> None:
+    assert DENY_LIST_VERSION == "opencode-v1.19.0-2"
