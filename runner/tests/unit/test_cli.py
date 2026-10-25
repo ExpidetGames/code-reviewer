@@ -27,32 +27,13 @@ def test_an_unknown_option_is_rejected_with_a_usage_error(
     assert "usage:" in capsys.readouterr().err
 
 
-# CR-29: without a configuration the loop does not start and says which variable is missing.
-def test_the_loop_does_not_start_without_the_url_of_the_app(
+# The mode is required: without one the entry point says how it is used and starts nothing.
+def test_without_a_mode_nothing_starts_and_the_usage_is_named(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     exit_code = main([], environment={"RUNNER_TOKEN": "dummy-runner-token-0123456789-abcdef"})
 
     assert exit_code == 2
     error = capsys.readouterr().err
-    assert "RUNNER_API_URL is required" in error
+    assert "invalid arguments (one of: worker-once, probe)" in error
     assert "dummy-runner-token" not in error
-
-
-def test_the_loop_does_not_start_with_an_unusable_value_and_never_prints_the_token(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    token = "dummy-runner-token-0123456789-abcdef"
-    exit_code = main(
-        [],
-        environment={
-            "RUNNER_API_URL": "http://app:3000",
-            "RUNNER_TOKEN": token,
-            "RUNNER_CONCURRENCY": "lots",
-        },
-    )
-
-    assert exit_code == 2
-    error = capsys.readouterr().err
-    assert "RUNNER_CONCURRENCY must be a number" in error
-    assert token not in error

@@ -1,28 +1,22 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""What the operator configures for the job loop, read from environment variables.
+"""What the Worker reads from its environment (`worker-once`, `probe` and `worker-reap`).
 
-| Variable                        | Meaning                                         | Default |
-|---------------------------------|-------------------------------------------------|---------|
-| `RUNNER_API_URL`                | Base URL of the app (`http://app:3000`)         | required |
-| `RUNNER_TOKEN`                  | The shared token of the runner API              | required |
-| `RUNNER_ID`                     | Free-form id sent as `X-Runner-Id`              | runner-HOST |
-| `RUNNER_CONCURRENCY`            | Jobs that run at the same time (1 to 32)        | 3 |
-| `RUNNER_POLL_INTERVAL_SECONDS`  | Wait between two claims when nothing is waiting | 5 |
-| `RUNNER_JOB_TIMEOUT_SECONDS`    | Hard timeout of one job                         | 1200 |
-| `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after SIGTERM  | 60 |
-| `PR_AGENT_COMMAND`              | Command that runs one job (test stacks only)    | run-job |
+| Variable                     | Meaning                                         | Default |
+|------------------------------|-------------------------------------------------|---------|
+| `RUNNER_JOB_TIMEOUT_SECONDS` | Hard timeout of one job                         | 1200 |
+| `RUNNER_DIFF_JOB_USER`       | `uid:gid` of the Diff job process (root Worker) | none |
+| `RUNNER_DYNAMIC_*`           | Engine user and ports of the Dynamic slot       | supervisor.py |
+| `PR_AGENT_COMMAND`           | Command that runs one job (test stacks only)    | run-job |
 
-A refusal names the variable and never the value: the token is one of them.
+The app address and the per-job credential are not settings: they come on stdin (`worker.py`). A
+refusal names the variable and never the value.
 """
 
-import re
 import shlex
-import socket
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
 
 from code_reviewer_runner.capabilities import ENGINE_DIFF
 from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
@@ -33,14 +27,8 @@ from code_reviewer_runner.dynamic_review.supervisor import (
     ENGINE_UID_VARIABLE,
 )
 
-DEFAULT_CONCURRENCY = 3
-DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 DEFAULT_JOB_TIMEOUT_SECONDS = 20 * 60.0
-DEFAULT_SHUTDOWN_GRACE_SECONDS = 60.0
-MAX_CONCURRENCY = 32
 MAX_JOB_TIMEOUT_SECONDS = 6 * 60 * 60.0
-MAX_SHUTDOWN_GRACE_SECONDS = 60 * 60.0
-_RUNNER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}")
 
 
 class SettingsError(Exception):
@@ -53,52 +41,11 @@ def default_job_command() -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class LoopSettings:
-    api_url: str
-    token: str = field(repr=False)
-    runner_id: str
-    concurrency: int = DEFAULT_CONCURRENCY
-    poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS
-    job_timeout: float = DEFAULT_JOB_TIMEOUT_SECONDS
-    shutdown_grace: float = DEFAULT_SHUTDOWN_GRACE_SECONDS
-    # The job process gets the timeout as its own soft limit (it reports `timeout` with its log);
-    # the loop ends it this much later if it still runs, which covers the process's own watchdog.
-    kill_margin: float = 10.0
-    # Time a process gets between SIGTERM and SIGKILL.
-    terminate_grace: float = 5.0
-    backoff_max: float = 60.0
-    request_timeout: float = 30.0
-    # How long a finished job's result is retried when the app cannot be reached.
-    complete_retry_window: float = 600.0
-    # #195: the engines this runner may claim for. Default is Diff only; `opencode` is added only
-    # by the startup self-check once it proved the isolation (`service.advertise_engines`, #202),
-    # together with the verified engine command that the Dynamic job process is handed.
-    engines: tuple[str, ...] = (ENGINE_DIFF,)
-    dynamic_command: tuple[str, ...] | None = None
-    dynamic_ripgrep: str | None = None
-    job_command: tuple[str, ...] = field(default_factory=default_job_command)
-    # (uid, gid) of the user every non-Dynamic job process drops to. Set only for a loop that runs
-    # as root (the Dynamic runner, #197); unset, jobs run as the loop's own user.
-    diff_job_user: tuple[int, int] | None = None
-    # (uid, gid) of the dedicated engine user of Dynamic Review. Set together with `diff_job_user`
-    # (a root loop, the Dynamic runner): after every Dynamic job process the loop ends whatever
-    # that user still runs, which a job killed outright could not.
-    dynamic_engine_user: tuple[int, int] | None = None
-    # The fixed proxy and engine ports of the single Dynamic slot, set with `dynamic_engine_user`:
-    # the engine user's nft rules are installed once at startup for exactly these (#244).
-    dynamic_ports: SlotPorts | None = None
-    # Which ruleset confines the engine user, as the startup step found the kernel (#345). Set by
-    # the service after startup, never read from the environment; the loop hands it to the Dynamic
-    # job processes, which prove the matching properties again.
-    dynamic_egress_mode: EgressMode = EgressMode.FULL
-
-
-@dataclass(frozen=True)
 class WorkerSettings:
     """What a Worker (`code-reviewer-worker --once`, #323) reads from its environment.
 
-    The same job-process settings as the loop, and none of its claiming: no token, no app URL (the
-    start document has the URL and the per-job credential), no slots, no polling.
+    The job-process settings: no token, no app URL (the start document has the URL and the per-job
+    credential), no slots, no polling.
     """
 
     job_timeout: float = DEFAULT_JOB_TIMEOUT_SECONDS
@@ -114,7 +61,9 @@ class WorkerSettings:
     diff_job_user: tuple[int, int] | None = None
     dynamic_engine_user: tuple[int, int] | None = None
     dynamic_ports: SlotPorts | None = None
-    # The ruleset startup installed (#345), as in `LoopSettings`: set after startup, not read.
+    # Which ruleset confines the engine user, as the startup step found the kernel (#345). Set by
+    # the startup after it, never read from the environment; the Worker hands it to the Dynamic job
+    # process, which proves the matching properties again.
     dynamic_egress_mode: EgressMode = EgressMode.FULL
 
 
@@ -131,29 +80,6 @@ def _number(
     if not low <= value <= high:
         raise SettingsError(f"{name} must be between {low:g} and {high:g}")
     return value
-
-
-def _api_url(raw: str) -> str:
-    try:
-        parts = urlsplit(raw)
-        _ = parts.port
-    except ValueError:
-        raise SettingsError("RUNNER_API_URL is not a valid URL") from None
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise SettingsError("RUNNER_API_URL must be an http or https URL")
-    if parts.username or parts.password or parts.query or parts.fragment:
-        raise SettingsError("RUNNER_API_URL must not contain credentials, a query or a fragment")
-    return raw.rstrip("/")
-
-
-def _runner_id(environment: Mapping[str, str]) -> str:
-    raw = environment.get("RUNNER_ID", "").strip()
-    if raw:
-        if not _RUNNER_ID.fullmatch(raw):
-            raise SettingsError("RUNNER_ID may only hold letters, digits and ._:@- (64 at most)")
-        return raw
-    host = re.sub(r"[^A-Za-z0-9._:@-]", "-", socket.gethostname())
-    return f"runner-{host}"[:64]
 
 
 def _job_command(environment: Mapping[str, str]) -> tuple[str, ...]:
@@ -184,7 +110,7 @@ def _diff_job_user(environment: Mapping[str, str]) -> tuple[int, int] | None:
 def _dynamic_engine_user(
     environment: Mapping[str, str], diff_job_user: tuple[int, int] | None
 ) -> tuple[int, int] | None:
-    """The engine user of a root loop; it must be nobody a Diff job runs as."""
+    """The engine user of a root Worker; it must be nobody a Diff job runs as."""
     if diff_job_user is None:
         return None
     uid, gid = (
@@ -219,57 +145,9 @@ def _identifier(environment: Mapping[str, str], name: str) -> int:
     return int(raw)
 
 
-def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
-    api_url = environment.get("RUNNER_API_URL", "").strip()
-    if not api_url:
-        raise SettingsError("RUNNER_API_URL is required")
-    token = environment.get("RUNNER_TOKEN", "").strip()
-    if not token:
-        raise SettingsError("RUNNER_TOKEN is required")
-    if any(char.isspace() or not char.isprintable() for char in token):
-        raise SettingsError("RUNNER_TOKEN must not contain white space or control characters")
-    concurrency = _number(
-        environment, "RUNNER_CONCURRENCY", DEFAULT_CONCURRENCY, 1, MAX_CONCURRENCY
-    )
-    if concurrency != int(concurrency):
-        raise SettingsError("RUNNER_CONCURRENCY must be a whole number")
-    diff_job_user = _diff_job_user(environment)
-    return LoopSettings(
-        job_command=_job_command(environment),
-        diff_job_user=diff_job_user,
-        dynamic_engine_user=_dynamic_engine_user(environment, diff_job_user),
-        dynamic_ports=_dynamic_ports(environment, diff_job_user),
-        api_url=_api_url(api_url),
-        token=token,
-        runner_id=_runner_id(environment),
-        concurrency=int(concurrency),
-        poll_interval=_number(
-            environment,
-            "RUNNER_POLL_INTERVAL_SECONDS",
-            DEFAULT_POLL_INTERVAL_SECONDS,
-            0.1,
-            300,
-        ),
-        job_timeout=_number(
-            environment,
-            "RUNNER_JOB_TIMEOUT_SECONDS",
-            DEFAULT_JOB_TIMEOUT_SECONDS,
-            1,
-            MAX_JOB_TIMEOUT_SECONDS,
-        ),
-        shutdown_grace=_number(
-            environment,
-            "RUNNER_SHUTDOWN_GRACE_SECONDS",
-            DEFAULT_SHUTDOWN_GRACE_SECONDS,
-            0,
-            MAX_SHUTDOWN_GRACE_SECONDS,
-        ),
-    )
-
-
 def worker_settings_from_environment(environment: Mapping[str, str]) -> WorkerSettings:
     """The Worker's settings: `RUNNER_JOB_TIMEOUT_SECONDS`, `PR_AGENT_COMMAND` (test stacks only),
-    `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables, exactly as the loop reads them."""
+    `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables."""
     diff_job_user = _diff_job_user(environment)
     return WorkerSettings(
         job_command=_job_command(environment),

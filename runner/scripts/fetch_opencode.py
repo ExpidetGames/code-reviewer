@@ -10,12 +10,11 @@ checked against the executable digest. Then the binary must report the pinned ve
 
     uv run python scripts/fetch_opencode.py [--dest DIR]
 
-Prints the path of the verified executable. `--allow-unpinned-platform` is for the image build only:
-on a platform without a pin (anything but linux-x64) it installs nothing, says so and exits 0, so
-that the image still builds there and its runner serves Diff jobs only (#264). Used by the engine
-CI job (the one step with the internet, like the tiktoken cache) and by `make fetch-opencode`; the
-runner image build reads the same pin in its own stage (#202). Nothing at run time downloads
-anything: the engine suite and the runner only ever use an executable that this script verified.
+Prints the path of the verified executable. Only linux-x64 is pinned; on another platform the script
+fails. Used by the engine CI job (the one step with the internet, like the tiktoken cache) and by
+`make fetch-opencode`; the runner image build reads the same pin in its own stage (#202). Nothing at
+run time downloads anything: the engine suite and the runner only ever use an executable that this
+script verified.
 """
 
 import argparse
@@ -194,35 +193,18 @@ def default_destination() -> Path:
     return Path(cache) / "code-reviewer" / "opencode" / entry["executableSha256"][:16]
 
 
-def unpinned_platform_notice(tool: str, key: str) -> str:
-    return (
-        f"no pin for {tool} on {key}: nothing is installed and Dynamic Review is disabled in this "
-        "image (the runner serves Diff jobs only); Dynamic Review needs x86_64\n"
-    )
-
-
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dest", type=Path, default=None)
-    parser.add_argument(
-        "--allow-unpinned-platform",
-        action="store_true",
-        help="for the image build: on a platform without a pin install nothing and exit 0",
-    )
     args = parser.parse_args(argv)
     try:
         path = install(args.dest or default_destination())
     except NoPinForPlatform:
-        if not args.allow_unpinned_platform:
-            sys.stderr.write(
-                f"cannot install the pinned OpenCode: there is no pinned artifact for "
-                f"{platform_key()}\n"
-            )
-            return 1
-        if args.dest is not None:
-            args.dest.mkdir(parents=True, exist_ok=True)
-        sys.stderr.write(unpinned_platform_notice("OpenCode", platform_key()))
-        return 0
+        sys.stderr.write(
+            "cannot install the pinned OpenCode: "
+            f"there is no pinned artifact for {platform_key()}\n"
+        )
+        return 1
     except (PinError, OSError, tarfile.TarError, subprocess.SubprocessError) as error:
         sys.stderr.write(f"cannot install the pinned OpenCode: {error}\n")
         return 1

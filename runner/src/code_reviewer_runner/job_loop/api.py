@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""The runner's side of the runner API (`contracts/runner-api.v1.json`).
+"""The reply types of the runner API (`contracts/runner-api.v1.json`) that the Worker and the job
+host share.
 
-Three calls: `claim` (200 with a job, 204 for none), `heartbeat` and `complete`. What a caller has
-to tell apart is small, so the errors are too:
+The claim and the HTTP client of the runner's own job loop are gone (#700): a Dispatcher claims, and
+a Worker only fetches, heartbeats and delivers with its per-job credential (`worker_api.py`). What
+stays: `ClaimedJob` (a job as the host runs it), the answers to a heartbeat and a completion, and
+their parsing. What a caller has to tell apart is small, so the errors (`http.py`) are too:
 
 - `ApiUnavailable`: the app cannot answer now (no connection, 5xx, 429, a wrong token, an answer
   that is not the contract). The caller waits and tries again.
@@ -15,17 +18,10 @@ to tell apart is small, so the errors are too:
 No error carries a value of the request or the response: they hold secrets.
 """
 
-import asyncio
-import json
-import re
-import urllib.request
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 
-from code_reviewer_runner import __version__
-from code_reviewer_runner.capabilities import ENGINE_DIFF
 from code_reviewer_runner.job_loop.http import (
     MAX_RETRY_AFTER_SECONDS,
     ApiError,
@@ -33,16 +29,10 @@ from code_reviewer_runner.job_loop.http import (
     ApiUnavailable,
     LeaseLost,
     Reply,
-    build_opener,
-    error_code,
     parse_json,
-    retry_after,
-    send,
 )
 from code_reviewer_runner.job_loop.jsonvalues import as_object
-from code_reviewer_runner.llm_providers import registered_provider_ids
 
-_JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # A heartbeat interval above this would let the 2 minute lease run out between two beats.
 MAX_HEARTBEAT_INTERVAL_SECONDS = 60
 
@@ -50,7 +40,6 @@ MAX_HEARTBEAT_INTERVAL_SECONDS = 60
 # The errors and the reply type live in http.py (the Worker API client uses them too); they are
 # part of this module's interface as before.
 __all__ = [
-    "CLAIM_FEATURES",
     "MAX_HEARTBEAT_INTERVAL_SECONDS",
     "MAX_RETRY_AFTER_SECONDS",
     "ApiError",
@@ -59,20 +48,8 @@ __all__ = [
     "ClaimedJob",
     "CompleteReply",
     "HeartbeatReply",
-    "HttpRunnerApi",
     "LeaseLost",
-    "RunnerApi",
 ]
-
-# What this runner understands beyond its engines (ClaimRequest.features in the contract).
-# `supersede` (#396): it stops gracefully when a heartbeat answers `job.superseded`.
-CLAIM_FEATURES: tuple[str, ...] = (
-    "dynamic_capabilities",
-    "supersede",
-    "dynamic_cost_policy",
-    "cost_limit",
-    "operator_cost_limit",
-)
 
 
 @dataclass(frozen=True)
@@ -128,152 +105,3 @@ def _epoch(value: object) -> float | None:
     except ValueError:
         return None
     return None if parsed.tzinfo is None else parsed.timestamp()
-
-
-class RunnerApi(Protocol):
-    async def claim(self) -> ClaimedJob | None: ...
-
-    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply: ...
-
-    async def complete(
-        self, job_id: str, lease_token: str, result: Mapping[str, Any]
-    ) -> CompleteReply: ...
-
-
-class HttpRunnerApi:
-    """The runner API over HTTP. Blocking calls run in a thread, so the loop stays responsive."""
-
-    def __init__(
-        self,
-        base_url: str,
-        token: str,
-        runner_id: str,
-        *,
-        engines: tuple[str, ...] = (ENGINE_DIFF,),
-        request_timeout: float = 30.0,
-    ) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._token = token
-        self._runner_id = runner_id
-        self._engines = engines or (ENGINE_DIFF,)
-        self._timeout = request_timeout
-        # No proxy: the token must only go to the app, and the app is reached directly.
-        self._opener = build_opener()
-
-    # -- the three calls ----------------------------------------------------------------------
-
-    async def claim(self) -> ClaimedJob | None:
-        # #195: the engines this runner can run. A previous-release runner sends no body; this one
-        # advertises what its startup self-check proved.
-        # #279: `features` says what else this runner reads, so an app sends a job's optional fields
-        # (the model capabilities of a Dynamic job) only to a runner that understands them; a
-        # previous-release runner names none and an app from before ignores the key.
-        reply = await asyncio.to_thread(
-            self._send,
-            "/claim",
-            {
-                "engines": list(self._engines),
-                "features": list(CLAIM_FEATURES),
-                # #424: the providers this runner can run; an app sends a job for no other, and a
-                # previous-release app ignores the key (absent means `openrouter` to a newer one).
-                "llmProviders": list(registered_provider_ids()),
-            },
-        )
-        if reply.status == 204:
-            return None
-        if reply.status != 200:
-            raise self._failure(reply)
-        return self._parse_claim(reply)
-
-    async def heartbeat(self, job_id: str, lease_token: str) -> HeartbeatReply:
-        reply = await asyncio.to_thread(
-            self._send, f"/jobs/{self._safe_id(job_id)}/heartbeat", {"leaseToken": lease_token}
-        )
-        if reply.status != 200:
-            raise self._failure(reply)
-        return parse_heartbeat(reply, job_id)
-
-    async def complete(
-        self, job_id: str, lease_token: str, result: Mapping[str, Any]
-    ) -> CompleteReply:
-        reply = await asyncio.to_thread(
-            self._send,
-            f"/jobs/{self._safe_id(job_id)}/complete",
-            {"leaseToken": lease_token, "result": dict(result)},
-        )
-        if reply.status != 200:
-            raise self._failure(reply)
-        body = as_object(parse_json(reply))
-        job = as_object(body.get("job")) if body else None
-        status = job.get("status") if job else None
-        return CompleteReply(
-            status=status if isinstance(status, str) else None,
-            already_completed=bool(body and body.get("alreadyCompleted") is True),
-        )
-
-    # -- internals ----------------------------------------------------------------------------
-
-    @staticmethod
-    def _safe_id(job_id: str) -> str:
-        if not _JOB_ID.fullmatch(job_id):
-            raise ApiRejected("the job id is not a UUID", 400, None)
-        return job_id
-
-    def _send(self, path: str, body: Mapping[str, Any] | None) -> Reply:
-        data = json.dumps(body, separators=(",", ":")).encode("ascii") if body is not None else b""
-        request = urllib.request.Request(
-            f"{self._base_url}/api/runners/v1{path}",
-            data=data,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "X-Runner-Id": self._runner_id,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": f"code-reviewer-runner/{__version__}",
-            },
-        )
-        return send(self._opener, request, self._timeout)
-
-    @staticmethod
-    def _failure(reply: Reply) -> ApiError:
-        status = reply.status
-        code = error_code(reply)
-        if status in (409, 404):
-            return LeaseLost(f"the app says the job is not held (HTTP {status})", status)
-        if status >= 500 or status in (401, 408, 425, 429):
-            return ApiUnavailable(
-                f"the app cannot serve the request (HTTP {status})",
-                status,
-                retry_after(reply.headers),
-            )
-        if 300 <= status < 400:
-            return ApiUnavailable(f"the app answered with a redirect (HTTP {status})", status)
-        return ApiRejected(f"the app refused the request (HTTP {status})", status, code)
-
-    @staticmethod
-    def _parse_claim(reply: Reply) -> ClaimedJob:
-        body = as_object(parse_json(reply))
-        job = as_object(body.get("job")) if body and body.get("version") == 1 else None
-        job_id = job.get("id") if job else None
-        lease_token = job.get("leaseToken") if job else None
-        interval = job.get("heartbeatIntervalSeconds") if job else None
-        job_input = as_object(job.get("input")) if job else None
-        if (
-            not isinstance(job_id, str)
-            or not _JOB_ID.fullmatch(job_id)
-            or not isinstance(lease_token, str)
-            or not 8 <= len(lease_token) <= 256
-            or not isinstance(interval, int)
-            or isinstance(interval, bool)
-            or interval < 1
-            or job_input is None
-        ):
-            # The job may be held now, but the lease cannot be used without these fields.
-            raise ApiUnavailable("the claim answer does not match the contract", 200)
-        return ClaimedJob(
-            id=job_id,
-            lease_token=lease_token,
-            heartbeat_interval=float(min(interval, MAX_HEARTBEAT_INTERVAL_SECONDS)),
-            input=job_input,
-        )

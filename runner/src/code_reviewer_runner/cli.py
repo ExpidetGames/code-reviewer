@@ -1,48 +1,33 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""Command line entry point of the runner image: `code-reviewer-runner [mode]`.
+"""Command line entry point of the Worker image: `code-reviewer-runner <mode>`.
 
-One entry point, four modes (#316, #324), all with the same hardened startup (network rules,
-end of `NET_ADMIN`, self-check; `job_loop/service.py`):
+Two modes (#316, #324), both with the same hardened startup (network rules, end of `NET_ADMIN`,
+self-check; `job_loop/service.py`):
 
 | Mode          | What it does                                                                  |
 |---------------|-------------------------------------------------------------------------------|
-| `legacy`      | The job loop that claims and runs jobs itself. The default.                   |
-| `dispatch`    | The Dispatcher. This image carries none yet (#334): refuses with a stable code. |
 | `worker-once` | One Worker: `{appUrl, jobId, credential}` on stdin, one job, exit code.       |
 | `probe`       | Runs the startup, prints a JSON verdict (engines, stable reasons) and exits.  |
 
-The mode is the argument; without one it is `RUNNER_MODE`; without that it is `legacy`, so an
-installation that sets nothing starts the loop as it always did.
+The mode is the argument and is required: the Sandbox-Launcher passes it as the container's command.
+There is no job loop that claims jobs by itself any more (#700): a Dispatcher claims, a Worker runs.
 """
 
 import argparse
-import logging
 import os
 import sys
 from collections.abc import Mapping, Sequence
 from typing import NoReturn, TextIO
 
 from code_reviewer_runner import __version__
-from code_reviewer_runner.dynamic_review.netguard import IsolationError
-from code_reviewer_runner.job_loop.service import (
-    LOGGER_NAME,
-    configure_logging,
-    run_from_environment,
-    run_startup,
-)
-from code_reviewer_runner.job_loop.settings import SettingsError, worker_settings_from_environment
 from code_reviewer_runner.probe import run_probe
 from code_reviewer_runner.worker_cli import run_once as run_worker_once
 
 PROGRAM_NAME = "code-reviewer-runner"
-MODE_VARIABLE = "RUNNER_MODE"
-MODE_LEGACY = "legacy"
-MODE_DISPATCH = "dispatch"
 MODE_WORKER_ONCE = "worker-once"
 MODE_PROBE = "probe"
-MODES = (MODE_LEGACY, MODE_DISPATCH, MODE_WORKER_ONCE, MODE_PROBE)
-DISPATCHER_BUNDLE_MISSING = "dispatcher_bundle_missing"
+MODES = (MODE_WORKER_ONCE, MODE_PROBE)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -57,44 +42,14 @@ class _Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog=PROGRAM_NAME,
-        description="Picks up review jobs from the Code Reviewer app and runs PR-Agent. "
-        f"The mode is the argument or {MODE_VARIABLE}; the default is {MODE_LEGACY} (the job loop, "
-        "configured by environment variables, see runner/README.md): RUNNER_API_URL, "
-        "RUNNER_TOKEN, RUNNER_CONCURRENCY, RUNNER_POLL_INTERVAL_SECONDS, "
-        "RUNNER_JOB_TIMEOUT_SECONDS, RUNNER_SHUTDOWN_GRACE_SECONDS, RUNNER_ID.",
+        description="Runs one review job as a Worker, or the startup self-check. "
+        "The mode is the argument; the Worker's start document is read from stdin. "
+        "Settings: RUNNER_JOB_TIMEOUT_SECONDS and the Dynamic slot's variables "
+        "(see runner/README.md).",
     )
     parser.add_argument("--version", action="version", version=f"{PROGRAM_NAME} {__version__}")
-    parser.add_argument(
-        "mode",
-        nargs="?",
-        choices=MODES,
-        help=f"{', '.join(MODES)} (default: ${MODE_VARIABLE}, else {MODE_LEGACY})",
-    )
+    parser.add_argument("mode", choices=MODES, help=", ".join(MODES))
     return parser
-
-
-def run_dispatcher(environment: Mapping[str, str]) -> int:
-    """The Dispatcher bundle is added to the self-hosted targets by #334; this image has none.
-
-    The hardened startup still runs first, like in every mode: what #334 starts after it inherits
-    the same container, and the engines file is written. Then the mode refuses.
-    """
-    configure_logging()
-    log = logging.getLogger(LOGGER_NAME)
-    try:
-        settings = worker_settings_from_environment(environment)
-    except SettingsError as error:
-        log.error("cannot start: %s", error)
-        return 2
-    try:
-        run_startup(settings)
-    except IsolationError as error:
-        log.error("cannot start: %s", error)
-        return 2
-    log.error(
-        "cannot start: %s: this image carries no Dispatcher bundle", DISPATCHER_BUNDLE_MISSING
-    )
-    return 2
 
 
 def main(
@@ -111,15 +66,6 @@ def main(
         # argparse exits for --version (code 0) and for usage errors (code 2).
         return exit_request.code if isinstance(exit_request.code, int) else 1
     env = dict(os.environ if environment is None else environment)
-    mode = arguments.mode or env.get(MODE_VARIABLE, "").strip() or MODE_LEGACY
-    if mode not in MODES:
-        # Names the variable, never its value.
-        sys.stderr.write(f"{PROGRAM_NAME}: {MODE_VARIABLE} must be one of: {', '.join(MODES)}\n")
-        return 2
-    if mode == MODE_WORKER_ONCE:
-        return run_worker_once(env, stdin=stdin)
-    if mode == MODE_PROBE:
+    if arguments.mode == MODE_PROBE:
         return run_probe(env)
-    if mode == MODE_DISPATCH:
-        return run_dispatcher(env)
-    return run_from_environment(env)
+    return run_worker_once(env, stdin=stdin)

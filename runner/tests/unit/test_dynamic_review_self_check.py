@@ -568,8 +568,8 @@ def test_a_platform_without_a_pinned_artifact_is_refused(world: World) -> None:
     assert getattr(error, "reason", None) is SelfCheckReason.PIN_UNREADABLE
 
 
-# #264-T10: the image of a platform without a pin has no engine files at all (the build installs
-# nothing there). The runner then reports the documented missing-engine reason and serves Diff only.
+# #264-T10: an image without the engine files (no pin for its platform) reports the documented
+# missing-engine reason and serves Diff only.
 def test_an_image_built_without_the_engine_on_an_unpinned_platform_reports_the_missing_engine(
     world: World,
 ) -> None:

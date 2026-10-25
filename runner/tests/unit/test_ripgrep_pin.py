@@ -193,25 +193,8 @@ def test_a_platform_without_a_pinned_artifact_is_refused() -> None:
         script.artifact(json.loads(PIN.read_text(encoding="utf-8")), "linux-arm64")
 
 
-# #264-T10: see test_opencode_pin.py; ripgrep behaves the same, so the image builds on any platform.
-def test_the_image_build_flag_turns_a_missing_pin_into_a_clear_message_and_no_ripgrep(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    script = load_script()
-    monkeypatch.setattr(platform, "machine", lambda: "aarch64")
-
-    assert script.main(["--dest", str(tmp_path / "tools"), "--allow-unpinned-platform"]) == 0
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "linux-aarch64" in captured.err
-    assert "no pin" in captured.err
-    assert "Dynamic Review is disabled" in captured.err
-    assert list((tmp_path / "tools").iterdir()) == []
-
-
-# #264-T10
-def test_without_the_flag_a_missing_pin_still_fails(
+# #264-T10: see test_opencode_pin.py; ripgrep behaves the same.
+def test_a_missing_pin_fails_with_a_clear_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     script = load_script()
@@ -221,8 +204,7 @@ def test_without_the_flag_a_missing_pin_still_fails(
     assert "cannot install the pinned ripgrep" in capsys.readouterr().err
 
 
-# #264-T10: an x86_64 host must find its pin. If the platform key were wrong there, the flagged
-# image build would skip the engine with one log line instead of failing.
+# #264-T10: an x86_64 host must find its pin.
 @pytest.mark.parametrize("machine", ["x86_64", "amd64", "AMD64"])
 def test_an_x86_64_host_is_the_pinned_linux_x64_platform(
     monkeypatch: pytest.MonkeyPatch, machine: str

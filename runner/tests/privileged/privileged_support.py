@@ -117,10 +117,8 @@ def blocked(result: dict[str, Any], mode: EgressMode) -> bool:
     return result["errno"] is None or result["errno"] in REFUSED
 
 
-# The environment of the Dynamic runner's loop (compose.dynamic.yml) as far as startup reads it.
+# The environment of the Dynamic Worker (the hardened container spec) as far as startup reads it.
 RUNNER_ENVIRONMENT = {
-    "RUNNER_API_URL": "http://app.invalid:3000",
-    "RUNNER_TOKEN": "dummy-runner-token-0123456789-abcdef-0123456789",
     "RUNNER_DIFF_JOB_USER": f"{JOB_UID}:{JOB_GID}",
     "RUNNER_DYNAMIC_ENGINE_UID": str(ENGINE_UID),
     "RUNNER_DYNAMIC_ENGINE_GID": str(ENGINE_GID),

@@ -28,7 +28,7 @@ from code_reviewer_runner.dynamic_review.static_isolation import (
     slot_ports,
 )
 from code_reviewer_runner.job_loop.service import prepare_dynamic_runtime
-from code_reviewer_runner.job_loop.settings import LoopSettings
+from code_reviewer_runner.job_loop.settings import WorkerSettings
 from code_reviewer_runner.result import ErrorCode
 
 PORTS = SlotPorts(10180, 10181)
@@ -259,18 +259,15 @@ def test_rules_that_cannot_be_installed_are_logged_once_at_error_level(
 
 def settings(
     engine_user: tuple[int, int] | None = None, ports: SlotPorts | None = None
-) -> LoopSettings:
-    return LoopSettings(
-        api_url="http://app",
-        token="t",
-        runner_id="r",
+) -> WorkerSettings:
+    return WorkerSettings(
         dynamic_engine_user=engine_user,
         dynamic_ports=ports,
     )
 
 
 # #244-T05
-def test_the_loop_runs_the_startup_only_on_a_root_loop_with_an_engine_user() -> None:
+def test_the_worker_runs_the_startup_only_as_root_with_an_engine_user() -> None:
     calls: list[tuple[int, SlotPorts]] = []
 
     def startup(uid: int, ports: SlotPorts) -> EgressSetup:
