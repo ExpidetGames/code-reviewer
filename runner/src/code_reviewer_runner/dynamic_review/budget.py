@@ -3,8 +3,8 @@
 """The limits of one Dynamic Review and the ledger that enforces them (#197, #290).
 
 The one budget of a run is an operator cost limit in USD (default 1.00, never above a ceiling in
-code, `RUNNER_DYNAMIC_MAX_COST_USD`; since #689 the operator's value from the admin portal arrives with
-the job and replaces it). Besides it only technical limits stay: the 600 seconds of
+code, `RUNNER_DYNAMIC_MAX_COST_USD`; since #689 the operator's value from the admin portal
+arrives with the job and replaces it). Besides it only technical limits stay: the 600 seconds of
 the whole job (the lease and the runner's capacity depend on it), 64 KiB per tool result, 4 MiB of
 cumulative content returned to the model, 2 MiB of untrusted input and the protocol byte caps.
 They protect the machine and the isolation, they are not a budget. There is no limit on tokens,
