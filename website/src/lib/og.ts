@@ -48,6 +48,7 @@ export async function renderOgImage(title: string, kicker: string): Promise<Buff
         style: {
           width: "100%",
           height: "100%",
+          boxSizing: "border-box",
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
