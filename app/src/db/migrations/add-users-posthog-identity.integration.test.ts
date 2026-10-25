@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #692: the three nullable columns that hold the PostHog identity of a user. No existing row changes (each stays null, so the
-// version that is still running keeps working on the same database) and a value can be stored. On SQLite and, when
-// TEST_DATABASE_URL is set, Postgres.
-import { sql } from "kysely";
+// version that is still running keeps working on the same database) and a value can be stored.
+import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
+import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
 
 const THIS = "20261025140000_add_users_posthog_identity";
@@ -28,7 +23,7 @@ const beforeThisMigration: MigrationProvider = {
   },
 };
 
-type Db = ReturnType<typeof openDatabase>;
+type Db = Kysely<Database>;
 
 async function seedUser(db: Db) {
   await sql`insert into users (id, name, email, email_verified, created_at, updated_at) values ('u-1', 'Ada', 'ada@example.test', 1, ${T}, ${T})`.execute(
@@ -77,27 +72,8 @@ async function checkMigration(db: Db) {
 
 describe("the PostHog columns of a user", () => {
   // #692-T09
-  it("are added on SQLite, leave an existing user empty and store a value", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
-    try {
-      await checkMigration(db);
-    } finally {
-      await db.destroy();
-    }
+  it("are added, leave an existing user empty and store a value", async () => {
+    const { db } = await createEmptyTestDatabase();
+    await checkMigration(db);
   });
-
-  // #692-T09
-  const onPostgres = hasPostgres() ? it : it.skip;
-  onPostgres(
-    "are added on Postgres, leave an existing user empty and store a value",
-    async () => {
-      const { db } = await createPostgresTestDatabase({ migrate: false });
-      await checkMigration(db);
-    },
-  );
 });
