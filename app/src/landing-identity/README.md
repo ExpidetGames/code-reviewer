@@ -23,19 +23,33 @@ landing page's rule; rejecting old links here would only lose attributions of vi
 
 ## How they travel
 
-| File          | Role                                                                                                                                                                                                                                                                                  |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity.ts` | The parameter names, the strict shape, the cookie value (`<did>~<sid>`) and its parsing                                                                                                                                                                                               |
-| `capture.ts`  | The proxy step (`src/proxy.ts`, after the setup gate): a `GET /sign-up` or `GET /login` with a parameter gets a **307 to the same address without `ph_did`, `ph_sid` and `ph_ts`** (other parameters, such as `invitation`, stay) and, when a value is valid, the cookie `cr-landing` |
-| `sign-in.ts`  | Better Auth's `session.create.after` hook (`src/auth/auth.ts`): after any sign-in (GitHub callback, email form), a request that carries the cookie stores it on the user (`store.ts`) and clears the cookie. A failure is logged by its name and never stops the sign-in              |
-| `store.ts`    | The only writer: the columns of a new user row, and the first-touch update of a known one                                                                                                                                                                                             |
-| `src/signup/` | The email sign-up (`POST /api/sign-up`) reads the cookie, the account made after the answer gets the identity, and the answer clears the cookie                                                                                                                                       |
+| File          | Role                                                                                                                                                                                                                                                                                                                        |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity.ts` | The parameter names, the strict shape, the cookie value (`<did>~<sid>`) and its parsing                                                                                                                                                                                                                                     |
+| `capture.ts`  | The proxy step (`src/proxy.ts`, after the setup gate): a `GET /sign-up` or `GET /login` with a parameter gets a **307 to the same address without `ph_did`, `ph_sid` and `ph_ts`** (other parameters, such as `invitation`, stay) and, when a value is valid, the cookie `__Host-cr-landing` (`cr-landing` over plain http) |
+| `sign-in.ts`  | Better Auth's `session.create.after` hook (`src/auth/auth.ts`): after any sign-in (GitHub callback, email form), a request that carries the cookie stores it on the user (`store.ts`) and clears the cookie. A failure is logged by its name and never stops the sign-in                                                    |
+| `store.ts`    | The only writer: the columns of a new user row, and the first-touch update of a known one                                                                                                                                                                                                                                   |
+| `src/signup/` | The email sign-up (`POST /api/sign-up`) reads the cookie, the account made after the answer gets the identity, and the answer clears the cookie                                                                                                                                                                             |
 
-The cookie `cr-landing` is first-party, `HttpOnly`, `SameSite=Lax` (it has to come back on the redirect from GitHub, a top
-level navigation), `Secure` when the app is served over https, `Path=/`, **one hour**. It exists so the values survive the
+The cookie is first-party, `HttpOnly`, `SameSite=Lax` (it has to come back on the redirect from GitHub, a top
+level navigation), `Path=/`, **one hour**. Over https it is named **`__Host-cr-landing`** and is `Secure` with no `Domain`, so
+the browser takes it only from this host and no sibling subdomain can set or shadow it. Over plain http (development, tests)
+a `__Host-` cookie would be refused, so it is `cr-landing` without `Secure`; both names are read, the prefixed one first, and
+a sign-in clears whichever the request carried (the prefixed one with `Secure`, which a browser demands even for its removal).
+The value is `<did>~<sid>`, percent-encoded by Next's cookie API (`:` becomes `%3A`), so it is decoded before it is checked
+(a malformed escape is no identity). It exists so the values survive the
 sign-in form, the redirect to GitHub and the way back; it is not an analytics cookie, no script can read it and it is cleared at the first
 sign-in or sign-up that sees it. The parameters are taken out of the address by the redirect, so they are not left in the
 address bar, the history or a later `Referer` (the `Referrer-Policy` of the pages is unchanged).
+
+## The stored ids are untrusted hints
+
+Anyone can plant `ph_did` and `ph_sid` by sending a link (or a cookie) with values of the accepted shape: the app cannot
+tell a real PostHog id from an invented one. What is stored is therefore **an attribution hint, never a fact about who the
+user is**. Do not merge PostHog persons, link accounts or decide anything from these ids without care (an attacker could
+claim another visitor's id and have it merged into their own account). The same holds for the URL: on the first request the
+ids are part of the address, so they can appear in the request logs of the hosting provider of the app for its usual
+retention; the redirect only keeps them out of the address bar, the history and a later `Referer`.
 
 ## What is stored, and the first-touch rule
 
@@ -70,7 +84,9 @@ accident.
 
 ## Tests
 
-`identity.test.ts` (the strict shape, the cookie value), `capture.test.ts` (the proxy step), `store.integration.test.ts`
-(first touch), `sign-in.integration.test.ts` (the cookie through the real GitHub redirect and the email form),
+`identity.test.ts` (the strict shape, the cookie value, the round trip through Next's cookie API), `capture.test.ts` (the
+proxy step), `sign-in.test.ts` (the cookie is cleared even when storing fails), `store.integration.test.ts` (first touch),
+`sign-in.integration.test.ts` (the cookie through the real GitHub redirect and the email form),
 `sign-up.integration.test.ts` (the email sign-up), `deletion.integration.test.ts`, `no-readers.test.ts`, the migration
-test `src/db/migrations/add-users-posthog-identity.integration.test.ts`, and the journey `e2e/auth/landing-identity.e2e.ts`.
+test `src/db/migrations/add-users-posthog-identity.integration.test.ts`, and the journeys in `e2e/auth/sign-up.e2e.ts` (the
+email sign-up and the sign-in form, whose server action goes through `nextCookies`) and `e2e/auth/login.e2e.ts` (GitHub).

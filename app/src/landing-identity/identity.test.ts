@@ -3,10 +3,16 @@
 // The two identifiers a visitor of code-review.com brings along are opaque text from outside: only a plain, short
 // shape is accepted, anything else is ignored without a word.
 import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+import { captureLandingIdentity } from "./capture.ts";
 import {
   LANDING_IDENTITY_COOKIE,
+  LANDING_IDENTITY_HOST_COOKIE,
   LANDING_IDENTITY_MAX_AGE_SECONDS,
+  carriesLandingIdentityCookie,
+  clearedLandingIdentityCookies,
   encodeLandingIdentity,
+  landingIdentityCookieName,
   landingIdentityFromCookieHeader,
   landingIdentityFromSearchParams,
   validLandingId,
@@ -118,5 +124,93 @@ describe("the cookie that carries the identity across the sign in", () => {
     ],
   ])("is nothing for %s", (_label, header) => {
     expect(landingIdentityFromCookieHeader(header)).toBeNull();
+  });
+});
+
+describe("the cookie as the browser sends it back", () => {
+  /** What the browser sends back for the `Set-Cookie` lines of a response: the name and value of each, as they are. */
+  function cookieHeaderOf(response: Response): string {
+    return response.headers
+      .getSetCookie()
+      .map((line) => line.split(";")[0])
+      .join("; ");
+  }
+
+  // #692-T02
+  it.each([
+    ["with a colon in both", "user_1:abc", "sess:xyz"],
+    ["with a colon in one", "a:b", "plain"],
+    ["a UUID and a legacy id", UUID_V7, LEGACY_ID],
+  ])(
+    "returns the identifiers the proxy set through Next's cookie API, %s",
+    (_label, did, sid) => {
+      for (const secure of [false, true]) {
+        const response = captureLandingIdentity(
+          new NextRequest(
+            `http://localhost:3000/sign-up?ph_did=${encodeURIComponent(did)}&ph_sid=${encodeURIComponent(sid)}`,
+          ),
+          { secure: () => secure },
+        );
+
+        expect(response).not.toBeNull();
+        expect(
+          landingIdentityFromCookieHeader(cookieHeaderOf(response as Response)),
+        ).toEqual({ distinctId: did, sessionId: sid });
+      }
+    },
+  );
+
+  // #692-T02
+  it("percent-decodes the value before it checks it", () => {
+    expect(
+      landingIdentityFromCookieHeader(`${LANDING_IDENTITY_COOKIE}=a%3Ab~x%3Ay`),
+    ).toEqual({ distinctId: "a:b", sessionId: "x:y" });
+  });
+
+  // #692-T06
+  it.each([
+    ["a malformed escape", "a%E0%A4%A~b"],
+    ["an escape of a character that is not allowed", "a%2Fb~c"],
+    ["an escaped separator that makes three parts", "a%7Eb~c"],
+    ["an escaped line break", "a%0Ab~c"],
+  ])("is nothing for %s", (_label, value) => {
+    expect(
+      landingIdentityFromCookieHeader(`${LANDING_IDENTITY_COOKIE}=${value}`),
+    ).toBeNull();
+  });
+
+  // #692-T02
+  it("is named with the __Host- prefix exactly when it is Secure", () => {
+    expect(landingIdentityCookieName(true)).toBe("__Host-cr-landing");
+    expect(landingIdentityCookieName(false)).toBe("cr-landing");
+  });
+
+  // #692-T02
+  it("is read under both names, the prefixed one first", () => {
+    expect(
+      landingIdentityFromCookieHeader(`${LANDING_IDENTITY_HOST_COOKIE}=a~b`),
+    ).toEqual({ distinctId: "a", sessionId: "b" });
+    expect(
+      landingIdentityFromCookieHeader(
+        `${LANDING_IDENTITY_COOKIE}=plain~plain; ${LANDING_IDENTITY_HOST_COOKIE}=host~host`,
+      ),
+    ).toEqual({ distinctId: "host", sessionId: "host" });
+  });
+
+  // #692-T03
+  it("is removed under the name the request carried, the prefixed one with Secure", () => {
+    expect(
+      clearedLandingIdentityCookies(`${LANDING_IDENTITY_HOST_COOKIE}=a~b`),
+    ).toEqual([
+      "__Host-cr-landing=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure",
+    ]);
+    expect(
+      clearedLandingIdentityCookies(`x=y; ${LANDING_IDENTITY_COOKIE}=a~b`),
+    ).toEqual(["cr-landing=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"]);
+    expect(clearedLandingIdentityCookies("x=y")).toEqual([]);
+    expect(carriesLandingIdentityCookie(`${LANDING_IDENTITY_COOKIE}=bad`)).toBe(
+      true,
+    );
+    expect(carriesLandingIdentityCookie("x=y")).toBe(false);
   });
 });

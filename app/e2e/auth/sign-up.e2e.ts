@@ -136,6 +136,46 @@ test.describe("signing up", () => {
     expect(await page.content()).not.toContain(distinctId);
   });
 
+  // #692-T03
+  test("a verified person who signs in through the form with a link from the landing page gets the identity once, and the cookie is gone (server action path)", async ({
+    page,
+    context,
+  }) => {
+    const address = "signs-in-from-landing@e2e.test";
+    const distinctId = "user_1:0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
+    const sessionId = "sess:0192f5f0-7c3e-7a52-9d1b-cccccccccccc";
+    await page.goto("/sign-up");
+    await fillSignUp(page, address);
+    await expect(page.getByRole("status")).toContainText("Check your inbox");
+    await page.goto((await verificationLinkTo(address)) ?? "");
+    await confirmWith(page, PASSWORD);
+    await expect(page.getByRole("status")).toContainText("confirmed");
+    expect(await landingIdentityOf(address)).toMatchObject({
+      capturedAt: null,
+    });
+
+    // Colons in the ids make the cookie API percent-encode the value.
+    await page.goto(
+      `/login?ph_did=${encodeURIComponent(distinctId)}&ph_sid=${encodeURIComponent(sessionId)}`,
+    );
+    await expect(page).toHaveURL(/\/login$/);
+    expect((await context.cookies()).some((c) => c.name === "cr-landing")).toBe(
+      true,
+    );
+    await page.getByLabel("Email address").fill(address);
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/no-access$/);
+
+    expect(await landingIdentityOf(address)).toMatchObject({
+      distinctId,
+      sessionId,
+    });
+    expect((await context.cookies()).some((c) => c.name === "cr-landing")).toBe(
+      false,
+    );
+  });
+
   // #692-T06
   test("values that are not plain identifiers are dropped without a word", async ({
     page,

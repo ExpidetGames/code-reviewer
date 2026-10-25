@@ -5,7 +5,10 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { captureLandingIdentity } from "./capture.ts";
-import { LANDING_IDENTITY_COOKIE } from "./identity.ts";
+import {
+  LANDING_IDENTITY_COOKIE,
+  LANDING_IDENTITY_HOST_COOKIE,
+} from "./identity.ts";
 
 const BASE = "http://localhost:3000";
 const DID = "0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
@@ -57,16 +60,31 @@ describe("the landing identity in the address of the sign-up and the login", () 
   });
 
   // #692-T02
-  it("marks the cookie Secure exactly when the app is served over https", () => {
-    const secure = captureLandingIdentity(get(`/sign-up?ph_did=${DID}`), {
+  it("is a Secure __Host- cookie over https: Path=/, no Domain", () => {
+    const response = captureLandingIdentity(get(`/sign-up?ph_did=${DID}`), {
       secure: () => true,
     });
-    const plain = captureLandingIdentity(get(`/sign-up?ph_did=${DID}`), {
+
+    expect(response?.cookies.get(LANDING_IDENTITY_COOKIE)).toBeUndefined();
+    expect(response?.cookies.get(LANDING_IDENTITY_HOST_COOKIE)).toMatchObject({
+      secure: true,
+      path: "/",
+      httpOnly: true,
+    });
+    expect(response?.headers.get("set-cookie")).toMatch(
+      /^__Host-cr-landing=[^;]+; Path=\/;.* Secure;/,
+    );
+    expect(response?.headers.get("set-cookie")).not.toMatch(/domain/i);
+  });
+
+  // #692-T02
+  it("keeps the plain name without Secure over plain http (a __Host- cookie would be refused there)", () => {
+    const response = captureLandingIdentity(get(`/sign-up?ph_did=${DID}`), {
       secure: () => false,
     });
 
-    expect(secure?.cookies.get(LANDING_IDENTITY_COOKIE)?.secure).toBe(true);
-    expect(plain?.cookies.get(LANDING_IDENTITY_COOKIE)?.secure).toBeFalsy();
+    expect(response?.cookies.get(LANDING_IDENTITY_HOST_COOKIE)).toBeUndefined();
+    expect(response?.cookies.get(LANDING_IDENTITY_COOKIE)?.secure).toBeFalsy();
   });
 
   // #692-T02

@@ -8,7 +8,9 @@
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import {
-  LANDING_IDENTITY_COOKIE,
+  LANDING_IDENTITY_HOST_COOKIE,
+  carriesLandingIdentityCookie,
+  carriedLandingIdentityCookieNames,
   landingIdentityFromCookieHeader,
 } from "./identity.ts";
 import { recordLandingIdentity } from "./store.ts";
@@ -20,7 +22,13 @@ export type SignInContext = {
   setCookie: (
     name: string,
     value: string,
-    options?: { path?: string; maxAge?: number },
+    options?: {
+      path?: string;
+      maxAge?: number;
+      secure?: boolean;
+      httpOnly?: boolean;
+      sameSite?: "lax";
+    },
   ) => unknown;
 };
 
@@ -36,14 +44,30 @@ export async function captureLandingIdentityAtSignIn(
     context.request?.headers.get("cookie") ??
     null;
   // Nothing to do for a request without the cookie: the usual case costs no query.
-  if (header === null || !header.includes(LANDING_IDENTITY_COOKIE)) return;
+  if (!carriesLandingIdentityCookie(header)) return;
   try {
     const identity = landingIdentityFromCookieHeader(header);
     if (identity !== null) await recordLandingIdentity(db, userId, identity);
-    context.setCookie(LANDING_IDENTITY_COOKIE, "", { path: "/", maxAge: 0 });
   } catch (error) {
     log(
       `[auth] LANDING_IDENTITY_FAILED: the landing identity could not be stored (${error instanceof Error ? error.name : "error"}).`,
     );
+  } finally {
+    // The cookie is cleared whatever came of the note: the first sign in that sees it deletes it.
+    try {
+      for (const name of carriedLandingIdentityCookieNames(header)) {
+        context.setCookie(name, "", {
+          path: "/",
+          maxAge: 0,
+          httpOnly: true,
+          sameSite: "lax",
+          ...(name === LANDING_IDENTITY_HOST_COOKIE ? { secure: true } : {}),
+        });
+      }
+    } catch (error) {
+      log(
+        `[auth] LANDING_IDENTITY_FAILED: the landing cookie could not be cleared (${error instanceof Error ? error.name : "error"}).`,
+      );
+    }
   }
 }

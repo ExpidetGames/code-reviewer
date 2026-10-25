@@ -11,7 +11,10 @@ import {
   type CookieJar,
 } from "../test-support/auth-harness.ts";
 import { insertUser } from "../test-support/users.ts";
-import { LANDING_IDENTITY_COOKIE } from "./identity.ts";
+import {
+  LANDING_IDENTITY_COOKIE,
+  LANDING_IDENTITY_HOST_COOKIE,
+} from "./identity.ts";
 
 const DID = "0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
 const SID = "0192f5f0-7c3e-7a52-9d1b-aaaaaaaaaaaa";
@@ -159,6 +162,26 @@ describe("a user that signs in with email and password", () => {
         .getSetCookie()
         .some((line) => line.startsWith(`${LANDING_IDENTITY_COOKIE}=;`)),
     ).toBe(true);
+  });
+
+  // #692-T05
+  it("reads the percent-encoded __Host- cookie of https and clears it with Secure", async () => {
+    const harness = await createAuthHarness();
+    await userWithPassword(harness);
+
+    const response = await signIn(
+      harness,
+      `${LANDING_IDENTITY_HOST_COOKIE}=${encodeURIComponent("did:1")}~${encodeURIComponent("sid:1")}`,
+    );
+
+    expect(await identityRows(harness)).toMatchObject([
+      { posthog_distinct_id: "did:1", posthog_session_id: "sid:1" },
+    ]);
+    expect(
+      response.headers
+        .getSetCookie()
+        .find((line) => line.startsWith(`${LANDING_IDENTITY_HOST_COOKIE}=;`)),
+    ).toMatch(/Path=\/.*Secure/i);
   });
 
   // #692-T06

@@ -20,8 +20,7 @@ import {
   type JsonBodyErrorCode,
 } from "../http/json-body.ts";
 import {
-  carriesLandingIdentityCookie,
-  clearedLandingIdentityCookie,
+  clearedLandingIdentityCookies,
   landingIdentityFromCookieHeader,
   type LandingIdentity,
 } from "../landing-identity/identity.ts";
@@ -139,8 +138,8 @@ export function createSignUpRouteHandlers({
         case "accepted": {
           const headers = new Headers(NO_STORE);
           // The cookie did its job whatever came of the account (the answer is the same for every address).
-          if (carriesLandingIdentityCookie(cookieHeader))
-            headers.append("set-cookie", clearedLandingIdentityCookie());
+          for (const line of clearedLandingIdentityCookies(cookieHeader))
+            headers.append("set-cookie", line);
           return Response.json({ ok: true, next: outcome.next }, { headers });
         }
         case "unavailable":
