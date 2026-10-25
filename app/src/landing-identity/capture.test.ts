@@ -39,6 +39,24 @@ describe("the landing identity in the address of the sign-up and the login", () 
   );
 
   // #692-T02
+  it("takes the decoration time out of the address too, and stores nothing of it", () => {
+    const withBoth = captureLandingIdentity(
+      get(`/sign-up?ph_did=${DID}&ph_ts=1761400000000`),
+      { secure: () => false },
+    );
+    const alone = captureLandingIdentity(get("/login?ph_ts=1761400000000"), {
+      secure: () => false,
+    });
+
+    expect(withBoth?.headers.get("location")).toBe(`${BASE}/sign-up`);
+    expect(withBoth?.cookies.get(LANDING_IDENTITY_COOKIE)?.value).toBe(
+      `${DID}~`,
+    );
+    expect(alone?.headers.get("location")).toBe(`${BASE}/login`);
+    expect(alone?.cookies.get(LANDING_IDENTITY_COOKIE)).toBeUndefined();
+  });
+
+  // #692-T02
   it("marks the cookie Secure exactly when the app is served over https", () => {
     const secure = captureLandingIdentity(get(`/sign-up?ph_did=${DID}`), {
       secure: () => true,

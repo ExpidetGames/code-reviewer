@@ -16,19 +16,20 @@ visitors who accepted tracking:
 | `ph_did`  | the PostHog distinct id |
 | `ph_sid`  | the PostHog session id  |
 
-Both are opaque text (PostHog uses UUIDs; older SDKs hyphenated hex groups). They are read strictly (`identity.ts`): 1 to
+`ph_did` and `ph_sid` are opaque text (PostHog uses UUIDs; older SDKs hyphenated hex groups). They are read strictly (`identity.ts`): 1 to
 200 characters of `A-Z a-z 0-9 . _ : -`. A value that does not fit is ignored without a word, the other one is kept.
-Nothing is ever decided from them; a visitor can send any value and only changes the note on their own account.
+`ph_ts` is only taken out of the address with the other two: it is neither stored nor checked (how fresh a link is, is the
+landing page's rule; rejecting old links here would only lose attributions of visitors who left the tab open). Nothing is ever decided from them; a visitor can send any value and only changes the note on their own account.
 
 ## How they travel
 
-| File          | Role                                                                                                                                                                                                                                                                         |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity.ts` | The parameter names, the strict shape, the cookie value (`<did>~<sid>`) and its parsing                                                                                                                                                                                      |
-| `capture.ts`  | The proxy step (`src/proxy.ts`, after the setup gate): a `GET /sign-up` or `GET /login` with a parameter gets a **307 to the same address without `ph_did` and `ph_sid`** (other parameters, such as `invitation`, stay) and, when a value is valid, the cookie `cr-landing` |
-| `sign-in.ts`  | Better Auth's `session.create.after` hook (`src/auth/auth.ts`): after any sign-in (GitHub callback, email form), a request that carries the cookie stores it on the user (`store.ts`) and clears the cookie. A failure is logged by its name and never stops the sign-in     |
-| `store.ts`    | The only writer: the columns of a new user row, and the first-touch update of a known one                                                                                                                                                                                    |
-| `src/signup/` | The email sign-up (`POST /api/sign-up`) reads the cookie, the account made after the answer gets the identity, and the answer clears the cookie                                                                                                                              |
+| File          | Role                                                                                                                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity.ts` | The parameter names, the strict shape, the cookie value (`<did>~<sid>`) and its parsing                                                                                                                                                                                               |
+| `capture.ts`  | The proxy step (`src/proxy.ts`, after the setup gate): a `GET /sign-up` or `GET /login` with a parameter gets a **307 to the same address without `ph_did`, `ph_sid` and `ph_ts`** (other parameters, such as `invitation`, stay) and, when a value is valid, the cookie `cr-landing` |
+| `sign-in.ts`  | Better Auth's `session.create.after` hook (`src/auth/auth.ts`): after any sign-in (GitHub callback, email form), a request that carries the cookie stores it on the user (`store.ts`) and clears the cookie. A failure is logged by its name and never stops the sign-in              |
+| `store.ts`    | The only writer: the columns of a new user row, and the first-touch update of a known one                                                                                                                                                                                             |
+| `src/signup/` | The email sign-up (`POST /api/sign-up`) reads the cookie, the account made after the answer gets the identity, and the answer clears the cookie                                                                                                                                       |
 
 The cookie `cr-landing` is first-party, `HttpOnly`, `SameSite=Lax` (it has to come back on the redirect from GitHub, a top
 level navigation), `Secure` when the app is served over https, `Path=/`, **one hour**. It exists so the values survive the
@@ -56,7 +57,7 @@ The values live on the user row and nowhere else (no log, no other table, no cop
 with the row: the cleanup of a sign-up that never verified its address (`src/maintenance/cleanup.ts`) and the retirement of a
 user in the merge (`src/github-signin/merge.ts`) delete the row, and with it the values. `users` is global, not a
 workspace's data, so deleting a workspace (`src/workspaces/delete-workspace.ts`) does not touch them; the app has no
-account-deletion feature yet, and when it gets one it deletes the row (a request for erasure is a deletion of the user,
+account-deletion feature yet (the landing page's privacy policy says the values are deleted with the account: any future deletion of a user is the deletion of the row, and `no-readers.test.ts` guards that no second copy exists), and when it gets one it deletes the row (a request for erasure is a deletion of the user,
 columns included). The values are kept as long as the user exists. The privacy policy on the landing site names the
 processing (storing the PostHog identifiers of consenting visitors on the account); it is maintained there, not here.
 

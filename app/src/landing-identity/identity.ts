@@ -12,6 +12,11 @@
 export const LANDING_IDENTITY_PARAMS = {
   distinctId: "ph_did",
   sessionId: "ph_sid",
+  /**
+   * When the landing page decorated the link. Only taken out of the address (with the other two), never stored and never
+   * checked: how fresh a link is, is the landing page's rule, and the identifiers are not trusted for anything anyway.
+   */
+  decoratedAt: "ph_ts",
 } as const;
 
 /** The first-party cookie that carries the identity from the page to the sign-in. HttpOnly, never read by a script. */
