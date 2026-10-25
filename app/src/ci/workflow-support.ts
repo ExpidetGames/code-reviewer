@@ -9,6 +9,13 @@ import { parse } from "yaml";
 
 export const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
+/**
+ * The GitHub repository these files belong to. The workflows guard their jobs with it
+ * (`github.repository == '...'`) and the community files link to it; the tests read it from here, so a transfer of
+ * the repository changes this line and the files, and a test fails for each place that was missed.
+ */
+export const REPOSITORY = "Itegro-GmbH/code-reviewer";
+
 export type Step = {
   name?: string;
   id?: string;

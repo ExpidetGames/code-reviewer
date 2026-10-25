@@ -74,13 +74,13 @@ describe("loading the pull requests over HTTP", () => {
   });
 
   // CR-33-T07
-  it("answers 502 with a stable code when GitHub fails", async () => {
+  it("answers 503 with a stable code when GitHub fails", async () => {
     const { h, get } = await setup();
     h.fake.fail({ pathIncludes: "/pulls", status: 500 });
 
     const response = await get();
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error: "MANUAL_REVIEW_GITHUB_UNAVAILABLE",
     });

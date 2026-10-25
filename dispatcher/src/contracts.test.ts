@@ -13,18 +13,21 @@ import { readContract } from "./test-support/harness.ts";
 
 const CONTRACTS = join(import.meta.dirname, "..", "..", "contracts");
 
+// A schema is found under its own `$id`, which the files state; no test spells the address out.
+const ids = new Map<string, string>();
 function ajvWithContracts(): Ajv2020 {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
-  for (const file of ["runner-api", "dispatch-webhook"])
-    ajv.addSchema(readContract(`${file}.v1.json`) as object);
+  for (const file of ["runner-api", "dispatch-webhook"]) {
+    const schema = readContract<{ $id: string }>(`${file}.v1.json`);
+    ids.set(file, schema.$id);
+    ajv.addSchema(schema);
+  }
   return ajv;
 }
 const ajv = ajvWithContracts();
 
 function validator(file: string, definition: string) {
-  const check = ajv.getSchema(
-    `https://github.com/ExpidetGames/code-reviewer/contracts/${file}.v1.json#/$defs/${definition}`,
-  );
+  const check = ajv.getSchema(`${ids.get(file)}#/$defs/${definition}`);
   if (check === undefined) throw new Error(`no definition ${definition}`);
   return check;
 }

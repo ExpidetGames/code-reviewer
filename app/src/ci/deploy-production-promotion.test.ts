@@ -11,7 +11,12 @@ import {
   simulate,
   type Scenario,
 } from "./workflow-conditions.ts";
-import { needsOf, readWorkflow, type Job } from "./workflow-support.ts";
+import {
+  needsOf,
+  readWorkflow,
+  REPOSITORY,
+  type Job,
+} from "./workflow-support.ts";
 
 const workflow = readWorkflow("deploy-production.yml");
 const job = (name: string): Job => {
@@ -342,9 +347,7 @@ describe("the conditions of the jobs that follow the snapshot build", () => {
   it("keep the guards and the canary in front of every promotion", () => {
     for (const name of PROMOTIONS) {
       const condition = String(job(name).if);
-      expect(condition, name).toContain(
-        "github.repository == 'ExpidetGames/code-reviewer'",
-      );
+      expect(condition, name).toContain(`github.repository == '${REPOSITORY}'`);
       expect(condition, name).toContain("github.ref == 'refs/heads/main'");
       expect(needsOf(job(name)), name).toContain("canary");
       expect(condition, name).toContain("needs.canary.result == 'success'");

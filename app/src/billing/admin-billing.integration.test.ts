@@ -30,6 +30,8 @@ const RATES = {
 };
 // Built from parts: a live-looking key in the source would be refused by the secret scan of the push.
 const LIVE_PREFIX = ["sk", "live", ""].join("_");
+const LIVE_RESTRICTED_PREFIX = ["rk", "live", ""].join("_");
+const TEST_RESTRICTED_PREFIX = ["rk", "test", ""].join("_");
 const MANUAL_SECRET = "whsec_ManualSecret0123456789abcdef";
 const TERMS_URL = "https://example.com/terms";
 const PRIVACY_URL = "https://example.com/privacy";
@@ -437,6 +439,7 @@ describe("the connection check", () => {
     expect(await response.json()).toEqual({
       ok: false,
       error: "stripe_key_rejected",
+      stripe: { status: 401, code: null, type: "invalid_request_error" },
     });
     expect((await s.view()).stripe.checkedAt).toBeNull();
   });
@@ -456,6 +459,7 @@ describe("the connection check", () => {
     expect(await (await s.post("/check")).json()).toEqual({
       ok: false,
       error: "stripe_unavailable",
+      stripe: { status: 500, code: null, type: "api_error" },
     });
     s.stripe.faults.clear();
     s.stripe.faults.rateLimit(
@@ -465,6 +469,7 @@ describe("the connection check", () => {
     expect(await (await s.post("/check")).json()).toEqual({
       ok: false,
       error: "stripe_rate_limited",
+      stripe: { status: 429, code: null, type: "rate_limit_error" },
     });
   });
 });
@@ -1059,7 +1064,7 @@ describe("the webhook endpoint at Stripe", () => {
     s.stripe.faults.clear();
     const again = await s.post("/webhook-endpoint");
 
-    expect(failed.status).toBe(502);
+    expect(failed.status).toBe(503);
     expect(await failed.json()).toEqual({ error: "stripe_unavailable" });
     expect(again.status).toBe(200);
   });
@@ -1939,6 +1944,484 @@ describe("what is never in an answer or a log", () => {
     expect(await check.json()).toEqual({
       ok: false,
       error: "api_key_unreadable",
+    });
+  });
+});
+
+describe("a Stripe key that fails the check (#690)", () => {
+  const PREVIEW = "managed_payments_preview";
+  const NEW_TEST_KEY = "sk_test_ANewKeyForTheTest0123456789";
+  const hasPreview = (call: { version: string | null }) =>
+    call.version?.includes(PREVIEW) === true;
+
+  /**
+   * Billing on with the key of the fake (or `apiKey`), then a `fetch` that sends the fake's key whatever key the app holds.
+   * `accountCalls()` are the calls of the app to `GET /v1/account` after billing was on, as they left the app (also the ones
+   * a wrapper answers itself): the version header says whether the preview flag of Managed Payments was sent.
+   */
+  async function billingOn(
+    options: {
+      apiKey?: string;
+      wrap?: (inner: typeof fetch, key: () => string) => typeof fetch;
+    } = {},
+  ) {
+    const wrap = options.wrap ?? ((inner) => inner);
+    let fakeKey = "";
+    const calls: { path: string; version: string | null }[] = [];
+    const asFakeKey: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("authorization", `Bearer ${fakeKey}`);
+      return fetch(input, { ...init, headers });
+    };
+    const wrapped = wrap(asFakeKey, () => fakeKey);
+    const recording: typeof fetch = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      calls.push({
+        path: new URL(url).pathname,
+        version: new Headers(init?.headers).get("stripe-version"),
+      });
+      return wrapped(input, init);
+    };
+    const s = await start({ stripeFetch: recording });
+    fakeKey = s.stripe.apiKey;
+    await s.put({ adapter: "stripe" });
+    await s.saveLegal();
+    await s.saveRates();
+    await s.saveStripe({
+      apiKey: options.apiKey ?? s.stripe.apiKey,
+      webhookSecret: MANUAL_SECRET,
+    });
+    await s.post("/check");
+    await s.put({ enabled: true });
+    const seen = calls.length;
+    return {
+      ...s,
+      accountCalls: () =>
+        calls.slice(seen).filter((call) => call.path === "/v1/account"),
+      /** What the admin sees of the stored key and of the check. */
+      stored: async () => {
+        const v = await s.view();
+        return {
+          apiKey: v.stripe.apiKey,
+          checkedAt: v.stripe.checkedAt,
+          environment: v.stripe.environment,
+        };
+      },
+    };
+  }
+
+  // #690-T01
+  it("answers JSON with a status no proxy swaps and the specific code when the account call fails, and logs why", async () => {
+    const s = await billingOn();
+    s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 500);
+
+    const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect([502, 504]).not.toContain(response.status);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "stripe_unavailable",
+      stripe: { status: 500, code: null, type: "api_error" },
+    });
+    expect(s.portal.billingLog).toContain(
+      "billing_stripe_check_failed code=stripe_unavailable reason=server_error http=500 stripe_type=api_error",
+    );
+    expect(s.portal.billingLog.join("\n")).not.toContain("sk_test_ANewKey");
+  });
+
+  // #690-T01
+  it("answers 503 stripe_unreachable when Stripe cannot be reached", async () => {
+    const s = await billingOn();
+    s.stripe.faults.dropResponse(
+      { method: "GET", path: "/v1/account" },
+      { mode: "reset" },
+    );
+
+    const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: "stripe_unreachable",
+    });
+  });
+
+  // #690-T01
+  it("names the Stripe code of the refusal in the log line", async () => {
+    const s = await billingOn();
+    s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 404, {
+      body: {
+        error: {
+          type: "invalid_request_error",
+          code: "resource_missing",
+          message: "No such account",
+        },
+      },
+    });
+
+    const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+    expect(await response.json()).toEqual({
+      error: "stripe_unavailable",
+      stripe: {
+        status: 404,
+        code: "resource_missing",
+        type: "invalid_request_error",
+      },
+    });
+    expect(s.portal.billingLog).toContain(
+      "billing_stripe_check_failed code=stripe_unavailable reason=not_found http=404 stripe_code=resource_missing stripe_type=invalid_request_error",
+    );
+  });
+
+  // #690-T02
+  describe("while billing is on, a key that is not of the stored environment is refused before Stripe is asked", () => {
+    it("refuses a live key over a stored test key", async () => {
+      const s = await billingOn();
+      const before = s.stripe.requests().length;
+      const kept = await s.stored();
+
+      const response = await s.saveStripe({
+        apiKey: `${LIVE_PREFIX}ALiveKeyForTheTest0123456789`,
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "billing_disable_first" });
+      expect(s.stripe.requests()).toHaveLength(before);
+      expect(s.accountCalls()).toEqual([]);
+      expect(await s.stored()).toEqual(kept);
+    });
+
+    it("refuses a restricted live key (rk_live_) over a stored test key", async () => {
+      const s = await billingOn();
+      const kept = await s.stored();
+
+      const response = await s.saveStripe({
+        apiKey: `${LIVE_RESTRICTED_PREFIX}ARestrictedKeyForTheTest0123456789`,
+      });
+
+      expect(await response.json()).toEqual({ error: "billing_disable_first" });
+      expect(s.accountCalls()).toEqual([]);
+      expect(await s.stored()).toEqual(kept);
+    });
+
+    it("refuses a test key over a stored live key", async () => {
+      const s = await billingOn({
+        apiKey: `${LIVE_PREFIX}AStoredLiveKey0123456789012`,
+      });
+      const kept = await s.stored();
+      expect(kept.environment).toBe("live");
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "billing_disable_first" });
+      expect(s.accountCalls()).toEqual([]);
+      expect(await s.stored()).toEqual(kept);
+    });
+
+    it("refuses a restricted test key (rk_test_) over a stored live key", async () => {
+      const s = await billingOn({
+        apiKey: `${LIVE_PREFIX}AStoredLiveKey0123456789012`,
+      });
+
+      const response = await s.saveStripe({
+        apiKey: `${TEST_RESTRICTED_PREFIX}ARestrictedKeyForTheTest0123456789`,
+      });
+
+      expect(await response.json()).toEqual({ error: "billing_disable_first" });
+      expect(s.accountCalls()).toEqual([]);
+    });
+
+    it("refuses any key when the stored key cannot be read", async () => {
+      const s = await billingOn();
+      await s.portal.db
+        .updateTable("secrets")
+        .set({ ciphertext: "AAAA" })
+        .where("name", "=", "stripe_api_key")
+        .execute();
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(await response.json()).toEqual({ error: "billing_disable_first" });
+      expect(s.accountCalls()).toEqual([]);
+    });
+
+    it("refuses any key when no key is stored", async () => {
+      const s = await billingOn();
+      await s.portal.db
+        .deleteFrom("secrets")
+        .where("name", "=", "stripe_api_key")
+        .execute();
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(await response.json()).toEqual({ error: "billing_disable_first" });
+      expect(s.accountCalls()).toEqual([]);
+    });
+
+    it("still checks a restricted key of the same environment (rk_test_ over a stored test key)", async () => {
+      const s = await billingOn();
+
+      const response = await s.saveStripe({
+        apiKey: `${TEST_RESTRICTED_PREFIX}ARestrictedKeyForTheTest0123456789`,
+      });
+
+      expect(response.status).toBe(200);
+      expect(s.accountCalls()).toHaveLength(1);
+      expect((await s.stored()).apiKey).toEqual({
+        state: "configured",
+        lastFour: "6789",
+      });
+    });
+  });
+
+  // #690-T04
+  describe("the retry without the preview header", () => {
+    /** Stripe accepted the preview while billing was switched on; `refusing()` makes it refuse the flag afterwards. */
+    function refusingPreview(status = 400, type = "invalid_request_error") {
+      let refusing = false;
+      const wrap =
+        (inner: typeof fetch): typeof fetch =>
+        (input, init) => {
+          const version = new Headers(init?.headers).get("stripe-version");
+          if (!refusing || version?.includes(PREVIEW) !== true)
+            return inner(input, init);
+          return Promise.resolve(
+            Response.json(
+              {
+                error: {
+                  type,
+                  message: "This account cannot use the preview.",
+                },
+              },
+              { status },
+            ),
+          );
+        };
+      return {
+        wrap,
+        refuse: () => {
+          refusing = true;
+        },
+      };
+    }
+
+    it("says Managed Payments is not enabled when the call with the flag fails twice and the call without it passes", async () => {
+      const preview = refusingPreview();
+      const s = await billingOn({ wrap: preview.wrap });
+      preview.refuse();
+      const kept = await s.stored();
+
+      const saved = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+      const checked = await s.post("/check");
+
+      expect(saved.status).toBe(422);
+      expect(await saved.json()).toEqual({
+        error: "stripe_managed_payments_unavailable",
+        stripe: { status: 400, code: null, type: "invalid_request_error" },
+      });
+      expect(await checked.json()).toMatchObject({
+        ok: false,
+        error: "stripe_managed_payments_unavailable",
+      });
+      expect(s.portal.billingLog).toContain(
+        "billing_stripe_check_failed code=stripe_managed_payments_unavailable reason=bad_request http=400 stripe_type=invalid_request_error",
+      );
+      // Each of the two checks: with the flag, without it, with it again.
+      expect(s.accountCalls().map(hasPreview)).toEqual([
+        true,
+        false,
+        true,
+        true,
+        false,
+        true,
+      ]);
+      // The refusal changed nothing the admin sees.
+      expect(await s.stored()).toEqual(kept);
+    });
+
+    it("passes when the second call with the flag works: the first refusal was a glitch of one moment", async () => {
+      const s = await billingOn();
+      s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 400, {
+        body: { error: { type: "invalid_request_error", message: "glitch" } },
+      });
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(response.status).toBe(200);
+      expect(s.accountCalls().map(hasPreview)).toEqual([true, false, true]);
+    });
+
+    it("keeps stripe_unavailable when Stripe refuses the key with and without the preview header", async () => {
+      const s = await billingOn();
+      const kept = await s.stored();
+      s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 400, {
+        times: 2,
+        body: { error: { type: "invalid_request_error", message: "no" } },
+      });
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "stripe_unavailable",
+        stripe: { status: 400, code: null, type: "invalid_request_error" },
+      });
+      // The retry without the flag is the one that failed: nothing more is tried.
+      expect(s.accountCalls().map(hasPreview)).toEqual([true, false]);
+      expect(await s.stored()).toEqual(kept);
+    });
+
+    it("keeps the generic error when the repeat with the flag fails in another way", async () => {
+      // With the flag: a 400 the first time, a 403 the second time. Without the flag the fake answers.
+      let armed = false;
+      let withFlag = 0;
+      const s = await billingOn({
+        wrap: (inner) => (input, init) => {
+          const version = new Headers(init?.headers).get("stripe-version");
+          if (!armed || version?.includes(PREVIEW) !== true)
+            return inner(input, init);
+          withFlag += 1;
+          const refusal =
+            withFlag === 1
+              ? { status: 400, type: "invalid_request_error" }
+              : { status: 403, type: "invalid_request_error" };
+          return Promise.resolve(
+            Response.json(
+              { error: { type: refusal.type, message: "no" } },
+              { status: refusal.status },
+            ),
+          );
+        },
+      });
+      armed = true;
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "stripe_unavailable",
+        stripe: { status: 400, code: null, type: "invalid_request_error" },
+      });
+      expect(s.accountCalls().map(hasPreview)).toEqual([true, false, true]);
+    });
+
+    // Not a refusal of the preview: Stripe answers about the key, the account or the moment, and nothing is retried.
+    it.each([
+      { status: 401, error: "stripe_key_rejected", calls: 1 },
+      { status: 403, error: "stripe_key_rejected", calls: 1 },
+      { status: 404, error: "stripe_unavailable", calls: 1 },
+      { status: 409, error: "stripe_unavailable", calls: 1 },
+      { status: 402, error: "stripe_unavailable", calls: 1 },
+      { status: 422, error: "stripe_unavailable", calls: 1 },
+    ])(
+      "does not retry without the flag after a $status, and answers $error",
+      async ({ status, error, calls }) => {
+        const s = await billingOn();
+        const kept = await s.stored();
+        s.stripe.faults.failWith(
+          { method: "GET", path: "/v1/account" },
+          status,
+          {
+            times: 5,
+          },
+        );
+
+        const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+        expect(await response.json()).toMatchObject({
+          error,
+          stripe: { status },
+        });
+        expect([502, 504]).not.toContain(response.status);
+        const sent = s.accountCalls();
+        expect(sent).toHaveLength(calls);
+        expect(sent.every(hasPreview)).toBe(true);
+        expect(await s.stored()).toEqual(kept);
+      },
+    );
+
+    it("does not retry a 409 lock_timeout without the flag", async () => {
+      const s = await billingOn();
+      s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 409, {
+        times: 5,
+        body: {
+          error: { type: "invalid_request_error", code: "lock_timeout" },
+        },
+      });
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(await response.json()).toMatchObject({
+        error: "stripe_unavailable",
+        stripe: { status: 409, code: "lock_timeout" },
+      });
+      expect(s.accountCalls().every(hasPreview)).toBe(true);
+    });
+
+    it("does not retry a 400 that carries lock_timeout without the flag", async () => {
+      const s = await billingOn();
+      s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 400, {
+        times: 5,
+        body: {
+          error: { type: "invalid_request_error", code: "lock_timeout" },
+        },
+      });
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(await response.json()).toMatchObject({
+        error: "stripe_unavailable",
+        stripe: { status: 400, code: "lock_timeout" },
+      });
+      expect(s.accountCalls().every(hasPreview)).toBe(true);
+    });
+
+    // Stripe's own failures and limits: the client may repeat a safe call, but never without the flag.
+    it.each([
+      { status: 429, error: "stripe_rate_limited" },
+      { status: 500, error: "stripe_unavailable" },
+      { status: 503, error: "stripe_unavailable" },
+    ])(
+      "never sends the call without the flag after a $status",
+      async ({ status, error }) => {
+        const s = await billingOn();
+        const kept = await s.stored();
+        s.stripe.faults.failWith(
+          { method: "GET", path: "/v1/account" },
+          status,
+          {
+            times: 20,
+          },
+        );
+
+        const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+        expect(await response.json()).toMatchObject({
+          error,
+          stripe: { status },
+        });
+        const sent = s.accountCalls();
+        expect(sent.length).toBeGreaterThan(0);
+        expect(sent.every(hasPreview)).toBe(true);
+        expect(await s.stored()).toEqual(kept);
+      },
+    );
+
+    it("does not read a 400 of another type as a missing preview", async () => {
+      const s = await billingOn();
+      s.stripe.faults.failWith({ method: "GET", path: "/v1/account" }, 400, {
+        times: 5,
+        body: { error: { type: "api_error", message: "no" } },
+      });
+
+      const response = await s.saveStripe({ apiKey: NEW_TEST_KEY });
+
+      expect(await response.json()).toMatchObject({
+        error: "stripe_unavailable",
+      });
+      expect(s.accountCalls()).toHaveLength(1);
     });
   });
 });

@@ -17,7 +17,7 @@ You need Node.js 24 or newer with pnpm 10 (`corepack enable` is enough), [uv](ht
 0.5 or newer, and `make`. Docker is only needed for the image and stack smoke tests below.
 
 ```sh
-git clone https://github.com/ExpidetGames/code-reviewer.git
+git clone https://github.com/Itegro-GmbH/code-reviewer.git
 cd code-reviewer
 make install
 ```

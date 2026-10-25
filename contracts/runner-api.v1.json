@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/runner-api.v1.json",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/runner-api.v1.json",
   "title": "Code Reviewer runner API, version 1",
   "description": "The wire format between the app and the runner. The app serves POST /api/runners/v1/claim, POST /api/runners/v1/jobs/{id}/heartbeat and POST /api/runners/v1/jobs/{id}/complete. Every request carries 'Authorization: Bearer <RUNNER_TOKEN>' and may carry 'X-Runner-Id' (a free-form id for bookkeeping, not a security boundary). A reader ignores fields it does not know, except where a definition says 'additionalProperties: false' (RunnerJobInput mirrors the closed job format of the runner). This file is the only source of the format: the app (app/integration-tests/compatibility) and the runner (runner/tests/contract) both validate against it, and contracts/examples holds one valid example per definition.",
   "version": 1,

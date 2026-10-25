@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { REPOSITORY } from "./workflow-support.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const templateDir = `${repoRoot}.github/ISSUE_TEMPLATE/`;
@@ -158,7 +159,7 @@ describe("issue template config", () => {
 
     expect(intro?.type).toBe("markdown");
     expect(intro?.attributes.value).toContain(
-      "https://github.com/ExpidetGames/code-reviewer/security/advisories/new",
+      `https://github.com/${REPOSITORY}/security/advisories/new`,
     );
   });
 

@@ -930,7 +930,7 @@ describe("checking a payment from a review row", () => {
     const unavailable = await down.call(CHECK, { method: "POST", body });
     const missing = await none.call(CHECK, { method: "POST", body });
 
-    expect(unavailable.status).toBe(502);
+    expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toEqual({
       error: "payment_check_unavailable",
     });

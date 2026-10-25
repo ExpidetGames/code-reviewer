@@ -162,10 +162,9 @@ describe("the probe verdict", () => {
   it("validates its own reading against the contract's closed shapes", () => {
     const ajv = new Ajv2020({ strict: false });
     ajv.addSchema(readContract("runner-api.v1.json") as object);
-    ajv.addSchema(readContract("probe-verdict.v1.json") as object);
-    const check = ajv.getSchema(
-      "https://github.com/ExpidetGames/code-reviewer/contracts/probe-verdict.v1.json#/$defs/ProbeVerdict",
-    );
+    const probe = readContract<{ $id: string }>("probe-verdict.v1.json");
+    ajv.addSchema(probe);
+    const check = ajv.getSchema(`${probe.$id}#/$defs/ProbeVerdict`);
     const verdict = parseProbeOutput(
       line({ version: 1, engines: ["pr-agent"], reasons: ["pin_unreadable"] }),
     );

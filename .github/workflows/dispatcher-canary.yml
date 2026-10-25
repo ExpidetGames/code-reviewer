@@ -81,7 +81,7 @@ concurrency:
 jobs:
   canary:
     name: Prove the Dynamic-Worker canary of a deployment
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Holds the Infisical sign-in as secrets; its deployment branches are restricted to main.

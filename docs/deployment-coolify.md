@@ -51,7 +51,7 @@ started with the rest, but idle until an instance admin turns Dynamic Review on,
   (Coolify's [firewall guide](https://coolify.io/docs/core/infrastructure/servers/firewall)): the proxy
   needs them to get the certificate and to receive GitHub's webhooks. Nothing else has to be public.
 - Owner (or app manager) rights on the GitHub account or organization that owns the repositories to be
-  reviewed, and read access to this repository (`ExpidetGames/code-reviewer`) for **Coolify's own**
+  reviewed, and read access to this repository (`Itegro-GmbH/code-reviewer`) for **Coolify's own**
   GitHub App, see [section 4](#4-create-the-coolify-application).
 - A shared **password manager** for the secrets below.
 - An **OpenRouter** account with an API key and a spending limit (openrouter.ai/keys). Reviews cost
@@ -122,7 +122,7 @@ slightly differently.
    ([Coolify: Set up a GitHub App](https://coolify.io/docs/applications/sources/github/app)).
 2. **New resource.** Open the project and environment, *+ New*, *Private Repository (with GitHub App)*,
    choose the server (the machine that will run the containers), choose the GitHub App source, choose
-   the repository `ExpidetGames/code-reviewer` and the branch **`main`**, *Load Repository*.
+   the repository `Itegro-GmbH/code-reviewer` and the branch **`main`**, *Load Repository*.
 3. **Build pack.** Under *General > Build pipeline* choose **Compose** as the build strategy and set:
    - **Base Directory**: `/`
    - **Docker Compose Location**: `/compose.coolify.yml`

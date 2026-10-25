@@ -10,7 +10,7 @@
 // parentheses, string literals, `needs.<job>.result`, `needs.<job>.outputs.<name>`, `github.<name>`, `cancelled()` and
 // `always()`); anything else throws, so a new construct cannot slip by unmodelled.
 import type { Job, Workflow } from "./workflow-support.ts";
-import { needsOf } from "./workflow-support.ts";
+import { needsOf, REPOSITORY } from "./workflow-support.ts";
 
 type Value = string | boolean;
 
@@ -28,7 +28,7 @@ export type Scenario = {
 };
 
 const GITHUB: Record<string, string> = {
-  repository: "ExpidetGames/code-reviewer",
+  repository: REPOSITORY,
   ref: "refs/heads/main",
 };
 

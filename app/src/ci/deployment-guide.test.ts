@@ -284,7 +284,7 @@ describe("the Coolify guide and the Compose file", () => {
   it("says that no image is published and names no GHCR image", () => {
     expect(guide).toContain("No image of the project is published");
     expect(guide).not.toMatch(/docker login ghcr\.io/);
-    expect(guide).not.toContain("ghcr.io/expidetgames");
+    expect(guide.toLowerCase()).not.toContain("ghcr.io/itegro-gmbh");
     expect(guide).not.toContain("sha-<first 7 characters of the");
   });
 

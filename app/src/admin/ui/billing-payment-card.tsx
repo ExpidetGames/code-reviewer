@@ -37,6 +37,7 @@ import { formatUtc } from "../../ui/format-time.ts";
 import type { BillingApi } from "./billing-api.ts";
 import {
   describeBillingFailure,
+  describeStripeDetail,
   describeBillingIssue,
 } from "./billing-messages.ts";
 import { OutcomeNote, useBillingRun } from "./billing-run.tsx";
@@ -111,7 +112,7 @@ export function BillingPaymentCard({
         ? { kind: "ok", text: "The payment adapter is saved." }
         : {
             kind: "failed",
-            text: describeBillingFailure(result.code),
+            text: describeBillingFailure(result.code, result.status),
             issues: result.issues,
             missing: [],
           };
@@ -131,7 +132,9 @@ export function BillingPaymentCard({
         ? { kind: "ok", text: "Saved." }
         : {
             kind: "failed",
-            text: describeBillingFailure(answer.code),
+            text:
+              describeBillingFailure(answer.code, answer.status) +
+              describeStripeDetail(answer.details?.stripe),
             issues: answer.issues,
             missing: [],
           };
@@ -148,7 +151,7 @@ export function BillingPaymentCard({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: [],
           missing: [],
         };
@@ -159,7 +162,9 @@ export function BillingPaymentCard({
           }
         : {
             kind: "failed",
-            text: describeBillingFailure(result.data.error),
+            text:
+              describeBillingFailure(result.data.error) +
+              describeStripeDetail(result.data.stripe),
             issues: [],
             missing: [],
           };
@@ -174,7 +179,9 @@ export function BillingPaymentCard({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text:
+            describeBillingFailure(result.code, result.status) +
+            describeStripeDetail(result.details?.stripe),
           issues: [],
           missing: [],
         };

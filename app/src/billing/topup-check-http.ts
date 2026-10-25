@@ -38,8 +38,8 @@ const STATUS: Record<RefusalCode, number> = {
   limits_unavailable: 503,
   forbidden: 403,
   intent_not_found: 404,
-  provider_unavailable: 502,
-  provider_rejected: 502,
+  provider_unavailable: 503,
+  provider_rejected: 503,
   provider_not_configured: 503,
 };
 

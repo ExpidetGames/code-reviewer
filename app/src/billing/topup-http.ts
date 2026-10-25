@@ -58,8 +58,8 @@ const STATUS: Record<RefusalCode, number> = {
   business_confirmation_required: 409,
   intent_conflict: 409,
   request_in_progress: 409,
-  provider_unavailable: 502,
-  provider_rejected: 502,
+  provider_unavailable: 503,
+  provider_rejected: 503,
   provider_not_configured: 503,
 };
 

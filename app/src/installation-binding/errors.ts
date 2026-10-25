@@ -80,7 +80,7 @@ export const BINDING_ERROR_STATUS: Record<BindingErrorCode, number> = {
   user_authorization_not_configured: 409,
   access_denied: 403,
   github_authorization_required: 401,
-  github_unreachable: 502,
+  github_unreachable: 503,
   installation_id_invalid: 422,
   installation_not_accessible: 403,
   not_installation_admin: 403,
@@ -124,6 +124,6 @@ export const APPROVAL_ERROR_STATUS: Record<ApprovalErrorCode, number> = {
   requester_not_admin: 409,
   installation_already_linked: 409,
   installation_not_accessible: 403,
-  github_unreachable: 502,
+  github_unreachable: 503,
   unavailable: 503,
 };

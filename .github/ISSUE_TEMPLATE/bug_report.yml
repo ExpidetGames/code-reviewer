@@ -10,7 +10,7 @@ body:
 
         **Never paste API keys, tokens, private keys, webhook secrets or `.env` files into this
         form.** For a security problem, do not use this form: report it privately at
-        https://github.com/ExpidetGames/code-reviewer/security/advisories/new
+        https://github.com/Itegro-GmbH/code-reviewer/security/advisories/new
   - type: input
     id: version
     attributes:

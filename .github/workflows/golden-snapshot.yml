@@ -72,7 +72,7 @@ jobs:
     name: Build, check and record the golden snapshot
     # The job's own condition guards against an accident; the boundary is the environment `production`, whose
     # deployment branches are restricted to main (docs/deployment-vercel.md, section 2.1).
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: production
