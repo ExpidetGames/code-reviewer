@@ -20,7 +20,8 @@ const account: GithubAccount = {
   email: "login-journey@example.test",
 };
 
-// A GitHub account no app knows yet: its first sign in makes the user.
+// An imported user (no landing identity yet): the first sign in with a link from the landing page gives it one. (The sign-up
+// of this app is closed, so a brand-new GitHub account could not be made here; that case is src/landing-identity/sign-in.integration.test.ts.)
 const visitor: GithubAccount = {
   id: 7100002,
   login: "landing-visitor",
@@ -31,7 +32,7 @@ const visitor: GithubAccount = {
 test.describe("signing in and out", () => {
   test.beforeAll(async ({ request }) => {
     await addGithubAccount(request, account);
-    await addGithubAccount(request, visitor, null);
+    await addGithubAccount(request, visitor);
   });
 
   // CR-18-T01
@@ -65,7 +66,7 @@ test.describe("signing in and out", () => {
   });
 
   // #692-T04
-  test("a visitor who comes from the landing page keeps the PostHog identity on the account that GitHub creates", async ({
+  test("a visitor who comes from the landing page keeps the PostHog identity on their account at the first sign in with GitHub", async ({
     page,
   }) => {
     const distinctId = "0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
@@ -78,8 +79,7 @@ test.describe("signing in and out", () => {
       .getByRole("button", { name: `Authorize ${visitor.login}` })
       .click();
 
-    // A new account has no workspace yet.
-    await expect(page).toHaveURL(/\/no-access$/);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
     expect(await landingIdentityOf(visitor.email ?? "", "main")).toMatchObject({
       distinctId,
       sessionId,

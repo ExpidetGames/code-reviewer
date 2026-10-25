@@ -105,7 +105,9 @@ test.describe("signing up", () => {
     const distinctId = "0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
     const sessionId = "0192f5f0-7c3e-7a52-9d1b-aaaaaaaaaaaa";
 
-    await page.goto(`/sign-up?ph_did=${distinctId}&ph_sid=${sessionId}`);
+    await page.goto(
+      `/sign-up?ph_did=${distinctId}&ph_sid=${sessionId}&ph_ts=${String(Date.now())}`,
+    );
 
     // The identifiers are out of the address and in one HttpOnly first-party cookie.
     await expect(page).toHaveURL(/\/sign-up$/);
