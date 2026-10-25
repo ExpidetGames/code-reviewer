@@ -131,9 +131,10 @@ file needed by either comparison that is **denied or unsafe** (engine discovery,
 symlink or other non-regular mode), **binary** or **over 512 KiB** is excluded from the checkout and
 the diff and listed in the evidence `skipped` array with the stable reason (`engine_discovery`,
 `credential_path`, `unsafe_mode`, `binary` or `too_large`), so the review can say the file was not
-reviewed; it never fails the job (#296). A skill manifest the runner cannot rewrite (#701) is
-different: it is only left out of the export, listed under `omissions` as `invalid_skill`, and stays
-in the diff. Before #296 a changed denied path failed the whole run,
+reviewed; it never fails the job (#296). A skill manifest the runner cannot rewrite, or whose rewrite
+is over the file limit, or that is past the per-job skill bounds (#701) is different: it is only left
+out of the export, listed under `omissions` as `invalid_skill`, `large_file` or `skill_limit`, and
+stays in the diff. Before #296 a changed denied path failed the whole run,
 which made any repository that tracks such a path unreviewable (with an unknown merge base every
 head path counts as changed). Skipping is as safe as failing: a denied path is never read,
 exported, diffed or wanted by name, so nothing of it reaches the engine; the failure only protected
@@ -165,8 +166,8 @@ completeness or resolution.
 
 ## Versioned discovery exclusions
 
-`DENY_LIST_VERSION = opencode-v1.19.0-2` (`-1` omitted the skill trees too; `-2` exports the documents of
-repository skills, see "Repository skills" below) was checked against the merged
+`DENY_LIST_VERSION = opencode-v1.19.0-3` (`-1` omitted the skill trees too; `-2` exports the documents of
+repository skills, see "Repository skills" below; `-3` bounds them: 50 skills, 8 KiB of listing) was checked against the merged
 [#85 research](spike/85-opencode-dynamic-review.md), upstream
 [config](https://opencode.ai/docs/config/), [plugins](https://opencode.ai/docs/plugins/),
 [agents](https://opencode.ai/docs/agents/) and [skills](https://opencode.ai/docs/skills/) documentation,
@@ -241,8 +242,16 @@ What the runner does with it:
   64 characters at most, not `customize-opencode`) and description is left out of the export and
   listed as `omitted (invalid_skill)`. It stays in the diff as the text it is: it is not a
   deny-list skip, so a changed skill is still reviewed. The description is one line of at most
-  1,024 printable characters in which `<` and `>` are escaped, so it cannot close the tag the
-  engine writes it into.
+  300 printable characters (counted after the escaping, cut with an `…`) in which `<` and `>` are
+  escaped, so it cannot close the tag the engine writes it into. A rewrite can make a manifest
+  that was within the 512 KiB file limit larger (the escapes); one that then exceeds the limit is
+  left out as `large_file` and never fails the checkout.
+- **At most 50 skills and 8 KiB of listing per job.** The engine lists the name and description of
+  every skill in the system prompt of every request. The valid `SKILL.md` files of the head are
+  taken in path order; the walk stops at the 51st skill or at the first one that would take the
+  names and descriptions (UTF-8 bytes) past 8 KiB, and the rest are left out of the export as
+  `skill_limit`. They stay in the diff, so a changed skill is still reviewed. The files next to an
+  omitted manifest are still exported as plain files; the engine lists only skills with a manifest.
 - **The trusted prompt** says that a repository skill is a document of the same class as
   `AGENTS.md`: it may tell the agent what to look for, it is untrusted data and cannot override
   the rules, the tools, the output format or the limits, and a script it mentions is text, never a

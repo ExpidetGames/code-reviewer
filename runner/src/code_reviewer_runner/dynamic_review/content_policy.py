@@ -14,7 +14,7 @@ from enum import StrEnum
 from code_reviewer_runner.dynamic_review.repo_skills import is_skill_resource
 from code_reviewer_runner.redaction import Redactor
 
-DENY_LIST_VERSION = "opencode-v1.19.0-2"
+DENY_LIST_VERSION = "opencode-v1.19.0-3"
 _CONFIG_NAMES = {"opencode.json", "opencode.jsonc", "tui.json", "tui.jsonc"}
 _CREDENTIAL_DIRS = {".ssh", ".aws", ".azure", ".gnupg", ".kube", ".docker"}
 _CREDENTIAL_NAMES = {
@@ -113,6 +113,9 @@ class OmissionReason(StrEnum):
     # A skill manifest the engine could not list safely (#701): no usable frontmatter. Not a
     # deny-list reason: the file stays in the diff and is only left out of the export.
     INVALID_SKILL = "invalid_skill"
+    # A skill past the per-job bounds (#701): the first skills by path are exported, the rest are
+    # left out. Like `invalid_skill`, not a deny-list reason; the file stays in the diff.
+    SKILL_LIMIT = "skill_limit"
     CREDENTIAL_PATH = "credential_path"
     UNSAFE_MODE = "unsafe_mode"
     LARGE_FILE = "large_file"

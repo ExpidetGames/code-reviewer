@@ -14,6 +14,7 @@ from fakes.dynamic_git.fixtures import GitFixture, git
 
 from code_reviewer_runner.dynamic_review.checkout import prepare_content
 from code_reviewer_runner.dynamic_review.limits import CheckoutError, CheckoutReason, Limits
+from code_reviewer_runner.dynamic_review.repo_skills import MAX_SKILLS
 from code_reviewer_runner.dynamic_review.transport import LocalTransport
 from code_reviewer_runner.job import ClaimBase
 from code_reviewer_runner.redaction import Redactor
@@ -221,6 +222,57 @@ def test_a_skill_manifest_the_runner_cannot_rewrite_stays_in_the_diff_and_out_of
     assert result.skipped == ()
     assert ".claude/skills/x/SKILL.md" in result.diff
     assert result.metrics.omitted == {"invalid_skill": 1} and result.metrics.skipped == {}
+
+
+# #701-T05
+def test_a_skill_manifest_that_grows_past_the_file_limit_when_rewritten_is_left_out_not_fatal(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    # Every `<` of the description becomes `&lt;`: a manifest right at the limit outgrows it.
+    head = b"---\nname: a\ndescription: <<<<<<<<<<\n---\n"
+    manifest = head + b"x" * (200 - len(head))
+    repo.set_head({"README.md": b"base\n", ".claude/skills/a/SKILL.md": manifest})
+
+    result = prepare_content(
+        claim(repo),
+        196,
+        LocalTransport(repo.path),
+        tmp_path / "job",
+        Redactor(()),
+        limits=Limits(file_bytes=200),
+    )
+
+    assert set(result.files) == {"README.md"}
+    assert [(x.path, x.reason) for x in result.omissions] == [
+        (".claude/skills/a/SKILL.md", "large_file")
+    ]
+    assert ".claude/skills/a/SKILL.md" in result.diff and result.skipped == ()
+
+
+# #701-T06
+def test_the_skills_past_the_limit_are_left_out_of_the_export_and_stay_in_the_diff(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    files: dict[str, bytes] = {"README.md": b"base\n"}
+    for index in range(MAX_SKILLS + 2):
+        name = f"s{index:03}"
+        files[f".claude/skills/{name}/SKILL.md"] = (
+            f"---\nname: {name}\ndescription: d\n---\nBody\n".encode()
+        )
+    repo.set_head(files)
+
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+
+    exported = {p for p in result.files if p.endswith("SKILL.md")}
+    assert exported == {f".claude/skills/s{i:03}/SKILL.md" for i in range(MAX_SKILLS)}
+    assert [(x.path, x.reason) for x in result.omissions] == [
+        (f".claude/skills/s{i:03}/SKILL.md", "skill_limit")
+        for i in range(MAX_SKILLS, MAX_SKILLS + 2)
+    ]
+    assert result.skipped == () and ".claude/skills/s051/SKILL.md" in result.diff
+    assert result.metrics.omitted == {"skill_limit": 2}
 
 
 # #296-T06 #296-T07

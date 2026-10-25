@@ -233,8 +233,8 @@ under Apache-2.0 (the files say so); the rest of the repository is proprietary.
 - Modifications for Code Reviewer: a finding may point outside the changed lines when the change
   causes the problem there (Codex requires the location to overlap the diff, because it posts inline
   comments; our single summary comment does not); there are no git or shell steps (the diff is
-  provided as a file and the checkout is read with the built-in read, grep, glob and list operations
-  only); the output is the Dynamic Review findings JSON (`contracts/dynamic-review/schema.v1.json`),
+  provided as a file and the checkout is read with the built-in read, grep and glob operations and the
+  skill loader only); the output is the Dynamic Review findings JSON (`contracts/dynamic-review/schema.v1.json`),
   so priorities are P0-P3 with a confidence and evidence instead of inline comment fields; the
   re-review rules live in the fixed core; repository instruction files are read and cited as
   evidence only, never as authority; the wording is tightened.

@@ -74,8 +74,15 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 # The skill the engine ships itself; the permission block hides it, so a repository skill of that
 # name would be unusable. It is refused instead of silently hidden.
 _RESERVED_NAMES = frozenset({"customize-opencode"})
-MAX_DESCRIPTION_CHARS = 1024
+MAX_DESCRIPTION_CHARS = 300
+_ELLIPSIS = "…"
+# What the engine lists for every skill in the system prompt of every request is bounded: at most
+# this many skills, and their names and descriptions together at most this many UTF-8 bytes. The
+# first skills by path are exported, the rest are omitted (`skill_limit`).
+MAX_SKILLS = 50
+MAX_SKILL_LISTING_BYTES = 8 * 1024
 _KEY = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*)[ \t]*:(.*)")
+_ESCAPES = {"<": "&lt;", ">": "&gt;"}
 _BLOCK_SCALAR = re.compile(r"[|>][+-]?[0-9]?")
 
 
@@ -144,10 +151,49 @@ def _quote(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def admit_skills(manifests: dict[str, str]) -> set[str]:
+    """The paths of the rewritten manifests that are exported: the first by path, within the bounds.
+
+    `manifests` maps a path to the text `neutralize_skill_manifest` returned. The walk is in path
+    order and stops at the first skill that does not fit, so the outcome never depends on the order
+    the objects were read in and a later, smaller skill cannot take the place of an earlier one.
+    """
+    admitted: set[str] = set()
+    listing = 0
+    for path in sorted(manifests):
+        listing += _listing_bytes(manifests[path])
+        if len(admitted) >= MAX_SKILLS or listing > MAX_SKILL_LISTING_BYTES:
+            break
+        admitted.add(path)
+    return admitted
+
+
+def _listing_bytes(manifest: str) -> int:
+    """The bytes a rewritten manifest adds to the engine's skill listing (name and description)."""
+    lines = manifest.split("\n")
+    name = json.loads(lines[1].removeprefix("name: "))
+    description = json.loads(lines[2].removeprefix("description: "))
+    return len(name.encode()) + len(description.encode())
+
+
 def _description(value: str) -> str:
-    """One bounded printable line that cannot close the tag the engine writes it into."""
+    """One bounded printable line that cannot close the tag the engine writes it into.
+
+    The bound is on the escaped text, which is what the engine writes, and a cut ends in an
+    ellipsis and never inside an escape.
+    """
     line = "".join(char for char in " ".join(value.split()) if char.isprintable())
-    return line[:MAX_DESCRIPTION_CHARS].rstrip().replace("<", "&lt;").replace(">", "&gt;")
+    escaped = [_ESCAPES.get(char, char) for char in line]
+    if sum(map(len, escaped)) <= MAX_DESCRIPTION_CHARS:
+        return "".join(escaped)
+    kept: list[str] = []
+    size = len(_ELLIPSIS)
+    for piece in escaped:
+        size += len(piece)
+        if size > MAX_DESCRIPTION_CHARS:
+            break
+        kept.append(piece)
+    return "".join(kept).rstrip() + _ELLIPSIS
 
 
 def _fields(lines: list[str]) -> dict[str, str] | None:

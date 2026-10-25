@@ -1477,8 +1477,10 @@ true` (left out otherwise), and a state head the job cannot account for on the *
   is read when the agent loads it. This is the same class as a nested `AGENTS.md` and is accepted
   by the owner: a skill is a document, the core ranks it below the fixed rules, and the agent has no
   tool that writes, runs a script or fetches, so a skill can change what the review says and not
-  what the engine can do. The `SKILL.md` frontmatter is rewritten by the runner because the engine
-  parses it with `gray-matter`, which evaluates a `---js` block. See "Repository skills" in
+  what the engine can do. The exposure is bounded: at most 50 skills and 8 KiB of names and
+  descriptions are exported (a description is cut at 300 characters). The `SKILL.md` frontmatter is
+  rewritten by the runner because the engine parses it with `gray-matter`, which evaluates a
+  `---js` block. See "Repository skills" in
   [Dynamic checkout](dynamic-checkout.md#repository-skills-701).
 - **The boundary is the container, not a sandbox.** The engine user's network is confined by nft rules
   that cover TCP, UDP and IPv6 (with the fallback ruleset: IPv6 by switching it off, #345) but not AF_UNIX (kept empty by mounting and sharing nothing), and the

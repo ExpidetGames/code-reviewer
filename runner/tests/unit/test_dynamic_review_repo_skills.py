@@ -13,7 +13,11 @@ import pytest
 
 from code_reviewer_runner.dynamic_review.content_policy import DENY_LIST_VERSION, omission_reason
 from code_reviewer_runner.dynamic_review.repo_skills import (
+    MAX_DESCRIPTION_CHARS,
+    MAX_SKILL_LISTING_BYTES,
+    MAX_SKILLS,
     SKILL_PATHS,
+    admit_skills,
     is_skill_manifest,
     neutralize_skill_manifest,
 )
@@ -306,8 +310,8 @@ def test_the_description_is_one_bounded_line_without_control_characters() -> Non
     description = frontmatter_of(result)["description"]
     assert description.isprintable()
     assert "\n" not in description and "\t" not in description
-    assert len(description) <= 1024
-    assert len(result.split("\n")[2]) < 1200
+    assert len(description) <= MAX_DESCRIPTION_CHARS == 300
+    assert len(result.split("\n")[2]) < 400
 
 
 # #701-T05
@@ -341,4 +345,90 @@ def test_the_result_is_stable_when_it_is_neutralized_again() -> None:
 
 # #701-T04: the evidence names the deny list it was made with; the skill export changed it.
 def test_the_deny_list_version_names_the_pinned_engine_and_the_skill_export() -> None:
-    assert DENY_LIST_VERSION == "opencode-v1.19.0-2"
+    assert DENY_LIST_VERSION == "opencode-v1.19.0-3"
+
+
+# #701-T05
+def test_a_long_description_is_cut_with_an_ellipsis_and_stays_one_escaped_line() -> None:
+    result = neutralize_skill_manifest(skill(f"name: a\ndescription: {'word ' * 200}"))
+
+    assert result is not None
+    description = frontmatter_of(result)["description"]
+    assert len(description) <= 300 and description.endswith("…")
+    assert description.startswith("word word") and "\n" not in description
+
+
+# #701-T05
+def test_a_description_of_exactly_the_cap_is_kept_whole() -> None:
+    result = neutralize_skill_manifest(skill(f"name: a\ndescription: {'x' * 300}"))
+
+    assert result is not None
+    assert frontmatter_of(result)["description"] == "x" * 300
+
+
+# #701-T05
+def test_the_cap_counts_the_escaped_text_and_never_cuts_an_escape_in_half() -> None:
+    result = neutralize_skill_manifest(skill(f"name: a\ndescription: {'<' * 400}"))
+
+    assert result is not None
+    description = frontmatter_of(result)["description"]
+    assert len(description) <= 300 and description.endswith("&lt;…")
+    assert "<" not in description and ">" not in description
+    assert description.removesuffix("…").replace("&lt;", "") == ""
+
+
+# #701-T05
+def test_a_cut_description_is_stable_when_it_is_neutralized_again() -> None:
+    once = neutralize_skill_manifest(skill(f"name: a\ndescription: {'<a> ' * 300}"))
+
+    assert once is not None
+    assert neutralize_skill_manifest(once) == once
+
+
+def manifest(name: str, description: str = "d") -> str:
+    result = neutralize_skill_manifest(skill(f"name: {name}\ndescription: {description}"))
+    assert result is not None
+    return result
+
+
+# #701-T06
+def test_at_most_the_first_skills_by_path_are_exported() -> None:
+    paths = [f".claude/skills/s{i:03}/SKILL.md" for i in range(MAX_SKILLS + 7)]
+    manifests = {path: manifest(f"s{i:03}") for i, path in enumerate(reversed(paths))}
+
+    admitted = admit_skills(manifests)
+
+    assert MAX_SKILLS == 50
+    assert admitted == set(paths[:MAX_SKILLS])
+
+
+# #701-T06
+def test_exactly_the_limit_of_skills_is_exported() -> None:
+    manifests = {f".agents/skills/s{i}/SKILL.md": manifest(f"s{i}") for i in range(MAX_SKILLS)}
+
+    assert admit_skills(manifests) == set(manifests)
+
+
+# #701-T06
+def test_the_skills_listed_together_stay_within_the_listing_budget() -> None:
+    description = "x" * 290
+    manifests = {
+        f".claude/skills/s{i:02}/SKILL.md": manifest(f"s{i:02}", description) for i in range(50)
+    }
+
+    admitted = admit_skills(manifests)
+
+    assert MAX_SKILL_LISTING_BYTES == 8 * 1024
+    assert 0 < len(admitted) < 50
+    assert len(admitted) * (290 + 3) <= MAX_SKILL_LISTING_BYTES
+    assert (len(admitted) + 1) * (290 + 3) > MAX_SKILL_LISTING_BYTES
+    # The ones that fit are the first by path; none is skipped to make room for a later one.
+    assert admitted == set(sorted(manifests)[: len(admitted)])
+
+
+# #701-T06
+def test_a_skill_that_does_not_fit_the_budget_does_not_admit_a_smaller_later_one() -> None:
+    big = {f".claude/skills/a{i:02}/SKILL.md": manifest(f"a{i:02}", "x" * 300) for i in range(55)}
+    small = {".claude/skills/z/SKILL.md": manifest("z")}
+
+    assert ".claude/skills/z/SKILL.md" not in admit_skills({**big, **small})
