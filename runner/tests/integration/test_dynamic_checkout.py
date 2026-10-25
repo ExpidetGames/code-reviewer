@@ -253,7 +253,7 @@ def test_a_skill_manifest_that_grows_past_the_file_limit_when_rewritten_is_left_
 def test_the_skills_past_the_limit_are_left_out_of_the_export_and_stay_in_the_diff(
     repo: GitFixture, tmp_path: Path
 ) -> None:
-    files: dict[str, bytes] = {"README.md": b"base\n"}
+    files: dict[str, bytes | tuple[str, bytes]] = {"README.md": b"base\n"}
     for index in range(MAX_SKILLS + 2):
         name = f"s{index:03}"
         files[f".claude/skills/{name}/SKILL.md"] = (
