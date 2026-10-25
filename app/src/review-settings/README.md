@@ -395,7 +395,9 @@ column, no migration: they are more keys of the same JSON, and a set stored befo
 - **The kind a job is pinned to** is the project's, else the workspace default, else Diff, read inside the enqueue transaction
   (`jobs/review-kind.ts`). A change of the default's kind cancels the waiting reviews of the projects that follow it (store no
   kind), exactly as a project's own change does (#195): `hooks.onWorkspaceDefaultsKindChanged` runs in the transaction of the write
-  and a rejection rolls the save back; a running review finishes. Without this both kinds would run, and bill, for the same
+  and a rejection rolls the save back; a running review finishes. The projects that follow are read in that transaction after
+  `ProjectsRepository.listLocked` locked the workspace's repository rows (gate, then `app_settings`, then repositories in
+  ascending id, then jobs), so an enqueue in flight cannot slip a job of the old kind past the cancellation. Without this both kinds would run, and bill, for the same
   head. The verdict follows the same order (`check-runs/verdict-mode.ts`),
   and the model catalog counts a project that follows the default entry as using it (`countProjectsUsing`).
 - **New projects** (`projects/new-project-settings.ts`): a workspace default of Diff gives a project that follows it (nothing

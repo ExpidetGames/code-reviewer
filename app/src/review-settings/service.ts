@@ -9,6 +9,7 @@ import type { Kysely } from "kysely";
 import type { AppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type {
+  ProjectListEntry,
   ProjectsRepository,
   ProjectSettings,
   StoredProject,
@@ -863,12 +864,16 @@ export function createReviewSettingsService(deps: {
   }
 
   /** The projects that store no review kind of their own: the kind of the workspace defaults is theirs (#676). */
-  async function followingKind() {
-    return (await projects.list()).filter(
+  function followingKindOf(entries: readonly ProjectListEntry[]) {
+    return entries.filter(
       (entry) =>
         entry.project !== null &&
         parseDynamic(entry.project.settings).reviewKind === undefined,
     );
+  }
+
+  async function followingKind() {
+    return followingKindOf(await projects.list());
   }
 
   async function globalView(): Promise<GlobalSettingsView> {
@@ -1041,7 +1046,9 @@ export function createReviewSettingsService(deps: {
 
   const pinnedAddresses = createPinnedAddressReader(
     projects,
-    async () => (await readGlobal()).dynamic.reviewKind,
+    // The kind a project that stores none follows, the one the instance's defaults give when the workspace stored none.
+    async () =>
+      (await readGlobal()).dynamic.reviewKind ?? dynamicDefaults().reviewKind,
   );
 
   /** The address the catalog trusts now for a provider, when it is a catalog provider it offers. */
@@ -1326,16 +1333,18 @@ export function createReviewSettingsService(deps: {
         );
       // The projects that follow the kind of the defaults switch with it: their waiting reviews were queued for the other
       // engine and are cancelled in the transaction of the write, as after a project's own change. Running reviews finish.
-      const following =
+      // Which projects follow is read inside that transaction, after the repository rows were locked (the lock an enqueue
+      // takes before it reads the default), so a review queued meanwhile is either cancelled here or sees the new kind.
+      const afterWrite =
         kindBefore === kindAfter ||
         hooks.onWorkspaceDefaultsKindChanged === undefined
-          ? []
-          : (await followingKind()).map((entry) => entry.repository.id);
-      const afterWrite =
-        following.length === 0
           ? undefined
-          : (executor: Kysely<Database>) =>
-              hooks.onWorkspaceDefaultsKindChanged!(
+          : async (executor: Kysely<Database>) => {
+              const following = followingKindOf(
+                await projects.listLocked(executor),
+              ).map((entry) => entry.repository.id);
+              if (following.length === 0) return;
+              await hooks.onWorkspaceDefaultsKindChanged!(
                 {
                   previousKind: kindBefore,
                   nextKind: kindAfter,
@@ -1343,6 +1352,7 @@ export function createReviewSettingsService(deps: {
                 },
                 executor,
               );
+            };
       const value = { ...review, ...dynamic };
       if (expected === undefined)
         await appSettings.set(REVIEW_DEFAULTS_KEY, value, actor, afterWrite);

@@ -548,19 +548,29 @@ describe("saving the workspace defaults over HTTP, against a stale form and a pr
     expect(fresh.status).toBe(200);
   });
 
-  it("answers 400 REQUEST_INVALID for an expected time that is neither a text nor null", async () => {
-    const app = await setup();
+  // #676-T07
+  it.each([
+    ["a number", 5],
+    ["a boolean", false],
+    ["an object", { at: "2026-10-25T00:00:00.000Z" }],
+    ["a list", ["2026-10-25T00:00:00.000Z"]],
+  ])(
+    "answers 400 REQUEST_INVALID for an expected time that is %s, and stores nothing",
+    async (_name, expectedUpdatedAt) => {
+      const app = await setup();
 
-    const response = await app.putGlobal({
-      settings: {},
-      expectedUpdatedAt: 5,
-    });
+      const response = await app.putGlobal({
+        settings: { maxFindings: 7 },
+        expectedUpdatedAt,
+      });
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: "REVIEW_SETTINGS_REQUEST_INVALID",
-    });
-  });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "REVIEW_SETTINGS_REQUEST_INVALID",
+      });
+      expect(await app.appSettingRows()).toEqual([]);
+    },
+  );
 
   it("names the projects a provider change would break, beside the issue", async () => {
     const app = await setup();

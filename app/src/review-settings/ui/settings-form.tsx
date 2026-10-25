@@ -90,6 +90,7 @@ import type { NativeFormData } from "../../native-providers/form-data.ts";
 import type { CatalogModelsApi } from "../../native-providers/ui/api.ts";
 import { providerOptions } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
+import { followersText } from "./followers-text.ts";
 import {
   GATE_OFF_WARNING,
   GATE_OFF_WARNING_DEFAULTS,
@@ -110,6 +111,7 @@ import {
   describeSaveFailure,
   describeWarning,
   FALLBACK_REMOVED_NOTICE,
+  projectsNote,
   TAB_PROBLEM_NOTE,
 } from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
@@ -221,22 +223,6 @@ function hiddenProblemOf(
 
 const UNCHANGED_TEXT = "No changes to save.";
 
-const SUMMARY_COMMENT_NOTE =
-  "The next review of such a project posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
-
-/** What a change of the kind of the workspace defaults does to the projects that follow it (#676). */
-function followersText(kind: ProjectReviewKind, following?: number): string {
-  if (following === undefined)
-    return `Every project that sets no review kind of its own switches to ${KIND_NAMES[kind]}. Their reviews that are still waiting are cancelled, and a review that is already running finishes. ${SUMMARY_COMMENT_NOTE}`;
-  if (following === 0)
-    return `No existing project follows this default, so nothing switches; projects that are added later start with ${KIND_NAMES[kind]}.`;
-  const who =
-    following === 1
-      ? "1 project follows this default and switches"
-      : `${String(following)} projects follow this default and switch`;
-  return `${who} to ${KIND_NAMES[kind]}. Their reviews that are still waiting are cancelled, and a review that is already running finishes. ${SUMMARY_COMMENT_NOTE}`;
-}
-
 function confirmText(
   kind: ProjectReviewKind,
   dynamicReviewEnabled: boolean,
@@ -287,16 +273,6 @@ const workspaceDefaultOption = (entry: {
   providerLabel: string;
   name: string;
 }) => `${MODEL_CHOICE_DEFAULT_OPTION} (${entry.providerLabel} · ${entry.name})`;
-
-/** The projects a refusal names (repository names), as one sentence; none when it names none. */
-function projectsNote(details: Record<string, unknown> | undefined): string[] {
-  const names = details?.projects;
-  if (!Array.isArray(names)) return [];
-  const listed = names.filter(
-    (name): name is string => typeof name === "string",
-  );
-  return listed.length === 0 ? [] : [`Projects: ${listed.join(", ")}.`];
-}
 
 /** The requests one save makes: a project's travel in two groups, the defaults' in one set. */
 function planOf(model: SettingsFormModel, state: FormState) {

@@ -56,6 +56,18 @@ export function GlobalSettingsPageContent({
   /** Only tests pass this. */
   resetApi?: Pick<SettingsApi, "save">;
 }) {
+  // The reset puts the kind back to the built-in one: when that is another kind, the projects that follow the default switch.
+  const dynamic = data.model.dynamic;
+  const kindChange =
+    dynamic !== undefined &&
+    dynamic.effective.reviewKind !== dynamic.defaults.reviewKind
+      ? {
+          to: dynamic.defaults.reviewKind,
+          ...(data.model.followingProjects === undefined
+            ? {}
+            : { following: data.model.followingProjects }),
+        }
+      : undefined;
   return (
     <SettingsScreen
       workspaceSlug={workspaceSlug}
@@ -82,6 +94,7 @@ export function GlobalSettingsPageContent({
         {canEdit ? (
           <ResetReviewDefaults
             workspaceSlug={workspaceSlug}
+            {...(kindChange === undefined ? {} : { kindChange })}
             {...(resetApi === undefined ? {} : { api: resetApi })}
           />
         ) : null}

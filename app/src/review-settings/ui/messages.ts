@@ -194,6 +194,37 @@ export function describeWarning(
     : null;
 }
 
+/** The projects a refusal names (repository names), as one sentence; none when it names none. */
+export function projectsNote(
+  details: Record<string, unknown> | undefined,
+): string[] {
+  const names = details?.projects;
+  if (!Array.isArray(names)) return [];
+  const listed = names.filter(
+    (name): name is string => typeof name === "string",
+  );
+  return listed.length === 0 ? [] : [`Projects: ${listed.join(", ")}.`];
+}
+
+/**
+ * The sentence for a refused save that has no field to mark (the reset of every default): what failed, each problem the
+ * server reported once, and the projects the refusal names.
+ */
+export function describeWholeRefusal(failure: {
+  code: string;
+  issues: readonly { field: string; code: string }[];
+  details?: Record<string, unknown>;
+}): string {
+  const problems = failure.issues.map((issue) =>
+    describeIssue(issue.field, issue.code),
+  );
+  return [
+    describeSaveFailure(failure.code),
+    ...new Set(problems),
+    ...projectsNote(failure.details),
+  ].join(" ");
+}
+
 const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_INVALID:
     "Some settings are not valid. Fix the marked fields and save again.",
