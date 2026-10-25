@@ -62,9 +62,11 @@ match the Worker in the Cloudflare dashboard):
 
 1. Cloudflare → **Workers & Pages** → the existing Worker `code-review-landing` → **Settings** → **Build**
    → connect the repository `Itegro-GmbH/code-reviewer` instead of `Itegro-GmbH/code-review-landing`. **Production
-   branch:** `main` as the process says, so a change to the site goes live with the next release of this repository
-   (`development` → `main`); to publish a site change earlier, release it like a hotfix, or set the production branch
-   to `development`.
+   branch:** `main` (decided by the owner), so a change to the site goes live with the next release of this repository
+   (`development` → `main`); to publish a site change earlier, release it like a hotfix. **Branch control → builds for
+   non-production branches: off**, so `development` and feature branches publish nothing and build no preview (if previews
+   are ever switched on, they have no `PUBLIC_POSTHOG_KEY` and no tracking, and `workers.dev` addresses send
+   `X-Robots-Tag: noindex`, see below).
 2. **Root directory:** `website`. **Build command:** `pnpm build`. **Deploy command:** `npx wrangler deploy`.
 3. **Build variables and secrets:** `NODE_VERSION` = `24`, `PNPM_VERSION` = `10.33.0`, and
    `PUBLIC_POSTHOG_KEY` = the key of the PostHog main project (vault entry "Posthog Landingpage Key"), for
@@ -103,7 +105,8 @@ only). The Klaro cookie is `code-review_klaro` (180 days); "Cookie settings" in 
 
 Manual steps outside the repository:
 
-- [ ] Cloudflare: the steps above (root directory `website`, variables, build watch paths).
+- [ ] Cloudflare: the steps above (production branch `main`, non-production branch builds off, root directory `website`,
+      variables, build watch paths).
 - [ ] PostHog main project: Authorized URLs include `https://code-review.com`; the settings listed above are true; after
       the first production deploy accept the banner on `https://code-review.com` and check that events arrive with
       `site = code-review` (`POST /ingest/e/` answers 200) and that a decline still counts a `$pageview`.
