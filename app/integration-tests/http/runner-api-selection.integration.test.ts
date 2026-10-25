@@ -869,7 +869,7 @@ describe("the token budget of a job", () => {
   });
 
   // #689-T01
-  it("is cut to the window of a model on the workspace's own key too, which a save used to check and no longer can", async () => {
+  it("is not cut to a window read from the provider for a Diff job on the workspace's own key: nobody is asked", async () => {
     const meta = metadata(() => supported(8_000));
     const h = await start({
       keyMode: "own",
@@ -877,13 +877,9 @@ describe("the token budget of a job", () => {
       harness: { modelCapabilities: meta.checker },
     });
 
-    expect((await h.claimed()).job.input.llm.maxTokens).toBe(8_000);
-    expect(meta.asked).toEqual([
-      {
-        model: "vendor/own-model",
-        options: { forClaim: true, provider: DEFAULT_PROVIDER },
-      },
-    ]);
+    // The instance's window (LLM_MAX_TOKENS of the harness) is the only window an own Diff job knows.
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
+    expect(meta.asked).toEqual([]);
   });
 });
 

@@ -162,8 +162,8 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    `env`. **The token budget** (`llm.maxTokens`) is no setting since #689: the claim decides it for every job
    (`reviewTokenBudget`, `src/model-catalog/token-budget.ts`) as 100,000, cut to the context window of the job's model when
    the provider's metadata states one (else to the window last read, else, on the workspace's own key, to the instance's
-   `LLM_MAX_TOKENS`); the metadata is read for a Diff job on the workspace's own key too, as a claim (an outage costs one
-   wait). **The cost limit** (`llm.maxCostUsd`, `llm.operatorMaxCostUsd`) is decided by `job-cost-limit.ts`: the customer's limit
+   `LLM_MAX_TOKENS`; a Diff job on the workspace's own key asks no provider).
+   **The cost limit** (`llm.maxCostUsd`, `llm.operatorMaxCostUsd`) is decided by `job-cost-limit.ts`: the customer's limit
    and the operator's maximum per review (#689, the admin portal, the instance setting `review_max_cost_cents`, read at
    each job through `ClaimDeps.operatorCostLimitCents`) go to a caller that names `operator_cost_limit` as two values; a caller
    that names `cost_limit` alone gets the smaller of the two in `llm.maxCostUsd`; a caller that names neither gets neither, and

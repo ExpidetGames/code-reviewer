@@ -835,20 +835,23 @@ export async function buildJobInput(
 
   // #279: the model's capabilities. The read can wait on the provider, so it comes after every cheap
   // local refusal above, and still before the git credentials are created. A job on the operator's key (#280, #432) reads
-  // its model's metadata too, Diff or Dynamic, and since #689 so does a Diff job on the workspace's own key, for the context
-  // window its token budget is cut to: one read serves both (a Dynamic job's model is the entry's). The metadata is read from the
-  // selection's provider. A native job (#578) reads none: its entry states the window, the output bound and the flags of the model.
-  const modelToRead = modelEntry === null ? selection.model : null;
-  // The claim asks as a claim (an outage costs one wait, not one per claim) and, on the operator's key, names the entry in the
-  // log line instead of the model.
+  // its model's metadata too, Diff or Dynamic, for the context window its token budget is cut to: one read serves both (a
+  // Dynamic job's model is the entry's). The metadata is read from the selection's provider. A Diff job on the workspace's own
+  // key asks nobody (PR-Agent handles the models of the workspace). A native job (#578) reads none: its entry states the
+  // window, the output bound and the flags of the model.
+  const modelToRead =
+    (dynamic !== null || managed) && modelEntry === null
+      ? selection.model
+      : null;
+  // The claim of a job on the operator's key asks as a claim (an outage costs one wait, not one per claim) and names the
+  // entry in the log line instead of the model.
   const metadata =
     modelToRead === null || deps.modelCapabilities === undefined
       ? undefined
       : await deps.modelCapabilities.check(modelToRead, {
           provider: selection.provider as LlmProvider,
-          forClaim: true,
           ...(selection.keyMode === "managed"
-            ? { logAs: `entry=${selection.entry.id}` }
+            ? { forClaim: true, logAs: `entry=${selection.entry.id}` }
             : {}),
         });
   let capabilities: DynamicModelCapabilities | undefined;
