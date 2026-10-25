@@ -9,12 +9,11 @@
 //   more, the change is refused with the number of workspaces and nothing changes.
 //
 // The count, the workspace and the setting are one transaction, and a user creates a workspace in a
-// transaction that reads the tenancy (src/workspaces/create-workspace.ts). On SQLite every
-// transaction takes the write lock when it begins (`begin immediate`, set in src/db/dialect.ts), so the two cannot interleave: whichever comes
-// first decides, and the other sees its result. An instance can therefore never end up
-// single-tenant with two workspaces. (A database without that lock needs a row lock on the tenancy
-// setting here and there; the Postgres port is a later issue.)
+// transaction that reads the tenancy (src/workspaces/create-workspace.ts). Both take the workspace creation lock first
+// (src/db/workspace-creation-lock.ts), so the two cannot interleave: whichever comes first decides, and the other
+// sees its result. An instance can therefore never end up single-tenant with two workspaces.
 import type { Kysely } from "kysely";
+import { lockWorkspaceCreation } from "../db/workspace-creation-lock.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -46,6 +45,7 @@ export async function changeTenancy(
   }: ChangeTenancyInput,
 ): Promise<ChangeTenancyResult> {
   return db.transaction().execute(async (trx) => {
+    await lockWorkspaceCreation(trx);
     const settings = createInstanceSettingsRepository(trx, now);
     const workspaces = createWorkspacesRepository(trx, now, newId);
 

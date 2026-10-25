@@ -16,7 +16,6 @@ describe("openPostgresDatabase pool settings", () => {
 
     const db = openPostgresDatabase(
       {
-        driver: "postgres",
         url,
         poolMax: 3,
         idleTimeoutMs: 5000,
@@ -36,10 +35,7 @@ describe("openPostgresDatabase pool settings", () => {
   it("does not touch the platform hook or the idle timeout in server mode", async () => {
     const attachPool = vi.fn<(pool: Pool) => void>();
 
-    const db = openPostgresDatabase(
-      { driver: "postgres", url, poolMax: 10 },
-      { attachPool },
-    );
+    const db = openPostgresDatabase({ url, poolMax: 10 }, { attachPool });
 
     expect(attachPool).not.toHaveBeenCalled();
     await db.destroy();
@@ -48,7 +44,7 @@ describe("openPostgresDatabase pool settings", () => {
   // #319-T05
   it("opens no connection until the first query", async () => {
     const db = openPostgresDatabase(
-      { driver: "postgres", url, poolMax: 3, idleTimeoutMs: 5000 },
+      { url, poolMax: 3, idleTimeoutMs: 5000 },
       { attachPool: () => undefined },
     );
 

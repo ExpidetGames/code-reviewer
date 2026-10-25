@@ -109,7 +109,7 @@ Unit (`*.test.ts(x)` here): status, duration, error copy (every code has a sente
 logs, what is left out), the filter toolbar (`runs-filter.test.tsx`: the query string and the controls
 following the filter), the list and the detail component (table rows, grouped facts, empty states,
 polling with fake timers, text rendered as text). Integration: `runs-service.integration.test.ts` (real
-SQLite, runs made through the queue with `src/test-support/runs.ts`), `ui/runs-page.integration.test.tsx`
+Postgres, runs made through the queue with `src/test-support/runs.ts`), `ui/runs-page.integration.test.tsx`
 (the pages with real data and the filter from the address, without a remount key),
 `integration-tests/http/runs-route*.integration.test.ts` (the proxy in front of the routes, 401 and 403,
 the route files). E2E: `e2e/runs/runs.e2e.ts`, where a pull request opened at the fake GitHub arrives as a

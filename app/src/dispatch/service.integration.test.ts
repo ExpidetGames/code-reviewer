@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The dispatch webhook against a real SQLite database (#326): the hook on the job queue, the signed request
+// The dispatch webhook against a real Postgres database (#326): the hook on the job queue, the signed request
 // to a stand-in for the Dispatcher, the rows of `job_dispatches`, and the resends the sweep (#328) will drive
-// through `sendDue`. On SQLite and, when TEST_DATABASE_URL is set, on Postgres (CI).
-import type { Kysely } from "kysely";
-import { describe, expect, it as vitestIt } from "vitest";
-import type { Database } from "../db/schema.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
+// through `sendDue`.
+import { describe, expect, it } from "vitest";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput, EnqueueResult } from "../jobs/job-types.ts";
@@ -22,6 +16,7 @@ import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
 import { ACK_TIMEOUT_MS, REJECTED_BACKOFF_MS } from "./outcome.ts";
 import { createDispatchService } from "./service.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const CURRENT = {
   kid: "k2",
@@ -42,25 +37,12 @@ const webhookConfig: WebhookDispatchConfig = {
   previousKey: PREVIOUS,
 };
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
-async function setupOn(
-  open: (() => Promise<Kysely<Database>>) | undefined,
-  options: { dynamicReview?: boolean } = {},
-) {
-  const database = await open?.();
+async function setupOn(options: { dynamicReview?: boolean } = {}) {
+  const database = await open();
   const fixture = await createJobQueueFixture({
-    ...(database === undefined ? {} : { database }),
+    database,
     ...(options.dynamicReview === true ? { dynamicReview: true } : {}),
   });
   const receiver = createFakeDispatchReceiver({
@@ -121,11 +103,8 @@ async function setupOn(
   };
 }
 
-describe.each(databases)("the dispatch webhook on %s", (name, open) => {
-  const it =
-    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-  const setup = (options: { dynamicReview?: boolean } = {}) =>
-    setupOn(open, options);
+describe("the dispatch webhook", () => {
+  const setup = (options: { dynamicReview?: boolean } = {}) => setupOn(options);
 
   describe("the dispatch webhook after a job is queued", () => {
     // #326-T01

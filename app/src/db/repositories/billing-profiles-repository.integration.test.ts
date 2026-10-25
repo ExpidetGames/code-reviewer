@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #501: the billing profile of one workspace, on SQLite and on Postgres.
+// #501: the billing profile of one workspace.
 import { describe, expect, it } from "vitest";
 import {
   BILLING_ENGINES,
@@ -21,7 +21,7 @@ const PROFILE: BillingProfileInput = {
 };
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`the billing profile on ${engine.name}`, () => {
+  describe(`the billing profile on ${engine.name}`, () => {
     // #501-T11
     it("has no profile until one is saved, then returns what was saved", async () => {
       const { db, workspaceId } = await engine.create();

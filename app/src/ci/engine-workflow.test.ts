@@ -115,7 +115,7 @@ describe("engine workflow", () => {
     );
     // nftables is what the engine user's network rules are proven with.
     expect(lines.join("\n")).toContain("nftables");
-    // Root, but only with the capabilities of compose.dynamic.yml (compose-dynamic.test.ts pins
+    // Root, but only with the capabilities of the hardened container spec (the container spec contract pins
     // the list), without new privileges, in a namespace that has loopback and no route out.
     expect(privilegedScript).toContain("sudo");
     expect(privilegedScript).toContain("unshare --net");

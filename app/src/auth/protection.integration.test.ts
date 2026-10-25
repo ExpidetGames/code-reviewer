@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down who gets in: the access proxy in front of every route, driven with real requests
-// against a real Better Auth instance and a real SQLite file. Without a valid session a page sends
+// against a real Better Auth instance and a real Postgres database. Without a valid session a page sends
 // the person to the login page and a data route answers 401; a signed out, expired or forged
 // session counts as no session. The route list is read from the file system, so a route added
 // without deciding here whether it is public makes the test fail (default deny).
@@ -161,7 +161,6 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/github/manifest",
   "/api/instance-portal/github/manifest/callback",
   "/api/instance-portal/integrations/sync",
-  "/api/backup/status",
   // Not about one workspace: creating one, accepting an invitation (src/auth/access.ts, NO_WORKSPACE_PATHS).
   "/api/workspaces",
   "/api/invitations/accept",

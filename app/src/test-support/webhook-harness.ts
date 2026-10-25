@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Everything a test of the webhook route needs: the sync harness (a real SQLite file, the fake
+// Everything a test of the webhook route needs: the sync harness (a real Postgres database, the fake
 // GitHub API, the real GitHub App provider behind a registry), the delivery record, a recording
 // intake and the route's handler wired to all of them. `deliver*` builds signed requests like GitHub.
 import { vi } from "vitest";

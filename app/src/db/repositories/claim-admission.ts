@@ -6,9 +6,8 @@
 // belongs to: it serves whichever workspace the oldest due job is in, and every statement it makes goes through
 // repositories created for that workspace.
 //
-// Exactness: the claim runs under the exclusive gate lock of the queue (Postgres) or the write lock of the
-// connection (SQLite), so two claims never read the count at once. On Postgres the workspace row is locked as
-// well (`for no key update`, which an insert that only references the row does not wait on), so the count stays
+// Exactness: the claim runs under the exclusive gate lock of the queue, so two claims never read the count at once.
+// The workspace row is locked as well (`for no key update`, which an insert that only references the row does not wait on), so the count stays
 // exact if the gate is ever narrowed. A workspace without limits reads no usage and takes no lock.
 import "server-only";
 import { sql, type Kysely, type Selectable } from "kysely";

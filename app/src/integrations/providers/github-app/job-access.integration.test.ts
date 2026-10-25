@@ -16,6 +16,7 @@ import { isGitAccess, revealGitAccess } from "../../normalized.ts";
 import type { GitAccess, Integration, RepoRef } from "../../types.ts";
 import { loadGithubAppConfig } from "./config.ts";
 import { createGithubAppProvider } from "./provider.ts";
+import { tableNames } from "../../../test-support/tables.ts";
 
 const ACME = { login: "acme", id: 5001, type: "Organization" } as const;
 
@@ -459,12 +460,9 @@ describe("secrets around job access", () => {
         url: "https://github.test/acme/widgets",
       });
 
-    const tables = await sql<{ name: string }>`
-      select name from sqlite_master where type = 'table' and name not like 'sqlite_%'`.execute(
-      h.db,
-    );
-    expect(tables.rows.length).toBeGreaterThan(1);
-    for (const { name } of tables.rows) {
+    const tables = await tableNames(h.db);
+    expect(tables.length).toBeGreaterThan(1);
+    for (const name of tables) {
       const dump = await sql
         .raw(`select * from "${name}"`)
         .execute(h.db)

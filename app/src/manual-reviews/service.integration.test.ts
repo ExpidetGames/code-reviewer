@@ -2,7 +2,7 @@
 
 // Pins down listing the open pull requests of a project and starting a command for one of them,
 // with the real service, the real GitHub App provider and client against the fake GitHub, the real
-// job queue and a real SQLite file. The rules are those of the other triggers: an active project, a
+// job queue and a real Postgres database. The rules are those of the other triggers: an active project, a
 // command the project allows, an open pull request that GitHub itself confirms, one job at a time
 // for the same pull request and command.
 import { describe, expect, it } from "vitest";

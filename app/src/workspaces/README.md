@@ -69,9 +69,7 @@ workspace need an Admin (they decide what every project costs). A Member changes
 the record says. Admins cannot touch Owners or other Admins, and cannot raise anybody's role.
 
 **The last Owner cannot leave, be removed or be demoted** (`last_owner`). The count and the change are one
-transaction that first takes the lock of the workspace (`WorkspaceMembersRepository.lock`; SQLite takes its
-write lock for every transaction, the lock statement is what keeps the code right on a database that locks by
-row), so two Owners who leave at the same moment cannot both succeed (`last-owner-race.integration.test.ts`
+transaction that first takes the lock of the workspace (`WorkspaceMembersRepository.lock`, a row lock), so two Owners who leave at the same moment cannot both succeed (`last-owner-race.integration.test.ts`
 runs it with two real processes).
 
 ## Creating workspaces
@@ -95,7 +93,7 @@ money paid in, so the person is told to contact support for a payout), `balance_
 (a top-up checkout started within `PENDING_TOP_UP_WINDOW_MS`, three days, that is neither `paid` nor `failed`, `pending` or
 `expired`: a delayed payment method can still succeed after its checkout page expired).
 
-The locks (Postgres; SQLite has one writer): the Dynamic gate, shared (a claim holds it exclusively from its start to its commit,
+The locks: the Dynamic gate, shared (a claim holds it exclusively from its start to its commit,
 so a claim in flight is waited for and none starts meanwhile; the gate is also what keeps a claim from waiting for rows this
 deletion holds, because a claim takes its job row before the workspace row and the deletion the other way round); the
 workspace row; the repositories and the waiting, running and superseded jobs (`FOR UPDATE`, by id: a writer that sets a job
@@ -189,7 +187,7 @@ the start page, which leads to another workspace of theirs or to `/no-access`.
 
 An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). The data
 model, and the operator API that sets it (#275): no page. The limits and the suspension are enforced when a job is
-claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key mode decides whose LLM key a job uses (#276, `src/llm/README.md`). A self-hosted instance configures nothing and nothing changes.
+claimed (#277, `src/usage/README.md`, "Limits and suspension at claim"); the key mode decides whose LLM key a job uses (#276, `src/llm/README.md`). An instance that configures nothing sees no change.
 
 - **Data.** One row per workspace in `workspace_entitlements` (`src/db/repositories/workspace-entitlements-repository.ts`)
   and one instance setting `default_entitlements` for the workspaces without a row. Both hold the same fields:
@@ -301,10 +299,9 @@ pages tell a member only that GitHub is not set up and to ask the instance admin
 instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
 "LLM not configured" tells a Member to ask an Admin or an Owner of the workspace (`src/llm/ui/`).
 
-The Postgres issue (#105) has work here as well: creating a workspace and the last Owner rule lean on SQLite's
-serialized writers (`begin immediate`). On Postgres the creation needs a lock (or the handling of the unique
-violation of the slug, so a collision never becomes a 500), see the comment in `create-workspace.ts`, and the lock of
-`WorkspaceMembersRepository.lock()` has to become a real row lock.
+Open (#105): creating a workspace was written when SQLite serialized all writers (`begin immediate`). On Postgres the
+creation needs a lock (or the handling of the unique violation of the slug, so a collision never becomes a 500), see the
+comment in `create-workspace.ts`.
 
 ## Tests
 
@@ -313,6 +310,6 @@ violation of the slug, so a collision never becomes a 500), see the comment in `
 rules and the structure rules. `members.integration.test.ts`, `invitations.integration.test.ts`,
 `create-workspace.integration.test.ts`, `last-owner-race.integration.test.ts`, `http.integration.test.ts`,
 `fresh-user.integration.test.ts`, `invitation-sign-up.integration.test.ts`: the services and handlers over a
-real SQLite file. `integration-tests/http/workspace-isolation.integration.test.ts`: every data route against
+real Postgres database. `integration-tests/http/workspace-isolation.integration.test.ts`: every data route against
 a second workspace and against every role. `ui/*.test.tsx`: the components. Journeys:
 `e2e/workspaces/invite-and-accept.e2e.ts` (single-tenant, no mail server), `e2e/workspaces/multi-tenant.e2e.ts`.

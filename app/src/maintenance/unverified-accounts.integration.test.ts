@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the expiry of sign-ups that never verified their address, against a real SQLite file: the
+// Pins down the expiry of sign-ups that never verified their address, against a real Postgres database: the
 // account, its password account and its pending links go after a week; everything that is more than such a
 // sign-up (a verified address, the admin, an imported user, a member of a workspace, someone signed in, a
 // GitHub identity) stays, and so does everything while the instance cannot verify by mail. A new sign-up

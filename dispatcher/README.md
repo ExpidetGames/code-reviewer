@@ -152,8 +152,8 @@ Launcher change, the memory limit) and `launcher` (the Launcher's own options, w
 
 ## The container spec renderer
 
-`src/launchers/container.ts` renders the hardened container spec (`contracts/worker-container.v1.json`, one
-definition shared with `compose.dynamic.yml` and the `runner-dynamic` service of `compose.coolify.yml`) to
+`src/launchers/container.ts` renders the hardened container spec (`contracts/worker-container.v1.json`, the one
+definition of the container) to
 `docker run` arguments: foreground with stdin attached, `--rm`, the user, `--cap-drop ALL` and the eight
 `--cap-add`, `no-new-privileges`, a read-only root, the three tmpfs, memory, reservation, swap, pids, stop timeout
 and the default bridge. No `--privileged`, no mount, no device, no host namespace. `renderDockerRunArguments`

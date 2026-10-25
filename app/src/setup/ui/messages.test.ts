@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the copy of the setup pages: every stable code of the server has a sentence, the
-// sentences name what to do (restart the app) where only that helps, and none of them can contain
+// sentences name what to do (make a new code) where only that helps, and none of them can contain
 // a code, a password or any value.
 import { describe, expect, it } from "vitest";
 import { PASSWORD_RULE_HINT } from "../../auth/password-policy.ts";
@@ -34,7 +34,7 @@ describe("the sentence for a failed call", () => {
   });
 
   // #97-SU-08
-  it("tells the person to restart the app when only a restart helps", () => {
+  it("sends the person to pnpm setup-code when only a new code helps", () => {
     for (const code of [
       "setup_locked",
       "code_expired",
@@ -42,7 +42,7 @@ describe("the sentence for a failed call", () => {
       "setup_session_expired",
       "setup_unavailable",
     ])
-      expect(describeSetupFailure(code), code).toMatch(/Restart the app/);
+      expect(describeSetupFailure(code), code).toMatch(/pnpm setup-code/);
   });
 
   it("explains the lock on a wrong code", () => {
@@ -57,7 +57,7 @@ describe("the sentence for a failed call", () => {
   });
 });
 
-describe("the sentence for a failed call in a serverless deployment", () => {
+describe("the sentence for a failed call", () => {
   // #321-T01
   it("sends the person to pnpm setup-code, never to restart the app or read its log", () => {
     for (const code of [
@@ -68,26 +68,10 @@ describe("the sentence for a failed call in a serverless deployment", () => {
       "setup_session_expired",
       "setup_unavailable",
     ]) {
-      const sentence = describeSetupFailure(code, "serverless");
+      const sentence = describeSetupFailure(code);
       expect(sentence, code).toMatch(/pnpm setup-code/);
       expect(sentence, code).not.toMatch(/Restart|log of the app/);
     }
-  });
-
-  // #321-T01
-  it("keeps the sentences that do not depend on where the app runs", () => {
-    for (const code of ["rate_limited", "already_set_up", "email_in_use"])
-      expect(describeSetupFailure(code, "serverless")).toBe(
-        describeSetupFailure(code),
-      );
-  });
-
-  // #321-T04
-  it("does not change the sentences of a server", () => {
-    expect(describeSetupFailure("code_used", "server")).toBe(
-      describeSetupFailure("code_used"),
-    );
-    expect(describeSetupFailure("code_used")).toMatch(/Restart the app/);
   });
 });
 

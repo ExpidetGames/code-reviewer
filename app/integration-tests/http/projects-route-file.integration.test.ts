@@ -6,17 +6,12 @@
 // scope). The behavior of the handler is in src/projects/http.integration.test.ts and the proxy in front is
 // in projects-route.integration.test.ts; this file proves the pieces are connected, and that switching a
 // project on or off is for Admins and Owners and for the workspace in the address only.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createIntegrationsRepository } from "../../src/db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { PUT } from "../../src/app/api/w/[workspace]/repositories/[repositoryId]/project/route.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
@@ -32,9 +27,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 async function startRoute() {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const integration = await createIntegrationsRepository(
     db,

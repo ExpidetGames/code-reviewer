@@ -16,25 +16,22 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import {
   waitForLockWait,
   withApplicationName,
 } from "../test-support/postgres-lock-wait.ts";
 import { seedWorkspaceForDeletion } from "../test-support/workspace-deletion-fixture.ts";
 import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 import { createWorkspaceDeletion } from "./delete-workspace.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import {
+  connectPostgres,
+  createTestDatabase,
+} from "../test-support/test-database.ts";
 
 const USD = 1_000_000;
 const PAYMENT = "pi_late";
 
 async function start() {
-  const postgres = await createPostgresTestDatabase({ poolMax: 4 });
+  const postgres = await createTestDatabase({ poolMax: 4 });
   const workspaceId = await defaultWorkspaceId(postgres.db);
   const seeded = await seedWorkspaceForDeletion(postgres.db, workspaceId, "a", {
     balanceMicroUsd: 0,
@@ -110,7 +107,7 @@ async function start() {
   return { postgres, workspaceId, seeded, remove, topUp, hold, entries };
 }
 
-describePostgres("a payment against the deletion of its workspace", () => {
+describe("a payment against the deletion of its workspace", () => {
   // #658-T04
   it("answers a late top-up with workspace_deleted while the deletion is in flight, and credits nothing", async () => {
     const t = await start();

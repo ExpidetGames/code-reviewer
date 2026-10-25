@@ -12,7 +12,7 @@
 // | DISPATCHER_PROBE_TIMEOUT_SECONDS                  | How long a probe (`POST /probe`, the deploy canary) may take, canary VM included (30 to 600); the reaper (#364) takes a canary's lifetime from it | 150 |
 // | DISPATCHER_PROBE_REUSE_SECONDS                    | A forced probe (`POST /probe`) is served from an answer younger than this instead of a new canary VM (0 to 600; 0: never) | 60 |
 // | DISPATCHER_PROBE_TTL_SECONDS                      | **Deprecated (#479), ignored.** Dispatch no longer runs a probe, so no answer has a time to live. Any value is accepted with a warning, for one release, so that an existing deployment still starts | none |
-// | RUNNER_DYNAMIC_CAPABILITIES, RUNNER_DYNAMIC_MAX_COST_USD | The operator's Dynamic configuration, given to the container of a Dynamic job and to the canary, as the self-hosted `runner-dynamic` service has them (a JSON object; a plain positive decimal) | none |
+// | RUNNER_DYNAMIC_CAPABILITIES, RUNNER_DYNAMIC_MAX_COST_USD | The operator's Dynamic configuration, given to the container of a Dynamic job and to the canary (a JSON object; a plain positive decimal) | none |
 // | VERCEL_TOKEN, VERCEL_TEAM_ID, VERCEL_PROJECT_ID    | Platform access by token. Without a token the OIDC token is used   | OIDC |
 //
 // VM size and container memory per Worker kind are part of DISPATCHER_WORKER_CONFIG (`launcher.vcpus`,

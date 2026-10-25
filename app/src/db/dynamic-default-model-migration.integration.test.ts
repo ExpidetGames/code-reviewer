@@ -5,12 +5,10 @@
 // name in a project's overrides or in the workspace review defaults becomes `deepseek/deepseek-v4.1-flash`;
 // any other model, any other field and any other setting stay as they are, a second run changes nothing,
 // and a row that a settings save changed after the migration read it is not overwritten. The same
-// suite runs on SQLite and, where TEST_DATABASE_URL is set, on Postgres.
-import { join } from "node:path";
+// suite runs on Postgres.
 import { sql } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "./connection.ts";
 import { migrateToLatest } from "./migrate.ts";
 import { migrationProvider } from "./migrations/index.ts";
 import {
@@ -22,12 +20,8 @@ import type { Database } from "./schema.ts";
 import type { Kysely } from "kysely";
 import { createIntegrationsRepository } from "./repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "./repositories/repositories-repository.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import { createTestDirectory, track } from "../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../test-support/workspaces.ts";
+import { createEmptyTestDatabase } from "../test-support/test-database.ts";
 
 const FIX_DEFAULT_MODEL = "20261014090000_fix_dynamic_default_model";
 
@@ -44,19 +38,8 @@ const providerBefore: MigrationProvider = {
 
 type OpenPreviousRelease = () => Promise<Kysely<Database>>;
 
-const openSqlite: OpenPreviousRelease = async () => {
-  const directory = await createTestDirectory();
-  return track(
-    openDatabase({
-      driver: "sqlite",
-      path: join(directory, "app.db"),
-      busyTimeoutMs: 1000,
-    }),
-  );
-};
-
 const openPostgres: OpenPreviousRelease = async () =>
-  (await createPostgresTestDatabase({ migrate: false })).db;
+  (await createEmptyTestDatabase()).db;
 
 async function startPreviousRelease(open: OpenPreviousRelease) {
   const db = await open();
@@ -328,15 +311,6 @@ function suite(open: OpenPreviousRelease) {
   });
 }
 
-describe("the migration that fixes the default Dynamic model on SQLite", () => {
-  suite(openSqlite);
+describe("the migration that fixes the default Dynamic model on Postgres", () => {
+  suite(openPostgres);
 });
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
-
-describePostgres(
-  "the migration that fixes the default Dynamic model on Postgres",
-  () => {
-    suite(openPostgres);
-  },
-);

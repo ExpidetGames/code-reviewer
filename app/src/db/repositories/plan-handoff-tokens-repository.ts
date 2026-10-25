@@ -8,7 +8,6 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
-import { databaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 
@@ -33,20 +32,17 @@ export function createPlanHandoffTokensRepository(
   workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
 ): PlanHandoffTokensRepository {
-  const driver = databaseDriver(db);
   return {
     async issue({ tokenHash, userId, role, ttlMs }) {
       const run = async (executor: Kysely<Database>) => {
         // Two clicks of one person at once would both revoke nothing and both insert (READ COMMITTED), leaving two
         // live tokens. The row of the person's membership is the lock they queue on: the second revokes the first's.
-        // On SQLite every transaction already holds the single write lock (`begin immediate`, ../dialect.ts), and
-        // `for update` does not exist there.
         const member = executor
           .selectFrom("workspace_members")
           .select("user_id")
           .where("workspace_id", "=", workspaceId)
           .where("user_id", "=", userId);
-        await (driver === "postgres" ? member.forUpdate() : member).execute();
+        await member.forUpdate().execute();
         const current = now();
         const timestamp = formatTimestamp(current);
         await executor

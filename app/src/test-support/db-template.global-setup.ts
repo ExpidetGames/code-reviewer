@@ -1,37 +1,54 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Vitest global setup of the integration project: builds the migrated template database once per
-// run. Every test then copies the file (see test-database.ts) instead of migrating again.
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { sql } from "kysely";
+// Vitest global setup of the integration project: builds the migrated template database once per run. Every
+// test then clones it (see test-database.ts) instead of migrating again.
 import type { TestProject } from "vitest/node";
-import { openDatabase } from "../db/connection.ts";
 import { migrateToLatest } from "../db/migrate.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
+import {
+  adminPool,
+  newDatabaseName,
+  postgresTestUrl,
+  withDatabase,
+} from "./postgres-server.ts";
 
 declare module "vitest" {
   export interface ProvidedContext {
-    dbTemplatePath: string;
+    dbTemplateName: string;
   }
 }
 
 export default async function setup(
   project: TestProject,
 ): Promise<() => Promise<void>> {
-  const directory = await mkdtemp(join(tmpdir(), "cr-db-template-"));
-  const templatePath = join(directory, "template.db");
+  const base = new URL(postgresTestUrl());
+  const template = newDatabaseName("cr_template");
+  const admin = adminPool(base);
+  try {
+    await admin.query(`create database "${template}"`);
+  } catch (cause) {
+    await admin.end();
+    throw new Error(
+      "The integration tests need a Postgres server (TEST_DATABASE_URL, or postgres://postgres:postgres@127.0.0.1:5432/postgres). " +
+        `Start one (see TESTING.md). ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+  await admin.end();
 
-  const db = openDatabase({
-    driver: "sqlite",
-    path: templatePath,
-    busyTimeoutMs: 5000,
+  const db = openPostgresDatabase({
+    url: withDatabase(base, template),
+    poolMax: 2,
   });
-  await migrateToLatest(db);
-  // Fold the write-ahead log into the main file so that copying that one file copies everything.
-  await sql`pragma wal_checkpoint(truncate)`.execute(db);
-  await db.destroy();
+  try {
+    await migrateToLatest(db);
+  } finally {
+    await db.destroy();
+  }
 
-  project.provide("dbTemplatePath", templatePath);
-  return () => rm(directory, { recursive: true, force: true });
+  project.provide("dbTemplateName", template);
+  return async () => {
+    const closer = adminPool(base);
+    await closer.query(`drop database if exists "${template}" with (force)`);
+    await closer.end();
+  };
 }

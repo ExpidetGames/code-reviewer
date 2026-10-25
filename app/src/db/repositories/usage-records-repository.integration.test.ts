@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The usage records of a workspace against a real SQLite file: reserving once per job, settling or voiding
+// The usage records of a workspace against a real Postgres database: reserving once per job, settling or voiding
 // once, the counting reads and the cursor page. Isolation between workspaces is in
 // scoped-isolation.integration.test.ts; the claim and the completion that drive the records are in
 // integration-tests/http/runner-api-usage.integration.test.ts.

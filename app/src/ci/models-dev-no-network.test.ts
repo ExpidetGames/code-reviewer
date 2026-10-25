@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // No test lane reaches the internet through the models.dev catalog (#548): an app under test (an e2e server, the hosted
-// sweep, the upgrade lane) starts the daily fetch on its own, so every environment that starts one
+// sweep) starts the daily fetch on its own, so every environment that starts one
 // must switch the fetch off (`MODELS_DEV_FETCH=off`) or point `MODELS_DEV_URL` at a fake (`fakes/models-dev`). The check
 // counts the environments a file builds (each one has an anchor, the variable every app needs) against the lines that
 // switch the fetch off, so a lane added later without it fails here and not in the logs of a CI run.
@@ -35,10 +35,6 @@ const TS_LANES: Record<string, { anchor: RegExp; what: string }> = {
   "app/playwright.dynamic.config.ts": {
     anchor: /^\s*APP_SECRET:/gm,
     what: "the Dynamic lane apps",
-  },
-  "app/e2e/helpers/upgrade-app.ts": {
-    anchor: /^\s*BETTER_AUTH_URL:/gm,
-    what: "the app of the upgrade lane",
   },
 };
 describe("no lane reaches models.dev", () => {

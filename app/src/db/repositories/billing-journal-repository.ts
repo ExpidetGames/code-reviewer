@@ -7,8 +7,7 @@
 //
 // Everything that writes runs in one transaction (the caller's, when it hands in a transaction) and is idempotent on the key `(workspace, type, ref_key)`: the same key with
 // the same amount returns the entry that exists, with another amount it is `idempotency_conflict`. A `reserve` is the one
-// conditional write, a hold of at most the balance: it takes the balance row's lock first (SQLite's `begin immediate`
-// already serializes writers; Postgres `FOR UPDATE`), answers a repeated job from the entry it wrote, and runs
+// conditional write, a hold of at most the balance: it takes the balance row's lock first (`FOR UPDATE`), answers a repeated job from the entry it wrote, and runs
 // `UPDATE ... SET balance = balance - :hold WHERE balance >= :hold`, so two claims of one workspace can never spend the
 // same money. Since #605 no claim takes a hold: a job's price is written when it ends, as one `usage` entry by `charge`,
 // which takes the balance row's lock like every writer and, being keyed by the job, writes it once. `reserve`, `settle` and
@@ -174,7 +173,7 @@ export type BillingJournalRepository = {
   /** Gives the hold of a job back without a charge (a job that never ran). Repeating it changes nothing. */
   release(jobId: string): Promise<ReleaseResult>;
   /**
-   * Takes the balance row's lock (Postgres `FOR UPDATE`; SQLite's writer lock is the transaction's) and keeps it until the
+   * Takes the balance row's lock (`FOR UPDATE`) and keeps it until the
    * transaction ends, for a caller that writes another table before it appends (the start credit's grants table, #507): the
    * rule is the lock first, then any write. A workspace without a balance row has nothing to lock.
    */
@@ -758,7 +757,7 @@ export function createBillingJournalRepository(
     },
 
     async verify() {
-      // One statement, so one snapshot on both engines: an entry that commits between two reads would show as drift.
+      // One statement, so one snapshot: an entry that commits between two reads would show as drift.
       const { rows } = await sql<{
         balance: string | number | null;
         reserved: string | number | null;

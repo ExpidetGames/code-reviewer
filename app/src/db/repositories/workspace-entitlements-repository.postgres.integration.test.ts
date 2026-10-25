@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The entitlements on Postgres behave like the SQLite ones: the same constraints refuse the same direct
-// writes, a reset of the period never goes backwards (also for the default), and a second writer cannot
-// race it back. The columns and types are compared with SQLite by the schema parity test in
-// ../postgres.integration.test.ts. Runs only when TEST_DATABASE_URL is set.
+// The entitlements: the constraints refuse direct writes, a reset of the period never goes backwards (also for the
+// default), and a second writer cannot race it back.
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
-import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import type { Database } from "../schema.ts";
-import { createTestDatabase } from "../../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import type { EntitlementsData } from "../../workspaces/entitlements.ts";
 import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
+import {
+  connectPostgres,
+  createTestDatabase,
+} from "../../test-support/test-database.ts";
 
 /** Waits until a backend of the database waits on a lock; bounded, so a bug fails instead of hanging. */
 async function waitForLockWait(
@@ -35,8 +31,6 @@ async function waitForLockWait(
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
 
 const NOW = new Date("2026-10-14T12:00:00.000Z");
 const ENTITLEMENTS: EntitlementsData = {
@@ -65,13 +59,12 @@ const REFUSED_ROWS = [
   ],
 ] as const;
 
-describePostgres("the entitlements on Postgres", () => {
+describe("the entitlements on Postgres", () => {
   // #271-T08
   it.each(REFUSED_ROWS)(
-    "refuse %s, like SQLite",
+    "refuse %s",
     async (_name, keyMode, suspended, code) => {
-      const postgres = await createPostgresTestDatabase();
-      const sqlite = await createTestDatabase();
+      const postgres = await createTestDatabase();
       const refuse = async (
         db: typeof postgres.db,
         workspaceId: string,
@@ -85,13 +78,12 @@ describePostgres("the entitlements on Postgres", () => {
       };
 
       await refuse(postgres.db, await defaultWorkspaceId(postgres.db));
-      await refuse(sqlite.db, await defaultWorkspaceId(sqlite.db));
     },
   );
 
   // #271-T08
-  it("allows one row per workspace on both engines", async () => {
-    const postgres = await createPostgresTestDatabase();
+  it("allows one row per workspace", async () => {
+    const postgres = await createTestDatabase();
     const workspaceId = await defaultWorkspaceId(postgres.db);
     const insert = () =>
       sql`insert into workspace_entitlements (workspace_id, plan_label, key_mode, limits, period_start, suspended, updated_at)
@@ -105,7 +97,7 @@ describePostgres("the entitlements on Postgres", () => {
 
   // #271-T05
   it("never moves the period start of a workspace backwards and accepts the same value again", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const repository = createWorkspaceEntitlementsRepository(
       postgres.db,
       await defaultWorkspaceId(postgres.db),
@@ -128,7 +120,7 @@ describePostgres("the entitlements on Postgres", () => {
 
   // #271-T05
   it("never moves the period start of the default backwards and keeps its JSON value", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const settings = createInstanceSettingsRepository(postgres.db, () => NOW);
     await settings.set("default_entitlements", ENTITLEMENTS, null);
 
@@ -148,7 +140,7 @@ describePostgres("the entitlements on Postgres", () => {
 
   // #428-T06
   it("keeps the stored model access when a put leaves it out, and clears it when told to", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const repository = createWorkspaceEntitlementsRepository(
       postgres.db,
       await defaultWorkspaceId(postgres.db),
@@ -176,7 +168,7 @@ describePostgres("the entitlements on Postgres", () => {
 
   // #271-T05
   it("refuses a reset that was overtaken while it waited for the row", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const workspaceId = await defaultWorkspaceId(postgres.db);
     const repository = createWorkspaceEntitlementsRepository(
       postgres.db,

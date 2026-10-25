@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The binding of an installation to a workspace through the real services over a real SQLite file and the fake
+// The binding of an installation to a workspace through the real services over a real Postgres database and the fake
 // GitHub (docs/decisions/0001-editions-setup-and-accounts.md, section 2.9): who may link which installation, with
 // what proof, and that everything that cannot be established links nothing. The proof is the person's own GitHub
 // token, obtained during the flow; these tests walk the whole round trip (the installation page, the setup

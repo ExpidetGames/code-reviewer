@@ -4,21 +4,16 @@
 // `reviewSettingsServiceFor` (#283): the key mode is read from the entitlements of the workspace in the database, the
 // catalog from its tables, and nothing is passed in by hand. A wrong wiring (the key mode, the catalog, the hiding
 // decision) fails here and in no unit test.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import {
   createCatalogFixture,
   seedRepositories,
 } from "../../src/test-support/review-settings-harness.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import {
   DELETE,
   GET as GET_PROJECT,
@@ -84,9 +79,7 @@ function entitlements(
 }
 
 async function start() {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const { first } = await seedRepositories(db);
   const workspaceId = await defaultWorkspaceId(db);

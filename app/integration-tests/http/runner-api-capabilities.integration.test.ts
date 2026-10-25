@@ -3,7 +3,7 @@
 // #195: routing a queued job to a runner that can run it. A runner advertises the engines it can run
 // in the claim body; the claim only hands it a job whose review kind one of those engines can run. An
 // ineligible job stays queued without an attempt being counted and without a credential being
-// created, and no capable runner is a waiting state, never a failed review. The real SQLite queue, the
+// created, and no capable runner is a waiting state, never a failed review. The real Postgres queue, the
 // real claim and the real job-options source are used; only GitHub is the fake.
 import { describe, expect, it } from "vitest";
 import {

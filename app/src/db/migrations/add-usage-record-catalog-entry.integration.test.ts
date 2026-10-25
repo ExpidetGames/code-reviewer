@@ -2,20 +2,11 @@
 
 // #432-T20: the migration adds three nullable columns to `usage_records` of a database made by the previous release's
 // migrations. Every existing record stays as it is (the new columns read NULL, `model_tier` is untouched); an app of the
-// previous release, which never names the columns, still reserves and settles records; SQLite and Postgres end up with
-// the same columns.
+// previous release, which never names the columns, still reserves and settles records.
 import { sql } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import {
-  createTestDatabase,
-  createTestDirectory,
-} from "../../test-support/test-database.ts";
-import { openDatabase } from "../connection.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
 
@@ -34,17 +25,11 @@ const beforeThisMigration: MigrationProvider = {
 };
 
 const T = "2026-10-18T08:00:00.000Z";
-const describePostgres = hasPostgres() ? describe : describe.skip;
 
 describe("the usage record catalog entry migration", () => {
   // #432-T20
   it("adds only nullable columns and leaves the existing records as they were", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     try {
       await migrateToLatest(db, beforeThisMigration);
       await db
@@ -57,8 +42,20 @@ describe("the usage record catalog entry migration", () => {
           created_at: T,
         })
         .execute();
-      // The records are made without their jobs: only the columns of the records are under test.
-      await sql`pragma foreign_keys = off`.execute(db);
+      // A record belongs to a job; only the columns of the record are under test.
+      await sql`insert into integrations (id, workspace_id, type, display_name, external_id, config, status, created_at, updated_at)
+        values ('i-1', 'w-1', 'github_app', 'acme', '1', '{}', 'active', ${T}, ${T})`.execute(
+        db,
+      );
+      await sql`insert into repositories (id, workspace_id, integration_id, external_id, full_name, url, active, created_at, updated_at)
+        values ('r-1', 'w-1', 'i-1', '1', 'acme/widgets', 'https://github.test/acme/widgets', 1, ${T}, ${T})`.execute(
+        db,
+      );
+      await sql`insert into jobs (id, workspace_id, repository_id, pr_number, pr_url, head_sha, command, args, trigger_kind, actor_login, status, run_after, attempts, created_at, updated_at)
+        values ('job-1', 'w-1', 'r-1', 7, 'https://github.test/acme/widgets/pull/7', ${"a".repeat(40)}, 'review', '', 'webhook', 'octocat', 'queued', ${T}, 0, ${T}, ${T}),
+        ('job-2', 'w-1', 'r-1', 8, 'https://github.test/acme/widgets/pull/8', ${"b".repeat(40)}, 'review', '', 'webhook', 'octocat', 'queued', ${T}, 0, ${T}, ${T})`.execute(
+        db,
+      );
       await sql`insert into usage_records (id, workspace_id, job_id, review_kind, key_mode, model_tier, state, reserved_at)
         values ('u-1', 'w-1', 'job-1', 'diff', 'managed', 'high', 'reserved', ${T})`.execute(
         db,
@@ -91,7 +88,7 @@ describe("the usage record catalog entry migration", () => {
         ).toMatchObject({
           isNullable: true,
           hasDefaultValue: false,
-          dataType: "TEXT",
+          dataType: "text",
         });
       // An app of the previous release inserts a record without naming the columns.
       await sql`insert into usage_records (id, workspace_id, job_id, review_kind, key_mode, state, reserved_at)
@@ -114,26 +111,5 @@ describe("the usage record catalog entry migration", () => {
     } finally {
       await db.destroy();
     }
-  });
-});
-
-describePostgres("the usage record catalog entry migration on Postgres", () => {
-  // #432-T20
-  it("makes the same columns as on SQLite", async () => {
-    const postgres = await createPostgresTestDatabase();
-    const sqlite = await createTestDatabase();
-    const columns = async (db: ReturnType<typeof openDatabase>) =>
-      (await db.introspection.getTables())
-        .find((table) => table.name === "usage_records")
-        ?.columns.filter((candidate) => COLUMNS.includes(candidate.name))
-        .map((candidate) => [
-          candidate.name,
-          candidate.isNullable,
-          candidate.hasDefaultValue,
-        ])
-        .sort();
-
-    expect(await columns(postgres.db)).toEqual(await columns(sqlite.db));
-    expect(await columns(sqlite.db)).toHaveLength(COLUMNS.length);
   });
 });

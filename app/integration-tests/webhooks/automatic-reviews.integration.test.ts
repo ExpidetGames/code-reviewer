@@ -2,7 +2,7 @@
 
 // The automatic reviews of CR-31, end to end up to the queue: a signed `pull_request` delivery goes
 // through the real webhook handler, the real GitHub App provider (against the fake GitHub), the real
-// trigger policy with the real review settings, and the real job queue on a real SQLite file. Time
+// trigger policy with the real review settings, and the real job queue on a real Postgres database. Time
 // is a hand-set clock shared by the policy and the queue, so the wait of a push is checked without
 // waiting. The decisions themselves are unit tests (src/webhooks/automatic-review-policy.test.ts);
 // what the queue does with a job is tested in src/jobs.

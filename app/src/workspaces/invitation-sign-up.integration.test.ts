@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An invitation and the sign-up of the person it is for, through the real sign-up, the real Better Auth and
-// a real SQLite file: the invitation does not override the sign-up rule. A rule that is tightened after the
+// a real Postgres database: the invitation does not override the sign-up rule. A rule that is tightened after the
 // invitation was made still decides whether the person can create an account; and a person who signs up with
 // the invited address (no mail server, rule "everyone") accepts with the link and becomes a member.
 import { describe, expect, it } from "vitest";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the setup state is read from the two explicit markers and from whether users exist,
-// against a real SQLite file: a database from before the markers, the combinations of the existing
+// against a real Postgres database: a database from before the markers, the combinations of the existing
 // installation, and a completed setup. The state is never inferred from whether a row exists.
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -38,26 +38,9 @@ describe("the setup state", () => {
   });
 
   // #97-SU-22
-  it("is an existing installation when users exist and the setup was not completed, whatever the import state", async () => {
+  it("is an existing installation when users exist and the setup was not completed", async () => {
     const { db } = await createTestDatabase();
     await addUser(db);
-    expect(await readSetupState(db)).toEqual({ kind: "existing" });
-
-    const settings = createInstanceSettingsRepository(db);
-    await settings.set("import_state", "none", null);
-    expect(await readSetupState(db)).toEqual({ kind: "existing" });
-    await settings.set("import_state", "done", null);
-    expect(await readSetupState(db)).toEqual({ kind: "existing" });
-  });
-
-  it("is an existing installation when the import ran, even without users", async () => {
-    const { db } = await createTestDatabase();
-    await createInstanceSettingsRepository(db).set(
-      "import_state",
-      "done",
-      null,
-    );
-
     expect(await readSetupState(db)).toEqual({ kind: "existing" });
   });
 

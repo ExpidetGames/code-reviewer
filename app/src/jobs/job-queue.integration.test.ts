@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the job queue against a real SQLite file: what enqueueing stores and when it refuses to
+// Pins down the job queue against a real Postgres database: what enqueueing stores and when it refuses to
 // create a second job, what a runner is handed and in which order, how leases and runtimes run out,
 // and how a job is finished. Concurrent callers (two processes) are in
 // job-queue-concurrency.integration.test.ts.
@@ -469,14 +469,12 @@ describe("replacing and deduplicating jobs", () => {
     await expect(
       insert({ status: "queued", head_sha: sha("c") }),
     ).rejects.toMatchObject({
-      message: expect.stringContaining("jobs.delivery_id"),
+      message: expect.stringContaining("jobs_delivery_id_unique"),
     });
     await expect(
       insert({ status: "queued", delivery_id: "delivery-2" }),
     ).rejects.toMatchObject({
-      message: expect.stringContaining(
-        "jobs.repository_id, jobs.pr_number, jobs.head_sha",
-      ),
+      message: expect.stringContaining("jobs_automatic_per_head_unique"),
     });
     await expect(
       insert({
@@ -485,7 +483,9 @@ describe("replacing and deduplicating jobs", () => {
         head_sha: sha("c"),
       }),
     ).rejects.toMatchObject({
-      message: expect.stringContaining("jobs.repository_id, jobs.pr_number"),
+      message: expect.stringContaining(
+        "jobs_one_running_per_pull_request_unique",
+      ),
     });
   });
 });
@@ -1500,7 +1500,7 @@ describe("a job that comes from a comment", () => {
           job_id: first.id,
         })
         .execute(),
-    ).rejects.toThrow(/UNIQUE/);
+    ).rejects.toThrow(/duplicate key value violates unique constraint/);
   });
 });
 
@@ -1509,7 +1509,7 @@ describe("the automatic slot index", () => {
     const fixture = await createJobQueueFixture();
 
     const { rows } = await sql<{ sql: string }>`
-      select sql from sqlite_master where name = 'jobs_automatic_per_head_unique'`.execute(
+      select indexdef as sql from pg_indexes where indexname = 'jobs_automatic_per_head_unique'`.execute(
       fixture.db,
     );
 
@@ -1693,7 +1693,7 @@ describe("the Dynamic Review rollout gate (#195)", () => {
     await fixture.enqueueNew({ prNumber: 8, headSha: sha("b") });
 
     const { rows } = await sql<{ count: number }>`
-      select count(*) as count from jobs
+      select count(*)::int as count from jobs
       where status = 'queued' and review_kind = 'dynamic'`.execute(fixture.db);
 
     expect(rows[0]?.count).toBe(0);
@@ -1818,7 +1818,7 @@ it.each(["disable", "remove"] as const)(
     ).toMatchObject({ status: "not_holder" });
     const { rows } = await sql<{
       count: number;
-    }>`select count(*) as count from jobs where review_kind = 'dynamic' and status in ('queued', 'running')`.execute(
+    }>`select count(*)::int as count from jobs where review_kind = 'dynamic' and status in ('queued', 'running')`.execute(
       fixture.db,
     );
     expect(rows[0]?.count).toBe(0);

@@ -228,7 +228,7 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 
 `integration-tests/webhooks/comment-commands.integration.test.ts` runs signed comment deliveries
 through the same wiring (the CR-32 behaviors above). `integration-tests/webhooks/automatic-reviews.integration.test.ts` runs signed deliveries through the
-handler into the real queue with a hand-set clock (the CR-31 behaviors above). `src/test-support/webhook-harness.ts` starts everything the route needs: a real SQLite file, the fake
+handler into the real queue with a hand-set clock (the CR-31 behaviors above). `src/test-support/webhook-harness.ts` starts everything the route needs: a real Postgres database, the fake
 GitHub API, the real GitHub App provider, a `RecordingReviewTriggerIntake`
 (`recording-review-trigger-intake.ts`, which can fail or take its time), the project service and the
 handler (`seedInstallation()` also activates the seeded repository as a project; pass

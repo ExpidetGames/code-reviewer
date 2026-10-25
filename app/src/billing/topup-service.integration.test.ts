@@ -23,6 +23,7 @@ import {
   createTopUpService,
   type TopUpResult,
 } from "./topup-service.ts";
+import { tableNames } from "../test-support/tables.ts";
 
 const INTENT_A = "6f1f4a2e-0c52-4b8e-9a43-0d0f6f1d2a11";
 const INTENT_B = "0b6d7c1e-5d3a-4c0e-8f64-3a1f9e2b7c22";
@@ -43,20 +44,8 @@ const UUID_ENDING_IN_THE_AMOUNT = "e477439f-0c00-43c7-8429-459301854321";
 const RETURN_URL = "https://app.example.test/w/billing-a/billing";
 
 async function allRows(db: Kysely<Database>): Promise<Record<string, string>> {
-  const tables = await sql<{ name: string }>`
-    select table_name as name from information_schema.tables where table_schema = 'public'`
-    .execute(db)
-    .then((result) => result.rows)
-    .catch(
-      async () =>
-        (
-          await sql<{
-            name: string;
-          }>`select name from sqlite_master where type = 'table'`.execute(db)
-        ).rows,
-    );
   const out: Record<string, string> = {};
-  for (const { name } of tables) {
+  for (const name of await tableNames(db)) {
     const rows = await sql
       .raw(`select * from "${name}"`)
       .execute(db)
@@ -67,7 +56,7 @@ async function allRows(db: Kysely<Database>): Promise<Record<string, string>> {
 }
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`starting a top-up on ${engine.name}`, () => {
+  describe(`starting a top-up on ${engine.name}`, () => {
     async function start() {
       const { db, workspaceId, otherWorkspaceId } = await engine.create();
       await insertUser(db, { id: "owner" });

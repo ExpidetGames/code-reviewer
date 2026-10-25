@@ -2,13 +2,13 @@
 
 // The daily repository sync of a serverless deployment (#319): the platform's cron calls it with the
 // shared secret, it runs the same full sync the server runs at start, and it answers with counts only.
-// Outside serverless mode the route does not exist, and without the right secret it grants nothing.
+// Without the right secret it grants nothing.
 import { describe, expect, it, vi } from "vitest";
 import type { SyncSummary } from "../integrations/sync/service.ts";
 import { handleRepositorySyncCron } from "./repository-sync.ts";
 
 const SECRET = "cron-secret-0123456789abcdef0123456789abcdef";
-const serverlessEnv = { APP_RUNTIME: "serverless", CRON_SECRET: SECRET };
+const serverlessEnv = { CRON_SECRET: SECRET };
 
 const summary: SyncSummary = {
   integrations: { created: 1, updated: 2, enabled: 0, disabled: 0 },
@@ -75,7 +75,7 @@ describe("the daily repository sync", () => {
   it("answers 401 for every caller while CRON_SECRET is missing or weak, even one that sends nothing useful", async () => {
     for (const secret of [undefined, "", "short"]) {
       const d = deps({
-        env: { APP_RUNTIME: "serverless", CRON_SECRET: secret },
+        env: { CRON_SECRET: secret },
       });
 
       const response = await handleRepositorySyncCron(
@@ -86,19 +86,6 @@ describe("the daily repository sync", () => {
       expect(response.status).toBe(401);
       expect(d.syncAll).not.toHaveBeenCalled();
     }
-  });
-
-  // #319-T11
-  it("does not exist in server mode: 404 with the right secret as well", async () => {
-    const d = deps({ env: { CRON_SECRET: SECRET } });
-
-    const response = await handleRepositorySyncCron(
-      request(`Bearer ${SECRET}`),
-      d,
-    );
-
-    expect(response.status).toBe(404);
-    expect(d.syncAll).not.toHaveBeenCalled();
   });
 
   // #319-T12

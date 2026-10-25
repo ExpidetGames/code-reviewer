@@ -8,7 +8,6 @@
 // one exists and is refused everything else; the key is encrypted at rest and in no answer, log line or error;
 // the request is read the one way every JSON route is (same site, JSON only, small, once); the test button is
 // limited; and the workspace of the address is the only one that is ever touched.
-import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,16 +15,12 @@ import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import { createWorkspacesRepository } from "../../src/db/repositories/workspaces-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { LlmAccessSection } from "../../src/llm/ui/llm-access-section.tsx";
 import { KEY_TEST_WORKSPACE_MAX } from "../../src/llm/key-test.ts";
 import { createSecretStore } from "../../src/secrets/store.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
 
 const session = vi.hoisted(() => ({
@@ -55,9 +50,7 @@ async function start() {
   vi.stubEnv("APP_SECRET", APP_SECRET);
   vi.stubEnv("LLM_API_BASE_URL", fake.baseUrl);
   vi.stubEnv("ALLOW_TEST_LLM_ENDPOINTS", "true");
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   vi.resetModules();
   const db = getDatabase();
   const workspaces = createWorkspacesRepository(db);

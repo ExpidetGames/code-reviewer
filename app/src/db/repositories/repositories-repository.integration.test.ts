@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the repositories table against a real SQLite file: reconciling a list from the platform
+// Pins down the repositories table against a real Postgres database: reconciling a list from the platform
 // adds, renames, deactivates and reactivates rows without ever deleting or duplicating one.
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";

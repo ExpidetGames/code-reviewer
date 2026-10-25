@@ -4,7 +4,7 @@ The operator's list of the models that workspaces on the operator's key may use 
 ADR 0005, 2.6). An entry has a free **name** that members see
 and a provider and a real model id that **only the operator** sees. This folder is the data and the rules, and the
 operator's side of them in the admin portal (#429, below). **The catalog is empty by default, and an empty catalog changes
-nothing** for any workspace, and no self-hoster has to do anything: the section in the admin portal is collapsed while it
+nothing** for any workspace, and nobody has to do anything: the section in the admin portal is collapsed while it
 is empty.
 
 | File                                                                                 | Role                                                                                                                                                                                    |
@@ -28,7 +28,7 @@ table), `status`, `sortOrder`, who changed it last and when.
 
 - **Name:** 1 to 40 printable characters, no space at either end, **unique whatever the case** (decision C3; refused
   `catalog_name_taken`). The uniqueness is a unique index on the stored `name_key` (the name folded to lower case), so it
-  is the same on SQLite and Postgres. The name is shown to members by design, so it is refused when it contains the
+  is the same on Postgres. The name is shown to members by design, so it is refused when it contains the
   entry's model id, its slug (the part after the last `/`, with or without a `:variant` such as `:free`) or the provider.
   The comparison folds the text first (compatibility forms, lower case, letters and digits only), so "Claude Sonnet 5.5",
   "claude_sonnet_5_5" and a fullwidth spelling are caught like the id itself; a piece shorter than four letters and
@@ -149,9 +149,9 @@ moves the data over so that no managed workspace changes model:
   the default tier (there is no workspace-level entry). A selection that is already set stays. A kind the tier has no entry
   for gets none, so the instance default of that kind applies, as it does to any project without a choice. Damaged JSON
   is skipped and named by id in the log, never by content.
-- **Safe to run.** It only adds. It is idempotent, needs no `APP_SECRET`, decrypts nothing, uses the same SQL on SQLite
-  and Postgres and does nothing when `managed_model_tiers` is missing, empty or holds no readable model (a self-hosted
-  instance on its own key never had one). The projects are read in one query and written in chunks of 500 with one
+- **Safe to run.** It only adds. It is idempotent, needs no `APP_SECRET`, decrypts nothing, uses plain SQL
+  and does nothing when `managed_model_tiers` is missing, empty or holds no readable model (an instance on its own
+  key never had one). The projects are read in one query and written in chunks of 500 with one
   `UPDATE … FROM (VALUES …)` each, so the time does not grow with a statement per project (about 0.2 s for 5,000 and 0.8 s
   for 20,000 projects on a local Postgres, instead of 2.2 s and 10.3 s). A row is written only if it still holds the text
   that was read (a settings save that lands between the read and the write is never overwritten) and a row that changed

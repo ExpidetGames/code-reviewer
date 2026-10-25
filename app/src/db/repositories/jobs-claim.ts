@@ -1,26 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The claim of a job: the one place in the job queue that is written for a dialect.
+// The claim of a job: the one place in the job queue that is written for the database engine.
 //
-// SQLite (`claimOldestDueJob`): one `UPDATE ... WHERE id = (SELECT ... LIMIT 1) RETURNING *`, which
-// SQLite runs as one atomic statement. Together with the `begin immediate` transactions of
-// `dialect.ts`, which take the database's single write lock up front, two runners claiming at once
-// are serialized: the second one sees the first one's row as `running` and takes the next job (or
-// none).
-//
-// Postgres (`claimOldestDueJobPostgres`): the same statement with `FOR UPDATE SKIP LOCKED` in the
-// sub-select, so two runners do not wait on each other's candidate. `SKIP LOCKED` alone is not
-// enough: two queued jobs of one pull request have no running job to skip on, so both runners can
-// pick one each. The partial unique index `jobs_one_running_per_pull_request_unique` (on both
-// databases) is what keeps the rule; the second `UPDATE` then fails with a unique violation, which
-// this code treats as "skip this job, try the next". A savepoint makes that recoverable: a Postgres
-// transaction that hit an error cannot run another statement until it is rolled back to a savepoint.
-// (An earlier version of this comment claimed `FOR UPDATE SKIP LOCKED` was the only line a port
-// would change; it is not, and the index is the reason.)
+// One `UPDATE ... WHERE id = (SELECT ... LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`, so two runners
+// do not wait on each other's candidate. `SKIP LOCKED` alone is not enough: two queued jobs of one
+// pull request have no running job to skip on, so both runners can pick one each. The partial unique
+// index `jobs_one_running_per_pull_request_unique` is what keeps the rule; the second `UPDATE` then
+// fails with a unique violation, which this code treats as "skip this job, try the next". A savepoint
+// makes that recoverable: a Postgres transaction that hit an error cannot run another statement until
+// it is rolled back to a savepoint.
 import { sql, type Kysely, type Selectable } from "kysely";
 import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { formatTimestamp } from "../codecs.ts";
-import { errorCode } from "../errors.ts";
+import { errorCode, UNIQUE_VIOLATION } from "../errors.ts";
 import type { Database, JobsTable } from "../schema.ts";
 
 /** Everything a claim writes onto the job it hands out. */
@@ -33,8 +25,6 @@ export type JobClaim = {
   leaseExpiresAt: Date;
 };
 
-/** Postgres answers a unique index violation with SQLSTATE 23505. */
-const UNIQUE_VIOLATION = "23505";
 /** Enough for every pull request in the queue to be tried; a bug fails instead of looping. */
 const MAX_CLAIM_ATTEMPTS = 100;
 
@@ -48,26 +38,11 @@ const MAX_CLAIM_ATTEMPTS = 100;
  * With `jobId` (#322) only that job can be selected, under every rule above: a job that is not due, not
  * queued, of another kind or blocked by a running job of its pull request is not claimed, and the answer
  * is undefined. Call it inside a transaction, after expired leases have been dealt with.
+ *
+ * A unique violation (the running slot of that pull request was taken by another runner at the same moment)
+ * makes it try the next due job instead of failing the transaction.
  */
 export async function claimOldestDueJob(
-  executor: Kysely<Database>,
-  claim: JobClaim,
-  reviewKinds: readonly ProjectReviewKind[],
-  jobId?: string,
-): Promise<Selectable<JobsTable> | undefined> {
-  const { rows } = await claimQuery(executor, claim, reviewKinds, {
-    skipLocked: false,
-    jobId,
-  });
-  return rows[0];
-}
-
-/**
- * The Postgres claim: the statement above with `FOR UPDATE SKIP LOCKED`, and a unique violation (the
- * running slot of that pull request was taken by another runner at the same moment) makes it try the
- * next due job instead of failing the transaction. Call it inside a transaction.
- */
-export async function claimOldestDueJobPostgres(
   executor: Kysely<Database>,
   claim: JobClaim,
   reviewKinds: readonly ProjectReviewKind[],
@@ -79,7 +54,6 @@ export async function claimOldestDueJobPostgres(
   for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
     try {
       const { rows } = await claimQuery(executor, claim, reviewKinds, {
-        skipLocked: true,
         jobId,
       });
       return rows[0];
@@ -94,12 +68,12 @@ export async function claimOldestDueJobPostgres(
   return undefined;
 }
 
-/** The one claim statement; `for update skip locked` is Postgres-only. */
+/** The one claim statement. */
 function claimQuery(
   executor: Kysely<Database>,
   claim: JobClaim,
   reviewKinds: readonly ProjectReviewKind[],
-  { skipLocked, jobId }: { skipLocked: boolean; jobId: string | undefined },
+  { jobId }: { jobId: string | undefined },
 ) {
   const now = formatTimestamp(claim.now);
   // #195: the runner only gets jobs of a kind one of its engines can run. A caller with no engines is
@@ -137,7 +111,7 @@ function claimQuery(
         )
       order by due.created_at, due.id
       limit 1
-      ${skipLocked ? sql`for update skip locked` : sql``}
+      for update skip locked
     )
     returning *`.execute(executor);
 }

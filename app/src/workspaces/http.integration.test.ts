@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind the routes of workspaces, members and invitations, through the real services over a
-// real SQLite file: how a request is read (same site, JSON only, a size limit, read once), what each route
+// real Postgres database: how a request is read (same site, JSON only, a size limit, read once), what each route
 // answers for a success and for each refusal, that a refusal changes nothing, and that nothing secret is in
 // an answer that is not meant to carry it. Who may do what is proven where the rules are
 // (members.integration.test.ts, invitations.integration.test.ts); here it is proven that the routes pass it

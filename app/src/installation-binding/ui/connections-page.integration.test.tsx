@@ -2,7 +2,7 @@
 
 // @vitest-environment jsdom
 // The Connections page with real data: the connections, the repository counts and the requests come from a real
-// SQLite file filled by the binding against the fake GitHub; the notice and the list of installations come from
+// database filled by the binding against the fake GitHub; the notice and the list of installations come from
 // the query the flow ended with; a Member sees the connections and none of the controls or requests.
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the app_meta repository against a real SQLite file: reading a missing key, writing,
+// Pins down the app_meta repository against a real Postgres database: reading a missing key, writing,
 // and replacing a value while moving the timestamp.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";

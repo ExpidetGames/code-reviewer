@@ -420,29 +420,3 @@ describe("the synchronization with GitHub", () => {
     expect(portal.syncCalls.count).toBe(0);
   });
 });
-
-describe("the backup status", () => {
-  const BACKUP = "/api/backup/status";
-
-  // #101-WM-08
-  it("is a path that does not exist, in every detail, for a member of a workspace, and reached by the instance admin", async () => {
-    const { portal, memberCookies } = await startPortal();
-
-    const asMember = await portal.visit(BACKUP, { cookies: memberCookies });
-    const asAdmin = await portal.visit(BACKUP, {
-      cookies: portal.adminCookies,
-    });
-
-    expect(isHidden(asMember)).toBe(true);
-    expect(asAdmin.status).toBe(200);
-    expect(await asAdmin.text()).toBe("reached");
-  });
-
-  it("asks a visitor without a session to sign in like every protected data route", async () => {
-    const { portal } = await startPortal();
-
-    const response = await portal.visit(BACKUP);
-
-    expect(response.status).toBe(401);
-  });
-});

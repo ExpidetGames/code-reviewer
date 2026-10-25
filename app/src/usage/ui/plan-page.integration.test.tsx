@@ -5,19 +5,14 @@
 // request scope). The page is rendered to markup, which is what a browser first gets: the numbers are in it, the
 // navigation lists the page only for a workspace with entitlements, and a workspace the person does not belong to is
 // the page of a path that does not exist.
-import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../auth/session-user.ts";
 import { createInstanceSettingsRepository } from "../../db/repositories/instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../db/repositories/workspace-entitlements-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../db/startup.ts";
+import { closeDatabase, getDatabase } from "../../db/startup.ts";
 import { signedInMember } from "../../test-support/session-lookup.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../test-support/test-database.ts";
 import { createUsageSeeder } from "../../test-support/usage-seed.ts";
 import {
   addWorkspace,
@@ -52,9 +47,7 @@ const ENTITLEMENTS: EntitlementsData = {
 };
 
 async function start(role: "member" | "admin" | "owner" = "member") {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const workspaceId = await defaultWorkspaceId(db);
   session.currentLookup.mockResolvedValue(

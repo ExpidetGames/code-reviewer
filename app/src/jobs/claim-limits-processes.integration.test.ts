@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #277-T06 with real OS processes on one SQLite file: two app instances claim at the same moment, and the
-// last unit of a limit goes to exactly one of them. better-sqlite3 blocks its thread, so only separate
-// processes can overlap; the write lock of the claim transaction is what serializes the check and the
-// reservation. (The same case on Postgres, with two pooled connections, is in claim-limits.integration.test.ts.)
+// #277-T06 with real OS processes on one database: two app instances claim at the same moment, and the
+// last unit of a limit goes to exactly one of them. Separate processes are what two app instances are: each has a
+// pool of its own, and the lock of the claim transaction is what serializes the check and the reservation. (The same
+// case with two connections of one pool is in claim-limits.integration.test.ts.)
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -60,7 +60,7 @@ describe("claiming the last unit of a limit from two processes", () => {
     const answers = await runTogether<{ job: Job | null }>(
       ["runner-a", "runner-b"].map((runner) => [
         "claim",
-        fixture.databasePath,
+        fixture.databaseUrl,
         T0.toISOString(),
         runner,
       ]),

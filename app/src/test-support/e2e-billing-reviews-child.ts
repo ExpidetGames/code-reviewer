@@ -2,26 +2,22 @@
 
 // A program the Playwright journey of the billing review rows runs (node runs this file directly, TypeScript types are stripped;
 // `--conditions=react-server` lets `server-only` pass) to leave two review rows in the app under test the way the webhook does:
-// through the real repositories on the app's SQLite file, never by writing rows. The app is a separate process with the same
+// through the real repositories on the app's database, never by writing rows. The app is a separate process with the same
 // file open (WAL), so the rows show up in its pages.
 //
 //   seed <db>   -> {workspaceId}
 //
 // A top-up of 25 USD of the default workspace with a payment that was refused (an amount that does not fit), and a refund of a
 // payment that belongs to nobody here. Prints one JSON line.
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createBillingTopUpIntentsRepository } from "../db/repositories/billing-topup-intents-repository.ts";
 import { createBillingWebhookEventsRepository } from "../db/repositories/billing-webhook-events-repository.ts";
 
-const [command, databasePath] = process.argv.slice(2);
-if (command !== "seed" || !databasePath)
+const [command, databaseUrl] = process.argv.slice(2);
+if (command !== "seed" || !databaseUrl)
   throw new Error("Usage: e2e-billing-reviews-child.ts seed <db>");
 
-const db = openDatabase({
-  driver: "sqlite",
-  path: databasePath,
-  busyTimeoutMs: 5000,
-});
+const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
 try {
   const workspace = await db
     .selectFrom("workspaces")

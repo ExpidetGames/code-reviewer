@@ -2,15 +2,10 @@
 
 // Deleting a workspace against a claim that is in flight, on Postgres with two connections (#658): a claim sets the job
 // `running` and its transaction has not committed yet, so no other connection can see that. The deletion must wait for it and
-// then refuse (`review_running`), never delete a job a runner holds. Postgres only; SQLite has one writer.
+// then refuse (`review_running`), never delete a job a runner holds.
 import { describe, expect, it } from "vitest";
 import { lockDynamicReviewGate } from "../db/dynamic-review-lock.ts";
 import { createRunnerJobsRepository } from "../db/repositories/runner-jobs-repository.ts";
-import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import {
   waitForLockWait,
   withApplicationName,
@@ -21,11 +16,13 @@ import {
 } from "../test-support/workspace-deletion-fixture.ts";
 import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 import { createWorkspaceDeletion } from "./delete-workspace.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import {
+  connectPostgres,
+  createTestDatabase,
+} from "../test-support/test-database.ts";
 
 async function start() {
-  const postgres = await createPostgresTestDatabase({ poolMax: 4 });
+  const postgres = await createTestDatabase({ poolMax: 4 });
   const workspaceId = await defaultWorkspaceId(postgres.db);
   const seeded: SeededWorkspace = await seedWorkspaceForDeletion(
     postgres.db,
@@ -68,7 +65,7 @@ async function start() {
   return { postgres, workspaceId, seeded, claimer, remove, hold };
 }
 
-describePostgres("deleting a workspace while a claim is in flight", () => {
+describe("deleting a workspace while a claim is in flight", () => {
   // #658-T04
   it("waits for a claim whose transaction has not committed and then refuses, leaving the running job alone", async () => {
     const t = await start();

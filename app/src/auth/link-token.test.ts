@@ -8,7 +8,7 @@ import {
   hashResetToken,
   isWellFormedResetToken,
   newResetToken,
-} from "./token.ts";
+} from "./link-token.ts";
 
 describe("a reset token", () => {
   it("is 256 random bits, spelled so that it survives a link", () => {

@@ -3,7 +3,7 @@
 // Pins down the handler behind `POST /api/integrations/sync` (the "Sync from GitHub" button): a
 // signed in user runs the sync against the fake GitHub and learns how many repositories are new, a
 // request from another site is refused, and the user is asked for before GitHub is called. Real
-// SQLite and the real provider against the fake GitHub; only the user check is passed in.
+// Postgres and the real provider against the fake GitHub; only the user check is passed in.
 import { describe, expect, it } from "vitest";
 import type { SessionUser } from "../../auth/access-policy.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";

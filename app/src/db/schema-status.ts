@@ -10,7 +10,6 @@
 // (docs: src/db/README.md, "Migrations in serverless mode").
 import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
-import { databaseDriver } from "./driver.ts";
 import { migrationProvider } from "./migrations/index.ts";
 import type { Database } from "./schema.ts";
 
@@ -21,16 +20,9 @@ export type SchemaStatus =
 const MIGRATION_TABLE = "kysely_migration";
 
 async function appliedMigrations(db: Kysely<Database>): Promise<Set<string>> {
-  const exists =
-    databaseDriver(db) === "postgres"
-      ? await sql<{
-          found: string | null;
-        }>`select to_regclass(${MIGRATION_TABLE}) as found`.execute(db)
-      : await sql<{
-          found: string | null;
-        }>`select name as found from sqlite_master where type = 'table' and name = ${MIGRATION_TABLE}`.execute(
-          db,
-        );
+  const exists = await sql<{
+    found: string | null;
+  }>`select to_regclass(${MIGRATION_TABLE}) as found`.execute(db);
   if (exists.rows[0]?.found == null) return new Set();
   const { rows } = await sql<{
     name: string;

@@ -114,7 +114,7 @@ describe("CI workflow triggers and jobs", () => {
   });
 
   // #105-PG-04, moved to app-int by #641
-  it("runs the database integration tests against a Postgres service container as well as SQLite", () => {
+  it("runs the database integration tests against a Postgres service container", () => {
     const job = jobNamed("app-int");
     const services = job.services as
       Record<string, { image?: string }> | undefined;
@@ -125,20 +125,6 @@ describe("CI workflow triggers and jobs", () => {
 
     expect(services?.postgres?.image).toMatch(/^postgres:/);
     expect(environment?.TEST_DATABASE_URL).toMatch(/^postgres:\/\//);
-  });
-
-  // #319-T06
-  it("runs the unit suite a second time in serverless mode, so the two runtime modes cannot drift", () => {
-    const job = jobNamed("app-serverless");
-    const unit = steps(job).find((step) => step.run === "pnpm test");
-    const environment = unit?.env as Record<string, string> | undefined;
-
-    expect(environment?.APP_RUNTIME).toBe("serverless");
-    expect(String(job.if)).toContain("needs.changes.outputs.app == 'true'");
-    expect(jobNamed("ci-passed").needs).toContain("app-serverless");
-    // Nothing here may be able to reach a database: the suite is the unit one.
-    expect(job.services).toBeUndefined();
-    expect(commandLines(job)).not.toContain("pnpm test:int");
   });
 
   // CR-16-T01

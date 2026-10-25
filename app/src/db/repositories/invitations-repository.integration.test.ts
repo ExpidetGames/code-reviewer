@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The statements that end or change an invitation, against a real SQLite file: each one only touches an
+// The statements that end or change an invitation, against a real Postgres database: each one only touches an
 // invitation that is still open, and accepting only one that has not expired, so a rule broken in the code
 // around them (a race, a missed check) cannot use up, revive or take over an invitation.
 import { describe, expect, it } from "vitest";

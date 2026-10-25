@@ -23,7 +23,7 @@ import {
   hashLinkToken,
   isWellFormedLinkToken,
   newLinkToken,
-} from "../admin-cli/token.ts";
+} from "../auth/link-token.ts";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";

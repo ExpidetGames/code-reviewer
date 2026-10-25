@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A program the balance journal tests run as a separate OS process (node runs this file directly, TypeScript types are
-// stripped): another app instance reserving holds on the same SQLite file. Prints "ready", waits for a line
+// stripped): another app instance reserving holds on the same database. Prints "ready", waits for a line
 // "go <epoch ms>", spins until that moment (a start barrier, so several processes begin together), then makes its
 // reserves one after the other on its own connection and prints one JSON line: how many were granted and refused.
 //
 //   reserve <db> <workspaceId> <holdMicroUsd> <jobPrefix> <count>   -> {"ok": n, "refused": n}
 import { createInterface } from "node:readline";
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 
-const [command, databasePath, workspaceId, hold, prefix, count] =
+const [command, databaseUrl, workspaceId, hold, prefix, count] =
   process.argv.slice(2);
-if (command !== "reserve" || !databasePath || !workspaceId)
+if (command !== "reserve" || !databaseUrl || !workspaceId)
   throw new Error(
     "Usage: billing-child.ts reserve <db> <workspaceId> <hold> <jobPrefix> <count>",
   );
@@ -22,11 +22,7 @@ const lines = createInterface({ input: process.stdin });
 lines.once("line", async (line) => {
   const startAt = Number(line.split(" ")[1]);
   while (Date.now() < startAt);
-  const db = openDatabase({
-    driver: "sqlite",
-    path: databasePath,
-    busyTimeoutMs: 30_000,
-  });
+  const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
   try {
     const journal = createBillingJournalRepository(db, workspaceId);
     let ok = 0;

@@ -6,16 +6,11 @@
 // an Admin is refused with the same answer whether the route guard (`withWorkspace(…, "delete_workspace", …)`) or the service
 // refuses; this file therefore watches the handler as well: for a person below the Owner it must never be reached. A route
 // whose permission was loosened (to `view`, say) fails here, not in a table that is built from the same permission.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 import { DELETE } from "../../src/app/api/w/[workspace]/route.ts";
 
@@ -49,9 +44,7 @@ async function startRoute() {
   reached.deleteWorkspace.mockClear();
   vi.stubEnv("BETTER_AUTH_URL", "https://app.test");
   vi.stubEnv("APP_SECRET", "delete-route-test-secret-0123456789-0123456789");
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const workspaceId = await defaultWorkspaceId(db);
   const signIn = async (role: "owner" | "admin" | "member") =>

@@ -10,7 +10,7 @@
 // cannot be activated (the repositories table says so, not this one).
 import "server-only";
 import { lockDynamicReviewGate } from "../dynamic-review-lock.ts";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type {
   IntegrationStatus,
   IntegrationType,
@@ -23,7 +23,6 @@ import {
   encodeJson,
   formatTimestamp,
 } from "../codecs.ts";
-import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database, ProjectsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 
@@ -180,7 +179,6 @@ export type ProjectsRepository = {
    * `list`, read inside the given transaction after every repository row of the workspace was locked `FOR UPDATE` in
    * ascending id: the lock a project's own save and a job's enqueue take first, so the list agrees with what they see
    * and a write that must reach every project (the workspace review defaults, #676) cannot miss a concurrent enqueue.
-   * On SQLite the transaction's own write lock does it.
    */
   listLocked(executor: Kysely<Database>): Promise<ProjectListEntry[]>;
   /** One entry of the list, found by the id of its repository; undefined when the list has none. */
@@ -231,7 +229,6 @@ export function createProjectsRepository(
   now: () => Date = () => new Date(),
   newId: () => string = () => crypto.randomUUID(),
   warn: (message: string) => void = console.warn,
-  driver: DatabaseDriver = databaseDriver(db),
   /**
    * The settings a project row starts with when it is created (#656): the instance decides inside the write
    * transaction, so the default review kind of a new project is read together with the row it is written to. A project
@@ -321,7 +318,8 @@ export function createProjectsRepository(
             eb("projects.id", "is not", null),
           ]),
         )
-        .orderBy("repositories.full_name")
+        // The byte order of the name, whatever collation the database was made with: the list reads the same everywhere.
+        .orderBy(sql`repositories.full_name collate "C"`)
         .orderBy("repositories.id")
     );
   }
@@ -374,9 +372,8 @@ export function createProjectsRepository(
   /**
    * The one settings write: replaces or creates the project row of a repository with the settings
    * `change` computes from the stored ones, in one transaction. The stored settings are read under a
-   * lock on the workspace-scoped repository row, so a concurrent `change` cannot lose an update:
-   * SQLite already holds the single write lock (`begin immediate`, see `dialect.ts`), Postgres takes
-   * the row's `FOR UPDATE` lock before the read. `afterChange` runs in that same transaction, so the
+   * lock on the workspace-scoped repository row (`FOR UPDATE`, taken before the read), so a concurrent
+   * `change` cannot lose an update. `afterChange` runs in that same transaction, so the
    * write and whatever it triggers commit together or roll back together.
    */
   function applySettings(
@@ -387,16 +384,13 @@ export function createProjectsRepository(
     return inTransaction(async (trx) => {
       const timestamp = formatTimestamp(now());
       // Lock the repository row (of this workspace) before reading the project. It exists for every
-      // settings save, project row or not, so it covers the first save too; on SQLite the lock is the
-      // transaction's own write lock and `for update` is not available.
+      // settings save, project row or not, so it covers the first save too.
       const repositoryQuery = trx
         .selectFrom("repositories")
         .select(["id", "active"])
         .where("workspace_id", "=", workspaceId)
         .where("id", "=", repositoryId);
-      const repository = await (
-        driver === "postgres" ? repositoryQuery.forUpdate() : repositoryQuery
-      ).executeTakeFirst();
+      const repository = await repositoryQuery.forUpdate().executeTakeFirst();
       if (repository === undefined) return undefined;
 
       const existing = await trx
@@ -593,14 +587,13 @@ export function createProjectsRepository(
     async listLocked(executor) {
       if (!executor.isTransaction)
         throw new Error("listLocked requires a transaction.");
-      if (databaseDriver(executor) === "postgres")
-        await executor
-          .selectFrom("repositories")
-          .select("id")
-          .where("workspace_id", "=", workspaceId)
-          .orderBy("id")
-          .forUpdate()
-          .execute();
+      await executor
+        .selectFrom("repositories")
+        .select("id")
+        .where("workspace_id", "=", workspaceId)
+        .orderBy("id")
+        .forUpdate()
+        .execute();
       const rows = await entryQuery(executor).execute();
       return rows.map(toEntry);
     },

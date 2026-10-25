@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The binding of installations to workspaces assembled for integration tests (src/installation-binding/): a real
-// SQLite file, the fake GitHub on a loopback port as github.com and api.github.com, the GitHub App saved in
+// database, the fake GitHub on a loopback port as github.com and api.github.com, the GitHub App saved in
 // the encrypted store the way the admin portal saves it (with the user authorization), the real registry, the
 // real synchronization with the real placement, the real services and route handlers, and a clock the test moves.
 // `walk` does what a person does: presses "Connect GitHub", installs on GitHub, comes back to the setup address,

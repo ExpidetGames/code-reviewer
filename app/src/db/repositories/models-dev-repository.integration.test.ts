@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The stored models.dev catalog (#548) on both engines: rows round-trip, an upsert keeps `first_seen_at`, nothing is ever
+// The stored models.dev catalog (#548): rows round-trip, an upsert keeps `first_seen_at`, nothing is ever
 // deleted, and the state of the last fetch is one row that a failure changes without touching the catalog.
 import { describe, expect, it } from "vitest";
 import type { StoredModel, StoredProvider } from "../../models-dev/catalog.ts";
@@ -54,124 +54,114 @@ function model(overrides: Partial<StoredModel> = {}): StoredModel {
 describe.each(MODELS_DEV_ENGINES)(
   "the models.dev catalog on $name",
   (engine) => {
-    const it_ = engine.skip ? it.skip : it;
-
     async function setup() {
       const { db } = await engine.create();
       return { db, repository: createModelsDevRepository(db) };
     }
 
     // #548-T03
-    it_(
-      "gives back exactly what it was given, prices, modalities and optional fields included",
-      async () => {
-        const { repository } = await setup();
-        const withTiers = model({
-          id: "tiered",
-          status: "deprecated",
-          limit: { context: 200000, output: 8192, input: 190000 },
-          cost: {
-            input: "1",
-            output: "5",
-            tiers: [{ contextOver: 100000, input: "2", output: "10" }],
-          },
-          interleaved: true,
-          family: null,
-          lastUpdated: null,
-        });
-        const unpriced = model({
-          id: "unpriced",
-          cost: null,
-          interleaved: null,
-        });
+    it("gives back exactly what it was given, prices, modalities and optional fields included", async () => {
+      const { repository } = await setup();
+      const withTiers = model({
+        id: "tiered",
+        status: "deprecated",
+        limit: { context: 200000, output: 8192, input: 190000 },
+        cost: {
+          input: "1",
+          output: "5",
+          tiers: [{ contextOver: 100000, input: "2", output: "10" }],
+        },
+        interleaved: true,
+        family: null,
+        lastUpdated: null,
+      });
+      const unpriced = model({
+        id: "unpriced",
+        cost: null,
+        interleaved: null,
+      });
 
-        await repository.apply({
-          providers: [provider()],
-          models: [model(), withTiers, unpriced],
-        });
+      await repository.apply({
+        providers: [provider()],
+        models: [model(), withTiers, unpriced],
+      });
 
-        expect(await repository.listProviders()).toEqual([provider()]);
-        expect((await repository.listModels()).map((m) => m.id).sort()).toEqual(
-          ["deepseek-v4-pro", "tiered", "unpriced"],
-        );
-        expect(await repository.getModel("deepseek", "tiered")).toEqual(
-          withTiers,
-        );
-        expect(await repository.getModel("deepseek", "unpriced")).toEqual(
-          unpriced,
-        );
-        expect(await repository.getModel("deepseek", "nobody")).toBeUndefined();
-        expect(await repository.getProvider("nobody")).toBeUndefined();
-      },
-    );
-
-    // #548-T03
-    it_(
-      "updates a row on a second write and keeps the day it was first seen",
-      async () => {
-        const { repository } = await setup();
-        await repository.apply({ providers: [provider()], models: [model()] });
-
-        await repository.apply({
-          providers: [
-            provider({ name: "DeepSeek AI", updatedAt: T2.toISOString() }),
-          ],
-          models: [
-            model({
-              cost: { input: "0.5", output: "1.1" },
-              firstSeenAt: T2.toISOString(),
-              updatedAt: T2.toISOString(),
-            }),
-          ],
-        });
-
-        const stored = await repository.getModel("deepseek", "deepseek-v4-pro");
-        expect(stored?.cost).toEqual({ input: "0.5", output: "1.1" });
-        expect(stored?.firstSeenAt).toBe(T1.toISOString());
-        expect(stored?.updatedAt).toBe(T2.toISOString());
-        const stored2 = await repository.getProvider("deepseek");
-        expect(stored2?.name).toBe("DeepSeek AI");
-        expect(stored2?.firstSeenAt).toBe(T1.toISOString());
-      },
-    );
+      expect(await repository.listProviders()).toEqual([provider()]);
+      expect((await repository.listModels()).map((m) => m.id).sort()).toEqual([
+        "deepseek-v4-pro",
+        "tiered",
+        "unpriced",
+      ]);
+      expect(await repository.getModel("deepseek", "tiered")).toEqual(
+        withTiers,
+      );
+      expect(await repository.getModel("deepseek", "unpriced")).toEqual(
+        unpriced,
+      );
+      expect(await repository.getModel("deepseek", "nobody")).toBeUndefined();
+      expect(await repository.getProvider("nobody")).toBeUndefined();
+    });
 
     // #548-T03
-    it_(
-      "marks a row unlisted and clears it again, with the last known entry kept in between",
-      async () => {
-        const { repository } = await setup();
-        await repository.apply({ providers: [provider()], models: [model()] });
+    it("updates a row on a second write and keeps the day it was first seen", async () => {
+      const { repository } = await setup();
+      await repository.apply({ providers: [provider()], models: [model()] });
 
-        await repository.apply({
-          providers: [],
-          models: [
-            model({
-              unlistedAt: T2.toISOString(),
-              updatedAt: T2.toISOString(),
-            }),
-          ],
-        });
-        const gone = await repository.getModel("deepseek", "deepseek-v4-pro");
-        expect(gone?.unlistedAt).toBe(T2.toISOString());
-        expect(gone?.cost).toEqual({
-          input: "0.6",
-          output: "1.2",
-          cacheRead: "0.06",
-        });
+      await repository.apply({
+        providers: [
+          provider({ name: "DeepSeek AI", updatedAt: T2.toISOString() }),
+        ],
+        models: [
+          model({
+            cost: { input: "0.5", output: "1.1" },
+            firstSeenAt: T2.toISOString(),
+            updatedAt: T2.toISOString(),
+          }),
+        ],
+      });
 
-        await repository.apply({
-          providers: [],
-          models: [model({ updatedAt: T2.toISOString() })],
-        });
-        expect(
-          (await repository.getModel("deepseek", "deepseek-v4-pro"))
-            ?.unlistedAt,
-        ).toBeNull();
-      },
-    );
+      const stored = await repository.getModel("deepseek", "deepseek-v4-pro");
+      expect(stored?.cost).toEqual({ input: "0.5", output: "1.1" });
+      expect(stored?.firstSeenAt).toBe(T1.toISOString());
+      expect(stored?.updatedAt).toBe(T2.toISOString());
+      const stored2 = await repository.getProvider("deepseek");
+      expect(stored2?.name).toBe("DeepSeek AI");
+      expect(stored2?.firstSeenAt).toBe(T1.toISOString());
+    });
+
+    // #548-T03
+    it("marks a row unlisted and clears it again, with the last known entry kept in between", async () => {
+      const { repository } = await setup();
+      await repository.apply({ providers: [provider()], models: [model()] });
+
+      await repository.apply({
+        providers: [],
+        models: [
+          model({
+            unlistedAt: T2.toISOString(),
+            updatedAt: T2.toISOString(),
+          }),
+        ],
+      });
+      const gone = await repository.getModel("deepseek", "deepseek-v4-pro");
+      expect(gone?.unlistedAt).toBe(T2.toISOString());
+      expect(gone?.cost).toEqual({
+        input: "0.6",
+        output: "1.2",
+        cacheRead: "0.06",
+      });
+
+      await repository.apply({
+        providers: [],
+        models: [model({ updatedAt: T2.toISOString() })],
+      });
+      expect(
+        (await repository.getModel("deepseek", "deepseek-v4-pro"))?.unlistedAt,
+      ).toBeNull();
+    });
 
     // #548-T08
-    it_("keeps the trusted address and the one that waits apart", async () => {
+    it("keeps the trusted address and the one that waits apart", async () => {
       const { repository } = await setup();
       const blocked = provider({
         url: {
@@ -190,47 +180,44 @@ describe.each(MODELS_DEV_ENGINES)(
     });
 
     // #548-T04
-    it_(
-      "records a failure in one row without touching the catalog, and a success after it",
-      async () => {
-        const { repository } = await setup();
-        await repository.apply({ providers: [provider()], models: [model()] });
-        expect(await repository.fetchState()).toBeUndefined();
+    it("records a failure in one row without touching the catalog, and a success after it", async () => {
+      const { repository } = await setup();
+      await repository.apply({ providers: [provider()], models: [model()] });
+      expect(await repository.fetchState()).toBeUndefined();
 
-        await repository.recordFailure("models_dev_http_status", T1);
-        await repository.recordFailure("models_dev_unreachable", T2);
+      await repository.recordFailure("models_dev_http_status", T1);
+      await repository.recordFailure("models_dev_unreachable", T2);
 
-        expect(await repository.fetchState()).toEqual({
-          lastAttemptAt: T2.toISOString(),
-          lastSuccessAt: null,
-          lastStatus: "failed",
-          lastError: "models_dev_unreachable",
-          lastSummary: null,
-        });
-        expect(await repository.listModels()).toHaveLength(1);
+      expect(await repository.fetchState()).toEqual({
+        lastAttemptAt: T2.toISOString(),
+        lastSuccessAt: null,
+        lastStatus: "failed",
+        lastError: "models_dev_unreachable",
+        lastSummary: null,
+      });
+      expect(await repository.listModels()).toHaveLength(1);
 
-        const summary = { providers: 1, models: 1 };
-        await repository.recordSuccess(summary, T2);
-        expect(await repository.fetchState()).toEqual({
-          lastAttemptAt: T2.toISOString(),
-          lastSuccessAt: T2.toISOString(),
-          lastStatus: "ok",
-          lastError: null,
-          lastSummary: summary,
-        });
+      const summary = { providers: 1, models: 1 };
+      await repository.recordSuccess(summary, T2);
+      expect(await repository.fetchState()).toEqual({
+        lastAttemptAt: T2.toISOString(),
+        lastSuccessAt: T2.toISOString(),
+        lastStatus: "ok",
+        lastError: null,
+        lastSummary: summary,
+      });
 
-        await repository.recordFailure(
-          "models_dev_invalid_body",
-          new Date(T2.getTime() + 1000),
-        );
-        const after = await repository.fetchState();
-        expect(after?.lastSuccessAt).toBe(T2.toISOString());
-        expect(after?.lastError).toBe("models_dev_invalid_body");
-      },
-    );
+      await repository.recordFailure(
+        "models_dev_invalid_body",
+        new Date(T2.getTime() + 1000),
+      );
+      const after = await repository.fetchState();
+      expect(after?.lastSuccessAt).toBe(T2.toISOString());
+      expect(after?.lastError).toBe("models_dev_invalid_body");
+    });
 
     // #548-T03
-    it_("writes many rows at once", async () => {
+    it("writes many rows at once", async () => {
       const { repository } = await setup();
       const models = Array.from({ length: 450 }, (_unused, index) =>
         model({ id: `model-${String(index)}` }),
@@ -241,184 +228,168 @@ describe.each(MODELS_DEV_ENGINES)(
       expect(await repository.listModels()).toHaveLength(450);
     });
     // #554-T01
-    it_(
-      "counts the listed models of each provider in the database, without loading the catalog, and of one provider on request",
-      async () => {
-        const { repository } = await setup();
-        await repository.apply({
-          providers: [
-            provider(),
-            provider({ id: "openai", name: "OpenAI" }),
-            provider({ id: "empty", name: "Empty" }),
-          ],
-          models: [
-            model({ id: "a" }),
-            model({ id: "b" }),
-            model({ id: "gone", unlistedAt: T2.toISOString() }),
-            model({ providerId: "openai", id: "c" }),
-          ],
-        });
+    it("counts the listed models of each provider in the database, without loading the catalog, and of one provider on request", async () => {
+      const { repository } = await setup();
+      await repository.apply({
+        providers: [
+          provider(),
+          provider({ id: "openai", name: "OpenAI" }),
+          provider({ id: "empty", name: "Empty" }),
+        ],
+        models: [
+          model({ id: "a" }),
+          model({ id: "b" }),
+          model({ id: "gone", unlistedAt: T2.toISOString() }),
+          model({ providerId: "openai", id: "c" }),
+        ],
+      });
 
-        const all = await repository.listedModelCounts();
-        const one = await repository.listedModelCounts("openai");
+      const all = await repository.listedModelCounts();
+      const one = await repository.listedModelCounts("openai");
 
-        expect([...all]).toEqual([
-          ["deepseek", 2],
-          ["openai", 1],
-        ]);
-        expect([...one]).toEqual([["openai", 1]]);
-        expect([...(await repository.listedModelCounts("empty"))]).toEqual([]);
-      },
-    );
+      expect([...all]).toEqual([
+        ["deepseek", 2],
+        ["openai", 1],
+      ]);
+      expect([...one]).toEqual([["openai", 1]]);
+      expect([...(await repository.listedModelCounts("empty"))]).toEqual([]);
+    });
 
     // #555-T03
-    it_(
-      "reads the models of one provider by itself, listed or not, in the order of their ids",
-      async () => {
-        const { repository } = await setup();
-        await repository.apply({
-          providers: [provider(), provider({ id: "openai", name: "OpenAI" })],
-          models: [
-            model({ id: "b" }),
-            model({ id: "a" }),
-            model({ id: "gone", unlistedAt: T2.toISOString() }),
-            model({ providerId: "openai", id: "c" }),
-          ],
-        });
+    it("reads the models of one provider by itself, listed or not, in the order of their ids", async () => {
+      const { repository } = await setup();
+      await repository.apply({
+        providers: [provider(), provider({ id: "openai", name: "OpenAI" })],
+        models: [
+          model({ id: "b" }),
+          model({ id: "a" }),
+          model({ id: "gone", unlistedAt: T2.toISOString() }),
+          model({ providerId: "openai", id: "c" }),
+        ],
+      });
 
-        expect(
-          (await repository.listModelsOf("deepseek")).map((m) => m.id),
-        ).toEqual(["a", "b", "gone"]);
-        expect(await repository.listModelsOf("nobody")).toEqual([]);
-      },
-    );
+      expect(
+        (await repository.listModelsOf("deepseek")).map((m) => m.id),
+      ).toEqual(["a", "b", "gone"]);
+      expect(await repository.listModelsOf("nobody")).toEqual([]);
+    });
 
     // #548-T04
-    it_(
-      "records the start of an attempt first: a new row is a failure that was interrupted, an old one keeps how it ended",
-      async () => {
-        const { repository } = await setup();
+    it("records the start of an attempt first: a new row is a failure that was interrupted, an old one keeps how it ended", async () => {
+      const { repository } = await setup();
 
-        await repository.recordAttempt(T1);
+      await repository.recordAttempt(T1);
 
-        expect(await repository.fetchState()).toEqual({
-          lastAttemptAt: T1.toISOString(),
-          lastSuccessAt: null,
-          lastStatus: "failed",
-          lastError: "models_dev_interrupted",
-          lastSummary: null,
-        });
+      expect(await repository.fetchState()).toEqual({
+        lastAttemptAt: T1.toISOString(),
+        lastSuccessAt: null,
+        lastStatus: "failed",
+        lastError: "models_dev_interrupted",
+        lastSummary: null,
+      });
 
-        const summary = { providers: 1, models: 1 };
-        await repository.recordSuccess(summary, T1);
-        await repository.recordAttempt(T2);
+      const summary = { providers: 1, models: 1 };
+      await repository.recordSuccess(summary, T1);
+      await repository.recordAttempt(T2);
 
-        expect(await repository.fetchState()).toEqual({
-          lastAttemptAt: T2.toISOString(),
-          lastSuccessAt: T1.toISOString(),
-          lastStatus: "ok",
-          lastError: null,
-          lastSummary: summary,
-        });
-      },
-    );
+      expect(await repository.fetchState()).toEqual({
+        lastAttemptAt: T2.toISOString(),
+        lastSuccessAt: T1.toISOString(),
+        lastStatus: "ok",
+        lastError: null,
+        lastSummary: summary,
+      });
+    });
 
     // #548-T04
-    it_(
-      "writes nothing when the caller says between two batches that the time is up",
-      async () => {
-        const { repository } = await setup();
-        const models = Array.from({ length: 450 }, (_unused, index) =>
-          model({ id: `model-${String(index)}` }),
-        );
-        let batches = 0;
+    it("writes nothing when the caller says between two batches that the time is up", async () => {
+      const { repository } = await setup();
+      const models = Array.from({ length: 450 }, (_unused, index) =>
+        model({ id: `model-${String(index)}` }),
+      );
+      let batches = 0;
 
-        await expect(
-          repository.apply(
-            { providers: [provider()], models },
-            { summary: { models: 450 }, at: T1 },
-            {
-              shouldStop: () => {
-                batches += 1;
-                return batches > 2;
-              },
+      await expect(
+        repository.apply(
+          { providers: [provider()], models },
+          { summary: { models: 450 }, at: T1 },
+          {
+            shouldStop: () => {
+              batches += 1;
+              return batches > 2;
             },
-          ),
-        ).rejects.toBeInstanceOf(ModelsDevDeadlineError);
-
-        expect(batches).toBeGreaterThan(2);
-        expect(await repository.listModels()).toEqual([]);
-        expect(await repository.listProviders()).toEqual([]);
-        expect(await repository.fetchState()).toBeUndefined();
-      },
-    );
-    // #548-T08
-    it_(
-      "holds the provider rows it read against a write from another connection until the transaction ends",
-      async () => {
-        const { db, repository } = await setup();
-        const blocked = provider({
-          url: {
-            state: "url_changed",
-            trustedUrl: "https://api.deepseek.com",
-            pendingUrl: "https://elsewhere.example/v1",
-            problem: null,
           },
-          urlChangedAt: T1.toISOString(),
+        ),
+      ).rejects.toBeInstanceOf(ModelsDevDeadlineError);
+
+      expect(batches).toBeGreaterThan(2);
+      expect(await repository.listModels()).toEqual([]);
+      expect(await repository.listProviders()).toEqual([]);
+      expect(await repository.fetchState()).toBeUndefined();
+    });
+    // #548-T08
+    it("holds the provider rows it read against a write from another connection until the transaction ends", async () => {
+      const { db, repository } = await setup();
+      const blocked = provider({
+        url: {
+          state: "url_changed",
+          trustedUrl: "https://api.deepseek.com",
+          pendingUrl: "https://elsewhere.example/v1",
+          problem: null,
+        },
+        urlChangedAt: T1.toISOString(),
+      });
+      await repository.apply({ providers: [blocked], models: [] });
+      let locked!: () => void;
+      const hasLocked = new Promise<void>((resolve) => (locked = resolve));
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const fetchRun = db.transaction().execute(async (trx) => {
+        await createModelsDevRepository(trx).listProviders({
+          forUpdate: true,
         });
-        await repository.apply({ providers: [blocked], models: [] });
-        let locked!: () => void;
-        const hasLocked = new Promise<void>((resolve) => (locked = resolve));
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => (release = resolve));
-        const fetchRun = db.transaction().execute(async (trx) => {
-          await createModelsDevRepository(trx).listProviders({
-            forUpdate: true,
+        locked();
+        await gate;
+      });
+      let confirmed = false;
+      let confirmation: Promise<void> = Promise.resolve();
+      try {
+        await hasLocked;
+
+        // The confirmation of #554: a guarded update of the one row, from its own connection.
+        confirmation = db
+          .updateTable("models_dev_providers")
+          .set({
+            url_state: "trusted",
+            trusted_url: "https://elsewhere.example/v1",
+            pending_url: null,
+            url_changed_at: null,
+          })
+          .where("provider_id", "=", "deepseek")
+          .where("pending_url", "=", "https://elsewhere.example/v1")
+          .execute()
+          .then(() => {
+            confirmed = true;
           });
-          locked();
-          await gate;
-        });
-        let confirmed = false;
-        let confirmation: Promise<void> = Promise.resolve();
-        try {
-          await hasLocked;
+        await new Promise((resolve) => setTimeout(resolve, 250));
 
-          // The confirmation of #554: a guarded update of the one row, from its own connection.
-          confirmation = db
-            .updateTable("models_dev_providers")
-            .set({
-              url_state: "trusted",
-              trusted_url: "https://elsewhere.example/v1",
-              pending_url: null,
-              url_changed_at: null,
-            })
-            .where("provider_id", "=", "deepseek")
-            .where("pending_url", "=", "https://elsewhere.example/v1")
-            .execute()
-            .then(() => {
-              confirmed = true;
-            });
-          await new Promise((resolve) => setTimeout(resolve, 250));
-
-          expect(confirmed).toBe(false);
-        } finally {
-          release();
-        }
-        await fetchRun;
-        await confirmation;
-        expect(confirmed).toBe(true);
-        expect((await repository.getProvider("deepseek"))?.url.state).toBe(
-          "trusted",
-        );
-      },
-    );
+        expect(confirmed).toBe(false);
+      } finally {
+        release();
+      }
+      await fetchRun;
+      await confirmation;
+      expect(confirmed).toBe(true);
+      expect((await repository.getProvider("deepseek"))?.url.state).toBe(
+        "trusted",
+      );
+    });
   },
 );
 
 describe.each(MODELS_DEV_ENGINES)(
   "the guarded confirmation of an address on $name",
   (engine) => {
-    const it_ = engine.skip ? it.skip : it;
     const MOVED = "https://api.deepseek.moved.example/v1";
     const changed = (overrides: Partial<StoredProvider["url"]> = {}) =>
       provider({
@@ -433,91 +404,79 @@ describe.each(MODELS_DEV_ENGINES)(
       });
 
     // #554-T06
-    it_(
-      "trusts the pending address and clears the block, and only that row",
-      async () => {
-        const { db } = await engine.create();
-        const repository = createModelsDevRepository(db);
-        await repository.apply({
-          providers: [changed(), provider({ id: "openai", name: "OpenAI" })],
-          models: [],
-        });
+    it("trusts the pending address and clears the block, and only that row", async () => {
+      const { db } = await engine.create();
+      const repository = createModelsDevRepository(db);
+      await repository.apply({
+        providers: [changed(), provider({ id: "openai", name: "OpenAI" })],
+        models: [],
+      });
 
-        const changedRow = await repository.confirmPendingUrl(
-          "deepseek",
-          MOVED,
-        );
+      const changedRow = await repository.confirmPendingUrl("deepseek", MOVED);
 
-        expect(changedRow).toBe(true);
-        expect((await repository.getProvider("deepseek"))?.url).toEqual({
-          state: "trusted",
-          trustedUrl: MOVED,
-          pendingUrl: null,
-          problem: null,
-        });
-        expect(
-          (await repository.getProvider("deepseek"))?.urlChangedAt,
-        ).toBeNull();
-        expect((await repository.getProvider("openai"))?.url.trustedUrl).toBe(
-          "https://api.deepseek.com",
-        );
-      },
-    );
+      expect(changedRow).toBe(true);
+      expect((await repository.getProvider("deepseek"))?.url).toEqual({
+        state: "trusted",
+        trustedUrl: MOVED,
+        pendingUrl: null,
+        problem: null,
+      });
+      expect(
+        (await repository.getProvider("deepseek"))?.urlChangedAt,
+      ).toBeNull();
+      expect((await repository.getProvider("openai"))?.url.trustedUrl).toBe(
+        "https://api.deepseek.com",
+      );
+    });
 
     // #554-T06
-    it_(
-      "changes nothing for an address other than the one pending, a trusted provider or an unknown one",
-      async () => {
-        const { db } = await engine.create();
-        const repository = createModelsDevRepository(db);
-        await repository.apply({
-          providers: [changed(), provider({ id: "openai", name: "OpenAI" })],
-          models: [],
-        });
+    it("changes nothing for an address other than the one pending, a trusted provider or an unknown one", async () => {
+      const { db } = await engine.create();
+      const repository = createModelsDevRepository(db);
+      await repository.apply({
+        providers: [changed(), provider({ id: "openai", name: "OpenAI" })],
+        models: [],
+      });
 
-        expect(
-          await repository.confirmPendingUrl("deepseek", "https://x.example/"),
-        ).toBe(false);
-        expect(
-          await repository.confirmPendingUrl(
-            "openai",
-            "https://api.deepseek.com",
-          ),
-        ).toBe(false);
-        expect(await repository.confirmPendingUrl("nobody", MOVED)).toBe(false);
+      expect(
+        await repository.confirmPendingUrl("deepseek", "https://x.example/"),
+      ).toBe(false);
+      expect(
+        await repository.confirmPendingUrl(
+          "openai",
+          "https://api.deepseek.com",
+        ),
+      ).toBe(false);
+      expect(await repository.confirmPendingUrl("nobody", MOVED)).toBe(false);
 
-        expect((await repository.getProvider("deepseek"))?.url).toMatchObject({
-          state: "url_changed",
-          pendingUrl: MOVED,
-        });
-      },
-    );
+      expect((await repository.getProvider("deepseek"))?.url).toMatchObject({
+        state: "url_changed",
+        pendingUrl: MOVED,
+      });
+    });
 
     // #548 review round: a refused address has no confirmation
-    it_(
-      "never trusts an address that was refused, even when it is the pending one",
-      async () => {
-        const { db } = await engine.create();
-        const repository = createModelsDevRepository(db);
-        await repository.apply({
-          providers: [
-            changed({ pendingUrl: "http://10.0.0.1/", problem: "not_https" }),
-          ],
-          models: [],
-        });
+    it("never trusts an address that was refused, even when it is the pending one", async () => {
+      const { db } = await engine.create();
+      const repository = createModelsDevRepository(db);
+      await repository.apply({
+        providers: [
+          changed({ pendingUrl: "http://10.0.0.1/", problem: "not_https" }),
+        ],
+        models: [],
+      });
 
-        const changedRow = await repository.confirmPendingUrl(
-          "deepseek",
-          "http://10.0.0.1/",
-        );
+      const changedRow = await repository.confirmPendingUrl(
+        "deepseek",
+        "http://10.0.0.1/",
+      );
 
-        expect(changedRow).toBe(false);
-        expect((await repository.getProvider("deepseek"))?.url).toMatchObject({
-          state: "url_changed",
-          trustedUrl: "https://api.deepseek.com",
-          problem: "not_https",
-        });
-      },
-    );
+      expect(changedRow).toBe(false);
+      expect((await repository.getProvider("deepseek"))?.url).toMatchObject({
+        state: "url_changed",
+        trustedUrl: "https://api.deepseek.com",
+        problem: "not_https",
+      });
+    });
   },
 );

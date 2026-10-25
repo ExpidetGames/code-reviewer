@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the review settings service against a real SQLite file: the global defaults and the
+// Pins down the review settings service against a real Postgres database: the global defaults and the
 // overrides of a project are two layers that are combined when they are read, a change of the global
 // defaults reaches every project that does not override the field, resetting an override brings the
 // project back to the global value, bad input is refused with the affected fields and stores nothing,

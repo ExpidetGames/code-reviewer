@@ -2,24 +2,19 @@
 
 // The stop call of the dispatch webhook against a real database and a stand-in for the Dispatcher (#487): which jobs get
 // a signed `POST /stop` (only those whose wake-up a Dispatcher acknowledged), what the call is, how a failure is
-// repeated and logged, and that nothing here ever throws. On SQLite and, when TEST_DATABASE_URL is set, on Postgres.
-import type { Kysely } from "kysely";
-import { describe, expect, it as vitestIt } from "vitest";
+// repeated and logged, and that nothing here ever throws.
+import { describe, expect, it } from "vitest";
 import type { DispatchStop } from "../contracts/dispatch-webhook.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
-import type { Database } from "../db/schema.ts";
 import {
   createFakeDispatchReceiver,
   type ReceiverReply,
 } from "../test-support/fake-dispatch-receiver.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
 import { decideOutcome } from "./outcome.ts";
 import { createStopService, STOP_RETRY_DELAYS_MS } from "./stop.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const CURRENT = {
   kid: "k2",
@@ -48,24 +43,11 @@ const noVm: ReceiverReply = {
   body: JSON.stringify({ version: 1, status: "ignored", reason: "no_vm" }),
 };
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
-describe.each(databases)("the stop call on %s", (name, open) => {
-  const it =
-    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-
+describe("the stop call", () => {
   async function setup(config: WebhookDispatchConfig = webhookConfig) {
-    const database = await open?.();
+    const database = await open();
     const fixture = await createJobQueueFixture(
       database === undefined ? {} : { database },
     );

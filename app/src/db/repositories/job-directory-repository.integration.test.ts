@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The jobs of every workspace for the instance admin (#541), against a real SQLite file: two workspaces,
+// The jobs of every workspace for the instance admin (#541), against a real Postgres database: two workspaces,
 // a list across both with the names of the workspace and the repository, one job by its id, and nothing
 // for an id nobody has.
 import { sql } from "kysely";
@@ -103,16 +103,22 @@ describe("the job directory of the instance admin", () => {
     const f = await createRunsFixture();
     await f.waiting();
 
-    const plan = await sql<{ detail: string }>`
-      explain query plan
-      select jobs.id from jobs
-      inner join repositories on repositories.id = jobs.repository_id
-      inner join workspaces on workspaces.id = jobs.workspace_id
-      order by jobs.created_at desc, jobs.id desc limit 101`.execute(f.db);
+    // With the sequential and bitmap scans out of the way the planner reads the index in order wherever there is one. (The joins of the page
+    // add nothing to the order: the page is read in the order of this index.)
+    const plan = await f.db.transaction().execute(async (trx) => {
+      await sql`set local enable_seqscan = off`.execute(trx);
+      await sql`set local enable_bitmapscan = off`.execute(trx);
+      return sql<{ detail: string }>`
+        explain
+        select jobs.id from jobs
+        order by jobs.created_at desc, jobs.id desc limit 101`.execute(trx);
+    });
 
-    const detail = plan.rows.map((row) => row.detail).join("\n");
+    const detail = plan.rows
+      .map((row) => (row as Record<string, string>)["QUERY PLAN"])
+      .join("\n");
     expect(detail).toContain("jobs_created_at_id");
-    expect(detail).not.toContain("TEMP B-TREE");
+    expect(detail).not.toMatch(/\bSort\b/);
   });
 
   // #541-T09

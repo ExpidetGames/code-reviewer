@@ -37,7 +37,7 @@ import {
   hashLinkToken,
   isWellFormedLinkToken,
   newLinkToken,
-} from "../admin-cli/token.ts";
+} from "../auth/link-token.ts";
 import { signUpAvailability } from "../signup/availability.ts";
 import { canonicalEmail, evaluateSignUpRule } from "../signup/rule.ts";
 import { readSignUpFacts, type SignUpFacts } from "../signup/state.ts";

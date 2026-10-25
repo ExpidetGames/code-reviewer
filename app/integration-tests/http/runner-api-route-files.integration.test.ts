@@ -5,7 +5,6 @@
 // RUNNER_TOKEN and LLM_*. A pull request delivery goes in through the webhook route and comes out
 // through claim, heartbeat and complete, so the pieces are proven to be connected. The details of each
 // behavior are in runner-api-claim, -report and -security.integration.test.ts.
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
@@ -17,7 +16,6 @@ import {
 } from "../../../fakes/github/webhooks.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
-import { initializeDatabaseOnStart } from "../../src/db/startup.ts";
 import {
   TEST_APP_ID,
   TEST_WEBHOOK_SECRET,
@@ -29,7 +27,7 @@ import {
   saveDefaultWorkspaceLlmKey,
   saveGithubAppFromEnv,
 } from "../../src/test-support/server-credentials.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
   linkTestInstallation,
@@ -86,10 +84,7 @@ async function startRoutes() {
   };
   for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
-  const directory = await createTestDirectory();
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(directory, "app.db") },
-  });
+  await openRouteTestDatabase();
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
   await saveGithubAppFromEnv(getDatabase(), env);
@@ -317,9 +312,10 @@ describe("the runner API route files", () => {
     expect(anonymous.status).toBe(401);
   });
 
-  it("answers 500 in the usual form, not cacheable, when the server was not set up", async () => {
+  it("answers 500 in the usual form, not cacheable, when the database cannot be reached", async () => {
     const routes = await startRoutes();
     await closeDatabase();
+    vi.stubEnv("DATABASE_URL", "postgres://app:secret@127.0.0.1:1/app");
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const response = await routes.claim.POST(runnerRequest("claim", undefined));

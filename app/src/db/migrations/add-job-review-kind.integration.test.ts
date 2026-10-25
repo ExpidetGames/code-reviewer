@@ -8,8 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { MigrationProvider } from "kysely/migration";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
-import { openDatabase } from "../connection.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 
 const SPLIT = "20261013090000_add_job_review_kind";
 
@@ -27,9 +26,7 @@ const beforeThisMigration: MigrationProvider = {
 const T = "2026-10-12T08:00:00.000Z";
 
 async function openPreviousReleaseDatabase() {
-  const directory = await createTestDirectory();
-  const path = `${directory}/app.db`;
-  const db = openDatabase({ driver: "sqlite", path, busyTimeoutMs: 5000 });
+  const { db } = await createEmptyTestDatabase();
   await migrateToLatest(db, beforeThisMigration);
   return db;
 }

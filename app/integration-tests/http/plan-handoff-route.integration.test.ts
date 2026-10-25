@@ -7,20 +7,15 @@
 // a cross-site request and too many requests are refused without a token being made; the target of the redirect is
 // the setting and nothing of the request; and no log line or answer holds the token.
 import { createHash } from "node:crypto";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createInstanceSettingsRepository } from "../../src/db/repositories/instance-settings-repository.ts";
 import { createPlanHandoffRedeemRepository } from "../../src/db/repositories/plan-handoff-redeem-repository.ts";
 import { createWorkspacesRepository } from "../../src/db/repositories/workspaces-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { PLAN_HANDOFF_MAX } from "../../src/plan-handoff/limits.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
 
 const session = vi.hoisted(() => ({
@@ -39,9 +34,7 @@ type Route =
   typeof import("../../src/app/api/w/[workspace]/plan-handoff/route.ts");
 
 async function start(options: { configured?: boolean } = {}) {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   vi.resetModules();
   const db = getDatabase();
   const workspaces = createWorkspacesRepository(db);

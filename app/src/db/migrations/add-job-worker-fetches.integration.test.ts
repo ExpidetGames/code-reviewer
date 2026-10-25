@@ -5,9 +5,8 @@
 // in place so that an older app instance, which does not name the column, still inserts jobs.
 import { describe, expect, it } from "vitest";
 import type { MigrationProvider } from "kysely/migration";
-import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { migrationProvider } from "./index.ts";
 
 const THIS_MIGRATION = "20261015100000_add_job_worker_fetches";
@@ -27,12 +26,7 @@ const T = "2026-10-15T08:00:00.000Z";
 describe("the migration of the Worker API's fetch counter", () => {
   // #320-T24
   it("gives every existing job a count of 0 and keeps its lease token", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     try {
       await migrateToLatest(db, beforeThisMigration);
       await db

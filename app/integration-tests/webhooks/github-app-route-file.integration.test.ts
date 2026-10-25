@@ -4,7 +4,6 @@
 // uses: the database opened at start, the process-wide sync service, the registry configured from
 // the environment, and the job queue intake. The details of each behavior are in
 // github-app-route.integration.test.ts; this file proves the pieces are connected.
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   webhookDelivery,
@@ -13,7 +12,6 @@ import {
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { projectServiceFor } from "../../src/projects/shared.ts";
 import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
-import { initializeDatabaseOnStart } from "../../src/db/startup.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import {
   startGithubFake,
@@ -25,7 +23,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
   linkTestInstallation,
@@ -62,10 +60,7 @@ async function startRoute(
   });
   for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
-  const directory = await createTestDirectory();
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(directory, "app.db") },
-  });
+  await openRouteTestDatabase();
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
   await saveGithubAppFromEnv(getDatabase(), env);

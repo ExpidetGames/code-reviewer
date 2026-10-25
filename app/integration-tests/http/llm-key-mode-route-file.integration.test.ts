@@ -4,14 +4,9 @@
 // database opened at start and the workspace access of the session. Only the session lookup and `connection()` are replaced (they
 // need Next.js's request scope). Every member reads the choice; only an Owner or an Admin sets it, so the permission of the route
 // file itself (`manage_llm_key`) is what a Member runs into, not a check of a handler that a test wired by hand.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import {
   GET,
   PUT,
@@ -19,7 +14,7 @@ import {
 import { createLlmKeyModeStore } from "../../src/llm/key-mode-store.ts";
 import { setBillingSwitch } from "../../src/test-support/billing-switch.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
@@ -33,9 +28,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 async function startRoute(role: "member" | "admin" | "owner") {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const workspaceId = await defaultWorkspaceId(db);
   await setBillingSwitch(db, true);

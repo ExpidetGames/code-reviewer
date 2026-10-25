@@ -4,22 +4,19 @@
 // the SQL of the guide is taken out of the guide itself and run as written (only the role names, the database name and the
 // two passwords are made unique), `pnpm migrate` runs as the migrate role, and the app role can then read and write the
 // tables but not change the schema. The repair statement of the guide fixes the tables that existed before the default
-// privileges. Runs only when TEST_DATABASE_URL is set (a superuser or a role that may create roles and databases).
+// privileges. The test server's user is a superuser or a role that may create roles and databases.
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 import { checkHealth } from "../health/health.ts";
-import { cleanUpAfterTest } from "../test-support/test-database.ts";
-import {
-  hasPostgres,
-  postgresTestUrl,
-} from "../test-support/postgres-test-database.ts";
 import { runMigrateCommand } from "./migrate-cli.ts";
 import { openPostgresDatabase } from "./postgres.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import {
+  cleanUpAfterTest,
+  postgresTestUrl,
+} from "../test-support/test-database.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const guide = readFileSync(`${repoRoot}docs/deployment-vercel.md`, "utf8");
@@ -167,7 +164,7 @@ function code(error: unknown): string | undefined {
   return (error as { code?: string }).code;
 }
 
-describePostgres("the migrate role and the app role of the guide", () => {
+describe("the migrate role and the app role of the guide", () => {
   // #333-T05
   it("lets the migrate role migrate and the app role read and write, but not change the schema", async () => {
     const setup = await setUp();
@@ -180,7 +177,6 @@ describePostgres("the migrate role and the app role of the guide", () => {
     await migrateAs(setup.migrateUrl);
 
     const db = openPostgresDatabase({
-      driver: "postgres",
       url: setup.appUrl,
       poolMax: 2,
     });

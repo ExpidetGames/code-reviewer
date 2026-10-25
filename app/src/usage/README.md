@@ -135,8 +135,8 @@ split claim of a Dispatcher and the claim by job id.
    or `settled`) reserved at or after `period_start` at or above the limit refuse with `quota_exhausted` (detail
    `diff_runs` or `dynamic_runs`). `0` allows none, `null` is unlimited and is not read. **Skipped while billing is on
    (#499, ADR 0006, D5):** the claim passes `runQuotas: false` then, and the limit is neither read nor counted (`readsUsage`
-   takes the same option, so a workspace with nothing but a run limit takes no lock). With billing off nothing changes: a
-   self-hosting operator keeps the limits of epic #268. Steps 1, 2 and 4 are not affected by billing.
+   takes the same option, so a workspace with nothing but a run limit takes no lock). With billing off nothing changes: an
+   operator keeps the limits of epic #268. Steps 1, 2 and 4 are not affected by billing.
 4. The cost limit of the key the job runs on (#361): `managedCostLimitMicroUsd` for a workspace whose key mode is
    `managed` (the operator's key), `ownKeyCostLimitMicroUsd` for one whose key mode is `own` (its own key). The sum
    of the settled `cost_micro_usd` of **that key mode** reserved at or after `period_start` at or above the limit
@@ -193,8 +193,7 @@ entitlements still stop it, and its record is then voided.
   that is already a transaction reports nothing, as it cannot see its caller's commit. The operator API counts the same runs per workspace and key mode (below), for a
   reader that polls instead of reading logs. Alerting on the line (or the count) is the operator's way of watching
   what the limit cannot bound.
-- **Locking.** The claim already runs under the instance gate lock of the queue (Postgres) or the write lock of the
-  connection (SQLite), which serializes claims. On Postgres the workspace row is also locked `for no key update` (an
+- **Locking.** The claim already runs under the instance gate lock of the queue, which serializes claims. The workspace row is also locked `for no key update` (an
   insert that only references it does not wait), so the count stays exact if the gate is ever narrowed. The lock and
   the count are taken only when a limit applies to the job (`readsUsage`: the limit of its kind, or the cost limit of
   the key mode it runs on); a workspace that is unlimited, suspended, unreadable or without such a limit reads no usage
@@ -340,13 +339,13 @@ named fields only:
 
 ## Tests
 
-The count of unknown costs (#385): `../db/repositories/unknown-cost-counts.integration.test.ts` (SQLite and Postgres:
+The count of unknown costs (#385): `../db/repositories/unknown-cost-counts.integration.test.ts` (Postgres:
 known and unknown cost, both key modes, `no_result` once, a lost lease, a rolled back transaction, the period, another
 workspace, concurrent completions, paging) and the operator API's usage tests
 (`integration-tests/http/operator-api-usage.integration.test.ts`, the contract test and the route-file test).
 
 The own-key cost limit (#361): `enforce-entitlements.test.ts` (the decision and which limit reads which sum),
-`jobs/claim-limits.integration.test.ts` (the claim on SQLite and Postgres: reached, the other key mode, a switch in the
+`jobs/claim-limits.integration.test.ts` (the claim on Postgres: reached, the other key mode, a switch in the
 middle of a period, unknown cost, `0` and `null`, a moved period, a lost lease, a race at the soft cap, another
 workspace, the unknown-cost alert), `unknown-cost-alert.test.ts` (what the line may say),
 `usage-records-repository.integration.test.ts` (the sum per key mode), `workspaces/entitlements-validation.test.ts` and

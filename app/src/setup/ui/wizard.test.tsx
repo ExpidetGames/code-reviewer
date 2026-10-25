@@ -270,7 +270,7 @@ describe("the wizard", () => {
   });
 
   // #97-SU-09
-  it("says to restart the app when the setup session has ended", async () => {
+  it("sends the person to pnpm setup-code when the setup session has ended", async () => {
     const { user, onDone } = renderWizard({
       ok: false,
       status: 401,
@@ -283,7 +283,7 @@ describe("the wizard", () => {
     await user.click(screen.getByRole("button", { name: "Finish setup" }));
 
     expect((await screen.findByRole("alert")).textContent).toMatch(
-      /Restart the app/,
+      /pnpm setup-code/,
     );
     expect(onDone).not.toHaveBeenCalled();
   });

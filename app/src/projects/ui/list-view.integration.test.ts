@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the project list is built from: the repositories of all installations as the sync
-// stored them (real SQLite, real provider against the fake GitHub), with the state of their
+// stored them (real Postgres, real provider against the fake GitHub), with the state of their
 // projects. Activating and deactivating through the real route handler shows in the next load.
 import { describe, expect, it } from "vitest";
 import type { SessionUser } from "../../auth/access-policy.ts";

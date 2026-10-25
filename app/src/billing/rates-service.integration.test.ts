@@ -4,31 +4,13 @@ import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import { createTestDatabase } from "../test-support/test-database.ts";
 import { insertUser } from "../test-support/users.ts";
 import { canSwitchBillingOn } from "./rates.ts";
 import { createBillingRatesService } from "./rates-service.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
-const ENGINES: Array<{
-  name: string;
-  open: () => Promise<Kysely<Database>>;
-  skip: boolean;
-}> = [
-  {
-    name: "SQLite",
-    open: async () => (await createTestDatabase()).db,
-    skip: false,
-  },
-  {
-    name: "Postgres",
-    open: async () => (await createPostgresTestDatabase()).db,
-    skip: !hasPostgres(),
-  },
-];
+const open = async (): Promise<Kysely<Database>> =>
+  (await createTestDatabase()).db;
 
 // Made-up numbers.
 const COMPLETE = {
@@ -52,68 +34,60 @@ function numbersIn(value: unknown): unknown[] {
   return Object.values(value).flatMap(numbersIn);
 }
 
-describe.each(ENGINES)("the billing rates on $name", (engine) => {
-  const it_ = engine.skip ? it.skip : it;
-
+describe("the billing rates", () => {
   // #494-T11
-  it_(
-    "reads as not set when nothing was saved, and billing cannot be switched on",
-    async () => {
-      const db = await engine.open();
-      const service = createBillingRatesService(db);
+  it("reads as not set when nothing was saved, and billing cannot be switched on", async () => {
+    const db = await open();
+    const service = createBillingRatesService(db);
 
-      expect(await service.rates()).toBeNull();
-      expect(await service.settings()).toStrictEqual({ enabled: false });
-      expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
-        ok: false,
-        code: "billing_rates_incomplete",
-      });
-      expect(await storedText(db)).toBeUndefined();
-    },
-  );
+    expect(await service.rates()).toBeNull();
+    expect(await service.settings()).toStrictEqual({ enabled: false });
+    expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
+      ok: false,
+      code: "billing_rates_incomplete",
+    });
+    expect(await storedText(db)).toBeUndefined();
+  });
 
   // #494-T10
-  it_(
-    "stores what it validated, and the rates are complete once A, both rates and the Diff AI reserve are there",
-    async () => {
-      const db = await engine.open();
-      const service = createBillingRatesService(db);
+  it("stores what it validated, and the rates are complete once A, both rates and the Diff AI reserve are there", async () => {
+    const db = await open();
+    const service = createBillingRatesService(db);
 
-      expect(await service.update({ factorA: 12_000 }, null)).toMatchObject({
-        ok: true,
-      });
-      expect(await service.rates()).toBeNull();
-      expect(
-        await service.update({ minuteRateMicroUsd: { diff: 10_000 } }, null),
-      ).toMatchObject({ ok: true });
-      expect(await service.rates()).toBeNull();
-      expect(
-        await service.update({ minuteRateMicroUsd: { dynamic: 25_000 } }, null),
-      ).toMatchObject({ ok: true });
-      // The reserve has no default: A and both B alone are not enough.
-      expect(await service.rates()).toBeNull();
-      expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
-        ok: false,
-        code: "billing_rates_incomplete",
-      });
-      expect(
-        await service.update({ diffAiReserveMicroUsd: 300_000 }, null),
-      ).toMatchObject({ ok: true });
+    expect(await service.update({ factorA: 12_000 }, null)).toMatchObject({
+      ok: true,
+    });
+    expect(await service.rates()).toBeNull();
+    expect(
+      await service.update({ minuteRateMicroUsd: { diff: 10_000 } }, null),
+    ).toMatchObject({ ok: true });
+    expect(await service.rates()).toBeNull();
+    expect(
+      await service.update({ minuteRateMicroUsd: { dynamic: 25_000 } }, null),
+    ).toMatchObject({ ok: true });
+    // The reserve has no default: A and both B alone are not enough.
+    expect(await service.rates()).toBeNull();
+    expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
+      ok: false,
+      code: "billing_rates_incomplete",
+    });
+    expect(
+      await service.update({ diffAiReserveMicroUsd: 300_000 }, null),
+    ).toMatchObject({ ok: true });
 
-      expect(await service.settings()).toStrictEqual({
-        enabled: false,
-        ...COMPLETE,
-      });
-      expect(await service.rates()).toStrictEqual(COMPLETE);
-      expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
-        ok: true,
-      });
-    },
-  );
+    expect(await service.settings()).toStrictEqual({
+      enabled: false,
+      ...COMPLETE,
+    });
+    expect(await service.rates()).toStrictEqual(COMPLETE);
+    expect(canSwitchBillingOn(await service.settings())).toStrictEqual({
+      ok: true,
+    });
+  });
 
   // #494-T10
-  it_("keeps what was stored when a change is refused", async () => {
-    const db = await engine.open();
+  it("keeps what was stored when a change is refused", async () => {
+    const db = await open();
     const service = createBillingRatesService(db);
     await service.update(COMPLETE, null);
     const before = await storedText(db);
@@ -143,8 +117,8 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
   });
 
   // #494-T10
-  it_("stores integers only", async () => {
-    const db = await engine.open();
+  it("stores integers only", async () => {
+    const db = await open();
     const service = createBillingRatesService(db);
     await service.update(COMPLETE, null);
     await service.update({ factorA: 12_000.5 }, null);
@@ -156,24 +130,21 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
   });
 
   // #494-T10
-  it_(
-    "leaves the switch alone: a change of the rates neither sets nor clears it",
-    async () => {
-      const db = await engine.open();
-      const settings = createInstanceSettingsRepository(db);
-      const service = createBillingRatesService(db);
-      await settings.set("billing_settings", { enabled: true }, null);
+  it("leaves the switch alone: a change of the rates neither sets nor clears it", async () => {
+    const db = await open();
+    const settings = createInstanceSettingsRepository(db);
+    const service = createBillingRatesService(db);
+    await settings.set("billing_settings", { enabled: true }, null);
 
-      await service.update({ ...COMPLETE, enabled: false }, null);
+    await service.update({ ...COMPLETE, enabled: false }, null);
 
-      expect((await service.settings()).enabled).toBe(true);
-      expect(await service.rates()).toMatchObject({ factorA: 12_000 });
-    },
-  );
+    expect((await service.settings()).enabled).toBe(true);
+    expect(await service.rates()).toMatchObject({ factorA: 12_000 });
+  });
 
   // #494-T10
-  it_("records who changed it", async () => {
-    const db = await engine.open();
+  it("records who changed it", async () => {
+    const db = await open();
     const userId = await insertUser(db, { id: "user-494" });
     const service = createBillingRatesService(db);
 
@@ -187,7 +158,7 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
   });
 
   // #494-T11
-  it_.each([
+  it.each([
     ["not an object", "junk"],
     ["an array", [1, 2]],
     ["a number", 7],
@@ -212,7 +183,7 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
       },
     ],
   ])("reads a stored value that is %s as not set", async (_name, stored) => {
-    const db = await engine.open();
+    const db = await open();
     await createInstanceSettingsRepository(db).set(
       "billing_settings",
       stored as never,
@@ -228,8 +199,8 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
   });
 
   // #494-T11
-  it_("reads stored text that is no JSON at all as not set", async () => {
-    const db = await engine.open();
+  it("reads stored text that is no JSON at all as not set", async () => {
+    const db = await open();
     await db
       .insertInto("instance_settings")
       .values({
@@ -246,22 +217,19 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
   });
 
   // #494-T11
-  it_(
-    "lets a database error through: rates that cannot be read are not rates that are not set",
-    async () => {
-      const db = await engine.open();
-      const service = createBillingRatesService(db);
-      await service.update(COMPLETE, null);
-      await db.destroy();
+  it("lets a database error through: rates that cannot be read are not rates that are not set", async () => {
+    const db = await open();
+    const service = createBillingRatesService(db);
+    await service.update(COMPLETE, null);
+    await db.destroy();
 
-      await expect(service.rates()).rejects.toThrow();
-      await expect(service.settings()).rejects.toThrow();
-    },
-  );
+    await expect(service.rates()).rejects.toThrow();
+    await expect(service.settings()).rejects.toThrow();
+  });
 
   // #494-T11
-  it_("repairs a damaged stored value with the next valid write", async () => {
-    const db = await engine.open();
+  it("repairs a damaged stored value with the next valid write", async () => {
+    const db = await open();
     await createInstanceSettingsRepository(db).set(
       "billing_settings",
       "junk" as never,
@@ -278,20 +246,17 @@ describe.each(ENGINES)("the billing rates on $name", (engine) => {
   });
 
   // #494-T10
-  it_(
-    "loses no change when two writers save different fields at the same time",
-    async () => {
-      const db = await engine.open();
-      const service = createBillingRatesService(db);
+  it("loses no change when two writers save different fields at the same time", async () => {
+    const db = await open();
+    const service = createBillingRatesService(db);
 
-      await Promise.all([
-        service.update({ factorA: 12_000 }, null),
-        service.update({ minuteRateMicroUsd: { diff: 10_000 } }, null),
-        service.update({ minuteRateMicroUsd: { dynamic: 25_000 } }, null),
-        service.update({ diffAiReserveMicroUsd: 300_000 }, null),
-      ]);
+    await Promise.all([
+      service.update({ factorA: 12_000 }, null),
+      service.update({ minuteRateMicroUsd: { diff: 10_000 } }, null),
+      service.update({ minuteRateMicroUsd: { dynamic: 25_000 } }, null),
+      service.update({ diffAiReserveMicroUsd: 300_000 }, null),
+    ]);
 
-      expect(await service.rates()).toStrictEqual(COMPLETE);
-    },
-  );
+    expect(await service.rates()).toStrictEqual(COMPLETE);
+  });
 });

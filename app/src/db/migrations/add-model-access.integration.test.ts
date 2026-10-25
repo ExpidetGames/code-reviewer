@@ -2,19 +2,11 @@
 
 // #428-T09: the model access migration adds one nullable column to `workspace_entitlements` of a database made by the
 // previous release's migrations. Every existing row stays as it is and reads as "every released entry"; an app of the
-// previous release, which never names the column, still writes rows; SQLite and Postgres end up with the same column.
+// previous release, which never names the column, still writes rows.
 import { sql } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import {
-  createTestDatabase,
-  createTestDirectory,
-} from "../../test-support/test-database.ts";
-import { openDatabase } from "../connection.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
 
@@ -32,17 +24,11 @@ const beforeThisMigration: MigrationProvider = {
 };
 
 const T = "2026-10-17T08:00:00.000Z";
-const describePostgres = hasPostgres() ? describe : describe.skip;
 
 describe("the model access migration", () => {
   // #428-T09
   it("adds only a nullable column and leaves the existing rows as they were", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     try {
       await migrateToLatest(db, beforeThisMigration);
       await db
@@ -75,7 +61,7 @@ describe("the model access migration", () => {
       expect(column).toMatchObject({
         isNullable: true,
         hasDefaultValue: false,
-        dataType: "TEXT",
+        dataType: "text",
       });
       // An app of the previous release inserts a row without naming the column.
       await db
@@ -100,29 +86,5 @@ describe("the model access migration", () => {
     } finally {
       await db.destroy();
     }
-  });
-});
-
-describePostgres("the model access migration on Postgres", () => {
-  // #428-T09
-  it("makes the same column as on SQLite", async () => {
-    const postgres = await createPostgresTestDatabase();
-    const sqlite = await createTestDatabase();
-    const column = async (db: ReturnType<typeof openDatabase>) =>
-      (await db.introspection.getTables())
-        .find((table) => table.name === "workspace_entitlements")
-        ?.columns.find((candidate) => candidate.name === "model_access");
-
-    const onPostgres = await column(postgres.db);
-    const onSqlite = await column(sqlite.db);
-
-    expect(onPostgres).toMatchObject({
-      isNullable: true,
-      hasDefaultValue: false,
-    });
-    expect([onPostgres?.isNullable, onPostgres?.hasDefaultValue]).toEqual([
-      onSqlite?.isNullable,
-      onSqlite?.hasDefaultValue,
-    ]);
   });
 });

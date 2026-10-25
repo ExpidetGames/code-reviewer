@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down `POST /api/runners/v1/jobs/:id/heartbeat` and `/complete` through the real handler and a
-// real SQLite file: what a holder of a job may do, what happens to a runner that lost its job, what a
+// real Postgres database: what a holder of a job may do, what happens to a runner that lost its job, what a
 // repeated report answers, and how bodies that are wrong or too large are refused without changing
 // anything. Claiming is in runner-api-claim.integration.test.ts.
 import { describe, expect, it } from "vitest";

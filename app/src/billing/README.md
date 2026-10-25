@@ -1,6 +1,6 @@
 # Billing module
 
-The place of billing in the app. **Billing is off unless an instance admin switches it on, and a self-hoster who never
+The place of billing in the app. **Billing is off unless an instance admin switches it on, and an instance that never
 does sees no change.** The design is ADR 0006 (`docs/decisions/0006-prepaid-billing-via-stripe-managed-payments.md`,
 epic #489): prepaid pay-as-you-go through Stripe Managed Payments, with a provider-neutral adapter in front of it. The
 earlier subscription design (plans, plan versions, prices with a payment provider, an admin page for them) was deleted
@@ -260,7 +260,7 @@ earlier claims are our fault ("an error on our side is free") and are never bill
 `jobs.claimed_at`, which a job keeps after it ends and which every claim sets anew; the attempt number alone is not reliable
 (`complete` and `timeout` do not count a lost attempt, a failed release does).
 
-**No VM: self-hosted and Compose.** There is none to measure. Where billing is on (`isBillingOn`), the job's wall clock on a
+**No VM.** A job that runs on a runner with no VM (the Worker API's tests, the e2e lanes) has none to measure. Where billing is on (`isBillingOn`), the job's wall clock on a
 runner (the claim of the settled attempt to its end) is recorded with `end_source = job_wall_clock` when its claim ends
 (`wall-clock.ts`, through the queue's `onClaimsEnded`); with billing off nothing is read or written. A job a Dispatcher
 acknowledged is left to its VM. An operator who does not want to charge for it sets B to 0. VM rows themselves are stored
@@ -394,7 +394,7 @@ credits the customer (#498-T14, T24). A job that was never charged has nothing t
 
 **Hosted jobs never measure zero minutes silently** (the gate of the review of #524, B-1). `settleEndedJobs` asks `measure`; a charged run with
 a claim and no VM row of it falls back to its claim wall clock: `claim_wall_clock` when a Dispatcher acknowledged the job (a VM was started and its
-report was lost, or the Dispatcher is of an earlier release), `job_wall_clock` for a runner with no VM (also the Compose and self-hosted rule). A stop
+report was lost, or the Dispatcher is of an earlier release), `job_wall_clock` for a runner with no VM. A stop
 answer that names a VM of our own naming for the job (`cr-<kind>-<job id>-...`) that has no row creates it (`app_stop_unreported`, from the claim to
 the stop, at most the longest a VM lives); a better end (a VM's own) wins over a wall clock in `measure`. A claim keeps at most four VMs (N-1). A late
 `/vm` report for a claim that already ended stays refused (customer-friendly). The Dispatcher names `vm_lifecycle` in its claim and the app notes when
@@ -409,7 +409,7 @@ Three things in ADR 0006, 2.9 are decided where a job is claimed and nowhere els
 **hourly abuse brake**, and the **absence of the per-period run quotas** while billing is on. The own-key cost limit (`ownKeyCostLimitMicroUsd`, #361) is untouched.
 All of it acts **at the claim only**: a run that started is never stopped by a limit, so no review is ever cut short for money, and the cost guard of Dynamic
 Review with its final-call exemption is not involved. With billing off none of it runs (`checkClaimCaps` is not even called; `decideAdmission` keeps the
-quotas), and nothing about a self-hoster changes.
+quotas), and nothing about an instance without billing changes.
 
 **Order of the checks at the claim**, inside the claim transaction, the first refusal wins: the entitlements (unreadable, suspended, the own-key and managed
 cost limits as today; the run quotas only while billing is off), then **the brake**, then **the monthly limit**, then the start credit and the balance (#498, #507).
@@ -429,7 +429,7 @@ and `onRefused` hears of it for the pull request notice.
   the workspace can lift it. What the **operator** can see: the server log line every refusal at the claim writes, `[queue] job=<id> workspace=<id> refused at claim: reviews_paused`
   (ids and the neutral code; no number, no window), and the admin runs list, which shows the stored code. The only other line the evaluation writes, `CLAIM_CAPS_FAILED`, holds the workspace
   id and the kind of error. The admin sets the number on the billing page of the admin portal (#504). Two claims of one workspace never both take the last start: the claim runs
-  under the gate lock of the queue (Postgres) or the write lock of the connection (SQLite), and the record of a started review is written in the same transaction.
+  under the gate lock of the queue, and the record of a started review is written in the same transaction.
 - **The monthly limit.** `charged >= limit` refuses (maintainer decision on #499, which replaced the first rule `charged + hold > limit` and a later hard cap): the claim
   is refused `monthly_limit_reached` only when this UTC month's **actual charges** have already reached the limit; below it the job starts. `charged` is the sum of `usage`
   entries by the time the run **settled** (`created_at`), from the start of the UTC month (`utcMonthStart`); the sum starts again at 00:00:00.000 UTC of the first day. Nothing is held at the claim (#605),
@@ -444,10 +444,10 @@ and `onRefused` hears of it for the pull request notice.
   `updated_at`). The form is on the workspace billing page (#505).
 - **Robustness.** `checkClaimCaps` runs in a savepoint (the pattern of the start credit). Anything that goes wrong in it is rolled back to the savepoint, logged as
   `CLAIM_CAPS_FAILED workspace=<id> error=<kind> retry=<yes|no>`, and never thrown out of the claim. On Postgres the savepoint is what keeps a failed statement from poisoning the claim
-  transaction. What happens to the job depends on the kind of error (`isTransientDatabaseError`, `db/errors.ts`, by the SQLSTATE or SQLite code, never by the message):
+  transaction. What happens to the job depends on the kind of error (`isTransientDatabaseError`, `db/errors.ts`, by the SQLSTATE, never by the message):
   - **Deterministic** (a table or column that cannot be read, a stored value that is no positive whole number: asking again gives the same answer): the stable refusal
     `billing_limits_unreadable` for that job: closed, never open, so the queue goes on with the next job.
-  - **Transient** (a serialization failure or deadlock, a lock that could not be taken, a statement timeout, too many connections, a failed connection, `SQLITE_BUSY`/`SQLITE_LOCKED`):
+  - **Transient** (a serialization failure or deadlock, a lock that could not be taken, a statement timeout, too many connections, a failed connection):
     no verdict on the job. The claim gives it back with the queue's own rule for a lost attempt (`loseAttempt`): it is `queued` again with `run_after` at now plus
     `CLAIM_CAPS_RETRY_MS` (15 seconds) and one attempt counted, so it is not due in the next pass (no hot loop; the queue head is not blocked, the next runner poll takes the
     next job) and, after `maxAttempts` (3) such tries, it ends `billing_limits_unreadable` like any lost lease. Until then no refusal, no notice, no usage record and no entry
@@ -514,7 +514,7 @@ rates) and `canSwitchBillingOnWithDispatcher` (a Dispatcher that does not report
 path too (#498-T23).
 
 There is no environment variable: billing is configured in the admin portal and in nothing else, so `.env.example` and
-the deployment files stay as they are for a self-hoster (`no-environment-variable.test.ts`).
+the deployment files stay as they are (`no-environment-variable.test.ts`).
 
 The credentials of Stripe are the encrypted, write-only secrets `stripe_api_key` and `stripe_webhook_secret` of the secret
 store (`src/secrets/`, ADR 0006 2.14). A row of a removed secret name that an old database still holds is not read, not listed
@@ -523,7 +523,7 @@ and not an error.
 ## The billing page
 
 `/admin/billing` (data routes below `/api/admin/billing`; `src/admin/README.md` has the guards), instance admin only. Opening it
-changes nothing and calls nobody; a self-hoster who never opens it sees no change, no new route that answers and no outbound call.
+changes nothing and calls nobody; an admin who never opens it sees no change, no new route that answers and no outbound call.
 
 - **The switch.** `PUT { "enabled": true }` reads everything again, the stored credentials too, in one transaction under
   `lockBillingSettings` (`settings-store.ts`; the service gets the secret store on that transaction, `secretsOn`) and writes the
@@ -615,7 +615,7 @@ through `applyBillingEvent` (below).
   entry of the workspace with the opposite amount, and is never of a reservation or a release.
 - **Atomic and race free on both engines.** An entry and the balance change in one transaction (the caller's, when it
   hands in a transaction). `reserve` is the conditional write of an old hold: it holds at most the balance, so 20 claims of 3
-  against 10 grant exactly 3, on Postgres (one pool, two pools) and on SQLite (one connection, several processes). `charge` is unconditional and
+  against 10 grant exactly 3, on Postgres (one pool, two pools). `charge` is unconditional and
   atomic: the same job charged at the same moment writes one entry, and many jobs charged at once leave the exact sum, also below zero (#605-T21).
   `settle` and `release` take the lock of the balance row before they read what a job has, so a release and a settlement
   of one job are decided one after the other: a job whose release committed first, or commits at the same moment, is
@@ -636,7 +636,7 @@ through `applyBillingEvent` (below).
   jobs that ended with nothing left to settle them and without a release (`strandedHoldCount`, `strandedHoldMicroUsd`, #591; a superseded run
   that still drains is not one) and `consistent` (both differences zero and no stranded hold), read in one statement (one snapshot), so traffic that commits meanwhile never shows as drift. The scheduled
   check that runs it for every workspace is described in "The scheduled journal check (#626)".
-- **Order.** Every entry has a `seq`, the order it was written in (a Postgres identity, the SQLite row id). `entries()`
+- **Order.** Every entry has a `seq`, the order it was written in (a Postgres identity). `entries()`
   lists by it, so a `release` and its `usage`, written in one millisecond, keep their order. On Postgres a transaction
   that commits late can land below a `seq` a reader has passed; a cursor reader sees it on its next fresh read.
 
@@ -824,7 +824,7 @@ payment, checkout or intent id, only for the adapter that made it.
 2. **Resolve** the intent: by the payment, then the checkout, then our own intent id recorded in the event, and every
    other field must agree. An event that names another intent than the payment belongs to, or another payment than the
    one recorded, resolves to nothing: `intent_unresolved`, no change, answered 200. The intent row is locked (Postgres
-   `FOR UPDATE`, SQLite one writer), so every event about one payment is applied one after the other. **A refund or
+   `FOR UPDATE`), so every event about one payment is applied one after the other. **A refund or
    dispute whose payment is not credited yet is not final** (#502): when the payment resolves to an intent that is not
    `paid`, or resolves to none while a top-up of the adapter is still `pending` with no payment recorded and was written in
    the last three days (it may be that one), `applyBillingEvent` throws `BillingEventRetryError("credit_pending")`, the
@@ -951,7 +951,7 @@ refunds or disputes, looked up by their payment. Foreign `checkout.session.*` ev
 with a review row, so a busy shared account fills the review list and costs one signature check and a few reads per delivery.
 Give the endpoint its own Stripe account when that matters (the subscription is already limited to the types it reads,
 `stripe-webhook-events.ts`). **Before verification** a request costs the settings reads of the guard (the billing switch, the active adapter, the stored webhook secret), the read of its
-body (at most 256 KiB) and one HMAC over it, and nothing is written: an unsigned flood costs that per request, which the platform's rate limit (Vercel firewall or the proxy in front of a self-hosted instance) should bound: a
+body (at most 256 KiB) and one HMAC over it, and nothing is written: an unsigned flood costs that per request, which the platform's rate limit (the Vercel firewall) should bound: a
 rate limit on `POST /api/billing/webhook` of a few dozen requests per minute per IP is recommended (Stripe's own deliveries are
 few and come from a small set of addresses).
 
@@ -1039,7 +1039,7 @@ entry=<id|none>`: never the note, which may name a customer. A row redelivered b
 
 ## The manual adapter
 
-For a self-hoster who runs prepaid billing with no payment provider. No checkout (`{ kind: "none" }`: the workspace page
+For prepaid billing with no payment provider (the credit is entered by hand). No checkout (`{ kind: "none" }`: the workspace page
 says "ask your operator to add credit") and no webhook. `createManualCreditService(db)` offers `grant` (a `top_up` with the
 provider `manual`) and `correct` (a `correction` of either sign, which may take a balance below zero), both with an actor
 and a note: the immutable journal entry is the audit trail. A grant is keyed by a random reference, so granting twice is
@@ -1195,7 +1195,7 @@ a journal, once a day, while billing is on (#510 item 7).
 - **It repairs nothing.** A difference is a bug to look at; the stranded holds of ended jobs are released by their own step
   (`billing_holds`), which runs before this one.
 
-Tests: `journal-check.integration.test.ts` (#626-T10 to T14, on SQLite and Postgres), the sweep (`dispatch/sweep.test.ts`,
+Tests: `journal-check.integration.test.ts` (#626-T10 to T14, on Postgres), the sweep (`dispatch/sweep.test.ts`,
 `dispatch/sweep.integration.test.ts`, #626-T15), the timer (`maintenance/startup.test.ts`, #626-T16) and the page's data (#626-T17).
 
 ## Open points

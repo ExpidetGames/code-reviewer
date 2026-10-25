@@ -9,7 +9,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { PRODUCTION_CAPABILITIES } from "../../e2e/helpers/dynamic-runner.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -144,7 +143,7 @@ describe("the Playwright configuration of the hosted lane", () => {
 
   // #332-C08
   it("runs the app in its serverless mode over Postgres, after `pnpm migrate`, with the dispatch webhook and the cron secret", () => {
-    expect(config).toContain('APP_RUNTIME: "serverless"');
+    expect(config).toContain("DATABASE_URL: database.app");
     expect(config).toContain("pnpm migrate");
     expect(config.indexOf("pnpm migrate")).toBeLessThan(
       config.indexOf("pnpm start"),
@@ -160,11 +159,11 @@ describe("the Playwright configuration of the hosted lane", () => {
 
   // #332-C09
   it("takes its database from a server on this machine and fails, naming it, without one", () => {
-    const env = read("app/e2e/helpers/hosted-env.ts");
+    const env = read("app/e2e/helpers/e2e-env.ts");
 
-    expect(env).toContain("E2E_DATABASE_URL is not set");
-    expect(env).toContain('url.hostname !== "127.0.0.1"');
-    expect(env).toContain("never a skip");
+    expect(env).toContain("E2E_DATABASE_URL must point at this machine");
+    expect(env).toContain('url.hostname === "127.0.0.1"');
+    expect(env).toContain("a test never uses a database somewhere else");
   });
 
   // #332-C10
@@ -197,7 +196,7 @@ describe("the Dispatcher and the Worker of the hosted lane", () => {
 
 describe("the Worker's container in the privileged lane", () => {
   // #332-C13
-  it("has exactly the capabilities of compose.dynamic.yml, no-new-privileges and a read-only root", () => {
+  it("has exactly the capabilities of the hardened container spec, no-new-privileges and a read-only root", () => {
     const named = /--bounding-set=-all,((?:\+[a-z_]+,?)+)/.exec(container)?.[1];
     const capabilities = (named ?? "")
       .split(",")
@@ -205,7 +204,15 @@ describe("the Worker's container in the privileged lane", () => {
       .filter((name) => name !== "")
       .sort();
 
-    expect(capabilities).toEqual([...PRODUCTION_CAPABILITIES].sort());
+    expect(capabilities).toEqual(
+      (
+        JSON.parse(
+          read("contracts/examples/worker-container/WorkerContainerSpec.json"),
+        ) as { capAdd: { name: string }[] }
+      ).capAdd
+        .map((capability) => capability.name.toLowerCase())
+        .sort(),
+    );
     expect(container).toContain("--inh-caps=-all");
     expect(container).toContain("--no-new-privs");
     // The container's /tmp is where the Worker makes its temporary directories, which the engine user must be able to enter.
@@ -228,10 +235,10 @@ describe("the Worker's container in the privileged lane", () => {
   });
 
   // #332-C15
-  it("is a project of the privileged lane that runs after the journey of the runner, with its own app", () => {
+  it("is a project of the privileged lane that runs after the guard of the lane, with its own app", () => {
     expect(dynamicConfig).toContain('name: "hosted"');
     expect(dynamicConfig).toContain("hosted-dynamic");
-    expect(dynamicConfig).toContain('dependencies: ["prepare", "journey"]');
+    expect(dynamicConfig).toContain('dependencies: ["prepare", "guard"]');
     expect(dynamicConfig).toContain('RUNNER_DISPATCH: "webhook"');
     expect(dynamicConfig).not.toMatch(/dynamic_review|DYNAMIC_REVIEW/);
   });

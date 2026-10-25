@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The instance level page of settled usage records (the feed of the operator API) against a real SQLite file:
+// The instance level page of settled usage records (the feed of the operator API) against a real Postgres database:
 // the order across workspaces, the bound of the safety lag and the hazard that the bound exists for.
 // The API on top is in integration-tests/http/operator-api-usage.integration.test.ts.
 import { describe, expect, it } from "vitest";

@@ -2,7 +2,7 @@
 
 // Pins down what a comment on a pull request does: a signed `issue_comment` delivery with `/review`
 // from a user with write access becomes a review job, through the real webhook handler, the real
-// GitHub App provider, the real job queue and a real SQLite file. A comment that starts with a
+// GitHub App provider, the real job queue and a real Postgres database. A comment that starts with a
 // removed command (`/ask`, `/improve`, `/describe`) is an ordinary comment (#203).
 // Everything else (an issue, an edited comment, a user without write access, the app's own comment,
 // a command the project switched off, a closed pull request, a replay) creates no job and posts

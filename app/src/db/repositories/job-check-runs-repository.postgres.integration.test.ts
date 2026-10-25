@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The check run record of the jobs on Postgres behaves like the SQLite one (#405-T16, T36): one statement makes the
+// The check run record of the jobs (#405-T16, T36): one statement makes the
 // row of a job and one takes it, so several app instances at once get exactly one sync, a failed sync is taken again
 // only after its back-off and dropped when its attempts are used up, the reconciler's query finds the jobs whose
-// check run is behind, and the checks of the table refuse the same direct writes. Runs only when TEST_DATABASE_URL
-// is set.
+// check run is behind, and the checks of the table refuse direct writes.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createJobCheckRunsRepository } from "./job-check-runs-repository.ts";
 import { listJobsWithCheckWork } from "./job-check-runs-sweep.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import { createTestDatabase } from "../../test-support/test-database.ts";
 
 const MINUTE = 60 * 1000;
 const LEASE = { leaseMs: MINUTE, maxAttempts: 5 };
@@ -32,7 +26,7 @@ const REFUSED_UPDATES = [
 ] as const;
 
 async function setup() {
-  const postgres = await createPostgresTestDatabase({ poolMax: 12 });
+  const postgres = await createTestDatabase({ poolMax: 12 });
   const fixture = await createJobQueueFixture({ database: postgres.db });
   const checks = createJobCheckRunsRepository(
     fixture.db,
@@ -40,7 +34,7 @@ async function setup() {
     fixture.clock.now,
   );
   const job = await fixture.enqueueNew();
-  // Not spread: the fixture's `databasePath` throws for a Postgres database.
+  // Not spread: the fixture's `databaseUrl` throws for a Postgres database.
   return {
     db: fixture.db,
     workspaceId: fixture.workspaceId,
@@ -51,7 +45,7 @@ async function setup() {
   };
 }
 
-describePostgres("the job check runs on Postgres", () => {
+describe("the job check runs on Postgres", () => {
   // #405-T16
   it("hands the job to one of several concurrent callers, and only that one sees the row as new", async () => {
     const t = await setup();

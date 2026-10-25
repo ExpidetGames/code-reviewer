@@ -6,9 +6,9 @@
 //
 // A confirmation is made against the price the admin saw: the request carries the hash of that reference price, and a price
 // that has changed since is refused (`price_changed`), so an admin never confirms a price they did not look at. It runs in
-// one transaction that first takes the provider's row `FOR UPDATE` on Postgres, the lock the daily fetch holds while it
+// one transaction that first takes the provider's row `FOR UPDATE`, the lock the daily fetch holds while it
 // writes (`listProviders({ forUpdate: true })`, #548), so a confirmation waits for a fetch that is writing and then reads what
-// the fetch wrote; on SQLite every transaction begins `begin immediate`. The fetch never writes the confirmation tables,
+// the fetch wrote. The fetch never writes the confirmation tables,
 // so it cannot overwrite a confirmation; a price it moves afterwards makes the confirmation stale.
 //
 // Every write that succeeds writes one audit line after it is stored: the person, the model, the old and the new price, a

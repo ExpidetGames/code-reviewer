@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the stored mail server settings against a real SQLite file and the real secret store: the
+// Pins down the stored mail server settings against a real Postgres database and the real secret store: the
 // password is encrypted at rest and never part of what is read back for a page, an empty password keeps the
 // stored one and the explicit clear removes it, a password that cannot be decrypted is a state and not a
 // crash, and removing the mail server removes the password with it.

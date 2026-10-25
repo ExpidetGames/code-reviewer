@@ -142,6 +142,6 @@ instances of different versions never post two for one pull request and period: 
 
 `notice-text.test.ts` (text), `service.integration.test.ts` (end to end on the claim, with the fake GitHub: one
 comment, once per period, closed and draft pull requests, GitHub refusing, retries, two instances),
-`plan-page.test.ts`, `plan-link.integration.test.ts` (the link follows the setting), `db/repositories/refusal-notices-repository*.test.ts` (the record, SQLite and Postgres),
+`plan-page.test.ts`, `plan-link.integration.test.ts` (the link follows the setting), `db/repositories/refusal-notices-repository*.test.ts` (the record, Postgres),
 `scoped-isolation.integration.test.ts` (workspaces), `integrations/providers/github-app/` (client and provider),
 `dispatch/sweep.test.ts` (the sweep step).

@@ -20,9 +20,8 @@ export type BillingTopUpIntentDirectory = {
     ref: string,
   ): Promise<TopUpIntent | undefined>;
   /**
-   * Reads the intent and, on Postgres, holds its row until the transaction ends: every event about one payment (its
-   * credit, its refunds, its disputes) is applied one after the other. SQLite's `begin immediate` already serializes
-   * writers. Call it inside the transaction that applies the event.
+   * Reads the intent and holds its row until the transaction ends: every event about one payment (its
+   * credit, its refunds, its disputes) is applied one after the other. Call it inside the transaction that applies the event.
    */
   lockById(id: string): Promise<TopUpIntent | undefined>;
   /**

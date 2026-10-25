@@ -2,19 +2,17 @@
 
 // #632: a review refused because billing is switched on but its setup is not complete gets a notice too, so the check on
 // `refusal_notices.code` takes one more code (`billing_rates_incomplete`). The rows of an existing database survive the change,
-// with their dedupe and the index of the sweep. SQLite rebuilds the table (a check cannot be changed in place); Postgres
-// replaces the constraint.
-import { sql } from "kysely";
+// with their dedupe and the index of the sweep. Postgres replaces the constraint.
+import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "../connection.ts";
-import { migrateToLatest } from "../migrate.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
+import {
+  createEmptyTestDatabase,
+  createTestDatabase,
+} from "../../test-support/test-database.ts";
+import { migrateToLatest } from "../migrate.ts";
 
 const WIDEN = "20261023090000_widen_refusal_notice_codes_for_billing_setup";
 const T = "2026-10-12T08:00:00.000Z";
@@ -29,7 +27,7 @@ const beforeThisMigration: MigrationProvider = {
   },
 };
 
-type Db = ReturnType<typeof openDatabase>;
+type Db = Kysely<Database>;
 
 async function seedNotice(db: Db, code: string, period = "2026-10-01") {
   await sql`insert into workspaces (id, name, slug, created_by, created_at) values ('w-1', 'acme', 'acme', null, ${T}) on conflict do nothing`.execute(
@@ -51,13 +49,8 @@ async function seedNotice(db: Db, code: string, period = "2026-10-01") {
 
 describe("the refusal notice codes migration for the billing setup", () => {
   // #632-T05
-  it("keeps the notices of an existing SQLite database and accepts the code of an incomplete billing setup", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+  it("keeps the notices of an existing database and accepts the code of an incomplete billing setup", async () => {
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, beforeThisMigration);
     await seedNotice(db, "quota_exhausted");
     await seedNotice(db, "insufficient_balance", "head:abc1234");
@@ -90,7 +83,7 @@ describe("the refusal notice codes migration for the billing setup", () => {
     ).rejects.toThrow();
     const indexes = await sql<{
       name: string;
-    }>`select name from sqlite_master where type = 'index' and tbl_name = 'refusal_notices'`.execute(
+    }>`select indexname as name from pg_indexes where tablename = 'refusal_notices'`.execute(
       db,
     );
     expect(indexes.rows.map((row) => row.name)).toEqual(
@@ -99,17 +92,11 @@ describe("the refusal notice codes migration for the billing setup", () => {
         "refusal_notices_due",
       ]),
     );
-    await db.destroy();
   });
 
   // #632-T05
   it("takes the notices of an incomplete billing setup back out when it is undone, and keeps the others", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, migrationProvider);
     await seedNotice(db, "insufficient_balance", "head:abc1234");
     await seedNotice(db, "billing_rates_incomplete", "head:def5678");
@@ -128,24 +115,20 @@ describe("the refusal notice codes migration for the billing setup", () => {
       { code: "insufficient_balance" },
       { code: "reviews_paused" },
     ]);
-    await db.destroy();
   });
 
   // #632-T05
-  it.skipIf(!hasPostgres())(
-    "accepts the code of an incomplete billing setup on Postgres and still refuses any other",
-    async () => {
-      const { db } = await createPostgresTestDatabase();
+  it("accepts the code of an incomplete billing setup on Postgres and still refuses any other", async () => {
+    const { db } = await createTestDatabase();
 
-      await seedNotice(
-        db as unknown as Db,
-        "billing_rates_incomplete",
-        "head:abc1234",
-      );
-      await seedNotice(db as unknown as Db, "reviews_paused", "head:def5678");
-      await expect(
-        seedNotice(db as unknown as Db, "not_a_notice", "head:0000000"),
-      ).rejects.toThrow();
-    },
-  );
+    await seedNotice(
+      db as unknown as Db,
+      "billing_rates_incomplete",
+      "head:abc1234",
+    );
+    await seedNotice(db as unknown as Db, "reviews_paused", "head:def5678");
+    await expect(
+      seedNotice(db as unknown as Db, "not_a_notice", "head:0000000"),
+    ).rejects.toThrow();
+  });
 });

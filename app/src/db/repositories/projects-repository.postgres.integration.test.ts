@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Concurrent settings changes on Postgres: two instances read-modify-write the same project, and no
-// update is lost. SQLite serializes them with its single write lock (`begin immediate`); Postgres
-// needs the workspace-scoped repository row locked before the read, which this test pins. Runs only
-// when TEST_DATABASE_URL is set.
+// update is lost. The workspace-scoped repository row is locked before the read, which this test pins.
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -11,14 +9,11 @@ import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 import type { Database } from "../schema.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import {
   connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+  createTestDatabase,
+} from "../../test-support/test-database.ts";
 
 /** `postgres://...?application_name=<name>`, so a backend can be found in `pg_stat_activity`. */
 function withApplicationName(url: string, name: string): string {
@@ -47,10 +42,10 @@ async function waitForLockWait(
   }
 }
 
-describePostgres("concurrent project settings changes on Postgres", () => {
+describe("concurrent project settings changes on Postgres", () => {
   // #194-T07
   it("do not lose an update: the second writer reads what the first one stored", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const workspaceId = await defaultWorkspaceId(postgres.db);
     const integration = await createIntegrationsRepository(
       postgres.db,

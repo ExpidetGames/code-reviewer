@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the change of the tenancy against a real SQLite file (docs/decisions/0001-editions-setup-
+// Pins down the change of the tenancy against a real Postgres database (docs/decisions/0001-editions-setup-
 // and-accounts.md, section 2.3): single to multi is always allowed; multi to single only while at most
 // one workspace exists, and with none the default workspace is created and the acting admin becomes
 // its Owner. Whatever is refused changes nothing. The race with a workspace being created at the same

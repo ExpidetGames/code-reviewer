@@ -149,7 +149,7 @@ same provider neutral access codes as the reads above, and never holds a token o
     needs its own default `Retry-After` for that case (for example 30 seconds).
 - `credentials` and `webhook_secret` in the table are reserved for token integrations. A GitHub App
   keeps neither there: they are instance level, in the encrypted secret store (`src/github-config/`), and
-  the variables of an installation from before accounts were imported into it once (`src/legacy-import/`). `INTEGRATION_SECRET_STORAGE` in
+  never in the environment. `INTEGRATION_SECRET_STORAGE` in
   `types.ts` says what a type may store, and the repository refuses the rest. **A type may only be
   set to store credentials once they are encrypted** (planned with the first token integration).
 - A `config` holds settings only. The per-type schema (known fields only, `unknown_field` for the
@@ -301,9 +301,7 @@ reported with its integration id and does not stop the others.
 
 Overlapping triggers: work on the same installation runs one after the other, and each run reads
 GitHub's current state inside the lock, so repeating or overlapping triggers end in the same state.
-`defaultKeyedLock` (`keyed-lock.ts`) picks the lock: on SQLite the in-process one (`sharedKeyedLock`,
-kept on `globalThis` because Next.js may load `instrumentation.ts` and the route handlers as separate
-module graphs), on Postgres a session-level advisory lock keyed on the installation, held on a
+`defaultKeyedLock` (`keyed-lock.ts`) picks the lock: a session-level advisory lock keyed on the installation, held on a
 dedicated connection of its own (never the main pool: the job keeps doing its own database work while
 the lock is held), so two app instances serialize too (PG-12). The webhook route and the button use
 `getIntegrationSync()`

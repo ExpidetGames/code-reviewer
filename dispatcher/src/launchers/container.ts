@@ -2,7 +2,6 @@
 
 // Renders the hardened Worker container spec (contracts/worker-container.v1.json, #316, #325) to
 // `docker run` arguments, and runs them through a host. One definition of the flags serves the
-// self-hosted compose files (kept equal by app/src/ci/worker-container-parity.test.ts) and the
 // container the Sandbox-Launcher (#329) starts inside a VM.
 //
 // The renderer does not trust its input. The schema is the floor, but a spec that reaches this code
@@ -389,7 +388,7 @@ export interface RenderOptions {
   overrides?: WorkerContainerOverrides;
   /**
    * What this launcher variant adds to the spec (the Sandbox: IPv6 off, `SANDBOX_LAUNCHER_ADDITIONS`).
-   * Nothing when absent, which is what the self-hosted compose files run.
+   * Nothing when absent.
    */
   additions?: WorkerContainerLauncherAdditions;
   /** A seccomp profile derived from the default one (seccomp.ts), by path on the host. Off when absent. */

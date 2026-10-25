@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Everything a test of the operator API needs: a real SQLite file with the default workspace, the API wired to the
+// Everything a test of the operator API needs: a real Postgres database with the default workspace, the API wired to the
 // real repositories, a recording logger, and a `call` that builds requests like an operator's client does.
 // `notFound` throws a marker, because in the running server it is Next.js's `notFound()`.
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";

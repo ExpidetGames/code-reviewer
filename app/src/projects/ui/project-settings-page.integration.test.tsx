@@ -5,7 +5,7 @@
 // a project that follows the defaults, the effect of changing the global defaults, a value saved on
 // the project, and text from GitHub rendered as text. The page carries exactly one form (the manual
 // review panel lives on its own page since #174), the estimated cost sits in the Model card and the
-// trail starts at the Projects list. Real SQLite, the real services and routes' handlers; the rendering
+// trail starts at the Projects list. Real Postgres, the real services and routes' handlers; the rendering
 // is the real component tree.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

@@ -2,11 +2,9 @@
 
 // The cron sweep of a hosted deployment (#328) against a real database, the real queue and the stand-in for the
 // Dispatcher: lease expiry without any polling runner, the resends, the give-up with `dispatch_unavailable`,
-// the pool cap, the revival of a stopped dispatch and the hourly cleanup. On SQLite and, when
-// TEST_DATABASE_URL is set, on Postgres (CI).
-import { sql, type Kysely } from "kysely";
-import { describe, expect, it as vitestIt, vi } from "vitest";
-import type { Database } from "../db/schema.ts";
+// the pool cap, the revival of a stopped dispatch and the hourly cleanup.
+import { sql } from "kysely";
+import { describe, expect, it, vi } from "vitest";
 import { createAppMetaRepository } from "../db/repositories/app-meta-repository.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import {
@@ -26,10 +24,6 @@ import {
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
 import { createDispatchService } from "./service.ts";
 import {
@@ -37,6 +31,7 @@ import {
   STOPPED_REVIVE_MS,
   type SweepSettings,
 } from "./sweep.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const CURRENT = {
   kid: "k2",
@@ -52,31 +47,20 @@ const webhookConfig: WebhookDispatchConfig = {
   currentKey: CURRENT,
 };
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
 const POOL = "dispatcher";
 
 async function setupOn(
-  open: (() => Promise<Kysely<Database>>) | undefined,
   options: {
     settings?: Partial<SweepSettings>;
     /** Poll mode: no dispatch service at all. */
     poll?: boolean;
   } = {},
 ) {
-  const database = await open?.();
+  const database = await open();
   const fixture = await createJobQueueFixture({
-    ...(database === undefined ? {} : { database }),
+    database,
   });
   const receiver = createFakeDispatchReceiver({
     keys: [CURRENT],
@@ -195,11 +179,9 @@ async function setupOn(
   };
 }
 
-describe.each(databases)("the dispatch sweep on %s", (name, open) => {
-  const it =
-    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-  const setup = (options: Parameters<typeof setupOn>[1] = {}) =>
-    setupOn(open, options);
+describe("the dispatch sweep", () => {
+  const setup = (options: Parameters<typeof setupOn>[0] = {}) =>
+    setupOn(options);
 
   describe("lease expiry without a polling runner", () => {
     // #328-T01

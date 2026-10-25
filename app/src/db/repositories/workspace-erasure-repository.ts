@@ -43,10 +43,10 @@ export type OpenCheck = {
 
 export type WorkspaceErasure = {
   /**
-   * Locks what a job needs to become `running`: on Postgres the repositories of the workspace and then its waiting, running
+   * Locks what a job needs to become `running`: the repositories of the workspace and then its waiting, running
    * and superseded jobs, `FOR UPDATE`, in the order every writer of the queue uses (the repository, then the jobs by id; the
    * Dynamic gate comes before both, `lockDynamicReviewGate`). A claim that is in flight holds one of those rows, so this waits
-   * for it and `hasRunningJobs` then sees its result. SQLite has one writer, so there is nothing to lock.
+   * for it and `hasRunningJobs` then sees its result.
    */
   lockActiveJobs(): Promise<void>;
   /**

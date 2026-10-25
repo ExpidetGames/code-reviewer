@@ -6,7 +6,7 @@
 // used up by junk, the link works once within 30 minutes and ends the old password and every session, and
 // without a mail server the whole thing does not exist.
 import { describe, expect, it, vi } from "vitest";
-import { hashResetToken } from "../admin-cli/token.ts";
+import { hashResetToken } from "../auth/link-token.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createSmtpMailSender } from "../mail/smtp-sender.ts";
 import {

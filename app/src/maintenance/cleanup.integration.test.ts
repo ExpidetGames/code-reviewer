@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the cleanup of old rows against a real SQLite file: counters whose window is over and
+// Pins down the cleanup of old rows against a real Postgres database: counters whose window is over and
 // verification links that expired or were used a week ago go, everything that still has an effect stays,
 // and the one window it relies on is at least as long as every window the app counts.
 import { describe, expect, it } from "vitest";

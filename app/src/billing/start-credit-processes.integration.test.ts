@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #507-T02 and #507-T04 with real OS processes on one SQLite file: two app instances meet billing at the same moment, for one
-// workspace or for two workspaces of one GitHub account, and exactly one start credit is written. better-sqlite3 blocks its
-// thread, so only separate processes can overlap; the write lock of the transaction and the primary key of the memory of grants
-// are what serialize them. (The same cases on Postgres, with connections of one pool, are in start-credit.integration.test.ts.)
+// #507-T02 and #507-T04 with real OS processes on one database: two app instances meet billing at the same moment, for one
+// workspace or for two workspaces of one GitHub account, and exactly one start credit is written. Separate
+// processes are what two app instances are, each with a pool of its own; the balance lock of the transaction and the primary key
+// of the memory of grants are what serialize them. (The same cases with connections of one pool are in
+// start-credit.integration.test.ts.)
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
@@ -58,8 +59,8 @@ describe("the start credit from two processes", () => {
     await bind(db, workspaceId, 5001, "1");
 
     const answers = await runTogether<{ status: string }>([
-      ["grant", config.path, workspaceId],
-      ["grant", config.path, workspaceId],
+      ["grant", config.url, workspaceId],
+      ["grant", config.url, workspaceId],
     ]);
 
     expect(answers.map((answer) => answer.status).sort()).toEqual([
@@ -85,8 +86,8 @@ describe("the start credit from two processes", () => {
     await bind(db, two, 5002, "2");
 
     const answers = await runTogether<{ status: string }>([
-      ["grant", config.path, one],
-      ["grant", config.path, two],
+      ["grant", config.url, one],
+      ["grant", config.url, two],
     ]);
 
     expect(answers.map((answer) => answer.status).sort()).toEqual([

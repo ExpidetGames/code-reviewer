@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// `pnpm setup-code` against a real (SQLite) database (#321): it writes a code the app's store accepts, a
+// `pnpm setup-code` against a real Postgres database (#321): it writes a code the app's store accepts, a
 // second run replaces it, and it refuses on an instance that is set up. The Postgres connection of the
 // real command is covered by the same code path as `pnpm migrate`.
 import { describe, expect, it } from "vitest";
@@ -13,7 +13,7 @@ import {
 } from "./setup-code-cli.ts";
 
 const SECRET = "cli-secret-0123456789-0123456789-0123456789";
-const ENV = { APP_RUNTIME: "serverless", APP_SECRET: SECRET } as const;
+const ENV = { APP_SECRET: SECRET } as const;
 
 async function setUp() {
   const { db } = await createTestDatabase();

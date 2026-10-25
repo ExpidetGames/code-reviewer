@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #676-T04: the kind a job is pinned to when it is queued is the project's own, else the workspace default, else Diff. It
-// is resolved inside the enqueue transaction, on both engines (the Postgres cases run when TEST_DATABASE_URL is set).
+// is resolved inside the enqueue transaction.
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
@@ -18,34 +18,12 @@ import {
 import { enqueueInWorkspace } from "../test-support/other-workspace-jobs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { createJobReviewSettingsHooks } from "./review-settings-hooks.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
-type Engine = {
-  name: string;
-  database: () => Promise<Kysely<Database> | undefined>;
-};
-
-const ENGINES: Engine[] = [
-  { name: "SQLite", database: async () => undefined },
-  ...(hasPostgres()
-    ? [
-        {
-          name: "Postgres",
-          database: async () => (await createPostgresTestDatabase()).db,
-        },
-      ]
-    : []),
-];
-
-describe.each(ENGINES)("the kind of a queued job on $name", (engine) => {
+describe("the kind of a queued job", () => {
   async function start() {
-    const database = await engine.database();
     const fixture = await createJobQueueFixture({
       dynamicReview: true,
-      ...(database === undefined ? {} : { database }),
     });
     const projects = createProjectsRepository(
       fixture.db,
@@ -105,10 +83,8 @@ describe.each(ENGINES)("the kind of a queued job on $name", (engine) => {
   // #676-T04: the waiting reviews of a project that follows the default were queued for the other engine (review fix 5).
   describe("when the kind of the defaults changes", () => {
     async function twoProjects() {
-      const database = await engine.database();
       const fixture = await createJobQueueFixture({
         dynamicReview: true,
-        ...(database === undefined ? {} : { database }),
       });
       const projects = createProjectsRepository(
         fixture.db,
@@ -236,83 +212,80 @@ describe.each(ENGINES)("the kind of a queued job on $name", (engine) => {
 // #676-T04: a review that is being queued while the defaults change must not escape the cancellation. The enqueue locks
 // its repository row and then reads the default; the save of the defaults takes the same row lock before it decides which
 // projects follow and cancels their jobs, so one of the two waits for the other. Needs two connections, so Postgres only.
-describe.skipIf(!hasPostgres())(
-  "a review queued while the kind of the defaults changes (Postgres)",
-  () => {
-    async function waitForBlockedQuery(db: Kysely<Database>) {
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const { rows } = await sql<{
-          blocked: string;
-        }>`select count(*) as blocked from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`.execute(
-          db,
-        );
-        if (Number(rows[0]?.blocked ?? 0) > 0) return;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error("The save of the defaults never waited for a lock.");
-    }
-
-    it("is cancelled with the others when the enqueue has not committed yet, so no follower keeps a waiting job of the old kind", async () => {
-      const { db } = await createPostgresTestDatabase();
-      const fixture = await createJobQueueFixture({
-        dynamicReview: true,
-        database: db,
-      });
-      const projects = createProjectsRepository(
+describe("a review queued while the kind of the defaults changes (Postgres)", () => {
+  async function waitForBlockedQuery(db: Kysely<Database>) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const { rows } = await sql<{
+        blocked: string;
+      }>`select count(*) as blocked from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`.execute(
         db,
-        fixture.workspaceId,
-        fixture.clock.now,
       );
-      await projects.activate(fixture.repositoryId);
-      const service = createReviewSettingsService({
-        appSettings: createAppSettingsRepository(db, fixture.workspaceId),
-        projects,
-        builtIn: () => builtInReviewSettings("test/model"),
-        hooks: createJobReviewSettingsHooks(fixture.workspaceId),
-      });
+      if (Number(rows[0]?.blocked ?? 0) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("The save of the defaults never waited for a lock.");
+  }
 
-      let release!: () => void;
-      const held = new Promise<void>((resolve) => (release = resolve));
-      let queued!: (jobId: string) => void;
-      const hasQueued = new Promise<string>((resolve) => (queued = resolve));
-      // An enqueue that read the old default (Diff) and inserted its job, and has not committed.
-      const enqueuing = db.transaction().execute(async (trx) => {
-        const result = await createTestQueue(trx, fixture.workspaceId, {
-          now: fixture.clock.now,
-          dynamicReviewEnabled,
-        }).enqueue({
-          repositoryId: fixture.repositoryId,
-          prNumber: 11,
-          prUrl: "https://github.test/acme/widgets/pull/11",
-          headSha: sha("d"),
-          command: "review",
-          triggerKind: "webhook",
-          actorLogin: "octocat",
-        });
-        if (result.status !== "created")
-          throw new Error("The job was not created.");
-        queued(result.job.id);
-        await held;
-      });
-      const jobId = await hasQueued;
-
-      let saved = false;
-      const saving = service
-        .updateGlobalSettings({ reviewKind: "dynamic" }, "ada")
-        .then(() => (saved = true));
-      await waitForBlockedQuery(db);
-      // The save waits for the enqueue's lock on the repository instead of cancelling what it cannot see.
-      expect(saved).toBe(false);
-
-      release();
-      await enqueuing;
-      await saving;
-
-      expect(await fixture.queue.get(jobId)).toMatchObject({
-        reviewKind: "diff",
-        status: "cancelled",
-        errorCode: "review_kind_changed",
-      });
+  it("is cancelled with the others when the enqueue has not committed yet, so no follower keeps a waiting job of the old kind", async () => {
+    const { db } = await createTestDatabase();
+    const fixture = await createJobQueueFixture({
+      dynamicReview: true,
+      database: db,
     });
-  },
-);
+    const projects = createProjectsRepository(
+      db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    );
+    await projects.activate(fixture.repositoryId);
+    const service = createReviewSettingsService({
+      appSettings: createAppSettingsRepository(db, fixture.workspaceId),
+      projects,
+      builtIn: () => builtInReviewSettings("test/model"),
+      hooks: createJobReviewSettingsHooks(fixture.workspaceId),
+    });
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let queued!: (jobId: string) => void;
+    const hasQueued = new Promise<string>((resolve) => (queued = resolve));
+    // An enqueue that read the old default (Diff) and inserted its job, and has not committed.
+    const enqueuing = db.transaction().execute(async (trx) => {
+      const result = await createTestQueue(trx, fixture.workspaceId, {
+        now: fixture.clock.now,
+        dynamicReviewEnabled,
+      }).enqueue({
+        repositoryId: fixture.repositoryId,
+        prNumber: 11,
+        prUrl: "https://github.test/acme/widgets/pull/11",
+        headSha: sha("d"),
+        command: "review",
+        triggerKind: "webhook",
+        actorLogin: "octocat",
+      });
+      if (result.status !== "created")
+        throw new Error("The job was not created.");
+      queued(result.job.id);
+      await held;
+    });
+    const jobId = await hasQueued;
+
+    let saved = false;
+    const saving = service
+      .updateGlobalSettings({ reviewKind: "dynamic" }, "ada")
+      .then(() => (saved = true));
+    await waitForBlockedQuery(db);
+    // The save waits for the enqueue's lock on the repository instead of cancelling what it cannot see.
+    expect(saved).toBe(false);
+
+    release();
+    await enqueuing;
+    await saving;
+
+    expect(await fixture.queue.get(jobId)).toMatchObject({
+      reviewKind: "diff",
+      status: "cancelled",
+      errorCode: "review_kind_changed",
+    });
+  });
+});

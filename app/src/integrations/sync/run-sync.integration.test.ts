@@ -4,7 +4,7 @@
 // (GitHub down, settings missing, no database) is logged and never stops the start.
 import { describe, expect, it } from "vitest";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
-import { runStartupSync } from "./startup.ts";
+import { runStartupSync } from "./run-sync.ts";
 
 const ACME = { login: "acme", id: 5001, type: "Organization" } as const;
 

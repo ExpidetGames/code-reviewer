@@ -42,7 +42,6 @@ import {
   FAIL_CLOSED_LINE,
   PASSWORD_REASON,
   stepOfField,
-  type SetupHosting,
 } from "./messages.ts";
 
 /** The entries a person typed: one per line, or separated by commas, semicolons or spaces. */
@@ -201,7 +200,6 @@ function OptionCards({
 
 export function Wizard({
   existingInstallation = false,
-  hosting = "server",
   api = browserSetupApi,
   onDone = (redirectTo: string) => window.location.assign(redirectTo),
 }: {
@@ -213,7 +211,6 @@ export function Wizard({
    */
   existingInstallation?: boolean;
   /** Where the setup code comes from; only the sentence for an ended session differs (#321). */
-  hosting?: SetupHosting;
   /** Only tests pass these two. */
   api?: SetupApi;
   onDone?: (redirectTo: string) => void;
@@ -300,7 +297,7 @@ export function Wizard({
       }
       return;
     }
-    setProblem(describeSetupFailure(result.code, hosting));
+    setProblem(describeSetupFailure(result.code));
   }
 
   if (step === 1)

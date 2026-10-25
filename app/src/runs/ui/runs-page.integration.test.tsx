@@ -2,7 +2,7 @@
 
 // @vitest-environment jsdom
 // Pins down the Runs page and the page of one run with real data: runs made through the job queue in
-// a real SQLite file, the filter from the address (the toolbar follows it without a remount key), and
+// a real Postgres database, the filter from the address (the toolbar follows it without a remount key), and
 // the not-found case. Rendering is the real component tree.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

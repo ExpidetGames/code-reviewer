@@ -1,58 +1,42 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The balance journal repository (#495, ADR 0006, 2.7), on SQLite and on Postgres: entries are idempotent per key, the
+// The balance journal repository (#495, ADR 0006, 2.7): entries are idempotent per key, the
 // balance is the sum of the journal, a hold is taken by a conditional update and never overspends, and a reserve, a
-// settlement and a refund racing on one workspace leave the cache equal to the sum. The cases that depend on the engine's
-// locking run on both: Postgres with a pool and with two pools (two app instances), SQLite with one connection and with
-// several processes on one file. Runs the Postgres half only when TEST_DATABASE_URL is set.
+// settlement and a refund racing on one workspace leave the cache equal to the sum. The cases that depend on the locking run with a pool and with
+// two pools (two app instances).
 import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { BillingJournalErrorCode } from "../../billing/journal.ts";
-import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import { startDbProcess } from "../../test-support/db-process.ts";
-import { createTestDatabase } from "../../test-support/test-database.ts";
 import { addWorkspace } from "../../test-support/workspaces.ts";
 import type { Database } from "../schema.ts";
 import {
   createBillingJournalRepository,
   type BillingJournalRepository,
 } from "./billing-journal-repository.ts";
+import {
+  connectPostgres,
+  createTestDatabase,
+} from "../../test-support/test-database.ts";
 
 const START = Date.parse("2026-10-19T08:00:00.000Z");
 const USD = 1_000_000;
 
 type Engine = {
-  name: "sqlite" | "postgres";
-  /** Postgres cases are skipped without TEST_DATABASE_URL. */
-  skip: boolean;
+  name: "postgres";
   create: () => Promise<{
     db: Kysely<Database>;
     /** Where the database lives, for the cases that open it from another process or pool. */
-    location: { path: string } | { url: string };
+    location: { url: string };
   }>;
 };
 
 const ENGINES: Engine[] = [
   {
-    name: "sqlite",
-    skip: false,
-    async create() {
-      const { db, config } = await createTestDatabase({
-        busyTimeoutMs: 20_000,
-      });
-      return { db, location: { path: config.path } };
-    },
-  },
-  {
     name: "postgres",
-    skip: !hasPostgres(),
     async create() {
-      const { db, url } = await createPostgresTestDatabase({ poolMax: 12 });
+      const { db, url } = await createTestDatabase({ poolMax: 12 });
       return { db, location: { url } };
     },
   },
@@ -129,14 +113,9 @@ async function thrownCode(run: () => Promise<unknown>) {
 }
 
 /**
- * Waits until another connection is blocked on a lock, so a staged race is not decided by a timer. SQLite has one
- * connection per database: the second transaction waits for the connection, a short pause lets it queue.
+ * Waits until another connection is blocked on a lock, so a staged race is not decided by a timer.
  */
 async function untilBlocked(engine: Engine, db: Kysely<Database>) {
-  if (engine.name === "sqlite") {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    return;
-  }
   for (let attempt = 0; attempt < 500; attempt += 1) {
     const { rows } = await sql<{
       n: string;
@@ -161,7 +140,7 @@ function mulberry32(seed: number) {
 }
 
 for (const engine of ENGINES) {
-  describe.skipIf(engine.skip)(`the balance journal on ${engine.name}`, () => {
+  describe(`the balance journal on ${engine.name}`, () => {
     // #495-T01
     it("makes the balance the sum of a top-up, a reservation, and a usage with its release, and the reserved amount 0 after the release", async () => {
       const { db, workspaceId, repo } = await setup(engine);
@@ -1047,36 +1026,31 @@ for (const engine of ENGINES) {
 
     // Every write takes the balance row first (settle, release, reserve, append), so no two of them can wait for each other.
     // #495-T06
-    it.skipIf(engine.name !== "postgres")(
-      "takes the balance row's lock before an append writes, so it cannot deadlock with a writer that holds the lock",
-      async () => {
-        const { db, workspaceId, repo, repoOf } = await setup(engine);
-        await repo.append(topUp(10 * USD));
-        let appended: Promise<unknown> = Promise.resolve();
-        let outcome: unknown;
-        await db.transaction().execute(async (trx) => {
-          // This transaction holds the balance row, as a settlement does.
-          await sql`select 1 from billing_balances where workspace_id = ${workspaceId} for update`.execute(
-            trx,
-          );
-          appended = repo.append(topUp(USD, "pi_race")).then(
-            (value) => value,
-            (error: unknown) => error,
-          );
-          await untilBlocked(engine, db);
-          // The same key from the lock holder. If the append had written its row before it waited for the lock, this
-          // insert would wait for it and the two would wait for each other: Postgres ends one with a deadlock error.
-          outcome = await repoOf(workspaceId, trx).append(
-            topUp(USD, "pi_race"),
-          );
-        });
+    it("takes the balance row's lock before an append writes, so it cannot deadlock with a writer that holds the lock", async () => {
+      const { db, workspaceId, repo, repoOf } = await setup(engine);
+      await repo.append(topUp(10 * USD));
+      let appended: Promise<unknown> = Promise.resolve();
+      let outcome: unknown;
+      await db.transaction().execute(async (trx) => {
+        // This transaction holds the balance row, as a settlement does.
+        await sql`select 1 from billing_balances where workspace_id = ${workspaceId} for update`.execute(
+          trx,
+        );
+        appended = repo.append(topUp(USD, "pi_race")).then(
+          (value) => value,
+          (error: unknown) => error,
+        );
+        await untilBlocked(engine, db);
+        // The same key from the lock holder. If the append had written its row before it waited for the lock, this
+        // insert would wait for it and the two would wait for each other: Postgres ends one with a deadlock error.
+        outcome = await repoOf(workspaceId, trx).append(topUp(USD, "pi_race"));
+      });
 
-        expect(outcome).toMatchObject({ created: true });
-        expect(await appended).toMatchObject({ created: false });
-        expect((await repo.balance()).balanceMicroUsd).toBe(11 * USD);
-        await expectConsistent(repo);
-      },
-    );
+      expect(outcome).toMatchObject({ created: true });
+      expect(await appended).toMatchObject({ created: false });
+      expect((await repo.balance()).balanceMicroUsd).toBe(11 * USD);
+      await expectConsistent(repo);
+    });
 
     // #495-T06
     it("lets top-ups, refunds and corrections race with settlements and releases of one workspace without an error", async () => {
@@ -1479,14 +1453,11 @@ for (const engine of ENGINES) {
 }
 
 describe("two app instances on one Postgres", () => {
-  const describePostgres = hasPostgres() ? describe : describe.skip;
-  describePostgres("reserving through separate pools", () => {
+  describe("reserving through separate pools", () => {
     // #495-T05
     it("lets 20 reserves from two pools succeed exactly 3 times against a balance of 10 holds of 3", async () => {
-      const first = await setup(ENGINES[1] as Engine);
-      const location = first.location;
-      if (!("url" in location)) throw new Error("expected a Postgres url");
-      const second = connectPostgres(location.url, 8);
+      const first = await setup(ENGINES[0] as Engine);
+      const second = connectPostgres(first.location.url, 8);
       const repoA = first.repo;
       const repoB = createBillingJournalRepository(
         second.db,
@@ -1511,19 +1482,18 @@ describe("two app instances on one Postgres", () => {
   });
 });
 
-describe("several processes on one SQLite file", () => {
+describe("several processes on one database", () => {
   // #495-T05
   it("lets reserves from three processes succeed exactly as often as the balance covers", async () => {
     const { db, location, workspaceId, repo } = await setup(
       ENGINES[0] as Engine,
     );
-    if (!("path" in location)) throw new Error("expected a SQLite path");
     await repo.append(topUp(10 * USD));
     const processes = [0, 1, 2].map((index) =>
       startDbProcess(
         [
           "reserve",
-          location.path,
+          location.url,
           workspaceId,
           String(3 * USD),
           `p${index}`,

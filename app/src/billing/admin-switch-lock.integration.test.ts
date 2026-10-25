@@ -25,77 +25,72 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 describe.each(BILLING_ENGINES)(
   "the switch and the webhook secret on $name",
   (engine) => {
-    const it_ = engine.skip ? it.skip : it;
-
     // #504-T19
-    it_(
-      "never leaves billing on without the webhook secret when it is removed while billing is being switched on",
-      async () => {
-        const { db } = await engine.create();
-        const adminId = await insertUser(db, { id: "admin-lock" });
-        const stripe = await startStripeFake();
-        cleanUpAfterTest(() => stripe.close());
-        const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
+    it("never leaves billing on without the webhook secret when it is removed while billing is being switched on", async () => {
+      const { db } = await engine.create();
+      const adminId = await insertUser(db, { id: "admin-lock" });
+      const stripe = await startStripeFake();
+      cleanUpAfterTest(() => stripe.close());
+      const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
 
-        // The first look at the webhook secret after `arm()` answers, then waits for `release()`.
-        let armed = false;
-        let reached: () => void = () => undefined;
-        let release: () => void = () => undefined;
-        const atTheGate = new Promise<void>((resolve) => (reached = resolve));
-        const opened = new Promise<void>((resolve) => (release = resolve));
-        const holding = (store: SecretStore): SecretStore => ({
-          ...store,
-          async status(name) {
-            const status = await store.status(name);
-            if (armed && name === "stripe_webhook_secret") {
-              armed = false;
-              reached();
-              await opened;
-            }
-            return status;
-          },
-        });
-        const service = createBillingAdminService({
-          db,
-          secretsOn: (executor) =>
-            holding(
-              createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
-            ),
-          publicUrl: "https://reviews.example.test",
-          clientFor: (apiKey, environment) =>
-            createStripeClient({
-              apiKey,
-              baseUrl: stripe.baseUrl,
-              environment,
-              maxRetries: 0,
-              sleep: () => Promise.resolve(),
-            }),
-          log: () => undefined,
-        });
-        await service.chooseAdapter(adminId, "stripe");
-        await service.saveRates(adminId, RATES);
-        await service.saveCredentials(adminId, {
-          apiKey: stripe.apiKey,
-          webhookSecret: WEBHOOK_SECRET,
-        });
-        expect((await service.checkConnection(adminId)).ok).toBe(true);
+      // The first look at the webhook secret after `arm()` answers, then waits for `release()`.
+      let armed = false;
+      let reached: () => void = () => undefined;
+      let release: () => void = () => undefined;
+      const atTheGate = new Promise<void>((resolve) => (reached = resolve));
+      const opened = new Promise<void>((resolve) => (release = resolve));
+      const holding = (store: SecretStore): SecretStore => ({
+        ...store,
+        async status(name) {
+          const status = await store.status(name);
+          if (armed && name === "stripe_webhook_secret") {
+            armed = false;
+            reached();
+            await opened;
+          }
+          return status;
+        },
+      });
+      const service = createBillingAdminService({
+        db,
+        secretsOn: (executor) =>
+          holding(
+            createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+          ),
+        publicUrl: "https://reviews.example.test",
+        clientFor: (apiKey, environment) =>
+          createStripeClient({
+            apiKey,
+            baseUrl: stripe.baseUrl,
+            environment,
+            maxRetries: 0,
+            sleep: () => Promise.resolve(),
+          }),
+        log: () => undefined,
+      });
+      await service.chooseAdapter(adminId, "stripe");
+      await service.saveRates(adminId, RATES);
+      await service.saveCredentials(adminId, {
+        apiKey: stripe.apiKey,
+        webhookSecret: WEBHOOK_SECRET,
+      });
+      expect((await service.checkConnection(adminId)).ok).toBe(true);
 
-        armed = true;
-        const switching = service.setEnabled(adminId, true);
-        await atTheGate;
-        const removing = service.removeSecret(adminId, "webhookSecret");
-        // If nothing stops the removal, it is done in this time.
-        await Promise.race([removing, pause(300)]);
-        release();
-        const [switched, removed] = await Promise.all([switching, removing]);
+      armed = true;
+      const switching = service.setEnabled(adminId, true);
+      await atTheGate;
+      const removing = service.removeSecret(adminId, "webhookSecret");
+      // If nothing stops the removal, it is done in this time.
+      await Promise.race([removing, pause(300)]);
+      release();
+      const [switched, removed] = await Promise.all([switching, removing]);
 
-        const stored = await secrets.status("stripe_webhook_secret");
-        // The switch as the admin set it (`isBillingOn` would hide the fault: it says off whenever the secret is gone).
-        const { enabled } = await service.view();
-        expect(!enabled || stored.state === "configured").toBe(true);
-        // One of the two went first and the other found its result.
-        expect([switched.ok, removed.ok].filter(Boolean)).toHaveLength(1);
-      },
-    );
+      const stored = await secrets.status("stripe_webhook_secret");
+      // The switch as the admin set it (`isBillingOn` would hide the fault: it says off whenever the secret is gone).
+      const { enabled } = await service.view();
+      expect(!enabled || stored.state === "configured").toBe(true);
+      // One of the two went first and the other found its result.
+      expect([switched.ok, removed.ok].filter(Boolean)).toHaveLength(1);
+    });
   },
 );

@@ -342,7 +342,7 @@ export function createAuth({
       // origin of a request and as a place to continue after a sign in.
       disableOriginCheck: false,
       disableCSRFCheck: false,
-      database: { generateId: () => randomUUID() },
+      database: { generateId: () => randomUUID(), validateSchema: false },
     },
     // A failed sign in lands on the login page with `?error=<code>`.
     onAPIError: { errorURL: `${config.baseUrl}/login` },

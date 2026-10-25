@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The two database engines a billing test runs on (SQLite always; Postgres when TEST_DATABASE_URL is set, otherwise its
-// cases are skipped), with a migrated database each and the one workspace the cases write to.
+// The database a billing test runs on (Postgres, see test-database.ts), with a migrated database for each case and the
+// workspaces the cases write to.
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "./postgres-test-database.ts";
-import { createTestDatabase } from "./test-database.ts";
 import { addWorkspace } from "./workspaces.ts";
+import { createTestDatabase } from "./test-database.ts";
 
 export type BillingEngine = {
-  name: "sqlite" | "postgres";
-  /** Postgres cases are skipped without TEST_DATABASE_URL. */
-  skip: boolean;
+  name: "postgres";
   /** A migrated database with two workspaces, `a` and `b`. */
   create: () => Promise<{
     db: Kysely<Database>;
@@ -33,18 +27,9 @@ async function withWorkspaces(db: Kysely<Database>) {
 
 export const BILLING_ENGINES: BillingEngine[] = [
   {
-    name: "sqlite",
-    skip: false,
-    async create() {
-      const { db } = await createTestDatabase({ busyTimeoutMs: 20_000 });
-      return withWorkspaces(db);
-    },
-  },
-  {
     name: "postgres",
-    skip: !hasPostgres(),
     async create() {
-      const { db } = await createPostgresTestDatabase({ poolMax: 12 });
+      const { db } = await createTestDatabase({ poolMax: 12 });
       return withWorkspaces(db);
     },
   },

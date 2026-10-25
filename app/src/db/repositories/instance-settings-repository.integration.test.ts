@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the instance settings repository against a real SQLite file: a setting without a row
+// Pins down the instance settings repository against a real Postgres database: a setting without a row
 // reads as undefined (never as a guess), a value round-trips as JSON, and a second write replaces
 // the value and records who and when.
 import { sql } from "kysely";
@@ -35,7 +35,9 @@ describe("the instance settings repository", () => {
     expect(await repository.get("setup_completed_at")).toBeNull();
     const { rows } = await sql<{
       type: string;
-    }>`select typeof(value) as type from instance_settings`.execute(db);
+    }>`select pg_typeof(value)::text as type from instance_settings`.execute(
+      db,
+    );
     expect(rows.every((row) => row.type === "text")).toBe(true);
   });
 

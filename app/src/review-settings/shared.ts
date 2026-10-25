@@ -55,7 +55,6 @@ export function reviewSettingsServiceFor(
       undefined,
       undefined,
       undefined,
-      undefined,
       newProjectSettings,
     ),
     // #195: a kind change cancels the project's waiting review jobs in this transaction.
