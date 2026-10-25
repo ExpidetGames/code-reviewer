@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/job-model-entry.v1.json",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/job-model-entry.v1.json",
   "title": "Code Reviewer per-job model entry, version 1",
   "description": "What a job is told about the model it runs with (#548, native OpenCode providers, #544): the one provider and the one model of the catalog read from models.dev (src/models-dev/), and nothing else of the catalog. It holds no secret: no key, no header value. `upstreamBaseUrl` is where the supervisor sends the real key; the engine is never given it, only the loopback address of the per-job proxy (#550). The runner turns the entry into the `provider.<providerId>` block of the engine's configuration: `npm` and `options.baseURL` (the proxy) with a dummy `options.apiKey`, and `models.<modelId>` as `model` says. Closed: a reader refuses a field it does not know, because the entry decides where a key goes and what the engine is told it may do. The writer is the app (src/models-dev/job-entry.ts); the version is in the path and in `version`.",
   "version": 1,

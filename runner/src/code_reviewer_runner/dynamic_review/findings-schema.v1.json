@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/dynamic-review/schema.v1.json",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/dynamic-review/schema.v1.json",
   "title": "Code Reviewer Dynamic Review findings, version 1",
   "description": "The neutral findings a Dynamic Review returns (#195), before the trusted runner renders them into the persistent summary comment (#199). The prompt and the publisher consume this shape. It is deliberately opaque and authority-free: opaque stable ids, a P0-P3 priority, a confidence, a bounded title/body, a safe repository-relative path and line range, evidence references, the ids the run resolved, and the exact reviewed SHA. It carries no permission, provider, hosting-provider, routing, endpoint or command field, and no field may add one: the fixed core, the tools and the limits are runner-owned. Fields are bounded so an untrusted model answer cannot grow a comment past the API limit. Existing JobResult/usage stays the completion envelope.",
   "version": 1,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/operator-api.v1.json",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/operator-api.v1.json",
   "title": "Code Reviewer operator API, version 1",
   "description": "The wire format of the operator API (#275, #278, #280, #284, #385): a machine interface for an operator who sets the entitlements of workspaces, reads what they consumed and redeems the handover of a workspace Owner or Admin, from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
   "version": 1,

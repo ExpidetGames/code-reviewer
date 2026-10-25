@@ -82,12 +82,12 @@ def test_the_app_jwt_is_signed_with_rs256_and_valid_for_less_than_ten_minutes(
 def test_only_pull_requests_of_the_sandbox_repository_are_accepted() -> None:
     script = load_script()
 
-    script.check_repository("https://github.com/ExpidetGames/code-reviewer-playground/pull/1")
+    script.check_repository("https://github.com/Itegro-GmbH/code-reviewer-playground/pull/1")
     for url in (
-        "https://github.com/ExpidetGames/code-reviewer/pull/1",
+        "https://github.com/Itegro-GmbH/code-reviewer/pull/1",
         "https://github.com/other/code-reviewer-playground/pull/1",
-        "https://evil.example.com/ExpidetGames/code-reviewer-playground/pull/1",
-        "https://github.com/ExpidetGames/code-reviewer-playground/pull/1/files",
+        "https://evil.example.com/Itegro-GmbH/code-reviewer-playground/pull/1",
+        "https://github.com/Itegro-GmbH/code-reviewer-playground/pull/1/files",
     ):
         with pytest.raises(SystemExit):
             script.check_repository(url)
@@ -174,7 +174,7 @@ def test_the_context_window_goes_into_the_llm_section_of_the_job() -> None:
 # CR-44-T02 (helper): the comment id is read from the link the runner reports.
 def test_the_comment_id_is_read_from_the_comment_link_of_the_sandbox_repository() -> None:
     script = load_script()
-    base = "https://github.com/ExpidetGames/code-reviewer-playground/pull/2"
+    base = "https://github.com/Itegro-GmbH/code-reviewer-playground/pull/2"
 
     assert script.comment_id_from_url(f"{base}#issuecomment-6097473386") == 6097473386
     for url in (
@@ -182,7 +182,7 @@ def test_the_comment_id_is_read_from_the_comment_link_of_the_sandbox_repository(
         base,
         f"{base}#discussion_r12",
         "https://github.com/other/repo/pull/2#issuecomment-1",
-        "https://evil.example.com/ExpidetGames/code-reviewer-playground/pull/2#issuecomment-1",
+        "https://evil.example.com/Itegro-GmbH/code-reviewer-playground/pull/2#issuecomment-1",
     ):
         assert script.comment_id_from_url(url) is None
 
@@ -193,7 +193,7 @@ def test_a_record_holds_the_run_data_and_the_comment_text(tmp_path: Path) -> Non
     result = {
         "ok": True,
         "durationMs": 61000,
-        "commentUrl": "https://github.com/ExpidetGames/code-reviewer-playground/pull/1#issuecomment-5",
+        "commentUrl": "https://github.com/Itegro-GmbH/code-reviewer-playground/pull/1#issuecomment-5",
         "errorCode": None,
         "logTail": "done",
         "usage": {"model": "vendor/model", "promptTokens": 10, "costUsd": 0.002},

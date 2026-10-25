@@ -24,7 +24,7 @@ jobs:
   engine:
     name: "Runner: engine tests"
     # A fork has no use for a nightly run of its own.
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' }}
     permissions:
       contents: read
     uses: ./.github/workflows/engine.yml

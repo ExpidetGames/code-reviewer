@@ -381,6 +381,23 @@ Its role is exactly this, and nothing more (create a custom role and add the ide
    setting to `fra1` too, so that the two do not disagree: the Sandbox VMs and the golden snapshots are in `fra1` and
    there is no failover region (section 9).
 
+**If the repository moves to another owner** (a transfer to an organization, a rename). The repository, its Actions
+secrets and its environments move with it, and GitHub redirects the old address, but nothing in the pipeline follows
+by itself:
+
+- In the repository: every job that deploys, rolls back, snapshots or runs the nightly is guarded by
+  `github.repository == '<owner>/<name>'`. A guard that still names the old owner **skips the job without an error**, so
+  the next push to `main` deploys nothing. Change the guards in `.github/workflows/` and `REPOSITORY` in
+  `app/src/ci/workflow-support.ts`; `app/src/ci/repository-identity.test.ts` fails for each place that was missed,
+  among them the `$id` of the schemas in `contracts/` and the links in the community files.
+- Outside it, nothing in the pipeline names the owner: the Infisical identity signs in with Universal Auth (a Client
+  ID and Secret, no claim of the GitHub token is checked), Vercel and the Sandbox use the Vercel project's own OIDC token,
+  the Vercel projects deploy by the CLI and have their Git auto-deploy off, and no image is published. What can still
+  point at the old address is the Git connection in step 2 of the Vercel dashboard list (reconnect it if you keep it
+  for the display of the commit), the **branch ruleset** and the **environment `production` rule** of the repository
+  (check both after the move, as above), and the GitHub App: install it on the new owner, because an installation
+  belongs to the account that holds the repositories.
+
 
 ## 3. Environment variables
 

@@ -19,6 +19,7 @@ import {
   stepIndex,
   stepsOf,
   type Job,
+  REPOSITORY,
 } from "./workflow-support.ts";
 
 const source = readText(".github/workflows/deploy-production.yml");
@@ -31,7 +32,7 @@ const job = (name: string): Job => {
   if (!found) throw new Error(`no job "${name}"`);
   return found;
 };
-const REPOSITORY_GUARD = "github.repository == 'ExpidetGames/code-reviewer'";
+const REPOSITORY_GUARD = `github.repository == '${REPOSITORY}'`;
 const MAIN_GUARD = "github.ref == 'refs/heads/main'";
 
 describe("the production deployment workflow", () => {

@@ -21,7 +21,7 @@ details anywhere public before we have fixed it.
 
 Report it privately with GitHub's private vulnerability reporting:
 
-1. Open [https://github.com/ExpidetGames/code-reviewer/security/advisories/new](https://github.com/ExpidetGames/code-reviewer/security/advisories/new)
+1. Open [https://github.com/Itegro-GmbH/code-reviewer/security/advisories/new](https://github.com/Itegro-GmbH/code-reviewer/security/advisories/new)
    (the "Report a vulnerability" button on the Security tab of the repository).
 2. Describe the problem: what is affected, the steps to reproduce it, and what an attacker gains.
    A short proof of concept helps.

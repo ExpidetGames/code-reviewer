@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { REPOSITORY } from "./workflow-support.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const source = readFileSync(
@@ -65,9 +66,7 @@ describe("dispatcher canary workflow", () => {
   // #331-extra-workflow
   it("has one job, read-only for the repository, for this repository only, in a protected environment", () => {
     expect(Object.keys(workflow.jobs)).toEqual(["canary"]);
-    expect(String(job.if)).toContain(
-      "github.repository == 'ExpidetGames/code-reviewer'",
-    );
+    expect(String(job.if)).toContain(`github.repository == '${REPOSITORY}'`);
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(job.permissions).toEqual({ contents: "read" });
     expect(job.environment).toBe("production");
