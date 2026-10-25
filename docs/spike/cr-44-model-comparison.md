@@ -266,7 +266,7 @@ measure how many problems a model finds in a real, large codebase.
 ```
 set -a; . ~/.config/code-reviewer/dev.env; set +a        # the developer's credentials, never printed
 cd runner
-uv run python scripts/manual_review.py --yes --pr-url https://github.com/ExpidetGames/code-reviewer-playground/pull/2 \
+uv run python scripts/manual_review.py --yes --pr-url https://github.com/Itegro-GmbH/code-reviewer-playground/pull/2 \
   --model anthropic/claude-haiku-5.5 --record-dir /path/to/records --label haiku-pr2-run1
 ```
 

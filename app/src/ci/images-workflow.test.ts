@@ -191,7 +191,7 @@ describe("no image is published", () => {
       expect(code).not.toMatch(/docker\/login-action@/);
       expect(code).not.toMatch(/docker\s+(push|login)/);
       expect(code).not.toMatch(/packages:\s*write/);
-      expect(code).not.toMatch(/ghcr\.io\/expidetgames/);
+      expect(code).not.toMatch(/ghcr\.io\/itegro-gmbh/i);
       expect(code).not.toMatch(/\bpush:\s*true\b/);
     },
   );

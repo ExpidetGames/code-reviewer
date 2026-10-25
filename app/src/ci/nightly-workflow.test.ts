@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { REPOSITORY } from "./workflow-support.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const source = readFileSync(`${repoRoot}.github/workflows/nightly.yml`, "utf8");
@@ -54,8 +55,6 @@ describe("nightly workflow", () => {
 
   // CR-41-T15
   it("does not run in forks", () => {
-    expect(engine.if).toContain(
-      "github.repository == 'ExpidetGames/code-reviewer'",
-    );
+    expect(engine.if).toContain(`github.repository == '${REPOSITORY}'`);
   });
 });

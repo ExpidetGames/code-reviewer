@@ -303,7 +303,7 @@ describe("the invoices of a workspace", () => {
   });
 
   // #659-T01
-  it("answers 502 provider_unavailable when Stripe fails, without a word of what it said", async () => {
+  it("answers 503 provider_unavailable when Stripe fails, without a word of what it said", async () => {
     const t = await start();
     await t.customerOf(t.workspaceId);
     t.fake.faults.failWith({ method: "GET", path: "/v1/invoices" }, 500, {
@@ -312,7 +312,7 @@ describe("the invoices of a workspace", () => {
 
     const answer = await t.get(await t.person("owner"));
 
-    expect(answer.status).toBe(502);
+    expect(answer.status).toBe(503);
     expect(await answer.json()).toEqual({ error: "provider_unavailable" });
     expect(t.logs.join("\n")).toContain("result=provider_unavailable");
   });

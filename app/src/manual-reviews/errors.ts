@@ -21,7 +21,7 @@ export const MANUAL_REVIEW_ERROR_CODES = [
   "MANUAL_REVIEW_COMMAND_NOT_ALLOWED",
   /** The app is no longer installed for the repository, or the platform refuses it access. 409. */
   "MANUAL_REVIEW_APP_NOT_INSTALLED",
-  /** The platform could not be asked, answered with an error, or answered with something unusable. 502. */
+  /** The platform could not be asked, answered with an error, or answered with something unusable. 503 (never a 502: a proxy swaps its body, #690). */
   "MANUAL_REVIEW_GITHUB_UNAVAILABLE",
 ] as const;
 export type ManualReviewErrorCode = (typeof MANUAL_REVIEW_ERROR_CODES)[number];
@@ -29,7 +29,7 @@ export type ManualReviewErrorCode = (typeof MANUAL_REVIEW_ERROR_CODES)[number];
 /** The HTTP status each code is answered with. */
 export const MANUAL_REVIEW_ERROR_STATUS: Record<
   ManualReviewErrorCode,
-  400 | 403 | 404 | 409 | 413 | 415 | 502
+  400 | 403 | 404 | 409 | 413 | 415 | 503
 > = {
   MANUAL_REVIEW_REQUEST_INVALID: 400,
   MANUAL_REVIEW_CROSS_SITE_REQUEST: 403,
@@ -40,7 +40,7 @@ export const MANUAL_REVIEW_ERROR_STATUS: Record<
   MANUAL_REVIEW_PULL_REQUEST_NOT_OPEN: 409,
   MANUAL_REVIEW_COMMAND_NOT_ALLOWED: 409,
   MANUAL_REVIEW_APP_NOT_INSTALLED: 409,
-  MANUAL_REVIEW_GITHUB_UNAVAILABLE: 502,
+  MANUAL_REVIEW_GITHUB_UNAVAILABLE: 503,
 };
 
 /** One field of the body that cannot be used. */

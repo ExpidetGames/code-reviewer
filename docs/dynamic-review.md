@@ -3,7 +3,7 @@
 Dynamic Review is the second review kind next to Diff Review (PR-Agent): an agent reads the pull
 request's code in a sanitised, read-only export and returns structured findings that the runner
 publishes as one persistent summary comment. The decisions are in epic
-[#193](https://github.com/ExpidetGames/code-reviewer/issues/193), the research in
+[#193](https://github.com/Itegro-GmbH/code-reviewer/issues/193), the research in
 `docs/spike/85-opencode-dynamic-review.md`, and the short deployment record is
 [`docs/decisions/0002-dynamic-review-deployment.md`](decisions/0002-dynamic-review-deployment.md).
 

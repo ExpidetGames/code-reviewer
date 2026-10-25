@@ -32,6 +32,8 @@ export const BILLING_CHECK_ERROR_CODES = [
   "stripe_unreachable",
   /** Stripe failed, refused the request, or answered with something the app cannot read. */
   "stripe_unavailable",
+  /** Stripe accepts the key, but refuses the request that asks for Managed Payments: the account is not enabled for it (#690). */
+  "stripe_managed_payments_unavailable",
 ] as const;
 export type BillingCheckErrorCode = (typeof BILLING_CHECK_ERROR_CODES)[number];
 
@@ -88,6 +90,10 @@ export const BILLING_ERROR_CODES = [
 ] as const;
 export type BillingErrorCode = (typeof BILLING_ERROR_CODES)[number];
 
+/**
+ * Never a 502 or a 504: the app sits behind proxies (Cloudflare) that replace the body of those two with their own page, and the
+ * admin would see no code and no reason (#690). A failure of Stripe is a 503.
+ */
 export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   cross_site_request: 403,
   unsupported_content_type: 415,
@@ -102,7 +108,7 @@ export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   webhook_endpoint_unusable: 409,
   webhook_endpoint_in_progress: 409,
   webhook_secret_not_stored: 503,
-  webhook_secret_not_returned: 502,
+  webhook_secret_not_returned: 503,
   workspace_not_found: 404,
   request_conflict: 409,
   review_not_found: 404,
@@ -110,15 +116,16 @@ export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   review_workspace_unknown: 409,
   review_has_no_intent: 409,
   payment_check_not_possible: 409,
-  payment_check_unavailable: 502,
+  payment_check_unavailable: 503,
   review_credit_type_mismatch: 409,
   intent_state_changed: 409,
   api_key_missing: 409,
   api_key_unreadable: 409,
   stripe_key_rejected: 422,
   stripe_rate_limited: 429,
-  stripe_unreachable: 502,
-  stripe_unavailable: 502,
+  stripe_unreachable: 503,
+  stripe_unavailable: 503,
+  stripe_managed_payments_unavailable: 422,
 };
 
 /** The codes a field of the form can be refused with (`issues[].code`): the rates and numbers, the credentials, the credit. */

@@ -13,6 +13,7 @@ import {
   describeBillingFailure,
   describeBillingIssue,
   describeMissingItem,
+  describeStripeDetail,
 } from "./billing-messages.ts";
 
 describe("the copy for the billing codes", () => {
@@ -95,5 +96,47 @@ describe("the copy for the billing codes", () => {
 
     expect(all.toLowerCase()).not.toContain(["pad", "dle"].join(""));
     expect(all).not.toMatch(/\bplans?\b/i);
+  });
+});
+
+describe("the copy for a failed Stripe check (#690)", () => {
+  // #690-T04
+  it("says in so many words that the account is not enabled for Managed Payments", () => {
+    const sentence = describeBillingFailure(
+      "stripe_managed_payments_unavailable",
+    );
+
+    expect(sentence).toMatch(/not enabled for Managed Payments/);
+  });
+
+  // #690-T03
+  it("names the HTTP status of an answer the page cannot read", () => {
+    expect(describeBillingFailure("UNEXPECTED_RESPONSE", 502)).toBe(
+      "The server answered with HTTP 502. Reload the page and try again.",
+    );
+  });
+
+  // #690-T01
+  it("shows what Stripe said as plain identifiers, and nothing else", () => {
+    expect(
+      describeStripeDetail({
+        status: 400,
+        code: "parameter_invalid_empty",
+        type: "invalid_request_error",
+      }),
+    ).toBe(
+      " Stripe said: HTTP 400, invalid_request_error, parameter_invalid_empty.",
+    );
+    expect(describeStripeDetail({ status: 500, code: null, type: null })).toBe(
+      " Stripe said: HTTP 500.",
+    );
+    expect(describeStripeDetail({ status: null, code: null, type: null })).toBe(
+      "",
+    );
+    expect(describeStripeDetail(undefined)).toBe("");
+    expect(describeStripeDetail("sk_test_secret")).toBe("");
+    expect(
+      describeStripeDetail({ status: 400, code: "<script>", type: "x y" }),
+    ).toBe(" Stripe said: HTTP 400.");
   });
 });
