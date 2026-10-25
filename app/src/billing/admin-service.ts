@@ -85,8 +85,16 @@ export type BillingAdminServiceOptions = {
    * credential that must be read or written together with them.
    */
   secretsOn: (executor: Kysely<Database>) => SecretStore;
-  /** A client of Stripe for this key and environment. May throw a `StripeClientError` (a key of the wrong environment). */
-  clientFor: (apiKey: string, environment: StripeEnvironment) => StripeClient;
+  /**
+   * A client of Stripe for this key and environment. May throw a `StripeClientError` (a key of the wrong environment).
+   * `managedPayments: false` leaves out the preview flag of Managed Payments (the check uses it to tell a key Stripe refuses
+   * from an account that is not enabled for the preview, #690).
+   */
+  clientFor: (
+    apiKey: string,
+    environment: StripeEnvironment,
+    options?: { managedPayments?: boolean },
+  ) => StripeClient;
   /** The public address of this app (`BETTER_AUTH_URL`): where Stripe is told to post its events. Never from a request. */
   publicUrl: string;
   now?: () => Date;
@@ -95,6 +103,21 @@ export type BillingAdminServiceOptions = {
 };
 
 export type BillingIssue = { field: string; code: BillingIssueCode };
+
+/**
+ * What Stripe said about a failed call, in plain identifiers only (the HTTP status, Stripe's `error.code` and `error.type`):
+ * never a text of Stripe, never a header, never a key. It lets the admin see why a check failed (#690).
+ */
+export type StripeFailureDetail = {
+  status: number | null;
+  code: string | null;
+  type: string | null;
+};
+export type CheckFailure = {
+  ok: false;
+  error: BillingCheckErrorCode;
+  stripe?: StripeFailureDetail;
+};
 
 export type BillingFailure =
   | { ok: false; error: "invalid_input"; issues: BillingIssue[] }
@@ -107,11 +130,10 @@ export type BillingFailure =
   | { ok: false; error: "webhook_endpoint_in_progress" }
   | { ok: false; error: "webhook_secret_not_stored" }
   | { ok: false; error: "webhook_secret_not_returned" }
-  | { ok: false; error: BillingCheckErrorCode };
+  | CheckFailure;
 export type BillingResult = { ok: true } | BillingFailure;
 export type ConnectionCheck =
-  | { ok: true; environment: StripeEnvironment }
-  | { ok: false; error: BillingCheckErrorCode };
+  { ok: true; environment: StripeEnvironment } | CheckFailure;
 export type EndpointResult =
   { ok: true; created: boolean; endpointId: string } | BillingFailure;
 
@@ -182,6 +204,43 @@ function checkErrorOf(error: unknown): BillingCheckErrorCode {
   }
 }
 
+/** A refusal of the request itself (not of the key, not a Stripe outage): the kind the missing preview of a feature can cause. */
+function refusesTheRequest(error: StripeClientError): boolean {
+  switch (error.code) {
+    case "bad_request":
+    case "not_found":
+    case "conflict":
+    case "rejected":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** The plain identifiers of a failed call of Stripe; nothing else of the error leaves the client. */
+function failureDetailOf(error: StripeClientError): StripeFailureDetail {
+  return {
+    status: error.status,
+    code: error.stripeCode,
+    type: error.stripeType,
+  };
+}
+
+/** One log line for a failed check: the codes only, so it can be read to find why Stripe refused. */
+function checkFailureLine(
+  code: BillingCheckErrorCode,
+  error: StripeClientError,
+): string {
+  const parts = [
+    `billing_stripe_check_failed code=${code}`,
+    `reason=${error.code}`,
+  ];
+  if (error.status !== null) parts.push(`http=${error.status}`);
+  if (error.stripeCode !== null) parts.push(`stripe_code=${error.stripeCode}`);
+  if (error.stripeType !== null) parts.push(`stripe_type=${error.stripeType}`);
+  return parts.join(" ");
+}
+
 async function mustSave(saving: Promise<{ ok: boolean }>): Promise<void> {
   if (!(await saving).ok) throw new Error("BILLING_SECRET_NOT_SAVED");
 }
@@ -211,7 +270,13 @@ export function createBillingAdminService({
   const webhookUrl = `${normalizedAddress(publicUrl)}${BILLING_WEBHOOK_PATH}`;
 
   type MadeClient =
-    | { ok: true; client: StripeClient; environment: StripeEnvironment }
+    | {
+        ok: true;
+        client: StripeClient;
+        /** The same key without the preview flag of Managed Payments. */
+        withoutPreview: () => StripeClient;
+        environment: StripeEnvironment;
+      }
     | { ok: false; error: BillingCheckErrorCode };
 
   function clientOf(key: string): MadeClient {
@@ -219,7 +284,13 @@ export function createBillingAdminService({
     if (environment === null)
       return { ok: false, error: "stripe_key_rejected" };
     try {
-      return { ok: true, client: clientFor(key, environment), environment };
+      return {
+        ok: true,
+        client: clientFor(key, environment),
+        withoutPreview: () =>
+          clientFor(key, environment, { managedPayments: false }),
+        environment,
+      };
     } catch (error) {
       return { ok: false, error: checkErrorOf(error) };
     }
@@ -239,6 +310,18 @@ export function createBillingAdminService({
     return clientOf(key.value.reveal());
   }
 
+  /** Whether Stripe takes the key when the preview flag of Managed Payments is left out. */
+  async function acceptedWithoutPreview(
+    made: Extract<MadeClient, { ok: true }>,
+  ): Promise<boolean> {
+    try {
+      await made.withoutPreview().getAccount();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function checkWith(made: MadeClient): Promise<ConnectionCheck> {
     if (!made.ok) return made;
     try {
@@ -246,7 +329,15 @@ export function createBillingAdminService({
       await made.client.getAccount();
       return { ok: true, environment: made.environment };
     } catch (error) {
-      return { ok: false, error: checkErrorOf(error) };
+      let code = checkErrorOf(error);
+      // checkErrorOf throws what is no StripeClientError, so this one is.
+      const failure = error as StripeClientError;
+      // The request carries the preview flag of Managed Payments. If Stripe refuses it with the flag and takes the key
+      // without, the account is not enabled for the preview: say that instead of a failure nobody can act on.
+      if (refusesTheRequest(failure) && (await acceptedWithoutPreview(made)))
+        code = "stripe_managed_payments_unavailable";
+      log(checkFailureLine(code, failure));
+      return { ok: false, error: code, stripe: failureDetailOf(failure) };
     }
   }
 
@@ -409,6 +500,14 @@ export function createBillingAdminService({
       // Billing is on: the new key has to work before it replaces the one that does.
       let checkedEnvironment: StripeEnvironment | undefined;
       if (current.enabled && newKey !== undefined) {
+        // Another environment than the stored key's (or a stored key that cannot be read) is refused whatever Stripe would say,
+        // so Stripe is not asked (#690): the admin hears what to do, not a failure of a call that could not have helped.
+        const kept = await secrets.use(STRIPE_API_KEY);
+        const keptEnvironment = kept.ok
+          ? stripeKeyEnvironment(kept.value.reveal())
+          : null;
+        if (keptEnvironment !== stripeKeyEnvironment(newKey))
+          return { ok: false, error: "billing_disable_first" };
         const check = await checkWith(clientOf(newKey));
         if (!check.ok) return check;
         checkedEnvironment = check.environment;
