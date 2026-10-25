@@ -566,7 +566,8 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     });
     await expect(providerDropdown).toHaveText("Default");
     await expect(providerDropdown).not.toContainText(PRODUCT_NAME);
-    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toBeVisible();
+    // This instance never switches billing on, and nothing is billed while it is off: no "Billed via" note (#675).
+    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toHaveCount(0);
     await chooseOption(page, "Provider", "Acme Labs");
     await page.getByRole("combobox", { name: "Model" }).click();
     await expect(
@@ -605,7 +606,9 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       name: "Provider",
       exact: true,
     });
-    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toBeVisible();
+    // Billing is off on this instance, so the choice carries no "Billed via" note (#675).
+    await expect(providerDropdown).toBeVisible();
+    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toHaveCount(0);
     await providerDropdown.click();
     await expect(page.getByRole("option")).toHaveCount(2);
     await page.getByRole("option", { name: "Acme Labs" }).click();
@@ -883,12 +886,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await member.goto(`/w/${slugA}/settings/plan`);
 
     // What a member of a managed workspace reads on the plan page: the label, the counts and a percentage bar, and
-    // that the instance provides the models. No "Manage plan" for a member.
+    // that the models are provided by the product (not billed: billing is off here, #675). No "Manage plan" for a member.
     await expect(member.getByText(PLAN_LABEL)).toBeVisible();
     await expect(member.getByText("2 of 2, limit reached")).toBeVisible();
     await expect(
       member.getByText(
-        "The models for your reviews are provided and billed via code-review.com.",
+        "The models for your reviews are provided by code-review.com.",
       ),
     ).toBeVisible();
     // Two runs of four runs' worth of cost: exactly half, and the Dynamic line is there too.
@@ -1053,9 +1056,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expect(page.getByRole("combobox", { name: "Model" })).toBeVisible();
     await page.goto(`/w/${slugB}/settings/plan`);
     await expect(
-      page.getByText(
-        "The models for your reviews are provided and billed via code-review.com.",
-      ),
+      page.getByText(/The models for your reviews are provided/),
     ).toHaveCount(0);
     await expect(page.getByText("2 used, no limit").first()).toBeVisible();
   });
