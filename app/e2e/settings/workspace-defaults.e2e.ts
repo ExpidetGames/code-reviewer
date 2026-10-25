@@ -284,17 +284,15 @@ test.describe("the review defaults of a workspace", () => {
       await openSection(page, "Limits");
       await expect(limit()).toHaveValue(/^4(\.00)?$/);
 
-      // Lowered again to 2.00 USD: the stored 4.00 stays and says it is cut to the maximum, and sending it back unchanged is
-      // not refused.
+      // Lowered again to 2.00 USD: the stored 4.00 stays and says it is cut to the maximum.
       await changeAdminSetting(e2eEnv.multiAppUrl, { reviewMaxCostCents: 200 });
       await openLimits();
       await expect(limit()).toHaveAttribute("placeholder", "Max $2.00");
       await expect(field()).toContainText(
         "The saved limit of $4.00 is above the maximum, so reviews stop at $2.00.",
       );
-      await save();
 
-      // Left as it was found: no limit of the workspace.
+      // Left as it was found: no limit of the workspace (taking away the stored limit above the maximum is not refused).
       await limit().fill("");
       await save();
     } finally {
