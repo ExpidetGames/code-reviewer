@@ -26,6 +26,8 @@ vi.mock("@/llm/shared", () => ({
 vi.mock("@/review-settings/shared", () => ({
   reviewSettingsServiceFor: () => ({}),
 }));
+vi.mock("@/db/startup", () => ({ getDatabase: () => ({}) }));
+vi.mock("@/billing/enabled", () => ({ isBillingOn: async () => true }));
 vi.mock("@/usage/shared", () => ({ planPageLinkedFor: async () => false }));
 vi.mock("@/billing/shared", () => ({
   billingPageLinkedFor: async () => false,

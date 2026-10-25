@@ -8,46 +8,37 @@
 // file; this one pins the split.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { openSection } from "../../test-support/settings-sections.ts";
+import {
+  chooseOption,
+  openSection,
+} from "../../test-support/settings-sections.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => undefined, replace: () => undefined }),
 }));
 
-import { estimateReviewCost } from "../../review-settings/cost.ts";
 import { modelFromGlobalView } from "../../review-settings/ui/form-model.ts";
 import { GlobalSettingsPageContent } from "../../review-settings/ui/global-settings-page.tsx";
-import {
-  builtInReviewSettings,
-  type ReviewSettingField,
-  withoutModelFields,
-} from "../../review-settings/settings.ts";
 import {
   describeConfigStatus,
   type ConfigStatus,
 } from "../../config-status/status.ts";
 import { testGithubAppStatus } from "../../test-support/github-app.ts";
+import {
+  BUILT_IN,
+  managedModel,
+  untouchedGlobalView,
+} from "../../test-support/settings-form-models.ts";
 import { LlmSettingsPageContent } from "../../llm/ui/llm-settings-page.tsx";
 import { AdvancedSettingsPageContent } from "./advanced-settings-page.tsx";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
 afterEach(cleanup);
 
-const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 const GLOBAL_DATA = {
-  model: modelFromGlobalView({
-    overrides: {},
-    effective: BUILT_IN,
-    sources: Object.fromEntries(
-      Object.keys(BUILT_IN).map((field) => [field, "built_in"]),
-    ) as Record<ReviewSettingField, "built_in">,
-    cost: estimateReviewCost(BUILT_IN),
-    modelManagedByInstance: false,
-    builtIn: BUILT_IN,
-    updatedAt: null,
-    updatedBy: null,
-  }),
+  model: modelFromGlobalView(untouchedGlobalView()),
+  dynamicReviewEnabled: true,
 };
 
 function workingConfig(): ConfigStatus {
@@ -131,7 +122,7 @@ describe("the workspace settings sub-pages", () => {
 
 describe("the review defaults page (#656)", () => {
   // #656-T06
-  it("has the same sections as a project: Review, LLM, Trigger and Limits, and no setting of a single project", () => {
+  it("has the same sections as a project: Review, LLM, Trigger and Limits, with the kind and verdict as defaults and no skill", () => {
     render(
       <GlobalSettingsPageContent workspaceSlug="acme" data={GLOBAL_DATA} />,
     );
@@ -142,39 +133,43 @@ describe("the review defaults page (#656)", () => {
       "Trigger",
       "Limits",
     ]);
+    // #676-T01: the kind and the verdict are workspace defaults now; the skill stays a project's.
     expect(
-      screen.queryByRole("radiogroup", { name: "Review kind" }),
-    ).toBeNull();
+      screen.getByRole("radiogroup", { name: "Review kind" }),
+    ).toBeTruthy();
     expect(
-      screen.queryByRole("radiogroup", { name: "Review verdict" }),
-    ).toBeNull();
+      screen.getByRole("radiogroup", { name: "Review verdict" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Review skill")).toBeNull();
   });
 });
 
 describe("the review defaults of a workspace that uses the instance's key (#283)", () => {
-  // #433-T02
-  it("shows a note about the choice per project instead of the model fields, and no model name", async () => {
+  // #676-T01
+  it("offers the choice of the catalog, like a project, and no model name", async () => {
     const user = userEvent.setup();
-    const readable = withoutModelFields(BUILT_IN);
     render(
       <GlobalSettingsPageContent
         workspaceSlug="acme"
         data={{
-          model: {
-            ...GLOBAL_DATA.model,
-            inherited: readable,
-            effective: readable,
-            cost: null,
-            managed: true,
-          },
+          model: managedModel({ mode: "global" }),
+          dynamicReviewEnabled: true,
         }}
       />,
     );
 
     await openSection(user, "LLM");
-    expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
-    expect(screen.getByText(/chosen for each project/)).toBeTruthy();
-    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByText(/chosen for each project/)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe(
+      "Default",
+    );
+    expect(screen.getByText("Billed via code-review.com")).toBeTruthy();
+    await chooseOption(
+      user,
+      screen.getByRole("combobox", { name: "Provider" }),
+      "OpenAI",
+    );
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
     expect(screen.queryByLabelText("Fallback model")).toBeNull();
     expect(document.body.innerHTML).not.toContain(BUILT_IN.model);
   });

@@ -78,6 +78,12 @@ export async function setupReviewSettings(
     nativeCatalog?: NativeSelectionSource;
     /** #656: what a project that is created starts with; default nothing. */
     newProjectSettings?: NewProjectSettings;
+    /** #676: whether Dynamic Review can run with the workspace defaults; default: not asked. */
+    dynamicReady?: Parameters<
+      typeof createReviewSettingsService
+    >[0]["dynamicReady"];
+    /** The clock of the workspace defaults, so two saves can be told apart; default the real one. */
+    settingsClock?: () => Date;
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
@@ -92,7 +98,11 @@ export async function setupReviewSettings(
     undefined,
     options.newProjectSettings,
   );
-  const appSettings = createAppSettingsRepository(database, workspaceId);
+  const appSettings = createAppSettingsRepository(
+    database,
+    workspaceId,
+    options.settingsClock,
+  );
   let model = TEST_MODEL;
   let operatorsModels = options.operatorsModels === true;
   const service = createReviewSettingsService({
@@ -109,6 +119,9 @@ export async function setupReviewSettings(
             Promise.resolve({}),
         }),
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
+    ...(options.dynamicReady === undefined
+      ? {}
+      : { dynamicReady: options.dynamicReady }),
     ...(options.catalog === undefined ? {} : { catalog: options.catalog }),
     ...(options.providers === undefined
       ? {}

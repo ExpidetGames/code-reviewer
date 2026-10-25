@@ -60,8 +60,11 @@ export function resolveReviewSettings(layers: {
   return { settings, sources };
 }
 
-/** Where a project-only value comes from: the shipped default or the project itself. */
-export type ProjectDynamicSource = "built_in" | "project";
+/**
+ * Where a kind, Dynamic model, skill or verdict comes from: the shipped default, the workspace default (#676) or the
+ * project itself.
+ */
+export type ProjectDynamicSource = SettingSource;
 
 export type EffectiveProjectDynamic = {
   reviewKind: ProjectReviewKind;
@@ -81,10 +84,10 @@ export type EffectiveProjectDynamic = {
 };
 
 /**
- * The project-only settings of one project (#194): the kind, the Dynamic model and the skill. There is
- * no global layer here, so a value is either the project's or the shipped default. `builtIn.reviewSkill`
- * is always null; `defaultSkill` is the text of the shipped skill the app and the runner share.
- * Switching kinds changes nothing about the other values: each kind keeps its own model and skill.
+ * The kind, Dynamic model, verdict and skill of one project (#194): the project's value, else the workspace default (#676),
+ * else the shipped default, like every other setting; the skill has no workspace default. `builtIn.reviewSkill` is always null; `defaultSkill` is the text of the shipped
+ * skill the app and the runner share. Switching kinds changes nothing about the other values: each kind keeps its own model
+ * and skill.
  */
 export function resolveProjectDynamicSettings(layers: {
   builtIn: {
@@ -96,15 +99,20 @@ export function resolveProjectDynamicSettings(layers: {
     reviewSkill: string | null;
     reviewVerdict: ReviewVerdictMode;
   };
+  /** What the workspace sets for all its projects (#676); only the fields somebody set, never the skill. */
+  workspace?: Omit<ProjectDynamicOverrides, "reviewSkill">;
   project?: ProjectDynamicOverrides;
   defaultSkill: string;
 }): EffectiveProjectDynamic {
-  const { builtIn, project } = layers;
-  const has = <K extends ProjectDynamicSettingField>(field: K): boolean =>
-    project !== undefined && project[field] !== undefined;
-
-  const reviewSkillOverride = project?.reviewSkill ?? null;
-  const reviewSkillIsDefault = reviewSkillOverride === null;
+  const { builtIn, workspace, project } = layers;
+  const sourceOf = (
+    field: ProjectDynamicSettingField,
+  ): ProjectDynamicSource => {
+    if (project?.[field] !== undefined) return "project";
+    if (field !== "reviewSkill" && workspace?.[field] !== undefined)
+      return "global";
+    return "built_in";
+  };
 
   const sources = {} as Record<
     ProjectDynamicSettingField,
@@ -118,21 +126,36 @@ export function resolveProjectDynamicSettings(layers: {
     "catalogEntryDynamic",
     "reviewVerdict",
   ] as const)
-    sources[field] = has(field) ? "project" : "built_in";
-  // A null (or empty, already normalized to null) override means "no override" and resolves to the
-  // shipped default, never to another project's skill.
+    sources[field] = sourceOf(field);
+  // The skill has no workspace default (#676): the project's text, else the shipped one. A null (or empty, already
+  // normalized to null) override means "no override" and resolves to the shipped default, never to another project's skill.
+  const reviewSkillOverride = project?.reviewSkill ?? null;
+  const reviewSkillIsDefault = reviewSkillOverride === null;
   sources.reviewSkill = reviewSkillIsDefault ? "built_in" : "project";
 
   return {
-    reviewKind: project?.reviewKind ?? builtIn.reviewKind,
-    dynamicModel: project?.dynamicModel ?? builtIn.dynamicModel,
-    dynamicProvider: project?.dynamicProvider ?? builtIn.dynamicProvider,
-    catalogEntryDiff: project?.catalogEntryDiff ?? builtIn.catalogEntryDiff,
+    reviewKind:
+      project?.reviewKind ?? workspace?.reviewKind ?? builtIn.reviewKind,
+    dynamicModel:
+      project?.dynamicModel ?? workspace?.dynamicModel ?? builtIn.dynamicModel,
+    dynamicProvider:
+      project?.dynamicProvider ??
+      workspace?.dynamicProvider ??
+      builtIn.dynamicProvider,
+    catalogEntryDiff:
+      project?.catalogEntryDiff ??
+      workspace?.catalogEntryDiff ??
+      builtIn.catalogEntryDiff,
     catalogEntryDynamic:
-      project?.catalogEntryDynamic ?? builtIn.catalogEntryDynamic,
+      project?.catalogEntryDynamic ??
+      workspace?.catalogEntryDynamic ??
+      builtIn.catalogEntryDynamic,
     reviewSkill: reviewSkillOverride ?? layers.defaultSkill,
     reviewSkillIsDefault,
-    reviewVerdict: project?.reviewVerdict ?? builtIn.reviewVerdict,
+    reviewVerdict:
+      project?.reviewVerdict ??
+      workspace?.reviewVerdict ??
+      builtIn.reviewVerdict,
     sources,
   };
 }

@@ -18,6 +18,16 @@ export type ProjectSettingsChangedEvent = {
   kindChanged: boolean;
 };
 
+/** The review kind the workspace defaults hold changed (#676): every project that stores no kind of its own follows it. */
+export type WorkspaceDefaultsKindChangedEvent = {
+  /** The kind the projects that follow the defaults had before the save. */
+  previousKind: ProjectReviewKind;
+  /** The kind they have after it. */
+  nextKind: ProjectReviewKind;
+  /** The repositories of the projects that store no kind of their own. */
+  followingRepositoryIds: readonly string[];
+};
+
 export interface ReviewSettingsHooks {
   /**
    * Called in the transaction that wrote the project settings, so the write and everything it
@@ -27,6 +37,14 @@ export interface ReviewSettingsHooks {
    */
   onProjectSettingsChanged(
     event: ProjectSettingsChangedEvent,
+    executor: Kysely<Database>,
+  ): Promise<void>;
+  /**
+   * Called in the transaction that wrote the workspace defaults when their review kind changed and projects follow it (#676), with
+   * the same rules as `onProjectSettingsChanged`: use `executor` for every query; a rejection rolls the save back.
+   */
+  onWorkspaceDefaultsKindChanged?(
+    event: WorkspaceDefaultsKindChangedEvent,
     executor: Kysely<Database>,
   ): Promise<void>;
 }
