@@ -6,9 +6,9 @@ not self-hostable, and external contributions are not accepted.
 
 ## What this is
 
-Code Reviewer wraps [PR-Agent](https://github.com/qodo-ai/pr-agent): a Next.js app (`app/`) receives
-GitHub webhooks, queues review jobs and shows the results; a Python runner (`runner/`) picks up jobs
-and runs PR-Agent. Read `README.md` first, then `TESTING.md`, then the GitHub issue you work on
+Code Reviewer wraps [PR-Agent](https://github.com/qodo-ai/pr-agent): a Next.js app (`app/`, on Vercel) receives
+GitHub webhooks, queues review jobs and shows the results; a Dispatcher (`dispatcher/`) claims a job and starts a
+Worker (`runner/`, Python) in a fresh Vercel Sandbox VM, which runs PR-Agent or the Dynamic Review engine. Read `README.md` first, then `TESTING.md`, then the GitHub issue you work on
 and `CONTRIBUTING.md`.
 
 ## Layout
@@ -16,8 +16,8 @@ and `CONTRIBUTING.md`.
 | Path | Content |
 |---|---|
 | `app/` | Next.js 16 (App Router, TypeScript strict, pnpm) |
-| `runner/` | Python (uv): the worker that runs PR-Agent |
-| `dispatcher/` | TypeScript on Hono (pnpm): claims jobs and starts Workers (hosted deployment, #316) |
+| `runner/` | Python (uv): the Worker that runs one job with PR-Agent or the Dynamic Review engine |
+| `dispatcher/` | TypeScript on Hono (pnpm): claims jobs and starts Workers in Sandbox VMs (#316), and the golden snapshot pipeline |
 | `fakes/` | Fake servers and fixtures shared by all test suites |
 | `TESTING.md` | The testing strategy; source of truth for tests |
 | `Makefile` | One entry point per task for all parts |
@@ -51,7 +51,7 @@ Run from the repository root.
 | Lint, all parts | `make lint` (app: `pnpm --dir app lint` and `pnpm --dir app format:check`; dispatcher: `pnpm --dir dispatcher lint` and `format:check`; runner: `uv --directory runner run ruff check . ../fakes` and `ruff format --check . ../fakes`) |
 | Typecheck, all parts | `make typecheck` (app: `pnpm --dir app typecheck`; dispatcher: `pnpm --dir dispatcher typecheck`; runner: `uv --directory runner run pyright`) |
 | Unit tests, all parts | `make test-unit` (app: `pnpm --dir app test`; dispatcher: `pnpm --dir dispatcher test`; runner: `uv --directory runner run pytest -m unit`) |
-| Integration tests on the host | `make test-integration` |
+| Integration tests (need a Postgres server, see `TESTING.md`) | `make test-integration` |
 | E2E | `make test-e2e` (needs a browser, see `TESTING.md`) |
 
 `make verify` must be green before a PR is opened. While iterating, run only the affected tests

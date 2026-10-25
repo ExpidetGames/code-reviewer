@@ -126,7 +126,7 @@ review verdict (`APPROVE` or `REQUEST_CHANGES`, see [Check runs and the review v
 |---|---|---|
 | Members (`members`) | Read-only | Read a person's role in an organization with their user token, when a workspace connects an installation of that organization |
 
-An App that was imported from an older installation, or made by hand without these permissions, still
+An App made by hand without these permissions still
 reviews pull requests, but signing in with a GitHub account and binding organization installations need the
 account and organization permissions, and the check run needs **Checks**.
 The Integrations page lists them, and **Check the permissions** asks GitHub which of them the App really lacks.
@@ -229,12 +229,11 @@ integration is configured with a client id and secret and GitHub is switched on 
 - You can also link a GitHub account from the account page ("Your account") while you are signed in: GitHub asks
   you to authorize the App, which proves the account is yours.
 
-### An App that was imported, or made without the user authorization
+### An App made without the user authorization
 
 The Integrations page then shows **Enable sign-in with GitHub**: it names the callback address
 (`https://<domain>/api/auth/callback/github`) to add under *Callback URL* in the App's settings, and takes the
-client id and a client secret. The old separate GitHub OAuth app (`GITHUB_OAUTH_CLIENT_ID`,
-`GITHUB_OAUTH_CLIENT_SECRET`) is **not used any more** and is never imported.
+client id and a client secret.
 
 Until the user authorization is configured, "Connect GitHub" in a workspace is unavailable on a multi-tenant
 instance, and the page says so.
@@ -326,22 +325,6 @@ it reads the workspace's own connections) if the repository is missing, and swit
   with 401: redeliver them under *Recent Deliveries* (a redelivery uses the same delivery id and is handled
   normally).
 - **Lost key:** generate a new one as above. There is no way to download the old one again.
-
-## Older installations
-
-An installation that still has `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and
-`GITHUB_APP_PRIVATE_KEY` (or `GITHUB_APP_PRIVATE_KEY_PATH`) in its environment keeps working through the
-update to accounts: on its first start the app imports them **once** into the encrypted store (after a backup
-of the database, in one transaction), and from then on the database is the only source and the variables are
-ignored (the log lists their names). A value that is missing or unusable (a private key that is not an RSA key, a
-slug with a space) is not imported: the log and the notice in the admin portal name the variable, the Integrations
-tile says GitHub is not configured, and you enter the App in the portal. The imported App has no user
-authorization and no "private app" flag yet: the Integrations page asks for the client id and secret of the App
-(to switch on sign in with GitHub) and whether the App can only be installed on its own account, and its
-**Check permissions** button says which of the permissions "Checks", "Email addresses" and "Members" the App
-lacks. `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` (the separate OAuth app of the earlier sign in) are
-not used any more and not imported. The steps of the update are in
-[`deployment-coolify.md`](deployment-coolify.md), "Updating an installation from before accounts".
 
 ## Checklist for whoever sets it up
 

@@ -10,8 +10,7 @@ publishes as one persistent summary comment. The decisions are in epic
 > **Status: shippable, off by default.** The engine is in the Dynamic runner image, the runner proves
 > its isolation at start and advertises `opencode` only when the proof passes, and the instance admin
 > has a switch for the rollout gate. Nothing turns Dynamic Review on by itself: the gate is off in
-> every shipped configuration, `compose.dynamic.yml` is opt-in, and the default runner image holds no
-> engine. The steps to switch it on are under "Activation, step by step"; whether and when to do it
+> every shipped configuration, and the Worker image holds the engine. The steps to switch it on are under "Activation, step by step"; whether and when to do it
 > on an instance is the operator's decision. Read "Known limitations and residual risks" first.
 
 ## What exists, and what does not
@@ -28,7 +27,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup                                                                                                                                                                                                | Shipped (#197 parts 2a and 2b, #244)                                                                                                  |
 | The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform. On another platform such as arm64 the image still builds, without an engine, and its runner serves Diff jobs only (#264); an arm64 engine needs its own pinned digests) | Shipped (#202, #264)                                                                                                                  |
 | Startup self-check that advertises `opencode` only when everything holds, with a stable logged reason otherwise                                                                                                                                                                                                                                                              | Shipped (#202)                                                                                                                        |
-| Deployment: `compose.dynamic.yml` (Docker Compose, opt-in override file) and the `runner-dynamic` service of `compose.coolify.yml` (Coolify, built and started with the rest, **untested on a real Coolify**)                                                                                                                                                                | Shipped (#202, #264)                                                                                                                  |
+| Deployment: the Worker image (`runner/Dockerfile`, target `sandbox`) in the golden snapshot of the hosted deployment, run in a Vercel Sandbox VM with the flags of the hardened container spec                                                                                                                                                                               | Shipped (#202, #264)                                                                                                                  |
 | Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md`                                                                                                                                                                       | Shipped (#202)                                                                                                                        |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time                                                                                                                                                                                                                                                                              | **Manual step, not done** (needs a real deployment target, see "Capacity")                                                            |
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253)                                                       | Shipped (#251, #252, #253)                                                                                                            |
@@ -75,7 +74,7 @@ publishes as one persistent summary comment. The decisions are in epic
    place** by every later run (a person's comment that merely quotes the marker is never edited). It
    writes with the job's own installation token; the engine never sees it. A failed run writes
    nothing, a failed write fails the run with its own stable code, and the Run links the comment.
-   Right before the write the process asks the job loop whether the job is still its own (#260): the
+   Right before the write the process asks the Worker whether the job is still its own (#260): the
    loop beats the heart once and answers from the app (a lost lease and a cancelled job are both
    409; a 5xx, a reset or a timeout is tried again up to three times within 40 seconds, and a 200
    counts only as the contract's heartbeat answer for this job). Anything but a clear yes ends the
@@ -91,7 +90,7 @@ The container, not a sandbox, is the boundary (lead decision of 2026-10-12): no 
 namespaces, no host kernel setting beyond the `nf_tables` support every current kernel has.
 
 - **Two users in one container.** The job process is the **supervisor** and runs as root with exactly
-  the capabilities listed in `compose.dynamic.yml` (`SETUID`, `SETGID`, `KILL`, `CHOWN`,
+  the capabilities of the hardened container spec, `contracts/worker-container.v1.json` (`SETUID`, `SETGID`, `KILL`, `CHOWN`,
   `DAC_OVERRIDE`, `FOWNER` for its whole life; `NET_ADMIN` and `SETPCAP` for container startup only,
   see below; everything else dropped, `no-new-privileges` on). It holds
   every credential and the model proxy. The **engine** runs as the dedicated unprivileged user
@@ -122,14 +121,14 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   before it drops `NET_ADMIN`. It asks the kernel by installing and removing a throw-away
   `table inet` with a `reject` rule (it matches no process).
 
-  |                               | Full ruleset                                                                                           | Fallback ruleset                                                                                                                   |
-  | ----------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-  | Chosen when                   | the kernel accepts `table inet` and `reject` (every ordinary Linux host, Docker host and Coolify host) | `inet` or `reject` is refused. Some VM kernels, for example the ones of hosted sandbox VMs, only support the nf_tables `ip` family |
-  | nft table                     | `table inet code_reviewer_engine_<uid>`                                                                | `table ip code_reviewer_engine_<uid>`                                                                                              |
-  | Last rule for the engine user | `reject with icmpx type admin-prohibited`: refused at once                                             | `drop`: no answer, a connection attempt times out                                                                                  |
-  | IPv4                          | proxy port and engine port on `127.0.0.1`, the engine's replies, nothing else                          | the same three accepts, nothing else                                                                                               |
-  | IPv6                          | covered by the same table (every packet of the user is rejected)                                       | **not covered by an `ip` table**: switched off, and proven off (below)                                                             |
-  | Startup log line              | `egress rules: full (inet)`                                                                            | `egress rules: fallback (ip, ipv6 disabled)`                                                                                       |
+  |                               | Full ruleset                                                                             | Fallback ruleset                                                                                                                   |
+  | ----------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+  | Chosen when                   | the kernel accepts `table inet` and `reject` (every ordinary Linux host and Docker host) | `inet` or `reject` is refused. Some VM kernels, for example the ones of hosted sandbox VMs, only support the nf_tables `ip` family |
+  | nft table                     | `table inet code_reviewer_engine_<uid>`                                                  | `table ip code_reviewer_engine_<uid>`                                                                                              |
+  | Last rule for the engine user | `reject with icmpx type admin-prohibited`: refused at once                               | `drop`: no answer, a connection attempt times out                                                                                  |
+  | IPv4                          | proxy port and engine port on `127.0.0.1`, the engine's replies, nothing else            | the same three accepts, nothing else                                                                                               |
+  | IPv6                          | covered by the same table (every packet of the user is rejected)                         | **not covered by an `ip` table**: switched off, and proven off (below)                                                             |
+  | Startup log line              | `egress rules: full (inet)`                                                              | `egress rules: fallback (ip, ipv6 disabled)`                                                                                       |
 
   The policy is the same in both: the engine user reaches the job's model proxy and its own server
   port on loopback and nothing else; a refused attempt and a dropped one are both "not reached".
@@ -139,7 +138,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   `net.ipv6.conf.{default,all,<each interface>}.disable_ipv6` as far as the container lets it. A
   container's `/proc/sys` is normally read-only, so the container spec of such a host must set
   `net.ipv6.conf.all.disable_ipv6=1` and `net.ipv6.conf.default.disable_ipv6=1` itself (for Docker
-  `--sysctl`, in a compose file `sysctls:`); the runner does not fail on a refused write but on the
+  `--sysctl`); the runner does not fail on a refused write but on the
   proof, which it takes from the kernel and from the engine user: every `disable_ipv6` reads `1`,
   `/proc/net/if_inet6` is empty, `/proc/net/ipv6_route` has no route that can carry a packet (the
   kernel's always-present "unreachable" entries do not count), `::1` cannot be bound, and as the
@@ -154,20 +153,20 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   privileged suite passes a `detect` argument to the startup step (`secure_startup(..., detect=...)`),
   the same kind of seam as its `install` and `drop` arguments. It is a Python argument, not an
   environment variable, a setting or a job field: nothing in the runner passes it (a unit test scans
-  the sources for that) and the loop never reads the mode from its environment. The loop hands the
-  mode it found to the Dynamic job process (`RUNNER_EGRESS_MODE`, set by the loop alone and
+  the sources for that) and the Worker never reads the mode from its environment. The Worker hands the
+  mode it found to the Dynamic job process (`RUNNER_EGRESS_MODE`, set by the Worker alone and
   dropped from the container's own environment), which proves the properties of that mode again; a
   missing value means the full mode and an unknown one stops the job. The suite's fallback pass sets
   its own harness variable (`CR_PRIVILEGED_EGRESS_MODE`) that only the test files read. The tests of
   the rules run for both rulesets, and the full ruleset's assertion of an immediate refusal is kept
   as it was; the fallback accepts a refusal or a timeout there.
 
-- **Cleanup.** At the end of a job, on SIGTERM (the job loop's way to end a job on lease loss,
+- **Cleanup.** At the end of a job, on SIGTERM (the Worker's way to end a job on lease loss,
   shutdown and timeout) and in the watchdog, the supervisor kills the engine's process group and then
   every process of the engine user, also helpers that left the group with `setsid()`, removes the
   user's processes and deletes the job directory (the rules are static and stay; the lease on the user and its group is released with the
   process). A job that was killed without a chance to clean up (SIGKILL, an OOM kill) leaves its
-  engine user's processes behind; the job loop (root) sweeps the user after every Dynamic job process
+  engine user's processes behind; the Worker (root) sweeps the user after every Dynamic job process
   has ended, and every job sweeps it again as its first step after taking the lease. If a sweep cannot
   finish, the next job does not start (`dynamic_isolation_self_check_failed`).
   A second Dynamic job on the same user is refused by the lease with the same code: run one Dynamic
@@ -176,10 +175,10 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   `SETPCAP` because the capabilities of a container are fixed at start. The runner's entry point
   installs the static rules, then drops both from the bounding set and from its own sets, before its
   event loop and before any other thread exists (a runner that cannot confirm the drop does not
-  start). From then on the loop, every job process, the supervisor and the engine have a bounding set
+  start). From then on the Worker, every job process, the supervisor and the engine have a bounding set
   without them: `nft` fails for all of them, root included, and no process can add or remove a rule
-  for the life of the container. It is per container, not forever: the container restarts
-  (`restart: unless-stopped`) and gets `NET_ADMIN` again, so what a restart runs must not be
+  for the life of the container. It is per container, not forever: a new container starts
+  with `NET_ADMIN` again, so what a restart runs must not be
   changeable by a compromised root supervisor. That is what the read-only root filesystem is for
   (next item, #249).
   If the rules cannot be installed (no `nft`, no `nf_tables` at all) the capabilities are dropped anyway and
@@ -188,8 +187,8 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   (`/proc/sys/net/ipv4/ip_local_port_range`); a port inside it, or a range that cannot be read,
   means the rules are not installed and every Dynamic job fails closed. Keep the defaults (10180, 10181) or other ports below the range.
   Only PID 1 (`tini`) keeps them. Do not run the container with `seccomp=unconfined`.
-- **Read-only root filesystem (#249).** `compose.dynamic.yml` runs the container with
-  `read_only: true`: nothing in the image can be written, not even by root with `DAC_OVERRIDE`, so
+- **Read-only root filesystem (#249).** the hardened container spec runs the container with
+  `--read-only`: nothing in the image can be written, not even by root with `DAC_OVERRIDE`, so
   `nft`, `tini`, the pinned tools and pins, and the runner source stay as built and a restart cannot
   run altered code with `NET_ADMIN`. The only writable paths are three private `tmpfs`, all
   `noexec,nosuid,nodev`, empty again after every restart: `/tmp` (512 MiB, world-writable with the
@@ -204,9 +203,8 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   charged to the container's memory limit, `/tmp` counts against the 2 GiB (see "Capacity"): a
   repository export is limited to 64 MiB, a preparation to 256 MiB and a download to 256 MiB (#296), but a runaway engine that
   fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
-  not add `volumes` or widen the tmpfs; the file test pins them. It is not a way to a read-only
-  Diff runner: only `compose.dynamic.yml` and the `runner-dynamic` service of `compose.coolify.yml` use it.
-- **Nothing mounted, nothing shared.** Besides those three tmpfs, `compose.dynamic.yml` has no
+  not add `volumes` or widen the tmpfs; the file test pins them. Every Worker, Diff or Dynamic, runs in it.
+- **Nothing mounted, nothing shared.** Besides those three tmpfs, the spec has no
   `volumes`, `network_mode`, `pid`, `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
   AF_UNIX, and this is what keeps that gap empty. The privileged suite reads `/proc/net/unix` as the
   engine user and asserts that no listener other than its own exists and that no Docker socket is
@@ -220,11 +218,10 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   startup phase (the container's created-with set) and a job phase (after the production startup
   step) (TESTING.md, "Privileged suite"); its CI step is part of the engine workflow.
 
-## The Dynamic runner image
+## The Worker image
 
-`runner/Dockerfile` builds two images from one shared base. The default target, `runtime`, is the
-PR-Agent-only runner and is the last stage, so a plain `docker build -f runner/Dockerfile .` gives
-it. The `dynamic` target adds:
+`runner/Dockerfile` builds one image, the `sandbox` target, the Worker image of the hosted deployment (the golden
+snapshot builds it). Besides PR-Agent it holds:
 
 | Part                                                                                  | Where                                               | How it is pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -234,12 +231,7 @@ it. The `dynamic` target adds:
 | The engine user `engine` (uid and gid 10101, no home, no login shell, no other group) | `/etc/passwd` of the image                          | Fixed numeric ids, distinct from the Diff job user 10001                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Both pin files                                                                        | `/opt/code-reviewer/pins/`, owned by root           | The runner's self-check compares the installed files with them                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
-**Why a separate image and not one image.** The engine adds about 186 MB, and `nft`, `rg`, a second
-user and a deployment shape that needs root and eight capabilities are things a Diff-only
-installation never uses. A smaller image with fewer executables is a smaller attack surface, and the
-default runner can never advertise `opencode`: it has no engine, no engine user and no `nft`, and its
-smoke test asserts exactly that. Both images start as the unprivileged user 10001; the Dynamic image
-only becomes a root supervisor through `compose.dynamic.yml` (`user: "0:0"` plus the capability list).
+**One image for both engines.** The engine adds about 186 MB, and `nft`, `rg`, a second user and a deployment shape that needs root and eight capabilities are what a Dynamic job needs; a Diff job runs in the same image (as the Diff job user 10001, never as root) so that the snapshot holds one image. The Worker advertises `opencode` only when its startup self-check passes, and its smoke test asserts the tools, the users and the pins. The image starts as the unprivileged user 10001 and becomes a root supervisor only through the container spec (`user: "0:0"` plus the capability list).
 
 **What is trusted.** The build downloads from GitHub release URLs and accepts the bytes only if they
 equal the pinned size and SHA-256; at start the runner hashes the installed files again. Nothing at
@@ -260,7 +252,7 @@ stable reason (never a value) and keeps serving Diff jobs.
 | Reason (in the log)                                            | What did not hold                                                                                                                                                                                                                                                                                                                                             |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `not_a_dynamic_runner`                                         | No engine user is configured: this is the default runner (information, not a warning)                                                                                                                                                                                                                                                                         |
-| `not_root_supervisor`                                          | The process is not root; `compose.dynamic.yml` sets `user: "0:0"`                                                                                                                                                                                                                                                                                             |
+| `not_root_supervisor`                                          | The process is not root; the container spec sets `user: "0:0"`                                                                                                                                                                                                                                                                                                |
 | `engine_user_invalid`                                          | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image                                                                                                                                                                                                |
 | `network_rules_not_installed`                                  | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel (a kernel with only the `ip` family gets the fallback ruleset instead, #345), no `nft`, or a slot port inside the kernel's ephemeral range                                                                                                         |
 | `capabilities_not_dropped`                                     | The process still holds `NET_ADMIN` or `SETPCAP`                                                                                                                                                                                                                                                                                                              |
@@ -281,7 +273,7 @@ proves nothing about isolation; what cannot be known at start (the sealed read-o
 unreadable private state, the network again) is proven for every job before its engine starts, and a
 failure there ends that job with `dynamic_isolation_self_check_failed`.
 
-The loop hands the job process of a Dynamic job the engines it advertised, the verified engine
+The Worker hands the job process of a Dynamic job the engines it advertised, the verified engine
 command, the verified `rg` (the engine runs exactly that file, first on its `PATH`) and the
 operator's `RUNNER_DYNAMIC_CAPABILITIES` (a ceiling for the descriptor the job brings, #279); nothing an operator sets under `RUNNER_OPENCODE_COMMAND`,
 `RUNNER_DYNAMIC_RIPGREP` or `RUNNER_ADVERTISED_ENGINES` reaches a job. A Dynamic job that arrives at
@@ -1258,95 +1250,76 @@ without publishing:
 
 ## Errors an operator sees
 
-| Code                                                                               | Meaning                                                                                                                                                                                                                                                                                                                               | What to check                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dynamic_review_disabled`                                                          | The instance gate is off                                                                                                                                                                                                                                                                                                              | Turn the gate on (below) when the rollout is ready                                                                                                                                                                                                                                                                                                                                                          |
-| `no_capable_runner`                                                                | No runner advertised `opencode` within the timeout                                                                                                                                                                                                                                                                                    | Is a Dynamic runner running, and did its self-check pass? (`docker compose logs runner-dynamic`)                                                                                                                                                                                                                                                                                                            |
-| `dynamic_engine_unavailable`                                                       | The runner (on hosted: the Worker) got a Dynamic job but its startup self-check did not pass, so it has no engine; nothing was run                                                                                                                                                                                                    | Self-hosted, a capable runner should be the only one to get a Dynamic job: read the runner's log for the failed property and report a job that reached another. Hosted: the Dispatcher runs no probe, so this is how a container that cannot be hardened shows. Run the deploy canary on the live deployment, read the reason, and redeploy through the pipeline (`docs/deployment-vercel.md`, section 5.3) |
-| `dynamic_isolation_self_check_failed`                                              | The startup self-check did not prove user, export and network                                                                                                                                                                                                                                                                         | The runner logs the failed property, never a value                                                                                                                                                                                                                                                                                                                                                          |
-| `dynamic_model_features_unsupported`                                               | The model's metadata (or the operator's description) says it lacks tool choice or structured output, or no provider supports the parameters                                                                                                                                                                                           | The model (OpenRouter's page lists the supported parameters); `RUNNER_DYNAMIC_CAPABILITIES` if you set one, since it is a ceiling                                                                                                                                                                                                                                                                           |
-| `lease_lost`                                                                       | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written                                                                                                                                                            | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again                                                                                                                                                                                                                                                                                              |
-| `dynamic_config_invalid`                                                           | Model, skill or limits of the job are unusable; or no description of the model has unit costs (the provider's metadata stated none and the operator named none); or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling                                                                                                   | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`)                                                                                                                                                                                                                                                                                                    |
-| `cost_limit_reached`                                                               | A **Diff** Review sent no further model request because its calls had cost as much as the cost limit of its project (#666)                                                                                                                                                                                                            | The project's Limits setting, or, when `usage.stoppedEarly` says `cost_limit`, the maximum cost per review of code-review.com (not a project setting)                                                                                                                                                                                                                                                       |
-| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost                                                                                                                                                                                                                                               | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD`                                                                                                                                                                                                                                                                                                                                                                |
-| `llm_output_invalid`                                                               | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn and the recovery ended (the engine's `finish=stop` covers prose, silence and a broken tool call alike; `last model calls: ...` tells which; `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES`                                                                                                                                                                                                                                                                                                   |
-| `llm_context_length_exceeded`                                                      | The provider said the request is larger than the model's context                                                                                                                                                                                                                                                                      | The model's context window (its metadata, or `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`); a smaller pull request                                                                                                                                                                                                                                                                              |
+| Code                                                                               | Meaning                                                                                                                                                                                                                                                                                                                               | What to check                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dynamic_review_disabled`                                                          | The instance gate is off                                                                                                                                                                                                                                                                                                              | Turn the gate on (below) when the rollout is ready                                                                                                                                                                                  |
+| `no_capable_runner`                                                                | No runner advertised `opencode` within the timeout                                                                                                                                                                                                                                                                                    | Did the Worker's self-check pass? (the deploy canary, `dispatcher/README.md`)                                                                                                                                                       |
+| `dynamic_engine_unavailable`                                                       | The runner (on hosted: the Worker) got a Dynamic job but its startup self-check did not pass, so it has no engine; nothing was run                                                                                                                                                                                                    | The Dispatcher runs no probe, so this is how a container that cannot be hardened shows. Run the deploy canary on the live deployment, read the reason, and redeploy through the pipeline (`docs/deployment-vercel.md`, section 5.3) |
+| `dynamic_isolation_self_check_failed`                                              | The startup self-check did not prove user, export and network                                                                                                                                                                                                                                                                         | The runner logs the failed property, never a value                                                                                                                                                                                  |
+| `dynamic_model_features_unsupported`                                               | The model's metadata (or the operator's description) says it lacks tool choice or structured output, or no provider supports the parameters                                                                                                                                                                                           | The model (OpenRouter's page lists the supported parameters); `RUNNER_DYNAMIC_CAPABILITIES` if you set one, since it is a ceiling                                                                                                   |
+| `lease_lost`                                                                       | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written                                                                                                                                                            | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again                                                                                                                      |
+| `dynamic_config_invalid`                                                           | Model, skill or limits of the job are unusable; or no description of the model has unit costs (the provider's metadata stated none and the operator named none); or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling                                                                                                   | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`)                                                                                                                            |
+| `cost_limit_reached`                                                               | A **Diff** Review sent no further model request because its calls had cost as much as the cost limit of its project (#666)                                                                                                                                                                                                            | The project's Limits setting, or, when `usage.stoppedEarly` says `cost_limit`, the maximum cost per review of code-review.com (not a project setting)                                                                               |
+| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost                                                                                                                                                                                                                                               | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD`                                                                                                                                                                                        |
+| `llm_output_invalid`                                                               | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn and the recovery ended (the engine's `finish=stop` covers prose, silence and a broken tool call alike; `last model calls: ...` tells which; `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES`                                                                                                                           |
+| `llm_context_length_exceeded`                                                      | The provider said the request is larger than the model's context                                                                                                                                                                                                                                                                      | The model's context window (its metadata, or `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`); a smaller pull request                                                                                                      |
 
 Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not
 carried across kinds (lead decision of 2026-10-13, see #199). Cancelling a run kills its engine's
 whole process group and removes its temporary directory.
 
-## The opt-in runner (`compose.dynamic.yml`)
+## The Worker for Dynamic Review
 
-`compose.dynamic.yml` is an override file that adds a second runner, `runner-dynamic`, next to the
-Diff runner of `compose.yml`. It builds the `dynamic` target from the checkout (no image is
-published):
+Every Worker is a container of the Worker image, started by the Sandbox-Launcher in a fresh Vercel Sandbox VM with the
+flags of the hardened container spec (`contracts/worker-container.v1.json`). There is no separate Dynamic deployment:
+the Dispatcher serves Dynamic jobs when `opencode` is among its `DISPATCHER_ENGINES` (the default) and the snapshot pair
+is set, and the deploy canary proves the container's hardening before a deployment is promoted
+(`docs/deployment-vercel.md`, section 5.1; `dispatcher/README.md`, "The canary probe").
 
-```sh
-docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
-```
+| Setting (the Worker's environment) | Default | Why                                                                                                                                                                                                            |
+| ---------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RUNNER_DYNAMIC_MAX_COST_USD`      | empty   | Fallback (#689): the most one run may cost, in USD, when the app sends no maximum with the job; empty is 1.00; up to 20 (see "Hard limits")                                                                    |
+| `RUNNER_DYNAMIC_CAPABILITIES`      | empty   | Optional ceiling and override of the model description (see "The model"). Empty: the description the app sends with the job applies, or, without one, the one built into the runner for the default model only |
 
-| Setting                             | Default                              | Why                                                                                                                                                                                                            |
-| ----------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RUNNER_DYNAMIC_CONCURRENCY`        | 1                                    | One Dynamic job at a time until the memory matrix below exists                                                                                                                                                 |
-| `RUNNER_DYNAMIC_MEMORY_LIMIT`       | `2g`                                 | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal)                                                                                             |
-| `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m`                              | The soft reservation under the limit                                                                                                                                                                           |
-| `RUNNER_DYNAMIC_IMAGE`              | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one                                                                                                                                                 |
-| `RUNNER_DYNAMIC_MAX_COST_USD`       | empty                                | Fallback (#689): the most one run may cost, in USD, when the app sends no maximum with the job; empty is 1.00; up to 20 (see "Hard limits")                                                                    |
-| `RUNNER_DYNAMIC_CAPABILITIES`       | empty                                | Optional ceiling and override of the model description (see "The model"). Empty: the description the app sends with the job applies, or, without one, the one built into the runner for the default model only |
-
-The container runs the supervisor as root with only the capabilities of "The engine boundary", sets
-`no-new-privileges`, bounds its process count (512) and has no swap, so a memory peak shows up as an
-OOM kill of the job rather than as a slow host. It publishes no port and reaches only the app. The
-slot's proxy and engine ports are fixed (10180, 10181); they, the engine user and the Diff job user
-belong to the image and the file, not to settings. Do not set `RUNNER_OPENCODE_COMMAND` by hand: the
-runner ignores it.
-
-With one slot (`RUNNER_DYNAMIC_CONCURRENCY=1`) a long Diff job can occupy the Dynamic runner's only
-slot, because that runner also serves Diff jobs. A Dynamic job can then end with `no_capable_runner`
-although a capable runner exists. Keep the Diff runner of `compose.yml` for Diff work and do not raise
-the concurrency before the memory matrix exists; a later change can keep Diff jobs off this runner.
+The memory limit and the VM size per Worker kind are the Dispatcher's `DISPATCHER_WORKER_CONFIG`
+(`docs/deployment-vercel.md`, section 6). The container runs the supervisor as root with only the capabilities of "The
+engine boundary", sets `no-new-privileges`, bounds its process count and has no swap, so a memory peak shows up as an
+OOM kill of the job rather than as a slow host. It publishes no port and reaches only the app. The slot's proxy and
+engine ports are fixed (10180, 10181); they, the engine user and the Diff job user belong to the image and the spec, not
+to settings. Do not set `RUNNER_OPENCODE_COMMAND` by hand: the Worker ignores it.
 
 ## Activation, step by step
 
-This is the order to follow; every step can be stopped and rolled back. Nothing in it is done by
-installing the files.
+This is the order to follow; every step can be stopped and rolled back.
 
 **Deploy order.** `base.attemptedShas` (#255) is only sent when it is not empty and
-`base.attemptedShasTruncated` (#257) only when it is true; a runner from before the respective issue
-rejects the key (its job contract is closed). Update the app and the Dynamic runner image together, or
-the runner first. A newer runner with an older app is safe: an absent key means none and false.
+`base.attemptedShasTruncated` (#257) only when it is true; a Worker from before the respective issue
+rejects the key (its job contract is closed). A release deploys the App before the Dispatcher and the snapshot, so the
+live App can meet an older Worker for a few minutes; a newer Worker with an older app is safe: an absent key means none
+and false.
 
-**Before you start.** A Linux Docker host (Docker Engine with Compose v2) whose kernel has
-`nf_tables` (every current distribution kernel; the self-check tells you when it does not), that can
-give the Dynamic runner container at least 2 GiB; an app that is already running with the workspace's
-LLM key entered (Settings, LLM; Dynamic Review reuses it, there is no other key); and, for the
-model you choose, the knowledge of what it supports (tool choice "required" and structured output).
+**Before you start.** A hosted deployment (`docs/deployment-vercel.md`) whose last deploy canary passed, with the
+workspace's LLM key entered (Settings, LLM; Dynamic Review reuses it, there is no other key); and, for the model you
+choose, the knowledge of what it supports (tool choice "required" and structured output).
 
 1. **Upgrade every app instance** to the version that routes by `review_kind`
    (`contracts/README.md`, "Rolling out Dynamic Review"). A previous-release app on the same database
-   could hand a Dynamic row to a runner as an untagged Diff job. Do not continue until all instances
+   could hand a Dynamic row to a Worker as an untagged Diff job. Do not continue until all instances
    are upgraded.
 2. **Describe the model** only if you want to narrow what the app reads from the provider's metadata
    ("The model"): `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true, "structured_output": true,
 "max_output_tokens": 32768, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}` is a ceiling for every
-   Dynamic job of this runner. Nothing is needed for the default model or for any tool-capable OpenRouter
-   model whose metadata states its window and prices. Review the memory settings of the table above.
-3. **Deploy the Dynamic runner:**
-   `docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait`.
-   The first build downloads the pinned engine (about 60 MB) and verifies it; if the bytes are not the
-   pinned ones the build fails and the Dynamic runner is not started. Containers that already run
-   (the app, the Diff runner) stay up: only the new service is missing.
-4. **Verify the self-check.** `docker compose logs runner-dynamic | grep "Dynamic Review"` must show
-   `Dynamic Review: opencode is advertised, the startup self-check passed`. If it shows `opencode is
-not advertised` the reason is in the same line: see the table in "The startup self-check". Fix it
-   and recreate the container. Do not go on while it is not advertised. The Diff runner and the Diff
-   jobs of this runner are unaffected either way.
-5. **Turn the gate on.** As instance admin open **Admin, Setup, Instance, Dynamic Review**, tick _Allow
+   Dynamic job. Nothing is needed for the default model or for any tool-capable OpenRouter
+   model whose metadata states its window and prices.
+3. **Verify the self-check.** The deploy canary (`pnpm --dir dispatcher probe:canary`, workflow
+   `dispatcher-canary.yml`) must report `opencode` among the engines. If it does not, the reason is in the same
+   verdict: see the table in "The startup self-check". Fix it and redeploy. Do not go on while it is not advertised. Diff
+   jobs are unaffected either way.
+4. **Turn the gate on.** As instance admin open **Admin, Setup, Instance, Dynamic Review**, tick _Allow
    Dynamic Review on this instance_, confirm that step 1 is done and save. The control is server side
    and admin only; it uses the instance settings setter (lock, then cancellation), never raw SQL.
-   Nothing changes for existing projects: all are Diff until step 6.
-6. **Choose one project to try it on:** set its review kind to Dynamic on its settings page. Open a
+   Nothing changes for existing projects: all are Diff until step 5.
+5. **Choose one project to try it on:** set its review kind to Dynamic on its settings page. Open a
    pull request (or press the play button of the project in the project list and pick one) and look at the Run: the kind, the model and a result URL are
    visible, and the previous successful summary stays in place if a run fails.
 
@@ -1355,63 +1328,49 @@ not advertised` the reason is in the same line: see the table in "The startup se
 1. Switch the gate off in the same admin card. That stops new Dynamic jobs and cancels the waiting ones
    with `dynamic_review_disabled`; **running jobs finish** on their leases. Projects set to Dynamic
    get a visibly failed run, never a silent Diff review.
-2. To stop the Dynamic runner: `docker compose -f compose.yml -f compose.dynamic.yml stop runner-dynamic`
-   (it ends running jobs within the 90-second grace period) and, to remove it,
-   `docker compose -f compose.yml -f compose.dynamic.yml rm -f runner-dynamic`. The Diff runner and
-   the data are not touched.
-3. Before any **downgrade of the app**, quiesce the runners, check that no Dynamic engine process is
-   left and that no Dynamic job is `queued` or `running`, as `contracts/README.md` says. Switching a
-   project from Dynamic back to Diff starts a fresh summary comment.
-
-**Coolify.** The `runner-dynamic` service is part of `compose.coolify.yml` (#264): the existing
-Coolify resource builds and starts it with the app and the Diff runner after the next release, and a
-file test keeps it equal to the service of `compose.dynamic.yml`. It does nothing until the gate is
-turned on (it also takes Diff jobs, see "Capacity"), and the runner has the capability descriptor of the default model built in. Read the section
-"Dynamic Review runner" of `docs/deployment-coolify.md` first. It has **not been tested on a real
-Coolify instance**.
+2. To stop Dynamic work at the Dispatcher too, remove `opencode` from `DISPATCHER_ENGINES`
+   (`docs/deployment-vercel.md`, section 5.4).
+3. Before any **downgrade of the app**, check that no Dynamic job is `queued` or `running`, as
+   `contracts/README.md` says. Switching a project from Dynamic back to Diff starts a fresh summary comment.
 
 ## Capacity: slots, memory and what is not measured
 
-The Dynamic runner is also a Diff runner: it keeps `pr-agent` among its engines (as every runner
-does), so the app hands it Diff jobs as well. Its one slot is shared: a Diff job (up to
-`RUNNER_JOB_TIMEOUT_SECONDS`, 20 minutes by default) can occupy it once the gate is on, and a Dynamic
-run then waits for it. Dynamic jobs wait for the gate and for an advertising runner; Diff jobs are
-shared by both runners, and the total Diff capacity is the Diff runner's slots plus this one.
+Every Worker runs exactly one job in a VM of its own, so a Diff job never occupies a Dynamic job's slot; what the
+Dispatcher's pool cap (`DISPATCHER_MAX_RUNNING`) limits is the number of VMs.
 
-The shipped defaults are **one Dynamic slot** (`RUNNER_DYNAMIC_CONCURRENCY=1`) and a **2 GiB limit with
-1.5 GiB reserved and no swap**: at least 1 GiB per slot plus the runner and proxy reserve. That is the
+The shipped defaults are **one Dynamic job per VM** and a **container limit of 1536m of a 2 GB VM with no swap** (`DISPATCHER_WORKER_CONFIG`, `docs/deployment-vercel.md`, section 6): at least 1 GiB per slot plus the runner and proxy reserve. That is the
 spike's conservative proposal, not a measurement. The spike's stock trace (11 model calls, 5.8 s,
 596.57 MiB peak RSS of the engine process with fake model answers) is **not** a capacity figure: it
 excludes the export's page cache, the proxy, the runner and helper processes, and it used a tiny
-repository. Do not raise the concurrency, and do not lower the limit below 1 GiB per slot plus the
+repository. Do not run more than one Dynamic job in a VM, and do not lower the limit below 1 GiB per slot plus the
 reserve, until the following has been measured on your deployment target. The read-only root
 filesystem (#249) puts the job working directories in a 512 MiB `tmpfs` (`/tmp`), which is charged
 to this limit like any other memory: it is part of the figure to measure, not extra.
 
 **What an out-of-memory kill does.** With no swap, a peak above the limit makes the kernel kill
-processes of the container. If the engine or the job process is killed, the loop ends the job, the
+processes of the container. If the engine or the job process is killed, the Worker ends the job, the
 job's engine-user processes are swept (also before the next job starts), the job directory is removed
-by the loop, and the run fails; the previous summary comment is untouched. If the kernel kills the
-runner's loop or PID 1, Docker restarts the container (`restart: unless-stopped`), the lease on the job
+by the Worker, and the run fails; the previous summary comment is untouched. If the kernel kills the
+Worker or PID 1, the VM's container ends, the lease on the job
 expires and the job is taken back or fails per the normal rules.
 
 **Manual measurement (not part of CI; it needs a real host).** Record the host, the kernel, Docker's
 version, the cgroup version and the image digest with the result.
 
-1. Start the Dynamic runner as in the activation steps on a test instance with a test repository at
+1. Start a Worker container as in the deploy canary on a test VM with a test repository at
    the size you want to support (the checkout limits are in `docs/dynamic-checkout.md`) and a model
    endpoint you control.
 2. Run a worst-case job: the largest export and the largest tool-result envelope the limits above
    allow. Read the container's cgroup peak, not process RSS: with cgroup v2,
-   `docker exec <runner-dynamic> cat /sys/fs/cgroup/memory.peak` and `memory.events` (`oom_kill`);
+   `docker exec <worker> cat /sys/fs/cgroup/memory.peak` and `memory.events` (`oom_kill`);
    with v1, `memory.max_usage_in_bytes`. `docker stats` is a coarse cross-check.
 3. Measure one slot only. The shipped image has one engine user and one pair of ports, so a second
    concurrent Dynamic job is refused by the lease (`dynamic_isolation_self_check_failed`);
    concurrency above one needs a pair of ports, an engine user and a ruleset per slot, which is not
    shipped.
 4. Inject an OOM kill and an engine kill (`docker kill --signal=SIGKILL` of the engine's process, or a
-   deliberately small `RUNNER_DYNAMIC_MEMORY_LIMIT`) and check that the previous comment is preserved,
-   no process of the engine user and no job directory survives (`docker exec <runner-dynamic> ps -eo
+   deliberately small container memory limit in `DISPATCHER_WORKER_CONFIG`) and check that the previous comment is preserved,
+   no process of the engine user and no job directory survives (`docker exec <worker> ps -eo
 user,pid,cmd`, `ls /tmp`).
 5. Write the measured peaks, the host and the recommended concurrency per GiB into this page. Until
    then no recommendation beyond the defaults exists. The byte-to-token calibration of the token cap
@@ -1474,17 +1433,13 @@ true` (left out otherwise), and a state head the job cannot account for on the *
   that cover TCP, UDP and IPv6 (with the fallback ruleset: IPv6 by switching it off, #345) but not AF_UNIX (kept empty by mounting and sharing nothing), and the
   supervisor is a root process that parses untrusted Git objects and HTTP. See ADR 0003.
 - **Supported hosts.** Linux/amd64 (x86_64) glibc images only, on a Docker host whose kernel has
-  `nf_tables` (the `ip` family is enough: see the fallback ruleset). **Dynamic Review needs x86_64.** On an arm64 host the stack still builds and deploys,
-  but the Dynamic image has no engine (the build skips the unpinned download, #264), the runner reports
-  `engine_binary_missing` and serves Diff jobs only: Dynamic stays unavailable. Nothing is tested on
-  rootless Docker, user-namespace remapping or Podman. Coolify support is written down but untested.
+  `nf_tables` (the `ip` family is enough: see the fallback ruleset). **Dynamic Review needs x86_64.** The image build fails on another platform (the pins have no other platform, #264), so there is no arm64 Worker. Nothing is tested on
+  rootless Docker, user-namespace remapping or Podman.
 - **Capacity beyond one slot is unknown** (see above).
-- **Hosted activation needs the egress gate (#82).** It is not permission for unrestricted
-  self-hosted agent egress either.
+- **Hosted activation needs the egress gate (#82).**
 
 ## Not covered
 
-- The firewall of hosted runners (#82) is a separate gate for hosted activation, not a permission
-  for unrestricted self-hosted agent egress.
+- The firewall of hosted runners (#82) is a separate gate for hosted activation.
 - Running repository code (build, tests) is out of scope (#130 and #82).
 - Guarantees about model behaviour: see "Known limitations and residual risks".

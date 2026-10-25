@@ -22,7 +22,7 @@ The rest of this file is for the team that develops the service.
 | `contracts/` | JSON schemas of the interfaces between the app, the runner and the dispatcher |
 | `docs/` | Internal guides: [`docs/deployment-vercel.md`](docs/deployment-vercel.md) (the hosted deployment on Vercel), [`docs/dispatcher.md`](docs/dispatcher.md) (the Dispatcher and Worker vocabulary and interfaces), [`docs/github-app.md`](docs/github-app.md) (creating and installing the GitHub App), [`docs/billing.md`](docs/billing.md) (billing with Stripe), [`docs/billing-terms-checklist.md`](docs/billing-terms-checklist.md) (the points for the terms), [`docs/dynamic-review.md`](docs/dynamic-review.md) (Dynamic Review) |
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
-| `compose*.yml`, `docker/` | Container stacks that CI and the local smoke tests build and start. They are test and development fixtures, not a way to run the service elsewhere |
+| `docker/` | The smoke test of the Worker image (`docker/smoke/`) and the VM preparation script of the golden snapshot (`docker/sandbox/`) |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and the team |
@@ -33,7 +33,10 @@ The rest of this file is for the team that develops the service.
 - [uv](https://docs.astral.sh/uv/) 0.5 or newer. It downloads the Python version pinned in
   `runner/.python-version` if needed.
 - `make`
-- Docker, only for the image and stack smoke tests
+- Docker: for the image smoke test, and to run a throwaway Postgres for the integration and browser tests (see below)
+- A Postgres server (version 18 is what CI uses) for the integration and end-to-end tests, for example
+  `docker run -d --name cr-pg -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5432:5432 postgres:18`. The tests make a database of
+  their own on it and drop it again (`TEST_DATABASE_URL`, `E2E_DATABASE_URL`; the default is the URL of that container)
 
 ## Setup
 
@@ -61,10 +64,9 @@ pnpm build
 pnpm start
 ```
 
-Locally the app keeps its data in a SQLite file. Copy `app/.env.example` to `app/.env.local` and
-create the directory it points to (`mkdir data` in the repository root for the example value). The
-file is created and migrated when the server starts; a missing directory stops the start with a clear
-message. The hosted deployment uses Postgres. Settings and the database layer are described in
+The app needs a Postgres database (`DATABASE_URL`, and `DATABASE_URL_MIGRATE` for the migration command). The schema is
+not migrated by the app: run `pnpm migrate` against the database first (a deployment does the same as a step of its own).
+Copy `app/.env.example` to `app/.env.local` and fill in the values. Settings and the database layer are described in
 `app/.env.example` and `app/src/db/README.md`.
 
 ### First start and sign in
@@ -74,9 +76,9 @@ Every page except the login page needs a session. The server refuses to start un
 `openssl rand -base64 32`) and the address of the app in `BETTER_AUTH_URL`. No GitHub setting is
 needed to start.
 
-A new database is set up in the browser. While it is not set up, every start of the app prints a fresh
-6-digit **setup code** in its log (`[setup] Setup code: ...`); everything but `/api/health` waits for the
-setup. Open the app, enter the code and create the admin account. You land in `/admin`, signed in.
+A new database is set up in the browser. The operator makes a 6-digit **setup code** with `pnpm setup-code` (against
+the same database; it prints the code in the terminal and nowhere else) until then, everything but `/api/health` waits
+for the setup. Open the app, enter the code and create the admin account. You land in `/admin`, signed in.
 How it works: `app/src/setup/README.md`.
 
 The admin portal at `/admin` (admin only; everybody else gets a 404) holds the settings of the
@@ -135,21 +137,19 @@ cd runner
 uv run python scripts/manual_review.py
 ```
 
-## Container images
+## Container image
 
-Two images are built from the repository, each with its own Dockerfile and `Dockerfile.dockerignore`
-(a root `.dockerignore` lists the same exclusions for the classic builder, which only reads that
-file). The build context is the repository root, so the Dockerfile is named with `--file`:
+One image is built from the repository: the Worker image, the `sandbox` target of `runner/Dockerfile` (the build context
+is the repository root, so the Dockerfile is named with `--file`):
 
-| Image | Build | Notes |
-|---|---|---|
-| app | `docker build -f app/Dockerfile -t code-reviewer-app .` | Next.js standalone server on port 3000, runs as uid 10001 |
-| runner | `docker build -f runner/Dockerfile -t code-reviewer-runner .` (the `--target dynamic` image is built the same way) | Python with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned) and its tiktoken encodings |
+```sh
+docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .
+```
 
-`make test-images` builds both images and runs their smoke tests (`docker/smoke/`); `make test-compose`
-starts them together with `compose.yml` and dummy settings (`docker/smoke/compose.sh`). CI runs the
-same for pull requests. No image is published to a registry: the hosted deployment builds what it runs
-from this repository (see below).
+It holds both engines (PR-Agent, pinned, and the pinned OpenCode for Dynamic Review) and runs as uid 10001. The golden
+snapshot of the hosted deployment builds this file inside a Vercel Sandbox VM, and every review job runs the image there.
+`make test-images` builds it and runs its smoke test (`docker/smoke/runner.sh`); CI does the same for pull requests that
+touch the runner. No image is published to a registry. The app is not an image: Vercel builds it.
 
 ## Deploy on Vercel (hosted)
 
@@ -170,7 +170,7 @@ One command per task from the repository root, covering both parts:
 make lint              # app: eslint and prettier --check; runner: ruff check and ruff format --check
 make typecheck         # app: next typegen and tsc --noEmit (strict); runner: pyright (strict)
 make test-unit         # app: vitest unit project; runner: pytest -m unit
-make test-integration  # integration tests that need no Docker stack
+make test-integration  # integration tests (they need a Postgres server)
 make verify            # all of the above, run before every pull request
 ```
 

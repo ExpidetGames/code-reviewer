@@ -228,8 +228,7 @@ In the admin portal, menu **Billing**, the card **Rates and numbers**:
 
 On the **Billing** page:
 
-1. **Payment adapter.** Choose `stripe`. (`manual` is for instances without a payment provider, see the self-hoster
-   guide.) The adapter cannot be changed while billing is on.
+1. **Payment adapter.** Choose `stripe`. (`manual` is for an instance with no payment provider: the credit is entered by hand.) The adapter cannot be changed while billing is on.
 2. **Stripe credentials.** Paste the API key and click save. The key is write-only: the page shows only whether it is
    stored and its last four characters. Click **Check connection**. It reads the Stripe account and records a pass. A new
    key clears the pass and has to pass again.

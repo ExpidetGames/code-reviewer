@@ -3,7 +3,7 @@
 This is the guide for the **hosted deployment** (umbrella #316): the App as a serverless Vercel project, a
 Dispatcher as a second Vercel project, and every review job run by a short-lived Worker inside a fresh Vercel
 Sandbox VM. Follow it top to bottom for a first deployment. Every variable, command and step in it was checked
-against the code on `development`; section 9 says what no test has proven yet, and that is a lot: **nobody has
+against the code on `development`; section 8 says what no test has proven yet, and that is a lot: **nobody has
 run the whole path on Vercel yet** (the first real deployment is the one this guide is written for).
 
 **Deployments are made by GitHub Actions, with Infisical as the secret manager, and a release has no manual step**
@@ -25,9 +25,8 @@ section 5.1 explains the snapshot, section 5.6 a release.
 5. [Operations](#5-operations)
 6. [Sizing the Worker VMs](#6-sizing-the-worker-vms)
 7. [Rolling back](#7-rolling-back)
-8. [Self-hosted and Coolify: nothing changes](#8-self-hosted-and-coolify-nothing-changes)
-9. [Known limits and what is not verified](#9-known-limits-and-what-is-not-verified)
-10. [Follow-ups](#10-follow-ups)
+8. [Known limits and what is not verified](#8-known-limits-and-what-is-not-verified)
+9. [Follow-ups](#9-follow-ups)
 
 ## 1. What you are deploying
 
@@ -38,9 +37,9 @@ The words below are used exactly like this in the code, the other documents and 
 |---|---|
 | **App** | The Next.js app with the database. Receives GitHub webhooks, creates jobs, stores results, serves the UI. It never reviews. Vercel project 1, root directory `app/`. |
 | **Dispatcher** | The middle layer. It is woken for a job, claims exactly that job, receives the per-job credential from the App and starts a Worker. It never reviews and never sees the git token or the model key. Vercel project 2, root directory `dispatcher/`, a Hono app. |
-| Trigger | How the Dispatcher learns about a job. Hosted: the **Webhook-Trigger** (the App calls it, signed). Self-hosted split (later, #334): the Poll-Trigger. |
+| Trigger | How the Dispatcher learns about a job. The **Webhook-Trigger**: the App calls it, signed. |
 | Dispatcher core | Claim, per-job credential handling, concurrency cap, launch error handling. No platform code. |
-| Launcher | How a Worker is started. Hosted: the **Sandbox-Launcher** (a fresh VM from the golden snapshot, our hardened container run through Docker inside it). Self-hosted split (later, #334): the Docker-Launcher. |
+| Launcher | How a Worker is started. The **Sandbox-Launcher**: a fresh VM from the golden snapshot, our hardened container run through Docker inside it. |
 | **Worker** | The isolated process tree that runs exactly one job: the **Diff-Worker** (PR-Agent) or the **Dynamic-Worker** (OpenCode engine). It knows only the App URL, the job id and a per-job credential. |
 | **Worker contract** | What the Worker may do with that credential and nothing more: fetch the job, heartbeat, deliver the result (`/api/workers/v1`, `contracts/worker-api.v1.json`). The same whoever started the Worker. |
 | **Golden snapshot** | A snapshot of a VM with a pinned Docker installed and the Worker image already built. Every job gets a fresh clone; a snapshot never holds job data. |
@@ -78,17 +77,15 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
    purpose: a serverless Postgres that scales to zero (Neon, for one) goes to sleep after about five minutes without a
    query, and a cron every minute would keep it awake, and billed, around the clock.
 
-### The two modes
+### How the App finds the Dispatcher
 
-| | **Poll / Docker** (self-hosted) | **Webhook / Sandbox** (hosted, this guide) |
-|---|---|---|
-| App runtime | `APP_RUNTIME=server`, a long-lived process, SQLite or Postgres | `APP_RUNTIME=serverless`, functions, Postgres only |
-| How a job is found | The runner asks the App every few seconds (`RUNNER_DISPATCH=poll`, the default) | The App wakes the Dispatcher (`RUNNER_DISPATCH=webhook`) |
-| Who starts the review | The runner container itself (`RUNNER_MODE=legacy`, today's job loop) | A Worker in a fresh Sandbox VM per job |
-| State | `docker compose`, volumes | Postgres, the golden snapshot |
-| Status | Today, unchanged. The split variant (Poll-Trigger plus Docker-Launcher) is #334, later | The subject of this guide |
+`RUNNER_DISPATCH` has two values. `webhook` is the deployment's mode: when a job is queued the App sends the Dispatcher a
+signed wake-up call, the Dispatcher claims exactly that job and starts a Worker in a fresh Sandbox VM. `poll` is the
+default when the variable is unset: the App wakes nobody, so a queued job only waits (the test lanes use it, and the
+first steps of section 4 run in it until step 5 switches the App to `webhook`). The App runs as functions on Vercel
+and uses Postgres only.
 
-### What the App gains in serverless mode
+### What the App does without a long-lived process
 
 - No work at start: the schema is migrated by a command (`pnpm migrate`), the first-run setup code is made by a
   command (`pnpm setup-code`), and `/api/health` answers `503` with `{"status":"error","code":"SCHEMA_BEHIND"}` while
@@ -201,7 +198,7 @@ SQL
 The role split is exercised in CI (`app/src/db/role-split.integration.test.ts` runs exactly the SQL above against a real
 Postgres: migrate as `cr_migrate`, then health, read and write as `cr_app`, and the repair).
 
-Back up the database yourself (the App starts no backup scheduler with Postgres) and keep a copy of `APP_SECRET`
+Back up the database yourself (the App makes no backups) and keep a copy of `APP_SECRET`
 **apart from it**: a database restored without its `APP_SECRET` loses every stored credential.
 
 **A GitHub App for the hosted instance.** Not the one of any other installation: a GitHub App has exactly one webhook
@@ -315,8 +312,8 @@ yours.
   the hosted App takes neither from its environment. The GitHub App is created from the deployed App in the admin portal
   (step 4) and its id, private key and secrets are stored in the database, encrypted with `APP_SECRET`; each workspace
   enters its own model key in its settings, and the operator's key for `managed` workspaces is saved in the admin portal
-  under **LLM key** (`/admin/llm`, section 3.5), also encrypted in the database. The legacy `GITHUB_*` and `LLM_API_KEY`
-  variables are for an update of an old self-hosted installation and a hosted instance never sets them (section 3.1).
+  under **LLM key** (`/admin/llm`, section 3.5), also encrypted in the database. The `GITHUB_*` and `LLM_API_KEY`
+  variables the code still reads are not used by a hosted instance, which never sets them (section 3.1).
 
 **The golden snapshot keys.** Three keys of `/dispatcher` belong to the pipeline: `SANDBOX_SNAPSHOT_ID`,
 `SANDBOX_IMAGE_DIGEST` and `SANDBOX_SNAPSHOT_COMMIT` (the commit the snapshot was built from). **Do not create them,
@@ -354,7 +351,7 @@ Its role is exactly this, and nothing more (create a custom role and add the ide
   environment is a bearer secret for anyone who ever passes the branch rule above. Create a Client Secret for the
   identity, put the Client ID and the Client Secret in the two GitHub secrets, and rotate the Client Secret on a
   schedule (section 5.2). Infisical's OIDC authentication for GitHub would replace the long-lived Client Secret
-  (section 10). The Secret Syncs use Infisical's own connection to Vercel, not this identity.
+  (section 9). The Secret Syncs use Infisical's own connection to Vercel, not this identity.
 
 **Vercel dashboard**, for each of the two projects:
 
@@ -375,7 +372,7 @@ Its role is exactly this, and nothing more (create a custom role and add the ide
 7. **Function region.** `app/vercel.json` and `dispatcher/vercel.json` say `"regions": ["fra1"]`, which is what the
    deployments get whatever the dashboard's *Function Region* setting says (the file wins). Set the dashboard
    setting to `fra1` too, so that the two do not disagree: the Sandbox VMs and the golden snapshots are in `fra1` and
-   there is no failover region (section 9).
+   there is no failover region (section 8).
 
 **If the repository moves to another owner** (a transfer to an organization, a rename). The repository, its Actions
 secrets and its environments move with it, and GitHub redirects the old address, but nothing in the pipeline follows
@@ -431,10 +428,9 @@ every secret: at least 32 characters, no white space or control characters.
 
 | Variable | Required | Secret | Meaning |
 |---|---|---|---|
-| `APP_RUNTIME` | yes, set it | no | `serverless`. Vercel sets `VERCEL=1` and that selects serverless by itself, but set it explicitly so a typo cannot start the other mode. Any other value than `server` or `serverless` stops the start (`APP_RUNTIME_INVALID`). |
 | `APP_SECRET` | yes | **yes** | The master key: signs sessions and encrypts the credentials in the database. At least 32 characters. Never reused between environments. Changing it signs everybody out and makes stored credentials unreadable. |
 | `BETTER_AUTH_URL` | yes, **before the first deployment** | no | The public https address of the App, no path (its production domain, so add the domain to the project first). Without it the App refuses to start (`AUTH_CONFIG_INVALID`). GitHub sends people back to `<this>/api/auth/callback/github`. |
-| `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`; SQLite is refused in serverless mode). **A direct or session-mode connection, never a transaction pooler** (section 2). |
+| `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`). **A direct or session-mode connection, never a transaction pooler** (section 2). |
 | `DATABASE_POOL_MAX` | optional | no | Connections per function instance, 1 to 20, default 3. Every instance has its own pool: keep it small. |
 | `RUNNER_TOKEN` | yes | **yes** | The **dispatcher credential**: what the Dispatcher claims jobs with. At least 32 characters. **Same value as the Dispatcher's `RUNNER_TOKEN`.** There is one token, no overlap while rotating (section 5.2). |
 | `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): the safety net of section 5.7 does not run (stuck jobs, lapsed leases of a quiet system, `dispatch_unavailable`, notices that failed). Vercel adds the header by itself once the variable exists. |
@@ -458,11 +454,9 @@ Not set in the project, on purpose:
   is not in `/app` and not in a function.
 - `VERCEL`: set by the platform.
 - `NODE_ENV`, `NEXT_RUNTIME`: set by Next.js.
-- `DATABASE_PATH`: the file of the SQLite image, unused with Postgres.
 - `BETTER_AUTH_SECRET`: the deprecated name of `APP_SECRET`; a new instance never sets it.
-- The `GITHUB_*`, `ALLOWED_GITHUB_*`, `LLM_PROVIDER` and `LLM_API_KEY` variables: legacy, for an update of an old
-  installation. A hosted instance never sets them.
-- `BACKUP_*`, `DATABASE_BUSY_TIMEOUT_MS`: SQLite only.
+- The `GITHUB_*`, `ALLOWED_GITHUB_*`, `LLM_PROVIDER` and `LLM_API_KEY` variables: older ways to configure GitHub and the
+  model from the environment. A hosted instance never sets them (the admin portal does).
 
 ### 3.2 The Dispatcher project
 
@@ -479,7 +473,7 @@ A refusal at start names the variable, never its value (`ConfigError`: `required
 | `DISPATCHER_SIGNING_KEY_ID_PREVIOUS`, `DISPATCHER_SIGNING_SECRET_PREVIOUS` | optional | **yes** (secret) | The previous key, accepted while keys rotate. Both or neither. |
 | `SANDBOX_SNAPSHOT_ID` | yes | no | The golden snapshot: `snapshotId` of its record. **The deployment pipeline sets it** (section 5.1): the Dispatcher deployment of every run carries the pair it uses as its own run-time variables, and the pipeline writes the pair to Infisical after the promotion. **Unset, the Dispatcher has no Launcher and claims nothing** (every wake-up is answered `200 ignored` with `not_capable`). Set with `SANDBOX_IMAGE_DIGEST` or not at all. |
 | `SANDBOX_IMAGE_DIGEST` | with the snapshot | no | The Worker image id in that snapshot (`imageDigest` of the same record), `sha256:` and 64 hex characters. The Launcher refuses a VM whose image has another id. The pipeline sets the two together, and writes `SANDBOX_SNAPSHOT_COMMIT` (the commit the snapshot was built from; the Dispatcher does not read it) next to them. |
-| `DISPATCHER_ENGINES` | optional | no | `pr-agent`, `opencode` or both (default both). `pr-agent` for a Diff-only deployment: it has no `POST /probe` and no canary VM. A Dynamic job is accepted whenever `opencode` is in this list and the snapshot pair is set: the Dispatcher runs no capability probe on a dispatch (section 9). |
+| `DISPATCHER_ENGINES` | optional | no | `pr-agent`, `opencode` or both (default both). `pr-agent` for a Diff-only deployment: it has no `POST /probe` and no canary VM. A Dynamic job is accepted whenever `opencode` is in this list and the snapshot pair is set: the Dispatcher runs no capability probe on a dispatch (section 8). |
 | `DISPATCHER_JOB_TIMEOUT_SECONDS` | optional | no | How long a Worker may live, 60 to 21600, default **1200**. The function has to outlive only the launch (at most 300 s): the Dispatcher does not supervise the Worker after the hand-over (#487), so the function limit no longer bounds the job; the VM's own timeout (this plus `SANDBOX_VM_TIMEOUT_MARGIN_SECONDS`) and the reaper (section 5.5) do. |
 | `DISPATCHER_WORKER_CONFIG` | optional | no | JSON `{"diff": {...}, "dynamic": {...}}`: the VM size (`launcher.vcpus`) and the container memory (`container.memory.limit` / `reservation`) per Worker kind. Section 6. A wrong value fails when the function initialises (the variable is named in the log), not at the first job. |
 | `DISPATCHER_POOL_ID` | optional | no | Sent as `X-Runner-Id`; the App counts the running jobs of the pool by it. Default `dispatcher`. |
@@ -564,7 +558,7 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
 - **Setting a workspace to `managed`** is an entitlement, set with the operator API (`OPERATOR_API_TOKEN` must be set):
   `PUT /api/operator/v1/workspaces/{id}/entitlements` with `"keyMode": "managed"`, the whole entitlements body
   (`contracts/operator-api.v1.json`). A cost limit (`managedCostLimitMicroUsd`) needs `managed` and is a soft cap
-  (section 9). The change takes effect at the next claim; a running job is not touched.
+  (section 8). The change takes effect at the next claim; a running job is not touched.
 - **Upgrade every App instance first.** An instance of a release before #276 does not know the key mode: it would run a
   managed workspace's jobs on the workspace's own key and model and outside the cost limit. Roll the new App out
   completely before the first workspace is set to `managed`.
@@ -744,14 +738,14 @@ image id the deployment is configured with, which must be the one this run built
 **The canary is the only proof** (#479) that a deployment may run Dynamic jobs. The Dispatcher itself runs no probe when a job
 is dispatched: no canary VM is made by a webhook, and a Dynamic job is accepted at once on a cold instance. That is safe
 because a deployment goes live only after this canary passed, and the snapshot pair and the settings cannot change
-during a deployment's lifetime. (The Worker still proves its own hardening again when it starts, section 9.)
+during a deployment's lifetime. (The Worker still proves its own hardening again when it starts, section 8.)
 
 **Pass:** exit 0, the deployment advertises every required engine from a probe that ran just now and names the image of
 this run. **Fail** (exit 1): read the stable reasons in the output (`dispatcher/README.md`, "The canary probe"; for a
 platform error the code is one of the closed `ProbeFailure` list, for a `denied` verdict the reasons of the startup
 self-check in [`dynamic-review.md`](dynamic-review.md)) and do not go on; nothing was promoted, and the snapshot of the
 run was discarded. Exit 2 means a wrong URL, a deployment that is not the Dispatcher's or a wrong option, and nothing
-was sent. `canary_image_mismatch` means the staged deployment did not use the snapshot this run built: see section 9
+was sent. `canary_image_mismatch` means the staged deployment did not use the snapshot this run built: see section 8
 (the run-time variables of a deployment). To run the canary alone on a staged deployment, Actions, *Dispatcher canary*,
 *Run workflow* on `main`, with `url` set to that deployment's own address; it must be built from the head of `main`.
 
@@ -762,7 +756,7 @@ A serverless instance has no log the operator reads, so the setup code is made b
 
 ```sh
 read -rs -p 'APP_SECRET of the deployment: ' APP_SECRET; echo; export APP_SECRET
-APP_RUNTIME=serverless pnpm --dir app setup-code
+pnpm --dir app setup-code
 ```
 
 (with `DATABASE_URL_MIGRATE` still exported; `unset APP_SECRET` afterwards). It prints `[setup-code] Setup code: <6 digits>`, valid for 60
@@ -825,7 +819,7 @@ the deploy canary of the deployment passed with `opencode`:
    instance must already run the version that routes by review kind.
 2. On the test project's settings page set the review kind to Dynamic.
 3. Open a pull request. A Dynamic wake-up is accepted at once, also on a cold Dispatcher instance: no probe runs on the
-   dispatch path (section 9). A `503` or `429` for another reason (a busy Dispatcher, a platform error) is repeated by the
+   dispatch path (section 8). A `503` or `429` for another reason (a busy Dispatcher, a platform error) is repeated by the
    App inside the request, and by the repair work of section 5.7 if that does not help.
 4. The Run shows the kind, the model and a result URL, and the summary comment is published.
 
@@ -870,7 +864,7 @@ snapshot it has:
    Dispatcher deployment then gets the pair of this run as its **own run-time variables** (`vercel deploy --env
    SANDBOX_SNAPSHOT_ID=... --env SANDBOX_IMAGE_DIGEST=...`) and as meta. The project's variables, Infisical and the live
    deployment are not touched, so production keeps using the old pair until the promotion. This is the one mechanism of
-   the pipeline that depends on how the platform treats `--env` next to the project's own variables (section 9); the
+   the pipeline that depends on how the platform treats `--env` next to the project's own variables (section 8); the
    canary does not trust it, it checks.
 4. **Prove** (`canary`). The canary calls `POST /probe` of the staged Dispatcher, whose answer names the **snapshot id and
    the Worker image id** the deployment is configured with, and fails unless both are the ones this run built
@@ -951,7 +945,7 @@ A run's error code is shown on the Runs pages with a fixed sentence. Four belong
 | Runs page | `dispatch_unavailable` | The job waited `RUNNER_DISPATCH_GIVE_UP_SECONDS` (60 minutes by default) without anyone claiming it, no attempt is counted, and the next push or review request runs it again. Look at the **App's** sweep and send logs (`DISPATCH_SEND_FAILED`, `DISPATCH_REJECTED`) and at the Dispatcher's log. Usual causes: `RUNNER_WEBHOOK_URL` or the signing key do not match (`DISPATCH_REJECTED`: a wrong URL or secret looks like this and the App waits 30 minutes between tries), the Dispatcher is down or protected, `SANDBOX_SNAPSHOT_ID` is unset (`not_capable`), the pool is full for longer than the give-up time, or the sweep itself is refused (`CRON_SECRET`). |
 | Runs page | `launch_failed` | The Worker could not be started even after three attempts. The cause is a launch code in the **Dispatcher's** log (line `launch_failed`, field `code`, plus `retryable`): the table in `dispatcher/README.md` ("The Sandbox-Launcher") lists them (`sandbox_auth_failed`, `sandbox_snapshot_missing`, `image_mismatch`, `docker_not_ready`, `worker_exited_early`, ...). |
 | Runs page | `worker_exited` | Runs from before #487 only. The Dispatcher used to give a job back with this code when it saw the Worker's container end with an error. It no longer watches the container after the hand-over: a Worker that dies is found by its lease and the run ends `lease_expired` after three lost attempts. |
-| Runs page | `dynamic_engine_unavailable` | A **Dynamic** job was dispatched and a Worker started, but the Worker refused it: its own startup self-check did not prove the container's isolation, so it serves Diff jobs only. No model was called and nothing was written to the pull request. The Worker's log says `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only (<reason>)` and `job ... refused: the Dynamic engine is not advertised`. Since the Dispatcher runs no probe on a dispatch (section 9), this is the signal that the live deployment's container cannot be hardened: run the canary against it (section 4, step 3; Actions, *Dispatcher canary*), read the stable reason (`dynamic-review.md`, "The startup self-check"), fix it and redeploy through the pipeline so that a canary passes before it goes live. Diff jobs are not affected. |
+| Runs page | `dynamic_engine_unavailable` | A **Dynamic** job was dispatched and a Worker started, but the Worker refused it: its own startup self-check did not prove the container's isolation, so it serves Diff jobs only. No model was called and nothing was written to the pull request. The Worker's log says `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only (<reason>)` and `job ... refused: the Dynamic engine is not advertised`. Since the Dispatcher runs no probe on a dispatch (section 8), this is the signal that the live deployment's container cannot be hardened: run the canary against it (section 4, step 3; Actions, *Dispatcher canary*), read the stable reason (`dynamic-review.md`, "The startup self-check"), fix it and redeploy through the pipeline so that a canary passes before it goes live. Diff jobs are not affected. |
 
 Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: `DISPATCHER_ENGINES` has no
 `opencode`, or no Dispatcher is configured for it), `dynamic_review_disabled` (the gate is off), `lease_expired` (the Worker
@@ -1104,13 +1098,13 @@ promptly is done by the request that causes it, after its response (`after()`), 
 | A job nobody claimed for `RUNNER_DISPATCH_GIVE_UP_SECONDS` (`dispatch_unavailable`) | The give-up time plus **up to 2 hours** (the time is counted when the sweep runs) |
 | A job that waited for the pool cap while the job that freed the slot ended by a **lease that ran out** (a Worker that vanished, nobody told the app) | Sent by the next request that touches the database once its row time (2 minutes after the refusal) has passed, else by the sweep: **up to 2 hours** |
 | A dispatch the Dispatcher stopped (`not_capable`) | Asked again by the sweep, **every 2 hours** instead of every 10 minutes |
-| A wake-up that kept failing after the inline repeats (or was refused `429`/`503` with a long `Retry-After`) in a system where **no job ends and no other request arrives** | Resent by the sweep, on the row's back-off: **up to 2 hours**. This is the one case a lone job can still wait: no event exists that could wake it, and a timer would keep the database awake. With the Dispatcher answering at once (no probe runs on a dispatch, section 9) it needs a Dispatcher that stays unavailable or busy for longer than the repeats (about 45 seconds) |
+| A wake-up that kept failing after the inline repeats (or was refused `429`/`503` with a long `Retry-After`) in a system where **no job ends and no other request arrives** | Resent by the sweep, on the row's back-off: **up to 2 hours**. This is the one case a lone job can still wait: no event exists that could wake it, and a timer would keep the database awake. With the Dispatcher answering at once (no probe runs on a dispatch, section 8) it needs a Dispatcher that stays unavailable or busy for longer than the repeats (about 45 seconds) |
 | A refusal notice whose post failed | Tried again at the next refusal on that pull request or by the sweep |
 | The cleanup (rate limit counters, unverified accounts, remembered job keys, old dispatch rows) | Once per sweep, so every 2 hours (it only runs once per hour) |
 
 **To see that it runs:** the App project's Cron Jobs settings list `/api/internal/dispatch-sweep` and its runs answer
 `200`; the log shows `[sweep] requeued=.. given_up=.. sent=..` for every run that did something; `401 CRON_UNAUTHORIZED`
-means `CRON_SECRET` is missing or short, and `404` means the App is not in serverless mode (`APP_RUNTIME`). The cron
+means `CRON_SECRET` is missing or short. The cron
 runs only for the **production** deployment, so a staged or preview deployment never sweeps. A review that does not
 start within a minute is not a sweep problem: look at section 5.3 and at the Dispatcher's log first.
 
@@ -1144,7 +1138,7 @@ the canary uses the Dynamic size, so run it after changing it.
 | **The Dispatcher** | The same workflow with `dispatcher_deployment`. It also writes the restored deployment's golden snapshot pair (read from its meta) back to Infisical `/dispatcher`, so that the next deployment decides from what production runs again. Restore the **previous** Dispatcher deployment: its snapshot is kept by the cleanup (the new one and the previous one stay). The workflow checks that the snapshot of the target deployment still exists, and **refuses with `rollback_snapshot_missing`** when it is gone, before it touches either project: restoring the deployment would put production on a Dispatcher that fails every job, and writing its dead pair to Infisical would send the next deployment after it. To go further back, deploy the old commit as a new run instead (a manual run with `allow_stale`), which builds a snapshot for it. A deployment made by hand, which carries no pair, is let through. |
 | **A pipeline that stopped between the two promotions** | The App was promoted and the Dispatcher was not (or the other way round): the GitHub deployment records say which (`app-production`, `dispatcher-production`). Run *Rollback production* for the one that moved, or fix the cause and run *Deploy production* again. A later deployment's `vercel promote` also ends a rollback's pause on the automatic assignment of the production domains. |
 | **The snapshot** | Roll the Dispatcher back (row above): it restores the pair with the deployment. There is no separate action on the snapshot; the cleanup keeps the current and the previous one for exactly this. |
-| **Webhook mode** | `RUNNER_DISPATCH=poll` stops the wake-ups. It is not a way back to the self-hosted runner: the hosted App has no runner that polls (section 8). |
+| **Webhook mode** | `RUNNER_DISPATCH=poll` stops the wake-ups. It is not a way back to another kind of runner: the App has no runner that polls. |
 | **Dynamic Review** | The gate (section 5.4). |
 | **A secret** | Section 5.2. |
 
@@ -1152,26 +1146,10 @@ the canary uses the Dynamic size, so run it after changing it.
 deployment and a waiting deployment cannot replace a waiting rollback. **It needs no approval**: whoever can run a
 workflow on `main` can roll production back. The environment `production` is restricted to `main`, which is what keeps
 other branches out; requiring reviewers on that environment would also gate every job of every deployment, so a
-separate approval for rollbacks would need a second environment (section 10). Rolling back does not stop a deployment
+separate approval for rollbacks would need a second environment (section 9). Rolling back does not stop a deployment
 that is running: if one is, the rollback and the deployment both finish, in whichever order, and the later one wins.
 
-## 8. Self-hosted and Coolify: nothing changes
-
-An installation on Docker Compose or Coolify keeps its runner as it is: `RUNNER_MODE` unset means `legacy` (the job
-loop that claims with `RUNNER_TOKEN` and reviews inside the runner container), `RUNNER_DISPATCH` unset means
-`poll`, `APP_RUNTIME` unset means `server`. Updating such an installation to a release that contains the hosted
-deployment changes no behavior and needs no new variable, and the images, `compose.yml`, `compose.coolify.yml` and
-`/api/runners/v1` stay as they are.
-
-The **split** for self-hosted installations (the Poll-Trigger and the Docker-Launcher: a Dispatcher that polls and
-starts a Worker as its own process and user inside the hardened container) is **#334** and later; the default flips
-to `split` only after a soak (#335). Until those issues land, the Dispatcher project in `dispatcher/` has no engine
-on the Node entry and there is nothing to migrate to. The migration step table (the `RUNNER_MODE` switch) will be
-added to `deployment-coolify.md` and `dynamic-review.md` with #334.
-
-A self-hosted installation and a hosted one never share a database or a GitHub App.
-
-## 9. Known limits and what is not verified
+## 8. Known limits and what is not verified
 
 **Not verified on the real platform (the first deployment is the test):**
 
@@ -1248,7 +1226,7 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
   back, and the pull request shows "Running" meanwhile. The attempt is lost either way (three, then `failed` with
   `lease_expired`); the delay is the cost of holding no supervision (before, a container the Dispatcher saw end was released
   within seconds as `worker_exited`).
-- **Hosted starts within seconds, like self-hosted**: a push is sent when it is queued, with no debounce. What is
+- **A review starts within seconds**: a push is sent when it is queued, with no debounce. What is
   up to 2 hours late is only the repair of abnormal cases (section 5.7).
 - **The deploy canary is the only proof of the Dynamic container's hardening** (#479). The Dispatcher keeps no probe answer
   and runs no probe when a job is dispatched, so a cold instance costs a Dynamic job no delay and no canary VM. What it
@@ -1271,11 +1249,10 @@ A self-hosted installation and a hosted one never share a database or a GitHub A
 - **An accepted wake-up whose answer was lost is not stopped by the App.** The App sends a stop only for a job whose wake-up it saw
   acknowledged (`job_dispatches.acked_at`). If the Dispatcher accepted the call but the answer never arrived (the 8 s timeout, a
   lost response), no stop is sent for that job and only the reaper and the VM timeout end its VM.
-- **Retired:** the runner's concept. A runner still means what it did on a server.
+- **Retired:** the runner's concept (its names stay).
 
-## 10. Follow-ups
+## 9. Follow-ups
 
-- #334 and #335 the self-hosted split and flipping its default: then section 8 gets its step table.
 - Infisical OIDC for the repository's workflows instead of a Universal Auth client secret that is a bearer secret for
   anyone who passes the branch rule, and separate identities and folders by purpose (the migration URL, the deployment,
   the canary), so that a job holds only what it names by construction and not by convention.
