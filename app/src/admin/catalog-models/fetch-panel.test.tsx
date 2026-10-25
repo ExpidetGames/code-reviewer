@@ -151,7 +151,7 @@ describe("fetching now", () => {
 
   // #554-T08
   it("explains a fetch that failed, and reloads the page to show how it was recorded", async () => {
-    const api = fakeApi(refused("models_dev_unreachable", 502));
+    const api = fakeApi(refused("models_dev_unreachable", 503));
     render(<FetchPanel fetch={FETCH_OK} fetchEnabled api={api} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Fetch now" }));
@@ -414,7 +414,7 @@ describe("a fetch the guard stopped", () => {
       <FetchPanel
         fetch={FETCH_OK}
         fetchEnabled
-        api={fakeApi(refused("models_dev_timeout", 504))}
+        api={fakeApi(refused("models_dev_timeout", 503))}
       />,
     );
 

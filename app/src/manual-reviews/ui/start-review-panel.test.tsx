@@ -127,7 +127,7 @@ describe("loading the pull requests", () => {
   // CR-33-T07
   it("says what went wrong when GitHub fails and loads again on 'Try again'", async () => {
     const { api, listPullRequests } = fakeApi([
-      failure("MANUAL_REVIEW_GITHUB_UNAVAILABLE", 502),
+      failure("MANUAL_REVIEW_GITHUB_UNAVAILABLE", 503),
       list([{ number: 7, title: "Add caching" }]),
     ]);
     const user = await renderPanel(api);
@@ -294,7 +294,7 @@ describe("starting a review", () => {
   it("keeps the closed-pull-request sentence when the list cannot be reloaded, and shows the failure beside it", async () => {
     const { api, startReview } = fakeApi([
       list([{ number: 7 }]),
-      failure("MANUAL_REVIEW_GITHUB_UNAVAILABLE", 502),
+      failure("MANUAL_REVIEW_GITHUB_UNAVAILABLE", 503),
       list([{ number: 7 }]),
     ]);
     startReview.mockResolvedValueOnce(

@@ -48,7 +48,7 @@ export function BillingSwitchCard({
         };
       return {
         kind: "failed",
-        text: describeBillingFailure(result.code),
+        text: describeBillingFailure(result.code, result.status),
         issues: result.issues,
         missing: missingOf(result.details),
       };

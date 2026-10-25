@@ -427,6 +427,80 @@ describe("the payment adapter and the Stripe credentials", () => {
     ).toBeTruthy();
   });
 
+  // #690-T03
+  it("names the HTTP status when the answer to a save is not one of the routes", async () => {
+    const mock = api({
+      change: () =>
+        Promise.resolve({
+          ok: false,
+          status: 502,
+          code: "UNEXPECTED_RESPONSE",
+          issues: [],
+        }),
+    });
+    render(<BillingPage billing={STRIPE_VIEW} notice={NOTICE} api={mock} />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Stripe API key"), KEY);
+    await user.click(screen.getByRole("button", { name: "Save credentials" }));
+
+    expect(
+      await screen.findByText(/The server answered with HTTP 502\./),
+    ).toBeTruthy();
+  });
+
+  // #690-T01
+  it("shows what Stripe said when a save fails the check", async () => {
+    const mock = api({
+      change: () =>
+        failure("stripe_unavailable", [], {
+          stripe: { status: 400, code: null, type: "invalid_request_error" },
+        }),
+    });
+    render(<BillingPage billing={STRIPE_VIEW} notice={NOTICE} api={mock} />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Stripe API key"), KEY);
+    await user.click(screen.getByRole("button", { name: "Save credentials" }));
+
+    expect(
+      await screen.findByText(
+        /Stripe failed to answer the request\. Try again in a moment\. Stripe said: HTTP 400, invalid_request_error\./,
+      ),
+    ).toBeTruthy();
+  });
+
+  // #690-T04
+  it("says the account is not enabled for Managed Payments when the check answers so", async () => {
+    const mock = api();
+    mock.check.mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        data: {
+          ok: false,
+          error: "stripe_managed_payments_unavailable",
+          stripe: { status: 400, code: null, type: "invalid_request_error" },
+        },
+      }),
+    );
+    const view = {
+      ...STRIPE_VIEW,
+      stripe: {
+        ...STRIPE_VIEW.stripe,
+        apiKey: { state: "configured", lastFour: "6789" } as const,
+      },
+    };
+    render(<BillingPage billing={view} notice={NOTICE} api={mock} />);
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Check connection" }));
+
+    expect(
+      await screen.findByText(/not enabled for Managed Payments/),
+    ).toBeTruthy();
+  });
+
   // #504-T06
   it("creates the webhook endpoint and tells a taken-over one from a new one", async () => {
     const mock = api();

@@ -36,7 +36,9 @@ export type BillingChange =
 
 /** The result of the connection check: it worked (and for which environment), or a stable code. */
 export type BillingCheckAnswer =
-  { ok: true; environment: "test" | "live" } | { ok: false; error: string };
+  | { ok: true; environment: "test" | "live" }
+  /** `stripe`: what Stripe said (HTTP status, error type and code as plain identifiers), when it said something (#690). */
+  | { ok: false; error: string; stripe?: unknown };
 
 export type BillingCreditInput = {
   type: "credit" | "correction";

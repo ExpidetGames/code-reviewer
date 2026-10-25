@@ -68,15 +68,42 @@ const FAILURE_COPY: Record<string, string> = {
   stripe_unreachable: "Stripe could not be reached. Try again in a moment.",
   stripe_unavailable:
     "Stripe failed to answer the request. Try again in a moment.",
+  stripe_managed_payments_unavailable:
+    "Stripe accepts the API key, but this Stripe account is not enabled for Managed Payments. Enable it in the Stripe dashboard (Settings, Managed Payments) or wait for Stripe's approval, then try again.",
 };
 
-/** The sentence for a failed change or call. */
-export function describeBillingFailure(code: string): string {
+/**
+ * The sentence for a failed change or call. With the HTTP status of the answer, an answer the page cannot read names it
+ * (#690).
+ */
+export function describeBillingFailure(
+  code: string,
+  status?: number | null,
+): string {
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(code, status) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );
+}
+
+/** A plain identifier of Stripe: a code or a type. Anything else is not shown. */
+const PLAIN_IDENTIFIER = /^[a-z][a-z0-9_]{0,63}$/;
+
+/**
+ * What Stripe said about a failed call (the `stripe` field of an answer of the billing routes): the HTTP status, the type and
+ * the code, only as plain identifiers, as one sentence to append to the one for the failure; empty when there is nothing to show.
+ */
+export function describeStripeDetail(detail: unknown): string {
+  if (typeof detail !== "object" || detail === null) return "";
+  const { status, code, type } = detail as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof status === "number" && Number.isInteger(status) && status >= 100)
+    parts.push(`HTTP ${status}`);
+  for (const part of [type, code])
+    if (typeof part === "string" && PLAIN_IDENTIFIER.test(part))
+      parts.push(part);
+  return parts.length === 0 ? "" : ` Stripe said: ${parts.join(", ")}.`;
 }
 
 const ISSUE_COPY: Record<string, string> = {

@@ -43,7 +43,7 @@ pullRequests: [{ number, title, url, author, draft, headRef, baseRef }] }`, the 
 | 409       | `MANUAL_REVIEW_COMMAND_NOT_ALLOWED`                             | The project switched the command off (`allowedCommands`)                                              |
 | 409       | `MANUAL_REVIEW_APP_NOT_INSTALLED`                               | The integration is disabled, or GitHub answers 401, 403 or 404 for the installation or the repository |
 | 413 / 415 | `MANUAL_REVIEW_BODY_TOO_LARGE` / `..._CONTENT_TYPE_UNSUPPORTED` | A body over 16 KB; a body that is not `application/json`                                              |
-| 502       | `MANUAL_REVIEW_GITHUB_UNAVAILABLE`                              | GitHub failed, timed out, was rate limited or answered with something unusable                        |
+| 503       | `MANUAL_REVIEW_GITHUB_UNAVAILABLE`                              | GitHub failed, timed out, was rate limited or answered with something unusable                        |
 
 A request without a session is turned away by the proxy (`401`, `403` for an account that is not
 allowed) before any of this runs.

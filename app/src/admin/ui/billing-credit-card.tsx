@@ -93,7 +93,7 @@ export function BillingCreditCard({ api }: { api: BillingApi }) {
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: [],
           missing: [],
         };
@@ -108,7 +108,7 @@ export function BillingCreditCard({ api }: { api: BillingApi }) {
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: [],
           missing: [],
         };
@@ -142,7 +142,7 @@ export function BillingCreditCard({ api }: { api: BillingApi }) {
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: result.issues,
           missing: [],
         };
