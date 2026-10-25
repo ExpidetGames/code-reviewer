@@ -32,6 +32,7 @@ from .limits import (
 from .objects import ObjectStore
 from .paths import validate_path
 from .protocol import advertisement, fetch_pack
+from .repo_skills import is_skill_manifest, neutralize_skill_manifest
 from .transport import HttpTransport, Transport, repository_url
 
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -239,7 +240,18 @@ def prepare_content(
                         if text is None:
                             reason = OmissionReason.BINARY
                         elif path in head and head[path] == entry:
-                            texts[path] = text
+                            # A skill manifest reaches the engine only in the form the runner
+                            # rewrote (#701). One it cannot rewrite stays in the diff as the text
+                            # it is and is left out of the export.
+                            exported = (
+                                neutralize_skill_manifest(text) if is_skill_manifest(path) else text
+                            )
+                            if exported is None:
+                                omissions[path] = Omission(
+                                    redact_text(path, redactor), OmissionReason.INVALID_SKILL
+                                )
+                            else:
+                                texts[path] = exported
                 if reason is not None:
                     omissions[path] = Omission(redact_text(path, redactor), reason)
                     if path in required:

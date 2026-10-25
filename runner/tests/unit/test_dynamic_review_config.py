@@ -13,12 +13,15 @@ from typing import Any
 
 from code_reviewer_runner.dynamic_review.config import (
     ALLOWED_TOOLS,
+    BUILTIN_SKILLS_DENIED,
     PROXY_PROVIDER_ID,
+    SKILL_TOOL,
     build_engine_config,
     engine_environment,
     permission_block,
 )
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
+from code_reviewer_runner.dynamic_review.repo_skills import SKILL_PATHS
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
@@ -34,23 +37,37 @@ def config() -> dict[str, Any]:
     )
 
 
-# #197-T03
-def test_every_tool_but_the_read_only_ones_is_denied_by_default() -> None:
+# #197-T03, #701-T06
+def test_every_tool_but_the_read_only_ones_and_the_skill_loader_is_denied_by_default() -> None:
     permissions = permission_block()
 
     assert permissions["*"] == "deny"
     for tool in ALLOWED_TOOLS:
         assert permissions[tool] == "allow"
     # The wildcard is what denies a built-in the runner does not know about, including a future one.
-    assert set(permissions) == {"*", *ALLOWED_TOOLS}
+    assert set(permissions) == {"*", *ALLOWED_TOOLS, SKILL_TOOL}
 
 
-# #197-T03
+# #701-T06
+def test_the_skill_loader_is_allowed_for_repository_skills_and_not_for_the_engines_own() -> None:
+    skill_rules = permission_block()[SKILL_TOOL]
+
+    # Rules are read last match first: the allow for every name, then the denies of the skills the
+    # engine ships itself (a repository skill is the only one the agent is offered).
+    assert skill_rules == {"*": "allow", **dict.fromkeys(BUILTIN_SKILLS_DENIED, "deny")}
+    assert next(iter(skill_rules)) == "*"
+    assert "customize-opencode" in BUILTIN_SKILLS_DENIED
+    assert SKILL_TOOL == "skill"
+
+
+# #197-T03, #701-T06
 def test_the_unknown_and_mutating_builtins_are_not_allowed() -> None:
     permissions = permission_block()
 
-    for tool in ("bash", "shell", "edit", "write", "patch", "webfetch", "task", "skill", "lsp"):
+    for tool in ("bash", "shell", "edit", "write", "patch", "webfetch", "task", "lsp"):
         assert tool not in permissions or permissions[tool] != "allow"
+    # Nothing but the skill loader is a pattern map: no other tool got a finer rule.
+    assert [tool for tool, rule in permissions.items() if isinstance(rule, dict)] == [SKILL_TOOL]
 
 
 # #197-T03
@@ -91,6 +108,7 @@ def test_the_config_defines_only_the_review_agent_with_the_trusted_prompt() -> N
     # tool, StructuredOutput included. The tool set is the default-deny permission block.
     assert "tools" not in agent
     assert all(document["permission"][tool] == "allow" for tool in ALLOWED_TOOLS)
+    assert document["permission"] == permission_block()
 
 
 # #197-T02
@@ -106,6 +124,37 @@ def test_discovery_and_runtime_services_are_switched_off_in_the_config() -> None
     assert document["share"] == "disabled"
     assert document["autoupdate"] is False
     assert document["compaction"] == {"auto": False, "prune": False}
+
+
+# #701-T04
+def test_the_repository_skill_trees_are_listed_by_the_trusted_config_and_nothing_else_is() -> None:
+    document = config()
+
+    # The engine scans these (relative to the export) for `**/SKILL.md`, whatever the discovery
+    # flags say; the config is the runner's own, the repository cannot add a path to it.
+    assert document["skills"] == {"paths": list(SKILL_PATHS)}
+    assert all(not path.startswith("/") and ".." not in path.split("/") for path in SKILL_PATHS)
+    # No skill URL: the engine would download from it.
+    assert "urls" not in document["skills"]
+
+
+# #701-T04
+def test_the_engine_flags_that_would_reach_outside_the_export_stay_on() -> None:
+    environment = engine_environment(
+        proxy_url="http://127.0.0.1:41234", home="/job/home", scratch_dir="/job/scratch"
+    )
+
+    # Lifting `OPENCODE_DISABLE_CLAUDE_CODE` for `.claude/skills` would also bring back the
+    # CLAUDE.md lookup, and lifting `OPENCODE_DISABLE_EXTERNAL_SKILLS` makes the engine walk up
+    # from the export; the trees are given by `skills.paths` instead.
+    for flag in (
+        "OPENCODE_DISABLE_PROJECT_CONFIG",
+        "OPENCODE_DISABLE_CLAUDE_CODE",
+        "OPENCODE_DISABLE_EXTERNAL_SKILLS",
+        "OPENCODE_PURE",
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+    ):
+        assert environment[flag] == "true"
 
 
 # #290-T13, #293-T11: OpenCode's own compaction stays off. After a compaction the engine's next

@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 """OpenCode v1.19.0 discovery deny-list, applied before blob hydration/reads.
 
-Both config graphs, external plugins and compatible skills are covered. Source links and
-outside-export discovery requirements are recorded in docs/dynamic-checkout.md.
+Both config graphs, external plugins and nested skill trees are covered. The one exception is the
+documents of a repository skill in the four root trees the runner-owned config lists (#701,
+`repo_skills.py`). Source links and outside-export discovery requirements are recorded in
+docs/dynamic-checkout.md.
 """
 
 import itertools
 import re
 from enum import StrEnum
 
+from code_reviewer_runner.dynamic_review.repo_skills import is_skill_resource
 from code_reviewer_runner.redaction import Redactor
 
-DENY_LIST_VERSION = "opencode-v1.19.0-1"
+DENY_LIST_VERSION = "opencode-v1.19.0-2"
 _CONFIG_NAMES = {"opencode.json", "opencode.jsonc", "tui.json", "tui.jsonc"}
 _CREDENTIAL_DIRS = {".ssh", ".aws", ".azure", ".gnupg", ".kube", ".docker"}
 _CREDENTIAL_NAMES = {
@@ -107,6 +110,9 @@ def _redact_assignment(match: re.Match[str]) -> str:
 
 class OmissionReason(StrEnum):
     ENGINE_DISCOVERY = "engine_discovery"
+    # A skill manifest the engine could not list safely (#701): no usable frontmatter. Not a
+    # deny-list reason: the file stays in the diff and is only left out of the export.
+    INVALID_SKILL = "invalid_skill"
     CREDENTIAL_PATH = "credential_path"
     UNSAFE_MODE = "unsafe_mode"
     LARGE_FILE = "large_file"
@@ -115,10 +121,12 @@ class OmissionReason(StrEnum):
 
 def omission_reason(path: str, mode: str) -> OmissionReason | None:
     parts = path.lower().split("/")
-    if ".opencode" in parts or parts[-1] in _CONFIG_NAMES:
-        return OmissionReason.ENGINE_DISCOVERY
-    if any(a in (".claude", ".agents") and b == "skills" for a, b in itertools.pairwise(parts)):
-        return OmissionReason.ENGINE_DISCOVERY
+    # A skill document of a root tree is the one engine-discovery path that is exported (#701).
+    if not is_skill_resource(path):
+        if ".opencode" in parts or parts[-1] in _CONFIG_NAMES:
+            return OmissionReason.ENGINE_DISCOVERY
+        if any(a in (".claude", ".agents") and b == "skills" for a, b in itertools.pairwise(parts)):
+            return OmissionReason.ENGINE_DISCOVERY
     if any(
         (part.startswith(".env") and part != ".env.example")
         or part in _CREDENTIAL_DIRS

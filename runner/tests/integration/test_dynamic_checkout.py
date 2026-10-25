@@ -127,8 +127,11 @@ def test_discovery_credentials_and_symlinks_are_not_read_or_relocated(
 
 
 _DENIED = [
-    (".claude/skills/review/SKILL.md", b"payload-sentinel", "engine_discovery"),
-    (".agents/skills/review/SKILL.md", b"payload-sentinel", "engine_discovery"),
+    ("pkg/.claude/skills/review/SKILL.md", b"payload-sentinel", "engine_discovery"),
+    ("pkg/.agents/skills/review/SKILL.md", b"payload-sentinel", "engine_discovery"),
+    (".opencode/skills/payload.js", b"payload-sentinel", "engine_discovery"),
+    (".claude/skills/review/package.json", b"payload-sentinel", "engine_discovery"),
+    (".claude/skills/review/.env", b"payload-sentinel", "engine_discovery"),
     (".opencode/agent/review.md", b"payload-sentinel", "engine_discovery"),
     ("opencode.json", b"{}", "engine_discovery"),
     (".env", b"payload-sentinel", "credential_path"),
@@ -136,6 +139,88 @@ _DENIED = [
     ("deploy.key", b"payload-sentinel", "credential_path"),
     ("link", ("120000", b"/etc/passwd"), "unsafe_mode"),
 ]
+
+
+# #701-T01 #701-T02 #701-T03
+def test_repository_skills_are_exported_as_documents_and_the_engine_inputs_around_them_are_not(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    manifest = (
+        b"---\nname: migrations\ndescription: Check migrations\nallowed-tools: Bash\n---\nBody\n"
+    )
+    repo.set_head(
+        {
+            "README.md": b"base\n",
+            ".claude/skills/migrations/SKILL.md": manifest,
+            ".claude/skills/migrations/references/rules.md": b"# rules\n",
+            ".claude/skills/migrations/scripts/check.sh": ("100755", b"#!/bin/sh\necho hi\n"),
+            ".agents/skills/style/SKILL.md": manifest.replace(b"migrations", b"style"),
+            ".opencode/skills/api/SKILL.md": manifest.replace(b"migrations", b"api"),
+            ".opencode/skill/old/SKILL.md": manifest.replace(b"migrations", b"old"),
+            ".opencode/plugins/evil.js": b"payload-sentinel",
+            ".opencode/skills/api/node_modules/x.js": b"payload-sentinel",
+            "opencode.json": b"payload-sentinel",
+        }
+    )
+    git(repo.path, "update-ref", "refs/heads/main", repo.head)
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+
+    assert set(result.files) == {
+        "README.md",
+        ".claude/skills/migrations/SKILL.md",
+        ".claude/skills/migrations/references/rules.md",
+        ".claude/skills/migrations/scripts/check.sh",
+        ".agents/skills/style/SKILL.md",
+        ".opencode/skills/api/SKILL.md",
+        ".opencode/skill/old/SKILL.md",
+    }
+    exported = (result.export / ".claude/skills/migrations/SKILL.md").read_text()
+    assert exported == '---\nname: "migrations"\ndescription: "Check migrations"\n---\nBody\n'
+    assert "allowed-tools" not in "".join(
+        p.read_text() for p in result.export.rglob("SKILL.md") if p.is_file()
+    )
+    # A script is a plain file: readable, and no executable bit anywhere in the export.
+    script = result.export / ".claude/skills/migrations/scripts/check.sh"
+    assert script.read_text() == "#!/bin/sh\necho hi\n"
+    assert not any(p.stat().st_mode & 0o111 for p in result.export.rglob("*") if p.is_file())
+    assert {(x.path, x.reason) for x in result.omissions} == {
+        (".opencode/plugins/evil.js", "engine_discovery"),
+        (".opencode/skills/api/node_modules/x.js", "engine_discovery"),
+        ("opencode.json", "engine_discovery"),
+    }
+    assert not any(
+        b"payload-sentinel" in p.read_bytes() for p in (tmp_path / "job").rglob("*") if p.is_file()
+    )
+
+
+# #701-T05
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        b'---js\n({name: "x", description: "y"})\n---\nBody\n',
+        b"---\nname: x\n---\nBody\n",
+        b"no frontmatter\n",
+    ],
+)
+def test_a_skill_manifest_the_runner_cannot_rewrite_stays_in_the_diff_and_out_of_the_export(
+    repo: GitFixture, tmp_path: Path, manifest: bytes
+) -> None:
+    repo.set_head({"README.md": b"base\n", ".claude/skills/x/SKILL.md": manifest})
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+
+    assert set(result.files) == {"README.md"}
+    assert not (result.export / ".claude").exists()
+    assert [(x.path, x.reason) for x in result.omissions] == [
+        (".claude/skills/x/SKILL.md", "invalid_skill")
+    ]
+    # The change is not hidden from the review: it is not a deny-list skip.
+    assert result.skipped == ()
+    assert ".claude/skills/x/SKILL.md" in result.diff
+    assert result.metrics.omitted == {"invalid_skill": 1} and result.metrics.skipped == {}
 
 
 # #296-T06 #296-T07

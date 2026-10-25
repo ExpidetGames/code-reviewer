@@ -9,13 +9,16 @@ cannot change it, because it is not read from the export.
 Two layers, both defence in depth and neither a proof on its own:
 
 - **Permissions** are default-deny before the explicit allows: a caller's own copy shows `read`
-  (which also supplies directory listing in this pin), `grep`, `glob` and the non-filesystem
-  `StructuredOutput` return. Every other built-in, every unknown and every future tool stays denied.
-  The wildcard deny is what makes a new built-in denied by default.
-- **Discovery and runtime services** are switched off (plugins, skills, MCP, LSP, formatter,
-  watcher, snapshots, sharing, updates, compaction, model fetching). #85 proved these flags are not
-  a security boundary on their own — the ESM plugin loader runs repository code despite them — so
-  #196 strips every discovery input from the export and this file assumes that happened.
+  (which also supplies directory listing in this pin), `grep`, `glob`, the `skill` loader for
+  repository skills (#701; documents, nothing that runs) and the non-filesystem `StructuredOutput`
+  return. Every other built-in, every unknown and every future tool stays denied. The wildcard deny
+  is what makes a new built-in denied by default.
+- **Discovery and runtime services** are switched off (plugins, MCP, LSP, formatter, watcher,
+  snapshots, sharing, updates, compaction, model fetching, the engine's own lookup of skills outside
+  the export). #85 proved these flags are not a security boundary on their own — the ESM plugin
+  loader runs repository code despite them — so #196 strips every discovery input from the export
+  and this file assumes that happened. The one thing it hands the engine from the export is the
+  list of skill trees (`skills.paths`), whose manifests the runner rewrote (`repo_skills.py`).
 
 The spike's caveat is binding: the flags are not proof of isolation. They only narrow what a
 misconfiguration can reach; the export and the OS boundary of #196/#202 are what actually protect.
@@ -33,6 +36,7 @@ from code_reviewer_runner.dynamic_review.passthrough.families import (
     WireFamily,
     spec_of,
 )
+from code_reviewer_runner.dynamic_review.repo_skills import SKILL_PATHS
 
 # The one provider the engine may talk to: the runner-owned model proxy on loopback. Its key is the
 # per-job capability (`new_proxy_capability`), never the workspace credential; the proxy checks it
@@ -50,6 +54,12 @@ def new_proxy_capability() -> str:
 # The tools the engine may call by name. `read` supplies directory listing in this pin (there is no
 # separate `list` tool); `StructuredOutput` is the prompt-loop's own non-filesystem return.
 ALLOWED_TOOLS: tuple[str, ...] = ("read", "grep", "glob", "StructuredOutput")
+# The loader of repository skills (#701). It returns a document and runs nothing; it is a pattern
+# map in the permission block rather than a plain allow, so it is not part of `ALLOWED_TOOLS`.
+SKILL_TOOL = "skill"
+# The skills the engine ships itself. `customize-opencode` teaches the agent to write OpenCode
+# config; the agent is offered repository skills only.
+BUILTIN_SKILLS_DENIED: tuple[str, ...] = ("customize-opencode",)
 
 # Environment variables the engine process receives. The engine never sees a GitHub, provider,
 # runner or lease credential: its provider is the loopback proxy with a dummy key.
@@ -57,6 +67,9 @@ _DISABLED_FLAGS: dict[str, str] = {
     # Stop project config/directory discovery and root instruction lookup. Does not stop nearby
     # rule files attached during a read (the accepted nested-injection risk) and is not a proof.
     "OPENCODE_DISABLE_PROJECT_CONFIG": "true",
+    # The next two also keep the engine from looking for skills (and CLAUDE.md) in the home and in
+    # the ancestors of the export. The repository's own skills are listed by `skills.paths`, which
+    # these flags do not touch (#701).
     "OPENCODE_DISABLE_CLAUDE_CODE": "true",
     "OPENCODE_DISABLE_EXTERNAL_SKILLS": "true",
     "OPENCODE_PURE": "true",
@@ -75,11 +88,16 @@ _DISABLED_FLAGS: dict[str, str] = {
 }
 
 
-def permission_block() -> dict[str, str]:
-    """Default-deny permissions with the explicit allows. A new tool is denied by the wildcard."""
-    permissions: dict[str, str] = {"*": "deny"}
+def permission_block() -> dict[str, str | dict[str, str]]:
+    """Default-deny permissions with the explicit allows. A new tool is denied by the wildcard.
+
+    Rules are read last match first, so the skill loader allows every name and then denies the
+    engine's own skills by name.
+    """
+    permissions: dict[str, str | dict[str, str]] = {"*": "deny"}
     for tool in ALLOWED_TOOLS:
         permissions[tool] = "allow"
+    permissions[SKILL_TOOL] = {"*": "allow", **dict.fromkeys(BUILTIN_SKILLS_DENIED, "deny")}
     return permissions
 
 
@@ -105,6 +123,10 @@ def _engine_config(
         "enabled_providers": list(provider),
         # No repository instruction discovery: the runner composes the prompt (core + skill)
         "instructions": [],
+        # The repository's skill trees, relative to the export; the engine scans them for
+        # `**/SKILL.md` and nothing else, and the runner rewrote every manifest it finds there
+        # (#701). No `urls`: the engine would download from one.
+        "skills": {"paths": list(SKILL_PATHS)},
         "plugin": [],
         "mcp": {},
         "lsp": False,
