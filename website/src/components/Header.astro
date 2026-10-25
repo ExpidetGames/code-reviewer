@@ -1,0 +1,115 @@
+---
+// Island nav: a floating glass pill; on small screens a hamburger (src/lib/menu.ts) that opens a full-screen menu.
+import { blogIsLive } from "../lib/blog";
+import { CTA, MENU_LINKS, NAV_LINKS, type NavLink } from "../content/nav";
+import ButtonLink from "./ButtonLink.astro";
+import Logo from "./Logo.astro";
+
+const pathname = Astro.url.pathname.replace(/\/$/, "") || "/";
+const current = (link: NavLink) => link.match !== undefined && link.match === pathname;
+
+const blog: NavLink | null = (await blogIsLive()) ? { label: "Blog", href: "/blog/", match: "/blog" } : null;
+const links = blog ? [...NAV_LINKS.slice(0, -1), blog, ...NAV_LINKS.slice(-1)] : NAV_LINKS;
+const menuLinks = blog ? [...MENU_LINKS.slice(0, -1), blog, ...MENU_LINKS.slice(-1)] : MENU_LINKS;
+
+const focusRing = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg";
+---
+
+<header data-site-header class="pointer-events-none fixed inset-x-0 top-0 z-50 px-4">
+  <nav
+    aria-label="Main"
+    class="pointer-events-auto relative z-50 mx-auto mt-6 flex w-max items-center gap-1 rounded-full border border-line bg-page/70 p-2 shadow-lg shadow-black/5 backdrop-blur-xl"
+  >
+    <a
+      href="/"
+      aria-label="code-review.com, home"
+      class:list={["rounded-full py-1 pr-3 pl-2 transition-all duration-700 ease-fluid hover:bg-surface active:scale-98", focusRing]}
+    >
+      <Logo />
+    </a>
+
+    <ul class="hidden items-center gap-1 md:flex">
+      {
+        links.map((link) => (
+          <li>
+            <a
+              href={link.href}
+              data-cta-location={link.location}
+              aria-current={current(link) ? "page" : undefined}
+              class:list={[
+                "block rounded-full px-3 py-2 text-sm font-semibold transition-all duration-700 ease-fluid active:scale-98",
+                current(link) ? "bg-raised text-fg" : "text-muted hover:bg-surface hover:text-fg",
+                focusRing,
+              ]}
+            >
+              {link.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+
+    <span class="hidden md:block">
+      <ButtonLink href={CTA.href} size="header" shape="full" location="nav">{CTA.header}</ButtonLink>
+    </span>
+
+    <button
+      type="button"
+      data-menu-toggle
+      aria-expanded="false"
+      aria-controls="site-menu"
+      aria-label="Open menu"
+      class:list={["group relative size-10 cursor-pointer rounded-full transition-all duration-700 ease-fluid hover:bg-surface active:scale-98 md:hidden", focusRing]}
+    >
+      <span aria-hidden="true" class="absolute inset-0 flex items-center justify-center">
+        <span class="block h-0.5 w-5 -translate-y-1 rounded-full bg-fg transition-all duration-700 ease-fluid group-aria-expanded:translate-y-0 group-aria-expanded:rotate-45"></span>
+      </span>
+      <span aria-hidden="true" class="absolute inset-0 flex items-center justify-center">
+        <span class="block h-0.5 w-5 translate-y-1 rounded-full bg-fg transition-all duration-700 ease-fluid group-aria-expanded:translate-y-0 group-aria-expanded:-rotate-45"></span>
+      </span>
+    </button>
+  </nav>
+
+  <div
+    id="site-menu"
+    inert
+    class="pointer-events-none invisible fixed inset-0 z-40 bg-white/80 opacity-0 backdrop-blur-3xl transition-all duration-700 ease-fluid data-[open]:pointer-events-auto data-[open]:visible data-[open]:opacity-100 md:hidden dark:bg-black/80"
+  >
+    <ul class="flex flex-col gap-2 px-6 pt-24">
+      <li aria-hidden="true" class="h-16"></li>
+      {
+        menuLinks.map((link, index) => (
+          <li class="overflow-hidden p-1">
+            <a
+              href={link.href}
+              data-cta-location={link.location}
+              aria-current={current(link) ? "page" : undefined}
+              style={`transition-delay: ${100 + index * 50}ms`}
+              class:list={[
+                "menu-item block translate-y-12 rounded-lg py-2 text-4xl font-semibold opacity-0 transition-all duration-700 ease-fluid active:scale-98",
+                current(link) ? "text-fg" : "text-muted hover:text-fg",
+                focusRing,
+              ]}
+            >
+              {link.label}
+              {current(link) && <span class="sr-only"> (current page)</span>}
+            </a>
+          </li>
+        ))
+      }
+      <li class="overflow-hidden p-1 pt-6">
+        <div class="menu-item translate-y-12 opacity-0 transition-all duration-700 ease-fluid" style={`transition-delay: ${100 + menuLinks.length * 50}ms`}>
+          <ButtonLink href={CTA.href} location="menu">{CTA.primary}</ButtonLink>
+        </div>
+      </li>
+    </ul>
+  </div>
+</header>
+
+<style>
+  /* The items of the open menu slide up one after the other (the delays are set per item above). */
+  #site-menu[data-open] .menu-item {
+    translate: 0 0;
+    opacity: 1;
+  }
+</style>

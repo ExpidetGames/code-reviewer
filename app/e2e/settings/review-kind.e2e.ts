@@ -88,6 +88,9 @@ test.describe("the review kind of a project", () => {
     await expect(page.getByLabel("Token budget", { exact: true })).toHaveCount(
       0,
     );
+    await expect(
+      page.getByLabel("Cost limit per review (USD)", { exact: true }),
+    ).toBeVisible();
     await openSection(page, "Review");
     const skill = page.getByLabel("Review skill", { exact: true });
     await expect(skill).toHaveJSProperty("readOnly", true);
@@ -173,8 +176,12 @@ test.describe("the review kind of a project", () => {
       .click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await openSection(page, "Limits");
+    // #689: no kind has a token budget; the cost limit is there for both.
+    await expect(page.getByLabel("Token budget", { exact: true })).toHaveCount(
+      0,
+    );
     await expect(
-      page.getByLabel("Token budget", { exact: true }),
+      page.getByLabel("Cost limit per review (USD)", { exact: true }),
     ).toBeVisible();
     await page.reload();
     await expect(diff).toBeChecked();

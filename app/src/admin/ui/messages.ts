@@ -54,7 +54,11 @@ export function describeAdminIssue(issue: RequestIssue): string {
     case "too_many_entries":
       return TOO_MANY_ENTRIES;
     case "number_out_of_range":
-      return "Enter a whole number from 1 to 1000.";
+      return issue.field === "reviewMaxCostCents"
+        ? "Enter an amount from $0.01 to $100.00, with at most two decimals."
+        : issue.field === "ownKeyTokenCap"
+          ? "Enter a whole number from 100,000 to 100,000,000."
+          : "Enter a whole number from 1 to 1000.";
     case "smtp_invalid":
     case "host_required":
       return "Enter the host name or address of the mail server.";

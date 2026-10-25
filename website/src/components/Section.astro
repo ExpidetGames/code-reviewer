@@ -1,0 +1,15 @@
+---
+// A page section with the shared width and vertical rhythm (64px on small screens, 96px above).
+interface Props {
+  id?: string;
+  labelledBy?: string;
+  class?: string;
+}
+const { id, labelledBy, class: className } = Astro.props;
+---
+
+<section id={id} aria-labelledby={labelledBy} class:list={["px-6 py-16 md:px-8 md:py-24", className]}>
+  <div class="mx-auto max-w-6xl">
+    <slot />
+  </div>
+</section>

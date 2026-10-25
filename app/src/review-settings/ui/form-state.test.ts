@@ -35,7 +35,6 @@ function model(
       fallbackModel: "built_in",
       extraInstructions: "built_in",
       maxFindings: "built_in",
-      maxTokens: "built_in",
       largePrChunking: "built_in",
       inlineKeyIssues: "built_in",
       autoReviewOnOpen: "built_in",
@@ -44,6 +43,7 @@ function model(
       maxCostCents: "built_in",
     },
     cost: estimateReviewCost(effective),
+    operatorMaxCostCents: 100,
     managed: false,
     catalog: null,
     lastSaved: null,
@@ -154,7 +154,7 @@ describe("the form values", () => {
     const state = initialFormState(model({ maxFindings: 9 }));
 
     expect(state.overridden.maxFindings).toBe(true);
-    expect(state.overridden.maxTokens).toBe(false);
+    expect(state.overridden.largePrChunking).toBe(false);
     expect(state.values.maxFindings).toBe("9");
   });
 
@@ -354,7 +354,7 @@ describe("the request built from the form", () => {
   it("reports every wrong field at once", () => {
     let state = initialFormState(model());
     state = setText(state, "maxFindings", "-1");
-    state = setText(state, "maxTokens", "many");
+    state = setText(state, "maxCostCents", "many");
     state = setText(state, "model", "");
 
     const result = buildPatch(state);
@@ -362,8 +362,8 @@ describe("the request built from the form", () => {
     expect(result.ok).toBe(false);
     if (!result.ok)
       expect(result.issues.map((issue) => issue.field).sort()).toEqual([
+        "maxCostCents",
         "maxFindings",
-        "maxTokens",
         "model",
       ]);
   });
@@ -388,7 +388,7 @@ describe("the preview of the cost", () => {
   });
 
   it("is not available while a value is wrong", () => {
-    const state = setText(initialFormState(model()), "maxTokens", "abc");
+    const state = setText(initialFormState(model()), "maxCostCents", "abc");
 
     expect(previewSettings(model(), state)).toBeNull();
   });

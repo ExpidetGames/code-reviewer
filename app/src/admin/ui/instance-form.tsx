@@ -38,11 +38,23 @@ import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi, SettingChange } from "./api.ts";
 import { useFocusFirstError } from "./focus-first-error.tsx";
 import { LastChanged } from "./last-changed.tsx";
+import { formatUsdFixed, parseUsd } from "./billing-money.ts";
 import { describeAdminIssue } from "./messages.ts";
 import { SaveResult, useSave, type SaveStatus } from "./use-save.tsx";
 
 function isTenancy(value: string): value is TenancyKind {
   return value === "single" || value === "multi";
+}
+
+/** US dollars as typed ("1.50") to whole cents, or null when it is no amount of at most two decimals. */
+function centsOfDollars(text: string): number | null {
+  const micro = parseUsd(text);
+  return micro !== null && micro % 10_000 === 0 ? micro / 10_000 : null;
+}
+
+/** Whole cents as the amount the field shows: 100 is "1.00". */
+function dollarsOfCents(cents: number): string {
+  return formatUsdFixed(cents * 10_000);
 }
 
 function workspaces(count: number): string {
@@ -69,6 +81,9 @@ export function InstanceForm({
   const [tokenCapText, setTokenCapText] = useState(
     String(settings.ownKeyTokenCap.value),
   );
+  const [maxCostText, setMaxCostText] = useState(
+    dollarsOfCents(settings.reviewMaxCostCents.value),
+  );
   const [dynamicEnabled, setDynamicEnabled] = useState(
     settings.dynamicReview.value,
   );
@@ -86,6 +101,15 @@ export function InstanceForm({
   const { pending, save } = useSave(api, settings.workspaceCount);
   const focusTargetRef = useFocusFirstError();
 
+  /** The control of the Limits card the refusal is about. */
+  function limitsFocusTarget(outcome: SaveStatus | undefined): string {
+    const field =
+      outcome?.kind === "failed" ? outcome.issues[0]?.field : undefined;
+    if (field === "reviewMaxCostCents") return `${ids}-max-cost`;
+    if (field === "ownKeyTokenCap") return `${ids}-token-cap`;
+    return `${ids}-max`;
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     // Only what changed is sent, so a save does not touch the other setting's "last changed".
@@ -102,6 +126,10 @@ export function InstanceForm({
     if (tokenCapText !== String(settings.ownKeyTokenCap.value)) {
       wanted.push("limits");
       changes.push({ ownKeyTokenCap: Number(tokenCapText) });
+    }
+    if (maxCostText !== dollarsOfCents(settings.reviewMaxCostCents.value)) {
+      wanted.push("limits");
+      changes.push({ reviewMaxCostCents: centsOfDollars(maxCostText) });
     }
     // Turning the gate on needs the operator's confirmation of the rollout order (contracts/README.md).
     const turningOn = dynamicEnabled && !settings.dynamicReview.value;
@@ -126,7 +154,15 @@ export function InstanceForm({
       plan: null,
     };
     wanted.forEach((key, index) => {
-      next[key] = outcomes[index] ?? null;
+      const outcome = outcomes[index] ?? null;
+      // Three settings share the Limits card: a refusal of one stays visible when a later one is saved.
+      const earlier = next[key];
+      if (earlier?.kind === "failed" && outcome?.kind === "failed")
+        next[key] = {
+          ...earlier,
+          issues: [...earlier.issues, ...outcome.issues],
+        };
+      else if (earlier?.kind !== "failed") next[key] = outcome;
     });
     setResults(next);
     // The confirmation belongs to this save: the next time the gate is turned on it is asked again.
@@ -137,7 +173,7 @@ export function InstanceForm({
     if (failed !== -1)
       focusTargetRef.current =
         wanted[failed] === "limits"
-          ? `${ids}-max`
+          ? limitsFocusTarget(outcomes[failed])
           : wanted[failed] === "dynamic"
             ? `${ids}-dynamic`
             : wanted[failed] === "plan"
@@ -156,6 +192,13 @@ export function InstanceForm({
   const tokenCapIssue =
     results.limits?.kind === "failed"
       ? results.limits.issues.find((issue) => issue.field === "ownKeyTokenCap")
+      : undefined;
+
+  const maxCostIssue =
+    results.limits?.kind === "failed"
+      ? results.limits.issues.find(
+          (issue) => issue.field === "reviewMaxCostCents",
+        )
       : undefined;
 
   const planIssue =
@@ -286,6 +329,31 @@ export function InstanceForm({
             ) : null}
           </Field>
           <LastChanged setting={settings.ownKeyTokenCap} />
+          <Field>
+            <FieldLabel htmlFor={`${ids}-max-cost`}>
+              Maximum cost per review (USD)
+            </FieldLabel>
+            <Input
+              id={`${ids}-max-cost`}
+              inputMode="decimal"
+              value={maxCostText}
+              onChange={(event) => setMaxCostText(event.target.value)}
+              aria-invalid={maxCostIssue !== undefined}
+              aria-describedby={`${ids}-max-cost-hint`}
+            />
+            <FieldDescription id={`${ids}-max-cost-hint`}>
+              The default is $1.00. The most one review may cost, for Diff and
+              Dynamic Review alike. Customers see it as the maximum for their
+              own cost limit and cannot save a higher one; a limit they saved
+              earlier that is above it is cut to it. A review that reaches it is
+              stopped and bills what its model requests really cost. Between
+              $0.01 and $100.00.
+            </FieldDescription>
+            {maxCostIssue ? (
+              <FieldError>{describeAdminIssue(maxCostIssue)}</FieldError>
+            ) : null}
+          </Field>
+          <LastChanged setting={settings.reviewMaxCostCents} />
           <SaveResult status={results.limits} />
         </CardContent>
       </Card>

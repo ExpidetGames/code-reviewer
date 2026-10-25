@@ -161,9 +161,15 @@ class DiffCostMeter:
     """What the provider charged for the model calls of one Diff run. One instance per run."""
 
     def __init__(
-        self, charge_of: ChargeOf = _stated_charge, max_cost_usd: Decimal | None = None
+        self,
+        charge_of: ChargeOf = _stated_charge,
+        max_cost_usd: Decimal | None = None,
+        stop_reason: str | None = None,
     ) -> None:
         self._charge_of = charge_of
+        # #689: which limit `max_cost_usd` is (`cost_limit` of the operator, `project_cost_limit`
+        # of the customer), reported as `stoppedEarly` when it stops the run.
+        self._stop_reason = stop_reason
         # #666: the project's cost limit. A request is only sent while what the run has cost so far
         # is below it; one call is never cut short, so the last one may end above the limit.
         self._max_cost_usd = max_cost_usd
@@ -209,6 +215,12 @@ class DiffCostMeter:
         """True when a request was refused because the cost had reached the limit (#666)."""
         with self._lock:
             return self._limit_reached
+
+    @property
+    def stop_reason(self) -> str | None:
+        """The limit that stopped the run (#689); None when no request was refused for its cost."""
+        with self._lock:
+            return self._stop_reason if self._limit_reached else None
 
     @property
     def answered_calls(self) -> int:
@@ -272,6 +284,7 @@ def install_cost_meter(
     *,
     provider: LlmProviderSpec | None = None,
     max_cost_usd: Decimal | None = None,
+    stop_reason: str | None = None,
 ) -> tuple[DiffCostMeter, Callable[[], None]]:
     """Wrap PR-Agent's `acompletion`. Returns the meter and a function that undoes the wrapping.
 
@@ -298,7 +311,9 @@ def install_cost_meter(
     if not inspect.iscoroutinefunction(original):
         raise CostMeterError(f"{_HANDLER_MODULE}.{_FUNCTION} is not a coroutine function")
 
-    meter = DiffCostMeter(_stated_charge if provider is None else charge_by(provider), max_cost_usd)
+    meter = DiffCostMeter(
+        _stated_charge if provider is None else charge_by(provider), max_cost_usd, stop_reason
+    )
 
     @wraps(original)
     async def metered(*args: Any, **kwargs: Any) -> Any:

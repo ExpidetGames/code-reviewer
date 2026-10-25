@@ -82,36 +82,6 @@ describe("the cost summary", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("warns when the token budget is larger than the context window of the model", () => {
-    render(
-      <CostSummary
-        cost={estimateReviewCost({
-          ...base,
-          model: "deepseek/deepseek-v3.2",
-          maxTokens: 500_000,
-        })}
-      />,
-    );
-
-    const warning = screen.getByRole("status").textContent;
-    expect(warning).toMatch(/context window/);
-    expect(warning).toMatch(/Saving is refused/);
-  });
-
-  it("still warns when the fallback model's context window is too small, because the save is refused for it too", () => {
-    render(
-      <CostSummary
-        cost={estimateReviewCost({
-          ...base,
-          fallbackModel: "deepseek/deepseek-v3.2",
-          maxTokens: 500_000,
-        })}
-      />,
-    );
-
-    expect(screen.getByRole("status").textContent).toMatch(/fallback model/);
-  });
-
   it("renders a model name with HTML as text", () => {
     const { container } = render(
       <CostSummary cost={estimateReviewCost({ ...base, model: "<b>x</b>" })} />,

@@ -1,0 +1,38 @@
+---
+// Heading block of the inner pages: the h1 with the text gradient and an optional lead.
+import { inline } from "../lib/inline";
+
+interface Props {
+  id: string;
+  lead?: string;
+  /** Lines of the title, broken on wide screens. */
+  lines: string[];
+  center?: boolean;
+}
+const { id, lead, lines, center = false } = Astro.props;
+---
+
+<header class="px-6 pt-24 pb-12 md:px-8">
+  <div class:list={["mx-auto pt-16 md:pt-24", center ? "flex max-w-6xl flex-col items-center text-center" : "max-w-3xl"]}>
+    <h1
+      id={id}
+      data-reveal="load"
+      class:list={[
+        "max-w-hero bg-linear-to-r from-hero-from to-hero-to bg-clip-text pb-2 text-4xl font-semibold tracking-tight text-transparent",
+        center ? "sm:text-6xl" : "sm:text-5xl",
+      ]}
+    >
+      {lines.map((line, index) => (
+        <Fragment>
+          {line}
+          {index < lines.length - 1 && <><br class="hidden sm:block" />{" "}</>}
+        </Fragment>
+      ))}
+    </h1>
+    {
+      lead && (
+        <p data-reveal="load" style="--reveal-delay: 100ms" class="mt-6 max-w-hero text-lg text-muted" set:html={inline(lead)} />
+      )
+    }
+  </div>
+</header>

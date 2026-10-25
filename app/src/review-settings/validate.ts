@@ -45,10 +45,10 @@ export const REVIEW_SETTING_ISSUE_CODES = [
   /** Control characters (other than tab and line breaks) or an unpaired surrogate. */
   "FORBIDDEN_CHARACTERS",
   /**
-   * The token budget is larger than the context window of the model (a model the price table knows).
-   * Reported on `maxTokens` when the request sets it, otherwise on the model that became too small.
+   * The cost limit of a customer is above the operator's maximum per review (#689). Reported on `maxCostCents`; the response
+   * carries the maximum beside the issue (`maximumCents`). Never reported by the validation itself: it needs the maximum.
    */
-  "EXCEEDS_MODEL_CONTEXT",
+  "EXCEEDS_OPERATOR_MAXIMUM",
   /**
    * The provider's model metadata lists no endpoint with both `tools` and `tool_choice` for the Dynamic model
    * of a save; Dynamic Review needs tool calling (#269). Never reported by the validation itself.
@@ -136,6 +136,8 @@ export type ReviewSettingIssue = {
     | "settings"
     | (string & {});
   code: ReviewSettingIssueCode;
+  /** `EXCEEDS_OPERATOR_MAXIMUM` (#689): the operator's maximum per review in whole US cents, so the message can name it. */
+  maximumCents?: number;
 };
 
 type FieldResult<T> =
@@ -299,10 +301,6 @@ const FIELD_CHECKS: {
   maxFindings: integerBetween(
     REVIEW_SETTING_LIMITS.maxFindings.min,
     REVIEW_SETTING_LIMITS.maxFindings.max,
-  ),
-  maxTokens: integerBetween(
-    REVIEW_SETTING_LIMITS.maxTokens.min,
-    REVIEW_SETTING_LIMITS.maxTokens.max,
   ),
   largePrChunking: bool,
   inlineKeyIssues: bool,

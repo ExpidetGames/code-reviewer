@@ -158,11 +158,19 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    operator's key, the catalog entry's id and its name as it is now (`recordSelection`, columns `llm_provider`,
    `catalog_entry_id`, `catalog_entry_name`; never the model). The claim logs `selection entry=<id> kind=<kind>` for
    such a job, and no model.
-   **Options** of the job come with the selection (`JobOptionsSource`, below): the token budget of the review settings
-   replaces the instance's context window (`llm.maxTokens`) and the other options go into `env`. **On the operator's
+   **Options** of the job come with the selection (`JobOptionsSource`, below): the options of the review settings go into
+   `env`. **The token budget** (`llm.maxTokens`) is no setting since #689: the claim decides it for every job
+   (`reviewTokenBudget`, `src/model-catalog/token-budget.ts`) as 100,000, cut to the context window of the job's model when
+   the provider's metadata states one (else to the window last read). A Diff job on the workspace's own key asks no provider
+   (`ClaimDeps.knownContextWindow`): it is cut to the smallest window the models.dev catalog in the database states for its
+   model and its fallback model, else to the instance's `LLM_MAX_TOKENS`, else it keeps the 100,000.
+   **The cost limit** (`llm.maxCostUsd`, `llm.operatorMaxCostUsd`) is decided by `job-cost-limit.ts`: the customer's limit
+   and the operator's maximum per review (#689, the admin portal, the instance setting `review_max_cost_cents`, read at
+   each job through `ClaimDeps.operatorCostLimitCents`) go to a caller that names `operator_cost_limit` as two values; a caller
+   that names `cost_limit` alone gets the smaller of the two in `llm.maxCostUsd`; a caller that names neither gets neither, and
+   the claim logs `carries no cost limit` (a Dynamic Review is then held only to the runner's `RUNNER_DYNAMIC_MAX_COST_USD`, a Diff Review to none); a caller that names `operator_cost_limit` alone gets the smaller of the two in `llm.operatorMaxCostUsd`. **On the operator's
    key** the model of the job is the entry's, never the workspace's; the capabilities of #279 are read for it, from the
-   selection's provider, and the token budget is cut to the context window of the entry's model when the provider
-   states one (else to the window last read, else to a documented bound). The entry's model is remembered with the key,
+   selection's provider. The entry's model is remembered with the key,
    so the result a runner reports is stripped of it (`usage.model` becomes `null`, the model ids of every entry of every
    status are masked in the text). The Worker's first fetch decides the same again with the same code (`checkJob`).
    `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never sent (the LLM configuration has no base
@@ -506,12 +514,11 @@ not a missed supersede to chase. A Dispatcher that does not read `draining` sees
   can differ per repository: `env` (the extra options of the review PR-Agent tool, `PR_REVIEWER__*`;
   a previous release also sent the removed tools' families, which the runner accepts and ignores) and
   optionally
-  `llm: { model, maxTokens, fallbackModels }`. The running server uses
+  `llm: { model, fallbackModels, maxCostCents }` (the token budget is the claim's since #689). The running server uses
   `createReviewSettingsJobOptionsSource` (`review-settings-job-options.ts`): the review settings of the
   job's repository (project over global defaults over built-in values, read at claim time) go through
   `toRunnerSettings`. The values are text of the type PR-Agent's option has (`"5"`, `"true"`); an option
-  that is off is left out. A `model` replaces the model of the LLM access, a `maxTokens` (a whole number
-  from 1000 to 10 000 000) becomes `llm.maxTokens` and wins over `LLM_MAX_TOKENS`; a null or missing
+  that is off is left out. A `model` replaces the model of the LLM access; a null or missing
   value is left out of the job. `fallbackModels` is accepted and **not handed on**: no fallback chain is
   decided for the MVP. A key outside the review family ends the job as `job_env_invalid`, a model or
   size the runner would refuse as `job_llm_options_invalid`. The key pattern is

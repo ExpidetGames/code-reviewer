@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a hold is made for (ADR 0006, 2.8 and D6; #498): the longest a job can occupy a VM, and the most its model cost can
-// be bounded to. Constants because the App cannot read the settings of a Dispatcher or of a runner; each is the default of
+// be bounded to. The times are constants because the App cannot read the settings of a Dispatcher; each is the default of
 // the place that owns it, and a test pins it there (`hold.test.ts` reads those places, and
 // `dispatcher/src/billing-hold-pin.test.ts` reads this file). An operator who raises a setting above its default makes the
 // hold smaller than the real maximum, never larger; the settlement charges the real price in any case.
@@ -23,12 +23,10 @@ export const JOB_TIMEOUT_SECONDS: Record<ProjectReviewKind, number> = {
   dynamic: DYNAMIC_JOB_TIMEOUT_SECONDS,
 };
 
-/**
- * The cost limit of a Dynamic run in micro-USD: the default of `RUNNER_DYNAMIC_MAX_COST_USD`
- * (`runner/src/code_reviewer_runner/dynamic_review/budget.py`, 1.00 USD). The App does not know the operator's value; a run
- * can cost more than this limit by the excess of #540, and then settlement charges the real price.
- */
-export const DYNAMIC_COST_LIMIT_MICRO_USD = 1_000_000;
+// The cost limit of a run is not a constant here since #689: it is the operator's maximum per review, set in the admin portal
+// (the instance setting `review_max_cost_cents`, `review-settings/operator-cost-limit.ts`), and a caller of `reserveFor` passes
+// it as `dynamicCostLimitMicroUsd` (cents x 10,000). A run can cost more than the limit by the excess of #540, and then
+// settlement charges the real price.
 
 const MINUTE_SECONDS = 60;
 

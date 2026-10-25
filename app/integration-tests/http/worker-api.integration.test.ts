@@ -1136,6 +1136,8 @@ describe("an old runner and the legacy claim", () => {
               provider: "openrouter",
               model: "vendor/test-model",
               apiKey: TEST_LLM_API_KEY,
+              // #689: the token budget the app decides, last of the legacy keys.
+              maxTokens: 100000,
             },
             env: {},
           },

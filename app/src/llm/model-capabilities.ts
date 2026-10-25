@@ -49,7 +49,7 @@ export const MODEL_CAPABILITY_CACHE_MS = 5 * 60 * 1000;
  * `MODEL_METADATA_TIMEOUT_MS` per model and this time, not one per claim.
  */
 export const MODEL_CAPABILITY_FAILURE_CACHE_MS = 45 * 1000;
-/** How long the last context window read for a model is kept, to clamp a token budget while the provider cannot be asked. */
+/** How long the last context window read for a model is kept, so a review can still be cut to it while the provider cannot be asked. */
 export const MODEL_CONTEXT_WINDOW_KEEP_MS = 24 * 60 * 60 * 1000;
 const MAX_CACHED_MODELS = 200;
 
@@ -138,7 +138,8 @@ export type ModelCapabilityChecker<P extends string = LlmProvider> = {
   ): Promise<ModelCapabilityResult>;
   /**
    * The context window the last successful read of this model stated, kept for a day (null: never read or stated
-   * none). The claim clamps the token budget of a managed job to it when a fresh read fails.
+   * none). The claim cuts how much of a pull request a managed job reads (an internal value, no setting) to it when a fresh
+   * read fails.
    */
   lastKnownContextLength?(modelId: string, provider?: P): number | null;
 };

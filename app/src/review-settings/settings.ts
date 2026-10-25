@@ -34,8 +34,6 @@ export type ReviewSettings = {
   extraInstructions: string;
   /** The most findings one review lists. */
   maxFindings: number;
-  /** The token budget of a review: how much of a diff goes to the model at once. */
-  maxTokens: number;
   /** Split a large pull request into chunks and review each, instead of leaving files out. */
   largePrChunking: boolean;
   /** Post every finding as an inline comment on its line as well. */
@@ -48,9 +46,9 @@ export type ReviewSettings = {
   allowedCommands: ReviewCommand[];
   /**
    * #656: the cost limit of a review, in whole US cents; `null` is none of its own (the estimate then warns above its standard
-   * level, which is never enforced). It is enforced (#666): a review stops when it reaches it, next to the instance's own limit
-   * (#540), and the smaller of the two applies. A project that sets none follows the workspace default, which is `null` until
-   * somebody sets it.
+   * level, which is never enforced). It is enforced (#666): a review stops when it reaches it, next to the operator's maximum
+   * per review (#689, `operator-cost-limit.ts`), and the smaller of the two applies. It can not be saved above that maximum. A
+   * project that sets none follows the workspace default, which is `null` until somebody sets it.
    */
   maxCostCents: number | null;
 };
@@ -198,7 +196,6 @@ export const REVIEW_SETTING_FIELDS = [
   "fallbackModel",
   "extraInstructions",
   "maxFindings",
-  "maxTokens",
   "largePrChunking",
   "inlineKeyIssues",
   "autoReviewOnOpen",
@@ -214,9 +211,7 @@ export const REVIEW_SETTING_LIMITS = {
   /** Characters of the project rules. PR-Agent puts them into every prompt, so they cost tokens on each call. */
   extraInstructionsMaxChars: 4000,
   maxFindings: { min: 1, max: 30 },
-  /** Below the lower bound the prompts of PR-Agent leave no room for a diff; the upper bound is above every context window in use. */
-  maxTokens: { min: 8_000, max: 2_000_000 },
-  /** #656: one cent to one hundred US dollars. The instance's own limit still applies; the smaller of the two holds (#666). */
+  /** #656: one cent to one hundred US dollars. The operator's maximum per review still applies; the smaller of the two holds (#666, #689). */
   maxCostCents: { min: 1, max: 10_000 },
 } as const;
 
@@ -226,8 +221,6 @@ export const PROJECT_DYNAMIC_LIMITS = {
   reviewSkillMaxBytes: 16 * 1024,
 } as const;
 
-/** PR-Agent's own limit is 32000; the point of this setting is to go well beyond it. */
-export const DEFAULT_MAX_TOKENS = 100_000;
 export const DEFAULT_MAX_FINDINGS = 5;
 
 /**
@@ -261,7 +254,6 @@ export function builtInReviewSettings(
     fallbackModel: null,
     extraInstructions: "",
     maxFindings: DEFAULT_MAX_FINDINGS,
-    maxTokens: DEFAULT_MAX_TOKENS,
     largePrChunking: true,
     inlineKeyIssues: false,
     autoReviewOnOpen: true,

@@ -1,28 +1,25 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The token budget of a job on the operator's key. Pure: no database, no clock.
+// The token budget of a review (#689). It is no setting of a workspace or a project any more: the app decides it for
+// every job from what it knows of the model. Pure: no database, no clock.
 
 /** The smallest token budget a runner accepts (`MIN_LLM_CONTEXT_TOKENS`). */
 const MIN_BUDGET = 1000;
 
 /**
- * The most a managed job's token budget may be while the context window of its model is not known (the provider
- * cannot be asked and no earlier read is kept). It equals the built-in budget of the review settings
- * (`DEFAULT_MAX_TOKENS`), so a workspace that never changed it is unaffected, and it fits the models an entry is
- * likely to name. A workspace can set a budget up to two million; it must never reach an unknown model unclamped.
+ * How much of a pull request goes to the model at once while nothing says the model holds less. It is PR-Agent's own 32 000
+ * widened on purpose, and what the setting held for every workspace that never changed it (so no review changes with the
+ * removal of the setting); a larger window does not make a review larger, since a bigger prompt costs more and the
+ * chunking of large pull requests exists for the rest.
  */
-export const UNKNOWN_WINDOW_MAX_TOKENS = 100_000;
+export const DEFAULT_REVIEW_TOKEN_BUDGET = 100_000;
 
 /**
- * The token budget of a managed job: the workspace's budget, cut down to the context window of the entry's model when
- * the window is known (the user cannot know it: the model is not theirs to see), else to `UNKNOWN_WINDOW_MAX_TOKENS`.
- * Never below what a runner accepts.
+ * The token budget of a job: the built-in value, cut down to the context window of its model when that window is known
+ * and smaller. Never below what a runner accepts.
  */
-export function clampMaxTokens(
-  maxTokens: number,
-  contextWindow: number | null,
-): number {
-  const ceiling = contextWindow ?? UNKNOWN_WINDOW_MAX_TOKENS;
-  if (maxTokens <= ceiling) return maxTokens;
-  return Math.max(ceiling, MIN_BUDGET);
+export function reviewTokenBudget(contextWindow: number | null): number {
+  if (contextWindow === null || contextWindow >= DEFAULT_REVIEW_TOKEN_BUDGET)
+    return DEFAULT_REVIEW_TOKEN_BUDGET;
+  return Math.max(contextWindow, MIN_BUDGET);
 }

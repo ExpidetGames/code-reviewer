@@ -36,7 +36,6 @@ export function createReviewSettingsJobOptionsSource(deps: {
           },
           llm: {
             model: resolved.dynamic.dynamicModel,
-            maxTokens: resolved.settings.maxTokens,
             maxCostCents: resolved.settings.maxCostCents,
           },
           dynamic: {

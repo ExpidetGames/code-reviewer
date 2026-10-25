@@ -15,11 +15,21 @@
 // A token utility (the same utilities with one of our token names) is not a palette color and
 // passes.
 
-/** The one file that may hold color literals. */
+/** The one file of the app that may hold color literals. */
 export const COLOR_FILE = "app/src/app/theme.css";
 
+/**
+ * The landing page (#696) is a project of its own: it has its own design tokens (website/src/styles/global.css), and it
+ * draws its share image and favicon with literal colors, which cannot use CSS variables. The guard is about the app's
+ * theme, so everything below website/ is outside of it.
+ */
+export const COLOR_EXEMPT_PREFIXES = ["website/"];
+
 export function isColorException(path: string): boolean {
-  return path === COLOR_FILE;
+  return (
+    path === COLOR_FILE ||
+    COLOR_EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
 }
 
 export type ColorFinding = {

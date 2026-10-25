@@ -57,14 +57,21 @@ function numberWithCommas(value: number): string {
 
 const COST_RANGE = `Enter an amount from $${(REVIEW_SETTING_LIMITS.maxCostCents.min / 100).toFixed(2)} to $${String(REVIEW_SETTING_LIMITS.maxCostCents.max / 100)}.`;
 
-const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
+/** Whole US cents as the amount a person reads: "$1.00". */
+export function formatDollars(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+const ISSUE_COPY: Record<
+  ReviewSettingIssueCode,
+  (field: string, maximumCents?: number) => string
+> = {
   UNKNOWN_FIELD: () => "This setting does not exist.",
   INVALID_TYPE: (field) => {
     const choice = malformedChoice(field);
     if (choice !== null) return choice;
     switch (field) {
       case "maxFindings":
-      case "maxTokens":
         return "Enter a whole number.";
       case "maxCostCents":
         return "Enter an amount in dollars with up to two decimals, like 0.50 or 2.";
@@ -92,16 +99,12 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     if (field === "maxCostCents") return COST_RANGE;
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.min)} or more.`;
-    if (field === "maxTokens")
-      return `Enter ${numberWithCommas(REVIEW_SETTING_LIMITS.maxTokens.min)} or more.`;
     return "This value is too small.";
   },
   TOO_LARGE: (field) => {
     if (field === "maxCostCents") return COST_RANGE;
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.max)} or less.`;
-    if (field === "maxTokens")
-      return `Enter ${numberWithCommas(REVIEW_SETTING_LIMITS.maxTokens.max)} or less.`;
     return "This value is too large.";
   },
   TOO_LONG: (field) => {
@@ -129,10 +132,11 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   DUPLICATE_ENTRY: () => "Each command can be chosen only once.",
   FORBIDDEN_CHARACTERS: () =>
     "Remove the control characters. Tabs and line breaks are fine.",
-  EXCEEDS_MODEL_CONTEXT: (field) =>
-    field === "maxTokens"
-      ? "The token budget is larger than the context window of the chosen model. Lower it or choose a model with a larger context window."
-      : "The context window of this model is smaller than the token budget. Choose another model or lower the token budget.",
+  // #689: the maximum per review is the operator's; a customer's limit can only be lower.
+  EXCEEDS_OPERATOR_MAXIMUM: (_field, maximumCents) =>
+    maximumCents === undefined
+      ? "This is above the maximum cost per review. Enter a lower amount."
+      : `The maximum cost per review is ${formatDollars(maximumCents)}. Enter that or less.`,
   DYNAMIC_MODEL_TOOLS_UNSUPPORTED: () =>
     "This model does not support tool calling, which Dynamic Review needs. Choose another model.",
   DYNAMIC_MODEL_UNKNOWN: () =>
@@ -175,8 +179,11 @@ function hasIssueCopy(code: string): code is ReviewSettingIssueCode {
 export function describeIssue(
   field: ReviewSettingField | string,
   code: string,
+  maximumCents?: number,
 ): string {
-  return hasIssueCopy(code) ? ISSUE_COPY[code](field) : GENERIC_ISSUE;
+  return hasIssueCopy(code)
+    ? ISSUE_COPY[code](field, maximumCents)
+    : GENERIC_ISSUE;
 }
 
 const WARNING_COPY: Record<ReviewSettingWarningCode, string> = {
@@ -212,11 +219,11 @@ export function projectsNote(
  */
 export function describeWholeRefusal(failure: {
   code: string;
-  issues: readonly { field: string; code: string }[];
+  issues: readonly { field: string; code: string; maximumCents?: number }[];
   details?: Record<string, unknown>;
 }): string {
   const problems = failure.issues.map((issue) =>
-    describeIssue(issue.field, issue.code),
+    describeIssue(issue.field, issue.code, issue.maximumCents),
   );
   return [
     describeSaveFailure(failure.code),

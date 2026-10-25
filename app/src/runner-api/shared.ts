@@ -9,6 +9,7 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 import { configuredLlmModel } from "../llm/config.ts";
+import { operatorCostLimitCentsFrom } from "../review-settings/operator-cost-limit-source.ts";
 import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
 import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
@@ -28,6 +29,7 @@ import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
 import { createProviderPins } from "./provider-pins.ts";
+import { knownContextWindowFrom } from "./known-context-window.ts";
 import { APP_VERSION } from "./app-version.ts";
 import {
   createWorkerApi,
@@ -106,6 +108,8 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // The key the selection of the claimed job names, of the job's own workspace: its own key of the selected provider, or
     // the operator's key of it, never another workspace's and never the other key (src/llm).
+    // #689: the most one review may cost, from the admin portal; read at each job, so a change reaches the next one.
+    operatorCostLimitCents: operatorCostLimitCentsFrom(db),
     keyFor: (workspaceId, selection) => llm.keyFor(workspaceId, selection),
     // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276), and its model access.
     entitlementsFor: (workspaceId) => readEntitlements(db, workspaceId),
@@ -136,6 +140,8 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // #279: the metadata of a job's model (Dynamic, and a managed entry's), read when its claim is built.
     modelCapabilities,
+    // #689: the window of a Diff job's model on the workspace's own key, from the public catalog the app keeps; the provider is not asked.
+    knownContextWindow: knownContextWindowFrom(db),
     // #553: the cost policy and the entry of a native job. A provider outside the registry (#555) is always native, there is no
     // legacy wire for it; the two registry providers are native only while the switch of the native path is on (#578).
     nativeCost,

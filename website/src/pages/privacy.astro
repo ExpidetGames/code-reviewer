@@ -1,0 +1,36 @@
+---
+// Legal text drafted without a lawyer (October 2026). Have it reviewed by one before relying on it.
+// The text itself lives in src/content/privacy.ts.
+import Base from "../layouts/Base.astro";
+import LegalDocument from "../components/LegalDocument.astro";
+import PageHeader from "../components/PageHeader.astro";
+import TextLink from "../components/TextLink.astro";
+import { PRIVACY_DE, PRIVACY_EN } from "../content/privacy";
+import { LEGAL_READY } from "../site";
+import { ogPath } from "../lib/blog";
+---
+
+<Base
+  title="Privacy policy"
+  description="Privacy policy of code-review.com by Itegro GmbH: the website (Cloudflare, PostHog analytics) and the hosted app (GitHub, AI providers, Stripe billing)."
+  ogImage={ogPath("/privacy/")}
+  noindex={!LEGAL_READY}
+>
+  <article aria-labelledby="privacy-title">
+    <PageHeader
+      id="privacy-title"
+      lines={["Privacy policy"]}
+      lead="What happens to your data on code-review.com and in the hosted application. The German version is the legally binding one; an English translation follows."
+    />
+    <div class="px-6 pb-16 md:px-8 md:pb-24">
+      <div class="mx-auto flex max-w-3xl flex-col gap-16">
+        <nav aria-label="Language" class="flex gap-4 text-sm">
+          <TextLink href="#privacy-de">Deutsch</TextLink>
+          <TextLink href="#privacy-en">English</TextLink>
+        </nav>
+        <LegalDocument document={PRIVACY_DE} id="privacy-de" />
+        <LegalDocument document={PRIVACY_EN} id="privacy-en" />
+      </div>
+    </div>
+  </article>
+</Base>

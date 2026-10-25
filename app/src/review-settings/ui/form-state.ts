@@ -33,7 +33,6 @@ export type FormValues = {
   fallbackModel: string;
   extraInstructions: string;
   maxFindings: string;
-  maxTokens: string;
   /** The cost limit in dollars as typed ("1.50"); empty means no limit of this layer (#656). */
   maxCostCents: string;
   largePrChunking: boolean;
@@ -64,7 +63,6 @@ function valuesOf(settings: ReadableReviewSettings): FormValues {
     fallbackModel: settings.fallbackModel ?? "",
     extraInstructions: settings.extraInstructions,
     maxFindings: String(settings.maxFindings),
-    maxTokens: String(settings.maxTokens),
     maxCostCents: dollarsOf(settings.maxCostCents ?? null),
     largePrChunking: settings.largePrChunking,
     inlineKeyIssues: settings.inlineKeyIssues,
@@ -98,7 +96,6 @@ export type TextField =
   | "fallbackModel"
   | "extraInstructions"
   | "maxFindings"
-  | "maxTokens"
   | "maxCostCents";
 export type BooleanField =
   | "largePrChunking"
@@ -231,7 +228,6 @@ function rawValue(values: FormValues, field: ReviewSettingField): unknown {
     case "maxCostCents":
       return typedCents(values.maxCostCents);
     case "maxFindings":
-    case "maxTokens":
       return typedNumber(values[field]);
     default:
       return values[field];
@@ -242,10 +238,7 @@ export type PatchResult =
   | { ok: true; patch: Record<string, unknown> }
   | { ok: false; issues: ReviewSettingIssue[] };
 
-const NUMBER_FIELDS: readonly ReviewSettingField[] = [
-  "maxFindings",
-  "maxTokens",
-];
+const NUMBER_FIELDS: readonly ReviewSettingField[] = ["maxFindings"];
 
 /** The fields the person set, as typed values, checked with the same validator the server uses. */
 export function diffPatch(state: FormState): {

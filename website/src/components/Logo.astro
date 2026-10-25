@@ -1,0 +1,19 @@
+---
+// The code-review.com mark: a check between two code brackets. Same drawing as public/favicon.svg.
+interface Props {
+  withName?: boolean;
+}
+const { withName = true } = Astro.props;
+---
+
+<span class="inline-flex items-center gap-2 text-base font-semibold whitespace-nowrap text-fg">
+  <svg viewBox="0 0 32 32" aria-hidden="true" class="size-6 shrink-0">
+    <rect width="32" height="32" rx="8" class="fill-fg"></rect>
+    <g fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="stroke-page">
+      <path d="M10.5 10 6 16l4.5 6"></path>
+      <path d="M21.5 10 26 16l-4.5 6"></path>
+      <path d="m12.5 16.5 2.5 2.5 4.5-5.5"></path>
+    </g>
+  </svg>
+  {withName && "code-review.com"}
+</span>

@@ -82,7 +82,8 @@ describe("reading the settings over HTTP", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       overrides: {},
-      effective: { model: "deepseek/deepseek-v3.2", maxTokens: 100_000 },
+      effective: { model: "deepseek/deepseek-v3.2" },
+      operatorMaxCostCents: 100,
       cost: { warn: false, limitUsd: 0.1 },
       limits: { maxFindings: { min: 1, max: 30 } },
       updatedAt: null,
