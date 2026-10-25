@@ -11,7 +11,8 @@
 // comparison (three sample pull requests, prompts of 3k, 8k to 12k and 31k to 45k tokens, replies of
 // 0.5k to 4k tokens) cost most for the large one, and with these two numbers the estimate for
 // gemini-3.8-flash is 0.034 USD against 0.035 measured on average. The prompt is capped by the token
-// budget (a review never sends more) and multiplied by the model's `inputTokenFactor` (a Claude model
+// budget the app uses for every review (#689, `DEFAULT_REVIEW_TOKEN_BUDGET`: a review never sends more) and multiplied by
+// the model's `inputTokenFactor` (a Claude model
 // counts the same diff as 1.4 times the tokens PR-Agent does). So Claude Sonnet 5.5 is estimated at
 // 0.114 USD, above the limit, which matches the one measured large review (0.1004 USD); Claude Haiku
 // 5.5 at 0.006 USD against 0.0051 measured.
@@ -23,6 +24,7 @@ import type {
   LlmProviderDescriptor,
   ModelPrice,
 } from "../llm/providers/types.ts";
+import { DEFAULT_REVIEW_TOKEN_BUDGET } from "../model-catalog/token-budget.ts";
 import type { ReviewSettings } from "./settings.ts";
 
 /** The level the estimate warns above when the customer set no limit: at most this many USD per review on average. Never enforced. */
@@ -36,7 +38,7 @@ export const UPPER_COMPLETION_TOKENS = 8_000;
 
 export type CostSettings = Pick<
   ReviewSettings,
-  "model" | "fallbackModel" | "maxTokens" | "largePrChunking"
+  "model" | "fallbackModel" | "largePrChunking"
 > & {
   /** The provider of the models (#433); absent: the default provider's price table. */
   provider?: string | undefined;
@@ -91,11 +93,6 @@ export type ReviewCostGuard = {
   warnings: CostWarning[];
   /** True when there is any warning. */
   warn: boolean;
-  /**
-   * The models whose context window is smaller than the token budget (the provider would refuse the
-   * request). Only models the price table knows can be listed.
-   */
-  exceedsContext: Array<"primary" | "fallback">;
 };
 
 function roundUsd(value: number): number {
@@ -131,14 +128,14 @@ function estimate(
       completionTokens * price.outputPerMillion) /
     1_000_000;
   const typicalPrompt =
-    Math.min(TYPICAL_PROMPT_TOKENS, settings.maxTokens) *
+    Math.min(TYPICAL_PROMPT_TOKENS, DEFAULT_REVIEW_TOKEN_BUDGET) *
     price.inputTokenFactor;
   const usd = roundUsd(cost(typicalPrompt, TYPICAL_COMPLETION_TOKENS));
   const calls = settings.largePrChunking ? MAX_CHUNK_CALLS : 1;
   const upperUsd = roundUsd(
     calls *
       cost(
-        settings.maxTokens * price.inputTokenFactor,
+        DEFAULT_REVIEW_TOKEN_BUDGET * price.inputTokenFactor,
         UPPER_COMPLETION_TOKENS,
       ),
   );
@@ -149,32 +146,6 @@ function estimate(
     upperUsd,
     aboveLimit: usd > costLimitUsdOf(settings),
   };
-}
-
-/**
- * Which of the two models (`model`, `fallbackModel`) have a context window, in the table, smaller
- * than the token budget (counted in the model's own tokens). A model the table does not know is
- * never listed.
- */
-export function modelsExceedingContext(
-  settings: Pick<ReviewSettings, "model" | "fallbackModel" | "maxTokens"> & {
-    provider?: string | undefined;
-  },
-  prices?: Readonly<Record<string, ModelPrice>>,
-  providers?: CostProviders,
-): Array<"model" | "fallbackModel"> {
-  const exceeds = (model: string | null): boolean => {
-    if (model === null) return false;
-    const price = priceOf(model, prices, settings.provider, providers);
-    return (
-      price !== undefined &&
-      settings.maxTokens * price.inputTokenFactor > price.contextTokens
-    );
-  };
-  const result: Array<"model" | "fallbackModel"> = [];
-  if (exceeds(settings.model)) result.push("model");
-  if (exceeds(settings.fallbackModel)) result.push("fallbackModel");
-  return result;
 }
 
 export function estimateReviewCost(
@@ -206,8 +177,5 @@ export function estimateReviewCost(
     fallback,
     warnings,
     warn: warnings.length > 0,
-    exceedsContext: modelsExceedingContext(settings, prices, providers).map(
-      (field) => (field === "model" ? "primary" : "fallback"),
-    ),
   };
 }

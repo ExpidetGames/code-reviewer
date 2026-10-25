@@ -186,15 +186,15 @@ moves the data over so that no managed workspace changes model:
   harmless there. #432, #433 and #434 go back together, and a fix forward is the normal way out. A settings page opened
   before the release can send the old quality level once: the save is refused with `UNKNOWN_FIELD` and a reload fixes it.
 
-## The token budget of a managed job
+## The token budget of a job
 
-The workspace's `maxTokens` stays the workspace's and is cut down to the context window of the entry's model when the
-provider's metadata states one (`token-budget.ts`, `clampMaxTokens`; the same read serves the capabilities of a Dynamic
-job). When a fresh read fails, the window last read for that model (kept a day) is used; when none was ever read, the
-budget is cut to `UNKNOWN_WINDOW_MAX_TOKENS` (100,000, the built-in budget): a managed job's budget is never sent
-unclamped, whatever the workspace saved (up to two million). The instance's `LLM_MAX_TOKENS` belongs to the instance's
-own model and is not used for a managed job. The claim asks as a claim: an answer that is not `supported` is remembered
-45 seconds (`src/llm/README.md`).
+No setting names the token budget since #689. The claim decides it (`token-budget.ts`, `reviewTokenBudget`): 100,000
+(`DEFAULT_REVIEW_TOKEN_BUDGET`, what every workspace that never changed the old setting had), cut down to the context window of
+the entry's model when the provider's metadata states one and it is smaller (the same read serves the capabilities of a
+Dynamic job). When a fresh read fails, the window last read for that model (kept a day) is used; when none was ever read,
+the budget stays 100,000: it is never sent larger. The instance's `LLM_MAX_TOKENS` belongs to the instance's own model and is
+used only for a job on the workspace's own key, as the window of a model the provider's metadata does not state. The claim
+asks as a claim: an answer that is not `supported` is remembered 45 seconds (`src/llm/README.md`).
 
 ## The model never leaves the server
 
