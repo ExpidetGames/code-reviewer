@@ -65,6 +65,9 @@ const fullConfig: Partial<PostHogConfig> = {
     blockSelector: ".ph-no-capture",
   },
   disable_surveys: false,
+  // Jedes Event trägt `site`, auch das $set, das PostHog beim Start sendet, bevor register() unten läuft
+  // (Abweichung von der Vorlage, gefunden beim Test im Prozess „Landingpages“, Schritt 7).
+  before_send: (event) => (event ? { ...event, properties: { ...event.properties, site: SITE } } : event),
 };
 
 const anonymousConfig: Partial<PostHogConfig> = {

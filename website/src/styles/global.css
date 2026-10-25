@@ -212,8 +212,9 @@
   --light2: var(--muted);
   --light3: var(--muted);
   --white1: var(--page);
-  --white2: var(--fg);
-  --white3: var(--fg);
+  /* Toggle: track when off, and the knob. */
+  --white2: var(--line-strong);
+  --white3: var(--page);
   --green1: var(--fg);
   --green2: var(--muted);
   --green3: var(--fg);
@@ -245,23 +246,37 @@
   font-weight: 600;
 }
 
-/* Decline and accept look the same: neither is highlighted. */
-.klaro .cm-btn.cm-btn-danger,
-.klaro .cm-btn.cn-decline,
-.klaro .cm-btn.cm-btn-success,
-.klaro .cm-btn.cm-btn-info,
-.klaro .cm-btn.cm-btn-accept-all {
-  background: var(--raised-strong);
-  color: var(--fg);
+/* Decline and accept look the same: neither is highlighted. (Klaro colours its buttons with several rules, hence !important.) */
+.klaro .cookie-notice .cm-btn.cm-btn-danger,
+.klaro .cookie-notice .cm-btn.cn-decline,
+.klaro .cookie-notice .cm-btn.cm-btn-success,
+.klaro .cookie-notice .cm-btn.cm-btn-info,
+.klaro .cookie-notice .cm-btn.cm-btn-accept-all,
+.klaro .cookie-notice .cm-btn.cm-btn-accept,
+.klaro .cookie-modal .cm-btn.cm-btn-danger,
+.klaro .cookie-modal .cm-btn.cn-decline,
+.klaro .cookie-modal .cm-btn.cm-btn-success,
+.klaro .cookie-modal .cm-btn.cm-btn-info,
+.klaro .cookie-modal .cm-btn.cm-btn-accept-all,
+.klaro .cookie-modal .cm-btn.cm-btn-accept {
+  background-color: var(--raised-strong) !important;
+  color: var(--fg) !important;
   border: 1px solid var(--line-strong);
 }
 
-.klaro .cm-btn.cm-btn-danger:hover,
-.klaro .cm-btn.cn-decline:hover,
-.klaro .cm-btn.cm-btn-success:hover,
-.klaro .cm-btn.cm-btn-info:hover,
-.klaro .cm-btn.cm-btn-accept-all:hover {
-  background: var(--line-strong);
+.klaro .cookie-notice .cm-btn.cm-btn-danger:hover,
+.klaro .cookie-notice .cm-btn.cn-decline:hover,
+.klaro .cookie-notice .cm-btn.cm-btn-success:hover,
+.klaro .cookie-notice .cm-btn.cm-btn-info:hover,
+.klaro .cookie-notice .cm-btn.cm-btn-accept-all:hover,
+.klaro .cookie-notice .cm-btn.cm-btn-accept:hover,
+.klaro .cookie-modal .cm-btn.cm-btn-danger:hover,
+.klaro .cookie-modal .cm-btn.cn-decline:hover,
+.klaro .cookie-modal .cm-btn.cm-btn-success:hover,
+.klaro .cookie-modal .cm-btn.cm-btn-info:hover,
+.klaro .cookie-modal .cm-btn.cm-btn-accept-all:hover,
+.klaro .cookie-modal .cm-btn.cm-btn-accept:hover {
+  background-color: var(--line-strong) !important;
 }
 
 .klaro .cookie-notice a,
