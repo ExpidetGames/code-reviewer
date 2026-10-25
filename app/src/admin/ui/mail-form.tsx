@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The mail server: SMTP host, port, how the connection is secured, the login, the sender and a test mail
@@ -519,7 +519,7 @@ export function MailForm({
       {saved === null ? null : (
         <DangerZone
           title="Danger zone"
-          description="Only when you no longer want mail from this instance."
+          description="Only when you no longer want mail from code-review.com."
           actionLabel="Remove the mail server"
           confirmTitle="Remove the mail server?"
           confirmDescription="Sign-up rules that need to verify addresses stop working until there is one again."

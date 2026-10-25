@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The keys remembered for a job (#276): every key handed out for it stays remembered, so each is masked in the
 // result after any number of rotations; the number is bounded; a row of the earlier format (one plain key) is

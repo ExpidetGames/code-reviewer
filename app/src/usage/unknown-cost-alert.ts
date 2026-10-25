@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The alert for a run that settled without a known cost (#361). A cost limit adds up known costs only, so such a run
 // is not bounded by it; the line is how an operator watches them (`src/usage/README.md`, "Unknown cost"). Pure, so

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: what a workspace has been told about its balance (the scoped repository) and the claim of the mails that are due
 // (the instance level directory), on SQLite and on Postgres.

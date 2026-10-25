@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT /api/admin/github: the GitHub integration of the instance, for the instance admin only (the
 // App, its credentials and the sign in with GitHub). Not signed in is 401, signed in but not an admin is a

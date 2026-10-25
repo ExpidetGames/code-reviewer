@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The effective price of a model (#549, part C): a pure function of the models.dev row, the override file and the admin's
 // latest confirmation. What is priced from is **a whole book**: the admin's confirmed book (a correction replaces the whole

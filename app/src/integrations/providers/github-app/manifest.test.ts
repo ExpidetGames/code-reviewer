@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The manifest the admin portal posts to GitHub: every address from the configured public URL, the
 // permissions and events of the App, public or private by tenancy, and the helper that names what an

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the project service on a real SQLite file: activating and deactivating by repository id,
 // the stable error codes of a refusal, the hook that lets the jobs module discard waiting jobs in the

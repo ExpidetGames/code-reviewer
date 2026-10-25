@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The fake App (fakes/dispatcher-app) speaks the Dispatcher API and the Worker API from the contract
 // examples, with scripted failures. Every answer is checked against the contract files, so the Worker

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reading the JSON body of a runner API or Worker API request: up to the limit (a larger body is refused
 // with 413 before it is parsed), then JSON. A refusal is the finished response; it never repeats the body.

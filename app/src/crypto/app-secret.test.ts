@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the master key is read: APP_SECRET first, the old BETTER_AUTH_SECRET as a fallback
 // that is reported as deprecated, and a problem that names the variable otherwise.

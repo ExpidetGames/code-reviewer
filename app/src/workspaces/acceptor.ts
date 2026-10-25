@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The person who accepts an invitation, as the database has them right now: whether the address is verified
 // is read from the account, never taken from the session or the request.

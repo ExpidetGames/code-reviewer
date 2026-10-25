@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dispatcher of the hosted end-to-end journeys (#332), as a process: the real Node entry (the Webhook-Trigger, the
 // core, the capability probe) over the real Sandbox-Launcher, whose platform is the local mode of the Sandbox double

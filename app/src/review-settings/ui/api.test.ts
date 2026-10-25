@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the calls the settings form makes: which route, which method and which body, for the
 // global defaults and for one project, including the reset of a project. The routes themselves are
@@ -77,5 +77,24 @@ describe("the settings form's calls", () => {
     expect(calls[0]?.url).toBe(
       "/api/w/acme/repositories/a%2Fb/project/settings",
     );
+  });
+
+  // #676-T09
+  it("sends the version of the defaults the form was built from with the global save, and none without", async () => {
+    const { calls, fetchImpl } = recorder();
+    const api = createGlobalSettingsApi(fetchImpl, "acme");
+
+    await api.save(
+      { maxFindings: 3 },
+      { expectedUpdatedAt: "2026-10-10T08:00:00.000Z" },
+    );
+    await api.save({ maxFindings: 3 }, { expectedUpdatedAt: null });
+    await api.save({ maxFindings: 3 });
+
+    expect(calls.map((call) => call.body)).toEqual([
+      '{"settings":{"maxFindings":3},"expectedUpdatedAt":"2026-10-10T08:00:00.000Z"}',
+      '{"settings":{"maxFindings":3},"expectedUpdatedAt":null}',
+      '{"settings":{"maxFindings":3}}',
+    ]);
   });
 });

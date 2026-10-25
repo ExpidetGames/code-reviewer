@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Opens the SQLite file and applies the connection settings every part of the app relies on:
 // the busy timeout (set first, so even the switch to WAL waits for a lock instead of failing),

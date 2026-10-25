@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Ending a connection (docs/decisions/0001-editions-setup-and-accounts.md, section 2.9): the connection and its
 // repositories are switched off for the workspace, the projects and their history stay stored, nothing happens

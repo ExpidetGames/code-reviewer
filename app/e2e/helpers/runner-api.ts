@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A Dynamic runner played by the journey's script (#435): it claims a Dynamic job over the runner API with the runner
 // token, as the privileged runner with the real OpenCode does, and reports a result. The browser lane has no engine

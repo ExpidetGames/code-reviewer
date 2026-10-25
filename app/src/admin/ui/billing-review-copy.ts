@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the billing review page (#603): what each outcome means for the operator, what the object of a row is called,
 // and what "Check payment" found. The outcomes are the codes of `BILLING_REVIEW_OUTCOMES`; an unknown one is shown as its code.
@@ -13,7 +13,7 @@ const OUTCOME_COPY: Record<string, { title: string; reading: string }> = {
   intent_unresolved: {
     title: "No top-up of ours",
     reading:
-      "The event is about a payment, refund or dispute that belongs to no top-up of this instance, or whose top-up could not be found. It may belong to another product on the same Stripe account, or a payment may have been taken and not credited to anybody. Nothing was changed.",
+      "The event is about a payment, refund or dispute that belongs to no top-up of ours, or whose top-up could not be found. It may belong to another product on the same Stripe account, or a payment may have been taken and not credited to anybody. Nothing was changed.",
   },
   amount_conflict: {
     title: "Conflicting payment",

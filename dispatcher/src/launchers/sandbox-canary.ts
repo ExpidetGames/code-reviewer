@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The canary VM of the capability probe (#331): the way the Sandbox-Launcher runs the Worker image's `probe` mode
 // to learn whether the Dynamic-Worker's hardening can be established here. It is a job VM without a job:

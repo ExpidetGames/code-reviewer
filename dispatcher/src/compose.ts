@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What both entry points share: the settings from the environment, the Webhook-Trigger over the
 // configured keys, the stop route and the reaper where there is a platform fleet, and a logger that masks every

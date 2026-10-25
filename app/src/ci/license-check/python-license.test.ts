@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: Python package metadata names a license in up to three ways (License-Expression, the
 // free-text License field, trove classifiers). The lookup turns them into one SPDX expression.

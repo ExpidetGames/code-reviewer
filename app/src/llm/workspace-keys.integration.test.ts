@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One key per provider in the same workspace (#426, ADR 0005 section 2.5): over a real SQLite file, with a registry
 // that has a second provider which exists only in tests. The OpenRouter key keeps the name it has always had.

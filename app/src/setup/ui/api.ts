@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the code form and the wizard make to the app's own routes (src/setup/http.ts). Browser
 // side; nothing throws, a failure is a stable code the page translates (messages.ts).

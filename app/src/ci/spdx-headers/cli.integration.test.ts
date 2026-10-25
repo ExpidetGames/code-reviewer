@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: the command that writes and checks the headers, against a throwaway git repository.
 import { execFileSync } from "node:child_process";
@@ -43,7 +43,7 @@ afterEach(() => {
   }
 });
 
-const HEADER = "SPDX-License-Identifier: Apache-2.0";
+const HEADER = "SPDX-License-Identifier: LicenseRef-Proprietary";
 
 describe("spdx-headers cli", () => {
   // #118-T04
@@ -84,7 +84,7 @@ describe("spdx-headers cli", () => {
   });
 
   // #166-T03
-  it("--write adds MIT to a copied component below app/src/components/ui/ and Apache-2.0 to every other file", () => {
+  it("--write adds MIT to a copied component below app/src/components/ui/ and LicenseRef-Proprietary to every other file", () => {
     const root = repository({
       "app/src/components/ui/button.tsx": "export {};\n",
       "app/src/button.tsx": "export {};\n",

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // DELETE /api/w/:workspace/invitations/:invitationId: revokes an invitation that is still open (an Owner, or
 // an Admin for an invitation of a Member). Protected like every workspace route

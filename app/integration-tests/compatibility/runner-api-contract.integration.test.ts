@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the app and contracts/runner-api.v1.json describe the same API: what the app really
 // answers (through the real handler) is valid against the file, what the app accepts from a runner

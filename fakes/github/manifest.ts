@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub App manifest flow of the fake GitHub, as GitHub documents it: the browser posts a manifest
 // to `/settings/apps/new` (or the organization's address), the person confirms on a page, and GitHub

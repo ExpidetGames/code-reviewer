@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins the overview of the portal (#180): the "Needs attention" region exists only while there is
@@ -251,11 +251,11 @@ describe("the setup card", () => {
     expect(configuredLink("Ways to sign in").getAttribute("href")).toBe(
       "/admin/setup/sign-in",
     );
-    expect(row("LLM keys of the instance").textContent).toContain(
+    expect(row("code-review.com LLM keys").textContent).toContain(
       "Not configured",
     );
     expect(
-      configuredLink("LLM keys of the instance").getAttribute("href"),
+      configuredLink("code-review.com LLM keys").getAttribute("href"),
     ).toBe("/admin/llm");
 
     for (const title of [
@@ -264,7 +264,7 @@ describe("the setup card", () => {
       "Tenancy",
       "Sign-up rule",
       "Ways to sign in",
-      "LLM keys of the instance",
+      "code-review.com LLM keys",
     ])
       expect(
         within(row(title)).getByRole("link", { name: `Configure ${title}` }),
@@ -393,9 +393,9 @@ describe("the LLM keys of the instance (#276, #427)", () => {
   it("is optional: no key is no warning and no attention notice, because only managed workspaces need it", () => {
     render(<Overview settings={view()} />);
 
-    expect(row("LLM keys of the instance").textContent).toContain("Optional");
+    expect(row("code-review.com LLM keys").textContent).toContain("Optional");
     expect(
-      within(row("LLM keys of the instance")).queryByRole("img", {
+      within(row("code-review.com LLM keys")).queryByRole("img", {
         hidden: true,
       }),
     ).toBeNull();
@@ -417,7 +417,7 @@ describe("the LLM keys of the instance (#276, #427)", () => {
       />,
     );
 
-    const text = row("LLM keys of the instance").textContent ?? "";
+    const text = row("code-review.com LLM keys").textContent ?? "";
     expect(text).toContain("Configured");
     expect(text).toContain("wxyz");
   });
@@ -445,7 +445,7 @@ describe("the LLM keys of the instance (#276, #427)", () => {
       />,
     );
 
-    expect(row("LLM keys of the instance").textContent).toContain(
+    expect(row("code-review.com LLM keys").textContent).toContain(
       "cannot be read",
     );
     expect(
@@ -480,7 +480,7 @@ describe("the LLM key of each provider on the overview (#427)", () => {
       />,
     );
 
-    const text = row("LLM keys of the instance").textContent ?? "";
+    const text = row("code-review.com LLM keys").textContent ?? "";
     expect(text).toContain("OpenRouter: Configured (ending in wxyz)");
     expect(text).toContain("fakeai: Not configured");
     expect(text.indexOf("OpenRouter")).toBeLessThan(text.indexOf("fakeai"));
@@ -495,7 +495,7 @@ describe("the LLM key of each provider on the overview (#427)", () => {
       />,
     );
 
-    const text = row("LLM keys of the instance").textContent ?? "";
+    const text = row("code-review.com LLM keys").textContent ?? "";
     expect(text).toContain("OpenRouter: Configured");
     expect(text).toContain("fakeai: Saved, cannot be read");
     expect(text).toContain("until its key is entered again");
@@ -512,12 +512,12 @@ describe("the LLM key of each provider on the overview (#427)", () => {
       />,
     );
 
-    expect(row("LLM keys of the instance").textContent).toContain("Optional");
+    expect(row("code-review.com LLM keys").textContent).toContain("Optional");
     expect(
       screen.queryByRole("region", { name: /needs attention/i }),
     ).toBeNull();
     expect(
-      within(row("LLM keys of the instance"))
+      within(row("code-review.com LLM keys"))
         .getByRole("link")
         .getAttribute("href"),
     ).toBe("/admin/llm");

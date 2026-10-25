@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The catalog page of the admin portal (#554): the state of the daily fetch with "Fetch now", the providers whose address
 // needs a decision, the filters, and one page of the models with their state, price status and actions. The catalog is

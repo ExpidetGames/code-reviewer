@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Integrations index of the admin portal (#182): one status card per service the instance works
 // with (GitHub App, Mail). Each card carries a status badge, one line and the link to the page that
 // owns the service, so the index stays a directory and never stacks the forms of both services.
-// Apache-2.0 (our own composition); the primitives it uses live under `components/ui/`.
+// proprietary (our own composition); the primitives it uses live under `components/ui/`.
 import Link from "next/link";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
 import { PageHeader } from "../../components/page-header.tsx";

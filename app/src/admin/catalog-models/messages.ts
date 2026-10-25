@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the catalog screens of the admin portal say (#554). A stable code from a route becomes a sentence here, never the
 // other way round; every table is typed over the codes it translates, so a new code is a compile error until it has its
@@ -269,7 +269,7 @@ const ERROR_COPY: Record<CatalogErrorCode, string> = {
   url_refused:
     "This address was refused, so it cannot be confirmed. It is shown as text only.",
   fetch_off:
-    "The fetch is switched off for this instance (MODELS_DEV_FETCH), so there is nothing to fetch.",
+    "The fetch is switched off (MODELS_DEV_FETCH), so there is nothing to fetch.",
   fetch_rate_limited:
     "The catalog was fetched too often. Wait a few minutes and try again.",
   ...FETCH_ERROR_COPY,

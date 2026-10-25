@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down that the engine suite never leaves the machine: every connection of a job process goes
 to loopback (the process records its connections and refuses all others, see connect_guard/), the

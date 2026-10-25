@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The access gates of the running server: whether the instance can send mail (looked up on every call,
 // because the admin can add or remove the mail server at any time) and whether the user belongs to a

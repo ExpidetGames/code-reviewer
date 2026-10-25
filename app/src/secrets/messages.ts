@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy about a stored secret (the SMTP password, the GitHub App's key, the LLM key): what it means
 // that a value cannot be read and what the person is told about a value they leave. One owner per fact

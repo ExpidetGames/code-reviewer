@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The dialog that adds or edits one catalog entry (#429): name (with the warning that members see it), description,
@@ -232,9 +232,9 @@ export function EntryDialog({
             {entry === null ? "Add a model" : `Edit ${entry.name}`}
           </DialogTitle>
           <DialogDescription>
-            An entry is what members of a workspace on the key of the instance
-            choose from. They see its name and description; the provider and the
-            model stay with you.
+            An entry is what members of a workspace billed via code-review.com
+            choose from. They see its name, description and the name of its
+            provider; the model stays with you.
           </DialogDescription>
         </DialogHeader>
         <form

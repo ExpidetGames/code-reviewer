@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that every way a review starts (a signed pull request delivery, an authorized `/review`
 // comment, the manual "Review now") ends in exactly one job of the kind the PROJECT chose, and that

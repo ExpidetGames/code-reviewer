@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The mails of balance crossings that are due, for the one process that sends them (#506): instance level on purpose, because
 // the sender is told "something is due" and not which workspace, and a workspace's rows are written in the transaction that

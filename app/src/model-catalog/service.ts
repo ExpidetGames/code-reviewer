@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The model catalog (#425, ADR 0005, 2.6): the operator's list of the models that workspaces on the operator's key may
 // use, and the two instance defaults. The one place that creates, changes, releases and retires an entry and that

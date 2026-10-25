@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the daily check of the billing journal found the last time (#626): "Journal check: ok (date)" or "inconsistent (date)". The check
 // compares, for every workspace, the cached balance with the journal and looks for holds nobody released; it runs once a day while

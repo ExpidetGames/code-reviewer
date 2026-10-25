@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the setup forms of the portal (#181): the instance form (tenancy and the limit as two
@@ -141,20 +141,18 @@ describe("the Dynamic Review card of the instance form", () => {
     await user.click(
       within(dynamic).getByRole("checkbox", { name: /Allow Dynamic Review/ }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     // Not confirmed: the server is not asked, the card says why.
     expect(change).not.toHaveBeenCalled();
     expect(within(dynamic).getByRole("alert").textContent).toMatch(/Confirm/);
 
     await user.click(
-      within(dynamic).getByRole("checkbox", { name: /every app instance/i }),
+      within(dynamic).getByRole("checkbox", {
+        name: /every running copy of the app/i,
+      }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(within(dynamic).getByRole("status").textContent).toBe("Saved."),
@@ -174,11 +172,11 @@ describe("the Dynamic Review card of the instance form", () => {
       within(dynamic).getByRole("checkbox", { name: /Allow Dynamic Review/ }),
     );
     await user.click(
-      within(dynamic).getByRole("checkbox", { name: /every app instance/i }),
+      within(dynamic).getByRole("checkbox", {
+        name: /every running copy of the app/i,
+      }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() =>
       expect(within(dynamic).getByRole("status").textContent).toBe("Saved."),
     );
@@ -186,7 +184,7 @@ describe("the Dynamic Review card of the instance form", () => {
     // The confirmation belonged to that save: it must not carry over to the next one.
     expect(
       within(dynamic)
-        .getByRole("checkbox", { name: /every app instance/i })
+        .getByRole("checkbox", { name: /every running copy of the app/i })
         .getAttribute("aria-checked"),
     ).toBe("false");
   });
@@ -214,9 +212,7 @@ describe("the Dynamic Review card of the instance form", () => {
     expect(allow.getAttribute("aria-checked")).toBe("true");
 
     await user.click(allow);
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(change).toHaveBeenCalledWith({
@@ -242,9 +238,7 @@ describe("the Dynamic Review card of the instance form", () => {
     await user.click(
       within(dynamic).getByRole("checkbox", { name: /Allow Dynamic Review/ }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(within(dynamic).getByRole("alert").textContent).not.toBe(""),
@@ -276,7 +270,7 @@ describe("the plan management card of the instance form", () => {
       "https://plans.example/manage",
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
+      screen.getByRole("button", { name: "Save settings" }),
     );
 
     await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
@@ -303,7 +297,7 @@ describe("the plan management card of the instance form", () => {
 
     await userEvent.clear(screen.getByLabelText("Address of the page"));
     await userEvent.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
+      screen.getByRole("button", { name: "Save settings" }),
     );
 
     await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
@@ -330,7 +324,7 @@ describe("the plan management card of the instance form", () => {
         "http://plans.example/",
       );
       await userEvent.click(
-        screen.getByRole("button", { name: "Save instance settings" }),
+        screen.getByRole("button", { name: "Save settings" }),
       );
 
       const field = screen.getByLabelText("Address of the page");
@@ -349,7 +343,7 @@ describe("the plan management card of the instance form", () => {
       "https://plans.example/",
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
+      screen.getByRole("button", { name: "Save settings" }),
     );
 
     await waitFor(() => expect(change).toHaveBeenCalled());
@@ -367,9 +361,7 @@ describe("the instance form", () => {
     render(<InstanceForm settings={view()} api={api} />);
 
     await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
@@ -389,9 +381,7 @@ describe("the instance form", () => {
 
     await user.clear(field);
     await user.type(field, "3");
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(change).toHaveBeenCalled());
     expect(change).toHaveBeenCalledWith({
@@ -417,9 +407,7 @@ describe("the instance form", () => {
 
     await user.clear(field);
     await user.type(field, "2500000");
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(change).toHaveBeenCalled());
     expect(change).toHaveBeenCalledWith({ ownKeyTokenCap: 2_500_000 });
@@ -441,9 +429,7 @@ describe("the instance form", () => {
     );
 
     await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
@@ -472,9 +458,7 @@ describe("the instance form", () => {
     const field = screen.getByLabelText(/Maximum number of workspaces/);
     await user.clear(field);
     await user.type(field, "3");
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     // The independent limit change is not dropped because the tenancy was refused.
     await waitFor(() => expect(change).toHaveBeenCalledTimes(2));
@@ -508,9 +492,7 @@ describe("the instance form", () => {
     const field = screen.getByLabelText(/Maximum number of workspaces/);
     await user.clear(field);
     await user.type(field, "abc");
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
@@ -563,9 +545,7 @@ describe("the instance form", () => {
 
     await user.clear(field);
     await user.type(field, "abc");
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(
@@ -587,9 +567,7 @@ describe("the instance form", () => {
 
     await user.clear(field);
     await user.type(field, "abc");
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(document.activeElement).toBe(field));
   });
@@ -609,9 +587,7 @@ describe("the instance form", () => {
     );
 
     await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(document.activeElement).toBe(
@@ -859,9 +835,7 @@ describe("a failure that is not about a field", () => {
     render(<InstanceForm settings={view()} api={api} />);
 
     await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
       expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
@@ -897,9 +871,7 @@ describe("the shape of the setup forms", () => {
     const { api } = apiAnswering(SAVED);
     render(<InstanceForm settings={view()} api={api} />);
     await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
-    await user.click(
-      screen.getByRole("button", { name: "Save instance settings" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() =>
       expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
         "Saved.",

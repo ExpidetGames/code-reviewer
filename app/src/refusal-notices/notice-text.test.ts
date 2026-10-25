@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import {
@@ -248,8 +248,8 @@ describe("the notice of a billing setup that is not complete (#632)", () => {
     const text = visible(noticeBody("billing_rates_incomplete", HEAD, null));
 
     expect(text).toContain("No review ran for this change.");
-    expect(text).toContain("billing setup of this instance is not complete");
-    expect(text).toContain("whoever runs this instance");
+    expect(text).toContain("billing setup is not complete");
+    expect(text).toContain("whoever runs code-review.com");
     expect(text).not.toMatch(/\d/);
     expect(text).not.toMatch(/[$€£%]/);
     expect(text).not.toMatch(/\b(terms|price|rate|stripe|key)\b/i);

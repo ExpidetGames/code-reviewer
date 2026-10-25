@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // "Link my GitHub account": starts GitHub's authorization of the signed-in person (the user authorization
@@ -84,11 +84,10 @@ export function LinkPanel({
       ) : null}
       {merge ? (
         <HelpDisclosure label="What merging does">
-          If you ran this instance before accounts existed and your GitHub
-          account is an imported user here, the two accounts are merged: its
-          memberships and history become yours, the higher role wins where you
-          are both members, and the imported user is retired. That cannot be
-          undone.
+          If you ran this server before accounts existed and your GitHub account
+          is an imported user here, the two accounts are merged: its memberships
+          and history become yours, the higher role wins where you are both
+          members, and the imported user is retired. That cannot be undone.
         </HelpDisclosure>
       ) : null}
     </div>

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which Dynamic model a project save has to ask the provider about, and at which provider (#430): the model is only
 // meaningful at the provider it belongs to, so the check follows the provider the project selected.

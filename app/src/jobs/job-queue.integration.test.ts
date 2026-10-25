@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the job queue against a real SQLite file: what enqueueing stores and when it refuses to
 // create a second job, what a runner is handed and in which order, how leases and runtimes run out,

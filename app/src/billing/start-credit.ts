@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The start credit (ADR 0006, 2.16, D11, P7; #507): a `start_credit` journal entry of the amount the admin set (0 disables
 // it), granted ONCE PER GITHUB ACCOUNT, lazily, the first time a workspace with a bound installation meets billing while

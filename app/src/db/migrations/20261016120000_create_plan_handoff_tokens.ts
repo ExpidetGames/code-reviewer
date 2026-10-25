@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `plan_handoff_tokens` (#284): the single-use tokens with which an Owner or Admin is handed over to the
 // operator-configured plan page (src/plan-handoff/README.md). The token is 256 random bits and travels in the

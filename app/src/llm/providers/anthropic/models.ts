@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models of the Anthropic (Claude API) adapter: a fixed, curated list defined here, in code (the catalog
 // decision of 2026-10-18). A person only picks from it; nobody can add a model, so every id that reaches a job has

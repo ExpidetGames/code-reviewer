@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads the network guard of the privileged Dynamic e2e lane (#253): the counters of the nft rules in
 // e2e/dynamic/guard.nft. A violation counter above zero means a process of the lane (OpenCode, Git, a helper,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the Approvals page of the admin portal: the three tabs (Waiting, Decided, Not linked)
@@ -413,13 +413,13 @@ describe("the page without requests", () => {
     const items = within(list).getAllByRole("listitem");
     expect(items[0]?.textContent).toMatch(/acme.*Approved/);
     expect(items[1]?.textContent).toMatch(
-      /beta.*Denied by the admin of the instance/,
+      /beta.*Denied by a code-review.com admin/,
     );
     expect(screen.queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
     // #183 review: one quiet variant per decision, never the primary fill; the label stays the
     // meaning, so the status is not told by color alone.
     expect(badgeVariant("Approved")).toBe("success");
-    expect(badgeVariant("Denied by the admin of the instance")).toBe("warning");
+    expect(badgeVariant("Denied by a code-review.com admin")).toBe("warning");
     expect(badgeVariant("Connected in the meantime")).toBe("neutral");
   });
 

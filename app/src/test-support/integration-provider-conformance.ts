@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The conformance suite every IntegrationProvider implementation runs (the fake today, the GitHub
 // App provider with its own ticket). It proves the contract of the interface: each method answers

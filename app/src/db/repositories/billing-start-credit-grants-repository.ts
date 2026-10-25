@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The memory of the start credit (table `billing_start_credit_grants`; ADR 0006, 2.16, D11; #507): which GitHub accounts were
 // granted it and for which workspace. INSTANCE LEVEL, on purpose (src/db/repositories/scoping.test.ts): the credit is tied to

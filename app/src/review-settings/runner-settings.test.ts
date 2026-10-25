@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how review settings become runner job fields: each setting lands in the PR-Agent variable
 // it belongs to (names checked against the settings file of the pinned PR-Agent version), switches

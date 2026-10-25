@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Not a journey: the first thing a run of the hosted lane does. The app starts on a migrated, empty database, as a new
 // deployment does after `pnpm migrate`; this sets it up through the same routes as the wizard, with a code from `pnpm

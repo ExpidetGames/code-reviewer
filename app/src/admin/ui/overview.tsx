@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The overview of the portal (#180): the screen's one "Needs attention" region first — stored
 // credentials that cannot be read, a sign-up rule that cannot work yet, addresses that could not be
@@ -117,14 +117,14 @@ function operatorKeyRow(settings: AdminSettingsView): {
     return {
       status: "warn",
       summary,
-      hint: "Workspaces that use the key of the instance cannot run reviews on that provider until its key is entered again.",
+      hint: "Workspaces billed via code-review.com cannot run reviews on that provider until its key is entered again.",
     };
   if (keys.some(([, key]) => key.state === "configured"))
     return { status: "ok", summary };
   return {
     status: "ok",
     summary,
-    hint: "Optional. Only workspaces that use the key of the instance need one.",
+    hint: "Optional. Only workspaces billed via code-review.com need one.",
   };
 }
 
@@ -304,7 +304,7 @@ export function Overview({
               href="/admin/integrations"
             />
             <SetupRow
-              title="LLM keys of the instance"
+              title="code-review.com LLM keys"
               status={operatorKey.status}
               summary={operatorKey.summary}
               {...(operatorKey.hint === undefined
@@ -316,7 +316,7 @@ export function Overview({
               title="Model catalog"
               status="ok"
               summary={modelCatalogSummary(settings.modelCatalog)}
-              hint="Optional. Only workspaces that use the key of the instance need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them."
+              hint="Optional. Only workspaces billed via code-review.com need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them."
               href="/admin/llm"
             />
             <SetupRow

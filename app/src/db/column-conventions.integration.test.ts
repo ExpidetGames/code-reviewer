@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down, against a real SQLite file, that the portable column conventions hold end to end:
 // a repository that stores JSON as text and booleans as integers gives back exactly what it got.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The two log lines levels the webhook route uses. The default writes to the console; tests pass
 // their own to read the lines. Nothing that reaches a logger may contain the webhook secret, a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The places of the signed in app, grouped the way the sidebar shows them. One list feeds the
 // navigation, so the labels, the links and the active state cannot drift apart. The places belong to

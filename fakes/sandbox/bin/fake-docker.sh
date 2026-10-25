@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 #
 # A stand-in for the `docker` executable, for the host suites of the Sandbox-Launcher's local mode (#329) on a
 # machine with no Docker daemon. It runs nothing: it records what it was asked, like the daemon's client would

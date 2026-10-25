@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the fixed core of Dynamic Review (#198): its identity matches its text, it is
 versioned, and it states the fixed rules (read-only, untrusted data, change-introduced findings, the

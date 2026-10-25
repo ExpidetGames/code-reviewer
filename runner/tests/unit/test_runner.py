@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the orchestration of one job: which PR-Agent call is made, how its outcome becomes ok,
 the comment URL and the error code, and that the patch and the recorder are undone afterwards. The

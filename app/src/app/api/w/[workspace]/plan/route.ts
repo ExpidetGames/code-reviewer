@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/plan: what the workspace may use and has used in the current period, which the plan page
 // polls (#282). Protected: the proxy lets a member of the workspace through (anybody else gets the answer of a path

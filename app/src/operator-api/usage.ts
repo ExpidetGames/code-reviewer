@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The usage routes of the operator API (#278, #385), as functions of their collaborators like api.ts, which calls
 // them after the credential, the route, the method, the body and the workspace have been checked:

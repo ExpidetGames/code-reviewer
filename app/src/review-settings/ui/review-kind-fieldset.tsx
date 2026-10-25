@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Review kind" card of a project's settings form (#200): exactly one of Dynamic Review and Diff
@@ -26,9 +26,14 @@ const KIND_HINTS: Record<ProjectReviewKind, string> = {
   diff: "Reviews the changes of the pull request.",
 };
 
-export const GATE_OFF_BADGE = "Not enabled on this instance yet.";
+export const GATE_OFF_BADGE = "Not enabled yet.";
 export const GATE_OFF_WARNING =
-  "Dynamic Review is not enabled on this instance yet. Reviews of this project fail until an instance admin turns it on.";
+  "Dynamic Review is not enabled yet. Reviews of this project fail until a code-review.com admin turns it on.";
+/** The same, on the workspace defaults (#676). */
+export const GATE_OFF_WARNING_DEFAULTS =
+  "Dynamic Review is not enabled yet. Reviews of the projects that use it fail until a code-review.com admin turns it on.";
+/** Next to the kind of a project that follows the defaults of the workspace (#676). */
+export const FOLLOWS_DEFAULT_BADGE = "Global default";
 const KINDS: readonly ProjectReviewKind[] = ["dynamic", "diff"];
 
 function isKind(value: string): value is ProjectReviewKind {
@@ -51,6 +56,8 @@ export function ReviewKindFieldset({
   hiddenProblem,
   kindError,
   handlers,
+  workspaceDefaults = false,
+  followsDefault = false,
 }: {
   view: ProjectDynamicView;
   values: DynamicFormValues;
@@ -63,12 +70,24 @@ export function ReviewKindFieldset({
   /** The message of a request of this card that failed after another one was saved. */
   kindError: string | null;
   handlers: ReviewKindHandlers;
+  /**
+   * The card of the workspace defaults (#676): the kind only. The review skill is a project's, so it is not offered, and
+   * the notes speak of the projects that use the kind.
+   */
+  workspaceDefaults?: boolean;
+  /** The project has no kind of its own: it follows the defaults of the workspace (#676). */
+  followsDefault?: boolean;
 }) {
   const ids = useId();
   const dynamic = values.reviewKind === "dynamic";
   const kindErrorId = `${ids}-kind-error`;
   return (
     <SettingsCard title="Review kind" disabled={disabled}>
+      {followsDefault ? (
+        <Badge variant="neutral" className="self-start">
+          {FOLLOWS_DEFAULT_BADGE}
+        </Badge>
+      ) : null}
       <RadioGroup
         value={values.reviewKind}
         onValueChange={(value) => {
@@ -135,7 +154,9 @@ export function ReviewKindFieldset({
       {dynamic && !dynamicReviewEnabled ? (
         // Static text, not a live region: it is true from the moment the page loads.
         <div className={alertVariants({ variant: "warning" })}>
-          <p className="col-start-1 [grid-column:1/-1]">{GATE_OFF_WARNING}</p>
+          <p className="col-start-1 [grid-column:1/-1]">
+            {workspaceDefaults ? GATE_OFF_WARNING_DEFAULTS : GATE_OFF_WARNING}
+          </p>
         </div>
       ) : null}
 
@@ -151,7 +172,7 @@ export function ReviewKindFieldset({
         </Alert>
       ) : null}
 
-      {dynamic ? (
+      {dynamic && !workspaceDefaults ? (
         <SkillEditor
           view={view}
           values={values}

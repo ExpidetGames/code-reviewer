@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A billing adapter for tests (#497): a made-up provider whose "wire" is a small JSON body signed with HMAC-SHA256 in the
 // header `x-fake-signature`, so the webhook route, the application of events and the adapter kit run without a real

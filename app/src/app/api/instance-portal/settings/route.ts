@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT /api/admin/settings: the instance settings, for the instance admin only. Not signed in is
 // 401, signed in but not an admin is a 404 (src/admin/access.ts); the proxy has done that first and the

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Reads a field of a model call's usage, whether it came as a mapping (a provider's JSON, the
 Dynamic proxy's translated answer) or as an object (LiteLLM's `Usage`)."""

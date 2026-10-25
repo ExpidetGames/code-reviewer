@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The delivery of the balance mails (ADR 0006, D9; #506). The decision that a workspace is to be told is made in the transaction
 // that moved its balance (`balance-notifications.ts`) and leaves a mail `due`; this runs AFTER the response, claims what is due

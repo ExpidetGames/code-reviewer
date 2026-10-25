@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The generic wire fakes' answer builders (#546): four provider formats, one place for the usage.
 

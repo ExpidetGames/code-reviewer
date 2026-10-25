@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Providers and the model catalog, from the admin portal to a member's run, and what no member may read on the way
 // (#435, the last issue of #420). On a new multi-tenant instance with the operator API on, through the real UI and the
@@ -136,20 +136,20 @@ const ENTRIES = {
   small: {
     name: "Small",
     description: "Quick passes over small changes.",
-    model: "e2eproof/m-small-q7w8.5:beta",
+    model: "acme-labs/e2eproof-m-small-q7w8.5:beta",
     kinds: ["Diff", "Dynamic"],
   },
   big: {
     name: "Big",
     description: "Careful passes over large changes.",
-    model: "e2eproof/m-big-q7w8.5:beta",
+    model: "acme-labs/e2eproof-m-big-q7w8.5:beta",
     kinds: ["Diff", "Dynamic"],
   },
   // Stays a draft for the whole journey: no member may read its name, and its model id is searched for as well.
   draft: {
     name: "Hidden draft",
     description: "Not released.",
-    model: "e2eproof/m-draft-q7w8.5:beta",
+    model: "acme-labs/e2eproof-m-draft-q7w8.5:beta",
     kinds: ["Diff"],
   },
 } as const;
@@ -640,9 +640,23 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     const page = ownerOfM();
     await openProject(page, slugM, REPO_M.fullName);
     await openSection(page, "LLM");
-    // Released entries by name, in the order of the catalog; the draft is not offered.
+    // Nothing is chosen yet. The provider dropdown names the maker of the released entries, never the product, next to the
+    // default; the draft's is not offered. This instance never switches billing on, and nothing is billed while it is off, so
+    // the note of who bills is not there (the unit tests of the LLM fieldset hold the note while billing is on).
+    const provider = page.getByRole("combobox", {
+      name: "Provider",
+      exact: true,
+    });
+    await expect(provider).toHaveText("Default");
+    await expect(page.getByText("Billed via code-review.com")).toHaveCount(0);
+    await provider.click();
+    await expect(page.getByRole("option")).toHaveCount(2);
+    await expect(page.getByRole("option", { name: "Default" })).toBeVisible();
+    await page.getByRole("option", { name: "Acme Labs" }).click();
+    await expect(provider).toHaveText("Acme Labs");
+    // Released entries of that provider by name, in the order of the catalog; the draft is not offered.
     await page.getByRole("combobox", { name: "Model" }).click();
-    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("option")).toHaveCount(2);
     await expect(
       page.getByRole("option", { name: ENTRIES.small.name }),
     ).toBeVisible();
@@ -652,9 +666,6 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     await expect(
       page.getByRole("option", { name: ENTRIES.draft.name }),
     ).toHaveCount(0);
-    await expect(
-      page.getByRole("option", { name: "Default of this instance" }),
-    ).toBeVisible();
     await page.keyboard.press("Escape");
     await chooseOption(page, "Model", /^Big/);
     await save(page);
@@ -689,10 +700,11 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     await openProject(page, slugM, REPO_M.fullName);
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
     await openSection(page, "LLM");
+    await chooseOption(page, "Provider", "Acme Labs");
     await page.getByRole("combobox", { name: "Model" }).click();
-    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("option")).toHaveCount(2);
     await page.keyboard.press("Escape");
-    // The instance default of Dynamic Review is Big; the Owner picks the other entry.
+    // The default of Dynamic Review is Big; the Owner picks the other entry.
     await chooseOption(page, "Model", /^Small/);
     await save(page, "Switch to Dynamic Review");
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The import of an existing installation (docs/decisions/0001-editions-setup-and-accounts.md, section 2.11): a
 // database made by the release before accounts (legacy-installation.ts, migrated to the current schema the way the

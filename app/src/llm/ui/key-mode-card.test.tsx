@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The choice of the key mode on the LLM access page while billing is on (#496): "Use our models" and "Use my own provider key", each
@@ -210,7 +210,7 @@ describe("the LLM access section with the choice", () => {
     expect(screen.queryByRole("button", { name: "Save key" })).toBeNull();
     expect(
       screen.queryByText(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       ),
     ).toBeNull();
 
@@ -251,7 +251,7 @@ describe("the LLM access section with the choice", () => {
     expect(screen.queryByRole("radio")).toBeNull();
     expect(
       screen.getByText(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       ),
     ).toBeTruthy();
   });

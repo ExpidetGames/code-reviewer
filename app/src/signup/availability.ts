@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether an email and password sign-up is open right now (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.5). It depends on the instance, not on the address: email with password has to

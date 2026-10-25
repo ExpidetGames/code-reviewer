@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The whole chain an operator relies on, on the real app (#285, the last issue of #268): a workspace with limits on an
 // instance whose operator API is on runs, is refused, is told so on its pull request, is reset from outside, can be
@@ -103,22 +103,22 @@ const ENTRIES = {
   quick: {
     name: "Quick look",
     description: "Fast passes over small changes.",
-    model: "entryproof/m-alpha-z1y2",
+    model: "acme-labs/entryproof-m-alpha-z1y2",
   },
   thorough: {
     name: "Thorough",
     description: "Careful passes over large changes.",
-    model: "entryproof/m-beta-z1y2",
+    model: "acme-labs/entryproof-m-beta-z1y2",
   },
   explorer: {
     name: "Explorer",
     description: "Explores the repository around a change.",
-    model: "entryproof/m-gamma-z1y2",
+    model: "acme-labs/entryproof-m-gamma-z1y2",
   },
   detective: {
     name: "Detective",
     description: "Follows every call to the end.",
-    model: "entryproof/m-delta-z1y2",
+    model: "acme-labs/entryproof-m-delta-z1y2",
   },
 } as const;
 const ENTRY_MODEL_IDS: string[] = Object.values(ENTRIES).map(
@@ -548,22 +548,38 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T10
-  test("an Owner reads the review defaults without a model field, or a model name anywhere on the page", async () => {
+  test("an Owner reads the review defaults with the choice of the catalog and without a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
     await openSection(page, "LLM");
-    // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
+    // The defaults choose a catalog entry per kind like a project does (#676): the provider dropdown names the maker of the
+    // models (never the product), then the entries of that provider by the names the operator gave them. Who bills is a note.
     await expect(
       page.getByText(/chosen for each project, on the settings page/),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("radiogroup", { name: "Quality" })).toHaveCount(
       0,
     );
-    // A workspace on the operator's key has no model field to fill in.
-    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
+    const providerDropdown = page.getByRole("combobox", {
+      name: "Provider",
+      exact: true,
+    });
+    await expect(providerDropdown).toHaveText("Default");
+    await expect(providerDropdown).not.toContainText(PRODUCT_NAME);
+    // This instance never switches billing on, and nothing is billed while it is off: no "Billed via" note (#675).
+    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toHaveCount(0);
+    await chooseOption(page, "Provider", "Acme Labs");
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.quick.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.explorer.name }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // No model field to fill in, and no fallback model or Dynamic model field.
     await expect(page.getByLabel("Fallback model")).toHaveCount(0);
     await expect(page.getByLabel("Dynamic Review model")).toHaveCount(0);
-    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
     await expectNothingSecret(
       [["the review defaults", await page.content()]],
       "the review defaults",
@@ -582,15 +598,24 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       page.getByRole("heading", { level: 1, name: REPO_A.fullName }),
     ).toBeVisible();
 
-    // The LLM section of a workspace on the operator's key: one provider, which names no vendor, and the entries of the
-    // catalog that serve Diff Review by the names the operator gave them, in the order of the catalog, and no Dynamic entry.
+    // The LLM section of a workspace on the operator's key: the provider dropdown names the maker of the models (never the
+    // product), then the entries of that provider that serve Diff Review by the names the operator gave them, in the order of
+    // the catalog, and no Dynamic entry. Who bills is a note, not a provider.
     await openSection(page, "LLM");
-    await expect(
-      page.getByRole("combobox", { name: "Provider", exact: true }),
-    ).toHaveText(PRODUCT_NAME);
+    const providerDropdown = page.getByRole("combobox", {
+      name: "Provider",
+      exact: true,
+    });
+    // Billing is off on this instance, so the choice carries no "Billed via" note (#675).
+    await expect(providerDropdown).toBeVisible();
+    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toHaveCount(0);
+    await providerDropdown.click();
+    await expect(page.getByRole("option")).toHaveCount(2);
+    await page.getByRole("option", { name: "Acme Labs" }).click();
+    await expect(providerDropdown).toHaveText("Acme Labs");
     const diffModel = page.getByRole("combobox", { name: "Model" });
     await diffModel.click();
-    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("option")).toHaveCount(2);
     await expect(
       page.getByRole("option", { name: ENTRIES.quick.name }),
     ).toBeVisible();
@@ -606,8 +631,9 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await openSection(page, "Review");
     await page.getByRole("radio", { name: "Dynamic Review" }).click();
     await openSection(page, "LLM");
+    await chooseOption(page, "Provider", "Acme Labs");
     await page.getByRole("combobox", { name: "Model" }).click();
-    await expect(page.getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("option")).toHaveCount(2);
     await page.keyboard.press("Escape");
     await chooseOption(page, "Model", /^Detective/);
     await page.getByRole("button", { name: "Save review settings" }).click();
@@ -860,12 +886,12 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await member.goto(`/w/${slugA}/settings/plan`);
 
     // What a member of a managed workspace reads on the plan page: the label, the counts and a percentage bar, and
-    // that the instance provides the models. No "Manage plan" for a member.
+    // that the models are provided by the product (not billed: billing is off here, #675). No "Manage plan" for a member.
     await expect(member.getByText(PLAN_LABEL)).toBeVisible();
     await expect(member.getByText("2 of 2, limit reached")).toBeVisible();
     await expect(
       member.getByText(
-        "The models for your reviews are provided by this instance.",
+        "The models for your reviews are provided by code-review.com.",
       ),
     ).toBeVisible();
     // Two runs of four runs' worth of cost: exactly half, and the Dynamic line is there too.
@@ -1030,9 +1056,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     await expect(page.getByRole("combobox", { name: "Model" })).toBeVisible();
     await page.goto(`/w/${slugB}/settings/plan`);
     await expect(
-      page.getByText(
-        "The models for your reviews are provided by this instance.",
-      ),
+      page.getByText(/The models for your reviews are provided/),
     ).toHaveCount(0);
     await expect(page.getByText("2 used, no limit").first()).toBeVisible();
   });
@@ -1282,8 +1306,8 @@ const CONTROLS: Array<{
   },
   {
     name: "the name of an entry model without its vendor",
-    text: "model m-gamma-z1y2",
-    fails: "a control holds m-gamma-z1y2",
+    text: "model entryproof-m-gamma-z1y2",
+    fails: "a control holds entryproof-m-gamma-z1y2",
   },
   {
     name: "the operator's key",

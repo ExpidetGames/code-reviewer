@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The Requests card of the Connections page (#176): compact rows for the links that wait for the
@@ -47,7 +47,7 @@ export function RequestsCard({ requests }: { requests: RequestView[] }) {
           <p className="text-sm text-muted-foreground">No requests waiting.</p>
         ) : (
           <ul
-            aria-label="Requests for the instance admin"
+            aria-label="Requests for the code-review.com admin"
             className="flex flex-col divide-y divide-border"
           >
             {requests.map((request) => (

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the handlers behind the review settings routes: the user is asked for first, a change is
 // checked for where it comes from, its content type, size and shape, the answer carries the settings
@@ -12,6 +12,7 @@ import {
   createModelCapabilityChecker,
   type ModelCapabilityChecker,
 } from "../llm/model-capabilities.ts";
+import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
 import {
@@ -19,6 +20,9 @@ import {
   createReviewSettingsRouteHandlers,
 } from "./http.ts";
 
+const OTHER_PROVIDER = llmProviderDescriptors.ids.find(
+  (id) => id !== llmProviderDescriptors.defaultProvider.id,
+)!;
 const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 const URL_BASE = "https://app.test";
 
@@ -400,18 +404,31 @@ describe("the project-only settings over HTTP", () => {
     });
   });
 
-  // #405-T28
-  it("cannot become a workspace default: the global route refuses the verdict mode", async () => {
+  // #676-T01
+  it("is a workspace default: the global route stores the verdict mode and shows it as the default of a project", async () => {
     const app = await setup();
 
     const response = await app.putGlobal({
       settings: { reviewVerdict: "any" },
     });
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "reviewVerdict", code: "UNKNOWN_FIELD" }],
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      dynamic: {
+        overrides: { reviewVerdict: "any" },
+        effective: { reviewVerdict: "any" },
+      },
+    });
+    const project = await app.handlers.getProject(
+      new Request(`${URL_BASE}${app.projectPath}`),
+      app.first.id,
+    );
+    expect(await project.json()).toMatchObject({
+      dynamic: {
+        effective: { reviewVerdict: "any" },
+        defaults: { reviewVerdict: "any" },
+        sources: { reviewVerdict: "global" },
+      },
     });
   });
 
@@ -435,18 +452,51 @@ describe("the project-only settings over HTTP", () => {
     expect((await app.projects.get(app.first.id))?.settings).toEqual({});
   });
 
-  // #194-T05
-  it("cannot become a workspace default: the global route refuses a project-only field", async () => {
+  // #676-T07
+  it("keeps the review skill a project's: the global route refuses it, and the address a project pins", async () => {
     const app = await setup();
 
     const response = await app.putGlobal({
-      settings: { reviewKind: "dynamic" },
+      settings: { reviewSkill: "my skill", confirmProviderAddress: true },
     });
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       error: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "reviewKind", code: "UNKNOWN_FIELD" }],
+      issues: [
+        { field: "confirmProviderAddress", code: "UNKNOWN_FIELD" },
+        { field: "reviewSkill", code: "UNKNOWN_FIELD" },
+      ],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #676-T07
+  it("offers the providers of the registry only as the Dynamic default: a catalog provider is a project's choice", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({
+      settings: { dynamicProvider: "zhipuai", dynamicModel: "glm-4.5" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "dynamicProvider", code: "PROVIDER_UNKNOWN" }],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #676-T07
+  it("names an unknown review kind of the defaults", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({ settings: { reviewKind: "both" } });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewKind", code: "INVALID_FORMAT" }],
     });
     expect(await app.appSettingRows()).toEqual([]);
   });
@@ -468,6 +518,78 @@ describe("the project-only settings over HTTP", () => {
     });
     expect(text).not.toContain(sentinel);
     expect((await app.projects.get(app.first.id))?.settings).toEqual({});
+  });
+});
+
+// #676: the review of #679, over HTTP.
+describe("saving the workspace defaults over HTTP, against a stale form and a project it would break", () => {
+  it("answers 409 REVIEW_SETTINGS_STALE for defaults that were saved since the form was read, and stores nothing of it", async () => {
+    const app = await setup();
+    await app.putGlobal({ settings: { maxFindings: 9 } });
+
+    const stale = await app.putGlobal({
+      settings: { maxFindings: 7 },
+      expectedUpdatedAt: null,
+    });
+
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "REVIEW_SETTINGS_STALE" });
+    const current = (await (
+      await app.handlers.getGlobal(
+        new Request(`${URL_BASE}/api/review-settings`),
+      )
+    ).json()) as { updatedAt: string; overrides: unknown };
+    expect(current.overrides).toEqual({ maxFindings: 9 });
+
+    const fresh = await app.putGlobal({
+      settings: { maxFindings: 7 },
+      expectedUpdatedAt: current.updatedAt,
+    });
+    expect(fresh.status).toBe(200);
+  });
+
+  // #676-T07
+  it.each([
+    ["a number", 5],
+    ["a boolean", false],
+    ["an object", { at: "2026-10-25T00:00:00.000Z" }],
+    ["a list", ["2026-10-25T00:00:00.000Z"]],
+  ])(
+    "answers 400 REQUEST_INVALID for an expected time that is %s, and stores nothing",
+    async (_name, expectedUpdatedAt) => {
+      const app = await setup();
+
+      const response = await app.putGlobal({
+        settings: { maxFindings: 7 },
+        expectedUpdatedAt,
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "REVIEW_SETTINGS_REQUEST_INVALID",
+      });
+      expect(await app.appSettingRows()).toEqual([]);
+    },
+  );
+
+  it("names the projects a provider change would break, beside the issue", async () => {
+    const app = await setup();
+    await app.service.updateProjectSettings(app.first.id, {
+      dynamicModel: "vendor/own-model",
+    });
+
+    const response = await app.putGlobal({
+      settings: { dynamicProvider: OTHER_PROVIDER },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [
+        { field: "dynamicProvider", code: "PROJECT_MODEL_BOUND_TO_PROVIDER" },
+      ],
+      projects: [app.first.fullName],
+    });
   });
 });
 

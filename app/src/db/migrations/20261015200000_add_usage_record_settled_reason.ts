@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #273: why a usage record was settled without a report of its run (`no_result`, src/usage/README.md). A run
 // that reported its usage, failed or not, has no reason; a job whose runner never reported (it died, its lease

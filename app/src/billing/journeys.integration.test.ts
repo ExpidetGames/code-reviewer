@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing journeys of #508 that are proven below the browser: each one runs the real chain of parts over a real database through the
 // runner API as a runner calls it (claim, report), with the notice of a refusal posted to the fake GitHub, and ends with the journal invariant

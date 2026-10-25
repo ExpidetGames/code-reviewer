@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the server start does with the database: it migrates and keeps the connection, and
 // a database problem ends the start with one readable line and exit code 1.

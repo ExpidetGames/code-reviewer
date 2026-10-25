@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing page of the admin portal, end to end (#504-T16), on the app of the catalog admin journey (an instance of its
 // own): the admin opens the page and finds billing off with the statement of what switching it on does, saves a Stripe API key
@@ -49,7 +49,7 @@ test.describe("the billing page in the admin portal", () => {
       page.getByText(/Each workspace chooses its key mode/),
     ).toBeVisible();
     await expect(
-      page.getByText(/This instance has 1 workspace\./),
+      page.getByText(/code-review.com has 1 workspace\./),
     ).toBeVisible();
 
     // Stripe, with the credentials: they are write-only.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The guards of the data routes on the running server, with the session lookup replaced (it needs the request
 // scope of Next.js): a route that is not about one workspace (`withSignedIn`) lets a person without a workspace

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Catalog models, providers and lists as the admin screens receive them (#554), for the component tests: dummy names,
 // prices as whole micro-USD strings, the shapes of src/model-prices/admin-view.ts and src/models-dev/admin-service.ts.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import {
   mkdirSync,
@@ -115,7 +115,9 @@ describe("the generated contract types", () => {
 
     for (const file of files) {
       expect(
-        file.content.startsWith("// SPDX-License-Identifier: Apache-2.0\n"),
+        file.content.startsWith(
+          "// SPDX-License-Identifier: LicenseRef-Proprietary\n",
+        ),
       ).toBe(true);
       expect(file.content).toContain(REGENERATE_COMMAND);
       expect(file.content).toMatch(/contracts\/[a-z-]+\.v1\.json/);

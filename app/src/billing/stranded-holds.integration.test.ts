@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The holds of jobs that ended while billing was off (#591; ADR 0006, 2.6; follow-up of #498). A job that took its hold
 // while billing was on and ended after the switch was turned off keeps its `reservation` with no `release`: nothing runs

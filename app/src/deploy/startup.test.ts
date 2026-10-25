@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that a production server refuses to start without the settings a deployment needs
 // besides sign in (the runner token): one readable line with the code and the variable names, exit

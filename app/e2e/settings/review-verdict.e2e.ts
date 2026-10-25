@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the "Review verdict" card of a project's settings in a real browser (#405): an Owner chooses a verdict
 // mode, saves and finds it after a reload, and a Member of the workspace sees it and changes it like the other project settings. What is

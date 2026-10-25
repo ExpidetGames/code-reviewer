@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The instance settings of the portal (#181): the tenancy and the workspace limit as two cards of one
-// form, with one explicit save named after what it saves ("Save instance settings") and the saved state
+// form, with one explicit save named after what it saves ("Save settings") and the saved state
 // inline next to each card. The tenancy copy is shared with the first-run wizard
 // (`signup/ui/tenancy-copy.ts`); the rules are the server's (src/admin/tenancy.ts and
 // src/admin/service.ts). A save sends only the settings that changed, runs all of them (a refusal of one
@@ -166,7 +166,7 @@ export function InstanceForm({
   return (
     <form
       onSubmit={(event) => void submit(event)}
-      aria-label="Instance settings"
+      aria-label="General settings"
       className="flex max-w-[44rem] flex-col gap-6"
     >
       <Card role="group" aria-labelledby={tenancyHeadingId}>
@@ -223,7 +223,8 @@ export function InstanceForm({
             })}
           </RadioGroup>
           <FieldDescription>
-            This instance has {workspaces(settings.workspaceCount)} now.
+            There {settings.workspaceCount === 1 ? "is" : "are"}{" "}
+            {workspaces(settings.workspaceCount)} now.
           </FieldDescription>
           <LastChanged setting={settings.tenancy} />
           <SaveResult status={results.tenancy} />
@@ -256,7 +257,7 @@ export function InstanceForm({
             />
             <FieldDescription id={`${ids}-max-hint`}>
               The default is 10. It limits the workspaces a user creates in a
-              multi-tenant instance.
+              multi-tenant setup.
             </FieldDescription>
             {limitIssue ? (
               <FieldError>{describeAdminIssue(limitIssue)}</FieldError>
@@ -312,7 +313,7 @@ export function InstanceForm({
                 aria-describedby={`${ids}-dynamic-hint`}
               />
               <Label htmlFor={`${ids}-dynamic`} className="font-normal">
-                Allow Dynamic Review on this instance
+                Allow Dynamic Review
               </Label>
             </span>
             <FieldDescription id={`${ids}-dynamic-hint`}>
@@ -339,8 +340,8 @@ export function InstanceForm({
                   aria-invalid={dynamicRefusal}
                 />
                 <Label htmlFor={`${ids}-rollout`} className="font-normal">
-                  Every app instance already runs the version that supports
-                  Dynamic Review
+                  Every running copy of the app already runs the version that
+                  supports Dynamic Review
                 </Label>
               </span>
               <FieldDescription>
@@ -394,7 +395,8 @@ export function InstanceForm({
               address, without a user name, a password or a #fragment. The
               person who clicks the button arrives there with a token that is
               valid for five minutes and works once; the page redeems it through
-              the operator API. Upgrade every app instance before you set it.
+              the operator API. Upgrade every running copy of the app before you
+              set it.
             </FieldDescription>
             {planIssue ? (
               <FieldError>{describeAdminIssue(planIssue)}</FieldError>
@@ -407,7 +409,7 @@ export function InstanceForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" loading={pending} loadingLabel="Saving">
-          Save instance settings
+          Save settings
         </Button>
       </div>
     </form>

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // Asks for a password reset link by mail. The answer is the same for every address, and so is the copy: it
@@ -25,7 +25,7 @@ const FAILURE_COPY: Record<string, string> = {
   rate_limited:
     "Too many requests for this address. Wait a while and try again.",
   not_available:
-    "Resetting a password by mail is not available on this instance. Ask the operator.",
+    "Resetting a password by mail is not available here. Ask the operator.",
   unavailable: UNAVAILABLE,
   cross_site_request: CROSS_SITE_REQUEST,
 };

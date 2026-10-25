@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The price of a review for the Runs pages (ADR 0006, 2.5; #505): what a customer reads next to a run. A charged review has its two
 // final prices, the AI part and the infrastructure part; a review on the workspace's own key has the infrastructure part only

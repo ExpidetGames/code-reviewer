@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195-T04: a project's review kind is pinned on every waiting job. Changing it cancels those waiting
 // jobs in the very transaction that writes the settings (status `cancelled`, code `review_kind_changed`)

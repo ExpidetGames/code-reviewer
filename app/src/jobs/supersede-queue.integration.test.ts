@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A new push supersedes the running automatic review (#397), on SQLite and, when TEST_DATABASE_URL is set, on
 // Postgres: which running jobs are superseded, that the new job is claimable at once while the old one drains, what

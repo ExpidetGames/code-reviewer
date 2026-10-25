@@ -1,10 +1,14 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the app_settings repository against a real SQLite file: reading a setting that was never
 // saved, saving and replacing a value with the time and the person, JSON values of every shape, and
 // removing a setting.
 import { sql } from "kysely";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createPostgresTestDatabase,
+  hasPostgres,
+} from "../../test-support/postgres-test-database.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { createAppSettingsRepository } from "./app-settings-repository.ts";
@@ -134,5 +138,121 @@ describe("a stored value that is not valid JSON", () => {
     await repository.set("review_defaults", { a: 2 }, null);
 
     expect((await repository.get("review_defaults"))?.value).toEqual({ a: 2 });
+  });
+});
+
+// #676: a save of the workspace defaults over defaults that were saved meanwhile is refused (review fix 4), on both engines.
+describe.each([
+  { name: "SQLite", database: async () => (await createTestDatabase()).db },
+  ...(hasPostgres()
+    ? [
+        {
+          name: "Postgres",
+          database: async () => (await createPostgresTestDatabase()).db,
+        },
+      ]
+    : []),
+])("saving a setting only while it is unchanged on $name", (engine) => {
+  async function start() {
+    const db = await engine.database();
+    const workspaceId = await defaultWorkspaceId(db);
+    let tick = 0;
+    const repository = createAppSettingsRepository(
+      db,
+      workspaceId,
+      () => new Date(Date.UTC(2026, 9, 10, 8, 0, tick++)),
+    );
+    return { db, repository };
+  }
+
+  it("writes the first value when the caller read no row, and refuses a second writer that read none", async () => {
+    const { repository } = await start();
+
+    expect(await repository.setIfUnchanged("k", { a: 1 }, "ada", null)).toBe(
+      true,
+    );
+    expect(await repository.setIfUnchanged("k", { a: 2 }, "bo", null)).toBe(
+      false,
+    );
+
+    expect((await repository.get("k"))?.value).toEqual({ a: 1 });
+  });
+
+  it("writes over the value the caller read, and refuses a caller whose read is out of date", async () => {
+    const { repository } = await start();
+    await repository.set("k", { a: 1 }, "ada");
+    const read = (await repository.get("k"))?.updatedAt ?? null;
+    await repository.set("k", { a: 2 }, "bo");
+
+    expect(await repository.setIfUnchanged("k", { a: 3 }, "ada", read)).toBe(
+      false,
+    );
+    const current = (await repository.get("k"))?.updatedAt ?? null;
+    expect(await repository.setIfUnchanged("k", { a: 4 }, "ada", current)).toBe(
+      true,
+    );
+
+    expect(await repository.get("k")).toMatchObject({
+      value: { a: 4 },
+      updatedBy: "ada",
+    });
+  });
+
+  it("lets only one of two saves of the same read win", async () => {
+    const { repository } = await start();
+    await repository.set("k", { a: 1 }, "ada");
+    const read = (await repository.get("k"))?.updatedAt ?? null;
+
+    const results = await Promise.all([
+      repository.setIfUnchanged("k", { who: "ada" }, "ada", read),
+      repository.setIfUnchanged("k", { who: "bo" }, "bo", read),
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("rolls the write back when what runs with it fails, and runs it with the write otherwise", async () => {
+    const { repository } = await start();
+    await repository.set("k", { a: 1 }, "ada");
+    const read = (await repository.get("k"))?.updatedAt ?? null;
+
+    await expect(
+      repository.setIfUnchanged("k", { a: 2 }, "bo", read, async () => {
+        throw new Error("the follow-up failed");
+      }),
+    ).rejects.toThrow("the follow-up failed");
+    expect((await repository.get("k"))?.value).toEqual({ a: 1 });
+
+    let sawWrite: unknown;
+    expect(
+      await repository.setIfUnchanged(
+        "k",
+        { a: 3 },
+        "bo",
+        read,
+        async (trx) => {
+          sawWrite = (
+            await trx
+              .selectFrom("app_settings")
+              .select("value")
+              .where("key", "=", "k")
+              .executeTakeFirstOrThrow()
+          ).value;
+        },
+      ),
+    ).toBe(true);
+    expect(JSON.parse(String(sawWrite))).toEqual({ a: 3 });
+  });
+
+  it("runs the follow-up of a plain save in the same transaction and rolls the save back with it", async () => {
+    const { repository } = await start();
+
+    await expect(
+      repository.set("k", { a: 1 }, "ada", async () => {
+        throw new Error("the follow-up failed");
+      }),
+    ).rejects.toThrow("the follow-up failed");
+
+    expect(await repository.get("k")).toBeUndefined();
   });
 });

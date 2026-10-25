@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The claim by job id and the pool cap of the queue (#322), on SQLite and, when TEST_DATABASE_URL is
 // set, on Postgres: `jobId` claims exactly that job (and nothing else), `maxRunning` counts the running

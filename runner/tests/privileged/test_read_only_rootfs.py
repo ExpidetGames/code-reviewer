@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The root filesystem is read-only; only the tmpfs are writable (#249, ADR 0003 decision 5).
 

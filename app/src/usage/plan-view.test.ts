@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the plan page may say about a workspace (#282): the view is built from the resolved entitlements and
 // the counted usage, and only counts, one whole percentage, a label, flags and a start date leave it. The cost
@@ -114,6 +114,17 @@ describe("the plan view", () => {
         dynamic: { used: 1, limit: null },
       },
     });
+  });
+
+  // #675-F5
+  it("is billed while billing is on, which is when the run quotas are not read", () => {
+    expect(
+      buildPlanView(limited(), NO_USAGE, { runQuotas: false }),
+    ).toMatchObject({ billed: true });
+    expect(buildPlanView(limited(), NO_USAGE)).toMatchObject({ billed: false });
+    expect(
+      buildPlanView(limited(), NO_USAGE, { runQuotas: true }),
+    ).toMatchObject({ billed: false });
   });
 
   it("carries the plan label, the start of the period and whether the instance provides the models", () => {
@@ -286,6 +297,7 @@ describe("the plan view while billing is on (#499)", () => {
       planLabel: "Team",
       managed: true,
       suspended: false,
+      billed: true,
       periodStart: "2026-10-01T00:00:00.000Z",
       runs: null,
       cost: { percentUsed: 25, unknownCostCount: 0 },

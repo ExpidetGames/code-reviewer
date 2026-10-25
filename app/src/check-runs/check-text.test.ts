@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the check run of a review says for each state of its job (#405): the status GitHub shows, a conclusion
 // that is never red, a title, and a summary made of fixed sentences, counts and the link to the review. Nothing a
@@ -293,10 +293,8 @@ describe("the check run of a job that did not finish", () => {
       conclusion: "neutral",
       title: "Review did not finish",
     });
-    expect(check.summary).toContain(
-      "the billing setup of this instance is not complete",
-    );
-    expect(check.summary).toContain("whoever runs this instance");
+    expect(check.summary).toContain("the billing setup is not complete");
+    expect(check.summary).toContain("whoever runs code-review.com");
     expect(check.summary).toContain("`billing_rates_incomplete`");
   });
 

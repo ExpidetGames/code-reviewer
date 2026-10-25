@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #195: routing a queued job to a runner that can run it. A runner advertises the engines it can run
 // in the claim body; the claim only hands it a job whose review kind one of those engines can run. An

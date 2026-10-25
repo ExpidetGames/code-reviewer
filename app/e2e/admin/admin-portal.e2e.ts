@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The admin portal in a real browser against a production build: the instance admin signs in with email
 // and password and finds the sections and the checklist; a person signed in with GitHub who is not
@@ -154,7 +154,7 @@ test.describe("the admin portal", () => {
       "Overview",
       "Approvals",
       "Runs",
-      "Instance",
+      "General",
       "Sign-up",
       "Sign-in",
       "Integrations",
@@ -174,7 +174,7 @@ test.describe("the admin portal", () => {
     await expect(setup.getByText("Tenancy")).toBeVisible();
     await expect(setup.getByText("Sign-up rule")).toBeVisible();
     await expect(setup.getByText("Ways to sign in")).toBeVisible();
-    await expect(setup.getByText("LLM keys of the instance")).toBeVisible();
+    await expect(setup.getByText("code-review.com LLM keys")).toBeVisible();
     // #429: the catalog replaced the row of the managed tiers; it links to the LLM page, where it is managed.
     await expect(setup.getByText("Model catalog")).toBeVisible();
     await expect(setup.getByRole("link", { name: /^Configure / })).toHaveCount(
@@ -204,7 +204,7 @@ test.describe("the admin portal", () => {
       "Overview",
       "Approvals",
       "Runs",
-      "Instance",
+      "General",
       "Sign-up",
       "Sign-in",
       "Integrations",
@@ -248,7 +248,7 @@ test.describe("the admin portal", () => {
     expect(portal?.status()).toBe(200);
     const nav = page.getByRole("navigation", { name: "Admin" });
     await expect(nav).toBeVisible();
-    await nav.getByRole("link", { name: "Instance" }).hover();
+    await nav.getByRole("link", { name: "General" }).hover();
     await expect.poll(() => prefetches.has("/admin/setup/instance")).toBe(true);
 
     // A prefetch answer is an admin-only answer: no shared cache may keep it, and never for the year
@@ -291,7 +291,7 @@ test.describe("the admin portal", () => {
       has: page.getByLabel(/Maximum number of workspaces/),
     });
     await page.getByLabel(/Maximum number of workspaces/).fill("4");
-    await page.getByRole("button", { name: "Save instance settings" }).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
     await expect(
       limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();

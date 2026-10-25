@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The look of a section link in a row of sections (the settings sections, the sections of a project),
 // as the design board draws its tabs (#633): a pill in 14px semibold, muted at rest, on surface while

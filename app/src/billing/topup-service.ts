@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starting a top-up (ADR 0006, 2.13; #501): provider-neutral, the same for every adapter that has a checkout. The order is
 // the contract; each step ends the request on failure and nothing before the intent touches the provider:

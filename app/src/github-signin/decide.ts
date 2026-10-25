@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a sign in with GitHub does with the person (docs/decisions/0001-editions-setup-and-accounts.md,
 // sections 2.5 and 2.6), as a decision made before anything is written. The inputs are what GitHub said

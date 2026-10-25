@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the codes of the binding (the UI translates a code to copy, never the other way round): what
 // the connections page and the result page say after a flow, what a failed call says, and how the approval
@@ -33,7 +33,7 @@ export const RESULT_COPY: Record<
   },
   waiting_for_instance_admin: {
     tone: "info",
-    text: "Nothing is connected yet. GitHub did not let the app check your role in the organization, so the admin of this instance has to approve the connection. You will see the decision below.",
+    text: "Nothing is connected yet. GitHub did not let the app check your role in the organization, so a code-review.com admin has to approve the connection. You will see the decision below.",
   },
   state_invalid: {
     tone: "error",
@@ -49,7 +49,7 @@ export const RESULT_COPY: Record<
   },
   user_authorization_not_configured: {
     tone: "error",
-    text: "Connecting GitHub is not available yet: the admin of the instance has to finish setting up the GitHub App (its sign in with GitHub).",
+    text: "Connecting GitHub is not available yet: a code-review.com admin has to finish setting up the GitHub App (its sign in with GitHub).",
   },
   access_denied: {
     tone: "error",
@@ -69,7 +69,7 @@ export const RESULT_COPY: Record<
   },
   installation_not_accessible: {
     tone: "error",
-    text: "That installation is not one this instance can connect for you: your GitHub account cannot use it, or the instance has not heard of it yet. If it was installed just now, wait a moment and try again.",
+    text: "That installation is not one code-review.com can connect for you: your GitHub account cannot use it, or code-review.com has not heard of it yet. If it was installed just now, wait a moment and try again.",
   },
   not_installation_admin: {
     tone: "error",
@@ -81,7 +81,7 @@ export const RESULT_COPY: Record<
   },
   identity_belongs_to_other_user: {
     tone: "error",
-    text: "That GitHub account belongs to another user of this instance.",
+    text: "That GitHub account belongs to another user.",
   },
   github_identity_mismatch: {
     tone: "error",
@@ -111,9 +111,9 @@ export const AVAILABILITY_COPY: Record<
 > = {
   app_not_configured: GITHUB_NOT_CONFIGURED_COPY,
   user_authorization_not_configured:
-    "Connecting GitHub is not available yet. The admin of the instance sets up the sign in with GitHub of the GitHub App in the admin portal.",
+    "Connecting GitHub is not available yet. A code-review.com admin sets up the sign in with GitHub of the GitHub App in the admin portal.",
   needs_approval:
-    "This instance cannot check your rights on GitHub, so the admin of the instance approves every connection. Connect GitHub sends the request.",
+    "code-review.com cannot check your rights on GitHub, so a code-review.com admin approves every connection. Connect GitHub sends the request.",
 };
 
 /** The "how it works" text of the Connect card, behind its disclosure (#176). */
@@ -161,9 +161,9 @@ export function describeRoleDetail(detail: string | null): string | null {
 
 /** How the decision on a request is told to the people who asked. */
 export const REQUEST_STATUS_COPY = {
-  pending: "Waiting for the admin of the instance",
+  pending: "Waiting for a code-review.com admin",
   approved: "Approved",
-  denied: "Denied by the admin of the instance",
+  denied: "Denied by a code-review.com admin",
   withdrawn: "Connected in the meantime",
 } as const;
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The review settings form, for the global defaults and for one project (#174, #656). One form, one save, four
@@ -30,6 +30,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../../components/ui/tabs.tsx";
+import { MODEL_CHOICE_DEFAULT_OPTION } from "../../copy/model-choice.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import {
   CATALOG_FIELD_OF_KIND,
@@ -68,7 +69,6 @@ import {
   type SettingsFormModel,
 } from "./form-model.ts";
 import {
-  buildPatch,
   initialFormState,
   previewSettings,
   resetField,
@@ -81,17 +81,19 @@ import {
   type FormState,
   type TextField,
 } from "./form-state.ts";
+import { planGlobalSave } from "./global-save.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ProviderAddressNote } from "./provider-address-note.tsx";
 import { LlmFieldset, type OwnLlmChoice } from "./llm-fieldset.tsx";
 import { LimitsFieldset } from "./limits-fieldset.tsx";
 import type { NativeFormData } from "../../native-providers/form-data.ts";
 import type { CatalogModelsApi } from "../../native-providers/ui/api.ts";
-import { MODEL_CHOICE_PER_PROJECT_NOTE } from "../../copy/model-choice.ts";
 import { providerOptions } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
+import { followersText } from "./followers-text.ts";
 import {
   GATE_OFF_WARNING,
+  GATE_OFF_WARNING_DEFAULTS,
   ReviewKindFieldset,
   type ReviewKindHandlers,
 } from "./review-kind-fieldset.tsx";
@@ -109,6 +111,7 @@ import {
   describeSaveFailure,
   describeWarning,
   FALLBACK_REMOVED_NOTICE,
+  projectsNote,
   TAB_PROBLEM_NOTE,
 } from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
@@ -223,11 +226,17 @@ const UNCHANGED_TEXT = "No changes to save.";
 function confirmText(
   kind: ProjectReviewKind,
   dynamicReviewEnabled: boolean,
+  mode: SettingsFormModel["mode"],
+  following?: number,
 ): string {
   const base =
-    "Reviews of this project that are still waiting are cancelled, and a review that is already running finishes. The next review posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
+    mode === "global"
+      ? followersText(kind, following)
+      : "Reviews of this project that are still waiting are cancelled, and a review that is already running finishes. The next review posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
+  const gateOff =
+    mode === "global" ? GATE_OFF_WARNING_DEFAULTS : GATE_OFF_WARNING;
   return kind === "dynamic" && !dynamicReviewEnabled
-    ? `${base} ${GATE_OFF_WARNING}`
+    ? `${base} ${gateOff}`
     : base;
 }
 
@@ -259,6 +268,19 @@ function splitIssues(issues: readonly RequestIssue[]): {
   return { fieldErrors, general };
 }
 
+/** The "Default" option of a project that chooses no entry while the workspace defaults choose one (#676): it names the provider and the entry it resolves to. */
+const workspaceDefaultOption = (entry: {
+  providerLabel: string;
+  name: string;
+}) => `${MODEL_CHOICE_DEFAULT_OPTION} (${entry.providerLabel} · ${entry.name})`;
+
+/** The requests one save makes: a project's travel in two groups, the defaults' in one set. */
+function planOf(model: SettingsFormModel, state: FormState) {
+  return model.mode === "global"
+    ? planGlobalSave(model, state)
+    : planProjectSave(model, state);
+}
+
 export function SettingsForm({
   workspaceSlug,
   initial,
@@ -267,6 +289,7 @@ export function SettingsForm({
   dynamicReviewEnabled = false,
   keyedProviders,
   nativeCatalog,
+  billingOn = true,
   canConfirmProviderAddress = false,
   providers: providerDescriptors = llmProviderDescriptors.providers,
   api: apiOverride,
@@ -298,6 +321,8 @@ export function SettingsForm({
    * then offers those providers next to the registry's and the model is picked from a list. The Diff provider is not affected.
    */
   nativeCatalog?: NativeFormData;
+  /** Billing is on (#675): a workspace on the operator's key is told its reviews are billed via code-review.com. Unknown counts as on. */
+  billingOn?: boolean;
   /**
    * The person may manage the workspace's LLM key (`manage_llm_key`, Owner and Admin): only they confirm a new address of the
    * project's catalog provider (#588); the route refuses anyone else. Unknown counts as no.
@@ -375,8 +400,8 @@ export function SettingsForm({
   // The section that is open (#656); a refused save opens the first one that has a problem.
   const [section, setSection] = useState<Section>("review");
 
-  // The project form of a repository holds the project-only settings (#194); the global form does not.
-  const projectView = model.mode === "project" ? model.dynamic : undefined;
+  // The review kind, the Dynamic model and the verdict are set on a project and, since #676, on the workspace defaults.
+  const projectView = model.dynamic;
   const kind: ProjectReviewKind = state.dynamic?.reviewKind ?? "diff";
   const preview = useMemo(() => previewSettings(model, state), [model, state]);
   const cost: ReviewCostGuard | null =
@@ -384,7 +409,7 @@ export function SettingsForm({
   // Whether anything differs from what was loaded; the person can take it all back.
   const dirty = useMemo(() => {
     if (projectView === undefined) return false;
-    const plan = planProjectSave(model, state);
+    const plan = planOf(model, state);
     return !plan.ok || plan.steps.length > 0;
   }, [model, projectView, state]);
   const hiddenProblem =
@@ -459,12 +484,20 @@ export function SettingsForm({
       let currentState = state;
       const notes: string[] = [];
       for (const [index, step] of steps.entries()) {
-        const result = await api.save(step.body);
+        // The defaults say which version of them this form was built from, so a save over newer ones is refused (#676).
+        const result =
+          currentModel.mode === "global"
+            ? await api.save(step.body, {
+                expectedUpdatedAt: currentModel.lastSaved?.at ?? null,
+              })
+            : await api.save(step.body);
         if (!result.ok) {
           const { fieldErrors, general } = splitIssues(result.issues);
-          const failure = [describeSaveFailure(result.code), ...general].join(
-            " ",
-          );
+          const failure = [
+            describeSaveFailure(result.code),
+            ...general,
+            ...projectsNote(result.details),
+          ].join(" ");
           const partial = index > 0;
           // After a saved first request, the card of the failed one says what was not saved.
           if (partial && step.cards.length === 1 && step.cards[0] === "kind")
@@ -477,7 +510,7 @@ export function SettingsForm({
           );
           return;
         }
-        const next = modelFromAnswer("project", result.data);
+        const next = modelFromAnswer(model.mode, result.data);
         if (next === null) {
           refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
           return;
@@ -506,34 +539,14 @@ export function SettingsForm({
     setStatus(null);
     setFormError(null);
     setKindError(null);
-    if (projectView !== undefined) {
-      const plan = planProjectSave(model, state);
-      if (!plan.ok) {
-        const { fieldErrors, general } = splitIssues(plan.issues);
-        refuse(
-          fieldErrors,
-          [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(
-            " ",
-          ),
-        );
-        return;
-      }
-      setErrors({});
-      // An untouched form sends nothing: an empty request would clear the Diff overrides.
-      if (plan.steps.length === 0) {
-        setStatus("unchanged");
-        return;
-      }
-      if (plan.kindChange !== null) {
-        setConfirming({ steps: plan.steps, to: plan.kindChange.to });
-        return;
-      }
-      await runSteps(plan.steps);
+    // A model without the Dynamic part (an answer of an older server) cannot be planned.
+    if (projectView === undefined) {
+      refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
       return;
     }
-    const built = buildPatch(state);
-    if (!built.ok) {
-      const { fieldErrors, general } = splitIssues(built.issues);
+    const plan = planOf(model, state);
+    if (!plan.ok) {
+      const { fieldErrors, general } = splitIssues(plan.issues);
       refuse(
         fieldErrors,
         [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(" "),
@@ -541,23 +554,16 @@ export function SettingsForm({
       return;
     }
     setErrors({});
-    setBusy(true);
-    const result = await api.save(built.patch);
-    setBusy(false);
-    if (!result.ok) {
-      const { fieldErrors, general } = splitIssues(result.issues);
-      refuse(
-        fieldErrors,
-        [describeSaveFailure(result.code), ...general].join(" "),
-      );
+    // An untouched form sends nothing: an empty request would clear the Diff overrides.
+    if (plan.steps.length === 0) {
+      setStatus("unchanged");
       return;
     }
-    if (!adopt(result.data))
-      setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
-    else {
-      setWarnings([]);
-      setStatus("saved");
+    if (plan.kindChange !== null) {
+      setConfirming({ steps: plan.steps, to: plan.kindChange.to });
+      return;
     }
+    await runSteps(plan.steps);
   }
 
   async function resetAll() {
@@ -693,13 +699,19 @@ export function SettingsForm({
     const dynamicChanged =
       chosenDynamicProvider !== defaultProvider ||
       state.dynamic.dynamicModel !== defaultDynamicModel;
+    const sources = [
+      projectView.sources.dynamicProvider,
+      projectView.sources.dynamicModel,
+    ];
     const providerOrigin: SettingsOrigin = {
       source:
-        dynamicChanged ||
-        projectView.sources.dynamicProvider === "project" ||
-        projectView.sources.dynamicModel === "project"
-          ? "Set for this project"
-          : "Built-in value",
+        dynamicChanged || sources.includes("project")
+          ? model.mode === "project"
+            ? "Set for this project"
+            : "Changed from the built-in value"
+          : sources.includes("global")
+            ? "Global default"
+            : "Built-in value",
       resetLabel: dynamicChanged ? RESET_LABEL : null,
       resetAriaLabel: "Reset to default for Dynamic Review provider and model",
       onReset: () =>
@@ -775,30 +787,29 @@ export function SettingsForm({
         />
       );
     // The workspace reviews on the operator's key (#283, #433): the entry of the catalog for the kind is the model. The
-    // workspace defaults hold no entry (decision C3), only a note.
-    if (state.dynamic === undefined)
-      return (
-        <LlmFieldset
-          workspaceSlug={workspaceSlug}
-          disabled={disabled}
-          note={
-            <p className="text-sm text-muted-foreground">
-              {MODEL_CHOICE_PER_PROJECT_NOTE}
-            </p>
-          }
-        />
-      );
+    // defaults of the workspace choose one per kind as well (#676); a project that chooses none follows them.
+    if (state.dynamic === undefined) return null;
     const field = CATALOG_FIELD_OF_KIND[kind];
+    const choices = model.catalog?.choices[kind] ?? [];
+    const followed = model.catalog?.workspaceSelection?.[kind] ?? null;
+    const followedEntry =
+      followed === null
+        ? undefined
+        : choices.find((entry) => entry.id === followed);
     return (
       <LlmFieldset
         workspaceSlug={workspaceSlug}
         disabled={disabled}
         managedFieldName={field}
+        billingOn={billingOn}
         managed={{
-          choices: model.catalog?.choices[kind] ?? [],
+          choices,
           value: state.dynamic.catalogEntries[kind],
           error: errors[field],
           onChange: (id) => edit(setCatalogEntry(state, kind, id), field),
+          ...(followedEntry === undefined
+            ? {}
+            : { defaultLabel: workspaceDefaultOption(followedEntry) }),
         }}
       />
     );
@@ -862,6 +873,12 @@ export function SettingsForm({
                   hiddenProblem={hiddenProblem}
                   kindError={kindError}
                   handlers={kindHandlers}
+                  workspaceDefaults={model.mode === "global"}
+                  followsDefault={
+                    model.mode === "project" &&
+                    projectView.sources.reviewKind === "global" &&
+                    kind === projectView.effective.reviewKind
+                  }
                 />
                 <ReviewVerdictFieldset
                   value={state.dynamic.reviewVerdict}
@@ -871,6 +888,12 @@ export function SettingsForm({
                   disabled={disabled}
                   onChange={(mode) =>
                     edit(setReviewVerdict(state, mode), "reviewVerdict")
+                  }
+                  followsDefault={
+                    model.mode === "project" &&
+                    projectView.sources.reviewVerdict === "global" &&
+                    state.dynamic.reviewVerdict ===
+                      projectView.effective.reviewVerdict
                   }
                 />
               </>
@@ -996,7 +1019,12 @@ export function SettingsForm({
               Switch to {KIND_NAMES[confirming?.to ?? kind]}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmText(confirming?.to ?? kind, dynamicReviewEnabled)}
+              {confirmText(
+                confirming?.to ?? kind,
+                dynamicReviewEnabled,
+                model.mode,
+                model.followingProjects,
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

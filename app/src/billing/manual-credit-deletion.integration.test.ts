@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An operator's manual credit against the deletion of the workspace, on Postgres with several connections (#658). The service reads
 // the workspace `FOR SHARE` inside the transaction that writes the entry, the deletion takes the row `FOR UPDATE`; a plain read

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The project-only part of the settings form (#200): the review kind, the Dynamic model and the review
 // skill. Pure functions over the form state, no React. The skill is either the shipped default (shown
@@ -12,6 +12,11 @@ import type { FormState } from "./form-state.ts";
 
 export type DynamicFormValues = {
   reviewKind: ProjectReviewKind;
+  /**
+   * The person chose a kind in this form, even if it is the one shown (#676). On the workspace defaults that stores the kind
+   * where none was stored, so a Diff Review chosen on purpose is not the same as nothing chosen.
+   */
+  kindChosen?: true;
   dynamicModel: string;
   /** The provider of the Dynamic model (#433); empty for a workspace on the operator's key, which has no field for it. */
   dynamicProvider: string;
@@ -75,7 +80,7 @@ export function setReviewKind(
   state: FormState,
   reviewKind: ProjectReviewKind,
 ): FormState {
-  return withDynamic(state, { reviewKind });
+  return withDynamic(state, { reviewKind, kindChosen: true });
 }
 
 export function setReviewVerdict(

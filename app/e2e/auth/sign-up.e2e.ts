@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Signing up and verifying an address in a real browser against a production build with a mail outbox: a
 // visitor creates an account, cannot sign in before the address is confirmed, reads the link from the
@@ -82,7 +82,7 @@ test.describe("signing up", () => {
     await signInThroughTheForm(page, ADDRESS, PASSWORD);
     await expect(page).toHaveURL(/\/no-access$/);
     await expect(
-      page.getByText("Ask an admin of this instance for an invitation."),
+      page.getByText("Ask an admin for an invitation."),
     ).toBeVisible();
 
     // The data stays out of reach for an account without a workspace.

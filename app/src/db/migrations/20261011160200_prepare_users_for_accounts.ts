@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Prepares `users` for accounts that are not tied to GitHub (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.6 and 2.5):

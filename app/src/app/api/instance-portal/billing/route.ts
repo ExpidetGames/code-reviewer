@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET|PUT /api/admin/billing: the billing settings of the instance (the adapter, the Stripe credentials, the rates and numbers
 // and the switch), for the instance admin only. Not signed in is 401, signed in but not an admin is a 404

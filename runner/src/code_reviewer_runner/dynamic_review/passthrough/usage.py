@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The usage tap (#550, #551): the bytes of an answer in, what the provider says it used out.
 

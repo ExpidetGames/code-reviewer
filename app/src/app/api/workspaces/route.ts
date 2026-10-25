@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/workspaces  { "name": "..." }: creates a workspace for the signed in person, who becomes its
 // Owner. Only a multi-tenant instance lets people do this (`multi_tenant_required` otherwise), up to the

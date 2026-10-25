@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The refusals of `pnpm migrate` that need no database (#319). The run against a real Postgres is in
 // migrate-cli.integration.test.ts.

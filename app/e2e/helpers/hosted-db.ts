@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a journey of the hosted lane (#332) reads from and does to the database of the app under test, directly:
 //

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the control endpoint with which a Playwright journey installs the GitHub App at the fake
 // GitHub that runs as its own process: what it creates is what the app's real client and sync read

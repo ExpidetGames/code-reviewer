@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the layers (built-in values, global defaults, project overrides) become the settings
 // of one review, and what the switches for triggers and commands mean.
@@ -411,5 +411,96 @@ describe("the provider and catalog selection", () => {
     expect(dynamic.dynamicProvider).toBe(DEFAULT_LLM_PROVIDER);
     expect(dynamic.catalogEntryDiff).toBeNull();
     expect(dynamic.catalogEntryDynamic).toBeNull();
+  });
+});
+
+describe("the workspace default of the kind, the Dynamic model and the verdict (#676)", () => {
+  const resolve = (
+    layers: Partial<Parameters<typeof resolveProjectDynamicSettings>[0]>,
+  ) =>
+    resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      defaultSkill: SHIPPED_SKILL,
+      ...layers,
+    });
+
+  // #676-T02
+  it("is used by a project that sets nothing, and says so as its source", () => {
+    const dynamic = resolve({
+      workspace: {
+        reviewKind: "dynamic",
+        dynamicProvider: "anthropic",
+        dynamicModel: "claude-sonnet",
+        catalogEntryDynamic: "mce_ws",
+        reviewVerdict: "any",
+      },
+      project: {},
+    });
+
+    expect(dynamic).toMatchObject({
+      reviewKind: "dynamic",
+      dynamicProvider: "anthropic",
+      dynamicModel: "claude-sonnet",
+      catalogEntryDynamic: "mce_ws",
+      reviewVerdict: "any",
+    });
+    expect(dynamic.sources).toMatchObject({
+      reviewKind: "global",
+      dynamicProvider: "global",
+      dynamicModel: "global",
+      catalogEntryDynamic: "global",
+      reviewVerdict: "global",
+      // Nothing set anywhere: the shipped value.
+      catalogEntryDiff: "built_in",
+    });
+  });
+
+  // #676-T02
+  it("loses to the project field by field, and the project's source is the project", () => {
+    const dynamic = resolve({
+      workspace: {
+        reviewKind: "dynamic",
+        dynamicModel: "workspace-model",
+        reviewVerdict: "any",
+      },
+      project: { reviewKind: "diff", dynamicModel: "project-model" },
+    });
+
+    expect(dynamic.reviewKind).toBe("diff");
+    expect(dynamic.dynamicModel).toBe("project-model");
+    // The verdict is not overridden: the workspace default still applies.
+    expect(dynamic.reviewVerdict).toBe("any");
+    expect(dynamic.sources).toMatchObject({
+      reviewKind: "project",
+      dynamicModel: "project",
+      reviewVerdict: "global",
+    });
+  });
+
+  // #676-T02
+  it("falls back to the shipped values when neither layer sets a field", () => {
+    const dynamic = resolve({ workspace: {}, project: {} });
+
+    expect(dynamic).toMatchObject({
+      reviewKind: "diff",
+      dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      reviewVerdict: "blocking",
+    });
+    expect(Object.values(dynamic.sources)).toEqual(
+      Object.values(dynamic.sources).map(() => "built_in"),
+    );
+  });
+
+  // #676 decision: the skill stays a project's
+  it("never gives a project the skill of a workspace layer: the skill is the project's or the shipped one", () => {
+    const smuggled = {
+      reviewSkill: "a skill from the workspace",
+    } as never;
+
+    const dynamic = resolve({ workspace: smuggled, project: {} });
+
+    expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
+    expect(dynamic.reviewSkillIsDefault).toBe(true);
+    expect(dynamic.sources.reviewSkill).toBe("built_in");
   });
 });

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the codes of the LLM key routes (the UI translates a code to copy, never the other way round).
 // No sentence here contains a value; a provider's own words only ever appear as the `detail` the server cleaned.
@@ -10,7 +10,7 @@ import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import type { LlmKeyIssueCode } from "../workspace-key.ts";
 
 const ISSUE_COPY: Record<LlmKeyIssueCode, string> = {
-  provider_invalid: "This instance does not support that provider.",
+  provider_invalid: "That provider is not supported.",
   api_key_invalid:
     "That does not look like an API key: it may have no spaces or line breaks inside and at most 4096 characters. Copy it again from the provider.",
   api_key_required: "Enter the API key. There is no saved key to keep.",
@@ -25,7 +25,7 @@ export function describeLlmKeyIssue(code: string): string {
 const FAILURE_COPY: Record<string, string> = {
   forbidden: "Only an Admin or an Owner of this workspace can change the key.",
   not_found: NOT_AVAILABLE_TO_YOU,
-  provider_not_found: "This instance does not support that provider.",
+  provider_not_found: "That provider is not supported.",
   cross_site_request:
     "The request did not come from this page. Reload it and try again.",
   unsupported_content_type: GENERIC_FAILURE,

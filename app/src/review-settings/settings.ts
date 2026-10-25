@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The review settings: what a review can be tuned by, their limits and their built-in values.
 //
@@ -16,6 +16,9 @@ import {
   DEFAULT_LLM_PROVIDER,
   llmProviderDescriptors,
 } from "../llm/providers/index.ts";
+
+/** The key of the workspace's review defaults in `app_settings`; the value is one JSON object (#676: Diff settings, kind, Dynamic model, verdict). */
+export const REVIEW_DEFAULTS_KEY = "review_defaults";
 
 export type ReviewSettings = {
   /**

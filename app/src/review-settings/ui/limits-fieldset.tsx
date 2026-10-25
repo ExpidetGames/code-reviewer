@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Limits" section of the settings form (#656, #666): the cost a review may reach before it stops, and (for a Diff Review) how
@@ -41,7 +41,7 @@ export function costLimitHint(
   const note = diff
     ? " For a Diff Review the limit is checked between model requests, so a single request can exceed it."
     : "";
-  const instance = " The instance may enforce a lower limit.";
+  const instance = " code-review.com may enforce a lower limit.";
   if (mode === "global")
     return `${start}${note}${instance} Leave empty for no limit of your own.`;
   if (inherited === null || inherited === undefined)

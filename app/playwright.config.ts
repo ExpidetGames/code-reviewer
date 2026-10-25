@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
@@ -93,6 +93,7 @@ export default defineConfig({
         /e2e\/billing-journeys\//,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
+        /e2e\/settings\/workspace-defaults\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
         /e2e\/upgrade\//,
         /e2e\/operator\//,
@@ -159,7 +160,7 @@ export default defineConfig({
       name: "multi-mail",
       use: { ...browser, baseURL: e2eEnv.multiAppUrl },
       testMatch: /e2e\/workspaces\/invite-by-mail\.e2e\.ts$/,
-      dependencies: ["multi", "multi-llm"],
+      dependencies: ["multi", "multi-llm", "multi-defaults"],
     },
     // The journey of the LLM key of a workspace uses the multi-tenant app as well (a workspace of its own, so it
     // changes nothing for the others), before the mail server is configured there.
@@ -168,6 +169,14 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.multiAppUrl },
       testMatch: /e2e\/settings\/llm-key\.e2e\.ts$/,
       dependencies: ["multi"],
+    },
+    // The journey of the workspace Review defaults (#676) uses the multi-tenant app too, in a workspace of its own, after the LLM key
+    // journey (both start the fake LLM of that app) and before the mail server is configured there.
+    {
+      name: "multi-defaults",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/settings\/workspace-defaults\.e2e\.ts$/,
+      dependencies: ["multi", "multi-llm"],
     },
     // The journey that connects GitHub installations to workspaces uses the multi-tenant app again, after the
     // journeys that configure the fake SMTP server there (which makes every account of that app confirm its

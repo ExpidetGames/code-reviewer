@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The real pinned OpenCode through the production passthrough proxy, one engine for all (#550).
 

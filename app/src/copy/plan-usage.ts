@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The words of the plan and usage page of a workspace (#282). Fixed sentences: nothing in them is an amount of
 // money, a price, a model, a reason for a pause or a name of a person. The plan label is the one operator-supplied
@@ -13,11 +13,15 @@ export const PLAN_NO_LIMITS = "No limits apply to this workspace.";
 
 /** Entitlements exist but cannot be read: reviews are refused until the operator repairs them. */
 export const PLAN_UNREADABLE =
-  "The limits of this workspace cannot be read right now, so reviews are not started. Contact the operator of this instance.";
+  "The limits of this workspace cannot be read right now, so reviews are not started. Contact the operator.";
 
-/** The workspace reviews with the operator's key. */
+/** The workspace reviews with the operator's key and billing is on. */
 export const PLAN_MANAGED =
-  "The models for your reviews are provided by this instance.";
+  "The models for your reviews are provided and billed via code-review.com.";
+
+/** The same while billing is off (#675): nothing is billed. */
+export const PLAN_MANAGED_UNBILLED =
+  "The models for your reviews are provided by code-review.com.";
 
 export const PLAN_PAUSED_TITLE = "Reviews are paused";
 /** No reason is given on purpose. */

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether the sign-up rule works right now (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.5). A rule that names emails or domains is only meaningful for verified addresses, and an

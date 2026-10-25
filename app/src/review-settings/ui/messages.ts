@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for review settings: what a problem with one field means and what to do about it, and what
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
@@ -138,7 +138,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   DYNAMIC_MODEL_UNKNOWN: () =>
     `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
   MODEL_MANAGED_BY_INSTANCE: () =>
-    "This instance provides the AI models for this workspace. Choose from the listed options instead.",
+    "code-review.com provides the AI models for this workspace. Choose from the listed options instead.",
   PROVIDER_UNKNOWN: () => CHOOSE_PROVIDER,
   CATALOG_ENTRY_UNKNOWN: () => "This choice does not exist. Choose another.",
   CATALOG_ENTRY_NOT_RELEASED: () =>
@@ -157,9 +157,14 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
   // #588: the address of a catalog provider cannot be confirmed when there is none.
   PROVIDER_ADDRESS_NOT_PINNABLE: () =>
     "There is no provider address to confirm right now. Choose the provider and a model from the catalog first.",
+  // #676: Dynamic Review as the workspace default needs a model to run on; say what is missing, not the setting.
+  DYNAMIC_REVIEW_NOT_READY: () =>
+    "Dynamic Review cannot run for this workspace yet, so projects could not use it as the default. Add the AI key it needs or choose an available option first.",
+  PROJECT_MODEL_BOUND_TO_PROVIDER: () =>
+    "Some projects chose a model of their own for the current provider. Change those models first, or keep the provider.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
-    "This workspace reviews with its own AI key, so the choices of this instance cannot be used. They can be chosen once the AI access comes from this instance.",
+    "This workspace reviews with its own AI key, so the code-review.com choices cannot be used. They can be chosen once the workspace is billed via code-review.com.",
 };
 
 function hasIssueCopy(code: string): code is ReviewSettingIssueCode {
@@ -189,6 +194,37 @@ export function describeWarning(
     : null;
 }
 
+/** The projects a refusal names (repository names), as one sentence; none when it names none. */
+export function projectsNote(
+  details: Record<string, unknown> | undefined,
+): string[] {
+  const names = details?.projects;
+  if (!Array.isArray(names)) return [];
+  const listed = names.filter(
+    (name): name is string => typeof name === "string",
+  );
+  return listed.length === 0 ? [] : [`Projects: ${listed.join(", ")}.`];
+}
+
+/**
+ * The sentence for a refused save that has no field to mark (the reset of every default): what failed, each problem the
+ * server reported once, and the projects the refusal names.
+ */
+export function describeWholeRefusal(failure: {
+  code: string;
+  issues: readonly { field: string; code: string }[];
+  details?: Record<string, unknown>;
+}): string {
+  const problems = failure.issues.map((issue) =>
+    describeIssue(issue.field, issue.code),
+  );
+  return [
+    describeSaveFailure(failure.code),
+    ...new Set(problems),
+    ...projectsNote(failure.details),
+  ].join(" ");
+}
+
 const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_INVALID:
     "Some settings are not valid. Fix the marked fields and save again.",
@@ -198,6 +234,8 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository was not found. Reload the Projects page and try again.",
+  REVIEW_SETTINGS_STALE:
+    "These defaults were changed meanwhile — reload the page and decide again.",
   // #588: the address of a catalog provider is confirmed, moved or dropped by an Owner or Admin only.
   PROVIDER_ADDRESS_CONFIRM_FORBIDDEN:
     "The address of this provider changed. Only an Owner or Admin of the workspace can confirm it or change the provider of this project.",

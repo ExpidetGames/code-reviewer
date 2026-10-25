@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The provider and model pickers of a workspace on its own key, in a real browser (#433): a person picks the
 // provider and the model of Diff Review, switches the project to Dynamic Review, picks the provider and the model of

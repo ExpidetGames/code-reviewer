@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads a comment on a pull request as a command. The text of a comment is untrusted input: only the
 // command word is taken from it; any text after the command is dropped, because PR-Agent would read

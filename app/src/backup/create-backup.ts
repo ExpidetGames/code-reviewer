@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One backup run: a consistent, verified copy of the SQLite database in the backup directory.
 //

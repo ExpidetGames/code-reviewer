@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The workspaces assembled for integration tests: a real SQLite file with users, one workspace and its
 // members, the real services (members, invitations) with the real counters, a mail double that can be

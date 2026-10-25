@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handoff tokens (#284): making one (scoped to a workspace) and redeeming one (by its hash alone). The behavior
 // of the whole hand-over is in src/plan-handoff/; what is pinned here is what the statements guarantee.

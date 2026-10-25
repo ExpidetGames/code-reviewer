@@ -444,7 +444,7 @@ em,i,cite{font-style:normal}
 <tr><td><strong>Owner</strong></td><td>Everything an Admin can, plus: change roles, rename the workspace, delete the workspace (Settings, Advanced), invite any role, remove anyone.</td></tr>
 <tr><td><strong>Instance admin</strong></td><td>Sees the Admin entry in the user menu and the whole <code>/admin</code> area. For everybody else <code>/admin</code> is a 404.</td></tr>
 </tbody></table>
-<div class="prose" style="margin-top:24px"><p>Two instance settings change what is shown: <strong>single or multi tenant</strong> (one workspace, or people can create more) and <strong>billing on or off</strong> (Billing replaces the Plan tab, a balance banner appears, runs show a price). A workspace can also use <strong>our models</strong> (managed key) or <strong>its own provider key</strong>; managed workspaces never see provider or model names.</p></div>
+<div class="prose" style="margin-top:24px"><p>Two instance settings change what is shown: <strong>single or multi tenant</strong> (one workspace, or people can create more) and <strong>billing on or off</strong> (Billing replaces the Plan tab, a balance banner appears, runs show a price). A workspace can also use <strong>our models</strong> (managed key) or <strong>its own provider key</strong>; managed workspaces pick the name of a model provider (Anthropic, OpenAI, ...) and then an option by the name the operator gave it, never a model id; a note says the reviews are billed via code-review.com while billing is on, and the Default option stands for the code-review.com default.</p></div>
 </section>
 
 <section class="part" id="design-system">
@@ -697,7 +697,7 @@ em,i,cite{font-style:normal}
 </article>
 <article class="screen" id="s-D3">
 <header><span class="sid">D3</span><h4>Project settings</h4></header>
-<p class="purpose">The per project review settings. The same form is used for the workspace defaults (without review kind and verdict). Every field shows where its value comes from: this project, the workspace default, or the built in value, with a reset link. Dynamic Review also shows a note about the provider address: a changed address is refused until an Owner or Admin confirms it.</p>
+<p class="purpose">The per project review settings. The same form is used for the workspace defaults (with the review kind, the verdict and the Dynamic model, without the review skill). Every field shows where its value comes from: this project, the workspace default, or the built in value, with a reset link. Dynamic Review also shows a note about the provider address: a changed address is refused until an Owner or Admin confirms it.</p>
 <dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/projects/&lt;repository&gt;</code></dd><dt>Who sees it</dt><dd>All members see it. Only Admins and Owners can save.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 2000"><div class="screen-host" data-tpl="D3" data-w="1280" role="img" aria-label="Mockup of the screen Project settings"></div></div>
 </article>
@@ -763,7 +763,7 @@ em,i,cite{font-style:normal}
 </article>
 <article class="screen" id="s-H2">
 <header><span class="sid">H2</span><h4>Settings, Review defaults</h4></header>
-<p class="purpose">The workspace wide defaults for every project, using the same form as the project settings. Managed workspaces choose a quality level per project instead of a model.</p>
+<p class="purpose">The workspace wide defaults for every project, using the same form as the project settings: Review, LLM, Trigger and Limits. The review kind, the verdict and the provider and model of each kind (a catalog entry per kind on our models) are defaults here too; a project that sets nothing follows them and says so. The review skill stays per project.</p>
 <dl class="facts"><dt>Address</dt><dd><code>/w/&lt;workspace&gt;/settings/review-defaults</code></dd><dt>Who sees it</dt><dd>All members read. Admins and Owners save.</dd><dt>Source</dt><dd><code>app/src/app/(app)/w/[workspace]/settings/review-defaults/page.tsx</code></dd></dl>
 <div class="frame" style="aspect-ratio: 1280 / 1500"><div class="screen-host" data-tpl="H2" data-w="1280" role="img" aria-label="Mockup of the screen Settings, Review defaults"></div></div>
 </article>

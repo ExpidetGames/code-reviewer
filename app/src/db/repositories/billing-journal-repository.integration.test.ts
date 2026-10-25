@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The balance journal repository (#495, ADR 0006, 2.7), on SQLite and on Postgres: entries are idempotent per key, the
 // balance is the sum of the journal, a hold is taken by a conditional update and never overspends, and a reserve, a

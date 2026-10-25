@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Turns the dispatch settings into the hook `createJobQueue` takes (`onEnqueued`): in poll mode (the default)
 // there is none, so nothing runs and nothing is written; in webhook mode the hook hands the send to

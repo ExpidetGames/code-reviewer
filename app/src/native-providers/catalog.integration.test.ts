@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a workspace on its own key may choose from the models.dev catalog (#555): the providers of the supported file that
 // are not blocked, and the tool-calling models of one of them. Over a real database filled with rows directly; the fetch

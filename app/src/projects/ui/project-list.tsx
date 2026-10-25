@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The list of repositories on the Projects page, as a compact table: name (a link to the settings,
 // also while the repository is inactive), installation, state, the status of the last run and the

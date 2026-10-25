@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The provider-neutral billing adapter (ADR 0006, 2.12; #497). Money arrives through an adapter, never through code that
 // knows a provider: an adapter performs actions at its provider and turns what the provider sends into the normalized

@@ -5,7 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this. Please search the existing issues first.
+        This repository belongs to the team that develops code-reviewer.com, a hosted service. Please
+        search the existing issues first.
 
         **Never paste API keys, tokens, private keys, webhook secrets or `.env` files into this
         form.** For a security problem, do not use this form: report it privately at
@@ -14,18 +15,17 @@ body:
     id: version
     attributes:
       label: Version
-      description: The image tag (for example `development`, `latest` or `sha-abc1234`) or the commit you run.
-      placeholder: sha-abc1234
+      description: The commit or the date and time at which you saw the problem.
+      placeholder: abc1234
     validations:
       required: true
   - type: dropdown
     id: deployment
     attributes:
       label: Deployment type
-      description: How do you run code-review.com?
+      description: Where did you see the problem?
       options:
-        - Docker Compose
-        - Coolify
+        - Hosted service (code-review.com)
         - Local development (pnpm dev and uv)
         - Other
     validations:

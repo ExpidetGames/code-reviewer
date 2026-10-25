@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `email_verification_tokens`: single-use links that verify an email address (docs/decisions/0001-
 // editions-setup-and-accounts.md, sections 2.5 and 2.7). The token is 256 random bits and travels in the

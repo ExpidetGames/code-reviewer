@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The real pinned stock OpenCode (v1.19.0) behind the runner proxy, against loopback fakes (#197).
 

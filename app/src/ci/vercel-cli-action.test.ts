@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the deployment workflows get the Vercel CLI (#403): from tools/vercel, the exact version in its
 // package.json with the whole dependency tree from the committed package-lock.json, installed with

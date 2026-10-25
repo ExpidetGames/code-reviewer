@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `job_vm_runs` (#493): where the infrastructure of a review job began and ended, one row per VM (or, where no VM exists,
 // one row for the job's wall clock). It only measures: it sets no price and writes no journal entry (src/billing/README.md,

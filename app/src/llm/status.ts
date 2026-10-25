@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the UI may know about the instance's LLM defaults: the built-in model and the options of
 // `LLM_MODEL` and `LLM_MAX_TOKENS`, and a warning for an option that is ignored. Never a value.

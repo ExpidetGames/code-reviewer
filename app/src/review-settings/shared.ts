@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server: the real database and the model of the instance. The webhook
 // intake and the claim of the runner API get the settings of a project from here.
@@ -7,7 +7,10 @@ import { createAppSettingsRepository } from "../db/repositories/app-settings-rep
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
-import { newProjectSettings } from "../projects/new-project-settings.ts";
+import {
+  dynamicReviewCanResolve,
+  newProjectSettings,
+} from "../projects/new-project-settings.ts";
 import { getDatabase } from "../db/startup.ts";
 import { createJobReviewSettingsHooks } from "../jobs/review-settings-hooks.ts";
 import { configuredLlmModel } from "../llm/config.ts";
@@ -72,6 +75,9 @@ export function reviewSettingsServiceFor(
     ),
     // #555: the catalog of providers and models a workspace on its own key picks for Dynamic Review.
     nativeCatalog: getNativeCatalog(),
+    // #676: Dynamic Review as the workspace default needs a model to run on, judged the way a new project and the claim judge it.
+    dynamicReady: (defaults) =>
+      dynamicReviewCanResolve(db, workspaceId, defaults),
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });

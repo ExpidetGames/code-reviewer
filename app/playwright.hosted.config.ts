@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The hosted lane (#332): the whole hosted flow with the real code of the App (serverless mode, Postgres), the
 // Dispatcher (a process, started by the journeys) and the Worker (`worker-once` and `probe`, started by the Dispatcher's

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which request paths belong to the admin portal. The rule has to hold for every spelling
 // that Next.js would route to an admin page or route: a path the proxy did not recognize as an admin

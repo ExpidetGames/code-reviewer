@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Reproducible tracked trees and base-repository fork PR refs, using real upload-pack."""
 
 import os

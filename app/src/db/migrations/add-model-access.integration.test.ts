@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #428-T09: the model access migration adds one nullable column to `workspace_entitlements` of a database made by the
 // previous release's migrations. Every existing row stays as it is and reads as "every released entry"; an app of the

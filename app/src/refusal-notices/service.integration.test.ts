@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The notice a pull request gets when a review is refused for a limit or a suspension (#281), end to end on the
 // claim: a real queue and database, the real GitHub App provider and client against the fake GitHub, and the
@@ -716,9 +716,7 @@ describe("the refusal for a billing setup that is not complete (#632)", () => {
     expect(comments(h)).toHaveLength(1);
     expect(comments(h)[0]).toMatchObject({ login: "code-reviewer-test[bot]" });
     expect(comments(h)[0]?.body).toContain("No review ran for this change.");
-    expect(comments(h)[0]?.body).toContain(
-      "billing setup of this instance is not complete",
-    );
+    expect(comments(h)[0]?.body).toContain("billing setup is not complete");
     expect(comments(h)[0]?.body).toContain(`head:${sha("a")}`);
     expect(comments(h)[0]?.body).not.toMatch(/https?:\/\//);
   });
@@ -752,9 +750,7 @@ describe("the refusal for a billing setup that is not complete (#632)", () => {
       errorCode: "billing_rates_incomplete",
     });
     expect(comments(h)).toHaveLength(1);
-    expect(comments(h)[0]?.body).toContain(
-      "billing setup of this instance is not complete",
-    );
+    expect(comments(h)[0]?.body).toContain("billing setup is not complete");
   });
 });
 

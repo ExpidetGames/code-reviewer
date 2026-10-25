@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the key of a registry provider may be sent (#578, hardening after the security review of PR #580).
 //

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the sign-up rule, shared by the first-run wizard and the admin forms (#169). The wizard
 // and the portal asked the same question with different words; the words live here once.
@@ -14,7 +14,7 @@ export const SIGN_UP_RULE_OPTIONS: ReadonlyArray<{
   {
     value: "everyone",
     title: "Everyone",
-    text: "Anyone who can reach this instance can create an account.",
+    text: "Anyone who can reach this server can create an account.",
   },
   {
     value: "emails",

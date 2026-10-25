@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: the billing profile of one workspace, on SQLite and on Postgres.
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The rules of invitations through the real service over a real SQLite file, a real clock moved by hand,
 // the real counters and a mail double: who may invite whom, which addresses may be invited, what is stored

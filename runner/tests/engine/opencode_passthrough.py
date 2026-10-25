@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Support for the engine tests of the passthrough proxy (#550): the real pinned OpenCode against
 the production `PassthroughProxy`, with the strict generic fakes of `fakes/wire` behind it.

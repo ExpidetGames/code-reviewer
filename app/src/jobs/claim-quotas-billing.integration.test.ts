@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The plan run quotas while billing is on (ADR 0006, D5; #499), on SQLite and, when TEST_DATABASE_URL is set, on Postgres: the
 // run limits of an entitlements row (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`) are not enforced at the claim then, while the

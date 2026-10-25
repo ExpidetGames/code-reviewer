@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cost limit of a project at claim time (#666): the review settings resolve `maxCostCents` (the project's value over the
 // workspace default over none), and the claim hands it to the runner as `llm.maxCostUsd`, on both ways a job reaches a runner

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497: the migration of the top-up intents and the webhook event record, on SQLite and on Postgres. Both tables are new
 // and empty; the event record has room for an id, an outcome and an order, and for no payload.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment node
 // #169: the copy pass. Every consolidated sentence has exactly one owner module, and no two message

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The top-up intents and the record of provider events for prepaid billing (ADR 0006, 2.13 and 2.12; #497). Both tables
 // are new and empty and no existing row is touched, so an app of the previous release keeps working on the same database.

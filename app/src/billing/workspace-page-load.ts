@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the page file of the billing page asks for (ADR 0006, 2.5; #505), apart from Next.js: while billing is off the page does not
 // exist (the 404 of a path that does not exist, nothing is read); while it is on, the data of the person's workspace and what the

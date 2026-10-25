@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which verdict mode a project's stored settings give (#405): its own choice when it is one this version knows,
 // otherwise the default. A project without a row, with old settings or with a value from a newer version never
@@ -26,5 +26,29 @@ describe("the verdict mode of stored project settings", () => {
   it("is the default for a value this version does not know", () => {
     for (const stored of ["sometimes", 5, null, {}, []])
       expect(reviewVerdictOf({ reviewVerdict: stored })).toBe("blocking");
+  });
+});
+
+describe("the verdict mode with a workspace default (#676)", () => {
+  // #676-T02
+  it("is the workspace default for a project that chose nothing", () => {
+    expect(reviewVerdictOf({}, { reviewVerdict: "off" })).toBe("off");
+    expect(reviewVerdictOf(undefined, { reviewVerdict: "any" })).toBe("any");
+  });
+
+  // #676-T02
+  it("is the project's own mode where it chose one", () => {
+    expect(
+      reviewVerdictOf({ reviewVerdict: "any" }, { reviewVerdict: "off" }),
+    ).toBe("any");
+  });
+
+  // #676-T02
+  it("falls back to the default for a workspace default this version does not know, or none", () => {
+    expect(reviewVerdictOf({}, { reviewVerdict: "sometimes" })).toBe(
+      "blocking",
+    );
+    expect(reviewVerdictOf({}, undefined)).toBe("blocking");
+    expect(reviewVerdictOf({}, "damaged")).toBe("blocking");
   });
 });

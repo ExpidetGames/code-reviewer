@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """No AF_UNIX path to anything but the engine's own sockets (#244, from the review of #239).
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the notice of a refused review leads once billing exists (ADR 0006, 2.5; #505). While billing is on the billing page of
 // the workspace is where an Owner or an Admin adds credit or changes the monthly limit, and it takes the place of the plan page,

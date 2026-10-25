@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub App page of the admin portal (#182): the App's status with the addresses to enter on
 // GitHub (shown directly, they are what the person came for), the two ways to connect it behind one
@@ -270,11 +270,10 @@ export function GithubSection({
         {tenancy === "multi" && !signInReady ? (
           <Alert variant="warning" role="note">
             <AlertDescription>
-              <strong>&quot;Connect GitHub&quot; is unavailable.</strong> On a
-              multi-tenant instance workspaces connect their installations with
-              the user authorization of the App, and its client id and secret
-              are not configured. Until they are, no workspace can connect
-              GitHub.
+              <strong>&quot;Connect GitHub&quot; is unavailable.</strong> With
+              several tenants, workspaces connect their installations with the
+              user authorization of the App, and its client id and secret are
+              not configured. Until they are, no workspace can connect GitHub.
             </AlertDescription>
           </Alert>
         ) : null}

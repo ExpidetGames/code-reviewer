@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The links to the operator's terms and privacy statement (#626, ADR 0006, 2.14): the business confirmation at the first top-up

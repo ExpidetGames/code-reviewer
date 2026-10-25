@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Workspaces, roles and invitations in a real browser against a production build, single-tenant and without
 // a mail server (so an invitation is a link that is shown once): the Owner invites a colleague and copies the
@@ -352,7 +352,7 @@ test.describe("a person who signs up on their own", () => {
 
     await expect(page).toHaveURL(/\/no-access$/);
     await expect(
-      page.getByText("Ask an admin of this instance for an invitation."),
+      page.getByText("Ask an admin for an invitation."),
     ).toBeVisible();
     await expect(
       page.getByRole("form", { name: "Create a workspace" }),

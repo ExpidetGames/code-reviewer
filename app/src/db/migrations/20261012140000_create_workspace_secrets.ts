@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `workspace_secrets`: the encrypted credentials of ONE workspace (docs/decisions/0001-editions-setup-and-
 // accounts.md, sections 2.7 and 2.8): today its own LLM key (name `llm_api_key`). One row per (workspace,

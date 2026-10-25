@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: the decision whether a workspace is told about its balance is a side effect of every money write and must never undo one.
 // A trigger makes every write to `billing_notifications` fail (test-support/failing-notifications.ts); the charge, the credit and

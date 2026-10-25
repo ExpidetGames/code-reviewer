@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // PATCH  /api/w/:workspace/members/:userId  { "role": "owner" | "admin" | "member" }: gives a member another
 //        role (an Owner).

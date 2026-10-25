@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Plan sub-page of the workspace settings (#282): what the workspace may use and has used in the current
 // period, read-only for every member. The page file reads the view (`readPlanView`) and the role; this renders

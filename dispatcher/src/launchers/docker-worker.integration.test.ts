@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The `docker` stand-in of the hosted end-to-end lane (fakes/sandbox/bin/docker-worker.sh, #332) behind the local mode
 // of the Sandbox double, with the flags the real renderer makes and a small program in place of the Worker. The lane's

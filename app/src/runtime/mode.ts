@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Whether the app runs as a long-lived server (Docker, Coolify: the default, and the only mode before
 // #319) or as serverless functions (every instance starts cold, many run at once, none lives long).

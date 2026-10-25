@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the network guard of the privileged Dynamic e2e lane (#253): the nft rules that count and reject
 // every connection that leaves the machine, and the reading of their counters that fails a test. The rules

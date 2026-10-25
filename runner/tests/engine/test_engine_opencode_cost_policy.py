@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The real pinned OpenCode under the cost policy of an own key whose model nobody priced (#553).
 

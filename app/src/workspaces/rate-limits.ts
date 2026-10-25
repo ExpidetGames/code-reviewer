@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limits on the endpoints of workspaces that can be abused: creating an invitation (which sends a mail
 // to an address of the caller's choice), accepting one (which takes a token that can be guessed at, and

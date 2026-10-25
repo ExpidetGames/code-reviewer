@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the preflight of the privileged Dynamic e2e lane (#253): before anything of the lane starts,
 // the pinned OpenCode binary, `rg`, `nft`, the engine user and root are checked, and a missing item

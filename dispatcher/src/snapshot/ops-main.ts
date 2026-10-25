@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm snapshot:ops <decide|persist|cleanup>` (see ops-cli.ts): the one place of these steps that touches the file
 // system, git, the process and the real platform SDK. Node strips the types.

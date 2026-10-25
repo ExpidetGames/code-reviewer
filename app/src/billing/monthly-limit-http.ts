@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind `GET` and `PUT /api/w/:workspace/billing/monthly-limit` (ADR 0006, 2.9; #499), with their collaborators
 // passed in so the route file only wires the real ones in (`shared.ts`) and tests wire the real service over a test database. The

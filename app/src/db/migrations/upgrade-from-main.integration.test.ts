@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #491: the billing plan migrations are gone from `development`. They never reached `main`, so a database of the last
 // release must migrate to latest, and so must a fresh one, on SQLite and on Postgres, with none of the billing plan

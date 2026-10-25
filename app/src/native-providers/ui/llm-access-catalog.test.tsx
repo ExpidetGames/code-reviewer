@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The LLM access section with the catalog providers (#555): the card comes after the two cards of the registry, for an Admin or
@@ -86,7 +86,7 @@ describe("the catalog providers on the LLM access page", () => {
 
     expect(
       screen.getByText(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText("Other providers")).toBeNull();

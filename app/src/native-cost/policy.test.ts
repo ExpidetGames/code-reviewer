@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The cost policy a claim hands a native job (#553): pure decisions from what the price service answers.
 import { describe, expect, it } from "vitest";

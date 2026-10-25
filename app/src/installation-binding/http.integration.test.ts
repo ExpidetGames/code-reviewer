@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The routes of the binding through the real services over a real SQLite file and the fake GitHub
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.9): how a request is read (same site, JSON only,

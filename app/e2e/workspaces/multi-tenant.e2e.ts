@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Workspaces in a multi-tenant instance in a real browser: a person who signs up is asked to create a
 // workspace and becomes its Owner; they create a second one (a name that is taken gets a numbered address)
@@ -193,7 +193,7 @@ test.describe("a multi-tenant instance", () => {
     await page
       .getByLabel("Maximum number of workspaces one user may own")
       .fill("1");
-    await page.getByRole("button", { name: "Save instance settings" }).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
     await expect(page.getByText("Saved.")).toBeVisible();
 
     const response = await page.request.post("/api/workspaces", {

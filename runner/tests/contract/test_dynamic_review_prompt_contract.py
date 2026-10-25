@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """#198-T04: the DynamicFindings contract accepts an evidence-backed finding for every priority and
 a location outside the reviewed diff. The schema has no inline-overlap requirement, so a

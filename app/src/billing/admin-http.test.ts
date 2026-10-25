@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The second guard of the billing data routes (#504): the proxy turns anonymous and non-admin callers away before a route
 // runs, but each handler checks the caller itself, first, and reaches nothing behind it for anybody who is not the instance

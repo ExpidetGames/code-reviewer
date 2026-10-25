@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A test double for the review trigger intake: it remembers every trigger it was given, and can be
 // told to fail or to take its time. Use it wherever code under test hands triggers over.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance admin's decision on a request to link an installation (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.9): approving links it (with the checks that still apply), denying links nothing, a

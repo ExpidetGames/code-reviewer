@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the tenancy question, shared by the first-run wizard and the admin Setup → Instance
 // page (#181). Both asked the same question with different words; the words live here once, like the
@@ -16,7 +16,7 @@ export const TENANCY_OPTIONS: ReadonlyArray<{
   {
     value: "single",
     title: "Single-tenant",
-    text: "One team. The instance has one workspace, and you are its owner; it can only stay single-tenant while the instance has at most one.",
+    text: "One team. There is one workspace and you are its owner; it can only stay single-tenant while there is at most one.",
   },
   {
     value: "multi",

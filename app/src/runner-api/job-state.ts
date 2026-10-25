@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/runners/v1/jobs/:id: the status of a job, for a Dispatcher that reaps the VMs of jobs that ended (#364).
 // Read only, and the answer is the status alone: no job input, lease, repository or credential. It proves the

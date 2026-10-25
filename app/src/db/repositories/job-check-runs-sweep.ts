@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The jobs whose check run on the platform is behind, for the reconciler that serves the whole instance (#405).
 // Instance level on purpose, like the sweep of the refusal notices: it reads the rows of every workspace, only the

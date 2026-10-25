@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing settings the admin portal reads and changes (ADR 0006, 2.14; #504): the adapter, the Stripe credentials (the two
 // secrets of the secret store), the rates and the numbers, the connection check, the webhook endpoint at Stripe and the switch.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Reads the GitHub Actions files of the repository for the tests that pin the hosted deployment pipeline
 // (deploy-production, rollback-production, the canary, the golden snapshot and the Infisical action). Test support

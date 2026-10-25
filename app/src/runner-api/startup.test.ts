@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the start-up hint about the runner token: it names the problem, once, and never the token.
 import { describe, expect, it } from "vitest";

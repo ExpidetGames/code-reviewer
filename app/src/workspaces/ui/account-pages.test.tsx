@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the pages of an account that has no workspace yet or is looking at an invitation: what a person
@@ -54,9 +54,7 @@ describe("a person without a workspace", () => {
       />,
     );
 
-    expect(
-      screen.getByText(/Ask an admin of this instance for an invitation/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Ask an admin for an invitation/)).toBeTruthy();
     expect(
       screen.queryByRole("form", { name: "Create a workspace" }),
     ).toBeNull();
@@ -74,7 +72,7 @@ describe("a person without a workspace", () => {
     expect(
       screen.getByRole("form", { name: "Create a workspace" }),
     ).toBeTruthy();
-    expect(screen.queryByText(/Ask an admin of this instance/)).toBeNull();
+    expect(screen.queryByText(/Ask an admin for an invitation/)).toBeNull();
   });
 
   // #101-WM-21
@@ -180,7 +178,7 @@ describe("the form that creates a workspace", () => {
     await user.click(screen.getByRole("button", { name: "Create workspace" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "You own as many workspaces as this instance allows.",
+      "You own as many workspaces as are allowed.",
     );
     expect(open).not.toHaveBeenCalled();
   });

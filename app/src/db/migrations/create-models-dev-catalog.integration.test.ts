@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #548: the models.dev catalog migration is expand only: it adds empty tables to a database made by the previous
 // release's migrations and changes no existing row; the checks of the tables hold what the repository relies on.

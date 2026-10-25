@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The button that accepts an invitation. Opening a link accepts nothing; this POST does (a mail scanner or a

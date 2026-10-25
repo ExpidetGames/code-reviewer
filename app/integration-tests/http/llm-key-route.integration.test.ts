@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The routes of the LLM key of a workspace through the real route files, with the wiring the running server
 // uses (the database opened at start, the secret store, the workspace access); only the session lookup and
@@ -646,7 +646,7 @@ describe("a workspace whose key mode is managed (#276)", () => {
 
     for (const html of pages) {
       expect(html).toContain(
-        "The LLM for this workspace is provided by this instance.",
+        "The LLM for this workspace is billed via code-review.com.",
       );
       expect(html).not.toContain("<form");
       expect(html).not.toContain("<input");

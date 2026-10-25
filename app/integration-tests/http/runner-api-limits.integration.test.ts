@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limits and the suspension of a workspace on every way a job is claimed (#277): the claim of a runner, the
 // split claim of a Dispatcher and the claim by job id. A refused job ends `failed` with its code, is not handed to

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The GitHub integration of the admin portal, the way an operator meets it, against the fake GitHub: the App
 // is created with one click (the manifest flow), people sign in with it (the sign-up rule is applied to their

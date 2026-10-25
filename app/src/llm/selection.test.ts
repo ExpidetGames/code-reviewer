@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import {
@@ -150,6 +150,39 @@ describe("an own key: provider and model of the job's kind", () => {
     expect(dynamic).toMatchObject({
       provider: DEFAULT_PROVIDER,
       model: "vendor/project-dynamic",
+    });
+  });
+
+  // #676-T03
+  it("takes the Dynamic provider and model from the workspace default when the project sets none, and lets the project win field by field", () => {
+    const layers = {
+      workspace: { provider: FAKE_PROVIDER_ID, model: "fake-small" },
+    };
+    const inherited = selected(
+      resolveModelSelection(
+        own({ kind: "dynamic", builtInModel: BUILT_IN_DYNAMIC_MODEL, layers }),
+        TWO_PROVIDERS,
+      ),
+    );
+    const overridden = selected(
+      resolveModelSelection(
+        own({
+          kind: "dynamic",
+          builtInModel: BUILT_IN_DYNAMIC_MODEL,
+          layers: { ...layers, project: { model: "fake-large" } },
+        }),
+        TWO_PROVIDERS,
+      ),
+    );
+
+    expect(inherited).toMatchObject({
+      kind: "dynamic",
+      provider: FAKE_PROVIDER_ID,
+      model: "fake-small",
+    });
+    expect(overridden).toMatchObject({
+      provider: FAKE_PROVIDER_ID,
+      model: "fake-large",
     });
   });
 

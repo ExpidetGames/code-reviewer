@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The fetch of the catalog on the admin page (#554): when it last worked and how the last attempt ended (the stable code as
@@ -131,9 +131,7 @@ describe("the state of the fetch", () => {
       (screen.getByRole("button", { name: "Fetch now" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    expect(
-      screen.getByText(/The fetch is switched off for this instance/),
-    ).toBeTruthy();
+    expect(screen.getByText(/The fetch is switched off/)).toBeTruthy();
   });
 });
 

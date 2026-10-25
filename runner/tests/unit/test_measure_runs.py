@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the driver of the CR-13 measurements: it only talks to the sandbox repository, never
 runs without confirmation, keeps the secrets out of every command line, builds the right commands

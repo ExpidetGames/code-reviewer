@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the projects table against a real SQLite file: activating a repository creates its one
 // project, deactivating keeps the row and its settings, activating again reuses the row, a repository
@@ -733,5 +733,41 @@ describe("settings that are not valid JSON", () => {
     const saved = await projects.updateSettings(first.id, { maxFindings: 2 });
 
     expect(saved?.settings).toEqual({ maxFindings: 2 });
+  });
+});
+
+// #676-T04: the list the workspace defaults cancel by is read in the write transaction, after the repository rows were locked.
+describe("listing the repositories with their projects inside a transaction", () => {
+  it("lists what the plain list does, and sees the settings written earlier in the same transaction", async () => {
+    const { db, projects, first, second } = await setup();
+    await projects.activate(first.id);
+
+    const inside = await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable("projects")
+        .set({ settings: JSON.stringify({ reviewKind: "diff" }) })
+        .where("repository_id", "=", first.id)
+        .execute();
+      return projects.listLocked(trx);
+    });
+
+    expect(inside.map((entry) => entry.repository.id)).toEqual(
+      (await projects.list()).map((entry) => entry.repository.id),
+    );
+    expect(
+      inside.find((entry) => entry.repository.id === first.id)?.project
+        ?.settings,
+    ).toEqual({ reviewKind: "diff" });
+    expect(
+      inside.find((entry) => entry.repository.id === second.id)?.project,
+    ).toBeNull();
+  });
+
+  it("refuses to run outside a transaction, where no lock would last", async () => {
+    const { db, projects } = await setup();
+
+    await expect(projects.listLocked(db)).rejects.toThrow(
+      "listLocked requires a transaction.",
+    );
   });
 });

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: whose payment a reviewed event is. A review row carried only the provider's reference (`payment:<id>`), which an
 // operator cannot map to a workspace without the provider's dashboard. When the application could attribute the event to

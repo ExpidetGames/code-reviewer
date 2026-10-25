@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The provenance and license audit of the prebuilt binaries that the Dynamic runner image ships
 // (OpenCode, ripgrep). A binary has no package manager metadata, so the audit reads what the

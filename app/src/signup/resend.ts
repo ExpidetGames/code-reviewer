@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Asking for a new verification link (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5).
 // The answer is the same whether or not the address has an account that waits for verification: a link

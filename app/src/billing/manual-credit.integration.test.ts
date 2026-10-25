@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497: the manual adapter's service. An operator grants credit or makes a correction by hand: a journal entry with the
 // provider `manual`, an actor and a note, which is the audit trail (the journal is append-only). There is no page yet

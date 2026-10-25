@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The provider and the catalog entry a project selects (#430, ADR 0005, 2.7), against a real database and a real
 // model catalog: what is stored beside what, what a workspace on its own key and one on the operator's key may write,
@@ -510,6 +510,8 @@ describe("the views of a workspace on the operator's key", () => {
       id: alpha.id,
       name: "Alpha",
       description: alpha.description,
+      // The maker in the model id of the harness's entries, read as the provider (#675); the id itself is not there.
+      providerLabel: "Sentinel",
       available: true,
       reason: null,
     });
@@ -517,7 +519,7 @@ describe("the views of a workspace on the operator's key", () => {
   });
 
   // #430-T08
-  it("show no catalog to a workspace on its own key, and none in the workspace defaults", async () => {
+  it("show no catalog to a workspace on its own key, in a project or in the workspace defaults", async () => {
     const own = await start({ managed: false });
     const entry = await own.catalog.entry();
     await own.projects.updateSettingsWith(own.first.id, () => ({
@@ -532,7 +534,8 @@ describe("the views of a workspace on the operator's key", () => {
     expect(view.catalogSelection).toBeNull();
     expect(JSON.stringify(view)).not.toContain(entry.id);
     expect(view.effective.model).toBe("vendor/own-model");
-    expect(Object.keys(global)).not.toContain("catalogChoices");
+    expect(global.catalogChoices).toBeNull();
+    expect(global.catalogSelection).toBeNull();
   });
 });
 

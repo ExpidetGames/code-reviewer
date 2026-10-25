@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The ways a page can turn a string into markup, script or navigation, for the scans that keep text from models.dev out of
 // them (#554). Text from the catalog (names, ids, addresses) is untrusted: React escapes what it renders, and none of these

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how a verified delivery ends up in the job queue: through the real webhook handler, the
 // real GitHub App provider, the real queue and a real SQLite file. The intake is a thin mapping from

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Helpers for the settings form with its four sections (#656): a section is a tab, a provider or a model a dropdown.
 import { expect, type Page } from "@playwright/test";

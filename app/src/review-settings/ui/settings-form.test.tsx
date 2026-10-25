@@ -1,11 +1,17 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the settings form in the browser: wrong values are named next to their field before
 // anything is sent, a valid change sends only the fields the person set and shows what the server
 // answered, a refusal of the server lands next to its field, "Reset to default" takes a field back, and
 // text from the settings is rendered as text.
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateReviewCost } from "../cost.ts";
@@ -21,6 +27,10 @@ import {
   chooseOption,
   openSection,
 } from "../../test-support/settings-sections.ts";
+import {
+  dynamicView,
+  ownModel,
+} from "../../test-support/settings-form-models.ts";
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
@@ -817,7 +827,7 @@ describe("the Limits section (#656)", () => {
     );
     // The instance may hold a lower limit, and the field does not say which.
     expect(field.textContent).toContain(
-      "The instance may enforce a lower limit.",
+      "code-review.com may enforce a lower limit.",
     );
     // No rate and no markup is named next to the limit.
     expect(field.textContent).not.toMatch(/rate|markup|per minute/i);
@@ -961,5 +971,375 @@ describe("the settings form of a workspace on its own key keeps its stored tier 
     await openSection(user, "Limits");
     expect(screen.getByLabelText("Token budget")).toBeTruthy();
     expect(document.body.textContent).toContain("Estimated cost");
+  });
+});
+
+describe("the form of the workspace defaults has the sections of a project (#676)", () => {
+  // #676-T01
+  it("offers the kind and the verdict in Review, the provider and model of the chosen kind in LLM, and no review skill", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({ mode: "global" })}
+        api={api}
+        dynamicReviewEnabled
+      />,
+    );
+
+    expect(
+      screen.getByRole("radiogroup", { name: "Review kind" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("radiogroup", { name: "Review verdict" }),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Review skill")).toBeNull();
+
+    // Diff Review is the kind: its provider and model are in LLM.
+    await openSection(user, "LLM");
+    expect(screen.getByLabelText("Provider").textContent).toContain(
+      "OpenRouter",
+    );
+    await openSection(user, "Review");
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    // Dynamic Review is chosen: the provider and model of the Dynamic default, and no Diff-only token budget.
+    expect(screen.queryByLabelText("Review skill")).toBeNull();
+    await openSection(user, "LLM");
+    expect(screen.getByLabelText("Model").textContent).toBe(
+      DEFAULT_DYNAMIC_MODEL,
+    );
+    await openSection(user, "Limits");
+    expect(screen.queryByLabelText("Token budget")).toBeNull();
+
+    // The change of the kind of every project is confirmed first, and the confirmation speaks of the projects.
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Switch to Dynamic Review?",
+    });
+    expect(dialog.textContent).toMatch(
+      /Every project that sets no review kind/,
+    );
+    expect(save).not.toHaveBeenCalled();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Switch to Dynamic Review" }),
+    );
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toEqual({ reviewKind: "dynamic" });
+  });
+
+  // #676-T01
+  it("says there is nothing to save when nothing changed, and sends the whole set when something did", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    const model = ownModel({ mode: "global" });
+    render(<SettingsForm workspaceSlug="acme" initial={model} api={api} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
+    expect(await screen.findByText("No changes to save.")).toBeTruthy();
+    expect(save).not.toHaveBeenCalled();
+
+    await openSection(user, "Review");
+    await user.click(screen.getByRole("radio", { name: "Any finding" }));
+    await changeSomething(user);
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // The kind is in every save, Diff Review too (#676 review fix 1).
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      maxFindings: 12,
+      reviewKind: "diff",
+      reviewVerdict: "any",
+    });
+  });
+
+  // #676-T01
+  it("shows a Dynamic default that was saved, with the origin the project forms refer to", async () => {
+    const user = userEvent.setup();
+    const view = dynamicView("dynamic", false);
+    const model: SettingsFormModel = {
+      ...ownModel({ mode: "global" }),
+      dynamic: {
+        ...view,
+        overrides: { reviewKind: "dynamic", dynamicModel: "vendor/model-a" },
+        effective: { ...view.effective, dynamicModel: "vendor/model-a" },
+        sources: {
+          ...view.sources,
+          reviewKind: "project",
+          dynamicModel: "project",
+        },
+      },
+    };
+    render(
+      <SettingsForm workspaceSlug="acme" initial={model} api={fakeApi().api} />,
+    );
+
+    expect(
+      screen
+        .getByRole("radio", { name: "Dynamic Review" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    await openSection(user, "LLM");
+    expect(screen.getByLabelText("Model").textContent).toBe("vendor/model-a");
+    expect(screen.getByText("Changed from the built-in value")).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Reset to default for Dynamic Review provider and model",
+      }),
+    ).toBeTruthy();
+  });
+});
+
+describe("a project form follows the workspace defaults (#676)", () => {
+  /** A project whose kind, Dynamic model and verdict come from the defaults of the workspace. */
+  function followingModel(): SettingsFormModel {
+    const view = dynamicView("dynamic", false);
+    return {
+      ...ownModel({ kind: "dynamic" }),
+      dynamic: {
+        ...view,
+        effective: {
+          ...view.effective,
+          dynamicModel: "vendor/workspace-model",
+          reviewVerdict: "any",
+        },
+        defaults: {
+          ...view.defaults,
+          reviewKind: "dynamic",
+          dynamicModel: "vendor/workspace-model",
+          reviewVerdict: "any",
+        },
+        sources: {
+          ...view.sources,
+          reviewKind: "global",
+          dynamicModel: "global",
+          reviewVerdict: "global",
+        },
+      },
+    };
+  }
+
+  // #676-T02
+  it("says the kind and the verdict are the global default, and shows the model with that origin", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={followingModel()}
+        repositoryId="r1"
+        api={fakeApi().api}
+        dynamicReviewEnabled
+      />,
+    );
+
+    expect(screen.getAllByText("Global default")).toHaveLength(2);
+    await openSection(user, "LLM");
+    expect(screen.getByLabelText("Model").textContent).toBe(
+      "vendor/workspace-model",
+    );
+    expect(screen.getAllByText("Global default").length).toBeGreaterThan(0);
+    // Nothing is set for the project, so there is nothing to take back.
+    expect(
+      screen.queryByRole("button", { name: /Reset to default for Dynamic/ }),
+    ).toBeNull();
+  });
+
+  // #676-T02
+  it("takes a model of its own back to the model of the workspace default, which clears the override on save", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    const base = followingModel();
+    const model: SettingsFormModel = {
+      ...base,
+      dynamic: {
+        ...base.dynamic!,
+        overrides: { dynamicModel: "vendor/own-model" },
+        effective: {
+          ...base.dynamic!.effective,
+          dynamicModel: "vendor/own-model",
+        },
+        sources: { ...base.dynamic!.sources, dynamicModel: "project" },
+      },
+    };
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={model}
+        repositoryId="r1"
+        api={api}
+      />,
+    );
+
+    await openSection(user, "LLM");
+    await user.click(
+      screen.getByRole("button", {
+        name: "Reset to default for Dynamic Review provider and model",
+      }),
+    );
+    expect(screen.getByLabelText("Model").textContent).toBe(
+      "vendor/workspace-model",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // The model of the workspace default is the default: choosing it again clears the project's own.
+    expect(save.mock.calls[0]?.[0]).toEqual({ dynamicModel: null });
+  });
+});
+
+// #676: the review of #679 (fixes 4 and 5).
+describe("the confirmation and the version of a save of the workspace defaults", () => {
+  const SAVE_DEFAULTS = { name: "Save review defaults" };
+
+  async function switchToDynamic(
+    following: number | undefined,
+  ): Promise<HTMLElement> {
+    const user = userEvent.setup();
+    const { api } = fakeApi();
+    const base = ownModel({ mode: "global" });
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={{
+          ...base,
+          ...(following === undefined ? {} : { followingProjects: following }),
+        }}
+        api={api}
+        dynamicReviewEnabled
+      />,
+    );
+    await openSection(user, "Review");
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+    return screen.findByRole("alertdialog", {
+      name: "Switch to Dynamic Review?",
+    });
+  }
+
+  // #676-T04
+  it("says how many projects follow the default and switch, and that their waiting reviews are cancelled", async () => {
+    const dialog = await switchToDynamic(3);
+
+    expect(dialog.textContent).toMatch(
+      /3 projects follow this default and switch to Dynamic Review\./,
+    );
+    expect(dialog.textContent).toMatch(
+      /reviews that are still waiting are cancelled, and a review that is already running finishes/,
+    );
+    expect(dialog.textContent).not.toMatch(
+      /keep the kind they were queued for/,
+    );
+  });
+
+  // #676-T04
+  it("says so when one project, or none, follows the default", async () => {
+    expect((await switchToDynamic(1)).textContent).toMatch(
+      /1 project follows this default and switches to Dynamic Review\./,
+    );
+    cleanup();
+    expect((await switchToDynamic(0)).textContent).toMatch(
+      /No existing project follows this default, so nothing switches/,
+    );
+  });
+
+  // #676-T09
+  it("sends the version of the defaults it was built from, and sends none for a project", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    const model: SettingsFormModel = {
+      ...ownModel({ mode: "global" }),
+      lastSaved: { at: "2026-10-10T08:00:00.000Z", by: "ada" },
+    };
+    render(<SettingsForm workspaceSlug="acme" initial={model} api={api} />);
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[1]).toEqual({
+      expectedUpdatedAt: "2026-10-10T08:00:00.000Z",
+    });
+
+    cleanup();
+    const project = fakeApi();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({})}
+        api={project.api}
+      />,
+    );
+    await changeSomething(user);
+    await user.click(
+      screen.getByRole("button", { name: "Save review settings" }),
+    );
+    await waitFor(() => expect(project.save).toHaveBeenCalledTimes(1));
+    expect(project.save.mock.calls[0]).toHaveLength(1);
+  });
+
+  // #676-T09
+  it("tells the person that the defaults were changed meanwhile, and keeps their edit", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    save.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      code: "REVIEW_SETTINGS_STALE",
+      issues: [],
+    });
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({ mode: "global" })}
+        api={api}
+      />,
+    );
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+
+    expect(
+      await screen.findByText(
+        "These defaults were changed meanwhile — reload the page and decide again.",
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Most findings per review") as HTMLInputElement)
+        .value,
+    ).toBe("12");
+  });
+
+  // #676-T07
+  it("names the projects a refused provider change would break", async () => {
+    const user = userEvent.setup();
+    const { api, save } = fakeApi();
+    save.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [
+        { field: "dynamicProvider", code: "PROJECT_MODEL_BOUND_TO_PROVIDER" },
+      ],
+      details: { projects: ["acme/widgets", "acme/gadgets"] },
+    });
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={ownModel({ mode: "global" })}
+        api={api}
+      />,
+    );
+    await changeSomething(user);
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+
+    expect(
+      await screen.findByText(/Projects: acme\/widgets, acme\/gadgets\./),
+    ).toBeTruthy();
   });
 });

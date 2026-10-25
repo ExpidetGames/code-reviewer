@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a VERIFIED Stripe event becomes (ADR 0006, 2.13; #502): one normalized event of `adapter.ts`. Pure: the parsed JSON and
 // the environment of the stored key come in, an event (or "not readable") comes out; nothing is asked of Stripe (the handler

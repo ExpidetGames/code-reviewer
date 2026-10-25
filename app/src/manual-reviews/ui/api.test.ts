@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the calls the panel makes: the addresses (with the repository id encoded), the methods and
 // the JSON body, and that a refusal comes back as a code.

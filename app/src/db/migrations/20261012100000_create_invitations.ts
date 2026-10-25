@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `invitations`: the single-use links that bring a person into a workspace (docs/decisions/0001-
 // editions-setup-and-accounts.md, sections 2.6 and 2.7). The token is 256 random bits and travels in the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The plan page file (#282) with the wiring the running server uses: the database opened at start, the workspace
 // access of the person in the address and the real view. Only the session lookup is replaced (it needs Next.js's
@@ -139,7 +139,7 @@ describe("the plan page file", () => {
     expect(markup).toContain("62 % of the usage limit used");
     expect(markup).toContain("1 finished review could not be measured");
     expect(markup).toContain("not exact");
-    expect(markup).not.toContain("provided by this instance");
+    expect(markup).not.toContain("billed via code-review.com");
     expect(markup).not.toMatch(/6200000|10000000|6\.2|\$|USD/);
   });
 

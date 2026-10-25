@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #506: the mails that tell an Owner or an Admin that the prepaid balance is low or empty. They say what happened, the balance
 // of that workspace and where to add credit, and nothing about how a review is priced.

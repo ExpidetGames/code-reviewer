@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/billing/invoices: the invoices the payment provider issued for the top-ups of the workspace, newest first
 // (#659). Owners and Admins only; a missing path while billing is off. The logic is in src/billing/invoices-http.ts.

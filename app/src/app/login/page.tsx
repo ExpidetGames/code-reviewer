@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sign-in page: the action is the h1, the ways to sign in each get their own named form, and a
 // sign-in error sits directly above the fields of the form it concerns (#170). What is on (the ways to

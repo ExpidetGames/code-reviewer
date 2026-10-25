@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The HTTP side of the dispatch webhook: one POST, an 8 second limit for all of it (connect, answer and
 // body), and a closed list of what the answer can mean. Only the status, `Retry-After` and, for a 200,

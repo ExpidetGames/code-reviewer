@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The wiring of the running server for the plan page (#282): the real database and the real clock. Pages and the
 // polling route ask for the view of one workspace here; tests call `readPlanView` with their own database.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Stripe's error answer is `{ error: { type, message, code?, param?, doc_url? } }`. A handler of the fake throws a
 // `StripeHttpError`; the server turns it into that body. The messages copy the ones the sandbox gave (2026-10-20) where

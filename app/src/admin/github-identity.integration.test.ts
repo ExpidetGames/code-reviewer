@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the check behind "GitHub only": the acting admin has a GitHub identity linked, a row in `accounts`
 // of the GitHub provider with a numeric GitHub id. Otherwise switching email with password off would lock

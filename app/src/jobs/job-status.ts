@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The life of a job as a table: which status may follow which. The repository builds its update
 // conditions from this table (`statusesThatCanBecome`), so the rules here and the rules in SQL

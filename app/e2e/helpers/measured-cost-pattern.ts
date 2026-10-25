@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 /**
  * A measured cost in a text: the 0.0001 US dollars the fake reports with every answer (written out or as `1e-4`), or a

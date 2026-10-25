@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Stable error codes of the database layer. Callers branch on `code`, never on the message text.
 export const DATABASE_ERROR_CODES = [

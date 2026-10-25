@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #511-T09: the key test of the Anthropic adapter against the fake LLM over real HTTP, reached through the registry.
 import { describe, expect, it } from "vitest";

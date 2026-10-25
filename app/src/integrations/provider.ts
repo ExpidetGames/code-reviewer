@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The interface behind which everything platform specific lives. Jobs, the runner API and the UI
 // call these methods and see normalized types only. See README.md in this folder.

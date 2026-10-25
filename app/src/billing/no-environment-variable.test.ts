@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Billing is configured in the admin portal and in nothing else (ADR 0006): no environment variable, so
 // `.env.example` and the deployment files stay as they are for a self-hoster.

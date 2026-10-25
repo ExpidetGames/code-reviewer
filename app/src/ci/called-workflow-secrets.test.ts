@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the Infisical sign-in reaches the reusable workflows of the production pipeline (#408). The four
 // INFISICAL_* secrets are secrets of the environment `production`, which a called job selects with `environment:`.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down what the Members page offers each role: an Owner changes roles, removes anybody and invites with
@@ -378,7 +378,7 @@ describe("inviting from the page", () => {
     await user.click(screen.getByRole("button", { name: "Send invitation" }));
 
     expect((await screen.findByRole("alert")).textContent).toMatch(
-      /sign-up rule of this instance does not let that address in/,
+      /sign-up rule does not let that address in/,
     );
     expect(document.activeElement).toBe(screen.getByLabelText("Email address"));
   });

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `POST /api/w/:workspace/plan-handoff`, with its collaborators passed in so the route file only
 // wires the real ones and tests wire the real services over a test database. The order is the contract; each step

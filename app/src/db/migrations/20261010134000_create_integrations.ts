@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Connections to git platforms (see src/integrations/README.md). `config` and `credentials` are JSON
 // text; `credentials` and `webhook_secret` stay empty for a GitHub App and are reserved for token

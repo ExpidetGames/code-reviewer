@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers behind the three public routes of the sign-up and the email verification, with their
 // collaborators passed in so the route files only wire the real ones and tests wire fakes:

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where the notice sends the Owners and Admins of a workspace: the plan page of the workspace in this app
 // (`planReturnPath`: the Plan page of the settings, #282). Only the address is made here. WHETHER the notice carries a link is the

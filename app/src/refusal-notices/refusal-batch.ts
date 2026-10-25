@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The refusals of a claim, gathered before anything is scheduled (#281). A claim can refuse a whole backlog (a
 // suspension fails every due job of the workspace), and one callback per job would be a callback per job after the

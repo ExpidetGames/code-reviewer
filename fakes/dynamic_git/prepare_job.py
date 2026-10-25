@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """A trusted-preparation stand-in for job-loop process-group and directory cleanup tests."""
 
 import json

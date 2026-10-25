@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Puts the sign-up, the resend and the verification together over one database, one mail sender and one set
 // of counters. The running server (`shared.ts`) and the integration tests (`src/test-support/signup-

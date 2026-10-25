@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # The container, as far as a process in the privileged Dynamic e2e lane can be one (#332): what the Worker's `docker run`
 # of the hosted deployment gives it that a plain process does not have. Called by the `docker` stand-in of the lane

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Translates the `error` code in the login page URL to copy. The code comes from Better Auth (or
 // from GitHub, for access_denied) and is untrusted: it only selects a message, it is never shown.
@@ -23,9 +23,9 @@ const MESSAGES: Readonly<Record<string, string>> = {
   github_email_unverified:
     "GitHub reports no verified primary email address for your account. Verify one in your GitHub settings and sign in again.",
   email_not_allowed:
-    "The email address of your GitHub account is not allowed to sign up on this code-review.com instance.",
+    "The email address of your GitHub account is not allowed to sign up on code-review.com.",
   signup_closed:
-    "Signing up is closed on this instance until its admin has set it up. Ask an admin for help.",
+    "Signing up is closed until an admin has set it up. Ask an admin for help.",
   email_exists_unverified:
     "An account with the email address of your GitHub account exists, but one of the two addresses is not verified, so the two are not joined. Sign in with your password, link GitHub from your account page, or verify the address.",
   github_identity_conflict:
@@ -33,7 +33,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   check_failed:
     "We could not read the email addresses of your GitHub account. Please try again later; if it keeps failing, ask an admin to check the permissions of the GitHub App.",
   github_not_configured:
-    "Signing in with GitHub is not set up on this instance. Use another way to sign in.",
+    "Signing in with GitHub is not set up here. Use another way to sign in.",
   // Email and password.
   invalid_credentials: "The email address or the password is not correct.",
   rate_limited:
@@ -45,7 +45,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   unavailable: "Sign in is not available right now. Please try again later.",
   // The admin switched this way of signing in off (Setup, Ways to sign in).
   sign_in_method_disabled:
-    "This way of signing in is switched off on this instance. Use another one.",
+    "This way of signing in is switched off here. Use another one.",
   account_not_linked:
     "This GitHub account could not be matched to an existing user. Ask an administrator for help.",
 };

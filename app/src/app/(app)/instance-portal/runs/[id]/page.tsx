@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One run for the instance admin (#541): the facts, what it consumed and the table of its calls, by the id of the
 // job. An id nobody has shows the not-found page. Instance admin only.

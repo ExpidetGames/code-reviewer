@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The exact secret values the app masks in a result it stores (see `redact.ts`): its own environment and the current
 // keys of the job's workspace (#426: one per provider, plus the operator's while the workspace is managed).

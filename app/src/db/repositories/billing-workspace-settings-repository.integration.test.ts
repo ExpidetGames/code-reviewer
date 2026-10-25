@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: the settings a workspace makes for its own billing (the monthly total limit), on SQLite and on Postgres.
 import { describe, expect, it } from "vitest";

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The models.dev service of the running server: the real database and the settings from the environment. The sweep, the
 // timer of a long-lived server and the admin's "fetch now" (#554) all use it.

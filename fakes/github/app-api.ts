@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A fake of the GitHub REST API as a GitHub App uses it: installations, installation repositories,
 // installation access tokens, pull requests and collaborator permissions. A real HTTP server that

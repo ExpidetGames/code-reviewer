@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #397: the reason of a usage record may now also be `superseded`: the run was replaced by a newer push, so it does
 // not count as a run of the free quota, while its measured cost counts as usage like any other (src/usage/README.md).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A key is sent only to an address that is public at the moment of the connection (#548, #550, #555): the check made when
 // the catalog is stored is a verdict of one moment, and a name can resolve elsewhere a minute later (DNS rebinding). The

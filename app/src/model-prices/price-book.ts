@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The price book (#549): every price a managed run is priced from, in BigInt micro-USD per million tokens (`money.ts`),
 // built from a models.dev row and the override file, or typed by an admin. A missing price is `null`, never zero: a

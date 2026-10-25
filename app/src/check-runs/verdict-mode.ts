@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The verdict mode a project's stored settings give (#405): its own choice when this version knows it, otherwise the
 // default. The same reading the settings page uses (`parseStoredProjectDynamicOverrides`), so what a person sees is
@@ -7,11 +7,19 @@ import {
   DEFAULT_REVIEW_VERDICT_MODE,
   type ReviewVerdictMode,
 } from "../review-settings/settings.ts";
-import { parseStoredProjectDynamicOverrides } from "../review-settings/validate.ts";
+import {
+  parseStoredProjectDynamicOverrides,
+  parseStoredWorkspaceDynamic,
+} from "../review-settings/validate.ts";
 
-export function reviewVerdictOf(settings: unknown): ReviewVerdictMode {
+/** The project's own mode, else the workspace default's (#676), else the built-in one. */
+export function reviewVerdictOf(
+  settings: unknown,
+  workspaceDefaults?: unknown,
+): ReviewVerdictMode {
   return (
     parseStoredProjectDynamicOverrides(settings).reviewVerdict ??
+    parseStoredWorkspaceDynamic(workspaceDefaults).reviewVerdict ??
     DEFAULT_REVIEW_VERDICT_MODE
   );
 }

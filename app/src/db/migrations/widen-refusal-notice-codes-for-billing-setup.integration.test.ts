@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #632: a review refused because billing is switched on but its setup is not complete gets a notice too, so the check on
 // `refusal_notices.code` takes one more code (`billing_rates_incomplete`). The rows of an existing database survive the change,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #166-T01, #185-T01: every color of the app lives in `app/src/app/theme.css` (the UI redesign
 // decision D2). The scan reads the real source files, so a color literal added anywhere else fails

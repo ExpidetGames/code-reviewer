@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where an installation that is new to the instance may go WITHOUT a person binding it (docs/decisions/0001-
 // editions-setup-and-accounts.md, section 2.9). Asked by the synchronization and by the webhook route for an

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `APP_SECRET`, the master key of the instance (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.1). `BETTER_AUTH_SECRET`, its old name, is accepted in its place when `APP_SECRET` is not
@@ -34,7 +34,7 @@ export function resolveAppSecret(env: Env): AppSecretResolution {
   if (secret === undefined)
     return {
       ok: false,
-      problem: `${APP_SECRET_VARIABLE} is not set (it is the master key of the instance: openssl rand -base64 32)`,
+      problem: `${APP_SECRET_VARIABLE} is not set (it is the master key of the server: openssl rand -base64 32)`,
     };
   if (secret.length < MIN_APP_SECRET_LENGTH)
     return {

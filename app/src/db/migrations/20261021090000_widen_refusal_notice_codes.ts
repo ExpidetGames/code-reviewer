@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #498: a review refused because the balance cannot hold it gets a notice on its pull request, like a limit or a suspension
 // (#281), so the check on `refusal_notices.code` takes two more codes: `insufficient_balance` and `balance_negative`. The

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The monthly total limit of a workspace for the code that serves a person (ADR 0006, 2.9; #499): who may read and set it, what
 // is accepted, and the audit line of a change. Only an Owner and an Admin (`manage_billing`) reach it; a Member gets

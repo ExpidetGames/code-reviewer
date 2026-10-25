@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """When the runner writes the failure note of a Dynamic run, and what a failed write cannot change
 (#299)."""

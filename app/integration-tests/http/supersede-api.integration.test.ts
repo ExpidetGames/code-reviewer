@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the runner API and the Worker API do for a run that a newer push replaced (#397), through the real handlers
 // and a real SQLite file: the feature `supersede` is noted from the claim (a runner) or the job details request (a

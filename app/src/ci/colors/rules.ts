@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The color guard of the UI redesign (#166): every color of the app lives in exactly one file,
 // `app/src/app/theme.css`. This module finds a color literal in the text of a source file, and the

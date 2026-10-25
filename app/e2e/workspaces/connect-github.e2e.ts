@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Binding GitHub installations to workspaces in a real browser (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.9), in a multi-tenant instance against the fake GitHub: the owner of an organization
@@ -289,18 +289,16 @@ test.describe("connecting GitHub to a workspace", () => {
     });
 
     await expect(o.page.getByRole("status").first()).toContainText(
-      "admin of this instance has to approve",
+      "code-review.com admin has to approve",
     );
     await expect(
       o.page.getByRole("list", { name: "Installations" }),
     ).toHaveCount(0);
     const requests = o.page.getByRole("list", {
-      name: "Requests for the instance admin",
+      name: "Requests for the code-review.com admin",
     });
     await expect(requests).toContainText(ORG_OPAQUE.login);
-    await expect(requests).toContainText(
-      "Waiting for the admin of the instance",
-    );
+    await expect(requests).toContainText("Waiting for a code-review.com admin");
     await o.page.goto(`/w/${o.slug}/projects`);
     await expect(
       o.page.getByRole("heading", { name: "No repositories yet" }),
@@ -352,7 +350,9 @@ test.describe("connecting GitHub to a workspace", () => {
       o.page.getByRole("list", { name: "Installations" }),
     ).toContainText(ORG_OPAQUE.login);
     await expect(
-      o.page.getByRole("list", { name: "Requests for the instance admin" }),
+      o.page.getByRole("list", {
+        name: "Requests for the code-review.com admin",
+      }),
     ).toContainText("Approved");
     await o.page.goto(`/w/${o.slug}/projects`);
     await expect(

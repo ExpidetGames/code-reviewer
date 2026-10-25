@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the claim asks about the cost of a native job (#553): which catalog model a selection names, and the cost policy
 // of its key (policy.ts). It reads the price service (`availability` for the managed key, `catalogPrice` for the own key)

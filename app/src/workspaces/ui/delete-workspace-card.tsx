@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The one thing "Advanced" holds (#658): deleting the workspace. A danger card with the confirmation in an AlertDialog that

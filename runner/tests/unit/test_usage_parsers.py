@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The usage parsers of the passthrough proxy (#551): four families, a whole document and a stream.
 

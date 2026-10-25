@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
 import {
@@ -86,7 +86,7 @@ describe("the sentences for error codes", () => {
     expect(known).toBe(true);
     expect(text).toMatch(/Owner or Admin/);
     expect(text).toMatch(/review settings/);
-    expect(text).toMatch(/whoever runs this instance/);
+    expect(text).toMatch(/whoever runs code-review.com/);
     expect(text).toMatch(/no AI model was used/);
     expect(text).not.toMatch(/\bmodel\b(?! was used)/);
   });
@@ -119,7 +119,7 @@ describe("the sentences for error codes", () => {
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
   it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
     expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
-      /instance|server/i,
+      /server/i,
     );
     expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
       /Diff Review/,

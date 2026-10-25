@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The filters of the catalog page live in its address (#554): what is read from it, what is dropped, how it becomes the
 // query of the service (one page of 50), and the address of the next page.

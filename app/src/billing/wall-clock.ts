@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The measure of a job that has no VM (#493, ADR 0006, 2.11): a self-hosted runner or a Compose stack runs the Worker
 // itself, so the time that can be measured is the job's wall clock on a runner, from the claim of the settled attempt to

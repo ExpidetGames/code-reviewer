@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The settings of the dispatch webhook (#326): whether the app wakes a Dispatcher after it queued a job,
 // where, and with which key. Off by default: without `RUNNER_DISPATCH=webhook` the app behaves as before

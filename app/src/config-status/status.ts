@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the pages may know about the instance's configuration: whether the GitHub App and the LLM defaults
 // work and, if not, what is wrong. Only names and stable codes, never a value (the private key, the webhook

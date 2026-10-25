@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the limits of the sign-up, the verification mail and the use of a link against the real
 // shared counters: a limit per address and for the whole instance, the same for every address, no way

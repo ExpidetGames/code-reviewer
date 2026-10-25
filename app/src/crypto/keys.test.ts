@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the key derivation: the same secret, purpose and version always give the same key, and
 // anything that differs gives another one, so a key for one use cannot stand in for another.

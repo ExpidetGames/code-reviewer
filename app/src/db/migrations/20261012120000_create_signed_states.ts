@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `signed_states`: the single-use side of the signed `state` values that make a round trip through the
 // browser and GitHub (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.4 and 2.9): the

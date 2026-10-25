@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one way the HTML bodies of the mails escape text that comes from outside (a link, an address of the app).
 

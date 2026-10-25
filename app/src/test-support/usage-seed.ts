@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Usage records for the tests of the operator API and the feed behind it: rows written straight into the tables,
 // so a test chooses the id, the state and the time of settlement of each one (the repositories stamp the clock

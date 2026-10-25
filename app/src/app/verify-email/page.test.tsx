@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the verification page asks the browser not to pass its address on as a referrer: the token
 // of the link is in the address, and a link on the page or a resource it loads must not receive it. (The

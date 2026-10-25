@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A Dynamic job from the claim to the Run a person reads: the key it gets is its own workspace's (or
 // the claim fails with `llm_not_configured`, no credential created, no other key borrowed), a failure

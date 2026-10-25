@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A payment against a deletion, on Postgres with several connections (#658). The top-up reads its workspace `FOR SHARE`
 // (`getIncludingDeleted(id, { lock: true })`, called by `applyBillingEvent`) and the deletion takes the same row `FOR UPDATE`

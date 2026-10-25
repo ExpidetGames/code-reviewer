@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The integrations table seen from outside every workspace. INSTANCE LEVEL, on purpose: a webhook
 // names an installation before anybody knows which workspace it belongs to, and the synchronization

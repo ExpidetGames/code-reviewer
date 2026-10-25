@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down when the cleanup runs: in production at the start and at every interval, never elsewhere, and a
 // failing run is logged by its code and does not stop the timer.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The model catalog on the LLM page (#429, ADR 0005, 2.6): the models that workspaces on the key of the instance may
@@ -185,9 +185,9 @@ export function ModelCatalogSection({
           <CollapsibleContent>
             <CardContent className="flex flex-col gap-4">
               <p className="text-sm text-muted-foreground">
-                The models that workspaces on the key of the instance may
-                choose. Members see the name and the description of a released
-                entry, never the provider or the model id. A retired entry stays
+                The models that workspaces billed via code-review.com may
+                choose. Members see the name, the description and the provider
+                of a released entry, never the model id. A retired entry stays
                 listed here.
               </p>
               <div className="flex flex-wrap items-center justify-between gap-3">

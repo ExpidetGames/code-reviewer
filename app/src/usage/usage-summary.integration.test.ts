@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The plan view of a workspace read from real entitlements and real usage records on SQLite (#282): which runs
 // count towards a limit, from when, and what the answer is allowed to hold. The page and the route on top are in

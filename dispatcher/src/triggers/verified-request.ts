@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The verification both signed routes share (`POST /dispatch`, `POST /stop`; contracts/dispatch-webhook.v1.json): the
 // content type and the size, the form of the headers, the clock (+/- 5 minutes), the key (the current and the previous

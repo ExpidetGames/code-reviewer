@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" call to OpenRouter (docs/decisions/0001-editions-setup-and-accounts.md, issue #104): one cheap
 // call that says whether the key is accepted, and the class of the failure when it is not (`llm_key_rejected`,

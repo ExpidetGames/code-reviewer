@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the wizard: three steps in order, each step one named form with the heading outside it
@@ -128,7 +128,7 @@ describe("the wizard", () => {
     const { user } = renderWizard();
 
     expect(screen.getByRole("heading").textContent).toMatch(
-      /How is this instance used/,
+      /How will it be used/,
     );
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("heading").textContent).toMatch(/Who may sign up/);
@@ -296,10 +296,10 @@ describe("the shape of the steps", () => {
 
     const firstHeading = screen.getByRole("heading", {
       level: 1,
-      name: "How is this instance used?",
+      name: "How will it be used?",
     });
     const firstForm = screen.getByRole("form", {
-      name: "How is this instance used?",
+      name: "How will it be used?",
     });
     expect(firstForm.contains(firstHeading)).toBe(false);
     expect(screen.getAllByRole("form")).toHaveLength(1);

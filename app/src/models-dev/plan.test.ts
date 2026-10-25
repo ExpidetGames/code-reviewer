@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What one fetch writes (#548): new rows, changed rows, rows that disappear (unlisted, never deleted) and rows that
 // return, the trust on first use of each provider's address, and the guard against a fetch that would unlist too much.

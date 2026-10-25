@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the page of the billing review rows (#603): what a row shows so an operator can act on it (the outcome in plain
@@ -148,7 +148,7 @@ describe("the billing review rows", () => {
 
     const row = within(rowOf("evt_foreign"));
     expect(row.getByText("Refund re_9")).toBeTruthy();
-    expect(row.getByText(/No workspace of this instance/)).toBeTruthy();
+    expect(row.getByText(/No workspace is known/)).toBeTruthy();
     expect(row.queryByRole("button", { name: /Credit/ })).toBeNull();
     expect(row.queryByRole("button", { name: "Check payment" })).toBeNull();
     expect(

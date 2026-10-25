@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The limit on email and password sign in attempts, counted in the shared `rate_limits` table
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.10), so every app instance counts the

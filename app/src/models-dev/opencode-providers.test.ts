@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The committed supported-provider file (#548, part B): `contracts/opencode-providers.v1.json`, tied to the pin of
 // OpenCode, and the copy the app image carries (the image holds `app/` only).

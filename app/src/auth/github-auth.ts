@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Better Auth instance that serves the sign in with GitHub on the running server. The client id and
 // secret of the GitHub App's user authorization are read from the database every time a GitHub sign in

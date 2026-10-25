@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the logic behind the settings form without a browser: how the saved settings become
 // form values, how the values become the request (only the fields the person set), and which problem

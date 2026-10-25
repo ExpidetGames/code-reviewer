@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Starts the fake SMTP server as its own process, for the Playwright journeys: the app under test is
 // configured in the admin portal to send to it, and the journey reads the "inbox" from a small HTTP

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sign in with email and password against the real Better Auth instance and a real
 // database: the instance admin the setup creates signs in, is recognized as the instance admin, needs

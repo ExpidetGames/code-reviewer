@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The body of the plan page (#282): what the workspace may use in the current period and what it has used. The
@@ -28,6 +28,7 @@ import {
   PLAN_CURRENT_HEADING,
   PLAN_LABEL_TERM,
   PLAN_MANAGED,
+  PLAN_MANAGED_UNBILLED,
   PLAN_NO_LIMITS,
   PLAN_PAUSED,
   PLAN_PAUSED_DETAIL,
@@ -153,7 +154,9 @@ function LimitedPlan({ plan }: { plan: Limited }) {
           ]}
         />
         {plan.managed ? (
-          <p className="text-sm text-muted-foreground">{PLAN_MANAGED}</p>
+          <p className="text-sm text-muted-foreground">
+            {plan.billed ? PLAN_MANAGED : PLAN_MANAGED_UNBILLED}
+          </p>
         ) : null}
       </Section>
       {plan.runs === null ? null : <RunUsage runs={plan.runs} />}

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "send test mail" button of the admin portal (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.3): one message to the admin's own address, with the saved settings, and the class of the failure
@@ -47,12 +47,12 @@ export function testMessage(to: string, baseUrl: string): MailMessage {
   const text = [
     "This is a test message from code-review.com.",
     "",
-    `It was sent by the instance at ${baseUrl} to check the mail server settings.`,
+    `It was sent by code-review.com at ${baseUrl} to check the mail server settings.`,
     "If you can read it, the settings work. Nobody needs to answer.",
   ].join("\n");
   const html = [
     "<p>This is a test message from code-review.com.</p>",
-    `<p>It was sent by the instance at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
+    `<p>It was sent by code-review.com at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
   ].join("\n");
   return { to, subject: "Test mail from code-review.com", text, html };
 }

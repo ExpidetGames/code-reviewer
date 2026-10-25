@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which jobs of .github/workflows/deploy-production.yml run in which case (#480). A run that reuses the
 // golden snapshot skips `snapshot-build`, and a job without a status function in its `if` is skipped with it, however

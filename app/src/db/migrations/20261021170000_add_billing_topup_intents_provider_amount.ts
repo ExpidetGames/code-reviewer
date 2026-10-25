@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: the amount the buyer was charged, gross, in the payment provider's unit (cents of the currency the buyer paid in),
 // pinned on the top-up intent when the payment is credited. A refund or a dispute names only its own amount (Stripe's events

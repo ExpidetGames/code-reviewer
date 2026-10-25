@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The "Other providers" card of the LLM access page (#555): the providers of the models.dev catalog a workspace on its own key may
@@ -27,7 +27,7 @@ import type {
 import type { NativeProviderView } from "../catalog.ts";
 
 const HOW_STORED =
-  "Reviews run with the API key of this workspace, and the provider bills that account. The key is stored encrypted on this server and is never shown again. The operator of this instance holds the key that encrypts it and can technically decrypt it.";
+  "Reviews run with the API key of this workspace, and the provider bills that account. The key is stored encrypted on this server and is never shown again. The operator of this server holds the key that encrypts it and can technically decrypt it.";
 
 const keyedOf = (status: WorkspaceLlmKeyStatus | undefined) =>
   status !== undefined && status.state !== "not_configured";

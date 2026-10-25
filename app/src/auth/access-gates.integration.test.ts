@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the two gates in front of the app for an email and password account, with real requests
 // through the real proxy over a real database and the real Better Auth: a verified address (while the

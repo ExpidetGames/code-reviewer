@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A managed Dynamic run can never settle with an unknown cost (#553-T09): we pay for it, so a price must be known before it
 // starts and a cost must be known when it ends. A runner that reports a success without one has not accounted for its run.

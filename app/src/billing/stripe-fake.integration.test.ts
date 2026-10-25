@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Stripe client against the fake Stripe API (fakes/stripe) on a loopback port: the requests the client builds, the
 // answers it parses, idempotency, the scripted bad days, and what the fake refuses like Managed Payments does.

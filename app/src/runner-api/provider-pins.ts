@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Where a claim adopts the address of a selection made before pins existed (#588): the settings of the job's own workspace, for the
 // job's own project. Kept apart from the wiring (shared.ts) so a test can run exactly this, and a wrong workspace or a no-op turns

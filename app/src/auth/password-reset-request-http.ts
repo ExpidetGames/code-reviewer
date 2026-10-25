@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handler behind `POST /api/password-reset/request` { email }: asks for a reset link by mail
 // (password-reset-request.ts). Public on purpose: the person has no session, that is why they ask. It reads

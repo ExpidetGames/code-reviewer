@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pool settings of the Postgres connection (#319): serverless gets a small pool with a short idle
 // timeout that the platform hook is told about; the server keeps exactly the pool it always had. Nothing

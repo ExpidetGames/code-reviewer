@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #499: a review refused for the monthly total limit or the hourly abuse brake gets a notice on its pull request, like the
 // balance (#498), so the check on `refusal_notices.code` takes two more codes: `monthly_limit_reached` and

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Switching billing on is judged under the lock of the billing settings, and the credentials it judges are read there too (#504):
 // a request that removes the webhook secret at the moment another switches billing on must not leave billing on without the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the server refuses to start with an incomplete sign in configuration: one readable
 // line with the code and the variable names, exit code 1, and never a secret in that line.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // "Would the sign in take this admin?" asked before the setup writes anything. The rules are the ones
 // Better Auth applies on sign in (`z.email()` for the address, at most 128 UTF-16 units for the

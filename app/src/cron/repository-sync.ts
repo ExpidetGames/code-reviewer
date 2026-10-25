@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/internal/repository-sync, called once a day by the platform's cron (`vercel.json`) in
 // serverless mode: the full sync with GitHub that a server runs at start. A serverless instance cannot

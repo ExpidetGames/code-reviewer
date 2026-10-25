@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 """Portable tracked paths; no host path interpretation or symlink traversal."""
 
 import re

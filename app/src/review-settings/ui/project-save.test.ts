@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how a project form becomes requests (#200): a save that changed nothing sends nothing, only
 // the changed groups are sent, the Diff group is replaced as a whole and reset explicitly, and the skill
@@ -399,7 +399,11 @@ function managedModel(
     ...model(overrides),
     managed: true,
     cost: null,
-    catalog: { choices: { diff: [], dynamic: [] }, selection },
+    catalog: {
+      choices: { diff: [], dynamic: [] },
+      selection,
+      workspaceSelection: null,
+    },
   };
 }
 

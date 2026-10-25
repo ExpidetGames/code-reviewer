@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """Pins down the Dynamic Review prompt composer (#198): the fixed core comes first and the editable
 skill is literal, lower-priority text after it; the pull request input is delimited untrusted blocks

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The step-by-step way to connect GitHub: the six values of an App that was made by hand (docs/github-app.md),
@@ -258,7 +258,7 @@ export function ManualForm({
           <p className="text-sm text-muted-foreground">
             {PRIVATE_APP_WHERE_HINT} GitHub does not report it. It decides
             whether a new installation may be attached to the one workspace of a
-            single-tenant instance without asking, so there is no default.
+            single-tenant setup without asking, so there is no default.
           </p>
           {error("privateApp")}
         </fieldset>

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a refused click on "Manage plan" tells the page. The button is a plain form post, so a refusal is not read by a
 // script: the browser would show the JSON. The route sends it back to the settings page instead

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The first-run setup, the way an operator does it: read the code from the log of a production build,
 // enter it in the browser, answer the three questions, and land in /admin signed in. The app has a
@@ -99,7 +99,7 @@ test.describe("the first-run setup", () => {
     await page.getByRole("textbox", { name: "Setup code" }).fill(code);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(
-      page.getByRole("heading", { name: "How is this instance used?" }),
+      page.getByRole("heading", { name: "How will it be used?" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Next" }).click();
 

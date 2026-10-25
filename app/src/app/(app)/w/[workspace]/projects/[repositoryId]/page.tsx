@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -72,28 +72,30 @@ async function ProjectSettingsContent({
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
   const llm = getWorkspaceLlm();
   // The key statuses are read only for a workspace on its own key; a managed one is handed no provider id.
-  const [llmSummary, keyedProviders, nativeCatalog] = await Promise.all([
-    llm.summaryFor(workspaceId),
-    keyedProvidersFor(data.model, llm.keyServiceFor(workspaceId)),
-    // The catalog providers and models of Dynamic Review on the workspace's own key (#555); nothing for a managed one.
-    nativeFormDataFor(
-      {
-        managed: data.model.managed,
-        currentProvider: data.model.dynamic?.effective.dynamicProvider,
-      },
-      {
-        catalog: getNativeCatalog(),
-        keys: llm.keyServiceFor(workspaceId),
-        billingOn: () => isBillingOn(getDatabase()),
-        tokenCap: async () =>
-          ownKeyTokenCapOf(
-            await createInstanceSettingsRepository(getDatabase()).get(
-              "own_key_max_total_tokens",
+  const [llmSummary, keyedProviders, nativeCatalog, billingOn] =
+    await Promise.all([
+      llm.summaryFor(workspaceId),
+      keyedProvidersFor(data.model, llm.keyServiceFor(workspaceId)),
+      // The catalog providers and models of Dynamic Review on the workspace's own key (#555); nothing for a managed one.
+      nativeFormDataFor(
+        {
+          managed: data.model.managed,
+          currentProvider: data.model.dynamic?.effective.dynamicProvider,
+        },
+        {
+          catalog: getNativeCatalog(),
+          keys: llm.keyServiceFor(workspaceId),
+          billingOn: () => isBillingOn(getDatabase()),
+          tokenCap: async () =>
+            ownKeyTokenCapOf(
+              await createInstanceSettingsRepository(getDatabase()).get(
+                "own_key_max_total_tokens",
+              ),
             ),
-          ),
-      },
-    ),
-  ]);
+        },
+      ),
+      isBillingOn(getDatabase()),
+    ]);
   const llmNotice = llmAccessAttention({
     workspaceSlug,
     summary: llmSummary,
@@ -106,6 +108,7 @@ async function ProjectSettingsContent({
       llmNotice={llmNotice}
       {...(keyedProviders === undefined ? {} : { keyedProviders })}
       {...(nativeCatalog === undefined ? {} : { nativeCatalog })}
+      billingOn={billingOn}
       canConfirmProviderAddress={canManageLlmKey}
       data={data}
     />

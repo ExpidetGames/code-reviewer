@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance that never switched any of the operator limits on (#285-T01, principle 1 of #268): no operator token and
 // no entitlements. A pull request is reviewed exactly as before, with the workspace's own key and the model of the

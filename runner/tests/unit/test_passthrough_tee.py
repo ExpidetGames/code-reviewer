@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The tee of the passthrough proxy (#550): SSE framing, the usage read from the bytes, the price of
 a call, and the redaction of an answer that quotes the key.

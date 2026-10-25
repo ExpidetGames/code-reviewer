@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for what the admin data route answers: one sentence per stable code (src/admin/errors.ts) and
 // for the fields of the forms. The codes are the contract, these sentences are only what the page shows.
@@ -20,7 +20,7 @@ import { describeLlmKeyIssue } from "../../llm/ui/messages.ts";
 const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,
   too_many_workspaces:
-    "This instance has more than one workspace, so it cannot become single-tenant. Remove the extra workspaces first.",
+    "There is more than one workspace, so it cannot become single-tenant. Remove the extra workspaces first.",
   at_least_one_method:
     "At least one way to sign in has to stay on, or nobody could sign in.",
   github_not_configured:
@@ -36,7 +36,7 @@ const FAILURE_COPY: Record<string, string> = {
 /** The sentence for a failed change. `count` is the number of workspaces for `too_many_workspaces`. */
 export function describeAdminFailure(code: string, count?: number): string {
   if (code === "too_many_workspaces" && count !== undefined)
-    return `This instance has ${String(count)} workspaces, so it cannot become single-tenant. Single-tenant allows one workspace at most; remove the others first.`;
+    return `There are ${String(count)} workspaces, so it cannot become single-tenant. Single-tenant allows one workspace at most; remove the others first.`;
   return (
     describeTransportFailure(code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Sandbox-Launcher from the environment, for the Vercel entry (#329). Names only; a refusal names the
 // variable and never the value.

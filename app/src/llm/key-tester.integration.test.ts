@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The "test key" service exactly as the running server wires it (`createWiredLlmKeyTester`, #588), over a real database: the
 // pins of the workspace's projects reach the test, only the projects that use the provider count, and a refusal sends nothing.

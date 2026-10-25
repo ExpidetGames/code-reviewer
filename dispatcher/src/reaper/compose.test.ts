@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a malformed CRON_SECRET does (#364): it refuses the start where the reaper's route is mounted, so a snapshot is
 // configured, and is ignored with a warning where there is no route, so a Dispatcher that never reaps is not taken

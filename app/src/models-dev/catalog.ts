@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the catalog stores (#548): the rows of the providers and models of models.dev as the app reads them, and the
 // state of the last fetch. Types only. Client safe.

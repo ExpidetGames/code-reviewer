@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // GET /api/w/:workspace/runs/:id: one run, as the detail page polls it while the run is waiting or
 // running. Protected like the list: the workspace is the one in the address, for a member only. The run is

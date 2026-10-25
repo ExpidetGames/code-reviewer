@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #496: whose key a workspace's jobs get while billing is on, assembled over a real database (src/llm/assemble.ts). With billing
 // off the entitlements decide, as ever; with billing on the choice of the workspace (default: our models) decides and the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the repositories table against a real SQLite file: reconciling a list from the platform
 // adds, renames, deactivates and reactivates rows without ever deleting or duplicating one.

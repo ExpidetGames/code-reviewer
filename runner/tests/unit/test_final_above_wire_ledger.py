@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """What the ledger does for a finalization that happens above the wire (#552, policy of #540/#542).
 

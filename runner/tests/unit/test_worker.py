@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """The Worker's entry (#323): what it reads from stdin, what it refuses, and that the per-job
 credential and the job input never leave the places meant for them. The API and the process are

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the reset by mail and the verification links fit together when somebody signs up with
 // another person's address first (src/signup/pre-hijack.integration.test.ts has the sign-up side). Everything

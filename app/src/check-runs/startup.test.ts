@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // When the reconciler of the check runs runs on a long-lived server (#405-T33): in production at the start and at
 // every interval, never elsewhere, one run at a time, and a failing run is logged by its code and does not stop the

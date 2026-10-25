@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // POST /api/webhooks/github-app: the one webhook URL of the GitHub App (installations, repositories,
 // pull requests and comment commands of every installation). Public: no session, the signature of

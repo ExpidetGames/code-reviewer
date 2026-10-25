@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The data of the billing page of a workspace (ADR 0006, 2.5; #505), for the code that serves a person: the balance, what
 // running reviews hold, the journal page by page, the payments that are still pending, and, for an Owner and an Admin

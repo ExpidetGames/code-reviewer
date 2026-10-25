@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The inbox of the journeys. The app under test sends its mail over SMTP to the fake SMTP server
 // (fakes/smtp), which the mail page's journey configures in the admin portal; the fake keeps every message and

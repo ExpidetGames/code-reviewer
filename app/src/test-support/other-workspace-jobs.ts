@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A job in a workspace other than the fixture's, for the tests that show one workspace's limit leaves another alone.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";

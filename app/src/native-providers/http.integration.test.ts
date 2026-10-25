@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The handlers of the key routes for a catalog provider (#555), over a real database with a stub catalog and key tester: a
 // supported provider that is offered carries a key and is tested; one that is blocked, excluded or unknown answers 404

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A signed in person for tests of route and page files, whose session lookup is replaced (it needs the
 // request scope of Next.js): the account is made in the database, joins a workspace with a role if asked,

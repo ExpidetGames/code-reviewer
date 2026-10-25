@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #502: `POST /api/w/:workspace/billing/top-ups/:id/check` ("Check payment") as the app wires it (guard, adapter, access,
 // limit, service), over a real database, the real matrix of roles and the fake Stripe: it repairs a lost webhook by asking

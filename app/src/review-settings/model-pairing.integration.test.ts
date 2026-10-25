@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #432: a project provider next to a workspace model of another provider is refused when the settings are saved, with
 // the rule the claim applies (`modelProviderMismatch`), and the layers the claim resolves a model from are handed on
@@ -221,6 +221,7 @@ describe("the layers the claim resolves a model from", () => {
         project: { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL },
       },
       dynamic: {
+        workspace: {},
         project: { model: "vendor/dynamic-model" },
       },
     });
@@ -234,6 +235,7 @@ describe("the layers the claim resolves a model from", () => {
 
     expect(resolved?.modelLayers.diff.workspace).toEqual({});
     expect(resolved?.modelLayers.diff.project).toEqual({});
+    expect(resolved?.modelLayers.dynamic.workspace).toEqual({});
     expect(resolved?.modelLayers.dynamic.project).toEqual({});
   });
 });

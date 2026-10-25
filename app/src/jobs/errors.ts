@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Stable error codes of the job queue. Callers branch on `code`, never on the message.
 export const JOB_ERROR_CODE_SET = [

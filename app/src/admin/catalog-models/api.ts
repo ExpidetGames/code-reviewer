@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The calls the catalog screens make to the portal's own data routes (src/model-prices/admin-http.ts and
 // src/models-dev/admin-http.ts). Browser side; nothing throws, a failure is a stable code the page translates

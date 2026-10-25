@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that mail is never configured through the environment: no source file of the app reads an
 // SMTP variable or the variables of the retired test outbox.

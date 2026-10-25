@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The operator's own LLM keys (#276, #427; docs/decisions/0001-editions-setup-and-accounts.md, section 2.8): the keys
@@ -49,7 +49,7 @@ function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
         <AlertDescription>
           <strong>The saved key cannot be read.</strong>{" "}
           {UNREADABLE_SECRET_CAUSE} Enter the key again and save. Until then
-          workspaces that use the key of the instance cannot run reviews on this
+          workspaces billed via code-review.com cannot run reviews on this
           provider.
         </AlertDescription>
       </Alert>
@@ -57,7 +57,7 @@ function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
   if (status.state === "not_configured")
     return (
       <FieldDescription>
-        No key is saved. Workspaces that use the key of the instance cannot run
+        No key is saved. Workspaces billed via code-review.com cannot run
         reviews on this provider until there is one.
       </FieldDescription>
     );
@@ -250,10 +250,10 @@ export function OperatorLlmKeyForm({
       {stored.state === "not_configured" ? null : (
         <DangerZone
           title={`Danger zone: ${label}`}
-          description={`Only when this instance should no longer offer its own ${label} key.`}
+          description={`Only when code-review.com should no longer offer its own ${label} key.`}
           actionLabel="Remove the key"
           confirmTitle={`Remove the ${label} key?`}
-          confirmDescription={`Workspaces that use the key of the instance cannot run reviews on ${label} until a key is saved again. Their own keys and the keys of other providers are not touched.`}
+          confirmDescription={`Workspaces billed via code-review.com cannot run reviews on ${label} until a key is saved again. Their own keys and the keys of other providers are not touched.`}
           confirmLabel="Remove the key"
           onConfirm={() => void save({ operatorLlmKeys: { [provider]: null } })}
         />
@@ -275,14 +275,14 @@ export function OperatorLlmKeys({
   return (
     <>
       <HelpDisclosure label="How this works">
-        A workspace whose key mode is managed reviews with the key of the
-        instance for the provider it runs on, instead of a key of its own; its
-        own keys stay stored and are not used. Any other workspace never uses
-        these keys. Each provider bills the account its key belongs to, and a
-        key is only ever sent to its own provider. The keys are stored encrypted
-        on this server with the key of this instance (APP_SECRET), so anyone who
-        holds both can decrypt them. Only an instance admin can save or remove
-        them, here; the operator API cannot read or change them.
+        A workspace whose key mode is managed reviews with the code-review.com
+        key for the provider it runs on, instead of a key of its own; its own
+        keys stay stored and are not used. Any other workspace never uses these
+        keys. Each provider bills the account its key belongs to, and a key is
+        only ever sent to its own provider. The keys are stored encrypted on
+        this server with the key of this server (APP_SECRET), so anyone who
+        holds both can decrypt them. Only a code-review.com admin can save or
+        remove them, here; the operator API cannot read or change them.
       </HelpDisclosure>
       {Object.entries(keys).map(([provider, status]) => (
         <OperatorLlmKeyForm

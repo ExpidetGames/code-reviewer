@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 """A run that wrote the summary and then did not succeed no longer wedges the pull request (#255).
 

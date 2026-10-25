@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key mode of the workspace at the claim of the runner API (#496): while billing is on the key a job is given is the one the
 // workspace chose (our models by default), never the entitlement's key mode; with billing off nothing changes. A choice of the

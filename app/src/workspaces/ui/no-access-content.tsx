@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a signed in person without a workspace sees (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.6), as a component over plain data so it is tested without a server:
@@ -44,14 +44,14 @@ export function NoAccessContent({
             <CreateWorkspaceForm {...withApi} />
           ) : (
             <p className="text-sm text-muted-foreground text-pretty">
-              Ask an admin of this instance for an invitation.
+              Ask an admin for an invitation.
             </p>
           )}
         </CardContent>
       </Card>
       {isInstanceAdmin ? (
         <p className="text-sm text-muted-foreground">
-          You run this instance:{" "}
+          You run code-review.com:{" "}
           <Link href="/admin" className="underline underline-offset-4">
             open the admin portal
           </Link>

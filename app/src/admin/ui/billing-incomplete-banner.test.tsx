@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the banner of the admin portal while billing is switched on but its setup is not complete (#632): every review of
@@ -18,7 +18,7 @@ describe("the banner of an incomplete billing setup", () => {
     const banner = screen.getByRole("region", {
       name: /Billing is switched on but not complete/,
     });
-    expect(banner.textContent).toMatch(/every review .* is refused/i);
+    expect(banner.textContent).toMatch(/every review is refused/i);
     expect(
       within(banner)
         .getAllByRole("listitem")

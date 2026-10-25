@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Keeps the deployment guide (docs/deployment-vercel.md) and dispatcher/.env.example in step with what the
 // Dispatcher reads (#333). Every variable the code reads is a placeholder in .env.example and a row of the guide's

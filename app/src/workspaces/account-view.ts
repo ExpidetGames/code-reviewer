@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the pages around a signed in account need to know about their workspaces: which ones they belong
 // to, whether they can create more, and which invitations wait for them. Read on the server for the

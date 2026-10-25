@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // The providers whose address is not trusted (#554): the address models.dev states changed, or was refused. The old and

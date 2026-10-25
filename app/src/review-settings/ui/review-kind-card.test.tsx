@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // Pins down the "Review kind" card of a project's settings form (#200): exactly one kind, the Dynamic
@@ -339,7 +339,7 @@ describe("the message while the instance has not enabled Dynamic Review", () => 
 
     const dynamic = screen.getByRole("radio", { name: "Dynamic Review" });
     expect(dynamic.getAttribute("aria-disabled")).not.toBe("true");
-    expect(screen.getByText("Not enabled on this instance yet.")).toBeTruthy();
+    expect(screen.getByText("Not enabled yet.")).toBeTruthy();
     expect(screen.queryByText(/will fail/)).toBeNull();
   });
 
@@ -354,12 +354,12 @@ describe("the message while the instance has not enabled Dynamic Review", () => 
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
 
     const warning = screen.getByText(
-      /Dynamic Review is not enabled on this instance yet\. Reviews of this project fail until an instance admin turns it on\./,
+      /Dynamic Review is not enabled yet\. Reviews of this project fail until a code-review\.com admin turns it on\./,
     );
     expect(warning.closest("[role='alert']")).toBeNull();
     await user.click(screen.getByRole("button", SAVE));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog.textContent).toMatch(/not enabled on this instance yet/);
+    expect(dialog.textContent).toMatch(/not enabled yet/);
     await user.click(
       within(dialog).getByRole("button", { name: "Switch to Dynamic Review" }),
     );
@@ -372,7 +372,7 @@ describe("the message while the instance has not enabled Dynamic Review", () => 
 
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
 
-    expect(screen.queryByText(/not enabled on this instance/)).toBeNull();
+    expect(screen.queryByText(/not enabled yet/)).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The external service of an operator, played by the journey's script (#285): it calls the operator API of the operator
 // app with the bearer token, the way a service that manages plans would. The API never reads a cookie, so these calls

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Decides which jobs of a workflow run, from the `if` expressions and the `needs` of the YAML, so that a test can say
 // "when the snapshot job is skipped and everything else succeeds, the promotion runs" instead of matching text. Test

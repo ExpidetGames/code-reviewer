@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Finds the routes of the app from the file system, for tests that must notice a route nobody
 // decided about. The files below src/app that Next.js turns into a route: pages and route handlers

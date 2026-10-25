@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy of the configuration hints. The status holds variable names and stable codes; this turns
 // them into the sentences a person reads (the UI translates codes, never the other way round). Never
@@ -16,7 +16,7 @@ export type ConfigNotice = {
 /** The one owner of the "GitHub is not set up" fact (#169); every screen that needs it imports it. */
 export const GITHUB_NOT_CONFIGURED_TITLE = "GitHub is not set up yet";
 export const GITHUB_NOT_CONFIGURED_COPY =
-  "The GitHub App of this instance is not set up yet. Ask your instance admin to set it up.";
+  "The GitHub App is not set up yet. Ask your admin to set it up.";
 
 export const LLM_ISSUE_COPY: Record<
   LlmConfigIssueCode,
@@ -88,8 +88,8 @@ export function describeConfigNotices(
           : "GitHub App settings not valid",
       detail:
         variables.length === 0
-          ? "GitHub is not connected yet. An instance admin connects it under Integrations in the admin portal. Until then repositories cannot be read from GitHub and projects cannot be activated."
-          : `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (an instance admin does that under Integrations in the admin portal).`,
+          ? "GitHub is not connected yet. A code-review.com admin connects it under Integrations in the admin portal. Until then repositories cannot be read from GitHub and projects cannot be activated."
+          : `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (a code-review.com admin does that under Integrations in the admin portal).`,
     });
   }
   // The LLM access is a matter of the workspace now (its own key, `src/llm/`), and its hint is shown by the

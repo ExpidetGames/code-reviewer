@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The dispatch webhook against a real SQLite database (#326): the hook on the job queue, the signed request
 // to a stand-in for the Dispatcher, the rows of `job_dispatches`, and the resends the sweep (#328) will drive

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the projects table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts; a project belongs to the workspace of its repository). The only code that
@@ -176,6 +176,13 @@ export type ProjectsRepository = {
    * with their integration and project, ordered by name.
    */
   list(): Promise<ProjectListEntry[]>;
+  /**
+   * `list`, read inside the given transaction after every repository row of the workspace was locked `FOR UPDATE` in
+   * ascending id: the lock a project's own save and a job's enqueue take first, so the list agrees with what they see
+   * and a write that must reach every project (the workspace review defaults, #676) cannot miss a concurrent enqueue.
+   * On SQLite the transaction's own write lock does it.
+   */
+  listLocked(executor: Kysely<Database>): Promise<ProjectListEntry[]>;
   /** One entry of the list, found by the id of its repository; undefined when the list has none. */
   find(repositoryId: string): Promise<ProjectListEntry | undefined>;
 };
@@ -280,9 +287,9 @@ export function createProjectsRepository(
       .where("integrations.status", "=", "active");
   }
 
-  function entryQuery() {
+  function entryQuery(executor: Kysely<Database> = db) {
     return (
-      db
+      executor
         .selectFrom("repositories")
         .innerJoin(
           "integrations",
@@ -580,6 +587,21 @@ export function createProjectsRepository(
 
     async list() {
       const rows = await entryQuery().execute();
+      return rows.map(toEntry);
+    },
+
+    async listLocked(executor) {
+      if (!executor.isTransaction)
+        throw new Error("listLocked requires a transaction.");
+      if (databaseDriver(executor) === "postgres")
+        await executor
+          .selectFrom("repositories")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .orderBy("id")
+          .forUpdate()
+          .execute();
+      const rows = await entryQuery(executor).execute();
       return rows.map(toEntry);
     },
 

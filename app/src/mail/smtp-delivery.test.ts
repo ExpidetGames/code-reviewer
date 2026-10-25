@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how the settings become the options of the mail library: what each security mode demands, that
 // certificates are checked unless the admin opted out, the lowest TLS version, the time limits and that the

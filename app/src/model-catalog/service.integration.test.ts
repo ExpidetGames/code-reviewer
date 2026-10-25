@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -708,7 +708,7 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
       const { service } = await start();
       const entry = await created(service, {
         ...FAST,
-        modelId: "sentinel/secret-model",
+        modelId: "acme-labs/secret-model",
       });
       await created(service, {
         ...FAST,
@@ -724,15 +724,18 @@ describe.each(ENGINES)("the model catalog service on $name", (engine) => {
           id: entry.id,
           name: "Fast",
           description: FAST.description,
+          providerLabel: "Acme Labs",
           kinds: ["diff"],
           status: "released",
           sortOrder: 0,
         },
       ]);
-      expect(JSON.stringify(members)).not.toMatch(/sentinel|openrouter/);
+      expect(JSON.stringify(members)).not.toMatch(
+        /sentinel|openrouter|secret-model|acme-labs/,
+      );
       expect((await service.allCatalogModelIds()).sort()).toEqual([
+        "acme-labs/secret-model",
         "sentinel/draft",
-        "sentinel/secret-model",
       ]);
     },
   );

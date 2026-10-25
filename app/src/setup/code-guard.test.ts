@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Which setup code store a runtime mode uses (#321): a server keeps its code in memory, as before, and
 // never opens the database for it; a serverless deployment reads it from the database.

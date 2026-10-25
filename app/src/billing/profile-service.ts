@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing profile of a workspace for the code that serves a person (ADR 0006, 2.13; #501): who may read and write it,
 // and what leaves. Only an Owner and an Admin (`manage_billing`) reach it; a Member gets `forbidden` and nothing of the

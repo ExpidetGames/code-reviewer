@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The stable codes of the data routes for catalog prices and enablement in the admin portal and the HTTP status of each
 // (#549). The page translates a code to copy (#554), never the other way round. A code never contains a model id, a price

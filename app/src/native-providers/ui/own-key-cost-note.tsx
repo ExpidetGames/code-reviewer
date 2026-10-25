@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a run on the workspace's own key costs and what bounds it (#555, #553): the explanation under the model picker. The
 // provider bills the workspace's own account. With a listed price the cost limit of a run applies as before and the token cap

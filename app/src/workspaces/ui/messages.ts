@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for the error codes of the workspace routes (the UI translates a code to copy, never the other
 // way round).
@@ -29,19 +29,18 @@ const FAILURE_COPY: Record<string, string> = {
   invalid_request:
     "The request was not complete. Reload the page and try again.",
   email_not_allowed:
-    "The sign-up rule of this instance does not let that address in, so it can neither be invited nor accept an invitation. An admin of the instance can change the rule.",
+    "The sign-up rule does not let that address in, so it can neither be invited nor accept an invitation. A code-review.com admin can change the rule.",
   signup_closed:
-    "Invitations are closed on this instance right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs the instance.",
+    "Invitations are closed right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs code-review.com.",
   already_member: "That address belongs to a member of this workspace already.",
   already_invited:
     "That address has an invitation already. Revoke it first, or send it again.",
   not_available:
-    "This instance cannot send mail, so a link cannot be sent again. Revoke the invitation and invite the address once more to get a new link.",
+    "code-review.com cannot send mail, so a link cannot be sent again. Revoke the invitation and invite the address once more to get a new link.",
   rate_limited: TOO_MANY_ATTEMPTS,
   multi_tenant_required:
-    "This instance has one workspace and people cannot create more.",
-  workspace_limit_reached:
-    "You own as many workspaces as this instance allows.",
+    "There is one workspace and people cannot create more.",
+  workspace_limit_reached: "You own as many workspaces as are allowed.",
   invitation_not_found: "This invitation does not exist.",
   invitation_expired: "This invitation has expired. Ask for a new one.",
   invitation_revoked: "This invitation was withdrawn.",

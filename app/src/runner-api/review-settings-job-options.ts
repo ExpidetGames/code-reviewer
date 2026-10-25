@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The job options of the running server: the review settings of the job's repository, the project's
 // overrides over the global defaults over the built-in values (CR-25), turned into the fields of a job
@@ -27,11 +27,11 @@ export function createReviewSettingsJobOptionsSource(deps: {
       // kind moved, the claimed job keeps the options of the kind it was queued for.
       if (job.reviewKind === "dynamic")
         return {
-          // A Dynamic job gets the project's model and skill, and **no** PR-Agent env: those options
-          // grant nothing to the read-only agent and must never be promoted into its permissions.
+          // A Dynamic job gets the model of the project, else of the workspace default (#676), and its skill, and **no**
+          // PR-Agent env: those options grant nothing to the read-only agent and must never be promoted into its permissions.
           env: {},
           selection: {
-            layers: { project: resolved.modelLayers.dynamic.project },
+            layers: resolved.modelLayers.dynamic,
             entryId: resolved.dynamic.catalogEntryDynamic,
           },
           llm: {

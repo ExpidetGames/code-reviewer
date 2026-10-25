@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The Dynamic Review journey with the real pinned OpenCode (#201-T01, #253), in the privileged lane
 // (runner/scripts/run_dynamic_e2e.sh): a person saves Dynamic Review for a project, a signed `opened` event

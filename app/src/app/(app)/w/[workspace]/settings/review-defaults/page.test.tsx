@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment node
 // The "Review defaults" page decides what its form is handed. A workspace on the operator's key never gets a
@@ -26,6 +26,8 @@ vi.mock("@/llm/shared", () => ({
 vi.mock("@/review-settings/shared", () => ({
   reviewSettingsServiceFor: () => ({}),
 }));
+vi.mock("@/db/startup", () => ({ getDatabase: () => ({}) }));
+vi.mock("@/billing/enabled", () => ({ isBillingOn: async () => true }));
 vi.mock("@/usage/shared", () => ({ planPageLinkedFor: async () => false }));
 vi.mock("@/billing/shared", () => ({
   billingPageLinkedFor: async () => false,

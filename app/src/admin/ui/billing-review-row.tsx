@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
 // One billing review row (#603): what the application stored about an event it did not apply, in words an operator can act on,
@@ -165,7 +165,7 @@ export function BillingReviewRow({
         )}
         <Fact label="Workspace">
           {review.workspace === null ? (
-            "No workspace of this instance is known for this event."
+            "No workspace is known for this event."
           ) : (
             <>
               {review.workspace.name}{" "}

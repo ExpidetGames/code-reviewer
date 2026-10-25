@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the plan page says about a workspace (#282): the resolved entitlements and the counted usage of the current
 // period, reduced to what a member may see. Pure: no database, no clock. This is the boundary to the browser, so
@@ -49,6 +49,8 @@ export type PlanView =
       managed: boolean;
       /** Reviews are paused for the workspace. */
       suspended: boolean;
+      /** Billing is on: what the workspace uses is billed via code-review.com (#675). */
+      billed: boolean;
       /** ISO 8601 UTC: usage is counted from here. The app does not know when the period ends. */
       periodStart: string;
       /**
@@ -88,6 +90,7 @@ export function buildPlanView(
     planLabel: entitlements.planLabel,
     managed,
     suspended: entitlements.suspended,
+    billed: options.runQuotas === false,
     periodStart: entitlements.periodStart,
     runs:
       options.runQuotas === false

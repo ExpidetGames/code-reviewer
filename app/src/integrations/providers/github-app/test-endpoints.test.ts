@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down that the sign in and the GitHub App read the same test endpoint variables with the same
 // rule (this file lives in the provider folder because it needs the GitHub App settings).

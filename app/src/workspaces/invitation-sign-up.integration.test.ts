@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // An invitation and the sign-up of the person it is for, through the real sign-up, the real Better Auth and
 // a real SQLite file: the invitation does not override the sign-up rule. A rule that is tightened after the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the admin is told before billing is switched on (ADR 0006, 2.14; #504): every workspace is charged from a prepaid
 // balance, the workspaces choose their key mode, one without balance cannot start a review, the run quotas are not applied and
@@ -32,10 +32,10 @@ export function enablingNotice({
   ownKeyWorkspaces,
 }: EnablingFacts): string[] {
   return [
-    "Once billing is on, the reviews of every workspace on this instance are charged from a prepaid balance in US dollars. A review costs its infrastructure minutes, plus the AI cost when it runs on your models.",
+    "Once billing is on, the reviews of every workspace are charged from a prepaid balance in US dollars. A review costs its infrastructure minutes, plus the AI cost when it runs on your models.",
     "Each workspace chooses its key mode: your models (the default) or its own key. A review on its own key is charged for its minutes only.",
     "A workspace with no balance cannot start a review until it has the start credit or credit from a top-up or from you.",
     "The run quotas of the workspaces are not applied while billing is on. The operator API limits stay.",
-    `This instance has ${workspacesText(workspaces)}. ${ownKeyText(workspaces, ownKeyWorkspaces)}`,
+    `code-review.com has ${workspacesText(workspaces)}. ${ownKeyText(workspaces, ownKeyWorkspaces)}`,
   ];
 }

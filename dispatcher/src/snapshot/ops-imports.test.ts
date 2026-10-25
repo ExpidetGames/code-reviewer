@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The steps of the deployment that sign in to Infisical and write to it run with the client secret in their
 // environment (#403). They load nothing from the package registry: every module they import, directly or through

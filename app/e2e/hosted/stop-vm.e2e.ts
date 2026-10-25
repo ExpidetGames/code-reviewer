@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The VM of a finished job is stopped on the App's signal (#487-T09), with the real app (serverless mode, Postgres), the real
 // Dispatcher and the real Worker on fakes. The Dispatcher holds no supervision after the hand-over: when the job's claim

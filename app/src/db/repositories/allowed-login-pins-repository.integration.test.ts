@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the allowed_login_pins repository against a real SQLite file: the first id wins, the
 // key is the lower-cased login, a pre-set id replaces a pin, and unlisted logins can be cleaned up.

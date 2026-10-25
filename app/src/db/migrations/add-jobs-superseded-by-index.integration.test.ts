@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #658: `jobs.superseded_by` refers to `jobs.id`, and without an index every deleted job made the database scan the whole table
 // for a job that still points at it (the foreign key's check), so deleting a workspace with n jobs took n scans: 13.6 s for 20 000

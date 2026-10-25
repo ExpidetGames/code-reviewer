@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment node
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -251,25 +251,32 @@ describe("what a member sees of a catalog entry", () => {
     updatedBy: "user-1",
   };
 
-  // #425-T07
-  it("has no provider and no model id in its type", () => {
+  // #425-T07, #675-T01
+  it("has no provider id and no model id in its type, only the label of the provider", () => {
     expectTypeOf<MemberCatalogEntry>().not.toHaveProperty("provider");
     expectTypeOf<MemberCatalogEntry>().not.toHaveProperty("modelId");
     expectTypeOf<MemberCatalogEntry>().not.toHaveProperty("model_id");
     expectTypeOf<keyof MemberCatalogEntry>().toEqualTypeOf<
-      "id" | "name" | "description" | "kinds" | "status" | "sortOrder"
+      | "id"
+      | "name"
+      | "description"
+      | "providerLabel"
+      | "kinds"
+      | "status"
+      | "sortOrder"
     >();
   });
 
-  // #425-T07
-  it("has no provider and no model id in the object, whatever the entry carried", () => {
-    const projected = toMemberEntry(entry);
+  // #425-T07, #675-T01
+  it("has no provider id and no model id in the object, whatever the entry carried", () => {
+    const projected = toMemberEntry({ ...entry, providerLabel: "Acme" });
 
     expect(Object.keys(projected).sort()).toEqual([
       "description",
       "id",
       "kinds",
       "name",
+      "providerLabel",
       "sortOrder",
       "status",
     ]);
@@ -278,6 +285,7 @@ describe("what a member sees of a catalog entry", () => {
       id: entry.id,
       name: "Deep",
       description: "Slower, deeper reviews.",
+      providerLabel: "Acme",
       kinds: ["diff", "dynamic"],
       status: "released",
       sortOrder: 2,

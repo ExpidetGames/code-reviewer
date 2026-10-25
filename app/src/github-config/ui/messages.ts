@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The copy for what the GitHub data routes answer: one sentence per stable code (src/github-config/errors.ts,
 // the issue codes of settings.ts and the outcomes of the manifest flow and of the linking). The codes are the
@@ -113,7 +113,7 @@ const OUTCOME_ERRORS: Record<string, string> = {
   already_linked:
     "This account is linked to a GitHub account already. Nothing changed.",
   identity_belongs_to_other_user:
-    "That GitHub account belongs to another user of this instance. Nothing changed.",
+    "That GitHub account belongs to another user. Nothing changed.",
   identity_has_other_credentials:
     "That GitHub account belongs to a user who can also sign in with a password, so the two accounts are not joined. Nothing changed. Sign in as that user instead.",
   github_not_configured: GITHUB_SIGN_IN_NOT_CONFIGURED,

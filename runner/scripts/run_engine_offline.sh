@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Runs the engine suite (pytest -m engine) in a Linux network namespace that has nothing but a
 # loopback interface: the operating system itself, not only the Python level guard of the suite,

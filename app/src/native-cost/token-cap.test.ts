@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The token cap of a run on the workspace's own key (#553): an instance setting with a default of 4,000,000 tokens that the
 // admin can change within bounds. A stored value that is not valid reads as the default, never as no cap.

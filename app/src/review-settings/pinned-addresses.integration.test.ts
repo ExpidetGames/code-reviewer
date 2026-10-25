@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The addresses the projects of one workspace pinned for a catalog provider (#588): what the key test of that provider is held to.
 // Scoped to the workspace like every read of customer data.
@@ -97,5 +97,31 @@ describe("the addresses pinned for a catalog provider in a workspace", () => {
 
     await app.projects.deactivate(app.first.id);
     expect(await read("deepseek", { inUseOnly: true })).toEqual([]);
+  });
+
+  // #676: a project that stores no kind has the kind of the workspace defaults (review fix 7).
+  it("counts a project that follows a Dynamic default of the workspace as using the provider, and not one that follows a Diff default", async () => {
+    const app = await setup();
+    await app.projects.updateSettingsWith(app.first.id, () => ({
+      dynamicProvider: "deepseek",
+      dynamicModel: "m",
+      dynamicProviderAddress: "https://api.deepseek.example",
+    }));
+    let workspaceKind: "diff" | "dynamic" | undefined = "dynamic";
+
+    const read = createPinnedAddressReader(
+      app.projects,
+      async () => workspaceKind,
+    );
+
+    expect(await read("deepseek", { inUseOnly: true })).toEqual([
+      "https://api.deepseek.example",
+    ]);
+    workspaceKind = "diff";
+    expect(await read("deepseek", { inUseOnly: true })).toEqual([]);
+    workspaceKind = undefined;
+    expect(await read("deepseek", { inUseOnly: true })).toEqual([]);
+    // Without the scope every project counts, as before.
+    expect(await read("deepseek")).toEqual(["https://api.deepseek.example"]);
   });
 });

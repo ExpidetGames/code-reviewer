@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `setup_codes`: the first-run setup code of a serverless deployment (#321, src/setup/database-code-store.ts).
 // A server keeps its setup code in the memory of its one process; serverless instances share nothing

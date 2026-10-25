@@ -1,11 +1,13 @@
-# Code Reviewer: the app and the runner on one machine. See "Run with Docker Compose" in README.md.
+# Code Reviewer: the app and the runner on one machine, as a test and development fixture of the team
+# (docker/smoke/compose.sh runs it in CI). Not a way to run the service elsewhere: see LICENSE.
 #
 #   cp .env.example .env     # then fill in the values; a missing required value stops `up` with a
 #                            # message naming the variable, before any container is created
 #   docker compose up -d --wait
 #
-# Images come from GHCR by default (the packages are private: `docker login ghcr.io` first). To build
-# them from this checkout instead, add the override file:
+# This stack is a test and development fixture of the team, not a way to run the service elsewhere
+# (LICENSE). No image is published: build the images from this checkout with the override file, or
+# name images you built yourself with APP_IMAGE and RUNNER_IMAGE:
 #   docker compose -f compose.yml -f compose.build.yml up -d --build --wait
 #
 # Every setting is read from the environment of this command or from `.env` (see .env.example for
@@ -19,7 +21,7 @@ name: code-reviewer
 
 services:
   app:
-    image: ${APP_IMAGE:-ghcr.io/expidetgames/code-reviewer-app:development}
+    image: ${APP_IMAGE:-code-reviewer-app:local}
     restart: unless-stopped
     ports:
       # Loopback only by default; set APP_BIND_ADDRESS=0.0.0.0 to reach the app from other machines
@@ -94,7 +96,7 @@ services:
       start_period: 20s
 
   runner:
-    image: ${RUNNER_IMAGE:-ghcr.io/expidetgames/code-reviewer-runner:development}
+    image: ${RUNNER_IMAGE:-code-reviewer-runner:local}
     restart: unless-stopped
     # No published port: the runner only talks to the app, over the compose network.
     # The memory the runner may use as a whole: 2 GiB by default, the figure the number of parallel

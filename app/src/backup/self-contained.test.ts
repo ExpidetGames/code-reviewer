@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The backup command line is a folder of its own: the image copies only `src/backup`
 // (app/Dockerfile) and runs `node backup/cli.ts` without Next.js. A value import that leaves this

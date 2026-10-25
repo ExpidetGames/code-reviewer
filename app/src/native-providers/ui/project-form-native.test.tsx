@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
 // The project settings form with the catalog (#555, #656): the Dynamic provider dropdown of the LLM section offers the catalog
@@ -20,7 +20,7 @@ import {
   DEFAULT_DYNAMIC_MODEL,
   PROJECT_DYNAMIC_LIMITS,
 } from "../../review-settings/settings.ts";
-import { PRODUCT_NAME } from "../../copy/product-name.ts";
+import { MODEL_CHOICE_NONE_OFFERED } from "../../copy/model-choice.ts";
 import type { NativeFormData } from "../form-data.ts";
 import type { NativeModelView } from "../catalog.ts";
 import type { CatalogModelsApi } from "./api.ts";
@@ -277,14 +277,13 @@ describe("the Dynamic provider and model of a project on its own key", () => {
     expect(screen.getByText(/No key is stored for OpenAI yet/)).toBeTruthy();
   });
 
-  // #555-T08, #656-T03
-  it("is not there for a workspace on the operator's key: one provider that is not a vendor, no catalog models", async () => {
+  // #555-T08, #656-T03, #675-T01
+  it("is not there for a workspace on the operator's key: no provider of the catalog, no catalog models, and the product is no provider", async () => {
     await renderLlm(model(view(), true), fakeApi().api, undefined);
 
     expect(screen.queryByLabelText("Search models")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe(
-      PRODUCT_NAME,
-    );
+    expect(screen.queryByRole("combobox", { name: "Provider" })).toBeNull();
+    expect(screen.getByText(MODEL_CHOICE_NONE_OFFERED)).toBeTruthy();
     expect(document.body.textContent).not.toContain("DeepSeek");
   });
 });

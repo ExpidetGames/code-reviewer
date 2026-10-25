@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #185-T02: no tracked source file uses a class name of the deleted legacy stylesheet. The scan
 // reads the real files (the same list the SPDX check uses) and only looks in class contexts — a

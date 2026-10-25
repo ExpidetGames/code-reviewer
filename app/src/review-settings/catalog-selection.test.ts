@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The pure rules of the catalog selection (#430): why an entry may not be chosen, what the picker lists, and that the
 // names of the settings are the ones the catalog counts the projects by.
@@ -20,6 +20,7 @@ function entry(
     id,
     name: id,
     description: null,
+    providerLabel: "Anthropic",
     kinds: ["diff", "dynamic"],
     status: "released",
     sortOrder: 0,
@@ -95,7 +96,7 @@ describe("whether a project may choose an entry", () => {
 
 describe("the picker of a managed workspace", () => {
   // #430-T08
-  it("copies an id, a name, a description and the availability, and nothing else an entry carries", async () => {
+  it("copies an id, a name, a description, the provider label and the availability, and nothing else an entry carries", async () => {
     const carrying = {
       ...entry("a", { name: "Alpha", description: "Quick." }),
       provider: "sentinel-provider",
@@ -112,6 +113,7 @@ describe("the picker of a managed workspace", () => {
         id: "a",
         name: "Alpha",
         description: "Quick.",
+        providerLabel: "Anthropic",
         available: true,
         reason: null,
       },

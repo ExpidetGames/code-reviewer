@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down which review settings are accepted: every field's range and format, that all problems of
 // a request are reported at once with a stable code per field, that no value is echoed back, and
@@ -11,8 +11,10 @@ import {
   REVIEW_SETTING_ISSUE_CODES,
   parseStoredOverrides,
   parseStoredProjectDynamicOverrides,
+  parseStoredWorkspaceDynamic,
   validateProjectSettingsPatch,
   validateReviewSettingsPatch,
+  validateWorkspaceSettingsPatch,
 } from "./validate.ts";
 import {
   PROJECT_DYNAMIC_LIMITS,
@@ -783,5 +785,100 @@ describe("validating the provider and catalog selection", () => {
         catalogEntryDynamic: "not valid!",
       }),
     ).toEqual({});
+  });
+});
+
+// #676-T07
+describe("validating the workspace defaults", () => {
+  const issuesOfDefaults = (input: unknown) => {
+    const result = validateWorkspaceSettingsPatch(input);
+    if (result.ok) throw new Error("expected the defaults to be refused");
+    return result.issues;
+  };
+
+  it("accepts the Diff settings together with the kind, the Dynamic provider and model, the entries and the verdict", () => {
+    expect(
+      validateWorkspaceSettingsPatch({
+        maxFindings: 7,
+        reviewKind: "dynamic",
+        dynamicProvider: "anthropic",
+        dynamicModel: "claude-sonnet-5-5",
+        catalogEntryDiff: "mce_diff",
+        catalogEntryDynamic: "mce_dynamic",
+        reviewVerdict: "off",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        review: { maxFindings: 7 },
+        dynamic: {
+          reviewKind: "dynamic",
+          dynamicProvider: "anthropic",
+          dynamicModel: "claude-sonnet-5-5",
+          catalogEntryDiff: "mce_diff",
+          catalogEntryDynamic: "mce_dynamic",
+          reviewVerdict: "off",
+        },
+      },
+    });
+  });
+
+  it("reads a null as a field that is not set: on a whole set that is how a default is taken back", () => {
+    expect(
+      validateWorkspaceSettingsPatch({
+        dynamicModel: null,
+        dynamicProvider: null,
+        catalogEntryDynamic: null,
+        reviewVerdict: null,
+      }),
+    ).toEqual({ ok: true, value: { review: {}, dynamic: {} } });
+  });
+
+  it("keeps the skill and the pinned address a project's: both are unknown fields", () => {
+    expect(
+      issuesOfDefaults({ reviewSkill: "x", confirmProviderAddress: true }),
+    ).toEqual([
+      { field: "confirmProviderAddress", code: "UNKNOWN_FIELD" },
+      { field: "reviewSkill", code: "UNKNOWN_FIELD" },
+    ]);
+  });
+
+  it("refuses a catalog provider as the Dynamic default and an unknown provider or kind", () => {
+    expect(issuesOfDefaults({ dynamicProvider: "zhipuai" })).toEqual([
+      { field: "dynamicProvider", code: "PROVIDER_UNKNOWN" },
+    ]);
+    expect(issuesOfDefaults({ dynamicProvider: "nope" })).toEqual([
+      { field: "dynamicProvider", code: "PROVIDER_UNKNOWN" },
+    ]);
+    expect(issuesOfDefaults({ reviewKind: "both" })).toEqual([
+      { field: "reviewKind", code: "INVALID_FORMAT" },
+    ]);
+  });
+
+  it("reports the problems of the Diff group and of the Dynamic group together", () => {
+    expect(
+      issuesOfDefaults({ maxFindings: 0, reviewVerdict: "sometimes" }),
+    ).toEqual([
+      { field: "maxFindings", code: "TOO_SMALL" },
+      { field: "reviewVerdict", code: "INVALID_FORMAT" },
+    ]);
+  });
+
+  it("reads the stored defaults without the skill, the pin and a catalog provider", () => {
+    expect(
+      parseStoredWorkspaceDynamic({
+        reviewKind: "dynamic",
+        reviewVerdict: "any",
+        reviewSkill: "smuggled",
+        dynamicProviderAddress: "https://api.example.test/v1",
+      }),
+    ).toEqual({ reviewKind: "dynamic", reviewVerdict: "any" });
+    expect(
+      parseStoredWorkspaceDynamic({
+        dynamicProvider: "zhipuai",
+        dynamicModel: "zhipuai/glm-4.5",
+        reviewKind: "diff",
+      }),
+    ).toEqual({ reviewKind: "diff" });
   });
 });

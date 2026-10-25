@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the runtime guards for the normalized types. They are what keeps a raw platform payload
 // from travelling through the app disguised as a RepoRef, ReviewTrigger or GitAccess.

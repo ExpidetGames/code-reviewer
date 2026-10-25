@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Models of the settings form for the tests of the LLM section (#656): a project of a workspace on its own key and one of
 // a workspace on the operator's key, whose views carry no provider and no model (ADR 0005). `leak` plants a sentinel where
@@ -7,7 +7,10 @@ import { vi } from "vitest";
 import { estimateReviewCost } from "../review-settings/cost.ts";
 import type { CatalogChoices } from "../review-settings/catalog-selection.ts";
 import { DEFAULT_REVIEW_SKILL } from "../review-settings/default-skill.ts";
-import type { ProjectDynamicView } from "../review-settings/service.ts";
+import type {
+  GlobalSettingsView,
+  ProjectDynamicView,
+} from "../review-settings/service.ts";
 import {
   builtInReviewSettings,
   DEFAULT_DYNAMIC_MODEL,
@@ -94,9 +97,7 @@ export function ownModel(
     managed: false,
     catalog: null,
     lastSaved: null,
-    ...((options.mode ?? "project") === "project"
-      ? { dynamic: dynamicView(options.kind ?? "diff", false) }
-      : {}),
+    dynamic: dynamicView(options.kind ?? "diff", false),
   };
 }
 
@@ -106,6 +107,7 @@ export const CHOICES: CatalogChoices = {
       id: "ent-fast",
       name: "Quick look",
       description: "Fast passes over small changes.",
+      providerLabel: "Anthropic",
       available: true,
       reason: null,
     },
@@ -113,6 +115,7 @@ export const CHOICES: CatalogChoices = {
       id: "ent-thorough",
       name: "Thorough",
       description: "Careful passes over large changes.",
+      providerLabel: "OpenAI",
       available: true,
       reason: null,
     },
@@ -120,6 +123,7 @@ export const CHOICES: CatalogChoices = {
       id: "ent-premium",
       name: "Premium",
       description: "The deepest passes we offer.",
+      providerLabel: "OpenAI",
       available: false,
       reason: "CATALOG_ENTRY_NOT_ALLOWED",
     },
@@ -129,6 +133,7 @@ export const CHOICES: CatalogChoices = {
       id: "ent-explorer",
       name: "Explorer",
       description: "Explores the repository around a change.",
+      providerLabel: "Anthropic",
       available: true,
       reason: null,
     },
@@ -136,6 +141,7 @@ export const CHOICES: CatalogChoices = {
       id: "ent-detective",
       name: "Detective",
       description: "Follows every call to the end.",
+      providerLabel: "Google",
       available: true,
       reason: null,
     },
@@ -149,6 +155,8 @@ export function managedModel(
     mode?: "project" | "global";
     choices?: CatalogChoices;
     selection?: { diff: string | null; dynamic: string | null };
+    /** The entries the workspace defaults select, which a project that selects none follows (#676). */
+    workspaceSelection?: { diff: string | null; dynamic: string | null };
     leak?: boolean;
   } = {},
 ): SettingsFormModel {
@@ -175,15 +183,36 @@ export function managedModel(
     ) as SettingsFormModel["sources"],
     cost: null,
     managed: true,
-    catalog:
-      mode === "project"
-        ? {
-            choices: options.choices ?? CHOICES,
-            selection: options.selection ?? { diff: null, dynamic: null },
-          }
-        : null,
+    catalog: {
+      choices: options.choices ?? CHOICES,
+      selection: options.selection ?? { diff: null, dynamic: null },
+      workspaceSelection:
+        mode === "project"
+          ? (options.workspaceSelection ?? { diff: null, dynamic: null })
+          : null,
+    },
     lastSaved: null,
-    ...(mode === "project" ? { dynamic } : {}),
+    dynamic,
+  };
+}
+
+/** The view of the workspace defaults of a workspace on its own key that saved nothing yet (#676). */
+export function untouchedGlobalView(): GlobalSettingsView {
+  return {
+    overrides: {},
+    effective: BUILT_IN,
+    sources: Object.fromEntries(
+      Object.keys(BUILT_IN).map((field) => [field, "built_in"]),
+    ) as GlobalSettingsView["sources"],
+    cost: estimateReviewCost(BUILT_IN),
+    modelManagedByInstance: false,
+    builtIn: BUILT_IN,
+    updatedAt: null,
+    updatedBy: null,
+    dynamic: dynamicView("diff", false),
+    catalogChoices: null,
+    catalogSelection: null,
+    followingProjects: 0,
   };
 }
 

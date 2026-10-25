@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The payment reviews of the admin portal, end to end (#603-T18), on the app of the billing journey (an instance of its own):
 // two events the webhook could not apply are waiting (a refused payment of the default workspace's top-up, and a refund of a
@@ -56,9 +56,7 @@ test.describe("the payment reviews in the admin portal", () => {
     await expect(refused.getByText(/Default workspace/)).toBeVisible();
     await expect(refused.getByText(/25\.00 USD asked/)).toBeVisible();
     await expect(foreign.getByText("Refund re_e2e_foreign")).toBeVisible();
-    await expect(
-      foreign.getByText(/No workspace of this instance/),
-    ).toBeVisible();
+    await expect(foreign.getByText(/No workspace is known/)).toBeVisible();
     await expect(foreign.getByRole("button", { name: /Credit/ })).toHaveCount(
       0,
     );

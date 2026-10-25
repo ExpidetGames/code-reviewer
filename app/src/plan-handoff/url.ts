@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The instance setting `plan_management_url`: the one operator-configured page an Owner or Admin is handed over to
 // (README.md). Only an instance admin or the operator API can change it, and what is stored has to pass

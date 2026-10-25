@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The one vocabulary of workspace scoping (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.7). A repository that reads or writes customer data is created for ONE workspace:

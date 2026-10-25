@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the connection settings the app relies on (WAL, busy timeout, foreign keys) and the
 // refusals when the database file cannot be opened.

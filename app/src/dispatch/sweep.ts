@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // One run of the cron sweep of a hosted deployment (#328). In a serverless deployment nothing polls and no
 // process lives long enough to hold a timer, so the clock is this run, called once a minute by the platform's

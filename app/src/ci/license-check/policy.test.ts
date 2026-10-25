@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #118: license-policy.json against the real lockfiles. Which packages are installed differs per
 // machine, so this reads only the lockfiles (the CI job and `make check-licenses` read the

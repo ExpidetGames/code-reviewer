@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the UI may know about the GitHub App besides whether its settings work (that is asked of the
 // credential store, src/github-config/): where a person installs the app, for a slug that is well

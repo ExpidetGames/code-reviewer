@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The billing profile of a workspace, as input (ADR 0006, 2.13; #501): the legal name and address of the business that
 // buys credit and an optional VAT ID. Pure: it validates what a person typed and says which FIELD is wrong with a stable
@@ -11,7 +11,7 @@
 import "server-only";
 
 /** The version of the business terms the confirmation at the first top-up refers to; bumped when the terms change. */
-export const BILLING_TERMS_VERSION = "2026-10";
+export const BILLING_TERMS_VERSION = "2026-10-24";
 
 export const BILLING_PROFILE_FIELDS = [
   "legalName",

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The operator's LLM key over a real SQLite file (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.8): what a save accepts and refuses (the rules of the workspace key), that the answers carry the status and the
