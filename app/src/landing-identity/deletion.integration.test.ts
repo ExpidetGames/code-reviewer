@@ -27,7 +27,7 @@ describe("the landing identity of a user that is removed", () => {
 
     harness.advance(8 * DAY);
     const result = await cleanUpExpiredRows(harness.db, harness.now, {
-      mailConfigured: () => true,
+      mailConfigured: () => Promise.resolve(true),
     });
 
     expect(result.unverifiedAccounts).toBe(1);
