@@ -26,7 +26,7 @@ from code_reviewer_runner.result import ErrorCode
 
 pytestmark = pytest.mark.engine
 
-TOOLS = {"read", "grep", "glob"}
+TOOLS = {"read", "grep", "glob", "skill"}
 
 
 @pytest.fixture(autouse=True)
