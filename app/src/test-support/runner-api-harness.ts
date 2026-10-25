@@ -5,6 +5,7 @@
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { operatorCostLimitCentsFrom } from "../review-settings/operator-cost-limit-source.ts";
 import { managedModelsOf } from "../runner-api/managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
@@ -46,6 +47,7 @@ import {
 import { createClaimedKeys } from "../runner-api/claimed-keys.ts";
 import { createProjectClaimGuard } from "../runner-api/project-claim-guard.ts";
 import { createKnownSecrets } from "../runner-api/known-secrets.ts";
+import { knownContextWindowFrom } from "../runner-api/known-context-window.ts";
 import { createReviewSettingsJobOptionsSource } from "../runner-api/review-settings-job-options.ts";
 import { configuredRunnerToken } from "../runner-api/token-auth.ts";
 import type { RunnerApiLogger } from "../runner-api/logger.ts";
@@ -346,6 +348,8 @@ export async function startRunnerApiHarness(
       entryAllowed(await settingsEntitlements(), { id }),
     ),
     providers: options.providers ?? llmProviderDescriptors,
+    // #689: a cost limit above the operator's maximum (the instance setting) is refused at the save, as on the running server.
+    operatorCostLimitCents: operatorCostLimitCentsFrom(fixture.db),
     ...(options.nativeCatalog === undefined
       ? {}
       : { nativeCatalog: options.nativeCatalog }),
@@ -407,6 +411,8 @@ export async function startRunnerApiHarness(
               settings: () => reviewSettings,
             })
           : emptyJobOptionsSource),
+      // #689: as on the running server, the operator's maximum is the instance setting (1.00 USD until a test sets it).
+      operatorCostLimitCents: operatorCostLimitCentsFrom(fixture.db),
       keyFor:
         options.loadLlm !== undefined
           ? (workspaceId) => options.loadLlm!(workspaceId)
@@ -451,6 +457,7 @@ export async function startRunnerApiHarness(
             fixture.clock.now,
           ).get(job.id)
         )?.keyMode,
+      knownContextWindow: knownContextWindowFrom(fixture.db),
       ...(options.modelCapabilities === undefined
         ? {}
         : { modelCapabilities: options.modelCapabilities }),

@@ -75,7 +75,7 @@ jobs:
   # run the same check themselves, right before they act.
   fresh:
     name: Check that the commit is the head of main
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -93,7 +93,7 @@ jobs:
   migrate:
     name: Migrate the database
     needs: fresh
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -130,7 +130,7 @@ jobs:
   snapshot-decide:
     name: Decide whether the golden snapshot is rebuilt
     needs: migrate
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production
@@ -192,7 +192,7 @@ jobs:
   snapshot-build:
     name: Build the golden snapshot
     needs: snapshot-decide
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-decide.outputs.rebuild == 'true' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-decide.outputs.rebuild == 'true' }}
     permissions:
       contents: read
     uses: ./.github/workflows/golden-snapshot.yml
@@ -205,7 +205,7 @@ jobs:
   stage-app:
     name: Stage the App
     needs: migrate
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
       deployments: write
@@ -226,7 +226,7 @@ jobs:
   stage-dispatcher:
     name: Stage the Dispatcher
     needs: [stage-app, snapshot-decide, snapshot-build]
-    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.snapshot-decide.result == 'success' && (needs.snapshot-build.result == 'success' || needs.snapshot-build.result == 'skipped') }}
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.snapshot-decide.result == 'success' && (needs.snapshot-build.result == 'success' || needs.snapshot-build.result == 'skipped') }}
     permissions:
       contents: read
       deployments: write
@@ -248,7 +248,7 @@ jobs:
   health-app:
     name: Check the staged App's health
     needs: stage-app
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production
@@ -314,7 +314,7 @@ jobs:
   canary:
     name: Run the Dispatcher canary
     needs: [stage-dispatcher, health-app, snapshot-decide, snapshot-build]
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && !cancelled() && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && !cancelled() && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' }}
     permissions:
       contents: read
     uses: ./.github/workflows/dispatcher-canary.yml
@@ -336,7 +336,7 @@ jobs:
   promote-app:
     name: Promote the App
     needs: [stage-app, stage-dispatcher, health-app, canary]
-    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' }}
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -377,7 +377,7 @@ jobs:
   promote-dispatcher:
     name: Promote the Dispatcher
     needs: [stage-app, stage-dispatcher, health-app, canary, promote-app]
-    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' && needs.promote-app.result == 'success' }}
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' && needs.promote-app.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -419,7 +419,7 @@ jobs:
   persist:
     name: Write the golden snapshot pair to Infisical
     needs: [snapshot-decide, snapshot-build, promote-dispatcher]
-    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.promote-dispatcher.result == 'success' && (needs.snapshot-decide.outputs.rebuild == 'true' || needs.snapshot-decide.outputs.repair == 'true') }}
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.promote-dispatcher.result == 'success' && (needs.snapshot-decide.outputs.rebuild == 'true' || needs.snapshot-decide.outputs.repair == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production
@@ -461,7 +461,7 @@ jobs:
   cleanup:
     name: Remove the golden snapshots nobody needs
     needs: [snapshot-decide, snapshot-build, promote-dispatcher, persist]
-    if: ${{ !cancelled() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.promote-dispatcher.result == 'success' && (needs.persist.result == 'success' || needs.persist.result == 'skipped') }}
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.promote-dispatcher.result == 'success' && (needs.persist.result == 'success' || needs.persist.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -506,7 +506,7 @@ jobs:
   discard:
     name: Discard the snapshot of a run that did not get live
     needs: [snapshot-decide, snapshot-build, promote-dispatcher]
-    if: ${{ always() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-build.result == 'success' && needs.promote-dispatcher.result == 'skipped' }}
+    if: ${{ always() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.snapshot-build.result == 'success' && needs.promote-dispatcher.result == 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -549,7 +549,7 @@ jobs:
   record:
     name: Close the GitHub deployments
     needs: [stage-app, stage-dispatcher, promote-app, promote-dispatcher]
-    if: ${{ always() && github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ always() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

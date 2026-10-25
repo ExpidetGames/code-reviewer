@@ -46,18 +46,18 @@ export type ModelsDevAdminErrorCode =
   (typeof MODELS_DEV_ADMIN_ERROR_CODES)[number];
 
 const FETCH_STATUS: Record<ModelsDevFetchErrorCode, number> = {
-  models_dev_unreachable: 502,
-  models_dev_http_status: 502,
-  models_dev_too_large: 502,
-  models_dev_invalid_json: 502,
-  models_dev_invalid_body: 502,
+  models_dev_unreachable: 503,
+  models_dev_http_status: 503,
+  models_dev_too_large: 503,
+  models_dev_invalid_json: 503,
+  models_dev_invalid_body: 503,
   // The guard refused the fetch: the admin can look at it and accept it.
   models_dev_guard_unlisted_share: 409,
   models_dev_guard_enabled_unlisted: 409,
   models_dev_guard_growth: 409,
   models_dev_guard_url_changed_share: 409,
   models_dev_guard_provider_size: 409,
-  models_dev_timeout: 504,
+  models_dev_timeout: 503,
   models_dev_interrupted: 500,
   models_dev_internal: 500,
 };

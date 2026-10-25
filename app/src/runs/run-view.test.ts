@@ -159,6 +159,50 @@ describe("the provider in the log of a run", () => {
   });
 });
 
+describe("the problem of a Diff Review that stopped at its cost limit", () => {
+  const failed = (stoppedEarly?: string) =>
+    job({
+      status: "failed",
+      errorCode: "cost_limit_reached",
+      result: {
+        ok: false,
+        commentUrl: null,
+        logTail: "",
+        usage: {
+          model: "vendor/model",
+          promptTokens: 1,
+          completionTokens: 1,
+          totalTokens: 2,
+          aiCalls: 2,
+          fallbackUsed: false,
+          costUsd: 0.16,
+          ...(stoppedEarly === undefined ? {} : { stoppedEarly }),
+        },
+      },
+    });
+
+  // #689-T26
+  it("names whose limit it was on the detail page, from the limit the runner reported", () => {
+    expect(
+      toRunDetailView(failed("cost_limit"), "acme/widgets", NOW).problem,
+    ).toContain("maximum cost per review set by code-review.com");
+    expect(
+      toRunDetailView(failed("project_cost_limit"), "acme/widgets", NOW)
+        .problem,
+    ).toContain("Limits in the project settings");
+  });
+
+  // #689-T26
+  it("is true for both limits where the runner did not say which, and in a list row", () => {
+    const neutral = toRunDetailView(failed(), "acme/widgets", NOW).problem;
+    expect(neutral).toContain("code-review.com");
+    expect(neutral).toContain("project");
+    expect(
+      toRunRowView(failed("cost_limit"), "acme/widgets", NOW).problem,
+    ).toBe(neutral);
+  });
+});
+
 describe("the usage of a run", () => {
   const usage = {
     model: "vendor/dynamic-model",

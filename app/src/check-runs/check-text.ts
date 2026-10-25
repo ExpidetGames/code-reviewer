@@ -93,9 +93,12 @@ function paragraphs(...parts: Array<string | null>): string {
 }
 
 /** The reason a job did not finish, in words, with its code when it has the shape of one. */
-function reasonLine(errorCode: string | null): string {
+function reasonLine(
+  errorCode: string | null,
+  stoppedEarly: string | null,
+): string {
   if (errorCode === null) return "The review did not finish.";
-  const described = describeErrorCode(errorCode);
+  const described = describeErrorCode(errorCode, stoppedEarly);
   return described.code === null
     ? described.text
     : `${described.text} (\`${described.code}\`)`;
@@ -147,7 +150,7 @@ export function describeCheck(subject: CheckSubject): CheckText {
         conclusion: "neutral",
         title: "Review cancelled",
         summary: paragraphs(
-          reasonLine(subject.errorCode),
+          reasonLine(subject.errorCode, subject.stoppedEarly),
           "This check is informational and never blocks a merge.",
         ),
       };
@@ -157,7 +160,7 @@ export function describeCheck(subject: CheckSubject): CheckText {
         conclusion: "neutral",
         title: "Review did not finish",
         summary: paragraphs(
-          reasonLine(subject.errorCode),
+          reasonLine(subject.errorCode, subject.stoppedEarly),
           linkLine(subject.commentUrl),
           "This check is informational and never blocks a merge. A new push or a review request runs the review again.",
         ),

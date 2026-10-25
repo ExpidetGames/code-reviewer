@@ -69,8 +69,8 @@ export type LlmConfig = {
   apiKey: string;
   /**
    * The context window (`LLM_MAX_TOKENS`) of a model PR-Agent does not know; null lets PR-Agent
-   * decide. Not the token budget of a review: that is a review setting (src/review-settings) and
-   * replaces this value in a job.
+   * decide. Not the token budget of a review: the claim decides that (#689) and cuts it to this
+   * window for a job on the workspace's own key.
    */
   contextWindowTokens: number | null;
 };

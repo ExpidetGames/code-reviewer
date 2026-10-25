@@ -75,10 +75,9 @@ const authorized = { authorization: `Bearer ${DISPATCHER_TOKEN}` };
 function validReport(): (document: unknown) => boolean {
   const ajv = new Ajv2020({ strict: false });
   ajv.addSchema(readContract("runner-api.v1.json") as object);
-  ajv.addSchema(readContract("probe-verdict.v1.json") as object);
-  const check = ajv.getSchema(
-    "https://github.com/ExpidetGames/code-reviewer/contracts/probe-verdict.v1.json#/$defs/ProbeReport",
-  );
+  const probe = readContract<{ $id: string }>("probe-verdict.v1.json");
+  ajv.addSchema(probe);
+  const check = ajv.getSchema(`${probe.$id}#/$defs/ProbeReport`);
   if (check === undefined) throw new Error("no ProbeReport");
   return (document) => check(document) === true;
 }

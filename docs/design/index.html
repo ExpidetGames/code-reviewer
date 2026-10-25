@@ -1228,10 +1228,13 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="field"><label for="prov">Provider</label><select class="select" id="prov"><option>OpenRouter</option></select></div>
 <div class="field"><label for="mod">Model</label><input class="input mono" id="mod" value="anthropic/claude-sonnet-5-5"></div>
 <div class="field"><label for="fb">Fallback model</label><input class="input" id="fb" placeholder="None"><span class="hint">Stored but not used yet.</span></div>
-<div class="field"><label for="tb">Token budget</label><input class="input" id="tb" value="200000" inputmode="numeric"></div>
 </div>
 <div class="alert"><i class="ic ic-info"></i><p>The estimated cost per review shows after the marked values are fixed.</p></div>
 <p class="hint">Global default. <a class="lnk" href="#">Reset to default</a></p>
+</section>
+<section class="card"><h2>Limits</h2>
+<div class="field" style="max-width: 280px"><label for="cl">Cost limit per review (USD)</label><input class="input" id="cl" placeholder="Max $1.00" inputmode="decimal"><span class="hint">A review stops when it reaches this amount, at most $1.00. Leave empty for up to $1.00.</span></div>
+<p class="hint">Built-in value.</p>
 </section>
 
 <section class="card"><h2>Review</h2>
@@ -1499,8 +1502,10 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <div class="field"><label for="prov">Provider</label><select class="select" id="prov"><option>OpenRouter</option></select></div>
 <div class="field"><label for="mod">Model</label><input class="input mono" id="mod" value="anthropic/claude-sonnet-5-5"></div>
 <div class="field"><label for="fb">Fallback model</label><input class="input" id="fb" placeholder="None"></div>
-<div class="field"><label for="tb">Token budget</label><input class="input" id="tb" value="200000"></div></div>
+</div>
 <div class="alert"><i class="ic ic-info"></i><p>Managed workspaces do not see these fields. The quality of reviews is chosen for each project, on the settings page of that project.</p></div></section>
+<section class="card"><h2>Limits</h2>
+<div class="field" style="max-width: 280px"><label for="cl">Cost limit per review (USD)</label><input class="input" id="cl" placeholder="Max $1.00" inputmode="decimal"></div></section>
 <section class="card"><h2>Review</h2>
 <div class="field" style="max-width: 240px"><label for="mf">Most findings per review</label><input class="input" id="mf" value="8"></div>
 <div class="check on"><span class="box"><i class="ic ic-check"></i></span><span>Review a large pull request in chunks</span></div>
@@ -1829,6 +1834,7 @@ tobias@itegro.example</textarea><span class="hint">Until the instance can verify
 <p class="hint">This instance has 1 workspace now. Last changed 20 Oct 2026 by Anna Keller.</p></section>
 <section class="card"><h2>Limits</h2>
 <div class="grid2"><div class="field"><label for="mw">Maximum number of workspaces one user may own</label><input class="input" id="mw" value="10"></div>
+<div class="field"><label for="mc">Maximum cost per review (USD)</label><input class="input" id="mc" value="1.00" inputmode="decimal"><span class="hint">For Diff and Dynamic Review. Customers see it as the maximum for their own cost limit. $0.01 to $100.00.</span></div>
 <div class="field"><label for="tl">Token limit for a run on a workspace's own key</label><input class="input" id="tl" value="4,000,000"><span class="hint">100,000 to 100,000,000</span></div></div></section>
 <section class="card"><h2>Dynamic Review</h2>
 <div class="check on"><span class="box"><i class="ic ic-check"></i></span><span>Allow Dynamic Review on this instance<span class="sub">A read only agent explores the repository around the change.</span></span></div>

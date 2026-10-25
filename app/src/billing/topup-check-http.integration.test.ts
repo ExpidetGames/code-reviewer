@@ -299,7 +299,7 @@ describe("Check payment", () => {
 
     const response = await t.check(intent.id, await t.person("owner"));
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "provider_unavailable" });
     expect(await credits(t)).toEqual([]);
     expect(await t.intents.get(intent.id)).toMatchObject({ state: "pending" });

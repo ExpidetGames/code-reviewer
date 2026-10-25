@@ -22,7 +22,7 @@ jobs running. It is configured by environment variables:
 | `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
 | `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
 | `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). The executable is the one `scripts/fetch_opencode.py` verified against `opencode-pin.json`. Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent. The engine also needs a trusted `rg` (ripgrep) on its `PATH`, or it is not started | unset |
-| `RUNNER_DYNAMIC_MAX_COST_USD` | #290: the most one Dynamic run may cost, in USD, a plain decimal number above 0 up to 20. Unset or empty: 1.00. Anything else ends the job with `dynamic_config_invalid`. Trusted operator configuration; nothing in a claim can set it | unset |
+| `RUNNER_DYNAMIC_MAX_COST_USD` | #290: the most one Dynamic run may cost, in USD, a plain decimal number above 0 up to 20. Unset or empty: 1.00. Anything else ends the job with `dynamic_config_invalid`. Trusted operator configuration; nothing in a claim can set it. Since #689 the operator sets the maximum per review in the admin portal and the app sends it with every job (`llm.operatorMaxCostUsd`); a job that carries it ignores this variable, which stays only the fallback for a job from an app that does not send it | unset |
 | `RUNNER_DYNAMIC_CAPABILITIES` | #197, #279: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 32768}`, with `input_usd_per_mtok` and `output_usd_per_mtok`, optionally with `context_window_tokens` (#290). **A ceiling, and optional (#279):** the app sends the descriptor it read from OpenRouter's model metadata in `dynamic.capabilities` of the job, and the runner intersects it with this value (both must support the features, the smaller output limit and window win, the higher unit price wins), so a job can only narrow it. Unset or empty: the job's descriptor applies; without one, the descriptor built into the runner for exactly the shipped default model `deepseek/deepseek-v4.1-flash` (#264); for any other model the job ends with `dynamic_model_features_unsupported`, no fallback. A model with no unit prices anywhere ends with `dynamic_config_invalid`. A value that is set but unusable fails the job | unset |
 | `RUNNER_DYNAMIC_ENGINE_UID`, `RUNNER_DYNAMIC_ENGINE_GID` | #197: the numeric dedicated unprivileged user (and its own group) the engine runs as; it must exist in the image and be neither root nor the runner's own user. The Dynamic job process is the root supervisor that starts the engine as this user | `10101` and `10101` |
 | `RUNNER_DYNAMIC_PROXY_PORT`, `RUNNER_DYNAMIC_ENGINE_PORT` | #244: the two fixed loopback ports of the single Dynamic slot (model proxy, engine server), 1024 to 32767 and different. The engine user's static nft rules, installed once at container start, name exactly these; a stranger holding one makes the job fail closed | `10180` and `10181` |
@@ -89,7 +89,9 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   with `dynamic_config_invalid`. It names `cost_limit` too (#666): it reads `llm.maxCostUsd` (the cost limit of the project) and holds a
   Dynamic run to the smaller of that and `RUNNER_DYNAMIC_MAX_COST_USD` (`stoppedEarly: project_cost_limit` when the project's is
   the smaller), and a Diff run sends no further model request once its calls cost that much (`diff_cost.py`, the result code
-  `cost_limit_reached`). A runner that cannot run a
+  `cost_limit_reached`). It names `operator_cost_limit` too (#689): it reads `llm.operatorMaxCostUsd`, the most one review may cost
+  as the operator set it in the admin portal, and holds a review of either kind to the smaller of that and `llm.maxCostUsd`; a job
+  that carries it ignores `RUNNER_DYNAMIC_MAX_COST_USD`. A runner that cannot run a
   kind is never handed such a job by the app; a Dynamic job that arrives anyway is refused locally and
   never run by PR-Agent.
 - **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
@@ -256,7 +258,7 @@ refused with its stable code; the runner never falls back to PR-Agent or to Diff
 unchanged. An unknown kind, a Dynamic job without its `dynamic`/`base` fields, or a Diff job that
 carries Dynamic options is an `invalid_job`.
 
-`llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
+`llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent (the app decides it for every job since #689, from the context window of the model; no setting names it). It
 sets `config.custom_model_max_tokens` (used for a model PR-Agent does not know) and
 `config.max_model_tokens` (the upper bound PR-Agent applies to every model, default 32,000), both
 to the same value; without `maxTokens` PR-Agent's own values stay. The value also applies to the

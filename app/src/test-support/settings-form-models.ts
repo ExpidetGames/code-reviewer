@@ -77,6 +77,8 @@ export function ownModel(
     mode?: "project" | "global";
     overrides?: SettingsFormModel["overrides"];
     inherited?: ReviewSettings;
+    /** The operator's maximum per review in cents (#689); default 1.00 USD. */
+    operatorMaxCostCents?: number;
   } = {},
 ): SettingsFormModel {
   const inherited = options.inherited ?? BUILT_IN;
@@ -94,6 +96,7 @@ export function ownModel(
       ]),
     ) as SettingsFormModel["sources"],
     cost: estimateReviewCost(effective),
+    operatorMaxCostCents: options.operatorMaxCostCents ?? 100,
     managed: false,
     catalog: null,
     lastSaved: null,
@@ -182,6 +185,7 @@ export function managedModel(
       Object.keys(BUILT_IN).map((field) => [field, "built_in"]),
     ) as SettingsFormModel["sources"],
     cost: null,
+    operatorMaxCostCents: 100,
     managed: true,
     catalog: {
       choices: options.choices ?? CHOICES,
@@ -206,6 +210,7 @@ export function untouchedGlobalView(): GlobalSettingsView {
     ) as GlobalSettingsView["sources"],
     cost: estimateReviewCost(BUILT_IN),
     modelManagedByInstance: false,
+    operatorMaxCostCents: 100,
     builtIn: BUILT_IN,
     updatedAt: null,
     updatedBy: null,

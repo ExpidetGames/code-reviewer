@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 "use client";
-// The "Limits" section of the settings form (#656, #666): the cost a review may reach before it stops, and (for a Diff Review) how
-// much of a pull request the model reads. An empty field on a project follows the workspace default, and the field says which
-// one that is. The runner enforces the cost limit (a Dynamic Review is wrapped up with the findings it has, a Diff Review sends
-// no further request); no rate and no markup is named.
-import { REVIEW_SETTING_LIMITS } from "../settings.ts";
+// The "Limits" section of the settings form (#656, #666, #689): the cost a review may reach before it stops. The most it can be
+// is the maximum per review that code-review.com sets, which the field shows ("Max $1.00") and which an empty field means. An
+// empty field on a project follows the workspace default, and the field says which one that is. The runner enforces the cost
+// limit (a Dynamic Review is wrapped up with the findings it has, a Diff Review sends no further request); no rate and no
+// markup is named. There is no token budget: the app decides how much of a pull request the model reads.
 import { costLimitUsdOf, type ReviewCostGuard } from "../cost.ts";
 import { CostSummary } from "./cost-summary.tsx";
+import { formatDollars } from "./messages.ts";
 import {
   SettingsCard,
   SettingsTextField,
@@ -15,38 +16,44 @@ import {
   type SettingsFieldsetProps,
 } from "./settings-fields.tsx";
 
-export function tokenBudgetHint(): string {
-  const { min, max } = REVIEW_SETTING_LIMITS.maxTokens;
-  return `How much of a pull request the model reads in one go. Between ${min.toLocaleString("en-US")} and ${max.toLocaleString("en-US")} tokens.`;
-}
-
 /** A cost limit as a sentence part: "$2.00". */
 export function describeCostLimit(cents: number): string {
   return `$${costLimitUsdOf({ maxCostCents: cents }).toFixed(2)}`;
 }
 
-const NO_LIMIT = "No limit";
+/** What the empty field means and shows: up to the maximum, "Max $1.00". */
+export function maxCostPlaceholder(maximumCents: number): string {
+  return `Max ${formatDollars(maximumCents)}`;
+}
 
 /**
- * What the cost field does: a review stops when it reaches the amount. A Diff Review checks it between model requests (#666),
- * so a single request can exceed it. The instance may enforce a lower limit of its own, which the field does not show. An
- * empty field is the workspace default, or no limit of the customer's own where there is none. No rate and no markup is named.
+ * What the cost field does: a review stops when it reaches the amount, and never costs more than the maximum. A Diff Review
+ * checks it between model requests (#666), so a single request can exceed it. An empty field is the workspace default, or up
+ * to the maximum where there is none. A limit above the maximum is cut to it, and the field says so. No rate and no markup is
+ * named.
  */
 export function costLimitHint(
   mode: "project" | "global",
   inherited: number | null | undefined,
-  diff = false,
+  maximumCents: number,
+  options: { diff?: boolean; saved?: number | null } = {},
 ): string {
-  const start = "A review stops when it reaches this amount.";
-  const note = diff
+  const maximum = formatDollars(maximumCents);
+  const note = options.diff
     ? " For a Diff Review the limit is checked between model requests, so a single request can exceed it."
     : "";
-  const instance = " code-review.com may enforce a lower limit.";
+  const start = `A review stops when it reaches this amount, at most ${maximum}.${note}`;
+  const capped =
+    options.saved !== null &&
+    options.saved !== undefined &&
+    options.saved > maximumCents
+      ? ` The saved limit of ${formatDollars(options.saved)} is above the maximum, so reviews stop at ${maximum}.`
+      : "";
   if (mode === "global")
-    return `${start}${note}${instance} Leave empty for no limit of your own.`;
+    return `${start}${capped} Leave empty for up to ${maximum}.`;
   if (inherited === null || inherited === undefined)
-    return `${start}${note}${instance} Leave empty for no limit of your own; the workspace sets none.`;
-  return `${start}${note}${instance} Leave empty to use the workspace default (${describeCostLimit(inherited)}).`;
+    return `${start}${capped} Leave empty for up to ${maximum}; the workspace sets no limit.`;
+  return `${start}${capped} Leave empty to use the workspace default (${describeCostLimit(inherited)}).`;
 }
 
 export function LimitsFieldset({
@@ -56,58 +63,45 @@ export function LimitsFieldset({
   disabled,
   handlers,
   cost,
-  showTokenBudget,
+  diff,
 }: SettingsFieldsetProps & {
   /** The estimate of a Diff Review on the workspace's own model; null when there is none. */
   cost: ReviewCostGuard | null;
-  /** The token budget belongs to a Diff Review only: a Dynamic Review is bound by its own window. */
-  showTokenBudget: boolean;
+  /** The review kind is Diff Review: its limit is checked between requests, and the estimate is the one of a Diff Review. */
+  diff: boolean;
 }) {
-  const origin = (name: "maxCostCents" | "maxTokens", label: string) =>
-    settingsOrigin({
-      model,
-      state,
-      name,
-      label,
-      onReset: () => handlers.reset(name),
-    });
+  const maximumCents = model.operatorMaxCostCents;
+  const inherited = model.inherited.maxCostCents;
   return (
     <SettingsCard title="Limits" disabled={disabled}>
       <SettingsTextField
         name="maxCostCents"
         label="Cost limit per review (USD)"
-        hint={costLimitHint(
-          model.mode,
-          model.inherited.maxCostCents,
-          showTokenBudget,
-        )}
+        hint={costLimitHint(model.mode, inherited, maximumCents, {
+          diff,
+          saved: model.effective.maxCostCents ?? null,
+        })}
         error={errors.maxCostCents}
-        origin={origin("maxCostCents", "Cost limit per review")}
+        origin={settingsOrigin({
+          model,
+          state,
+          name: "maxCostCents",
+          label: "Cost limit per review",
+          onReset: () => handlers.reset("maxCostCents"),
+        })}
         value={state.values.maxCostCents}
         onChange={(value) => handlers.setText("maxCostCents", value)}
         inputMode="decimal"
         placeholder={
           model.mode === "project" &&
-          model.inherited.maxCostCents !== null &&
-          model.inherited.maxCostCents !== undefined
-            ? describeCostLimit(model.inherited.maxCostCents)
-            : NO_LIMIT
+          inherited !== null &&
+          inherited !== undefined
+            ? describeCostLimit(Math.min(inherited, maximumCents))
+            : maxCostPlaceholder(maximumCents)
         }
       />
-      {showTokenBudget ? (
-        <SettingsTextField
-          name="maxTokens"
-          label="Token budget"
-          hint={tokenBudgetHint()}
-          error={errors.maxTokens}
-          origin={origin("maxTokens", "Token budget")}
-          value={state.values.maxTokens}
-          onChange={(value) => handlers.setText("maxTokens", value)}
-          inputMode="numeric"
-        />
-      ) : null}
       {/* A workspace on the operator's key does not know the model, so there is no estimate for it to read. */}
-      {showTokenBudget && !model.managed ? <CostSummary cost={cost} /> : null}
+      {diff && !model.managed ? <CostSummary cost={cost} /> : null}
     </SettingsCard>
   );
 }

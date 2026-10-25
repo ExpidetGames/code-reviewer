@@ -13,6 +13,7 @@ import {
   stepIndex,
   stepsOf,
   type Job,
+  REPOSITORY,
 } from "./workflow-support.ts";
 
 const source = readText(".github/workflows/rollback-production.yml");
@@ -43,9 +44,7 @@ describe("the production rollback workflow", () => {
   it("has one job, for this repository and the main branch only, in the environment production", () => {
     expect(Object.keys(workflow.jobs)).toHaveLength(1);
     const condition = String(job.if);
-    expect(condition).toContain(
-      "github.repository == 'ExpidetGames/code-reviewer'",
-    );
+    expect(condition).toContain(`github.repository == '${REPOSITORY}'`);
     expect(condition).toContain("github.ref == 'refs/heads/main'");
     expect(condition.match(/github\.ref\b/g)).toHaveLength(1);
     expect(job.environment).toBe("production");

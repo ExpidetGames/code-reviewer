@@ -1,9 +1,9 @@
 # Review settings
 
 What a review can be tuned by, with sensible built-in values, global defaults for the whole workspace
-and overrides per project. The settings end up in the runner job (`llm.model`, `llm.maxTokens`, `env`)
+and overrides per project. The settings end up in the runner job (`llm.model`, `env`)
 through one pure function. On a workspace whose key mode is `managed` (the operator's own key, `src/llm/README.md`)
-the model, token budget and Dynamic model are stored but **not used**: the instance chooses the model, and the form
+the model and Dynamic model are stored but **not used**: the instance chooses the model, and the form
 shows a note instead of those fields (#276).
 
 ## Layers
@@ -21,19 +21,18 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                                                                                                                 | Built-in value                                 | Limits                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `provider`          | The provider of `model` (#430): a provider of the registry (`src/llm/providers/`), stored by its id. A workspace default that a project may override. Own key mode only | the default provider (`openrouter`)            | an id of the registry (`PROVIDER_UNKNOWN` otherwise)             |
-| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                  | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                               | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                                                                                                                  | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                                                                                                                      | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                                                                              | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                      | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                            | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                          | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                    | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                             | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
+| Field               | Meaning                                                                                                                                                                 | Built-in value                                 | Limits                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------- |
+| `provider`          | The provider of `model` (#430): a provider of the registry (`src/llm/providers/`), stored by its id. A workspace default that a project may override. Own key mode only | the default provider (`openrouter`)            | an id of the registry (`PROVIDER_UNKNOWN` otherwise) |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`)                                                  | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                       |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                                                                               | none                                           | same pattern                                         |
+| `extraInstructions` | Project rules for the model, free text                                                                                                                                  | none                                           | 4000 characters, no control characters               |
+| `maxFindings`       | The most findings one review lists                                                                                                                                      | 5                                              | 1 to 30                                              |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                                                                      | on                                             | boolean                                              |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                                                                            | off                                            | boolean                                              |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                                                                          | on                                             | boolean                                              |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                                                                    | on                                             | boolean                                              |
+| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                                                                             | `["review"]`                                   | a subset of `["review"]`, no duplicates              |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -43,15 +42,24 @@ stored text that is not JSON at all reads as no settings (a `[db] APP_SETTING_UN
 damaged or hand-edited data cannot make a review fail, the project list or a page. The next save
 replaces it.
 
-The token budget must fit into the context window of the models the saved settings would use (model and
-fallback model, counted in the model's own tokens, only for models the price table knows):
-otherwise the save is refused with `EXCEEDS_MODEL_CONTEXT` on `maxTokens` (or on the model, when the
-request only changed the model). A combination that a later change of another layer made too large is
-not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI. **For a workspace on the operator's key**
-(key mode `managed`, #280) none of this applies: the stored model is not the one that runs and the user does not know
-the one that does, so the save does not check `maxTokens` against a model and `cost.exceedsContext` is empty; the claim
-cuts the budget to the window of the catalog entry's model (`src/model-catalog/README.md`, "The token budget of a managed
-job").
+**There is no token budget setting (#689).** How much of a pull request the model reads in one go used to be the
+setting `maxTokens` ("Token budget", Diff Review only). It is gone, everywhere (form, API, admin, docs): the claim decides it
+for every job from the context window of the model (`src/model-catalog/token-budget.ts`, `reviewTokenBudget`: 100 000, or the
+window when that is smaller) and sends it as `llm.maxTokens`, so chunking and leaving files out behave as they did for a
+workspace that never changed the setting. A request that carries `maxTokens` is refused as an unknown field (`400
+UNKNOWN_FIELD`, `field` is the name, never a value), and a stored `maxTokens` is read by nothing (`parseStoredOverrides` knows
+the fields of the table above only); it stays in the stored JSON, and the next save of a layer leaves it out. There is no
+migration. The cost guard no longer lists models whose window is smaller than the budget (`cost.exceedsContext`) and a save
+is no longer refused with `EXCEEDS_MODEL_CONTEXT`: the budget is cut to the window when a review starts.
+
+**The most a review may cost (#689).** The operator sets "Maximum cost per review (USD)" in the admin portal (General, Limits;
+the instance setting `review_max_cost_cents`, `operator-cost-limit.ts`; 1.00 USD until it is set). It holds for both review
+kinds and is the customers' maximum: the cost limit of a workspace or a project (`maxCostCents`) can not be saved above it
+(`400 EXCEEDS_OPERATOR_MAXIMUM` on `maxCostCents` with `maximumCents` beside the code), and every view carries it as
+`operatorMaxCostCents` for the form to show ("Max $1.00" as the placeholder, and "up to the maximum" for an empty field).
+A limit that is already stored and above a maximum lowered since stays stored and is not blamed on a save that sends it
+back unchanged; the lower maximum wins when a review runs (`src/runner-api/job-cost-limit.ts`), and the form says that the
+saved limit is cut to it.
 
 **The quality level `modelTier` is gone (#434).** The tiers Low, Medium and High were turned into catalog entries
 (`20261018170000_migrate_model_tiers_to_catalog.ts`, `src/model-catalog/README.md`, "Migrated from the tiers") and are no
@@ -79,7 +87,7 @@ operator's and the workspace never sees them (`src/model-catalog/README.md`):
   gets them back if it returns to its own key.
 - **The form** shows the catalog chooser in place of the provider, model, fallback model, Dynamic model, model
   suggestions and cost estimate (see "The settings form" below); the Low/Medium/High choice of #283 is gone from it
-  (#433, and the setting itself with #434). The token budget stays. The form reads everything from the view (`managed`, `catalogChoices`), so a save that
+  (#433, and the setting itself with #434). There is no token budget (#689). The form reads everything from the view (`managed`, `catalogChoices`), so a save that
   changes the key mode adapts the next answer.
 - **The instance admin is not special inside a workspace (decision).** An instance admin who is a member of a managed
   workspace gets the same stripped view and the same refusal as its other members: the view depends on the workspace's
@@ -176,7 +184,7 @@ valid. Two families sit side by side and only the one that matches the workspace
 
 `ui/settings-form.tsx` shows its fields in four sections, as tabs: **Review** (the review kind and its skill, the review
 verdict, then the review options), **LLM** (`ui/llm-fieldset.tsx`), **Trigger** (`ui/when-fieldset.tsx`: when the reviewer
-starts) and **Limits** (`ui/limits-fieldset.tsx`: the cost limit of a review, and for a Diff Review the token budget with its
+starts) and **Limits** (`ui/limits-fieldset.tsx`: the cost limit of a review with the maximum the operator set, and for a Diff Review its
 cost estimate). The workspace defaults page (Settings, Review defaults) is the same form (#676): it has the same sections, the
 kind, the verdict, the Dynamic provider and model (a catalog entry per kind on the operator's key) as workspace defaults, and no
 review skill (the skill stays a project's). A refused save opens the first section with a problem and focuses its first marked field; a problem in a field
@@ -246,20 +254,20 @@ the Review kind card (Dynamic Review) show depends on the key mode of the worksp
 
 ## From settings to a runner job
 
-`toRunnerSettings(settings)` (`runner-settings.ts`) returns `{ llm: { model, maxTokens }, env, fallbackModels }`:
+`toRunnerSettings(settings)` (`runner-settings.ts`) returns `{ llm: { model }, env, fallbackModels }`:
 
-| Setting              | Runner job                                                                                                                                                                                                        |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`, `maxTokens` | `llm.model`, `llm.maxTokens` (the provider and the key come from the LLM configuration, `src/llm`)                                                                                                                |
-| `extraInstructions`  | `PR_REVIEWER__EXTRA_INSTRUCTIONS`, `PR_DESCRIPTION__...`, `PR_CODE_SUGGESTIONS__...`, `PR_QUESTIONS__...` (left out when empty)                                                                                   |
-| `maxFindings`        | `PR_REVIEWER__NUM_MAX_FINDINGS`                                                                                                                                                                                   |
-| `largePrChunking`    | `PR_REVIEWER__ENABLE_LARGE_PR_CHUNKING=true` (left out when off: PR-Agent's own value is off)                                                                                                                     |
-| `inlineKeyIssues`    | `PR_REVIEWER__INLINE_KEY_ISSUES=true` (left out when off: PR-Agent's own value is off)                                                                                                                            |
-| `fallbackModel`      | `fallbackModels` (in the contract, but the app **does not send it** in the MVP: no fallback chain is decided)                                                                                                     |
-| triggers, commands   | nothing: the app is the only trigger. The webhook handler's trigger policy asks `isAutomaticReviewEnabled(settings, "opened" or "updated")` (CR-31) and the comment handler `isCommandAllowed(settings, command)` |
+| Setting             | Runner job                                                                                                                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`             | `llm.model` (the provider and the key come from the LLM configuration, `src/llm`; `llm.maxTokens` is the claim's since #689)                                                                                      |
+| `extraInstructions` | `PR_REVIEWER__EXTRA_INSTRUCTIONS`, `PR_DESCRIPTION__...`, `PR_CODE_SUGGESTIONS__...`, `PR_QUESTIONS__...` (left out when empty)                                                                                   |
+| `maxFindings`       | `PR_REVIEWER__NUM_MAX_FINDINGS`                                                                                                                                                                                   |
+| `largePrChunking`   | `PR_REVIEWER__ENABLE_LARGE_PR_CHUNKING=true` (left out when off: PR-Agent's own value is off)                                                                                                                     |
+| `inlineKeyIssues`   | `PR_REVIEWER__INLINE_KEY_ISSUES=true` (left out when off: PR-Agent's own value is off)                                                                                                                            |
+| `fallbackModel`     | `fallbackModels` (in the contract, but the app **does not send it** in the MVP: no fallback chain is decided)                                                                                                     |
+| triggers, commands  | nothing: the app is the only trigger. The webhook handler's trigger policy asks `isAutomaticReviewEnabled(settings, "opened" or "updated")` (CR-31) and the comment handler `isCommandAllowed(settings, command)` |
 
 The result holds only `PR_*` variables the runner lets through (`RUNNER_ENV_KEY_PATTERN`, defined in
-`src/runner-api/contract.ts`, is the runner's own allowlist and the one in the contract file) and the two `llm` fields. It never receives the LLM key or a Git token, so it cannot
+`src/runner-api/contract.ts`, is the runner's own allowlist and the one in the contract file) and the `llm` field. It never receives the LLM key or a Git token, so it cannot
 contain them. The names are PR-Agent 0.47.0's: `runner-settings.test.ts` reads
 `fixtures/pr-agent-0.47.0-configuration.excerpt.toml` (verbatim lines of that release's
 `configuration.toml`) and checks that every variable exists there with the kind of value we send, and
@@ -290,14 +298,12 @@ behaviour for free text again (next section): the table in `runner-settings.test
   always sent (`maxFindings`, project rules, switches that are on) cannot be changed by the repository
   file. To give the repository file the last word, the runner would need to apply these options as typed
   settings (`get_settings().set(...)`) instead of environment variables.
-- **`llm.maxTokens` is not yet the token budget.** The runner passes it as `config.custom_model_max_tokens`
+- **`llm.maxTokens` is the token budget, decided by the claim (#689).** The runner passes it as `config.custom_model_max_tokens`
   (the context window of a model PR-Agent does not know). PR-Agent then clamps that to
   `config.max_model_tokens`, which is 32000 unless set (`algo/token_budget.py`, `get_max_tokens`). The
-  runner has to set `CONFIG__MAX_MODEL_TOKENS` from `llm.maxTokens` as well, otherwise a budget above
-  32000 has no effect.
-- `LLM_MAX_TOKENS` (`src/llm`) is not used here: the budget is a review setting now. It stays as the
-  instance's hint for the context window of a model PR-Agent does not know (`contextWindowTokens`), and
-  the budget of a review replaces it in a job.
+  runner sets `CONFIG__MAX_MODEL_TOKENS` from `llm.maxTokens` as well, so a budget above 32000 has effect.
+- `LLM_MAX_TOKENS` (`src/llm`) is the instance's hint for the context window of a model the provider's metadata does not state
+  (`contextWindowTokens`); on a workspace's own key the claim cuts the review's token budget to it (#689).
 
 **The built-in model is visible to members.** The built-in value of `model` is the instance's `LLM_MODEL` (or the
 recommended default), and a member sees it in this form as "built-in value" (decided with #144: a model name is no
@@ -323,7 +329,7 @@ Flash at 0.034 (0.035 measured on average) and for Claude Sonnet 5.5 at 0.114 US
 one large review that was measured (0.1004 USD): Sonnet is the quality alternative for a single project and
 shows the warning. `upperUsd` of an estimate is the most a review can cost with the model: the whole
 budget as the prompt, and every call that chunking a large pull request allows (three); it is shown
-and never warns. `exceedsContext` lists the models whose context window is smaller than the budget.
+and never warns. The budget it assumes is the one the app uses for every review (#689, `DEFAULT_REVIEW_TOKEN_BUDGET`).
 
 ## Routes
 
@@ -540,18 +546,18 @@ the estimated cost sits in the Model card and resetting the whole project is a s
 whose confirmation is a dialog. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch`
 before sending, so a
 wrong value is named next to its field with a sentence from `ui/messages.ts` (a code is never shown);
-the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT`, and the first marked
+the answer of the server is shown the same way, including `EXCEEDS_OPERATOR_MAXIMUM` (which names the maximum), and the first marked
 field takes the focus. The estimated
 cost updates while typing (`estimateReviewCost`) and shows the `above_limit` and `cost_unknown`
-warnings and a token budget above the context window; warnings never block a save. The **fallback
-model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again. For a project, the reset asks for a confirmation first; the workspace-wide reset is a danger zone on `/settings/advanced` (an empty patch through the same global route, `ui/reset-defaults.tsx`). A project form has a fourth card, **Review kind** (#200, `ui/review-kind-fieldset.tsx`), above the others
+warnings; warnings never block a save. The **fallback
+model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning . A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again. For a project, the reset asks for a confirmation first; the workspace-wide reset is a danger zone on `/settings/advanced` (an empty patch through the same global route, `ui/reset-defaults.tsx`). A project form has a fourth card, **Review kind** (#200, `ui/review-kind-fieldset.tsx`), above the others
 because they follow its choice: exactly one of Diff Review and Dynamic Review (a radio group, never two
 checkboxes). With Dynamic Review chosen it holds the Dynamic model (a default, not an allow-list;
 `messages.ts` names a bad one, and "Reset to default" puts the built-in model back) and the review skill
 (`ui/skill-editor.tsx`): the shipped skill is shown
 read-only with its id, version and SHA-256, "Edit skill" starts an override from that text, "Reset review
 skill to default" stages the shipped skill again until Save, and a counter shows the UTF-8 bytes against
-the 16 KiB limit. The Model card (model, fallback model, token budget and the cost estimate), the chunking
+the 16 KiB limit. The Model card (model, fallback model and the cost estimate), the chunking
 and inline switches and the project rules are PR-Agent's and are not shown for Dynamic Review; their values
 stay in the form and are kept when the person switches back (a problem in a field the selected kind does not
 show is reported on the card, which says which kind to choose to see it). Dynamic Review has no cost

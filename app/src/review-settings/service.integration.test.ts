@@ -14,7 +14,7 @@ import {
   TEST_DEFAULT_SKILL,
   TEST_MODEL,
 } from "../test-support/review-settings-harness.ts";
-import { DEFAULT_DYNAMIC_MODEL, DEFAULT_MAX_TOKENS } from "./settings.ts";
+import { DEFAULT_DYNAMIC_MODEL } from "./settings.ts";
 
 async function refusal(
   promise: Promise<unknown>,
@@ -35,7 +35,7 @@ describe("the cost limit of a review", () => {
     await app.projects.activate(app.first.id);
 
     const none = await app.service.getProjectSettings(app.first.id);
-    await app.service.updateGlobalSettings({ maxCostCents: 200 }, "octocat");
+    await app.service.updateGlobalSettings({ maxCostCents: 80 }, "octocat");
     const inherited = await app.service.getProjectSettings(app.first.id);
     const own = await app.service.updateProjectSettings(app.first.id, {
       maxCostCents: 50,
@@ -43,12 +43,12 @@ describe("the cost limit of a review", () => {
     const back = await app.service.updateProjectSettings(app.first.id, {});
 
     expect(none.effective.maxCostCents).toBeNull();
-    expect(inherited.effective.maxCostCents).toBe(200);
+    expect(inherited.effective.maxCostCents).toBe(80);
     expect(inherited.sources.maxCostCents).toBe("global");
-    expect(inherited.inherited.maxCostCents).toBe(200);
+    expect(inherited.inherited.maxCostCents).toBe(80);
     expect(own.effective.maxCostCents).toBe(50);
     expect(own.sources.maxCostCents).toBe("project");
-    expect(back.effective.maxCostCents).toBe(200);
+    expect(back.effective.maxCostCents).toBe(80);
   });
 });
 
@@ -85,7 +85,6 @@ describe("the global defaults", () => {
 
     expect(view.overrides).toEqual({});
     expect(view.effective.model).toBe(TEST_MODEL);
-    expect(view.effective.maxTokens).toBe(DEFAULT_MAX_TOKENS);
     expect(view.effective.largePrChunking).toBe(true);
     expect(view.updatedAt).toBeNull();
     expect(Object.values(view.sources)).toEqual(
@@ -136,16 +135,16 @@ describe("the global defaults", () => {
   it("go back to the built-in value for a field that is left out of the next save", async () => {
     const app = await setupReviewSettings();
     await app.service.updateGlobalSettings(
-      { maxFindings: 8, maxTokens: 50_000 },
+      { maxFindings: 8, inlineKeyIssues: true },
       "octocat",
     );
 
     const view = await app.service.updateGlobalSettings(
-      { maxTokens: 60_000 },
+      { inlineKeyIssues: false },
       "hubot",
     );
 
-    expect(view.overrides).toEqual({ maxTokens: 60_000 });
+    expect(view.overrides).toEqual({ inlineKeyIssues: false });
     expect(view.effective.maxFindings).toBe(5);
     expect(view.updatedBy).toBe("hubot");
   });
@@ -156,27 +155,30 @@ describe("the global defaults", () => {
     const app = await setupReviewSettings();
     await app.projects.activate(app.first.id);
     await app.service.updateGlobalSettings(
-      { maxFindings: 8, maxTokens: 50_000 },
+      { maxFindings: 8, inlineKeyIssues: true },
       "octocat",
     );
     await app.service.updateProjectSettings(app.first.id, {
       maxFindings: 3,
-      maxTokens: 70_000,
+      largePrChunking: false,
     });
 
     const view = await app.service.updateGlobalSettings({}, "hubot");
 
     expect(view.overrides).toEqual({});
     expect(view.effective.maxFindings).toBe(5);
-    expect(view.effective.maxTokens).toBe(DEFAULT_MAX_TOKENS);
+    expect(view.effective.inlineKeyIssues).toBe(false);
     expect(view.updatedBy).toBe("hubot");
     expect(await app.appSettingRows()).toMatchObject([
       { key: "review_defaults", value: "{}", updated_by: "hubot" },
     ]);
     const project = await app.service.getProjectSettings(app.first.id);
-    expect(project.overrides).toEqual({ maxFindings: 3, maxTokens: 70_000 });
+    expect(project.overrides).toEqual({
+      maxFindings: 3,
+      largePrChunking: false,
+    });
     expect(project.effective.maxFindings).toBe(3);
-    expect(project.effective.maxTokens).toBe(70_000);
+    expect(project.effective.largePrChunking).toBe(false);
   });
 
   // #434-T03
@@ -229,128 +231,153 @@ describe("the global defaults", () => {
   });
 });
 
-describe("the token budget against the context window of the model", () => {
-  // deepseek/deepseek-v3.2 has a context window of 163,840 tokens in the price table
-  it("refuses a global budget that does not fit into the model, blaming the budget", async () => {
+describe("the token budget", () => {
+  // #689-T04
+  it("is no setting: a save that sends it is refused as an unknown field and stores nothing", async () => {
     const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
 
-    const error = await refusal(
+    const global = await refusal(
       app.service.updateGlobalSettings({ maxTokens: 1_000_000 }, "octocat"),
     );
+    const project = await refusal(
+      app.service.updateProjectSettings(app.first.id, { maxTokens: 50_000 }),
+    );
 
-    expect(error.issues).toEqual([
-      { field: "maxTokens", code: "EXCEEDS_MODEL_CONTEXT" },
+    expect(global.issues).toEqual([
+      { field: "maxTokens", code: "UNKNOWN_FIELD" },
+    ]);
+    expect(project.issues).toEqual([
+      { field: "maxTokens", code: "UNKNOWN_FIELD" },
     ]);
     expect(await app.appSettingRows()).toEqual([]);
   });
 
-  it("accepts the same budget together with a model that has the room", async () => {
+  // #689-T04
+  it("stored with a project before is left in its row, read by nobody, and dropped by the next save", async () => {
     const app = await setupReviewSettings();
-
-    const view = await app.service.updateGlobalSettings(
-      { maxTokens: 500_000, model: "anthropic/claude-haiku-5.5" },
-      "octocat",
-    );
-
-    expect(view.effective.maxTokens).toBe(500_000);
-    expect(view.cost?.exceedsContext).toEqual([]);
-  });
-
-  // #280-T09
-  it("is not checked against a model for a workspace on the operator's key: it does not know the model", async () => {
-    const app = await setupReviewSettings(undefined, {
-      operatorsModels: true,
-    });
     await app.projects.activate(app.first.id);
-
-    const global = await app.service.updateGlobalSettings(
-      { maxTokens: 1_000_000 },
-      "octocat",
-    );
-    const project = await app.service.updateProjectSettings(app.first.id, {
-      maxTokens: 1_200_000,
+    await app.projects.updateSettings(app.first.id, {
+      maxFindings: 4,
+      maxTokens: 60_000,
     });
 
-    expect(global.effective.maxTokens).toBe(1_000_000);
-    expect(global.cost).toBeNull();
-    expect(project.effective.maxTokens).toBe(1_200_000);
-    expect(project.cost).toBeNull();
-  });
+    const before = await app.service.getProjectSettings(app.first.id);
+    const after = await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 4,
+      inlineKeyIssues: true,
+    });
 
-  // #280-T09
-  it("is still checked for a workspace on its own key, in the same situation", async () => {
+    expect(before.overrides).toEqual({ maxFindings: 4 });
+    expect(Object.keys(before.effective)).not.toContain("maxTokens");
+    expect(after.overrides).toEqual({ maxFindings: 4, inlineKeyIssues: true });
+  });
+});
+
+describe("the operator's maximum cost per review", () => {
+  // #689-T05
+  it("is 1.00 USD until the admin sets one, and every view carries it", async () => {
     const app = await setupReviewSettings();
     await app.projects.activate(app.first.id);
 
-    await expect(
-      app.service.updateProjectSettings(app.first.id, {
-        maxTokens: 1_200_000,
-        model: "deepseek/deepseek-v3.2",
-      }),
-    ).rejects.toMatchObject({
-      issues: [{ field: "maxTokens", code: "EXCEEDS_MODEL_CONTEXT" }],
-    });
+    expect((await app.service.getGlobalSettings()).operatorMaxCostCents).toBe(
+      100,
+    );
+    expect(
+      (await app.service.getProjectSettings(app.first.id)).operatorMaxCostCents,
+    ).toBe(100);
   });
 
-  it("refuses a model that is too small for the budget in effect and blames the model", async () => {
-    const app = await setupReviewSettings();
-    await app.service.updateGlobalSettings(
-      { maxTokens: 500_000, model: "anthropic/claude-haiku-5.5" },
-      "octocat",
-    );
+  // #689-T05
+  it("follows what the admin set, for a workspace on its own key and on the operator's key alike", async () => {
+    const app = await setupReviewSettings(undefined, { operatorsModels: true });
+    await app.setOperatorCostLimit(250);
     await app.projects.activate(app.first.id);
+
+    expect((await app.service.getGlobalSettings()).operatorMaxCostCents).toBe(
+      250,
+    );
+    expect(
+      (await app.service.getProjectSettings(app.first.id)).operatorMaxCostCents,
+    ).toBe(250);
+  });
+
+  // #689-T06
+  it("is the most a customer can save as the cost limit of the workspace defaults, named in the refusal", async () => {
+    const app = await setupReviewSettings();
 
     const error = await refusal(
-      app.service.updateProjectSettings(app.first.id, {
-        model: "deepseek/deepseek-v3.2",
-      }),
+      app.service.updateGlobalSettings({ maxCostCents: 101 }, "octocat"),
     );
 
     expect(error.issues).toEqual([
-      { field: "model", code: "EXCEEDS_MODEL_CONTEXT" },
+      {
+        field: "maxCostCents",
+        code: "EXCEEDS_OPERATOR_MAXIMUM",
+        maximumCents: 100,
+      },
     ]);
+    expect(await app.appSettingRows()).toEqual([]);
   });
 
-  it("does not know a model the table does not know, so it cannot refuse the budget for it", async () => {
-    const app = await setupReviewSettings();
-
-    const view = await app.service.updateGlobalSettings(
-      { model: "some/new-model", maxTokens: 2_000_000 },
-      "octocat",
-    );
-
-    expect(view.effective.maxTokens).toBe(2_000_000);
-    expect(view.cost?.warnings).toEqual([
-      { model: "primary", kind: "cost_unknown" },
-    ]);
-  });
-
-  it("shows a combination that a later change made too large without blaming an unrelated save", async () => {
-    const app = await setupReviewSettings();
+  // #689-T06
+  it("is the most a customer can save as the cost limit of a project, and exactly the maximum is fine", async () => {
+    const app = await setupReviewSettings(undefined, { operatorsModels: true });
+    await app.setOperatorCostLimit(300);
     await app.projects.activate(app.first.id);
-    await app.service.updateGlobalSettings(
-      { model: "anthropic/claude-haiku-5.5" },
-      "octocat",
-    );
+
+    await expect(
+      app.service.updateProjectSettings(app.first.id, { maxCostCents: 301 }),
+    ).rejects.toMatchObject({
+      issues: [
+        {
+          field: "maxCostCents",
+          code: "EXCEEDS_OPERATOR_MAXIMUM",
+          maximumCents: 300,
+        },
+      ],
+    });
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      maxCostCents: 300,
+    });
+    expect(view.effective.maxCostCents).toBe(300);
+  });
+
+  // #689-T07
+  it("lowered below a stored limit leaves the stored limit alone: it is cut when a review runs, and an unrelated save is not refused for it", async () => {
+    const app = await setupReviewSettings();
+    await app.setOperatorCostLimit(1000);
+    await app.projects.activate(app.first.id);
+    await app.service.updateGlobalSettings({ maxCostCents: 800 }, "octocat");
     await app.service.updateProjectSettings(app.first.id, {
-      maxTokens: 600_000,
+      maxCostCents: 600,
     });
 
-    await app.service.updateGlobalSettings(
-      { model: "deepseek/deepseek-v3.2" },
+    await app.setOperatorCostLimit(100);
+    const global = await app.service.getGlobalSettings();
+    const project = await app.service.getProjectSettings(app.first.id);
+    // The form sends the limit it holds again with whatever else changed.
+    const savedGlobal = await app.service.updateGlobalSettings(
+      { maxCostCents: 800, maxFindings: 7 },
       "octocat",
     );
-    const view = await app.service.getProjectSettings(app.first.id);
-    const saved = await app.service
-      .updateProjectSettings(app.first.id, {
-        maxTokens: 600_000,
-        maxFindings: 3,
-      })
-      .catch((error: unknown) => error);
+    const savedProject = await app.service.updateProjectSettings(app.first.id, {
+      maxCostCents: 600,
+      maxFindings: 2,
+    });
 
-    expect(view.cost?.exceedsContext).toEqual(["primary"]);
-    // A save that sets the budget again is asked to fix it.
-    expect(saved).toBeInstanceOf(ReviewSettingsError);
+    expect(global.effective.maxCostCents).toBe(800);
+    expect(global.operatorMaxCostCents).toBe(100);
+    expect(project.effective.maxCostCents).toBe(600);
+    expect(savedGlobal.effective.maxCostCents).toBe(800);
+    expect(savedProject.effective.maxCostCents).toBe(600);
+    // Setting another amount above the maximum is refused; one within it is fine.
+    await expect(
+      app.service.updateProjectSettings(app.first.id, { maxCostCents: 700 }),
+    ).rejects.toBeInstanceOf(ReviewSettingsError);
+    await expect(
+      app.service.updateProjectSettings(app.first.id, { maxCostCents: 100 }),
+    ).resolves.toBeDefined();
   });
 });
 
@@ -402,7 +429,6 @@ describe("the settings of a project", () => {
       extraInstructions: "Mind the migrations.",
       model: "qwen/qwen3-coder",
       inlineKeyIssues: true,
-      maxTokens: DEFAULT_MAX_TOKENS,
     });
     expect(view).toMatchObject({
       repositoryId: app.first.id,
@@ -416,7 +442,7 @@ describe("the settings of a project", () => {
     await app.projects.activate(app.first.id);
     await app.service.updateProjectSettings(app.first.id, {
       maxFindings: 2,
-      maxTokens: 50_000,
+      inlineKeyIssues: true,
     });
 
     const view = await app.service.updateProjectSettings(app.first.id, {
@@ -424,7 +450,7 @@ describe("the settings of a project", () => {
     });
 
     expect(view.overrides).toEqual({ maxFindings: 3 });
-    expect(view.effective.maxTokens).toBe(DEFAULT_MAX_TOKENS);
+    expect(view.effective.inlineKeyIssues).toBe(false);
   });
 
   it("keep a project's overrides while it is switched off", async () => {
@@ -556,7 +582,7 @@ describe("the settings of a project", () => {
     });
     await app.appSettings.set(
       "review_defaults",
-      { maxTokens: "lots", inlineKeyIssues: true },
+      { maxCostCents: "lots", inlineKeyIssues: true },
       null,
     );
 
@@ -566,7 +592,7 @@ describe("the settings of a project", () => {
     expect(view.effective).toMatchObject({
       model: "qwen/qwen3-coder",
       maxFindings: 5,
-      maxTokens: DEFAULT_MAX_TOKENS,
+      maxCostCents: null,
       inlineKeyIssues: true,
     });
   });

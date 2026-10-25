@@ -45,7 +45,7 @@ lives with the review kind, `src/review-settings/`) and `findings` of the runner
 - **`APPROVE` needs a whole review.** It is never submitted when the counts are unknown, the Dynamic review stopped at
   its cost or time limit, the result says `findings.incomplete` (the runner reports it when the validation dropped a
   finding, or, for a Diff review, when PR-Agent's own record says the run was not complete: a failed chunk, files left
-  out of the token budget, an incremental run), or the run made no model call (`usage.aiCalls`) or did not report its
+  out because the pull request did not fit the model's window, an incremental run), or the run made no model call (`usage.aiCalls`) or did not report its
   usage. A blocker that was found still requests changes. The verdict is a function of what the model reported; this
   is the part the app can check, and the docs say the rest (it can be manipulated; a human code owner is the gate).
 - **A skipped verdict leaves an earlier one in place** (fail closed) and the check run says why no verdict was

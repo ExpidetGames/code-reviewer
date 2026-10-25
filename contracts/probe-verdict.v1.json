@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/probe-verdict.v1.json",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/probe-verdict.v1.json",
   "title": "Code Reviewer capability probe, version 1",
   "description": "The capability probe of the hosted deployment (#316, #331). ProbeVerdict is the one line of JSON that the Worker image prints in its `probe` entry mode (#324, runner/README.md): which engines the container may advertise and, when `opencode` is not among them, the stable reasons of its startup self-check (docs/dynamic-review.md, 'The startup self-check'). It holds engines and stable reasons and nothing else: no path, no value of the environment, no text. The Dispatcher runs the probe in a canary VM from the golden snapshot with the flags of the hardened container spec, only when the deploy canary asks (`POST /probe`); the dispatch path runs no probe (#479). A deployment goes live only after a canary whose verdict passed (fail closed). ProbeReport is what `POST /probe` of the Dispatcher answers (authorized with the dispatcher credential as `Authorization: Bearer <token>`): the verdict as the Dispatcher read it, or the stable code of the reason no verdict was read. It is what a deploy step reads to block a release whose Dynamic canary fails. A reader ignores fields it does not know; the writer of a ProbeVerdict never adds one.",
   "version": 1,

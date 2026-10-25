@@ -106,6 +106,7 @@ function model(
     cost: estimateReviewCost(BUILT_IN),
     managed,
     catalog: null,
+    operatorMaxCostCents: 100,
     lastSaved: null,
     dynamic,
   };

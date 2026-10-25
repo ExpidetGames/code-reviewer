@@ -33,7 +33,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-REPO = "ExpidetGames/code-reviewer-playground"
+REPO = "Itegro-GmbH/code-reviewer-playground"
 BOT_LOGIN = "code-reviewer-dev-expidetgames[bot]"
 PULLS = (1, 2, 3)
 MODELS = (

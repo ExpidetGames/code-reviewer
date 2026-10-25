@@ -76,7 +76,7 @@ export function BillingReviewRow({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: result.issues,
           missing: [],
         };
@@ -115,7 +115,7 @@ export function BillingReviewRow({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: result.issues,
           missing: [],
         };
@@ -135,7 +135,7 @@ export function BillingReviewRow({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(result.code, result.status),
           issues: result.issues,
           missing: [],
         };

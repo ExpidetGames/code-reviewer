@@ -61,7 +61,7 @@ export function ReviewFieldset({
           <SettingsCheckboxField
             name="largePrChunking"
             label="Review a large pull request in chunks"
-            hint="Otherwise files that do not fit the token budget are left out."
+            hint="Otherwise files that do not fit in one go are left out."
             error={errors.largePrChunking}
             origin={origin(
               "largePrChunking",

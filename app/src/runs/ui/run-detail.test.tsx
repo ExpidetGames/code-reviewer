@@ -145,6 +145,34 @@ describe("the usage of a run", () => {
     },
   );
 
+  // #689: a Diff Review that reached the cost limit fails and posts nothing; the failure text names the limit, so the
+  // wrap-up sentences of a review that was delivered must not appear next to "No review was posted".
+  it.each(["cost_limit", "project_cost_limit"] as const)(
+    "does not say a failed run was wrapped up at its %s",
+    (stoppedEarly) => {
+      const { container } = render(
+        <RunDetail
+          workspaceSlug="acme"
+          initial={snap(
+            detail({
+              status: "failed",
+              errorCode: "cost_limit_reached",
+              errorCodeKnown: true,
+              commentUrl: null,
+              usage: { ...usage, stoppedEarly },
+            }),
+          )}
+          api={apiAnswering([])}
+        />,
+      );
+
+      const content = text(container);
+      expect(content).not.toContain("wrapped up");
+      expect(content).not.toContain("may be incomplete");
+      expect(content).not.toContain("Stopped early");
+    },
+  );
+
   // #293-T08
   it("shows nothing about stopping early for a complete run", () => {
     const { container } = render(

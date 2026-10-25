@@ -69,6 +69,12 @@ export type InstanceSettingValues = {
    */
   own_key_max_total_tokens: number;
   /**
+   * #689: the most one review may cost, in whole US cents, for both review kinds (src/review-settings/operator-cost-limit.ts). No
+   * row: the default (1.00 USD). The admin sets it within bounds; a stored value outside them reads as the default. A
+   * customer's own cost limit can only be lower, and the limit of a job is the smaller of the two.
+   */
+  review_max_cost_cents: number;
+  /**
    * The mail server (src/mail/smtp-config.ts). No row: the instance has no mail server. The password is
    * not here but in the secret store (`smtp_password`).
    */

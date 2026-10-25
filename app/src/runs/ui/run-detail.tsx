@@ -88,7 +88,9 @@ function costItem(
 
 /** What the run posted on GitHub: the text of the review, or the reason there is none to show. */
 function Findings({ run }: { run: CustomerRunDetailView }) {
-  const stoppedEarly = run.usage?.stoppedEarly ?? null;
+  // Only a review that was delivered can be "wrapped up"; a failed Diff Review at its cost limit says so in its failure text.
+  const stoppedEarly =
+    run.status === "succeeded" ? (run.usage?.stoppedEarly ?? null) : null;
   return (
     <Section title={FINDINGS_HEADING}>
       {run.reviewText !== null ? (

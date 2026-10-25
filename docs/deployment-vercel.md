@@ -381,6 +381,23 @@ Its role is exactly this, and nothing more (create a custom role and add the ide
    setting to `fra1` too, so that the two do not disagree: the Sandbox VMs and the golden snapshots are in `fra1` and
    there is no failover region (section 9).
 
+**If the repository moves to another owner** (a transfer to an organization, a rename). The repository, its Actions
+secrets and its environments move with it, and GitHub redirects the old address, but nothing in the pipeline follows
+by itself:
+
+- In the repository: every job that deploys, rolls back, snapshots or runs the nightly is guarded by
+  `github.repository == '<owner>/<name>'`. A guard that still names the old owner **skips the job without an error**, so
+  the next push to `main` deploys nothing. Change the guards in `.github/workflows/` and `REPOSITORY` in
+  `app/src/ci/workflow-support.ts`; `app/src/ci/repository-identity.test.ts` fails for each place that was missed,
+  among them the `$id` of the schemas in `contracts/` and the links in the community files.
+- Outside it, nothing in the pipeline names the owner: the Infisical identity signs in with Universal Auth (a Client
+  ID and Secret, no claim of the GitHub token is checked), Vercel and the Sandbox use the Vercel project's own OIDC token,
+  the Vercel projects deploy by the CLI and have their Git auto-deploy off, and no image is published. What can still
+  point at the old address is the Git connection in step 2 of the Vercel dashboard list (reconnect it if you keep it
+  for the display of the commit), the **branch ruleset** and the **environment `production` rule** of the repository
+  (check both after the move, as above), and the GitHub App: install it on the new owner, because an installation
+  belongs to the account that holds the repositories.
+
 
 ## 3. Environment variables
 
@@ -434,7 +451,7 @@ every secret: at least 32 characters, no white space or control characters.
 | `RUNNER_DISPATCH_MAX_RUNNING` | **set it** | no | The pool cap the App keeps to when it sends wake-ups for jobs that waited for a slot, 1 to 1000. **Must equal the Dispatcher's `DISPATCHER_MAX_RUNNING`.** Unset, the App still works (the claim enforces the Dispatcher's cap) but a freed slot wakes one waiting job at a time and the sweep wakes the Dispatcher for jobs it cannot take. |
 | `RUNNER_DISPATCH_GIVE_UP_SECONDS` | optional | no | A job that waited this long without a claim fails with `dispatch_unavailable`, when the next sweep looks at it (**up to 2 hours later than the time itself**). 60 to 604800, default **3600** in webhook mode, off in poll mode, `0` turns it off. It is also the longest a job may queue while the pool is full: set it above the queue you accept. |
 | `OPERATOR_API_TOKEN` | optional | **yes** | Switches on the operator API (`/api/operator/v1`: workspaces, entitlements and limits, usage). Unset, the API does not exist (404). At least 32 characters, different from `RUNNER_TOKEN` and `APP_SECRET`. |
-| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. For workspaces on their own key they are only the defaults a review setting can override. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the catalog entries its projects select (else the instance default entry of the kind; section 3.5), and its token budget is cut to the window of that entry's model. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
+| `LLM_MODEL`, `LLM_MAX_TOKENS` | optional | no | The instance's model and context window. `LLM_MODEL` is the default a review setting overrides; `LLM_MAX_TOKENS` is no setting, only a fallback window. A **`managed` workspace** (section 3.5) does not use them: the models of its reviews are the catalog entries its projects select (else the instance default entry of the kind; section 3.5), and what its reviews read of a pull request is cut to that entry's window. `LLM_MODEL` is an OpenRouter name, default `anthropic/claude-haiku-5.5`; a model for Dynamic jobs must be tool-capable (`dynamic-review.md`, "The model"). The LLM key is **not** an environment variable. |
 | `NATIVE_OPENCODE_PROVIDERS` | optional | no | `1`, `true` or `on` runs Dynamic reviews on OpenRouter and Anthropic through the native OpenCode path (#578, design #544): the claim carries the model entry and the price of the catalog. Default off (unset). Needs catalog models that are enabled with a confirmed price for the operator's key (admin catalog), and Worker images and runners that read `dynamic.modelEntry`. Read at every claim, so removing it takes effect on the next claim. |
 | `MODELS_DEV_URL`, `MODELS_DEV_FETCH` | optional | no | The model catalog (`app/src/models-dev/README.md`): the sweep reads the public models.dev catalog into the database once a day (when the last read is more than 23 hours old), so a new model needs no release. `MODELS_DEV_URL` names a mirror instead; `MODELS_DEV_FETCH=off` switches the read off (the catalog stays empty and nothing else changes). A failed or implausible read keeps the catalog it has; there is no cron of its own. |
 
@@ -475,7 +492,7 @@ A refusal at start names the variable, never its value (`ConfigError`: `required
 | `DISPATCHER_PROBE_REUSE_SECONDS` | optional | no | A forced probe (`POST /probe`, the deploy canary) within this time of the last answer is served from it, 0 to 600, default 60; `0` runs every one. |
 | `DISPATCHER_PROBE_TIMEOUT_SECONDS` | optional | no | How long a probe (`POST /probe`) may take, canary VM included, 30 to 600, default 150. |
 | `RUNNER_DYNAMIC_CAPABILITIES` | optional | no | Narrows the model's capabilities for Dynamic jobs and the canary: a JSON object on one line, at most 4096 characters. Normally unset (`docs/dynamic-review.md`, "The model"). Read only when `DISPATCHER_ENGINES` includes `opencode`. |
-| `RUNNER_DYNAMIC_MAX_COST_USD` | optional | no | The most one Dynamic run may cost, a plain positive decimal such as `2.5`. Unset: the Worker's default. |
+| `RUNNER_DYNAMIC_MAX_COST_USD` | optional | no | Only a fallback since #689: the maximum cost per review is set in the admin portal (General, Limits) and sent with every job. The most one Dynamic run from an app that sends none may cost, a plain positive decimal such as `2.5`. Unset: the Worker's default. |
 | `CRON_SECRET` | yes, with the snapshot | **yes** | The secret Vercel's cron sends to the reaper route (`/api/cron/reap-sandboxes`, every 5 minutes) as `Authorization: Bearer ...`. At least 32 characters, different from `RUNNER_TOKEN` and every signing secret, and **a value of its own: do not reuse the App project's `CRON_SECRET`**. The route exists only when `SANDBOX_SNAPSHOT_ID` is set. Unset, every caller gets `401` and the log warns `reaper_cron_secret_missing`: nothing stops a VM that outlived its job (section 5.5). A malformed value (short, or equal to another secret) stops the start when the snapshot is set; without the snapshot it is ignored with a warning. |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` | all three or none | **yes** (the token) | Platform access by access token. **None: the Dispatcher uses the project's own OIDC token**, which Vercel provides inside a function and which needs nothing to rotate. Prefer that. |
 
@@ -569,8 +586,8 @@ valuable key in `/ci`: it can deploy to production, which is why the environment
   again if the workspace goes back to `own`); their routes refuse a model field with `MODEL_MANAGED_BY_INSTANCE`. An entry
   that is missing, retired, of the wrong kind or outside the plan's `modelAccess`, or an entry of a provider the runner
   did not advertise, fails the job with `managed_model_unavailable`; it never moves to another entry or to `LLM_MODEL`.
-  The workspace's token budget is cut to the context window of the entry's model when the provider states one (the last
-  window read when it cannot be asked, else 100,000 tokens: it is never sent unclamped). The model ids are visible to you
+  The token budget of a job (no setting names it, #689) is 100,000 tokens, cut to the context window of the entry's model when the provider states a smaller one (the last
+  window read when it cannot be asked: it is never sent larger). The model ids are visible to you
   and the runner only: not to a workspace, not in a result (`[model]` stands where a result repeated one), a record or a
   log. The quality tiers of #280 are gone (#434): the migration turned the models you had configured for Low, Medium and High into
   released catalog entries of the same names and made the Medium ones the defaults, and `PUT /api/operator/v1/model-tiers` is

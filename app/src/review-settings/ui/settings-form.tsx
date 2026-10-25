@@ -255,7 +255,7 @@ function splitIssues(issues: readonly RequestIssue[]): {
   const fieldErrors: Errors = {};
   const general: string[] = [];
   for (const issue of issues) {
-    const text = describeIssue(issue.field, issue.code);
+    const text = describeIssue(issue.field, issue.code, issue.maximumCents);
     if (
       (REVIEW_SETTING_FIELDS as readonly string[]).includes(issue.field) ||
       (PROJECT_DYNAMIC_SETTING_FIELDS as readonly string[]).includes(
@@ -927,7 +927,7 @@ export function SettingsForm({
               disabled={disabled}
               handlers={handlers}
               cost={cost}
-              showTokenBudget={kind === "diff"}
+              diff={kind === "diff"}
             />
           </TabsContent>
         </Tabs>

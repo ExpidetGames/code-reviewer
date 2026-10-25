@@ -60,8 +60,10 @@ from code_reviewer_runner.dynamic_review.budget import (
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    diff_cost_limit,
+    diff_cost_stop_reason,
     effective_cost_limit,
-    max_cost_from_environment,
+    operator_cost_limit,
 )
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
@@ -216,6 +218,18 @@ class MeterSlot:
         self.meter: DiffCostMeter | None = None
 
 
+def _with_stop_reason(usage: Usage | None, meter: DiffCostMeter) -> Usage | None:
+    """The usage of a Diff run that was refused at its cost limit, naming the limit (#689).
+
+    The app words the failure by whose limit it was: the customer's (they can change it) or the
+    operator's maximum (they cannot). A run that was not refused for its cost is left as it is.
+    """
+    reason = meter.stop_reason
+    if usage is None or reason is None:
+        return usage
+    return replace(usage, stopped_early=reason)
+
+
 def _unreported_use(usage: Usage | None, meter: DiffCostMeter | None) -> str | None:
     """The reason of a failed Diff run whose model use PR-Agent did not measure (#363).
 
@@ -315,7 +329,12 @@ def _run_diff_job(
             # The cost of the run is what the provider states for every answer (#274), or, for a
             # provider that states none, what its usage costs by the price list (#511).
             meter, undo_meter = install_cost_meter(
-                superseded=superseded, provider=provider, max_cost_usd=job.llm.max_cost_usd
+                superseded=superseded,
+                provider=provider,
+                max_cost_usd=diff_cost_limit(job.llm.max_cost_usd, job.llm.operator_max_cost_usd),
+                stop_reason=diff_cost_stop_reason(
+                    job.llm.max_cost_usd, job.llm.operator_max_cost_usd
+                ),
             )
             patches.callback(undo_meter)
             patches.callback(lambda: _log_cache_use(capture, meter.cache_tally))
@@ -414,7 +433,7 @@ def _run_diff_job(
                 # A request was refused at the project's cost limit (#666): that is the cause,
                 # whatever PR-Agent made of the refusal.
                 code = ErrorCode.COST_LIMIT_REACHED
-            usage = probe.usage()
+            usage = _with_stop_reason(probe.usage(), meter)
             return _failure(
                 code or ErrorCode.UNKNOWN,
                 "the command raised",
@@ -453,7 +472,7 @@ def _run_diff_job(
         error_code = ErrorCode.COST_LIMIT_REACHED
     log_tail, log_truncated = capture.snapshot()
     # A failed command reports usage only when it reached the model.
-    reported = usage if ok else probe.usage()
+    reported = usage if ok else _with_stop_reason(probe.usage(), meter)
     return JobResult(
         ok=ok,
         duration_ms=_elapsed_ms(started),
@@ -477,20 +496,23 @@ def dynamic_ledger(
     environment: Mapping[str, str],
     deadline: float,
     project_max_cost_usd: Decimal | None = None,
+    operator_max_cost_usd: Decimal | None = None,
 ) -> BudgetLedger:
     """The ledger of one Dynamic run, from trusted runner configuration only (#290).
 
     The window and the unit costs are the model's (its descriptor, and a model without unit costs
-    is refused); the cost limit is the operator's (`RUNNER_DYNAMIC_MAX_COST_USD`, up to a ceiling
-    in code). The project's own cost limit (`llm.maxCostUsd` of the job, #666) can only narrow it:
-    the run is held to the smaller of the two. Nothing else of the job takes part: the project's
-    Diff "Token budget" (`llm.maxTokens`) is not the window of a Dynamic run, and the repository
-    cannot name a limit.
+    is refused); the cost limit is the operator's: the maximum per review the app sends with the
+    job (`llm.operatorMaxCostUsd`, #689), else `RUNNER_DYNAMIC_MAX_COST_USD` (up to a ceiling in
+    code) for a job from an app that does not send it. The customer's own cost limit
+    (`llm.maxCostUsd` of the job, #666) can only narrow it: the run is held to the smaller of the
+    two. Nothing else of the job takes part: the Diff token budget (`llm.maxTokens`) is not the
+    window of a Dynamic run, and the repository cannot name a limit.
     """
     # A model that cannot serve the run at all is named first, then one that cannot be priced.
     capabilities.check_required()
     max_cost, stop_reason = effective_cost_limit(
-        max_cost_from_environment(environment.get(DYNAMIC_MAX_COST_VARIABLE)), project_max_cost_usd
+        operator_cost_limit(environment.get(DYNAMIC_MAX_COST_VARIABLE), operator_max_cost_usd),
+        project_max_cost_usd,
     )
     limits = DynamicLimits(
         deadline_seconds=deadline, max_cost_usd=max_cost, cost_stop_reason=stop_reason
@@ -730,7 +752,13 @@ def _run_dynamic_job(
     if isinstance(deadline, JobResult):
         return deadline
     try:
-        ledger = dynamic_ledger(capabilities, environment, deadline, job.llm.max_cost_usd)
+        ledger = dynamic_ledger(
+            capabilities,
+            environment,
+            deadline,
+            job.llm.max_cost_usd,
+            job.llm.operator_max_cost_usd,
+        )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
     # From here on every failure says what the model calls so far cost (nothing before the first).

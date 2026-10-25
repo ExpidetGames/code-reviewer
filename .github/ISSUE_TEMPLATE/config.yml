@@ -6,5 +6,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://github.com/ExpidetGames/code-reviewer#readme
+    url: https://github.com/Itegro-GmbH/code-reviewer#readme
     about: Development setup and testing are described in the README and the docs folder.

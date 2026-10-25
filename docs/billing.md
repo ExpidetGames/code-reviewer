@@ -12,7 +12,7 @@ what to set up in Stripe, how to set the rates, in which order to go live, and h
   [0006](decisions/0006-prepaid-billing-via-stripe-managed-payments.md). The code is described in
   `app/src/billing/README.md`.
 - The hosted deployment itself (the webhook route must be reachable) is in [Deploy on Vercel](deployment-vercel.md),
-  section 3.6. 
+  section 3.6.
 
 **Every number in this guide is made up.** They are examples to show the arithmetic. The real rates are your decision.
 They are never in the repository, and they are not in this guide.
@@ -97,11 +97,15 @@ deleting and re-creating a workspace does not give a second one. It is the only 
 
 A project (or the workspace default) can set a **cost limit per review** in whole cents, 1 cent to 100 dollars (Project settings,
 Limits; #656). It is enforced where the review runs (#666), next to the instance's own limit
-(`RUNNER_DYNAMIC_MAX_COST_USD`, default 1.00 USD, which only the operator changes): a review is held to the **smaller** of the
-two. The claim sends the project's value as `llm.maxCostUsd`, only to a runner or Worker that named the claim feature
-`cost_limit`; a job that meets a caller without it runs without the field and under the operator's limit alone (the claim logs
-it), because a refused review is worse than a project limit that is not kept while a release rolls out. No limit set means
-nothing is sent and the job is the job of before.
+(the **maximum cost per review** the operator sets in the admin portal, General, Limits; 1.00 USD until it is set; #689): a
+review is held to the **smaller** of the two. The maximum is one value for Diff and Dynamic Review alike, and it is the customer's
+maximum: a limit above it can not be saved ("The maximum cost per review is $1.00"), and one saved before the operator lowered
+the maximum stays stored but is cut to it when a review runs (the settings say so). The claim sends the project's value as
+`llm.maxCostUsd` and the maximum as `llm.operatorMaxCostUsd`, only to a runner or Worker that named the claim features
+`cost_limit` and `operator_cost_limit`; a runner of the release before gets the smaller of the two in `llm.maxCostUsd`, and a
+job that meets a caller with neither runs without the fields (the claim logs it), because a refused review is worse than a
+limit that is not kept while a release rolls out. `RUNNER_DYNAMIC_MAX_COST_USD` is only the fallback of a runner whose app
+does not send the maximum.
 
 - **Dynamic Review.** The limit is the budget of the run: the run is wrapped up when a further call and a final one would not
   fit, delivers the review with the findings it has, and says so ("stopped early", on the pull request, the check run and the run
@@ -111,7 +115,7 @@ nothing is sent and the job is the job of before.
   but the wrap-up.
 - **Diff Review.** One model request is never cut short, so the limit decides about the _next_ request: once what the answers so
   far cost has reached it, the runner sends no further request (a fallback model, a retry of an unusable answer) and the run
-  ends `cost_limit_reached`. A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
+  ends `cost_limit_reached`, with `usage.stoppedEarly` naming the limit that bound (`project_cost_limit`, or `cost_limit` for the operator's maximum), so the run text says whether the customer can change it (#689). A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
   under the field (a large pull request, warned above the limit) is how a customer judges a model before choosing it. Nothing is
   refused at the start on an estimate: the estimate is a typical review, and a small pull request costs far less.
 - **Billing.** A stopped run is billed like any other run: what the calls really cost (the exact cost the runner reports, never
@@ -148,10 +152,28 @@ you to paste one into a chat or an issue.
    will not create it for an account that is not enrolled. The connection check does not prove this; the first test top-up does.
 3. **The product tax code.** The top-up is sold as one line, "Review credit", with the tax code `txcd_10105002`. Stripe
    must accept that code for your product under Managed Payments. If it refuses, the checkout is refused too.
-4. **The API key.** Create a **restricted** key with the least permissions that work. The app uses these Stripe resources:
-   customers (with their tax IDs), Checkout sessions, payment intents (read), invoices (read, for the invoice list of the
-   workspace page), webhook endpoints, and the account (the connection check reads it). It does not create refunds. Test the key with the connection check (section 5) and one
-   test top-up, and widen it only as far as a failure shows.
+4. **The API key.** Create a **restricted** key with the least permissions that work (Dashboard, Developers, API keys,
+   "Create restricted key"); everything not listed stays **None**. The app uses these Stripe resources:
+
+   | Stripe resource               | Permission | What the app does with it                                                 |
+   | ----------------------------- | ---------- | ------------------------------------------------------------------------- |
+   | Customers (and their tax IDs) | **Write**  | creates the Stripe customer of a workspace and stores its tax ID          |
+   | Checkout Sessions             | **Write**  | creates the top-up checkout (with Managed Payments)                       |
+   | PaymentIntents                | **Read**   | "Check payment", and the payment of a checkout                            |
+   | Invoices                      | **Read**   | the invoice list on the workspace page (#659)                             |
+   | Webhook Endpoints             | **Write**  | creates, lists and replaces the endpoint the admin page makes (section 5) |
+
+   The app creates no refunds. A write permission includes the read permission of the resource. These five come from the
+   calls the app makes; they are not yet confirmed by a test with a restricted key at Stripe.
+
+   **Unconfirmed: the connection check calls `GET /v1/account`.** Stripe's documentation does not say which permission a
+   restricted key needs for it. A user report names the Connect permission ("All Connect resources" set to Read), but we have
+   not confirmed that against a real account, so it is not in the table. If the check answers a restricted key with
+   `stripe_key_rejected` ("Stripe did not accept the API key") and the card shows `Stripe said: HTTP 403`, the key lacks
+   the permission for this call: add **Connect, Read** to the key and check again, and tell us whether that was it. A secret
+   key (`sk_`) always works, but can do everything in the account, so prefer the restricted key. Test the key with the
+   connection check (section 5) and one test top-up, and widen it only as far as a failure shows.
+
 5. **Test and live keys are separate.** A key starting `sk_test_` or `rk_test_` is the test environment, a key starting
    `sk_live_` or `rk_live_` is live. The admin page shows the environment it read from the prefix. The app sends events
    only to the environment of its key: a test event at a live instance, or the reverse, is refused.
@@ -247,9 +269,41 @@ billing off (reviews then run without charge). **Before you deploy an update tha
 ### Changing the Stripe key
 
 - A new key of the same environment must pass the connection check before it replaces the working one.
-- A key of the **other environment** is refused while billing is on (it would take the webhook secret with it). Switch
-  billing off first, change the key, create the endpoint again, check, and switch on.
+- A key of the **other environment** is refused while billing is on, before Stripe is asked (it would take the webhook
+  secret with it): the page says to switch billing off first (`billing_disable_first`).
 - You cannot remove a credential while billing is on.
+
+### From test to live
+
+A test key and a live key are two separate Stripe setups: the key, the webhook endpoint and its signing secret all belong
+to one environment. To go from test to live, in this order:
+
+1. **Switch billing off** (Billing, the switch card). Reviews run without charge meanwhile.
+2. **Save the live key** (`sk_live_` or `rk_live_`) in **Stripe credentials**. Because the environment changes, the app
+   forgets the webhook secret and the endpoint of the test setup and clears the connection check.
+3. **Create the webhook endpoint** again. It is made at Stripe in live mode, with its own signing secret. (If the live
+   account already has an endpoint of this address, use **Recreate**, or enter its secret.)
+4. **Check connection.** It must pass for `live`. If it does not, the card says why (below).
+5. **Switch billing on.**
+
+If the live key fails the check, the message names the reason and, where Stripe gave them, its HTTP status, error type and
+code (`Stripe said: HTTP 400, invalid_request_error`):
+
+| Message                                                     | Meaning                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stripe did not accept the API key                           | Wrong, revoked or too narrow a key (section 3, step 4), or a key of the other environment.                                                                                                                                                                         |
+| This Stripe account is **not enabled for Managed Payments** | Stripe refuses the request that asks for Managed Payments, twice in a row, and takes the same call without it (rule below). Enable it for the **live** account (Dashboard, Settings, Managed Payments); test and live are enabled separately.                                                                    |
+| Stripe could not be reached / failed to answer              | Stripe timed out or failed; try again. The reason is in the log: `billing_stripe_check_failed code=<code> reason=<client code> http=<status> stripe_type=<type> stripe_code=<code>` (fields Stripe did not give are left out; never a key or an answer of Stripe). |
+
+**When the check says "not enabled for Managed Payments".** Only a 400 `invalid_request_error` from Stripe can be read that
+way, and only if the call with the Managed Payments preview flag fails a second time in the same way after the same call
+without the flag has passed. A 401, 403, 404, 409 (also `lock_timeout`), 402, 422, 429 or 5xx is reported as what it is
+(`stripe_key_rejected`, `stripe_rate_limited`, `stripe_unavailable`) and never retried without the flag; a repeat with the
+flag that passes makes the check pass. The status, type and code stay on the card. A Stripe that retires the syntax of the
+preview header would look the same as a missing enrollment; the code and type on the card then tell you which it is.
+
+The admin page never answers with HTTP 502 or 504: a proxy in front of the app (Cloudflare) replaces the body of those two
+with its own page and the reason would be lost. A failure of Stripe is a 503 with the usual `{ "error": <code> }` body.
 
 ## 6. The go-live order
 
@@ -392,6 +446,7 @@ Billing page when a legitimate burst trips it. Never tell a workspace the number
 | `billing_webhook_failed code=<code>`, `billing_webhook_adapter_failed`                        | The webhook failed and answered 500. Stripe will deliver again.                                                                     |
 | `billing_webhook_credit_pending`                                                              | A refund or dispute arrived before its credit. Answered 503, Stripe delivers again.                                                 |
 | `billing_webhook_applied outcome=<code>`                                                      | A normal delivery.                                                                                                                  |
+| `billing_stripe_check_failed code=<code> ...`                                                 | A call to Stripe in the admin portal failed: codes and numbers only.                                                                |
 | `[billing] TOPUP_STARTED workspace=<id> result=<code>`                                        | A top-up was started. Never an amount.                                                                                              |
 | `[billing] TOPUP_CHECKED workspace=<id> result=<code>`                                        | "Check payment" was used.                                                                                                           |
 | `billing_review_resolved provider=<p> event=<id> actor=<user> entry=<id\|none>`               | A review row was closed.                                                                                                            |

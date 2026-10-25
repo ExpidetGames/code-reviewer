@@ -37,7 +37,9 @@ export const STOPPED_EARLY_TEXT: Record<StoppedEarly, string> = {
 };
 
 /** The model, tokens, calls and cost the runner reported; a text from outside is rendered as text. */
-export function usageItems(run: Pick<RunDetailView, "usage" | "costHidden">) {
+export function usageItems(
+  run: Pick<RunDetailView, "usage" | "costHidden" | "status">,
+) {
   const usage = run.usage;
   if (usage === null) return { model: [], consumption: [] };
   const calls = usage.aiCalls === 1 ? "model call" : "model calls";
@@ -74,7 +76,8 @@ export function usageItems(run: Pick<RunDetailView, "usage" | "costHidden">) {
                 ),
             },
           ]),
-      ...(usage.stoppedEarly === null
+      // Only a delivered review was wrapped up; a failed run at its cost limit is explained by its failure text.
+      ...(usage.stoppedEarly === null || run.status !== "succeeded"
         ? []
         : [
             {

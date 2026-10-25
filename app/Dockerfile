@@ -42,7 +42,7 @@ RUN mkdir -p public && pnpm build
 FROM ${NODE_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="Code Reviewer app" \
       org.opencontainers.image.description="Web app and API of Code Reviewer" \
-      org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
+      org.opencontainers.image.source="https://github.com/Itegro-GmbH/code-reviewer" \
       org.opencontainers.image.licenses="LicenseRef-Proprietary"
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

@@ -7,7 +7,7 @@
 //   1. billing      off: the 404 of a path that does not exist, before anything else is read or asked
 //   2. access       the session and the role (`manage_billing`: an Owner or an Admin)        401 / 404 / 403, access-response.ts
 //   3. service      the invoices of THIS workspace; the role is judged again there
-//                   403 forbidden, 502 provider_unavailable / provider_rejected, 503 provider_not_configured
+//                   403 forbidden, 503 provider_unavailable / provider_rejected / provider_not_configured
 //                                                                                              200 { invoices }
 //
 // The page of a workspace shows the invoices to an Owner and an Admin only, and so does this route.
@@ -21,8 +21,8 @@ const NO_STORE = { "cache-control": "no-store" };
 
 const STATUS: Record<InvoicesErrorCode, number> = {
   forbidden: 403,
-  provider_unavailable: 502,
-  provider_rejected: 502,
+  provider_unavailable: 503,
+  provider_rejected: 503,
   provider_not_configured: 503,
 };
 

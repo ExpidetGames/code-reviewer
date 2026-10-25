@@ -17,7 +17,6 @@ import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import { MODEL_PRICES } from "../llm/providers/openrouter/model-pricing.ts";
 import {
   DEFAULT_DYNAMIC_MODEL,
-  DEFAULT_MAX_TOKENS,
   builtInProjectDynamicSettings,
   builtInReviewSettings,
   type ReviewSettings,
@@ -29,12 +28,11 @@ const SHIPPED_SKILL = "# shipped default skill";
 
 describe("the built-in review settings", () => {
   // CR-25-T01
-  it("give the token budget well above PR-Agent's 32000 and switch large pull request chunking on", () => {
+  it("switch large pull request chunking on and hold no token budget (#689)", () => {
     const { settings } = resolveReviewSettings({ builtIn });
 
-    expect(settings.maxTokens).toBe(DEFAULT_MAX_TOKENS);
-    expect(settings.maxTokens).toBeGreaterThan(32_000);
     expect(settings.largePrChunking).toBe(true);
+    expect(Object.keys(settings)).not.toContain("maxTokens");
   });
 
   it("use the model they are given and have no fallback and no project rules", () => {
@@ -69,7 +67,7 @@ describe("resolving the settings of a project", () => {
     expect(settings).toEqual({ ...builtIn, ...global });
     expect(sources.model).toBe("global");
     expect(sources.maxFindings).toBe("global");
-    expect(sources.maxTokens).toBe("built_in");
+    expect(sources.largePrChunking).toBe("built_in");
   });
 
   // CR-25-T02
@@ -94,13 +92,13 @@ describe("resolving the settings of a project", () => {
     expect(settings.extraInstructions).toBe("Prefer small functions.");
     expect(settings.model).toBe("qwen/qwen3-coder");
     expect(settings.inlineKeyIssues).toBe(true);
-    expect(settings.maxTokens).toBe(builtIn.maxTokens);
+    expect(settings.largePrChunking).toBe(builtIn.largePrChunking);
     expect(sources).toMatchObject({
       maxFindings: "project",
       extraInstructions: "project",
       model: "global",
       inlineKeyIssues: "global",
-      maxTokens: "built_in",
+      largePrChunking: "built_in",
     });
   });
 

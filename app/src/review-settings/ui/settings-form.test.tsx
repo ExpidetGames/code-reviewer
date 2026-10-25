@@ -89,6 +89,7 @@ function projectModel(
     cost: estimateReviewCost(effective),
     managed: false,
     catalog: null,
+    operatorMaxCostCents: 100,
     lastSaved: null,
     dynamic: DYNAMIC_VIEW,
   };
@@ -189,7 +190,8 @@ describe("the settings form", () => {
     expect(heading.nextElementSibling?.textContent).toBe("Built-in value");
   });
 
-  it("explains the token budget in plain words, in the Limits section", async () => {
+  // #689-T14
+  it("has no token budget field in the Limits section, only the cost limit with its maximum", async () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
@@ -200,13 +202,13 @@ describe("the settings form", () => {
     );
 
     await openSection(user, "Limits");
-    const budget = screen
-      .getByLabelText("Token budget")
+
+    expect(screen.queryByLabelText("Token budget")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/token budget/i);
+    const limit = screen
+      .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
-    expect(budget.textContent).toContain(
-      "How much of a pull request the model reads in one go",
-    );
-    expect(budget.textContent).toContain("8,000");
+    expect(limit.textContent).toContain("at most $1.00");
   });
 
   // CR-34-T06
@@ -221,9 +223,9 @@ describe("the settings form", () => {
     await user.clear(findings);
     await user.type(findings, "-3");
     await openSection(user, "Limits");
-    const tokens = screen.getByLabelText("Token budget");
-    await user.clear(tokens);
-    await user.type(tokens, "lots");
+    const cost = screen.getByLabelText("Cost limit per review (USD)");
+    await user.clear(cost);
+    await user.type(cost, "lots");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -241,7 +243,9 @@ describe("the settings form", () => {
     );
     await openSection(user, "Limits");
     expect(
-      within(field("Token budget")).getByText("Enter a whole number."),
+      within(field("Cost limit per review (USD)")).getByText(
+        /Enter an amount in dollars/,
+      ),
     ).toBeTruthy();
   });
 
@@ -263,9 +267,9 @@ describe("the settings form", () => {
     await user.clear(findings);
     await user.type(findings, "-3");
     await openSection(user, "Limits");
-    const tokens = screen.getByLabelText("Token budget");
-    await user.clear(tokens);
-    await user.type(tokens, "lots");
+    const cost = screen.getByLabelText("Cost limit per review (USD)");
+    await user.clear(cost);
+    await user.type(cost, "lots");
     // Nothing is marked before a save is refused.
     expect(tabNames()).toEqual(["Review", "LLM", "Trigger", "Limits"]);
     await user.click(
@@ -282,8 +286,11 @@ describe("the settings form", () => {
     expect(screen.getByRole("tab", { name: "Trigger" })).toBeTruthy();
 
     await openSection(user, "Limits");
-    await user.clear(screen.getByLabelText("Token budget"));
-    await user.type(screen.getByLabelText("Token budget"), "16000");
+    await user.clear(screen.getByLabelText("Cost limit per review (USD)"));
+    await user.type(
+      screen.getByLabelText("Cost limit per review (USD)"),
+      "0.5",
+    );
 
     expect(screen.getByRole("tab", { name: "Limits" })).toBeTruthy();
     expect(
@@ -358,53 +365,61 @@ describe("the settings form", () => {
       ok: false,
       status: 400,
       code: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "maxTokens", code: "TOO_LARGE" }],
+      issues: [{ field: "maxCostCents", code: "TOO_LARGE" }],
     });
     render(
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
     await openSection(user, "Limits");
-    await user.type(screen.getByLabelText("Token budget"), "0");
+    await user.type(
+      screen.getByLabelText("Cost limit per review (USD)"),
+      "0.5",
+    );
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
 
     const field = screen
-      .getByLabelText("Token budget")
+      .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
     expect(
-      await within(field).findByText(/Enter 2,000,000 or less/),
+      await within(field).findByText(/Enter an amount from \$0.01/),
     ).toBeTruthy();
     expect(screen.queryByText(/Saved\./)).toBeNull();
   });
 
-  // CR-34-T05 (the error EXCEEDS_MODEL_CONTEXT of the service)
-  it("explains a token budget that does not fit the model's context window", async () => {
+  // #689-T06
+  it("names the maximum when the server refuses a cost limit above it, and shows no code", async () => {
     const user = userEvent.setup();
     const { api } = fakeApi({
       ok: false,
       status: 400,
       code: "REVIEW_SETTINGS_INVALID",
-      issues: [{ field: "maxTokens", code: "EXCEEDS_MODEL_CONTEXT" }],
+      issues: [
+        {
+          field: "maxCostCents",
+          code: "EXCEEDS_OPERATOR_MAXIMUM",
+          maximumCents: 150,
+        },
+      ],
     });
     render(
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
     await openSection(user, "Limits");
-    const tokens = screen.getByLabelText("Token budget");
-    await user.clear(tokens);
-    await user.type(tokens, "500000");
+    const cost = screen.getByLabelText("Cost limit per review (USD)");
+    await user.type(cost, "5");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
 
-    const field = tokens.closest("[data-field]") as HTMLElement;
+    const field = cost.closest("[data-field]") as HTMLElement;
     const message = await within(field).findByText(
-      /context window of the chosen model/,
+      "The maximum cost per review is $1.50. Enter that or less.",
     );
-    expect(message.textContent).not.toContain("EXCEEDS_MODEL_CONTEXT");
+    expect(message.textContent).not.toContain("EXCEEDS_OPERATOR_MAXIMUM");
   });
 
   it("tells the person when the save fails as a whole", async () => {
@@ -820,14 +835,14 @@ describe("the Limits section (#656)", () => {
     expect(input.value).toBe("1.00");
     const field = input.closest("[data-field]") as HTMLElement;
     expect(field.textContent).toContain(
-      "A review stops when it reaches this amount.",
+      "A review stops when it reaches this amount, at most $1.00.",
     );
     expect(field.textContent).toContain(
       "Leave empty to use the workspace default ($2.50).",
     );
-    // The instance may hold a lower limit, and the field does not say which.
-    expect(field.textContent).toContain(
-      "code-review.com may enforce a lower limit.",
+    // Nothing of where the maximum comes from is named to a member.
+    expect(field.textContent).not.toMatch(
+      /environment|operator|instance|admin/i,
     );
     // No rate and no markup is named next to the limit.
     expect(field.textContent).not.toMatch(/rate|markup|per minute/i);
@@ -894,6 +909,55 @@ describe("the Limits section (#656)", () => {
     expect(dynamicField.textContent).not.toContain("between model requests");
   });
 
+  // #689-T14
+  it("shows the maximum the admin set, as the placeholder and in the hint, and says when a saved limit is cut to it", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={{
+          ...projectModel({ maxCostCents: 600 }),
+          operatorMaxCostCents: 250,
+        }}
+        api={fakeApi().api}
+      />,
+    );
+
+    await openSection(user, "Limits");
+    const input = screen.getByLabelText(
+      "Cost limit per review (USD)",
+    ) as HTMLInputElement;
+    const field = input.closest("[data-field]") as HTMLElement;
+
+    expect(input.value).toBe("6.00");
+    expect(field.textContent).toContain("at most $2.50");
+    expect(field.textContent).toContain(
+      "The saved limit of $6.00 is above the maximum, so reviews stop at $2.50.",
+    );
+  });
+
+  // #689-T14
+  it("shows Max with the amount in an empty field, and names the workspace default cut to the maximum", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={{
+          ...projectModel({}, { ...BUILT_IN, maxCostCents: 800 }),
+          operatorMaxCostCents: 300,
+        }}
+        api={fakeApi().api}
+      />,
+    );
+
+    await openSection(user, "Limits");
+    const input = screen.getByLabelText(
+      "Cost limit per review (USD)",
+    ) as HTMLInputElement;
+
+    expect(input.placeholder).toBe("$3.00");
+  });
+
   // #666-T06
   it("says that no limit is set, and shows no amount, when neither the workspace nor the project set one", async () => {
     const user = userEvent.setup();
@@ -910,12 +974,14 @@ describe("the Limits section (#656)", () => {
     const field = screen
       .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
-    expect(field.textContent).toContain("Leave empty for no limit of your own");
+    expect(field.textContent).toContain(
+      "Leave empty for up to $1.00; the workspace sets no limit.",
+    );
     expect(field.textContent).not.toContain("$0.10");
     expect(
       (screen.getByLabelText("Cost limit per review (USD)") as HTMLInputElement)
         .placeholder,
-    ).toBe("No limit");
+    ).toBe("Max $1.00");
   });
 
   // #656-T04
@@ -969,7 +1035,7 @@ describe("the settings form of a workspace on its own key keeps its stored tier 
     );
     expect(screen.queryByRole("radiogroup", { name: "Quality" })).toBeNull();
     await openSection(user, "Limits");
-    expect(screen.getByLabelText("Token budget")).toBeTruthy();
+    expect(screen.getByLabelText("Cost limit per review (USD)")).toBeTruthy();
     expect(document.body.textContent).toContain("Estimated cost");
   });
 });
@@ -1003,7 +1069,7 @@ describe("the form of the workspace defaults has the sections of a project (#676
     );
     await openSection(user, "Review");
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
-    // Dynamic Review is chosen: the provider and model of the Dynamic default, and no Diff-only token budget.
+    // Dynamic Review is chosen: the provider and model of the Dynamic default.
     expect(screen.queryByLabelText("Review skill")).toBeNull();
     await openSection(user, "LLM");
     expect(screen.getByLabelText("Model").textContent).toBe(
@@ -1011,6 +1077,7 @@ describe("the form of the workspace defaults has the sections of a project (#676
     );
     await openSection(user, "Limits");
     expect(screen.queryByLabelText("Token budget")).toBeNull();
+    expect(screen.getByLabelText("Cost limit per review (USD)")).toBeTruthy();
 
     // The change of the kind of every project is confirmed first, and the confirmation speaks of the projects.
     await user.click(

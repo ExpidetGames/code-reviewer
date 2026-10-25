@@ -235,7 +235,7 @@ provider_not_found`.
   operator's key of that provider are what the job gets, in the job, in the Dynamic options and in the capabilities
   read, on both delivery paths (`runner-api/claim-selection.ts`, `src/llm/selection.ts`). The review settings' `model`,
   provider, fallback model and Dynamic model stay stored and take effect again if the workspace goes back to its own
-  key; the workspace's `maxTokens` is kept and cut to the context window of the entry's model when it is known. An
+  key; the token budget of the job is the claim's (#689) and is cut to the context window of the entry's model when it is known. An
   entry that is missing, retired, not for the kind, not in the plan's `modelAccess` or of a provider the runner cannot
   run fails the job with `managed_model_unavailable`: no move to another entry and not to the instance's `LLM_MODEL`,
   which a managed job does not use at all. The model of an entry never reaches a workspace (not the settings, a page, a
@@ -348,12 +348,12 @@ workspace's key, bound to the provider; a new instance ignores them, and nothing
 `LLM_MODEL` that differs from the default into the review defaults of the default workspace (unless the team chose a
 model), so the model survives the removal of the variable.
 
-| Variable         | Meaning                                                                                                                                                                                                                                               |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM_PROVIDER`   | A provider of the registry: `openrouter` (the default) or `anthropic`. Not case sensitive.                                                                                                                                                            |
-| `LLM_API_KEY`    | Surrounding whitespace and a trailing line break are ignored; whitespace inside, control characters or over 4096 characters make it invalid.                                                                                                          |
-| `LLM_MODEL`      | The OpenRouter name of the model reviews use unless the review settings choose another, without an `openrouter/` prefix (the runner adds it). Default `anthropic/claude-haiku-5.5` (`DEFAULT_LLM_MODEL`, the recommendation of the model comparison). |
-| `LLM_MAX_TOKENS` | The context window of a model PR-Agent does not know (1000 to 10000000); `contextWindowTokens` in the code. Unset lets PR-Agent decide. It is **not** the token budget of a review: that is a review setting and replaces this value in a job.        |
+| Variable         | Meaning                                                                                                                                                                                                                                                                            |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`   | A provider of the registry: `openrouter` (the default) or `anthropic`. Not case sensitive.                                                                                                                                                                                         |
+| `LLM_API_KEY`    | Surrounding whitespace and a trailing line break are ignored; whitespace inside, control characters or over 4096 characters make it invalid.                                                                                                                                       |
+| `LLM_MODEL`      | The OpenRouter name of the model reviews use unless the review settings choose another, without an `openrouter/` prefix (the runner adds it). Default `anthropic/claude-haiku-5.5` (`DEFAULT_LLM_MODEL`, the recommendation of the model comparison).                              |
+| `LLM_MAX_TOKENS` | The context window of a model PR-Agent does not know (1000 to 10000000); `contextWindowTokens` in the code. Unset lets PR-Agent decide. It is **not** the token budget of a review: the claim decides that (#689) and cuts it to this window for a job on the workspace's own key. |
 
 The limits are the ones the runner enforces on `llm.*` of a job (`runner/README.md`, `job.py`), so a value the
 runner would refuse shows up as a configuration error or warning instead of as a failed job. They are copied by
@@ -407,8 +407,8 @@ job (#280) passes `logAs` and the line names its tier (`model=tier=high`) instea
 saving the same model repeatedly asks once; for a settings save no other outcome is remembered. **The claim of a
 managed job asks with `forClaim`** (#280): it also remembers an answer that is not `supported` for 45 seconds, so a
 provider outage costs one wait of the 5 second timeout per model, not one per claim and Worker fetch, and the checker
-keeps the last context window it read for a model for a day (`lastKnownContextLength`), which the claim clamps the
-token budget to while the provider cannot be asked (`src/model-catalog/README.md`, "The token budget of a managed job"). The settings save is its first user
+keeps the last context window it read for a model for a day (`lastKnownContextLength`), which the claim cuts the
+token budget to while the provider cannot be asked (`src/model-catalog/README.md`, "The token budget of a job"). The settings save is its first user
 (`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner
 proxy's (`dynamic_model_features_unsupported`).
 
@@ -432,8 +432,8 @@ claimed-keys.ts`: one row per job, the sealed text is the list of the keys hande
   out with the claim of that job _and_ the current keys of its workspace. A read of those keys that fails **fails
   closed**: `complete` answers `RUNNER_INTERNAL_ERROR` and stores nothing (`runner-api/known-secrets.ts`), it never
   masks with fewer keys.
-- **Model and token budget per project** are review settings (`src/review-settings`); they replace the model and the
-  context window of the access when a job is built. The provider and the key always come from here.
+- **The model per project** is a review setting (`src/review-settings`); it replaces the model of the access when a job is
+  built, and the claim decides the token budget from the context window (#689). The provider and the key always come from here.
 
 ## Testing
 

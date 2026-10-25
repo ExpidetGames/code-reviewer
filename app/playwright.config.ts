@@ -89,6 +89,7 @@ export default defineConfig({
         /e2e\/admin\/catalog\.e2e\.ts$/,
         /e2e\/admin\/billing\.e2e\.ts$/,
         /e2e\/admin\/billing-reviews\.e2e\.ts$/,
+        /e2e\/admin\/operator-cost-limit\.e2e\.ts$/,
         /e2e\/billing\//,
         /e2e\/billing-journeys\//,
         /e2e\/workspaces\//,
@@ -136,6 +137,14 @@ export default defineConfig({
       testMatch: /e2e\/settings\/native-provider\.e2e\.ts$/,
       dependencies: ["chromium", "runs", "reviews"],
     },
+    // The journey of the operator's maximum cost per review (#689) changes that maximum of the first app for a while,
+    // while the project settings journey expects the default: it runs after every journey of that app.
+    {
+      name: "operator-cost-limit",
+      use: browser,
+      testMatch: /e2e\/admin\/operator-cost-limit\.e2e\.ts$/,
+      dependencies: ["chromium", "runs", "reviews", "native-provider"],
+    },
     // The journey of the invitations changes who belongs to the workspace of the first app and needs its
     // sign-up rule to be "everyone", which the admin portal journey changes for a while: it runs after
     // every journey of that app.
@@ -143,7 +152,13 @@ export default defineConfig({
       name: "invitations",
       use: browser,
       testMatch: /e2e\/workspaces\/invite-and-accept\.e2e\.ts$/,
-      dependencies: ["chromium", "runs", "reviews", "native-provider"],
+      dependencies: [
+        "chromium",
+        "runs",
+        "reviews",
+        "native-provider",
+        "operator-cost-limit",
+      ],
     },
     // The journeys of the workspaces in a multi-tenant instance have an app of their own (the fifth): people
     // create workspaces there, and a single-tenant instance does not let them.

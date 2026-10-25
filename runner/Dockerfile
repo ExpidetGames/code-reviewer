@@ -82,7 +82,7 @@ RUN python /fetch/scripts/fetch_opencode.py --dest /engine-tools --allow-unpinne
 
 # ---- runtime-base: Python, the venv and nothing else (no uv, no compiler, no sources) ----
 FROM ${PYTHON_IMAGE} AS runtime-base
-LABEL org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
+LABEL org.opencontainers.image.source="https://github.com/Itegro-GmbH/code-reviewer" \
       org.opencontainers.image.licenses="LicenseRef-Proprietary"
 # LITELLM_LOCAL_MODEL_COST_MAP makes LiteLLM use its bundled price list instead of fetching it from
 # GitHub when it is imported (the runner sets it for every job as well).

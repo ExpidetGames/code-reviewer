@@ -361,10 +361,19 @@ export function toRunDetailView(
       job.errorCode !== null &&
       POSTED_REVIEW_ERROR_CODES.includes(job.errorCode));
   const commentUrl = hasPostedReview ? safeGithubUrl(stored.commentUrl) : null;
+  // #689: the limit that stopped a Diff Review words its failure; the usage of a failed run carries it.
+  const stoppedEarly = readStoredUsage(job.result)?.stoppedEarly ?? null;
   const error =
-    job.errorCode === null ? null : describeErrorCode(job.errorCode);
+    job.errorCode === null
+      ? null
+      : describeErrorCode(job.errorCode, stoppedEarly);
+  const row = toRunRowView(job, project, now);
   return {
-    ...toRunRowView(job, project, now),
+    ...row,
+    problem:
+      row.problem !== null && job.errorCode === "cost_limit_reached"
+        ? (error?.text ?? row.problem)
+        : row.problem,
     headSha: job.headSha,
     args: cleanLog(job.args),
     attempts: job.attempts,

@@ -329,7 +329,7 @@ describe("POST /api/w/:workspace/billing/top-ups", () => {
   });
 
   // #501-T07
-  it("answers 502 provider_unavailable when Stripe is down, with a code and nothing of Stripe", async () => {
+  it("answers 503 provider_unavailable when Stripe is down, with a code and nothing of Stripe", async () => {
     const t = await start();
     t.fake.faults.failWith(
       { method: "POST", path: "/v1/checkout/sessions" },
@@ -346,7 +346,7 @@ describe("POST /api/w/:workspace/billing/top-ups", () => {
       t.as(await t.person("owner")),
     );
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "provider_unavailable" });
     expect((await t.intents()).map((i) => i.state)).toEqual(["failed"]);
   });

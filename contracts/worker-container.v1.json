@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/worker-container.v1.json",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/worker-container.v1.json",
   "title": "Code Reviewer hardened Worker container, version 1",
   "description": "The hardened container spec (#316, #318): one definition of the flags of the container a Worker runs in, so that the self-hosted compose files and the container the Sandbox-Launcher starts inside a VM cannot drift apart. The schema is the hardening floor: a document that weakens it (privileged, a bind or volume, a device, host namespaces, host networking, an unconfined seccomp or AppArmor profile, a writable root, a weaker tmpfs, another user, another capability set, a credential in the environment) is refused, because the weakening has no key to live in or a value the schema does not allow. examples/worker-container/WorkerContainerSpec.json is the spec and equals compose.dynamic.yml and the runner-dynamic service of compose.coolify.yml (tests in the app, #325 extends them); the renderer to `docker run` arguments is #325. Per Worker kind a launcher may override only what WorkerContainerOverrides names (the memory limit: the self-hosted default is the spec's, the Sandbox sizes differ). The per-job credential is never part of a container: it goes to the Worker on stdin.",
   "version": 1,
