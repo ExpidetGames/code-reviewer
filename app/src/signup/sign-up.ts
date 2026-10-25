@@ -22,6 +22,8 @@ import { checkPassword } from "../auth/password-policy.ts";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
+import type { LandingIdentity } from "../landing-identity/identity.ts";
+import { landingIdentityColumns } from "../landing-identity/store.ts";
 import type { MailSender } from "../mail/sender.ts";
 import {
   signUpAvailability,
@@ -73,6 +75,7 @@ async function createAccount(
   }: Pick<SignUpDependencies, "db" | "now" | "newId">,
   email: string,
   passwordHash: string,
+  landingIdentity: LandingIdentity | null,
 ): Promise<{ id: string } | null> {
   const timestamp = formatTimestamp(now());
   const id = newId();
@@ -97,6 +100,8 @@ async function createAccount(
           is_instance_admin: 0,
           org_checked_at: null,
           org_checked_for: null,
+          // The PostHog identity the landing page handed over (src/landing-identity/README.md), if any.
+          ...landingIdentityColumns(landingIdentity, now()),
           created_at: timestamp,
           updated_at: timestamp,
         })
@@ -152,7 +157,12 @@ async function findWaitingAccount(
 
 export async function signUp(
   dependencies: SignUpDependencies,
-  input: { email: unknown; password: unknown },
+  input: {
+    email: unknown;
+    password: unknown;
+    /** What the cookie of the landing page carried, already validated; only a new account keeps it. */
+    landingIdentity?: LandingIdentity | null;
+  },
 ): Promise<SignUpOutcome> {
   const { hashPassword, limits, facts, defer } = dependencies;
 
@@ -200,6 +210,7 @@ export async function signUp(
       passwordHash,
       rule: state.rule,
       verifyByMail: availability.verifyByMail,
+      landingIdentity: input.landingIdentity ?? null,
     }),
   );
   return { kind: "accepted", next };
@@ -218,17 +229,24 @@ async function provisionAccount(
     passwordHash,
     rule,
     verifyByMail,
+    landingIdentity,
   }: {
     email: string;
     passwordHash: string;
     rule: SignUpFacts["rule"];
     verifyByMail: boolean;
+    landingIdentity: LandingIdentity | null;
   },
 ): Promise<void> {
   const { db, mail, baseUrl, now, log = console.error } = dependencies;
   try {
     if (!evaluateSignUpRule(rule, email).ok) return;
-    const created = await createAccount(dependencies, email, passwordHash);
+    const created = await createAccount(
+      dependencies,
+      email,
+      passwordHash,
+      landingIdentity,
+    );
     const account =
       created ?? (verifyByMail ? await findWaitingAccount(db, email) : null);
     if (account === null || !verifyByMail) return;

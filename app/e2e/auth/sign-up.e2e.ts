@@ -9,6 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { signOutThroughTheMenu } from "../helpers/github-fake";
 import { e2eEnv } from "../helpers/e2e-env";
+import { landingIdentityOf } from "../helpers/landing-identity";
 import { verificationLinkTo, verificationLinksTo } from "../helpers/mail";
 
 const ADDRESS = "newcomer@e2e.test";
@@ -93,6 +94,66 @@ test.describe("signing up", () => {
     // Signing out lives in the user menu of the header now that the page is inside the app frame.
     await signOutThroughTheMenu(page, { name: ADDRESS.split("@")[0] ?? "" });
     await expect(page).toHaveURL(/\/login$/);
+  });
+
+  // #692-T10
+  test("a visitor who comes from the landing page keeps the PostHog identity on the new account, out of the address and out of the app", async ({
+    page,
+    context,
+  }) => {
+    const address = "from-landing@e2e.test";
+    const distinctId = "0192f5f0-7c3e-7a52-9d1b-3f6a2c4e8b10";
+    const sessionId = "0192f5f0-7c3e-7a52-9d1b-aaaaaaaaaaaa";
+
+    await page.goto(`/sign-up?ph_did=${distinctId}&ph_sid=${sessionId}`);
+
+    // The identifiers are out of the address and in one HttpOnly first-party cookie.
+    await expect(page).toHaveURL(/\/sign-up$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Create your account" }),
+    ).toBeVisible();
+    const cookie = (await context.cookies()).find(
+      (candidate) => candidate.name === "cr-landing",
+    );
+    expect(cookie).toMatchObject({ httpOnly: true, sameSite: "Lax" });
+    expect(await page.evaluate(() => document.cookie)).not.toContain(
+      "cr-landing",
+    );
+
+    await fillSignUp(page, address);
+    await expect(page.getByRole("status")).toContainText("Check your inbox");
+
+    expect(await landingIdentityOf(address)).toMatchObject({
+      distinctId,
+      sessionId,
+    });
+    // The cookie did its job and is gone; the page shows the values nowhere.
+    expect((await context.cookies()).some((c) => c.name === "cr-landing")).toBe(
+      false,
+    );
+    expect(await page.content()).not.toContain(distinctId);
+  });
+
+  // #692-T06
+  test("values that are not plain identifiers are dropped without a word", async ({
+    page,
+    context,
+  }) => {
+    const address = "not-from-landing@e2e.test";
+
+    await page.goto(`/sign-up?ph_did=${"x".repeat(201)}&ph_sid=a%20b`);
+
+    await expect(page).toHaveURL(/\/sign-up$/);
+    expect((await context.cookies()).some((c) => c.name === "cr-landing")).toBe(
+      false,
+    );
+    await fillSignUp(page, address);
+    await expect(page.getByRole("status")).toContainText("Check your inbox");
+    expect(await landingIdentityOf(address)).toMatchObject({
+      distinctId: null,
+      sessionId: null,
+      capturedAt: null,
+    });
   });
 
   // #99-SR-14

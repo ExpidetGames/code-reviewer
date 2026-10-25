@@ -19,6 +19,12 @@ import {
   JSON_BODY_ERROR_STATUS,
   type JsonBodyErrorCode,
 } from "../http/json-body.ts";
+import {
+  carriesLandingIdentityCookie,
+  clearedLandingIdentityCookie,
+  landingIdentityFromCookieHeader,
+  type LandingIdentity,
+} from "../landing-identity/identity.ts";
 import type { ResendOutcome } from "./resend.ts";
 import type { SignUpIssue, SignUpOutcome } from "./sign-up.ts";
 import type { SignUpUnavailableCode } from "./availability.ts";
@@ -79,6 +85,7 @@ export type SignUpRouteDependencies = {
   signUp: (input: {
     email: unknown;
     password: unknown;
+    landingIdentity: LandingIdentity | null;
   }) => Promise<SignUpOutcome>;
   resend: (email: unknown) => Promise<ResendOutcome>;
   /** The id of the user the request is signed in as, or null. */
@@ -116,21 +123,26 @@ export function createSignUpRouteHandlers({
     async signUp(request) {
       const body = await readJsonObject(request, SIGN_UP_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
+      const cookieHeader = request.headers.get("cookie");
       let outcome: SignUpOutcome;
       try {
         outcome = await signUp({
           email: body.value.email,
           password: body.value.password,
+          // The cookie the proxy set for a visitor of the landing page (src/landing-identity/README.md).
+          landingIdentity: landingIdentityFromCookieHeader(cookieHeader),
         });
       } catch (error) {
         return unavailable("SIGN_UP_UNAVAILABLE", error);
       }
       switch (outcome.kind) {
-        case "accepted":
-          return Response.json(
-            { ok: true, next: outcome.next },
-            { headers: NO_STORE },
-          );
+        case "accepted": {
+          const headers = new Headers(NO_STORE);
+          // The cookie did its job whatever came of the account (the answer is the same for every address).
+          if (carriesLandingIdentityCookie(cookieHeader))
+            headers.append("set-cookie", clearedLandingIdentityCookie());
+          return Response.json({ ok: true, next: outcome.next }, { headers });
+        }
         case "unavailable":
           return refusal(outcome.error);
         case "invalid":

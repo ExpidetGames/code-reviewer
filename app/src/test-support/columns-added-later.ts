@@ -8,6 +8,8 @@
 const COLUMNS_ADDED_LATER: Record<string, readonly string[]> = {
   // #658: when a workspace was deleted; null for every workspace that exists.
   workspaces: ["deleted_at"],
+  // #692: the PostHog identity of the landing page; null for every user that exists.
+  users: ["posthog_distinct_id", "posthog_session_id", "posthog_captured_at"],
 };
 
 /** `rows` of `table` without the columns that migrations after the one under test added; those columns must be null. */
