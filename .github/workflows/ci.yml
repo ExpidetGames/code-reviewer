@@ -47,9 +47,13 @@ jobs:
         with:
           predicate-quantifier: every
           filters: |
+            # website/ (the code-review.com landing page, #696) is a project of its own with its own
+            # lightweight workflow (website.yml): none of the three filters below counts it, so a
+            # website-only pull request runs no app, dispatcher or runner job and ci-passed still reports.
             app:
               - '**'
               - '!runner/**'
+              - '!website/**'
               - '!*.md'
               - '!fakes/**/*.md'
             # The Dispatcher (#327) also reads contracts/ and fakes/, so those count; the app and the
@@ -58,11 +62,13 @@ jobs:
               - '**'
               - '!app/**'
               - '!runner/**'
+              - '!website/**'
               - '!*.md'
               - '!fakes/**/*.md'
             runner:
               - '**'
               - '!app/**'
+              - '!website/**'
               - '!**/*.md'
             workflows:
               - '.github/**'

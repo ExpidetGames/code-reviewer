@@ -1,0 +1,42 @@
+---
+// One language version of a long legal text: title, date line and numbered sections. The texts are plain data
+// in src/content (privacy.ts, terms.ts), see legal-types.ts.
+import type { LegalDocument } from "../content/legal-types";
+import { COMPANY } from "../content/company";
+import { legalText } from "../lib/inline";
+
+interface Props {
+  document: LegalDocument;
+  id: string;
+}
+const { document, id } = Astro.props;
+---
+
+<section lang={document.lang} aria-labelledby={id} class="flex flex-col gap-8">
+  <header>
+    <h2 id={id} class="text-2xl font-semibold tracking-tight text-fg">{document.title}</h2>
+    <p class="mt-2 text-base text-muted">
+      {document.dateLabel}{document.note ? ` · ${document.note}` : null}
+    </p>
+  </header>
+  {
+    document.sections.map((section) => (
+      <section aria-labelledby={section.id} class="border-t border-line pt-6">
+        <h3 id={section.id} class="scroll-mt-24 text-lg font-semibold text-fg">{section.heading}</h3>
+        <div class="mt-3 flex flex-col gap-3">
+          {section.blocks.map((block) =>
+            typeof block === "string" ? (
+              <p class="text-base text-muted" set:html={legalText(block, COMPANY.email)} />
+            ) : (
+              <ul class="flex list-disc flex-col gap-1 pl-6 text-base text-muted marker:text-line-strong">
+                {block.list.map((item) => (
+                  <li set:html={legalText(item, COMPANY.email)} />
+                ))}
+              </ul>
+            ),
+          )}
+        </div>
+      </section>
+    ))
+  }
+</section>

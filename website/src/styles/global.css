@@ -1,0 +1,272 @@
+/* SPDX-License-Identifier: LicenseRef-Proprietary */
+
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/*
+ * Design tokens of code-review.com (same values as the former Next.js site): flat backgrounds only, the hero
+ * heading gradient is the only gradient and sits on text, one easing curve for all motion. The theme follows
+ * the system (light, dark); nothing is stored for it.
+ */
+
+:root {
+  color-scheme: light dark;
+  interpolate-size: allow-keywords;
+
+  --page: #ffffff;
+  --surface: #f5f5f4;
+  --raised: #ebebea;
+  --raised-strong: #e2e2e1;
+  --fg: #0a0a0a;
+  --muted: #5c5c5c;
+  --line: #e2e2e1;
+  --line-strong: #c9c9c7;
+  --hero-from: #000000;
+  --hero-to: #666666;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #000000;
+    --surface: #181818;
+    --raised: #1f1f1f;
+    --raised-strong: #272727;
+    --fg: #ffffff;
+    --muted: #a3a3a3;
+    --line: #272727;
+    --line-strong: #313131;
+    --hero-from: #ffffff;
+    --hero-to: #9b9b9b;
+  }
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-raised-strong: var(--raised-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-hero-from: var(--hero-from);
+  --color-hero-to: var(--hero-to);
+  /* Names the template's blog pages use: mapped to the tokens above. */
+  --color-ink: var(--fg);
+  --color-brand-50: var(--surface);
+  --color-brand-600: var(--fg);
+  --color-brand-700: var(--fg);
+}
+
+@theme {
+  /* Hero heading, subheading and the tagline reveal are capped at 680px. */
+  --container-hero: 680px;
+  /* The one easing curve for every transition. */
+  --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+  --default-transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  --default-transition-duration: 700ms;
+}
+
+/*
+ * Reveal on scroll, CSS only (no script). Everything is visible by default. Where the browser supports scroll
+ * driven animations, elements below the fold fade up as they enter the viewport; elements in the first screen
+ * fade up on load, one after the other (--reveal-delay). Never with reduced motion.
+ */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    translate: 0 4rem;
+    filter: blur(12px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal="load"] {
+    animation: reveal-in 1000ms var(--ease-fluid) backwards;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+
+  @supports (animation-timeline: view()) {
+    [data-reveal="scroll"] {
+      animation: reveal-in linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+
+    /* Tagline: every word lights up as it moves up the screen, in reading order. */
+    .tagline-word {
+      animation: word-light linear both;
+      animation-timeline: view();
+      animation-range: entry 40% entry 100%;
+    }
+  }
+}
+
+@keyframes word-light {
+  from {
+    color: color-mix(in srgb, var(--fg) 30%, transparent);
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 6rem;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background-color: var(--page);
+    color: var(--fg);
+    font-family: var(--font-sans);
+  }
+
+  /* No italics anywhere in the interface. */
+  em,
+  i,
+  cite,
+  address,
+  var,
+  dfn {
+    font-style: normal;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+
+  p,
+  li,
+  dd,
+  figcaption {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background-color: var(--fg);
+    color: var(--page);
+  }
+
+  /* FAQ accordion: native details, opened with the same easing as everything else. */
+  details::details-content {
+    block-size: 0;
+    overflow: hidden;
+    transition:
+      block-size 700ms var(--ease-fluid),
+      content-visibility 700ms var(--ease-fluid) allow-discrete;
+  }
+
+  details[open]::details-content {
+    block-size: auto;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after,
+    details::details-content {
+      transition-duration: 1ms !important;
+      transition-delay: 0ms !important;
+    }
+  }
+}
+
+/* The hero video: the play button exists only with JavaScript (it is added by HeroVideo.astro's script). */
+[data-video][data-started] [data-video-play] {
+  display: none;
+}
+
+/*
+ * Consent dialog (Klaro), adapted to the tokens of the site. Klaro takes its colours from CSS variables:
+ * --dark1 dialog background, --dark2 secondary surface, --dark3 muted text, --light1 text, --light2 secondary
+ * text, --white1 the text on buttons, --green1 the accept button (and toggles), --green2 its hover state.
+ * "Accept" and "Decline" get the same weight on purpose: both are neutral buttons.
+ */
+.klaro {
+  --font-family: var(--font-sans);
+  --font-size: 15px;
+  --border-radius: 12px;
+  --dark1: var(--surface);
+  --dark2: var(--raised);
+  --dark3: var(--muted);
+  --light1: var(--fg);
+  --light2: var(--muted);
+  --light3: var(--muted);
+  --white1: var(--page);
+  --white2: var(--fg);
+  --white3: var(--fg);
+  --green1: var(--fg);
+  --green2: var(--muted);
+  --green3: var(--fg);
+  --blue1: var(--fg);
+  --blue2: var(--muted);
+  --blue3: var(--fg);
+  --button-text-color: var(--page);
+  --notice-max-width: 28rem;
+  --notice-bottom: 1rem;
+  --notice-right: 1rem;
+}
+
+.klaro .cookie-notice:not(.cookie-modal-notice),
+.klaro .cookie-modal .cm-modal.cm-klaro {
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.35);
+}
+
+.klaro .cookie-notice .cn-body,
+.klaro .cookie-modal .cm-modal .cm-body,
+.klaro .cookie-modal .cm-modal .cm-header,
+.klaro .cookie-modal .cm-modal .cm-footer {
+  color: var(--fg);
+}
+
+.klaro .cm-btn,
+.klaro .cn-ok .cm-btn {
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+/* Decline and accept look the same: neither is highlighted. */
+.klaro .cm-btn.cm-btn-danger,
+.klaro .cm-btn.cn-decline,
+.klaro .cm-btn.cm-btn-success,
+.klaro .cm-btn.cm-btn-info,
+.klaro .cm-btn.cm-btn-accept-all {
+  background: var(--raised-strong);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+}
+
+.klaro .cm-btn.cm-btn-danger:hover,
+.klaro .cm-btn.cn-decline:hover,
+.klaro .cm-btn.cm-btn-success:hover,
+.klaro .cm-btn.cm-btn-info:hover,
+.klaro .cm-btn.cm-btn-accept-all:hover {
+  background: var(--line-strong);
+}
+
+.klaro .cookie-notice a,
+.klaro .cookie-modal a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

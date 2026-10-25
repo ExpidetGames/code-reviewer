@@ -667,6 +667,35 @@ describe("CI workflow path filter", () => {
       expect(touched("dispatcher", file), file).toBe(false);
   });
 
+  // #696
+  it("sends a change that only touches website/ to no heavy job: not app, not Dispatcher, not runner, not licenses, not workflows", () => {
+    for (const file of [
+      "website/src/pages/index.astro",
+      "website/src/lib/analytics.ts",
+      "website/public/videos/code-review-demo-v3.mp4",
+      "website/pnpm-lock.yaml",
+      "website/README.md",
+    ])
+      for (const filter of [
+        "app",
+        "dispatcher",
+        "runner",
+        "licenses",
+        "workflows",
+      ])
+        expect(touched(filter, file), `${filter} ${file}`).toBe(false);
+  });
+
+  // #696
+  it("still sends a change outside website/ to the same jobs as before when it touches website/ too", () => {
+    expect(touched("app", "app/src/db/index.ts")).toBe(true);
+    expect(touched("runner", "runner/src/code_reviewer_runner/cli.py")).toBe(
+      true,
+    );
+    expect(touched("dispatcher", "dispatcher/src/app.ts")).toBe(true);
+    expect(touched("app", "Makefile")).toBe(true);
+  });
+
   // CR-16-T09
   it("lints the workflow files when anything under .github changes", () => {
     expect(filters.workflows).toEqual([".github/**"]);
