@@ -113,9 +113,9 @@ jobs:
         run: pnpm build
 
   # The integration tests in a job of their own, split into two shards: in app-fast they took 6 to
-  # 10 minutes and pushed it over its limit (#641). They run against both SQLite (the default of the
-  # test suite) and this Postgres service container; TEST_DATABASE_URL turns the Postgres tests on
-  # (they skip without it). The credentials are throwaway: CI uses no repository secret.
+  # 10 minutes and pushed it over its limit (#641). They run against this Postgres service container: every test
+  # gets a database of its own, cloned from a migrated template (TEST_DATABASE_URL names the server). The
+  # credentials are throwaway: CI uses no repository secret.
   app-int:
     name: "App: integration tests (${{ matrix.shard }}/2)"
     needs: changes
@@ -160,35 +160,6 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           SHARD: ${{ matrix.shard }}
         run: pnpm test:int --shard="$SHARD/2"
-
-  # The same unit suite as app-fast, run with APP_RUNTIME=serverless (#319): the server start is pinned
-  # to its own mode inside the tests that cover it, everything else must hold in both modes. No
-  # database service: unit tests never connect to one.
-  app-serverless:
-    name: "App: unit tests in serverless mode"
-    needs: changes
-    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: app
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Unit tests
-        env:
-          APP_RUNTIME: serverless
-        run: pnpm test
 
   # The Dispatcher (#327): TypeScript on Hono, its own pnpm project. No database and no network service:
   # its tests run against the fake App of fakes/dispatcher-app on loopback.
@@ -326,6 +297,22 @@ jobs:
     if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Every app under test makes a database of its own on this server (E2E_DATABASE_URL). The credentials are
+    # throwaway: CI uses no repository secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: app
@@ -381,11 +368,13 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && github.base_ref != 'main' }}
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: pnpm test:e2e --grep @smoke --grep-invert @flaky
       - name: Run all journeys
         if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: pnpm test:e2e --grep-invert @flaky
       - name: Upload the Playwright report
         if: ${{ failure() }}
@@ -498,7 +487,7 @@ jobs:
           if-no-files-found: ignore
 
   # The privileged Dynamic lane (#253, #201-T01): the journey of a pull request through the real app,
-  # the real Dynamic runner (root, the capabilities of compose.dynamic.yml, its own startup self-check)
+  # the real Worker (root, the capabilities of the hardened container spec, its own startup self-check)
   # and the real pinned OpenCode as the engine user, against the loopback fakes only. It needs root, so
   # it has a job of its own: the GitHub runner has passwordless sudo and the nf_tables module.
   # runner/scripts/run_dynamic_e2e.sh fetches the pinned OpenCode and ripgrep (the pin files accept
@@ -516,6 +505,20 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -568,8 +571,12 @@ jobs:
         with:
           path: ~/.cache/code-reviewer/opencode
           key: opencode-${{ hashFiles('runner/opencode-pin.json') }}
+      # The lane has no network but loopback; it reaches the Postgres server of the job through a Unix socket
+      # (app/e2e/pg-bridge.ts, started by the script).
       - name: Run the Dynamic Review journey and the network guard
         working-directory: runner
+        env:
+          E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: scripts/run_dynamic_e2e.sh
       - name: Upload the Playwright report and the logs
         if: ${{ failure() }}
@@ -681,7 +688,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-int, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-runner-sandbox, sandbox-local, actionlint]
+    needs: [changes, app-fast, app-int, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-runner-sandbox, sandbox-local, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
