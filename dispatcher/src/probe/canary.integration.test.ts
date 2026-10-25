@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DispatcherAppFake } from "../../../fakes/dispatcher-app/server.ts";
 import { systemClock } from "../core/clock.ts";
 import { createFakeLauncher } from "../launchers/fake.ts";
-import { startNodeServer, type NodeServer } from "../node.ts";
+import { startNodeServer, type NodeServer } from "../test-support/node-host.ts";
 import {
   DISPATCHER_TOKEN,
   KEY_ID,

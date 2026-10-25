@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The `node` entry: the same Dispatcher as a Node process (@hono/node-server) with a graceful shutdown.
-// The Docker-Launcher (#334) is wired in here; until then `noLauncher` advertises no engine. Run it with
-// `pnpm start` (Node strips the types). On SIGTERM or SIGINT the server stops accepting calls, the launches
-// in progress get DISPATCHER_SHUTDOWN_GRACE_SECONDS to hand their Workers over, and what is still running
-// after that is stopped and its job released.
+// The Dispatcher as a Node process (@hono/node-server) with a graceful shutdown, for the test lanes only: the hosted
+// end-to-end journeys (`hosted-e2e-main.ts`) and the integration tests start it over a fake Launcher or over the
+// Sandbox-Launcher with the Sandbox double. The deployment is the Vercel entry (`src/index.ts`), which never imports
+// this file or `node:child_process` (src/bundle/serverless-bundle.test.ts). On SIGTERM or SIGINT the server stops
+// accepting calls, the launches in progress get DISPATCHER_SHUTDOWN_GRACE_SECONDS to hand their Workers over, and what
+// is still running after that is stopped and its job released.
 import { serve } from "@hono/node-server";
 import type { ServerType } from "@hono/node-server";
 import type { AddressInfo } from "node:net";
 import { createBackgroundTracker } from "./background.ts";
-import { composeDispatcher } from "./compose.ts";
-import type { Launcher, Logger } from "./core/types.ts";
-import { noLauncher } from "./launchers/none.ts";
-import type { ReaperSetup } from "./launchers/sandbox-env.ts";
-import type { Settings } from "./config.ts";
+import { composeDispatcher } from "../compose.ts";
+import type { Launcher, Logger } from "../core/types.ts";
+import type { ReaperSetup } from "../launchers/sandbox-env.ts";
+import type { Settings } from "../config.ts";
 
 export type NodeServerOptions = {
   env: Readonly<Record<string, string | undefined>>;
   launcher: Launcher;
-  /** 0 picks a free port; the default is PORT or 8080. */
+  /** 0 picks a free port; the default is 8080. */
   port?: number;
   hostname?: string;
   logger?: Logger;
@@ -43,7 +43,7 @@ export async function startNodeServer(
     logger: options.logger,
     ...(options.reaper === undefined ? {} : { reaper: options.reaper }),
   });
-  const port = options.port ?? (Number(options.env.PORT) || 8080);
+  const port = options.port ?? 8080;
   const server: ServerType = await new Promise((resolve) => {
     const started = serve(
       { fetch: app.fetch, port, hostname: options.hostname ?? "0.0.0.0" },
@@ -80,22 +80,4 @@ export async function startNodeServer(
       return closing;
     },
   };
-}
-
-// Runs only when started as the program, not when a test imports `startNodeServer`.
-if (import.meta.main) {
-  const server = await startNodeServer({
-    env: process.env,
-    launcher: noLauncher,
-  });
-  console.log(
-    JSON.stringify({ level: "info", event: "listening", port: server.port }),
-  );
-  let stopping = false;
-  for (const signal of ["SIGTERM", "SIGINT"] as const)
-    process.on(signal, () => {
-      if (stopping) return;
-      stopping = true;
-      void server.shutdown().then(() => process.exit(0));
-    });
 }

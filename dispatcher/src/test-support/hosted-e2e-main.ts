@@ -25,7 +25,7 @@ import { LocalSandboxService } from "../../../fakes/sandbox/local.ts";
 import { integer, loadSettings, read } from "../config.ts";
 import { createLogger } from "../core/logger.ts";
 import { systemClock } from "../core/clock.ts";
-import { startNodeServer } from "../node.ts";
+import { startNodeServer } from "./node-host.ts";
 import { createSandboxCanary } from "../launchers/sandbox-canary.ts";
 import { createSandboxLauncher } from "../launchers/sandbox.ts";
 import {

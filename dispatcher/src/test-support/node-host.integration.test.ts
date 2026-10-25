@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { DispatcherAppFake } from "../../fakes/dispatcher-app/server.ts";
-import { FakeSandboxService } from "../../fakes/sandbox/service.ts";
-import { createFakeLauncher } from "./launchers/fake.ts";
-import { startNodeServer, type NodeServer } from "./node.ts";
+import type { DispatcherAppFake } from "../../../fakes/dispatcher-app/server.ts";
+import { FakeSandboxService } from "../../../fakes/sandbox/service.ts";
+import { createFakeLauncher } from "../launchers/fake.ts";
+import { startNodeServer, type NodeServer } from "./node-host.ts";
 import {
   DISPATCHER_TOKEN,
   KEY_ID,
@@ -16,7 +16,7 @@ import {
   stopBody,
   waitFor,
   webhookBody,
-} from "./test-support/harness.ts";
+} from "./harness.ts";
 
 let fake: DispatcherAppFake;
 let server: NodeServer | undefined;
@@ -48,7 +48,7 @@ async function post(port: number, request: Request): Promise<Response> {
   });
 }
 
-describe("the Node entry against the fake App", () => {
+describe("the Node test host against the fake App", () => {
   // #327-T11
   it("serves /health and /dispatch over HTTP and starts the Worker for a signed call", async () => {
     const jobId = fake.enqueue();
