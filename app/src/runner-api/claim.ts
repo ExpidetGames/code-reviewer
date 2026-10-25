@@ -46,11 +46,7 @@ import { withClaimedKeyMode } from "../workspaces/effective-key-mode.ts";
 import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import { llmProviderDescriptors as DEFAULT_PROVIDERS } from "../llm/providers/index.ts";
-import {
-  MAX_LLM_CONTEXT_TOKENS,
-  MIN_LLM_CONTEXT_TOKENS,
-  type LlmProvider,
-} from "../llm/config.ts";
+import type { LlmProvider } from "../llm/config.ts";
 import { MANAGED_MODEL_UNAVAILABLE, type Selection } from "../llm/selection.ts";
 import type { UsageKeyMode } from "../usage/usage-records.ts";
 import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
@@ -58,10 +54,7 @@ import type {
   ModelCapabilityChecker,
   ModelCapabilityResult,
 } from "../llm/model-capabilities.ts";
-import {
-  clampMaxTokens,
-  UNKNOWN_WINDOW_MAX_TOKENS,
-} from "../model-catalog/token-budget.ts";
+import { reviewTokenBudget } from "../model-catalog/token-budget.ts";
 import {
   PROVIDER_ADDRESS_CHANGED,
   type NativeCostService,
@@ -72,6 +65,7 @@ import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ProviderPins } from "./provider-pins.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import { selectModel, type SelectionDeps } from "./claim-selection.ts";
+import { jobCostLimit } from "./job-cost-limit.ts";
 import {
   RUNNER_API_VERSION,
   RUNNER_ENV_KEY_PATTERN,
@@ -176,6 +170,11 @@ export type ClaimDeps = {
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
   /**
+   * #689: the most one review may cost, in whole US cents, as the operator set it in the admin portal (the instance setting
+   * `review_max_cost_cents`; 1.00 USD until it is set). Read when a job's input is built, so a change reaches the next job.
+   */
+  operatorCostLimitCents: () => Promise<number>;
+  /**
    * The key a job needs, once its provider is chosen (`selectModel`): the workspace's own key of the selection's provider,
    * or the operator's key of it, as the selection says. Called for the selected job's workspace only, after the
    * selection, never before. Nothing of another workspace or another provider is read.
@@ -263,7 +262,7 @@ export type Checked = {
   llm: Extract<LlmAccessResult, { ok: true }>;
   command: ReviewCommand;
   options: JobOptions;
-  llmOptions: { maxTokens?: number; maxCostCents?: number };
+  llmOptions: { maxCostCents?: number };
   /** The Dynamic options of a Dynamic job; null for a Diff job. */
   dynamic: DynamicReviewOptions | null;
   /** #553: the cost policy of a native Dynamic job (`dynamic.cost`); null for every other job. */
@@ -323,16 +322,14 @@ const PLATFORM_OF: Record<IntegrationType, GitPlatform> = {
 };
 
 /**
- * The token budget and the cost limit a project chose, as the job takes them: a null is left out (the runner refuses a
- * `maxTokens` that is not a whole number, and a `maxCostUsd` outside its range). Null when a value is one the runner would
- * refuse. The model is not here: the provider and model of a job are chosen by the resolver (`selectModel`), which also
- * checks the model id.
+ * The cost limit a project chose, as the job takes it: a null is left out (the runner refuses a `maxCostUsd` outside its
+ * range). Null when the value is one the runner would refuse. The model is not here: the provider and model of a job are chosen
+ * by the resolver (`selectModel`), which also checks the model id. Neither is the token budget: since #689 no setting names it,
+ * the claim decides it from the model (`reviewTokenBudget`).
  */
-function llmOptionsOf(
-  options: JobOptions,
-): { maxTokens?: number; maxCostCents?: number } | null {
-  const { maxTokens, maxCostCents } = options.llm ?? {};
-  const chosen: { maxTokens?: number; maxCostCents?: number } = {};
+function llmOptionsOf(options: JobOptions): { maxCostCents?: number } | null {
+  const { maxCostCents } = options.llm ?? {};
+  const chosen: { maxCostCents?: number } = {};
   if (maxCostCents !== undefined && maxCostCents !== null) {
     const { min, max } = REVIEW_SETTING_LIMITS.maxCostCents;
     if (
@@ -343,21 +340,7 @@ function llmOptionsOf(
       return null;
     chosen.maxCostCents = maxCostCents;
   }
-  if (maxTokens !== undefined && maxTokens !== null) {
-    if (
-      !Number.isInteger(maxTokens) ||
-      maxTokens < MIN_LLM_CONTEXT_TOKENS ||
-      maxTokens > MAX_LLM_CONTEXT_TOKENS
-    )
-      return null;
-    chosen.maxTokens = maxTokens;
-  }
   return chosen;
-}
-
-/** #666: `llm.maxCostUsd` of a job from the limit in whole cents: exact to the cent, and nothing for no limit. */
-function costLimitOf(cents: number | undefined): { maxCostUsd?: number } {
-  return cents === undefined ? {} : { maxCostUsd: cents / 100 };
 }
 
 /** `/review` takes no arguments; it is the only command a claim may hand out (#203). */
@@ -833,37 +816,39 @@ export async function buildJobInput(
   // (the price book of the managed key, the token cap of an own key), so the job ends here, before any credential exists.
   if (cost !== null && !features.includes("dynamic_cost_policy"))
     return refuse("dynamic_engine_unavailable");
-  // #666: the cost limit of the project, Diff or Dynamic, goes only to a caller that reads `llm.maxCostUsd` (the job is a closed
-  // object). A caller without the feature is a runner or Worker image older than the app, which a release can briefly leave
-  // behind. The job is not refused for that: a refused review is worse than a project limit that is not kept for a short
-  // window, so it runs with the operator's own limit alone, and the log says so.
-  const sendProjectLimit = features.includes("cost_limit");
-  if (llmOptions.maxCostCents !== undefined && !sendProjectLimit)
+  // #666, #689: the cost limit of a review, Diff or Dynamic, is the smaller of the customer's own limit and the operator's maximum
+  // (the admin portal). The job is a closed object, so what is sent depends on what the caller named (`job-cost-limit.ts`). A
+  // caller that names neither feature is a runner or Worker image older than the app, which a release can briefly leave
+  // behind. The job is not refused for that: a refused review is worse than a limit that is not kept for a short window, so it
+  // runs with the runner's own limit alone, and the log says so.
+  const costLimit = jobCostLimit({
+    customerCents: llmOptions.maxCostCents,
+    operatorCents: await deps.operatorCostLimitCents(),
+    features,
+  });
+  if (costLimit.enforced === "none")
     deps.logger.info(
-      `[runner-api] job=${job.id} runs without its project cost limit: the runner does not name the claim feature cost_limit`,
+      `[runner-api] job=${job.id} runs without its cost limit: the runner names neither claim feature cost_limit nor operator_cost_limit`,
     );
-  const projectLimit = sendProjectLimit ? llmOptions.maxCostCents : undefined;
   const managed = selection.keyMode === "managed";
   const provider = deps.registry.resolve(integration.type);
 
   // #279: the model's capabilities. The read can wait on the provider, so it comes after every cheap
   // local refusal above, and still before the git credentials are created. A job on the operator's key (#280, #432) reads
-  // its model's metadata too, Diff or Dynamic, for the context window its token budget is clamped to: one read serves
-  // both (a Dynamic job's model is the entry's). The metadata is read from the selection's provider.
-  // A native job (#578) reads none: its entry states the window, the output bound and the flags of the model.
-  const modelToRead =
-    (dynamic !== null || managed) && modelEntry === null
-      ? selection.model
-      : null;
-  // The claim of a job on the operator's key asks as a claim (an outage costs one wait, not one per claim) and names the
-  // entry in the log line instead of the model.
+  // its model's metadata too, Diff or Dynamic, and since #689 so does a Diff job on the workspace's own key, for the context
+  // window its token budget is cut to: one read serves both (a Dynamic job's model is the entry's). The metadata is read from the
+  // selection's provider. A native job (#578) reads none: its entry states the window, the output bound and the flags of the model.
+  const modelToRead = modelEntry === null ? selection.model : null;
+  // The claim asks as a claim (an outage costs one wait, not one per claim) and, on the operator's key, names the entry in the
+  // log line instead of the model.
   const metadata =
     modelToRead === null || deps.modelCapabilities === undefined
       ? undefined
       : await deps.modelCapabilities.check(modelToRead, {
           provider: selection.provider as LlmProvider,
+          forClaim: true,
           ...(selection.keyMode === "managed"
-            ? { forClaim: true, logAs: `entry=${selection.entry.id}` }
+            ? { logAs: `entry=${selection.entry.id}` }
             : {}),
         });
   let capabilities: DynamicModelCapabilities | undefined;
@@ -898,21 +883,18 @@ export async function buildJobInput(
   // The instance's model and context window are the defaults; the review settings of the project
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
-  // The workspace's own key: its budget, else the instance's context window. A managed job: the workspace's budget
-  // (the instance's window belongs to another model), cut to the window of the entry's model when that is known
-  // (#280), else to the window last read for it, else to a documented bound: never sent unclamped. The workspace
-  // cannot know the model, so its settings are not checked against it.
-  const maxTokens = !managed
-    ? (llmOptions.maxTokens ?? llmAccess.contextWindowTokens)
-    : clampMaxTokens(
-        llmOptions.maxTokens ?? UNKNOWN_WINDOW_MAX_TOKENS,
-        contextWindowOf(metadata) ??
-          deps.modelCapabilities?.lastKnownContextLength?.(
-            selection.model,
-            selection.provider as LlmProvider,
-          ) ??
-          null,
-      );
+  // #689: no setting names the token budget; the app decides it from the context window of the model: the window the provider's
+  // metadata states, else the one last read for it (the provider may be down), else on the workspace's own key the instance's
+  // `LLM_MAX_TOKENS`, else the built-in value. Never sent unclamped. A native job (#578) states its window in its entry, but it
+  // runs no PR-Agent and never reads the field: it gets the built-in value like the others.
+  const maxTokens = reviewTokenBudget(
+    contextWindowOf(metadata) ??
+      deps.modelCapabilities?.lastKnownContextLength?.(
+        selection.model,
+        selection.provider as LlmProvider,
+      ) ??
+      (managed ? null : llmAccess.contextWindowTokens),
+  );
   // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
   // can compare against it. A Diff job never carries a base, so it is not looked up.
   const previousReviewedSha =
@@ -940,8 +922,8 @@ export async function buildJobInput(
             provider: selection.provider,
             model: selection.model,
             apiKey: llmAccess.apiKey,
-            ...(maxTokens === null ? {} : { maxTokens }),
-            ...costLimitOf(projectLimit),
+            maxTokens,
+            ...costLimit.fields,
           },
           env: options.env,
         }
@@ -972,8 +954,8 @@ export async function buildJobInput(
             provider: selection.provider,
             model: selection.model,
             apiKey: llmAccess.apiKey,
-            ...(maxTokens === null ? {} : { maxTokens }),
-            ...costLimitOf(projectLimit),
+            maxTokens,
+            ...costLimit.fields,
           },
           env: {},
         };

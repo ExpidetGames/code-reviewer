@@ -12,6 +12,8 @@
 //                             { "limits": { "maxWorkspacesPerUser": number } }
 //                             { "ownKeyTokenCap": number }   the most tokens a Dynamic run on a workspace's own key may use
 //                             when the price of its model is not known (#553; src/native-cost/token-cap.ts)
+//                             { "reviewMaxCostCents": number }   the most one review may cost, in whole US cents, for both
+//                             review kinds: the customers' maximum (#689; src/review-settings/operator-cost-limit.ts)
 //                             { "dynamicReview": { "enabled": boolean } }   the Dynamic Review rollout gate
 //                             (contracts/README.md: off cancels the waiting Dynamic jobs, running ones finish)
 //                             { "planManagementUrl": "https://..." | null }   the operator-configured page "Manage plan"
@@ -123,6 +125,7 @@ const SETTING_KEYS = [
   "signInMethods",
   "limits",
   "ownKeyTokenCap",
+  "reviewMaxCostCents",
   "dynamicReview",
   "planManagementUrl",
   "smtp",
@@ -193,6 +196,11 @@ export function createAdminRouteHandlers({
             return service.changeSignInMethods(who.id, fields.signInMethods);
           case "ownKeyTokenCap":
             return service.changeOwnKeyTokenCap(who.id, fields.ownKeyTokenCap);
+          case "reviewMaxCostCents":
+            return service.changeReviewMaxCost(
+              who.id,
+              fields.reviewMaxCostCents,
+            );
           case "dynamicReview":
             return service.changeDynamicReview(who.id, fields.dynamicReview);
           case "planManagementUrl":

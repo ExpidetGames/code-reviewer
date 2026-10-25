@@ -9,6 +9,7 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 import { configuredLlmModel } from "../llm/config.ts";
+import { operatorCostLimitCentsOf } from "../review-settings/operator-cost-limit.ts";
 import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
 import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
@@ -106,6 +107,11 @@ function sharedDeps(): WorkerApiDeps {
     }),
     // The key the selection of the claimed job names, of the job's own workspace: its own key of the selected provider, or
     // the operator's key of it, never another workspace's and never the other key (src/llm).
+    // #689: the most one review may cost, from the admin portal; read at each job, so a change reaches the next one.
+    operatorCostLimitCents: async () =>
+      operatorCostLimitCentsOf(
+        await createInstanceSettingsRepository(db).get("review_max_cost_cents"),
+      ),
     keyFor: (workspaceId, selection) => llm.keyFor(workspaceId, selection),
     // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276), and its model access.
     entitlementsFor: (workspaceId) => readEntitlements(db, workspaceId),

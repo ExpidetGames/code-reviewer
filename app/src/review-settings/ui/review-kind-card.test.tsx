@@ -99,6 +99,7 @@ function projectModel(
     cost: estimateReviewCost(effective),
     managed: false,
     catalog: null,
+    operatorMaxCostCents: 100,
     lastSaved: null,
     dynamic,
   };
@@ -812,11 +813,9 @@ describe("problems with the Dynamic settings", () => {
     const user = userEvent.setup();
     renderForm(projectModel(), fakeApi().api);
 
-    await openSection(user, "Limits");
-    const tokens = screen.getByLabelText("Token budget");
-    await user.clear(tokens);
-    await user.type(tokens, "lots");
-    await openSection(user, "Review");
+    // Project rules are a Diff Review setting (#689: the token budget, which was one too, is gone).
+    await user.click(screen.getByLabelText("Project rules"));
+    await user.paste("x".repeat(4001));
     await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
     await openSection(user, "Limits");
     await user.click(screen.getByRole("button", SAVE));
@@ -827,9 +826,9 @@ describe("problems with the Dynamic settings", () => {
     expect(note.textContent).toMatch(/Choose Diff Review/);
     expect(document.activeElement).toBe(note.closest("[data-hidden-problem]"));
     await user.click(screen.getByRole("radio", { name: "Diff Review" }));
-    await openSection(user, "Limits");
+    await openSection(user, "Review");
     expect(
-      screen.getByLabelText("Token budget").getAttribute("aria-invalid"),
+      screen.getByLabelText("Project rules").getAttribute("aria-invalid"),
     ).toBe("true");
   });
 });

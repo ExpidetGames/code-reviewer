@@ -26,8 +26,6 @@ export type JobOptions = {
   llm?: {
     /** Replaces the model of the LLM access for this job. Null or left out: keep it. */
     model?: string | null;
-    /** `llm.maxTokens` of the job (a whole number of 1000 to 10 000 000). Null or left out: not sent. */
-    maxTokens?: number | null;
     /**
      * #666: the cost limit of the project in whole US cents (the project's setting over the workspace default). Null or left
      * out: none is set and nothing is sent.

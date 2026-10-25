@@ -74,7 +74,6 @@ describe("validating review settings", () => {
       fallbackModel: "deepseek/deepseek-v3.2",
       extraInstructions: "Check the tests.\nBe brief.",
       maxFindings: 7,
-      maxTokens: 120_000,
       largePrChunking: false,
       inlineKeyIssues: true,
       autoReviewOnOpen: false,
@@ -89,7 +88,6 @@ describe("validating review settings", () => {
         fallbackModel: "deepseek/deepseek-v3.2",
         extraInstructions: "Check the tests.\nBe brief.",
         maxFindings: 7,
-        maxTokens: 120_000,
         largePrChunking: false,
         inlineKeyIssues: true,
         autoReviewOnOpen: false,
@@ -124,24 +122,8 @@ describe("validating review settings", () => {
     ]);
   });
 
-  // CR-25-T07
-  it.each([
-    [REVIEW_SETTING_LIMITS.maxTokens.min - 1, "TOO_SMALL"],
-    [32, "TOO_SMALL"],
-    [0, "TOO_SMALL"],
-    [REVIEW_SETTING_LIMITS.maxTokens.max + 1, "TOO_LARGE"],
-    ["100000", "INVALID_TYPE"],
-    [100_000.5, "INVALID_TYPE"],
-  ])("refuses %j as the token budget with %s", (value, code) => {
-    expect(issuesOf({ maxTokens: value })).toEqual([
-      { field: "maxTokens", code },
-    ]);
-  });
-
-  it("accepts the smallest and the largest token budget and number of findings", () => {
+  it("accepts the smallest and the largest number of findings", () => {
     for (const settings of [
-      { maxTokens: REVIEW_SETTING_LIMITS.maxTokens.min },
-      { maxTokens: REVIEW_SETTING_LIMITS.maxTokens.max },
       { maxFindings: REVIEW_SETTING_LIMITS.maxFindings.min },
       { maxFindings: REVIEW_SETTING_LIMITS.maxFindings.max },
     ])
@@ -246,11 +228,11 @@ describe("validating review settings", () => {
   });
 
   it("reports every problem of one request at once", () => {
-    const issues = issuesOf({ maxFindings: 0, model: "", maxTokens: "x" });
+    const issues = issuesOf({ maxFindings: 0, model: "", maxCostCents: "x" });
 
     expect(issues.map((issue) => issue.field).sort()).toEqual([
+      "maxCostCents",
       "maxFindings",
-      "maxTokens",
       "model",
     ]);
   });
@@ -290,7 +272,7 @@ describe("reading stored review settings", () => {
     expect(
       parseStoredOverrides({
         maxFindings: 4,
-        maxTokens: 5,
+        maxTokens: 50_000,
         model: "qwen/qwen3-coder",
         removedField: true,
         largePrChunking: "yes",
@@ -365,8 +347,6 @@ describe("the legacy allowedCommands seam", () => {
 describe("the documented limits", () => {
   // CR-25-T07, CR-25-T08
   it.each([
-    [{ maxTokens: 7_999 }, "maxTokens", "TOO_SMALL"],
-    [{ maxTokens: 2_000_001 }, "maxTokens", "TOO_LARGE"],
     [{ maxFindings: 0 }, "maxFindings", "TOO_SMALL"],
     [{ maxFindings: 31 }, "maxFindings", "TOO_LARGE"],
     [{ extraInstructions: "x".repeat(4_001) }, "extraInstructions", "TOO_LONG"],
@@ -375,8 +355,6 @@ describe("the documented limits", () => {
   });
 
   it.each([
-    { maxTokens: 8_000 },
-    { maxTokens: 2_000_000 },
     { maxFindings: 1 },
     { maxFindings: 30 },
     { extraInstructions: "x".repeat(4_000) },
@@ -388,7 +366,6 @@ describe("the documented limits", () => {
     expect(REVIEW_SETTING_LIMITS).toEqual({
       extraInstructionsMaxChars: 4_000,
       maxFindings: { min: 1, max: 30 },
-      maxTokens: { min: 8_000, max: 2_000_000 },
       maxCostCents: { min: 1, max: 10_000 },
     });
     expect(PROJECT_DYNAMIC_LIMITS).toEqual({ reviewSkillMaxBytes: 16_384 });

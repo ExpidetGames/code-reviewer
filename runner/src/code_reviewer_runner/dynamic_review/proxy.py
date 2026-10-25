@@ -129,7 +129,7 @@ class DynamicCapabilities:
     structured_output: bool
     max_output_tokens: int
     # The model's context window in tokens: what a request and its output allowance must fit. It
-    # belongs to the model, not to the project (the Diff "Token budget" is a different thing and
+    # belongs to the model, not to the project (the Diff token budget `llm.maxTokens` is a different thing and
     # plays no part here). A descriptor that omits it gets the conservative default.
     context_window_tokens: int = DEFAULT_WINDOW_TOKENS
     # What a call reserves before it is sent. Optional: without it a call reserves a floor.

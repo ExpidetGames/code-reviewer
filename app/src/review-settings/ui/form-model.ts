@@ -12,6 +12,7 @@ import type {
   ReadableSources,
 } from "../service.ts";
 import type { ReviewCostGuard } from "../cost.ts";
+import { DEFAULT_OPERATOR_COST_LIMIT_CENTS } from "../operator-cost-limit.ts";
 import type { CatalogChoices, CatalogSelection } from "../catalog-selection.ts";
 import {
   type ReadableReviewSettings,
@@ -42,6 +43,11 @@ export type SettingsFormModel = {
   effective: ReadableReviewSettings;
   /** Where each field of `effective` comes from. */
   sources: ReadableSources;
+  /**
+   * #689: the most one review may cost, in whole US cents, as code-review.com sets it. The cost limit field shows it as the
+   * maximum, and a limit above it is cut to it.
+   */
+  operatorMaxCostCents: number;
   /** The estimate of a review; null for a workspace on the operator's key, which has no model of its own (#283). */
   cost: ReviewCostGuard | null;
   /**
@@ -82,6 +88,7 @@ export function modelFromGlobalView(
     effective: view.effective,
     sources: view.sources,
     cost: view.cost,
+    operatorMaxCostCents: view.operatorMaxCostCents,
     managed: view.modelManagedByInstance,
     catalog: catalogOf(view),
     lastSaved:
@@ -119,6 +126,7 @@ export function modelFromProjectView(
     effective: view.effective,
     sources: view.sources,
     cost: view.cost,
+    operatorMaxCostCents: view.operatorMaxCostCents,
     managed: view.modelManagedByInstance,
     catalog: catalogOf(view),
     lastSaved: null,
@@ -155,13 +163,20 @@ export function modelFromAnswer(
   return modelFromProjectView(withManagedFlag(answer as ProjectSettingsView));
 }
 
-/** An answer of a server that does not know the flag (the release before #283) is not managed. */
+/**
+ * An answer of a server that does not know the flag (the release before #283) is not managed, and one that does not know the
+ * maximum per review (the release before #689) has the default one.
+ */
 function withManagedFlag<T extends GlobalSettingsView | ProjectSettingsView>(
   view: T,
 ): T {
   return {
     ...view,
     modelManagedByInstance: view.modelManagedByInstance === true,
+    operatorMaxCostCents:
+      typeof view.operatorMaxCostCents === "number"
+        ? view.operatorMaxCostCents
+        : DEFAULT_OPERATOR_COST_LIMIT_CENTS,
   };
 }
 

@@ -104,14 +104,6 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
             )}
           </Alert>
         ))}
-      {cost.exceedsContext.map((which) => (
-        <Alert key={`context-${which}`} variant="warning" role="status">
-          The token budget is larger than the context window of the{" "}
-          {whichText(which)}{" "}
-          <span className="font-mono">{modelOf(cost, which)}</span>. Saving is
-          refused until the token budget or the model is changed.
-        </Alert>
-      ))}
     </div>
   );
 }

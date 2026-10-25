@@ -304,6 +304,40 @@ test.describe("the admin portal", () => {
     ).toBeVisible();
   });
 
+  // #689-T13
+  test("the admin sets the maximum cost per review in dollars and finds it again after a reload", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    await page.goto("/admin/setup/instance");
+    const maximum = page.getByLabel(/Maximum cost per review \(USD\)/);
+    // 1.00 USD until somebody sets another amount.
+    await expect(maximum).toHaveValue("1.00");
+
+    await maximum.fill("1.005");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(
+      page.getByText(
+        "Enter an amount from $0.01 to $100.00, with at most two decimals.",
+      ),
+    ).toBeVisible();
+
+    await maximum.fill("2.50");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(
+      page.locator('[data-slot="card"]', { has: maximum }).getByText("Saved."),
+    ).toBeVisible();
+    await page.reload();
+    await expect(maximum).toHaveValue("2.50");
+
+    // Put back, so the journeys that follow find the default.
+    await maximum.fill("1.00");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(
+      page.locator('[data-slot="card"]', { has: maximum }).getByText("Saved."),
+    ).toBeVisible();
+  });
+
   // #98-AD-02
   test("a signed in person who is not an admin gets exactly the answer of a page that does not exist, everywhere in the portal", async ({
     page,

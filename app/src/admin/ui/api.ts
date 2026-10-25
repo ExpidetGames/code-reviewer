@@ -39,6 +39,8 @@ export type SettingChange =
   | { limits: { maxWorkspacesPerUser: number } }
   /** The tokens a run on a workspace's own key may use when the price of its model is not known (#553). */
   | { ownKeyTokenCap: number }
+  /** The most one review may cost, in whole US cents, for both review kinds (#689); `null` for a text that is no amount, which the server refuses. */
+  | { reviewMaxCostCents: number | null }
   /** The Dynamic Review rollout gate of the instance. */
   | { dynamicReview: { enabled: boolean } }
   /** The page "Manage plan" hands people over to (#284); `null` removes it. */

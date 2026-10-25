@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  DYNAMIC_COST_LIMIT_MICRO_USD,
   JOB_TIMEOUT_SECONDS,
   maxVmMinutes,
   VM_TIMEOUT_MARGIN_SECONDS,
@@ -39,19 +38,11 @@ describe("the longest a VM lives, which a hold is made for", () => {
     expect(declared?.[1]).toBe(String(JOB_TIMEOUT_SECONDS.dynamic));
   });
 
-  // #498-T16
-  it("keeps the Dynamic cost limit equal to the default of the runner", () => {
-    const source = read(
-      "runner/src/code_reviewer_runner/dynamic_review/budget.py",
+  // #689-T15: the dollar limit of a hold is the operator's setting, not a constant that has to equal a default elsewhere.
+  it("holds no Dynamic cost limit of its own: the operator's maximum per review is the caller's input", () => {
+    expect(read("app/src/billing/hold.ts")).not.toMatch(
+      /export const \w*COST_LIMIT\w* =/,
     );
-    const declared = /^MAX_COST_USD = Decimal\("(\d+)\.(\d{2})"\)$/m.exec(
-      source,
-    );
-
-    expect(declared).not.toBeNull();
-    const micro =
-      Number(declared?.[1]) * 1_000_000 + Number(declared?.[2]) * 10_000;
-    expect(micro).toBe(DYNAMIC_COST_LIMIT_MICRO_USD);
   });
 
   // #498-T16

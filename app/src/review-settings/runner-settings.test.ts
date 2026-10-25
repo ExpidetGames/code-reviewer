@@ -93,15 +93,13 @@ describe("the PR-Agent variable names", () => {
 
 describe("mapping review settings to a runner job", () => {
   // CR-25-T03
-  it("sends the model and the token budget as the llm fields of the job", () => {
+  // #689-T03: the token budget is the claim's, not a setting.
+  it("sends the model as the llm field of the job and no token budget", () => {
     const result = toRunnerSettings(
-      withSettings({ model: "qwen/qwen3-coder", maxTokens: 150_000 }),
+      withSettings({ model: "qwen/qwen3-coder" }),
     );
 
-    expect(result.llm).toEqual({
-      model: "qwen/qwen3-coder",
-      maxTokens: 150_000,
-    });
+    expect(result.llm).toEqual({ model: "qwen/qwen3-coder" });
   });
 
   // CR-25-T03
@@ -112,7 +110,7 @@ describe("mapping review settings to a runner job", () => {
 
     expect(result.fallbackModels).toEqual(["qwen/qwen3-coder"]);
     expect(JSON.stringify(result.env)).not.toContain("qwen/qwen3-coder");
-    expect(Object.keys(result.llm)).toEqual(["model", "maxTokens"]);
+    expect(Object.keys(result.llm)).toEqual(["model"]);
   });
 
   // CR-25-T03
@@ -261,7 +259,7 @@ describe("mapping review settings to a runner job", () => {
             "fallbackModels",
             "llm",
           ]);
-          expect(Object.keys(result.llm)).toEqual(["model", "maxTokens"]);
+          expect(Object.keys(result.llm)).toEqual(["model"]);
           for (const name of Object.keys(result.env))
             expect(name).toMatch(RUNNER_ENV_KEY_PATTERN);
         }

@@ -51,6 +51,10 @@ import {
   checkOwnKeyTokenCap,
   ownKeyTokenCapOf,
 } from "../native-cost/token-cap.ts";
+import {
+  checkOperatorCostLimit,
+  operatorCostLimitCentsOf,
+} from "../review-settings/operator-cost-limit.ts";
 import { githubIdentityLinked } from "./github-identity.ts";
 import { parseOperatorKeyChange } from "./operator-key-change.ts";
 import {
@@ -96,6 +100,11 @@ export type AdminSettingsView = {
    * default until saved; a saved value is within the bounds of `token-cap.ts`.
    */
   ownKeyTokenCap: SettingView<number>;
+  /**
+   * #689: the most one review may cost, in whole US cents, for both review kinds: the customers' maximum. 1.00 USD until saved;
+   * a saved value is within the bounds of `operator-cost-limit.ts`.
+   */
+  reviewMaxCostCents: SettingView<number>;
   /**
    * #195/#202 rollout gate: whether Dynamic Review may be queued. Off until an admin turns it on; turning
    * it off cancels the waiting Dynamic jobs and leaves the running ones (contracts/README.md).
@@ -169,6 +178,8 @@ export type AdminService = {
   ): Promise<ChangeResult>;
   /** `value` is the request's `ownKeyTokenCap` as received: a whole number of tokens within the bounds of `token-cap.ts`. */
   changeOwnKeyTokenCap(actorId: string, value: unknown): Promise<ChangeResult>;
+  /** `value` is the request's `reviewMaxCostCents` as received: a whole number of US cents within the bounds of `operator-cost-limit.ts` (#689). */
+  changeReviewMaxCost(actorId: string, value: unknown): Promise<ChangeResult>;
   /**
    * `change` is the request's `dynamicReview` value as received: `{ enabled: boolean }`. It goes through the
    * instance settings repository, which takes the gate lock and cancels the waiting Dynamic jobs on off.
@@ -316,6 +327,7 @@ export function createAdminService({
         "sign_in_methods",
         "max_workspaces_per_user",
         "own_key_max_total_tokens",
+        "review_max_cost_cents",
         "setup_completed_at",
         "import_notice",
         "dynamic_review",
@@ -327,6 +339,7 @@ export function createAdminService({
         methods,
         maxWorkspaces,
         ownKeyTokenCap,
+        reviewMaxCost,
         completed,
         notice,
         dynamicReview,
@@ -340,6 +353,7 @@ export function createAdminService({
         methods?.updatedBy,
         maxWorkspaces?.updatedBy,
         ownKeyTokenCap?.updatedBy,
+        reviewMaxCost?.updatedBy,
         dynamicReview?.updatedBy,
         planManagementUrl?.updatedBy,
         mailServer.updatedBy,
@@ -383,6 +397,10 @@ export function createAdminService({
         ownKeyTokenCap: view(
           ownKeyTokenCap,
           ownKeyTokenCapOf(ownKeyTokenCap?.value),
+        ),
+        reviewMaxCostCents: view(
+          reviewMaxCost,
+          operatorCostLimitCentsOf(reviewMaxCost?.value),
         ),
         dynamicReview: view(
           dynamicReview,
@@ -593,6 +611,18 @@ export function createAdminService({
           issues: [{ field: "ownKeyTokenCap", code: checked.code }],
         };
       await settings.set("own_key_max_total_tokens", checked.value, actorId);
+      return { ok: true };
+    },
+
+    async changeReviewMaxCost(actorId, value) {
+      const checked = checkOperatorCostLimit(value);
+      if (!checked.ok)
+        return {
+          ok: false,
+          error: "invalid_input",
+          issues: [{ field: "reviewMaxCostCents", code: checked.code }],
+        };
+      await settings.set("review_max_cost_cents", checked.value, actorId);
       return { ok: true };
     },
   };

@@ -54,6 +54,7 @@ WORKER_FEATURES: tuple[str, ...] = (
     "supersede",
     "dynamic_cost_policy",
     "cost_limit",
+    "operator_cost_limit",
 )
 # The feature of `GET /api/runners/v1/version` that says the Worker API exists.
 FEATURE_WORKER_API = "worker_api"

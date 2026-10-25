@@ -838,7 +838,7 @@ counted and shown in the Run; they just stop nothing.
 
 | Limit                                     | Value                                                                                                                                                                                | Kind                                                                                                                                       |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cost of one run                           | 1.00 USD; `RUNNER_DYNAMIC_MAX_COST_USD` sets it (a plain decimal number above 0, up to the ceiling of 20 USD in the code; anything else fails the job with `dynamic_config_invalid`) | budget                                                                                                                                     |
+| Cost of one run                           | 1.00 USD; the operator sets it in the admin portal ("Maximum cost per review", General, Limits; #689; the app sends it with the job as `llm.operatorMaxCostUsd`, up to 100 USD, one value for Diff and Dynamic Review). `RUNNER_DYNAMIC_MAX_COST_USD` is only the fallback for a job from an app that does not send it (a plain decimal number above 0, up to the ceiling of 20 USD in the code; anything else fails the job with `dynamic_config_invalid`) | budget                                                                                                                                     |
 | Wall clock                                | 600 s (lower when `RUNNER_JOB_TIMEOUT_SECONDS` is lower)                                                                                                                             | technical: the lease and the runner's capacity depend on it                                                                                |
 | One tool result                           | 64 KiB                                                                                                                                                                               | technical                                                                                                                                  |
 | All tool results together                 | 4 MiB                                                                                                                                                                                | technical                                                                                                                                  |
@@ -950,10 +950,10 @@ production symptom, where an estimate that was too high refused a request the pr
 taken. Every other case is the provider's: its "context length exceeded" answer (read from the
 answer's `error.code` and `error.message` only, never from text elsewhere in the body) ends the run
 with `llm_context_length_exceeded`. The conservative estimate (bytes over 3) is used for the cost
-reservation only. The project's
-Diff Review "Token budget" (`llm.maxTokens`) is **ignored** by Dynamic Review: it is another concept
-(the size PR-Agent gives a diff), the review kind card hides it for Dynamic, and using it as the
-window is what refused real reviews. It is neither a window nor an extra cap.
+reservation only. The Diff Review
+token budget (`llm.maxTokens`, which the app decides for every job since #689 and no setting names any more) is **ignored** by
+Dynamic Review: it is another concept (the size PR-Agent gives a diff), and using it as the window is what refused real
+reviews. It is neither a window nor an extra cap.
 
 A run whose limit is hit ends with `dynamic_budget_exceeded` (see "Wrap-up" for the run that is
 wrapped up before), a run whose usage or cost cannot be established with `dynamic_accounting_failed`. The previous summary comment is preserved in both
@@ -1292,7 +1292,7 @@ docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
 | `RUNNER_DYNAMIC_MEMORY_LIMIT`       | `2g`                                 | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal)                                                                                             |
 | `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m`                              | The soft reservation under the limit                                                                                                                                                                           |
 | `RUNNER_DYNAMIC_IMAGE`              | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one                                                                                                                                                 |
-| `RUNNER_DYNAMIC_MAX_COST_USD`       | empty                                | The most one run may cost, in USD; empty is 1.00; up to 20 (see "Hard limits")                                                                                                                                 |
+| `RUNNER_DYNAMIC_MAX_COST_USD`       | empty                                | Fallback (#689): the most one run may cost, in USD, when the app sends no maximum with the job; empty is 1.00; up to 20 (see "Hard limits") |
 | `RUNNER_DYNAMIC_CAPABILITIES`       | empty                                | Optional ceiling and override of the model description (see "The model"). Empty: the description the app sends with the job applies, or, without one, the one built into the runner for the default model only |
 
 The container runs the supervisor as root with only the capabilities of "The engine boundary", sets

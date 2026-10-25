@@ -15,6 +15,7 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
               "requireParameters": true,                       // optional, with baseUrl (fakes)
               "maxTokens": 163840,                             // optional, context window
               "maxCostUsd": 0.5,                               // optional, the project's cost limit
+              "operatorMaxCostUsd": 1.0,                       // optional, the operator's maximum
               "fallbackModels": ["<vendor>/<model>"]},         // optional, at most five
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
@@ -91,6 +92,7 @@ _LLM_FIELDS = {
     "requireParameters",
     "maxTokens",
     "maxCostUsd",
+    "operatorMaxCostUsd",
     "fallbackModels",
 }
 _DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities", "cost", "modelEntry"}
@@ -263,6 +265,10 @@ class LlmAccess:
     # #666: the cost limit the customer set for a review of the project, in USD; None: none was set.
     # The run is held to the smaller of this and the operator's limit.
     max_cost_usd: Decimal | None = None
+    # #689: the most one review may cost as the operator set it in the admin portal, in USD; None:
+    # the app did not send it (an app of the release before), and a Dynamic run is held to the
+    # operator's environment variable instead.
+    operator_max_cost_usd: Decimal | None = None
     fallback_models: tuple[str, ...] = ()
     # Whether every request carries the provider's require-parameters field (OpenRouter's
     # `provider.require_parameters`, #270). True for the provider itself when its entry has the
@@ -385,6 +391,7 @@ def _catalog_llm_access(llm: dict[str, Any], slug: str) -> LlmAccess:
         require_parameters=False,
         max_tokens=_max_tokens(llm),
         max_cost_usd=_max_cost_usd(llm),
+        operator_max_cost_usd=_operator_max_cost_usd(llm),
     )
 
 
@@ -413,6 +420,7 @@ def _llm_access(data: dict[str, Any], *, catalog: bool = False) -> LlmAccess:
         and provider.require_parameters is not None,
         max_tokens=_max_tokens(llm),
         max_cost_usd=_max_cost_usd(llm),
+        operator_max_cost_usd=_operator_max_cost_usd(llm),
         fallback_models=_fallback_models(llm, model, provider),
     )
 
@@ -455,17 +463,27 @@ def _max_tokens(llm: dict[str, Any]) -> int | None:
     return value
 
 
-def _max_cost_usd(llm: dict[str, Any]) -> Decimal | None:
-    """`llm.maxCostUsd` (#666): a finite number above zero and at most `MAX_PROJECT_COST_USD`."""
-    if "maxCostUsd" not in llm:
+def _cost_usd(llm: dict[str, Any], name: str) -> Decimal | None:
+    """A cost field of `llm`: a finite number above zero and at most `MAX_PROJECT_COST_USD`."""
+    if name not in llm:
         return None
-    value = llm["maxCostUsd"]
+    value = llm[name]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise _invalid("llm.maxCostUsd must be a number")
+        raise _invalid(f"llm.{name} must be a number")
     if not math.isfinite(value) or not 0 < value <= MAX_PROJECT_COST_USD:
-        raise _invalid("llm.maxCostUsd is out of range")
+        raise _invalid(f"llm.{name} is out of range")
     # The shortest text of the number, so 0.07 is 0.07 and not the float's long tail.
     return Decimal(repr(value))
+
+
+def _max_cost_usd(llm: dict[str, Any]) -> Decimal | None:
+    """`llm.maxCostUsd` (#666): the customer's limit."""
+    return _cost_usd(llm, "maxCostUsd")
+
+
+def _operator_max_cost_usd(llm: dict[str, Any]) -> Decimal | None:
+    """`llm.operatorMaxCostUsd` (#689): the operator's maximum per review (admin portal)."""
+    return _cost_usd(llm, "operatorMaxCostUsd")
 
 
 def _fallback_models(

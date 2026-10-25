@@ -5,6 +5,8 @@
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { operatorCostLimitCentsOf } from "../review-settings/operator-cost-limit.ts";
 import { managedModelsOf } from "../runner-api/managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
@@ -346,6 +348,13 @@ export async function startRunnerApiHarness(
       entryAllowed(await settingsEntitlements(), { id }),
     ),
     providers: options.providers ?? llmProviderDescriptors,
+    // #689: a cost limit above the operator's maximum (the instance setting) is refused at the save, as on the running server.
+    operatorCostLimitCents: async () =>
+      operatorCostLimitCentsOf(
+        await createInstanceSettingsRepository(fixture.db).get(
+          "review_max_cost_cents",
+        ),
+      ),
     ...(options.nativeCatalog === undefined
       ? {}
       : { nativeCatalog: options.nativeCatalog }),
@@ -407,6 +416,13 @@ export async function startRunnerApiHarness(
               settings: () => reviewSettings,
             })
           : emptyJobOptionsSource),
+      // #689: as on the running server, the operator's maximum is the instance setting (1.00 USD until a test sets it).
+      operatorCostLimitCents: async () =>
+        operatorCostLimitCentsOf(
+          await createInstanceSettingsRepository(fixture.db).get(
+            "review_max_cost_cents",
+          ),
+        ),
       keyFor:
         options.loadLlm !== undefined
           ? (workspaceId) => options.loadLlm!(workspaceId)

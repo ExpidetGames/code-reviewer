@@ -53,6 +53,7 @@ function view(
     },
     maxWorkspacesPerUser: { value: 10, ...never },
     ownKeyTokenCap: { value: 4_000_000, ...never },
+    reviewMaxCostCents: { value: 100, ...never },
     dynamicReview: { value: false, ...never },
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never, ...smtp },

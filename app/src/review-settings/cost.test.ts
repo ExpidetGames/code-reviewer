@@ -6,12 +6,12 @@
 // itself is sane and holds the prices of the model comparison.
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LLM_MODEL } from "../llm/config.ts";
+import { DEFAULT_REVIEW_TOKEN_BUDGET } from "../model-catalog/token-budget.ts";
 import {
   REVIEW_COST_LIMIT_USD,
   TYPICAL_COMPLETION_TOKENS,
   TYPICAL_PROMPT_TOKENS,
   estimateReviewCost,
-  modelsExceedingContext,
   type CostSettings,
 } from "./cost.ts";
 import {
@@ -53,7 +53,6 @@ const prices = {
 const settings = (changes: Partial<CostSettings>): CostSettings => ({
   model: "test/cheap",
   fallbackModel: null,
-  maxTokens: 100_000,
   largePrChunking: false,
   ...changes,
 });
@@ -117,12 +116,10 @@ describe("estimating the cost of a review", () => {
     expect(guard.primary).toMatchObject({ usd: 0.048 });
   });
 
-  it("never counts more prompt than the token budget allows", () => {
-    const small = estimateReviewCost(settings({ maxTokens: 10_000 }), prices);
-
-    // 10000 * 1/1e6 + 3000 * 2/1e6
-    expect(small.primary).toMatchObject({ usd: 0.016 });
-    expect(TYPICAL_PROMPT_TOKENS).toBeGreaterThan(10_000);
+  // #689-T02
+  it("never counts more prompt than the token budget the app uses allows", () => {
+    // The typical review is below the internal budget, so it is the typical number that counts.
+    expect(TYPICAL_PROMPT_TOKENS).toBeLessThan(DEFAULT_REVIEW_TOKEN_BUDGET);
     expect(TYPICAL_COMPLETION_TOKENS).toBe(3_000);
   });
 
@@ -199,48 +196,15 @@ describe("estimating the cost of a review", () => {
   });
 });
 
-describe("the token budget against the context window", () => {
-  it("lists the models whose window is smaller than the budget", () => {
-    expect(
-      modelsExceedingContext(
-        { model: "test/cheap", fallbackModel: "test/dear", maxTokens: 100_001 },
-        prices,
-      ),
-    ).toEqual(["model", "fallbackModel"]);
-    expect(
-      modelsExceedingContext(
-        { model: "test/cheap", fallbackModel: null, maxTokens: 100_000 },
-        prices,
-      ),
-    ).toEqual([]);
-  });
-
-  it("counts the budget in the model's own tokens", () => {
-    // 300000 * 1.5 = 450000 > 400000
-    expect(
-      modelsExceedingContext(
-        { model: "test/wordy", fallbackModel: null, maxTokens: 300_000 },
-        prices,
-      ),
-    ).toEqual(["model"]);
-  });
-
-  it("does not guess for a model the table does not know", () => {
-    expect(
-      modelsExceedingContext(
-        { model: "some/new-model", fallbackModel: null, maxTokens: 2_000_000 },
-        prices,
-      ),
-    ).toEqual([]);
-  });
-
-  it("shows the models in the cost guard as primary and fallback", () => {
+// #689-T02: the token budget is no setting and the cost guard no longer checks it against the context window.
+describe("the cost guard without a token budget", () => {
+  it("has no list of models whose window is too small", () => {
     const guard = estimateReviewCost(
-      settings({ maxTokens: 150_000, fallbackModel: "test/limit" }),
+      settings({ fallbackModel: "test/limit" }),
       prices,
     );
 
-    expect(guard.exceedsContext).toEqual(["primary", "fallback"]);
+    expect(Object.keys(guard)).not.toContain("exceedsContext");
   });
 });
 
@@ -249,7 +213,6 @@ describe("the price table", () => {
     const guard = estimateReviewCost({
       model: DEFAULT_LLM_MODEL,
       fallbackModel: null,
-      maxTokens: 100_000,
       largePrChunking: true,
     });
 
@@ -264,7 +227,6 @@ describe("the price table", () => {
       estimateReviewCost({
         model,
         fallbackModel: null,
-        maxTokens: 100_000,
         largePrChunking: true,
       }).warn;
 
@@ -320,7 +282,6 @@ describe("the estimate follows the provider of the settings", () => {
     provider,
     model,
     fallbackModel: null,
-    maxTokens: 100_000,
     largePrChunking: true,
   });
 
@@ -332,7 +293,6 @@ describe("the estimate follows the provider of the settings", () => {
     );
 
     expect(guard.primary.status).toBe("estimated");
-    expect(guard.exceedsContext).toEqual([]);
   });
 
   it("does not know a model of another provider", () => {

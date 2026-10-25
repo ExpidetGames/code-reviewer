@@ -82,6 +82,7 @@ function projectModel(
     cost: estimateReviewCost(BUILT_IN),
     managed: false,
     catalog: null,
+    operatorMaxCostCents: 100,
     lastSaved: null,
     dynamic,
   };

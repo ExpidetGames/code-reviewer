@@ -23,7 +23,7 @@ import { createProjectsRepository } from "../../src/db/repositories/projects-rep
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
 import { MAX_PROVIDER_TEXT_CHARS } from "../../src/llm/provider-text.ts";
-import { UNKNOWN_WINDOW_MAX_TOKENS } from "../../src/model-catalog/token-budget.ts";
+import { DEFAULT_REVIEW_TOKEN_BUDGET } from "../../src/model-catalog/token-budget.ts";
 import { usageItemView } from "../../src/operator-api/usage-views.ts";
 import {
   startRunnerApiHarness,
@@ -244,7 +244,7 @@ describe("an own key: the provider and model of the project, with the key of tha
   it("is unchanged for a workspace that never chose a provider: the default provider, the project's model and its key", async () => {
     const h = await start({
       keyMode: "own",
-      project: { model: "vendor/project-model", maxTokens: 50_000 },
+      project: { model: "vendor/project-model" },
     });
 
     const { job } = await h.claimed();
@@ -253,7 +253,8 @@ describe("an own key: the provider and model of the project, with the key of tha
       provider: DEFAULT_PROVIDER,
       model: "vendor/project-model",
       apiKey: WORKSPACE_KEY,
-      maxTokens: 50_000,
+      // The harness's LLM_MAX_TOKENS (64 000) is the window of a model the provider's metadata does not state.
+      maxTokens: 64_000,
     });
   });
 
@@ -761,25 +762,22 @@ describe("a managed Dynamic job whose entry's model cannot be used", () => {
   });
 });
 
-describe("the token budget of a job on the operator's key", () => {
-  // #432-T09
-  it("is cut to the documented bound when the window of the entry's model is not known", async () => {
-    const h = await start({
-      keyMode: "managed",
-      project: { maxTokens: 150_000 },
-    });
+// #689: no setting names the token budget; the claim decides it from the context window of the model (#432-T09 before).
+describe("the token budget of a job", () => {
+  // #689-T01
+  it("is the built-in bound when the window of the entry's model is not known", async () => {
+    const h = await start({ keyMode: "managed" });
 
     expect((await h.claimed()).job.input.llm.maxTokens).toBe(
-      UNKNOWN_WINDOW_MAX_TOKENS,
+      DEFAULT_REVIEW_TOKEN_BUDGET,
     );
   });
 
-  // #432-T09
-  it("is clamped to the context window of the entry's model, read as a claim and logged by the entry, not the model", async () => {
+  // #689-T01
+  it("is cut to the context window of the entry's model, read as a claim and logged by the entry, not the model", async () => {
     const meta = metadata(() => supported(64_000));
     const h = await start({
       keyMode: "managed",
-      project: { maxTokens: 150_000 },
       harness: { modelCapabilities: meta.checker },
     });
 
@@ -798,7 +796,20 @@ describe("the token budget of a job on the operator's key", () => {
     ]);
   });
 
-  // #432-T09
+  // #689-T01
+  it("is not made larger by a larger window: a window above the built-in bound leaves the bound", async () => {
+    const meta = metadata(() => supported(1_000_000));
+    const h = await start({
+      keyMode: "managed",
+      harness: { modelCapabilities: meta.checker },
+    });
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(
+      DEFAULT_REVIEW_TOKEN_BUDGET,
+    );
+  });
+
+  // #689-T01
   it("uses the last window read for the entry's model of that provider when the provider cannot be asked now", async () => {
     let answer: ModelCapabilityResult = supported(64_000);
     const known = new Map<string, number>();
@@ -816,7 +827,6 @@ describe("the token budget of a job on the operator's key", () => {
     };
     const h = await start({
       keyMode: "managed",
-      project: { maxTokens: 150_000 },
       harness: { modelCapabilities: checker },
     });
     expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
@@ -827,50 +837,53 @@ describe("the token budget of a job on the operator's key", () => {
     expect(lookups).toEqual([["entry/default-model", DEFAULT_PROVIDER]]);
   });
 
-  // #432-T09
-  it("is cut to the bound when the provider cannot be asked and no window was ever read for the entry's model", async () => {
+  // #689-T01
+  it("is the built-in bound when the provider cannot be asked and no window was ever read for the entry's model", async () => {
     const checker: ModelCapabilityChecker = {
       check: async () => ({ outcome: "unverifiable" }),
       lastKnownContextLength: () => null,
     };
     const h = await start({
       keyMode: "managed",
-      project: { maxTokens: 150_000 },
       harness: { modelCapabilities: checker },
     });
 
     expect((await h.claimed()).job.input.llm.maxTokens).toBe(
-      UNKNOWN_WINDOW_MAX_TOKENS,
+      DEFAULT_REVIEW_TOKEN_BUDGET,
     );
   });
 
-  // #432-T09
-  it("is clamped to the Dynamic entry's window with one read of its metadata", async () => {
-    const meta = metadata(() => supported(100_000));
+  // #689-T01
+  it("is cut to the Dynamic entry's window with one read of its metadata", async () => {
+    const meta = metadata(() => supported(60_000));
     const h = await start({
       keyMode: "managed",
       dynamic: true,
-      project: { maxTokens: 150_000 },
       harness: { modelCapabilities: meta.checker },
     });
 
     const { job } = await h.claimed(DYNAMIC_CLAIM);
 
-    expect(job.input.llm.maxTokens).toBe(100_000);
+    expect(job.input.llm.maxTokens).toBe(60_000);
     expect(meta.asked).toHaveLength(1);
   });
 
-  // #432-T09
-  it("is not clamped for a workspace on its own key, and the provider is not asked for a Diff model", async () => {
+  // #689-T01
+  it("is cut to the window of a model on the workspace's own key too, which a save used to check and no longer can", async () => {
     const meta = metadata(() => supported(8_000));
     const h = await start({
       keyMode: "own",
-      project: { maxTokens: 150_000, model: "vendor/own-model" },
+      project: { model: "vendor/own-model" },
       harness: { modelCapabilities: meta.checker },
     });
 
-    expect((await h.claimed()).job.input.llm.maxTokens).toBe(150_000);
-    expect(meta.asked).toEqual([]);
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(8_000);
+    expect(meta.asked).toEqual([
+      {
+        model: "vendor/own-model",
+        options: { forClaim: true, provider: DEFAULT_PROVIDER },
+      },
+    ]);
   });
 });
 

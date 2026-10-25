@@ -181,7 +181,15 @@ test.describe("the project list and the settings pages", () => {
     const field = () => page.locator("[data-field]", { has: limit() });
 
     await expect(field()).toContainText(
-      "A review stops when it reaches this amount.",
+      "A review stops when it reaches this amount, at most $1.00.",
+    );
+    // #689: an empty field means up to the maximum, and the field says so.
+    await expect(limit()).toHaveAttribute("placeholder", "Max $1.00");
+    // A limit above the maximum is refused with the maximum named, and nothing is saved.
+    await limit().fill("2");
+    await page.getByRole("button", { name: "Save review settings" }).click();
+    await expect(field()).toContainText(
+      "The maximum cost per review is $1.00. Enter that or less.",
     );
     await limit().fill("0.75");
     await page.getByRole("button", { name: "Save review settings" }).click();
@@ -215,9 +223,9 @@ test.describe("the project list and the settings pages", () => {
     await openSection(page, "Limits");
     const budget = () =>
       page
-        .getByLabel("Token budget", { exact: true })
+        .getByLabel("Cost limit per review (USD)", { exact: true })
         .filter({ visible: true });
-    await expect(budget()).toHaveValue("100000");
+    await expect(budget()).toHaveValue("");
     await expect(
       page
         .locator("[data-field]", { has: budget() })
@@ -239,7 +247,7 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("heading", { level: 1, name: "Review defaults" }),
     ).toBeVisible();
     await openSection(page, "Limits");
-    await budget().fill("60000");
+    await budget().fill("0.60");
     await page.getByRole("button", { name: "Save review defaults" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
@@ -254,7 +262,7 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("heading", { level: 1, name: REPOSITORY }),
     ).toBeVisible();
     await openSection(page, "Limits");
-    await expect(budget()).toHaveValue("60000");
+    await expect(budget()).toHaveValue("0.60");
     await expect(
       page
         .locator("[data-field]", { has: budget() })
@@ -262,7 +270,7 @@ test.describe("the project list and the settings pages", () => {
     ).toBeVisible();
     await page.reload();
     await openSection(page, "Limits");
-    await expect(budget()).toHaveValue("60000");
+    await expect(budget()).toHaveValue("0.60");
   });
 
   // CR-34-T09, #101-WM-08, #104-LK-13

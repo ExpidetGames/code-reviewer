@@ -281,6 +281,20 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
   a project without a limit is the job of before, byte for byte. It applies to both kinds of review, which is why the field sits in
   `llm` next to `maxTokens` and not in `dynamic.limits`.
 
+- #689 adds the optional `llm.operatorMaxCostUsd` (the most one review may cost as the operator set it in the admin portal, "Maximum
+  cost per review", a number above 0 and at most 100, whole cents) and the claim feature `operator_cost_limit`. It is the customers'
+  maximum and holds for both kinds of review: the runner holds a review to the smaller of it and `llm.maxCostUsd`, and a job that
+  carries it ignores `RUNNER_DYNAMIC_MAX_COST_USD`, which stays the limit of a Dynamic job from an app that does not send the field
+  (a Diff job then has no operator limit, as before). The job is closed, so the **app** never sends `llm.operatorMaxCostUsd` unless the
+  caller named `operator_cost_limit`; the app handles the three callers of a release in `runner-api/job-cost-limit.ts`: one that
+  names `operator_cost_limit` gets the two values, one that names `cost_limit` alone (the runner of the release before) gets the
+  smaller of the two in `llm.maxCostUsd` (its own limit and the environment variable can only narrow it further), and one that
+  names neither gets neither field and the log says `runs without its cost limit`. A runner that names `operator_cost_limit` also
+  reads a job from an app of the release before (no field: the environment variable applies), so the deploy order does not matter.
+  #689 also removes the review setting behind `llm.maxTokens` (the "Token budget"): the field stays in the contract with its bounds,
+  and the app now sends the value it decides itself (100000, or the context window of the model when that is smaller) with every job,
+  so a runner of either release reads a job of either.
+
 - #578 adds the optional `DynamicReview.modelEntry` (`DynamicModelEntry`: the `JobModelEntry` of `job-model-entry.v1.json`, which holds
   no key). It travels with `cost` (`dependentRequired`), so it is sent only to a caller that named `dynamic_cost_policy`, and the
   rule is the one of `cost`: `RunnerJobInput` is closed, the **app** never sends the field to a caller without the feature, and an old
@@ -440,7 +454,7 @@ The meaning of the calls (status codes, the lease, what happens on failure) is i
   `PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
   `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT`. The app never sends them (a test over the options of the
   review settings checks it).
-- `llm.maxTokens` is the token budget of a review. `llm.fallbackModels` (at most five names) is accepted
+- `llm.maxTokens` is the token budget of a review, which the app decides from the model (#689; no setting names it). `llm.fallbackModels` (at most five names) is accepted
   by the runner; the app does not send it until a chain is decided, and then `maxTokens` must fit the
   smallest window of the chain.
 

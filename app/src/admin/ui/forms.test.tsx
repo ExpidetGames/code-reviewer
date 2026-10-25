@@ -48,6 +48,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     },
     maxWorkspacesPerUser: { value: 10, ...never },
     ownKeyTokenCap: { value: 4_000_000, ...never },
+    reviewMaxCostCents: { value: 100, ...never },
     dynamicReview: { value: false, ...never },
     planManagementUrl: { value: null, ...never },
     smtp: { value: null, password: "none", ...never },
@@ -414,6 +415,74 @@ describe("the instance form", () => {
     expect(change).toHaveBeenCalledTimes(1);
   });
 
+  // #689-T13
+  it("changes the maximum cost per review, typed in dollars and sent in cents, and sends only that", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(/Maximum cost per review \(USD\)/);
+    expect((field as HTMLInputElement).value).toBe("1.00");
+
+    await user.clear(field);
+    await user.type(field, "2.50");
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(change).toHaveBeenCalled());
+    expect(change).toHaveBeenCalledWith({ reviewMaxCostCents: 250 });
+    expect(change).toHaveBeenCalledTimes(1);
+  });
+
+  // #689-T13
+  it("sends an amount with more than two decimals as no amount, and shows the refusal of the server next to the field", async () => {
+    const { api, change } = apiAnswering(
+      refused("invalid_input", [
+        { field: "reviewMaxCostCents", code: "number_out_of_range" },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(/Maximum cost per review \(USD\)/);
+
+    await user.clear(field);
+    await user.type(field, "1.005");
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(change).toHaveBeenCalled());
+    expect(change).toHaveBeenCalledWith({ reviewMaxCostCents: null });
+    expect(
+      await within(card("Limits")).findByText(
+        "Enter an amount from $0.01 to $100.00, with at most two decimals.",
+      ),
+    ).toBeTruthy();
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  // #689-T13
+  it("keeps the refusal of one limit visible when another limit of the card is saved in the same step", async () => {
+    const { api } = apiSequencing(
+      refused("invalid_input", [
+        { field: "maxWorkspacesPerUser", code: "number_out_of_range" },
+      ]),
+      SAVED,
+    );
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+
+    await user.clear(screen.getByLabelText(/Maximum number of workspaces/));
+    await user.type(screen.getByLabelText(/Maximum number of workspaces/), "0");
+    await user.clear(screen.getByLabelText(/Maximum cost per review \(USD\)/));
+    await user.type(
+      screen.getByLabelText(/Maximum cost per review \(USD\)/),
+      "2",
+    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(
+      await within(card("Limits")).findByText(/Enter a whole number from 1/),
+    ).toBeTruthy();
+    expect(within(card("Limits")).queryByText("Saved.")).toBeNull();
+  });
+
   // #98-AD-06
   it("says how many workspaces stand in the way when the change to single-tenant is refused", async () => {
     const { api } = apiAnswering(refused("too_many_workspaces"));
@@ -529,7 +598,7 @@ describe("the instance form", () => {
   it("says that a setting was never changed", () => {
     render(<InstanceForm settings={view()} />);
 
-    expect(screen.getAllByText(/Never changed/)).toHaveLength(5);
+    expect(screen.getAllByText(/Never changed/)).toHaveLength(6);
   });
 
   it("shows the server's reason for a number that is not allowed", async () => {
