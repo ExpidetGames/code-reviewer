@@ -23,6 +23,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Job tag, capability matching, `no_capable_runner`, `dynamic_review_disabled`                                                                                                                                                                                                                                                                                                 | Shipped (#195)                                                                                                                        |
 | Sanitised read-only checkout of the pull request head                                                                                                                                                                                                                                                                                                                        | Shipped (#196)                                                                                                                        |
 | Fixed review core and the editable skill                                                                                                                                                                                                                                                                                                                                     | Shipped (#198)                                                                                                                        |
+| Repository skills: the agent lists, loads and reads the skills of the head checkout with OpenCode's own `skill` tool (manifests rewritten, no script runs)                                                                                                                                                                                                                   | Shipped (#701), see "Repository skills" in [Dynamic checkout](dynamic-checkout.md#repository-skills-701)                              |
 | Engine seam: trusted config, hard limits, per-job model proxy, adapter, process-group cleanup                                                                                                                                                                                                                                                                                | Shipped (#197 part 1, #202 process-group reuse)                                                                                       |
 | Summary comment, findings state, reconciliation                                                                                                                                                                                                                                                                                                                              | Shipped (#199)                                                                                                                        |
 | Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup                                                                                                                                                                                                | Shipped (#197 parts 2a and 2b, #244)                                                                                                  |
@@ -927,7 +928,7 @@ next claim of the workspace is then refused (`balance_negative`). Billing never 
 nothing from a run that ended without a review: it prices what the run reported.
 
 _Serial calls._ The engine's model calls are serial: one agent (`review`), the permission block denies
-every tool but `read`, `grep`, `glob` and `StructuredOutput` (so no subagent runs in parallel), and a
+every tool but `read`, `grep`, `glob`, `skill` and `StructuredOutput` (so no subagent runs in parallel), and a
 step waits for its tool results. The ledger still holds the reservation of every call in flight; if
 requests ever overlapped, the bound above would be the sum of the excesses over the calls in flight,
 and a final call is refused when `spent + held` already passes the limit (that case is not the
@@ -1144,7 +1145,7 @@ usage do not say what 55 calls did. The runner therefore records a **trace** and
 - **Per tool call:** the tool, `resultBytes` (what the model was shown) and `isRepeat` (the same tool with the same
   normalised arguments, a path spelled absolute or relative being one file, already ran in this job).
 - **Never content:** no path, no argument, no tool result, no model text. A tool name that is none of the engine's
-  (`read`, `grep`, `glob`, `StructuredOutput`) is stored as `other`; a finish reason outside the protocol's too. Whether a
+  (`read`, `grep`, `glob`, `StructuredOutput`; the `skill` loader is one of the `other`) is stored as `other`; a finish reason outside the protocol's too. Whether a
   call repeats an earlier one is decided from a digest in memory that is never written out. The trace does not steer
   the run: nothing reads it back, and the agent is not told about it.
 - **Bounded:** the first 100 model calls and the first 100 tool calls; `truncated` says that more happened. A full trace
@@ -1470,6 +1471,17 @@ true` (left out otherwise), and a state head the job cannot account for on the *
 - **Nested `AGENTS.md` and similar files** in the repository can influence the model. The core marks
   repository content as untrusted data and the engine has no write, execute or general-network
   capability, but there is no guarantee of model resistance.
+- **Repository skills can steer a review (#701).** The agent can load the skills of the repository
+  (`.claude/skills`, `.agents/skills`, `.opencode/skill(s)` at the root of the head checkout), and a
+  pull request can ship or change one: its description is listed in the system prompt and its body
+  is read when the agent loads it. This is the same class as a nested `AGENTS.md` and is accepted
+  by the owner: a skill is a document, the core ranks it below the fixed rules, and the agent has no
+  tool that writes, runs a script or fetches, so a skill can change what the review says and not
+  what the engine can do. The exposure is bounded: at most 50 skills and 8 KiB of names and
+  descriptions are exported (a description is cut at 300 characters). The `SKILL.md` frontmatter is
+  rewritten by the runner because the engine parses it with `gray-matter`, which evaluates a
+  `---js` block. See "Repository skills" in
+  [Dynamic checkout](dynamic-checkout.md#repository-skills-701).
 - **The boundary is the container, not a sandbox.** The engine user's network is confined by nft rules
   that cover TCP, UDP and IPv6 (with the fallback ruleset: IPv6 by switching it off, #345) but not AF_UNIX (kept empty by mounting and sharing nothing), and the
   supervisor is a root process that parses untrusted Git objects and HTTP. See ADR 0003.

@@ -196,7 +196,7 @@ def test_the_core_does_not_ask_the_model_for_the_constants() -> None:
     assert "schemaVersion" not in output.split("The runner sets")[0]
     assert '"reviewedSha"' not in output.split("The runner sets")[0]
     assert "The runner sets" in output
-    assert prompt_core.CORE_VERSION == "2"
+    assert prompt_core.CORE_VERSION == "3"
 
 
 # #530-T01: adapter. The first turn's answer carries none of the constants: no recovery, a result.
