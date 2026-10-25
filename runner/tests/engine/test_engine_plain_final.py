@@ -38,7 +38,7 @@ from code_reviewer_runner.result import ErrorCode
 
 pytestmark = pytest.mark.engine
 
-TOOLS = {"read", "grep", "glob"}
+TOOLS = {"read", "grep", "glob", "skill"}
 MAX_FINDINGS = 5  # `dynamic_job` in `opencode_support.py`
 
 

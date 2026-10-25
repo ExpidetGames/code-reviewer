@@ -243,7 +243,9 @@ sanitized endpoint evidence, exclusive job identities and an actual-uid verified
 The base-to-head diff is against the merge base of the head and the base ref (a missing merge base
 declares a full review of the head); a changed binary, oversized, denied or unsafe file is excluded
 and reported as `skipped` (`binary`, `too_large`, `engine_discovery`, `credential_path`,
-`unsafe_mode`) instead of failing the run (#296). Oversized blobs are never downloaded (a
+`unsafe_mode`) instead of failing the run (#296). The documents of a repository skill in
+`.claude/skills`, `.agents/skills` or `.opencode/skill(s)` are exported with a rewritten manifest
+(#701, `repo_skills.py`). Oversized blobs are never downloaded (a
 `filter blob:limit` on the commit want). Every failure carries a stable `CheckoutReason`. It is an integration seam for #197; it does not launch an engine or enable the
 capability/gate. The default runner image is not the root supervisor; the `dynamic` image target run by
 `compose.dynamic.yml` is (#202).
@@ -357,7 +359,8 @@ input and the boundaries around it (the epic's binding decision). Modules:
 
 - `dynamic_review/config.py` generates the trusted engine config and the closed environment: a
   default-deny `permission` block that allows only `read` (which also supplies directory listing in
-  this pin), `grep`, `glob` and the non-filesystem `StructuredOutput`, one loopback provider (the
+  this pin), `grep`, `glob`, the `skill` loader for repository skills (#701) and the non-filesystem
+  `StructuredOutput`, one loopback provider (the
   proxy) and the discovery/runtime services switched off. The fixed core (#198) is the runner-defined
   `review` agent's prompt, so it reaches the model through the trusted channel. The flags are defence
   in depth, not a security boundary: #196 strips the discovery inputs from the export.
