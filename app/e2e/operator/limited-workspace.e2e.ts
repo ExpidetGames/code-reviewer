@@ -548,22 +548,37 @@ test.describe("a limited workspace on an instance with the operator API on", () 
   });
 
   // #285-T10
-  test("an Owner reads the review defaults without a model field, or a model name anywhere on the page", async () => {
+  test("an Owner reads the review defaults with the choice of the catalog and without a model name anywhere on the page", async () => {
     const page = ownerPage();
     await page.goto(`/w/${slugA}/settings/review-defaults`);
     await openSection(page, "LLM");
-    // The workspace holds no default entry (decision C3): the page says the choice is made for each project.
+    // The defaults choose a catalog entry per kind like a project does (#676): the provider dropdown names the maker of the
+    // models (never the product), then the entries of that provider by the names the operator gave them. Who bills is a note.
     await expect(
       page.getByText(/chosen for each project, on the settings page/),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("radiogroup", { name: "Quality" })).toHaveCount(
       0,
     );
-    // A workspace on the operator's key has no model field to fill in.
-    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
+    const providerDropdown = page.getByRole("combobox", {
+      name: "Provider",
+      exact: true,
+    });
+    await expect(providerDropdown).toHaveText("Default");
+    await expect(providerDropdown).not.toContainText(PRODUCT_NAME);
+    await expect(page.getByText(`Billed via ${PRODUCT_NAME}`)).toBeVisible();
+    await chooseOption(page, "Provider", "Acme Labs");
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.quick.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: ENTRIES.explorer.name }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // No model field to fill in, and no fallback model or Dynamic model field.
     await expect(page.getByLabel("Fallback model")).toHaveCount(0);
     await expect(page.getByLabel("Dynamic Review model")).toHaveCount(0);
-    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0);
     await expectNothingSecret(
       [["the review defaults", await page.content()]],
       "the review defaults",

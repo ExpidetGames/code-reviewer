@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
-// The LLM section of a workspace on the operator's key (#433, #656, #675, ADR 0005): a provider dropdown that names the
+// The LLM section of a workspace on the operator's key (#433, #656, #675, #676, ADR 0005): a provider dropdown that names the
 // model providers of the catalog (Anthropic, OpenAI, ...; never the product name), then a dropdown of the entries of
 // that provider by the names the operator gave them. What a member may see and what a request may carry: the name of the
 // provider, never a provider id or a model id. Ported from the chooser tests of before the dropdowns (#433-T02, T03,
 // T04, T06), with the same expectations.
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -18,7 +18,6 @@ import {
   MODEL_CHOICE_NONE_OFFERED,
   MODEL_CHOICE_UNAVAILABLE_OPTION,
   MODEL_CHOICE_BILLED_NOTE,
-  MODEL_CHOICE_PER_PROJECT_NOTE,
   MODEL_CHOICE_RETIRED_BADGE,
 } from "../../copy/model-choice.ts";
 import {
@@ -40,6 +39,7 @@ import { SettingsForm } from "./settings-form.tsx";
 afterEach(cleanup);
 
 const SAVE = { name: "Save review settings" };
+const SAVE_DEFAULTS = { name: "Save review defaults" };
 const FALLBACK_REMOVED =
   "The fallback model of the previous provider was removed.";
 type User = ReturnType<typeof userEvent.setup>;
@@ -149,17 +149,60 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
     expect(providerDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
   });
 
-  // #433-T02
-  it("shows a note, and no dropdown of entries, on the workspace defaults: an entry is chosen per project", async () => {
+  // #676-T01
+  it("offers the same entries on the workspace defaults and saves the chosen one as the default", async () => {
     const user = userEvent.setup();
-    await renderManaged(user, managedModel({ mode: "global" }));
+    const { save } = await renderManaged(
+      user,
+      managedModel({ mode: "global" }),
+    );
 
-    expect(screen.getByText(MODEL_CHOICE_PER_PROJECT_NOTE)).toBeTruthy();
-    expect(screen.queryByLabelText("Model")).toBeNull();
-    expect(screen.queryByLabelText("Provider")).toBeNull();
-    expect(screen.queryByText(MODEL_CHOICE_BILLED_NOTE)).toBeNull();
-    await openSection(user, "Limits");
-    expect(screen.getByLabelText("Token budget")).toBeTruthy();
+    expect(providerDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
+    expect(await providersOffered(user)).toEqual([
+      MODEL_CHOICE_DEFAULT_OPTION,
+      "Anthropic",
+      "OpenAI",
+    ]);
+    expect(screen.getByText(MODEL_CHOICE_BILLED_NOTE)).toBeTruthy();
+    await chooseOption(user, providerDropdown(), "OpenAI");
+    expect(await offered(user)).toEqual([
+      "Thorough",
+      labelOf("Premium", MODEL_CHOICE_LOCKED_BADGE),
+    ]);
+    await chooseKind(user, "Dynamic Review");
+    await chooseOption(user, providerDropdown(), "Google");
+    await user.click(screen.getByRole("button", SAVE_DEFAULTS));
+    // A change of the kind of every project is confirmed first.
+    await user.click(
+      await screen.findByRole("button", { name: "Switch to Dynamic Review" }),
+    );
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      reviewKind: "dynamic",
+      catalogEntryDiff: "ent-thorough",
+      catalogEntryDynamic: "ent-detective",
+    });
+  });
+
+  // #676-T02
+  it("names the entry the workspace defaults choose as the Default option a project follows, never the product", async () => {
+    const user = userEvent.setup();
+    await renderManaged(
+      user,
+      managedModel({
+        workspaceSelection: { diff: "ent-thorough", dynamic: null },
+      }),
+    );
+
+    expect(providerDropdown().textContent).toBe("Default (OpenAI · Thorough)");
+    expect(providerDropdown().textContent).not.toMatch(/code-review\.com/i);
+    expect(await providersOffered(user)).toEqual([
+      "Default (OpenAI · Thorough)",
+      "Anthropic",
+      "OpenAI",
+    ]);
+    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
   });
 
   // #433-T02
@@ -545,7 +588,7 @@ describe("what a workspace on the operator's key may see and send", () => {
     await user.click(screen.getByRole("button", SAVE));
     await user.click(await screen.findByRole("button", { name: /^Switch to/ }));
 
-    expect(save).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0]?.[0]).toEqual({
       reviewKind: "dynamic",
       catalogEntryDiff: "ent-thorough",

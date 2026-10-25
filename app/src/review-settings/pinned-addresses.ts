@@ -5,13 +5,17 @@
 // workspace does not hold is written by an Owner or Admin only). Both read every project: a pin is dormant, not gone (#614).
 // Pure over a workspace-scoped projects repository.
 import type { ProjectsRepository } from "../db/repositories/projects-repository.ts";
-import { builtInProjectDynamicSettings } from "./settings.ts";
+import {
+  builtInProjectDynamicSettings,
+  type ProjectReviewKind,
+} from "./settings.ts";
 import { parseStoredProjectDynamicOverrides } from "./validate.ts";
 
 /** Which projects count. */
 export type PinScope = {
   /**
-   * Only the projects whose reviews use the provider now: switched on, listed by the platform, and Dynamic. Default: every project
+   * Only the projects whose reviews use the provider now: switched on, listed by the platform, and Dynamic (a project that
+   * stores no kind has the one of the workspace defaults, #676). Default: every project
    * that has the provider as its Dynamic provider, whatever its kind and state (a pin is dormant, not gone). No reader of the
    * server asks for this since #614 (a Member could switch a project to Diff to leave its pin out of the key test).
    */
@@ -28,9 +32,17 @@ export type PinnedAddressReader = (
 /** Reads the distinct pins of the projects of the repository's workspace that select `slug` as their Dynamic provider. */
 export function createPinnedAddressReader(
   projects: Pick<ProjectsRepository, "list">,
+  /** The review kind of the workspace defaults, for a project that stores none (#676); asked only for `inUseOnly`. */
+  workspaceKind: () => Promise<ProjectReviewKind | undefined> = async () =>
+    undefined,
 ): PinnedAddressReader {
   return async (slug, scope = {}) => {
     const pins = new Set<string>();
+    const followedKind =
+      scope.inUseOnly === true
+        ? ((await workspaceKind()) ??
+          builtInProjectDynamicSettings().reviewKind)
+        : undefined;
     for (const entry of await projects.list()) {
       if (entry.project === null) continue;
       if (entry.repository.id === scope.exceptRepositoryId) continue;
@@ -40,8 +52,7 @@ export function createPinnedAddressReader(
       if (
         scope.inUseOnly === true &&
         (entry.status !== "active" ||
-          (stored.reviewKind ?? builtInProjectDynamicSettings().reviewKind) !==
-            "dynamic")
+          (stored.reviewKind ?? followedKind) !== "dynamic")
       )
         continue;
       pins.add(stored.dynamicProviderAddress);

@@ -43,7 +43,3 @@ export const MODEL_CHOICE_RETIRED_BADGE = "No longer available";
 /** Under the choices while the one in force cannot be used: its reviews would not start. */
 export const MODEL_CHOICE_CHOSEN_UNAVAILABLE =
   "The chosen option is not available right now, so reviews do not start until another one is chosen.";
-
-/** On the workspace defaults, which hold no choice (an entry is chosen per project). */
-export const MODEL_CHOICE_PER_PROJECT_NOTE =
-  "The quality of reviews is chosen for each project, on the settings page of that project.";

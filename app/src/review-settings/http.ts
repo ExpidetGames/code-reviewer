@@ -52,6 +52,7 @@ function refusal(error: ReviewSettingsError): Response {
     {
       error: error.code,
       ...(error.issues.length > 0 ? { issues: error.issues } : {}),
+      ...(error.projects.length > 0 ? { projects: error.projects } : {}),
     },
     { status: REVIEW_SETTINGS_ERROR_STATUS[error.code], headers: NO_STORE },
   );
@@ -73,8 +74,13 @@ function checkSite(request: Request): void {
     );
 }
 
-/** The `settings` object of a body `{ "settings": {...} }`; its fields are checked by the service. */
-async function readSettings(request: Request): Promise<unknown> {
+/**
+ * The `settings` object of a body `{ "settings": {...} }`; its fields are checked by the service. A save of the workspace
+ * defaults may also say which defaults the person saw: `"expectedUpdatedAt": "<time>" | null` (#676).
+ */
+async function readBody(
+  request: Request,
+): Promise<{ settings: unknown; expectedUpdatedAt?: string | null }> {
   if (!isJsonRequest(request))
     throw new ReviewSettingsError(
       "REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED",
@@ -107,7 +113,18 @@ async function readSettings(request: Request): Promise<unknown> {
     !Object.hasOwn(parsed, "settings")
   )
     throw invalid();
-  return (parsed as { settings: unknown }).settings;
+  const { settings, expectedUpdatedAt } = parsed as {
+    settings: unknown;
+    expectedUpdatedAt?: unknown;
+  };
+  if (expectedUpdatedAt === undefined) return { settings };
+  if (typeof expectedUpdatedAt !== "string" && expectedUpdatedAt !== null)
+    throw invalid();
+  return { settings, expectedUpdatedAt };
+}
+
+async function readSettings(request: Request): Promise<unknown> {
+  return (await readBody(request)).settings;
 }
 
 export function createReviewSettingsRouteHandlers({
@@ -134,9 +151,11 @@ export function createReviewSettingsRouteHandlers({
     putGlobal: (request) =>
       guarded(async (user) => {
         checkSite(request);
-        const settings = await readSettings(request);
+        const { settings, expectedUpdatedAt } = await readBody(request);
         return ok(
-          await service.updateGlobalSettings(settings, actorName(user)),
+          await service.updateGlobalSettings(settings, actorName(user), {
+            ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }),
+          }),
         );
       }),
 

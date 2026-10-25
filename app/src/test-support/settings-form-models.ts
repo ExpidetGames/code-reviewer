@@ -7,7 +7,10 @@ import { vi } from "vitest";
 import { estimateReviewCost } from "../review-settings/cost.ts";
 import type { CatalogChoices } from "../review-settings/catalog-selection.ts";
 import { DEFAULT_REVIEW_SKILL } from "../review-settings/default-skill.ts";
-import type { ProjectDynamicView } from "../review-settings/service.ts";
+import type {
+  GlobalSettingsView,
+  ProjectDynamicView,
+} from "../review-settings/service.ts";
 import {
   builtInReviewSettings,
   DEFAULT_DYNAMIC_MODEL,
@@ -94,9 +97,7 @@ export function ownModel(
     managed: false,
     catalog: null,
     lastSaved: null,
-    ...((options.mode ?? "project") === "project"
-      ? { dynamic: dynamicView(options.kind ?? "diff", false) }
-      : {}),
+    dynamic: dynamicView(options.kind ?? "diff", false),
   };
 }
 
@@ -154,6 +155,8 @@ export function managedModel(
     mode?: "project" | "global";
     choices?: CatalogChoices;
     selection?: { diff: string | null; dynamic: string | null };
+    /** The entries the workspace defaults select, which a project that selects none follows (#676). */
+    workspaceSelection?: { diff: string | null; dynamic: string | null };
     leak?: boolean;
   } = {},
 ): SettingsFormModel {
@@ -180,15 +183,36 @@ export function managedModel(
     ) as SettingsFormModel["sources"],
     cost: null,
     managed: true,
-    catalog:
-      mode === "project"
-        ? {
-            choices: options.choices ?? CHOICES,
-            selection: options.selection ?? { diff: null, dynamic: null },
-          }
-        : null,
+    catalog: {
+      choices: options.choices ?? CHOICES,
+      selection: options.selection ?? { diff: null, dynamic: null },
+      workspaceSelection:
+        mode === "project"
+          ? (options.workspaceSelection ?? { diff: null, dynamic: null })
+          : null,
+    },
     lastSaved: null,
-    ...(mode === "project" ? { dynamic } : {}),
+    dynamic,
+  };
+}
+
+/** The view of the workspace defaults of a workspace on its own key that saved nothing yet (#676). */
+export function untouchedGlobalView(): GlobalSettingsView {
+  return {
+    overrides: {},
+    effective: BUILT_IN,
+    sources: Object.fromEntries(
+      Object.keys(BUILT_IN).map((field) => [field, "built_in"]),
+    ) as GlobalSettingsView["sources"],
+    cost: estimateReviewCost(BUILT_IN),
+    modelManagedByInstance: false,
+    builtIn: BUILT_IN,
+    updatedAt: null,
+    updatedBy: null,
+    dynamic: dynamicView("diff", false),
+    catalogChoices: null,
+    catalogSelection: null,
+    followingProjects: 0,
   };
 }
 

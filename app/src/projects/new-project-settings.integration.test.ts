@@ -2,6 +2,7 @@
 
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
@@ -15,7 +16,15 @@ import {
   addWorkspace,
   defaultWorkspaceId,
 } from "../test-support/workspaces.ts";
-import { newProjectSettings } from "./new-project-settings.ts";
+import { setReviewKind } from "../review-settings/ui/dynamic-form-state.ts";
+import { initialFormState } from "../review-settings/ui/form-state.ts";
+import { modelFromGlobalView } from "../review-settings/ui/form-model.ts";
+import { planGlobalSave } from "../review-settings/ui/global-save.ts";
+import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
+import {
+  dynamicReviewCanResolve,
+  newProjectSettings,
+} from "./new-project-settings.ts";
 
 const APP_SECRET = "new-project-test-app-secret-0123456789-0123";
 const KEYS: Record<string, string> = {
@@ -55,6 +64,19 @@ async function storeKey(
     null,
   );
   expect(saved.ok).toBe(true);
+}
+
+/** The review defaults the workspace saved (#676): the kind, and where it matters the Dynamic provider and entry. */
+async function saveDefaults(
+  db: Kysely<Database>,
+  workspaceId: string,
+  defaults: Record<string, unknown>,
+) {
+  await createAppSettingsRepository(db, workspaceId).set(
+    "review_defaults",
+    defaults,
+    null,
+  );
 }
 
 async function chooseManaged(db: Kysely<Database>, workspaceId: string) {
@@ -220,5 +242,181 @@ describe("the settings a new project starts with", () => {
 
       expect(await newProjectSettings(db, workspaceId)).toEqual({});
     });
+  });
+});
+
+// #676-T05
+describe("the settings a new project starts with, when the workspace chose a default kind", () => {
+  it("follows a default of Diff Review: no kind is stored, not even where Dynamic Review could run", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, { reviewKind: "diff" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({});
+  });
+
+  it("follows a default of Dynamic Review where it can run, and stores no kind so a later change of the default reaches it", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, { reviewKind: "dynamic" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({});
+  });
+
+  it("starts on Diff Review when the default is Dynamic Review and no Dynamic model resolves, the safety of #664", async () => {
+    const { db, workspaceId } = await start();
+    await saveDefaults(db, workspaceId, { reviewKind: "dynamic" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "diff",
+    });
+  });
+
+  it("starts on Diff Review while the instance has not turned Dynamic Review on", async () => {
+    const { db, workspaceId } = await start({ dynamicOn: false });
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, { reviewKind: "dynamic" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "diff",
+    });
+  });
+
+  it("judges the Dynamic model the workspace chose: a key of that provider is the one that counts", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    await saveDefaults(db, workspaceId, {
+      reviewKind: "dynamic",
+      dynamicProvider: OTHER_PROVIDER,
+      dynamicModel: "claude-sonnet-5-5",
+    });
+    const withoutKey = await newProjectSettings(db, workspaceId);
+    await storeKey(db, workspaceId, OTHER_PROVIDER);
+    const withKey = await newProjectSettings(db, workspaceId);
+
+    expect(withoutKey).toEqual({ reviewKind: "diff" });
+    expect(withKey).toEqual({});
+  });
+
+  it("judges the entry the workspace chose on the operator's key, not the instance's", async () => {
+    const { db, workspaceId } = await start();
+    await chooseManaged(db, workspaceId);
+    // The instance default serves Dynamic Review, but the workspace chose an entry that does not.
+    await addEntry(db);
+    const unfit = await createCatalogRepository(db).insert(
+      {
+        name: "Diff only",
+        nameKey: "diff only",
+        description: null,
+        provider: "openrouter",
+        modelId: "acme/diff-only-1",
+        kinds: ["diff"],
+        sortOrder: 1,
+      },
+      null,
+    );
+    await createCatalogRepository(db).setStatus(
+      unfit.id,
+      "draft",
+      "released",
+      null,
+    );
+    await saveDefaults(db, workspaceId, {
+      reviewKind: "dynamic",
+      catalogEntryDynamic: unfit.id,
+    });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "diff",
+    });
+  });
+
+  it("reads the defaults of this workspace only", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    const other = await addWorkspace(db, "other");
+    await saveDefaults(db, other, { reviewKind: "diff" });
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "dynamic",
+    });
+  });
+});
+
+// #676-T01: what the form of the workspace defaults saves is what a new project starts with (review fix 1).
+describe("the workspace defaults as the form saves them", () => {
+  it("start a new project on Diff Review after Diff Review was chosen, though the shipped kind would start it on Dynamic Review", async () => {
+    const { db, workspaceId } = await start();
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    const app = await setupReviewSettings(db);
+    // Nothing saved: a project that is created now starts on Dynamic Review, though the page shows Diff Review.
+    expect(await newProjectSettings(db, workspaceId)).toEqual({
+      reviewKind: "dynamic",
+    });
+
+    const model = modelFromGlobalView(await app.service.getGlobalSettings());
+    const plan = planGlobalSave(
+      model,
+      setReviewKind(setReviewKind(initialFormState(model), "dynamic"), "diff"),
+    );
+    if (!plan.ok) throw new Error("the form could not plan the save");
+    for (const step of plan.steps)
+      await app.service.updateGlobalSettings(step.body, "ada");
+
+    expect(await newProjectSettings(db, workspaceId)).toEqual({});
+  });
+
+  // #676-T04: Dynamic Review as the default is judged the way a new project and the claim judge it (review fix 3).
+  it("refuse Dynamic Review as the default while the key of its provider is missing, and take it once the key is stored", async () => {
+    const { db, workspaceId } = await start();
+    const app = await setupReviewSettings(db, {
+      dynamicReady: (defaults) =>
+        dynamicReviewCanResolve(db, workspaceId, defaults),
+    });
+    const refused = await app.service
+      .updateGlobalSettings({ reviewKind: "dynamic" }, "ada")
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(refused).toMatchObject({
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" }],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+
+    await storeKey(db, workspaceId, DEFAULT_PROVIDER);
+    const saved = await app.service.updateGlobalSettings(
+      { reviewKind: "dynamic" },
+      "ada",
+    );
+    expect(saved.dynamic.effective.reviewKind).toBe("dynamic");
+  });
+
+  it("refuse Dynamic Review as the default on the operator's key while no usable entry exists", async () => {
+    const { db, workspaceId } = await start();
+    await chooseManaged(db, workspaceId);
+    const app = await setupReviewSettings(db, {
+      operatorsModels: true,
+      dynamicReady: (defaults) =>
+        dynamicReviewCanResolve(db, workspaceId, defaults),
+    });
+    const refused = await app.service
+      .updateGlobalSettings({ reviewKind: "dynamic" }, "ada")
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(refused).toMatchObject({
+      issues: [{ field: "reviewKind", code: "DYNAMIC_REVIEW_NOT_READY" }],
+    });
+
+    await addEntry(db);
+    const saved = await app.service.updateGlobalSettings(
+      { reviewKind: "dynamic" },
+      "ada",
+    );
+    expect(saved.dynamic.effective.reviewKind).toBe("dynamic");
   });
 });

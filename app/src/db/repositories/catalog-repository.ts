@@ -410,10 +410,20 @@ export function createCatalogRepository(
           "repositories.workspace_id",
         )
         .select([
+          "repositories.workspace_id as workspace_id",
           "projects.settings as settings",
           "workspace_entitlements.key_mode as key_mode",
         ])
         .execute();
+      // The workspace defaults (#676): a project that sets no kind or entry of its own follows them.
+      const defaultsRows = await db
+        .selectFrom("app_settings")
+        .select(["workspace_id", "value"])
+        .where("key", "=", "review_defaults")
+        .execute();
+      const workspaceDefaults = new Map(
+        defaultsRows.map((row) => [row.workspace_id, settingsOf(row.value)]),
+      );
       const stored = await db
         .selectFrom("instance_settings")
         .select("value")
@@ -429,11 +439,14 @@ export function createCatalogRepository(
       for (const row of rows) {
         const managed =
           row.key_mode === null ? instanceManaged : row.key_mode === "managed";
-        for (const id of entriesUsedBy(
-          settingsOf(row.settings),
-          managed,
-          defaults,
-        ))
+        const own = settingsOf(row.settings);
+        const inherited = workspaceDefaults.get(row.workspace_id) ?? {};
+        const effective: Record<string, unknown> = {};
+        for (const key of ["reviewKind", ...CATALOG_SELECTION_KEYS])
+          if (own[key] !== undefined) effective[key] = own[key];
+          else if (inherited[key] !== undefined)
+            effective[key] = inherited[key];
+        for (const id of entriesUsedBy(effective, managed, defaults))
           counts.set(id, (counts.get(id) ?? 0) + 1);
       }
       return counts;

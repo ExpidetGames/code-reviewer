@@ -115,8 +115,8 @@ export type SelectionInput =
       /** The model of the kind for the default provider when no layer sets one (`LLM_MODEL`, or the Dynamic default). */
       builtInModel: string;
       /**
-       * The layers that set provider and model for the kind, weakest first in the order workspace, project. A Dynamic
-       * job has a project layer only. A field a layer leaves out is not set there.
+       * The layers that set provider and model for the kind, weakest first in the order workspace, project. A field a
+       * layer leaves out is not set there. The workspace default of the Dynamic provider and model is a layer since #676.
        */
       layers: { workspace?: ModelLayer; project?: ModelLayer };
     })

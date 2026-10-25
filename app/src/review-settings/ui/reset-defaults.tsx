@@ -11,15 +11,23 @@ import { DangerZone } from "../../components/danger-zone.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { browserGlobalSettingsApi, type SettingsApi } from "./api.ts";
-import { describeSaveFailure } from "./messages.ts";
+import { followersText } from "./followers-text.ts";
+import { describeWholeRefusal } from "./messages.ts";
+import type { ProjectReviewKind } from "../settings.ts";
 
 type Outcome = { kind: "reset" } | { kind: "failed"; text: string } | null;
 
 export function ResetReviewDefaults({
   workspaceSlug,
+  kindChange,
   api: apiOverride,
 }: {
   workspaceSlug: string;
+  /**
+   * Set when the reset changes the review kind of the defaults (#676): the kind they go back to and how many projects follow
+   * them, so the confirmation says who switches. Left out when the kind stays.
+   */
+  kindChange?: { to: ProjectReviewKind; following?: number };
   /** Only tests pass this. */
   api?: Pick<SettingsApi, "save">;
 }) {
@@ -38,7 +46,8 @@ export function ResetReviewDefaults({
     const result = await api.save({});
     setPending(false);
     if (!result.ok) {
-      setOutcome({ kind: "failed", text: describeSaveFailure(result.code) });
+      // The refusal names the projects that hold the reset back, as the form does.
+      setOutcome({ kind: "failed", text: describeWholeRefusal(result) });
       return;
     }
     setOutcome({ kind: "reset" });
@@ -53,7 +62,11 @@ export function ResetReviewDefaults({
         actionLabel="Reset every default…"
         confirmTitle="Reset every review default?"
         confirmLabel="Yes, reset every default"
-        confirmDescription="Every changed review default of this workspace goes back to the built-in value. Projects with their own values are not touched. This cannot be undone."
+        confirmDescription={`Every changed review default of this workspace goes back to the built-in value. Projects with their own values are not touched.${
+          kindChange === undefined
+            ? ""
+            : ` ${followersText(kindChange.to, kindChange.following)}`
+        } This cannot be undone.`}
         onConfirm={reset}
       >
         {pending ? <StatusRegion>Resetting the defaults…</StatusRegion> : null}

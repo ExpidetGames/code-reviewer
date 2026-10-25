@@ -17,6 +17,9 @@ import {
   llmProviderDescriptors,
 } from "../llm/providers/index.ts";
 
+/** The key of the workspace's review defaults in `app_settings`; the value is one JSON object (#676: Diff settings, kind, Dynamic model, verdict). */
+export const REVIEW_DEFAULTS_KEY = "review_defaults";
+
 export type ReviewSettings = {
   /**
    * The provider of `model` (ADR 0005, 2.7), a workspace default that a project may override. Absent in storage means

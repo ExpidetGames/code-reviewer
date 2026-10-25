@@ -77,6 +77,8 @@ export type ManagedLlmChoice = {
   error: string | undefined;
   /** `null` takes the choice back. */
   onChange: (id: string | null) => void;
+  /** The text of the provider dropdown's "Default" option, when the default is an entry the workspace chose (#676): it names what the default resolves to. */
+  defaultLabel?: string;
 };
 
 const DEFAULT_OPTION = "__default__";
@@ -296,7 +298,7 @@ function ManagedChoice({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_OPTION}>
-                  {MODEL_CHOICE_DEFAULT_OPTION}
+                  {choice.defaultLabel ?? MODEL_CHOICE_DEFAULT_OPTION}
                 </SelectItem>
                 {gone ? (
                   <SelectItem value={UNAVAILABLE_OPTION} disabled>
@@ -312,9 +314,12 @@ function ManagedChoice({
             </Select>
           </div>
           {provider === DEFAULT_OPTION ? (
-            <p className="text-sm text-muted-foreground">
-              {MODEL_CHOICE_NONE_CHOSEN}
-            </p>
+            // With a default entry of the workspace the option names what it resolves to; the sentence would contradict it.
+            choice.defaultLabel === undefined ? (
+              <p className="text-sm text-muted-foreground">
+                {MODEL_CHOICE_NONE_CHOSEN}
+              </p>
+            ) : null
           ) : gone ? null : (
             <ModelSelect
               name={fieldName}
@@ -368,20 +373,17 @@ export function LlmFieldset({
   managed,
   managedFieldName,
   billingOn = true,
-  note,
   catalogApi,
 }: {
   workspaceSlug: string;
   disabled: boolean;
-  /** Exactly one of `own`, `managed` and `note` is given. */
+  /** Exactly one of `own` and `managed` is given. */
   own?: OwnLlmChoice;
   managed?: ManagedLlmChoice;
   /** The setting a managed choice edits, for the `data-field` of its dropdown. */
   managedFieldName?: string;
   /** Billing is on: the managed choice says the reviews are billed via code-review.com (#675). Nothing is billed while it is off. */
   billingOn?: boolean;
-  /** Instead of the dropdowns: what to do about the model here (the workspace defaults hold no choice of the catalog). */
-  note?: ReactNode;
   /** Only tests pass this. */
   catalogApi?: CatalogModelsApi;
 }) {
@@ -404,7 +406,6 @@ export function LlmFieldset({
           billingOn={billingOn}
         />
       ) : null}
-      {note}
     </SettingsCard>
   );
 }
