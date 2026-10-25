@@ -204,17 +204,17 @@ function checkErrorOf(error: unknown): BillingCheckErrorCode {
   }
 }
 
-/** A refusal of the request itself (not of the key, not a Stripe outage): the kind the missing preview of a feature can cause. */
-function refusesTheRequest(error: StripeClientError): boolean {
-  switch (error.code) {
-    case "bad_request":
-    case "not_found":
-    case "conflict":
-    case "rejected":
-      return true;
-    default:
-      return false;
-  }
+/**
+ * Whether a failure looks like the refusal of the preview flag of Managed Payments: a 400 `invalid_request_error`, nothing
+ * else. A 401, 403, 429 or 5xx is about the key or Stripe, a 404 or 409 (a conflict, `lock_timeout`) and any other refusal
+ * (402, 422) is about the state of the account or a moment, and none of them is ever read as "not enabled".
+ */
+function looksLikePreviewRefusal(error: StripeClientError): boolean {
+  return (
+    error.code === "bad_request" &&
+    error.stripeType === "invalid_request_error" &&
+    error.stripeCode !== "lock_timeout"
+  );
 }
 
 /** The plain identifiers of a failed call of Stripe; nothing else of the error leaves the client. */
@@ -310,15 +310,32 @@ export function createBillingAdminService({
     return clientOf(key.value.reveal());
   }
 
-  /** Whether Stripe takes the key when the preview flag of Managed Payments is left out. */
-  async function acceptedWithoutPreview(
+  /**
+   * What the preview flag of Managed Payments has to do with a failed check. Only a 400 `invalid_request_error` is looked at
+   * (`looksLikePreviewRefusal`). Then the rule is: Stripe takes the key WITHOUT the flag, and refuses the call WITH the flag
+   * AGAIN in the same way. Both are needed: the call without the flag shows the key and the account are fine, and the repeat
+   * with the flag shows the refusal is not a glitch of one moment. A repeat that passes means the first failure was a glitch
+   * (`works`); anything else is `unclear` and the failure is reported as what it was. A retired header syntax would look the
+   * same as a missing preview; the details line of the card (HTTP status, type, code) lets the admin tell.
+   */
+  async function previewOutcome(
     made: Extract<MadeClient, { ok: true }>,
-  ): Promise<boolean> {
+    first: StripeClientError,
+  ): Promise<"refused" | "works" | "unclear"> {
+    if (!looksLikePreviewRefusal(first)) return "unclear";
     try {
       await made.withoutPreview().getAccount();
-      return true;
     } catch {
-      return false;
+      return "unclear";
+    }
+    try {
+      await made.client.getAccount();
+      return "works";
+    } catch (again) {
+      return again instanceof StripeClientError &&
+        looksLikePreviewRefusal(again)
+        ? "refused"
+        : "unclear";
     }
   }
 
@@ -332,10 +349,10 @@ export function createBillingAdminService({
       let code = checkErrorOf(error);
       // checkErrorOf throws what is no StripeClientError, so this one is.
       const failure = error as StripeClientError;
-      // The request carries the preview flag of Managed Payments. If Stripe refuses it with the flag and takes the key
-      // without, the account is not enabled for the preview: say that instead of a failure nobody can act on.
-      if (refusesTheRequest(failure) && (await acceptedWithoutPreview(made)))
-        code = "stripe_managed_payments_unavailable";
+      const outcome = await previewOutcome(made, failure);
+      if (outcome === "works")
+        return { ok: true, environment: made.environment };
+      if (outcome === "refused") code = "stripe_managed_payments_unavailable";
       log(checkFailureLine(code, failure));
       return { ok: false, error: code, stripe: failureDetailOf(failure) };
     }

@@ -11,8 +11,11 @@ import { listSourceFiles } from "./spdx-headers/source-files.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
-/** A status written as a value or a type: `code: 502,`, `status: 504`, `| 502`. */
-const GATEWAY_STATUS = /(?::|\|)\s*50[24]\b/;
+/**
+ * A status written as a value, a type or an argument: `code: 502,`, `| 504`, `= 502`, `status(502)`, `, 502)`, `[502,`,
+ * `case 504:`. Prose ("answers 502") and the numbers inside longer ones (`15024`) do not match.
+ */
+const GATEWAY_STATUS = /(?:[:|=(,[]|\bcase)\s*50[24]\b/;
 
 export function findGatewayStatuses(
   files: { path: string; content: string }[],
@@ -60,11 +63,30 @@ describe("no route answers 502 or 504", () => {
         path: "app/src/y/errors.ts",
         content: "// answered 502 before\nexport const T = 400 | 504;\n",
       },
+      {
+        path: "app/src/z/http.ts",
+        content: [
+          "if (status === 502) fail();",
+          "reply.status(504);",
+          "send(res, body, 502);",
+          "const r = { status: 504 };",
+          "switch (s) { case 502: break; }",
+          "const l = [502, 504];",
+        ].join("\n"),
+      },
+      {
+        path: "app/src/w/ok.ts",
+        content: "const text = 'Stripe answered 502 once';\nconst n = 15024;\n",
+      },
     ]);
 
     expect(found).toEqual([
       { path: "app/src/x/errors.ts", line: 2 },
       { path: "app/src/y/errors.ts", line: 2 },
+      ...[1, 2, 3, 4, 5, 6].map((line) => ({
+        path: "app/src/z/http.ts",
+        line,
+      })),
     ]);
   });
 });

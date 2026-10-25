@@ -25,7 +25,7 @@ const FAILURE_COPY: Record<string, string> = {
   billing_not_ready:
     "Billing cannot be switched on yet. The list shows what is missing; fix it and try again.",
   billing_disable_first:
-    "Switch billing off first. The payment adapter, the credentials and the link to the terms (with Stripe) are not removed while billing is on.",
+    "Switch billing off before you change or remove the Stripe key, the webhook secret, the payment adapter or the link to the terms, then switch it on again.",
   webhook_environment_mismatch:
     "The webhook endpoint at Stripe belongs to the other environment than the API key. A test key goes with test mode, a live key with live mode.",
   webhook_url_not_public:
