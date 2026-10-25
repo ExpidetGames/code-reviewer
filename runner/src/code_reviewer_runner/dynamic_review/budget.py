@@ -3,7 +3,8 @@
 """The limits of one Dynamic Review and the ledger that enforces them (#197, #290).
 
 The one budget of a run is an operator cost limit in USD (default 1.00, never above a ceiling in
-code, `RUNNER_DYNAMIC_MAX_COST_USD`). Besides it only technical limits stay: the 600 seconds of
+code, `RUNNER_DYNAMIC_MAX_COST_USD`; since #689 the operator's value from the admin portal
+arrives with the job and replaces it). Besides it only technical limits stay: the 600 seconds of
 the whole job (the lease and the runner's capacity depend on it), 64 KiB per tool result, 4 MiB of
 cumulative content returned to the model, 2 MiB of untrusted input and the protocol byte caps.
 They protect the machine and the isolation, they are not a budget. There is no limit on tokens,
@@ -304,6 +305,40 @@ def max_cost_from_environment(raw: str | None) -> Decimal:
     if not Decimal(0) < limit <= MAX_COST_USD_CEILING:
         raise invalid
     return limit
+
+
+def operator_cost_limit(raw_environment: str | None, from_job: Decimal | None) -> Decimal:
+    """The operator's cost limit of a run (#689).
+
+    The operator sets it in the admin portal and the app sends it with the job
+    (`llm.operatorMaxCostUsd`); a job that carries it ignores the environment, so what the admin
+    sees is what holds. A job from an app that does not send it is held to
+    `RUNNER_DYNAMIC_MAX_COST_USD` (default 1.00) as before.
+    """
+    if from_job is not None:
+        return from_job
+    return max_cost_from_environment(raw_environment)
+
+
+def diff_cost_stop_reason(project: Decimal | None, operator: Decimal | None) -> str | None:
+    """The reason a Diff review names when its cost limit stops it (#689): `project_cost_limit` when
+    the customer's limit is the smaller or equal (the one they can change), `cost_limit` when the
+    operator's maximum is, None without either. The same names a Dynamic run reports."""
+    if project is None:
+        return STOPPED_EARLY_COST if operator is not None else None
+    if operator is None or project <= operator:
+        return STOPPED_EARLY_PROJECT_COST
+    return STOPPED_EARLY_COST
+
+
+def diff_cost_limit(project: Decimal | None, operator: Decimal | None) -> Decimal | None:
+    """The limit a Diff review is held to (#666, #689): the smaller of the customer's and the
+    operator's.
+
+    A Diff review has no limit of its own in the environment, so without either value it has none.
+    """
+    limits = [limit for limit in (project, operator) if limit is not None]
+    return min(limits) if limits else None
 
 
 def effective_cost_limit(operator: Decimal, project: Decimal | None) -> tuple[Decimal, str]:

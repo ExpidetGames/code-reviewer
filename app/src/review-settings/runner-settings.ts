@@ -3,7 +3,7 @@
 // Turns the settings of one review into the fields of a runner job. Pure: the settings go in, the
 // `llm` fields, the `env` and the fallback models come out, and nothing else.
 //
-// What the runner accepts (runner/README.md, the job): `llm.model`, `llm.maxTokens` and an `env` of
+// What the runner accepts (runner/README.md, the job): `llm.model` (and `llm.maxTokens`, which the claim decides since #689) and an `env` of
 // strings that may only hold options of the review tool, `PR_REVIEWER__*`. Anything that decides
 // where a credential or a request goes (the LLM key, the token of GitHub, endpoints) has its own
 // field of the job or is pinned by the runner, so it can never come out of here: this function does
@@ -14,8 +14,8 @@
 import type { ReviewSettings } from "./settings.ts";
 
 export type RunnerSettings = {
-  /** `llm.model` and `llm.maxTokens` of the job. The provider and the key come from the LLM configuration. */
-  llm: { model: string; maxTokens: number };
+  /** `llm.model` of the job. The provider and the key come from the LLM configuration; the token budget is the claim's (#689). */
+  llm: { model: string };
   /** `env` of the job: only the options of the review tool, as strings. */
   env: Record<string, string>;
   /**
@@ -86,7 +86,7 @@ export function toRunnerSettings(settings: ReviewSettings): RunnerSettings {
   if (settings.inlineKeyIssues) env[INLINE_KEY_ISSUES_VARIABLE] = "true";
 
   return {
-    llm: { model: settings.model, maxTokens: settings.maxTokens },
+    llm: { model: settings.model },
     env,
     fallbackModels:
       settings.fallbackModel === null ? [] : [settings.fallbackModel],

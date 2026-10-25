@@ -215,7 +215,6 @@ describe("the options of a claimed job", () => {
       maxFindings: 7,
       extraInstructions: "Prefer small functions.",
       model: "vendor/project-model",
-      maxTokens: 50_000,
     });
     await h.enqueueNew();
 
@@ -230,7 +229,8 @@ describe("the options of a claimed job", () => {
       provider: "openrouter",
       model: "vendor/project-model",
       apiKey: TEST_LLM_API_KEY,
-      maxTokens: 50_000,
+      // #689: no setting names the token budget; the claim decides it.
+      maxTokens: 100_000,
     });
     // The values the project set, spelled out: the project beats the global default.
     expect(job.input.env).toMatchObject({
@@ -246,10 +246,7 @@ describe("the options of a claimed job", () => {
   // CR-46-T04
   it("are the global defaults when the project overrides nothing", async () => {
     const h = await startWiredHarness();
-    await h.reviewSettings.updateGlobalSettings(
-      { maxFindings: 9, maxTokens: 64_000 },
-      "alice",
-    );
+    await h.reviewSettings.updateGlobalSettings({ maxFindings: 9 }, "alice");
     await h.enqueueNew();
 
     const { job } = await h.claimed();
@@ -262,7 +259,7 @@ describe("the options of a claimed job", () => {
       provider: "openrouter",
       model: TEST_LLM_MODEL,
       apiKey: TEST_LLM_API_KEY,
-      maxTokens: 64_000,
+      maxTokens: 100_000,
     });
   });
 
@@ -334,7 +331,8 @@ describe("the LLM access of a claimed job", () => {
   });
 
   // CR-46-T06
-  it("hands out the model and context window of the LLM configuration in a claim that is valid against the contract", async () => {
+  // #689-T09
+  it("hands out the model of the LLM configuration, and a token budget cut to the context window it names, in a claim that is valid against the contract", async () => {
     const h = await startRunnerApiHarness({
       projects: true,
       env: { LLM_MODEL: "vendor/instance-model" },
@@ -342,7 +340,7 @@ describe("the LLM access of a claimed job", () => {
       jobOptions: { optionsFor: async () => ({ env: {} }) },
     });
     await h.projectService.activateProject(h.repositoryId);
-    h.env.LLM_MAX_TOKENS = "163840";
+    h.env.LLM_MAX_TOKENS = "32000";
     await h.enqueueNew();
 
     const body = await h.claimed();
@@ -351,7 +349,7 @@ describe("the LLM access of a claimed job", () => {
       provider: "openrouter",
       model: "vendor/instance-model",
       apiKey: TEST_LLM_API_KEY,
-      maxTokens: 163840,
+      maxTokens: 32_000,
     });
     expect(contract.check("ClaimResponse", body)).toStrictEqual({
       valid: true,
@@ -419,7 +417,6 @@ describe("the contract file and the options the app sends", () => {
       fallbackModel: null,
       extraInstructions: "rules",
       maxFindings: 5,
-      maxTokens: 100_000,
       largePrChunking: true,
       inlineKeyIssues: true,
       autoReviewOnOpen: true,
@@ -481,6 +478,7 @@ describe("the contract file and the options the app sends", () => {
       "maxCostUsd",
       "maxTokens",
       "model",
+      "operatorMaxCostUsd",
       "provider",
     ]);
   });

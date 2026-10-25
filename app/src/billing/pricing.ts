@@ -134,7 +134,10 @@ export type ReserveInput = {
   /** The longest the VM lives (job timeout plus the margin), in minutes; a fraction is a started minute. */
   maxMinutes: number;
   rates: BillingRates;
-  /** The cost limit of a Dynamic job; read only for Dynamic on the managed key. */
+  /**
+   * The cost limit of a Dynamic job in micro-USD; read only for Dynamic on the managed key. Since #689 it is the operator's maximum
+   * per review (the admin portal, `review_max_cost_cents` x 10,000), a smaller customer limit narrowing it.
+   */
   dynamicCostLimitMicroUsd: number | null;
 };
 

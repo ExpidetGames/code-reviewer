@@ -43,7 +43,6 @@ describe("the copy for a problem with one setting", () => {
     expect(describeIssue("maxFindings", "TOO_LARGE")).toBe(
       `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.max)} or less.`,
     );
-    expect(describeIssue("maxTokens", "TOO_SMALL")).toMatch(/8,000/);
   });
 
   // #656-T04
@@ -63,7 +62,7 @@ describe("the copy for a problem with one setting", () => {
 
   // CR-34-T06
   it("asks for a whole number where a number field holds something else", () => {
-    expect(describeIssue("maxTokens", "INVALID_TYPE")).toBe(
+    expect(describeIssue("maxFindings", "INVALID_TYPE")).toBe(
       "Enter a whole number.",
     );
   });
@@ -85,15 +84,26 @@ describe("the copy for a problem with one setting", () => {
     expect(describeIssue("model", "EMPTY")).toBe("Enter a model name.");
   });
 
-  it("explains a token budget that does not fit the model's context window, on either field", () => {
-    expect(describeIssue("maxTokens", "EXCEEDS_MODEL_CONTEXT")).toMatch(
-      /context window/,
+  // #689-T06
+  it("names the maximum per review when a cost limit is above it, and still says something without the amount", () => {
+    expect(describeIssue("maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM", 100)).toBe(
+      "The maximum cost per review is $1.00. Enter that or less.",
     );
-    expect(describeIssue("model", "EXCEEDS_MODEL_CONTEXT")).toMatch(
-      /context window/,
+    expect(
+      describeIssue("maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM", 1250),
+    ).toBe("The maximum cost per review is $12.50. Enter that or less.");
+    expect(describeIssue("maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM")).toBe(
+      "This is above the maximum cost per review. Enter a lower amount.",
     );
-    expect(describeIssue("fallbackModel", "EXCEEDS_MODEL_CONTEXT")).toMatch(
-      /context window/,
+  });
+
+  // #689-T04
+  it("has no copy for the token budget any more", () => {
+    expect(describeIssue("maxTokens", "TOO_SMALL")).toBe(
+      "This value is too small.",
+    );
+    expect(describeIssue("model", "EXCEEDS_MODEL_CONTEXT")).toBe(
+      "This value is not valid.",
     );
   });
 

@@ -33,7 +33,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     DynamicLimits,
     LimitError,
     effective_cost_limit,
-    max_cost_from_environment,
+    operator_cost_limit,
 )
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import (
@@ -140,7 +140,8 @@ def build_native_job(
         ) from None
     capability = new_proxy_capability()
     max_cost, stop_reason = effective_cost_limit(
-        max_cost_from_environment(environment.get(_MAX_COST_VARIABLE)), job.llm.max_cost_usd
+        operator_cost_limit(environment.get(_MAX_COST_VARIABLE), job.llm.operator_max_cost_usd),
+        job.llm.max_cost_usd,
     )
     limits = DynamicLimits(
         deadline_seconds=deadline, max_cost_usd=max_cost, cost_stop_reason=stop_reason

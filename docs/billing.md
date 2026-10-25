@@ -97,11 +97,15 @@ deleting and re-creating a workspace does not give a second one. It is the only 
 
 A project (or the workspace default) can set a **cost limit per review** in whole cents, 1 cent to 100 dollars (Project settings,
 Limits; #656). It is enforced where the review runs (#666), next to the instance's own limit
-(`RUNNER_DYNAMIC_MAX_COST_USD`, default 1.00 USD, which only the operator changes): a review is held to the **smaller** of the
-two. The claim sends the project's value as `llm.maxCostUsd`, only to a runner or Worker that named the claim feature
-`cost_limit`; a job that meets a caller without it runs without the field and under the operator's limit alone (the claim logs
-it), because a refused review is worse than a project limit that is not kept while a release rolls out. No limit set means
-nothing is sent and the job is the job of before.
+(the **maximum cost per review** the operator sets in the admin portal, General, Limits; 1.00 USD until it is set; #689): a
+review is held to the **smaller** of the two. The maximum is one value for Diff and Dynamic Review alike, and it is the customer's
+maximum: a limit above it can not be saved ("The maximum cost per review is $1.00"), and one saved before the operator lowered
+the maximum stays stored but is cut to it when a review runs (the settings say so). The claim sends the project's value as
+`llm.maxCostUsd` and the maximum as `llm.operatorMaxCostUsd`, only to a runner or Worker that named the claim features
+`cost_limit` and `operator_cost_limit`; a runner of the release before gets the smaller of the two in `llm.maxCostUsd`, and a
+job that meets a caller with neither runs without the fields (the claim logs it), because a refused review is worse than a
+limit that is not kept while a release rolls out. `RUNNER_DYNAMIC_MAX_COST_USD` is only the fallback of a runner whose app
+does not send the maximum.
 
 - **Dynamic Review.** The limit is the budget of the run: the run is wrapped up when a further call and a final one would not
   fit, delivers the review with the findings it has, and says so ("stopped early", on the pull request, the check run and the run
@@ -111,7 +115,7 @@ nothing is sent and the job is the job of before.
   but the wrap-up.
 - **Diff Review.** One model request is never cut short, so the limit decides about the _next_ request: once what the answers so
   far cost has reached it, the runner sends no further request (a fallback model, a retry of an unusable answer) and the run
-  ends `cost_limit_reached`. A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
+  ends `cost_limit_reached`, with `usage.stoppedEarly` naming the limit that bound (`project_cost_limit`, or `cost_limit` for the operator's maximum), so the run text says whether the customer can change it (#689). A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
   under the field (a large pull request, warned above the limit) is how a customer judges a model before choosing it. Nothing is
   refused at the start on an estimate: the estimate is a typical review, and a small pull request costs far less.
 - **Billing.** A stopped run is billed like any other run: what the calls really cost (the exact cost the runner reports, never

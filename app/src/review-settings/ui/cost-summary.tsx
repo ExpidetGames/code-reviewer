@@ -2,12 +2,11 @@
 
 // The estimated cost of one review with the model (and the fallback model), and the warnings of the
 // cost guard (src/review-settings/cost.ts): above the customer's warning level, a model without a known
-// price. Those two advise and never block a save; a token budget that does not fit the model's
-// context window is different: the service refuses that save, and the warning says so. The fallback
-// model is never called in the MVP (src/review-settings/README.md), so it is listed as "not used
-// yet" and gets no estimate and no cost warning (its context window still counts, as the save is
-// refused for it too). Model names are typed by people, so they are rendered as text like everything
-// else. #174 moves the summary into the Model card, right below the fields it depends on.
+// price. Both advise and never block a save. There is no token budget to fit (#689: the app decides
+// how much of a pull request the model reads, from the model's window). The fallback model is never
+// called in the MVP (src/review-settings/README.md), so it is listed as "not used yet" and gets no
+// estimate and no cost warning. Model names are typed by people, so they are rendered as text like
+// everything else. #174 moves the summary into the Model card, right below the fields it depends on.
 import { Alert } from "../../components/ui/alert.tsx";
 import type { ModelCostEstimate, ReviewCostGuard } from "../cost.ts";
 
@@ -104,14 +103,6 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
             )}
           </Alert>
         ))}
-      {cost.exceedsContext.map((which) => (
-        <Alert key={`context-${which}`} variant="warning" role="status">
-          The token budget is larger than the context window of the{" "}
-          {whichText(which)}{" "}
-          <span className="font-mono">{modelOf(cost, which)}</span>. Saving is
-          refused until the token budget or the model is changed.
-        </Alert>
-      ))}
     </div>
   );
 }

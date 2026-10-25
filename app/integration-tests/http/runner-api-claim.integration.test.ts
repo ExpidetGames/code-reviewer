@@ -104,6 +104,8 @@ describe("claiming a job", () => {
         provider: "openrouter",
         model: TEST_LLM_MODEL,
         apiKey: TEST_LLM_API_KEY,
+        // #689: every job carries the token budget the app decided, last of the legacy keys.
+        maxTokens: 100_000,
       },
       env: {},
     });
@@ -181,7 +183,8 @@ describe("claiming a job", () => {
     });
   });
 
-  it("asks the source for the options of each job, so the model and the context size can differ per repository", async () => {
+  // #689-T08
+  it("asks the source for the options of each job, so the model can differ per repository, and decides the token budget itself", async () => {
     const h = await startRunnerApiHarness({
       jobOptions: {
         optionsFor: async (job) =>
@@ -190,11 +193,10 @@ describe("claiming a job", () => {
                 env: {},
                 llm: {
                   model: "vendor/model-one",
-                  maxTokens: 64000,
                   fallbackModels: ["vendor/fallback"],
                 },
               }
-            : { env: {}, llm: { model: "vendor/model-two", maxTokens: null } },
+            : { env: {}, llm: { model: "vendor/model-two" } },
       },
     });
     await h.enqueueNew({ prNumber: 7 });
@@ -208,13 +210,14 @@ describe("claiming a job", () => {
       provider: "openrouter",
       model: "vendor/model-one",
       apiKey: TEST_LLM_API_KEY,
-      maxTokens: 64000,
+      maxTokens: 100_000,
     });
-    // A null is left out: the runner refuses a maxTokens that is not a whole number.
+    // The budget is the app's since #689 (no setting names it): the built-in value while no window is known.
     expect(second.job.input.llm).toStrictEqual({
       provider: "openrouter",
       model: "vendor/model-two",
       apiKey: TEST_LLM_API_KEY,
+      maxTokens: 100_000,
     });
   });
 
@@ -232,6 +235,7 @@ describe("claiming a job", () => {
       provider: "openrouter",
       model: TEST_LLM_MODEL,
       apiKey: TEST_LLM_API_KEY,
+      maxTokens: 100_000,
     });
   });
 
@@ -531,8 +535,9 @@ describe("a job that cannot be handed out", () => {
   });
 
   it.each([
-    ["a context size that is not a whole number", { maxTokens: 1.5 }],
-    ["a context size below the minimum", { maxTokens: 10 }],
+    ["a cost limit that is not whole cents", { maxCostCents: 1.5 }],
+    ["a cost limit below the minimum", { maxCostCents: 0 }],
+    ["a cost limit above the maximum", { maxCostCents: 10_001 }],
     ["a model name the runner refuses", { model: "bad model name" }],
   ])(
     "fails a job whose options hold %s, without creating job credentials",

@@ -71,6 +71,7 @@ CLAIM_FEATURES: tuple[str, ...] = (
     "supersede",
     "dynamic_cost_policy",
     "cost_limit",
+    "operator_cost_limit",
 )
 
 

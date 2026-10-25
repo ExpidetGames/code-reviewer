@@ -42,6 +42,10 @@ export const CLAIM_FEATURES = [
   // #666: the runner reads `llm.maxCostUsd` and enforces it next to the operator's own cost limit. A project cost limit goes
   // only to a caller that named it; any other caller runs the job without it.
   "cost_limit",
+  // #689: the runner reads `llm.operatorMaxCostUsd`, the most one review may cost as the operator set it in the admin portal, and
+  // holds a review to the smaller of that and `llm.maxCostUsd`. Sent only to a caller that named it; a caller with `cost_limit`
+  // alone gets the smaller of the two in `llm.maxCostUsd`, one with neither gets neither (`job-cost-limit.ts`).
+  "operator_cost_limit",
 ] as const;
 export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
 
@@ -374,13 +378,18 @@ export type RunnerJobInput = {
     provider: string;
     model: string;
     apiKey: string;
-    /** The token budget of the review; left out when neither the settings nor the instance set one. */
+    /** The token budget of the review (#689: decided by the app from the model's context window, `model-catalog/token-budget.ts`; no setting). */
     maxTokens?: number;
     /**
      * #666: the cost limit of the project in US dollars (whole cents), left out when none is set. Sent only to a caller that
      * advertised the `cost_limit` feature; a previous-release runner has a closed job contract and would refuse the key.
      */
     maxCostUsd?: number;
+    /**
+     * #689: the most one review may cost as the operator set it in the admin portal, in US dollars (whole cents). Sent only to a
+     * caller that advertised `operator_cost_limit`; the runner holds a review to the smaller of this and `maxCostUsd`.
+     */
+    operatorMaxCostUsd?: number;
     /** Not sent by the app in the MVP (no fallback chain). The runner accepts it. */
     fallbackModels?: string[];
   };

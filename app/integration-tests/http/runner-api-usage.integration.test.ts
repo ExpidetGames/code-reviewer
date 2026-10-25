@@ -134,6 +134,7 @@ describe("the claim of a job", () => {
       provider: "openrouter",
       model: TEST_LLM_MODEL,
       apiKey: TEST_LLM_API_KEY,
+      maxTokens: 100_000,
     });
     expect(await allRecords(h)).toHaveLength(1);
     const done = await h.complete(body.job.id, body.job.leaseToken);

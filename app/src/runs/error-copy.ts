@@ -163,8 +163,9 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The Dynamic Review used more than its allowed budget and was stopped.",
   dynamic_accounting_failed:
     "The Dynamic Review's model usage could not be accounted for, so it was stopped.",
+  // The sentence for a reader who does not know whose limit it was (a list row, a runner that did not say): true for both.
   cost_limit_reached:
-    "The review stopped at the cost limit set for this project: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. You can change the limit under Limits in the project settings.",
+    "The review stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. The limit is the one set for this project under Limits in the project settings, or the maximum cost per review set by code-review.com, whichever is lower.",
   dynamic_model_features_unsupported:
     "The configured model does not support the features Dynamic Review requires. Choose another model.",
   lease_lost:
@@ -220,6 +221,17 @@ export const UNKNOWN_ERROR_COPY =
 /** A code is a short word with underscores; anything else is not shown. */
 const CODE_SHAPE = /^[a-z][a-z0-9_]{0,63}$/;
 
+/**
+ * #689: a Diff Review that is stopped at its cost limit ends with one code whichever limit it was; the runner names the limit in
+ * `usage.stoppedEarly`. The customer can change their own limit but not the maximum of code-review.com, so the text says which.
+ */
+const COST_LIMIT_REACHED_COPY: Readonly<Record<string, string>> = {
+  project_cost_limit:
+    "The review stopped at the cost limit set for this project: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. You can change the limit under Limits in the project settings.",
+  cost_limit:
+    "The review stopped at the maximum cost per review set by code-review.com: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. This maximum is not a setting of the project.",
+};
+
 export type ErrorDescription = {
   /** The code as stored when it has the shape of one, otherwise null (it is never shown then). */
   code: string | null;
@@ -229,14 +241,25 @@ export type ErrorDescription = {
   known: boolean;
 };
 
-export function describeErrorCode(code: string): ErrorDescription {
+/** `stoppedEarly` is the limit the runner reported in the usage of the run (`cost_limit`, `project_cost_limit`), when it did. */
+export function describeErrorCode(
+  code: string,
+  stoppedEarly?: string | null,
+): ErrorDescription {
   const shown = CODE_SHAPE.test(code) ? code : null;
   if (shown !== null && Object.hasOwn(ERROR_COPY, shown)) {
+    const bound =
+      shown === "cost_limit_reached" &&
+      stoppedEarly !== undefined &&
+      stoppedEarly !== null &&
+      Object.hasOwn(COST_LIMIT_REACHED_COPY, stoppedEarly)
+        ? COST_LIMIT_REACHED_COPY[stoppedEarly]
+        : undefined;
     return {
       code: (UNSHOWN_ERROR_CODES as readonly string[]).includes(shown)
         ? null
         : shown,
-      text: ERROR_COPY[shown] ?? UNKNOWN_ERROR_COPY,
+      text: bound ?? ERROR_COPY[shown] ?? UNKNOWN_ERROR_COPY,
       known: true,
     };
   }

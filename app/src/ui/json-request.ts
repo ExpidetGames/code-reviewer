@@ -20,7 +20,12 @@ export type TransportErrorCode = (typeof TRANSPORT_ERROR_CODES)[number];
 /** `fetch`, narrowed to what the pages use so a test can hand in a stand-in. */
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-export type RequestIssue = { field: string; code: string };
+export type RequestIssue = {
+  field: string;
+  code: string;
+  /** #689: the operator's maximum per review in whole US cents, on a cost limit above it (`EXCEEDS_OPERATOR_MAXIMUM`). */
+  maximumCents?: number;
+};
 
 export type RequestResult<T> =
   | { ok: true; data: T }
@@ -51,9 +56,17 @@ function readIssues(value: unknown): RequestIssue[] {
   const issues: RequestIssue[] = [];
   for (const entry of value as unknown[]) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { field, code } = entry as { field?: unknown; code?: unknown };
+    const { field, code, maximumCents } = entry as {
+      field?: unknown;
+      code?: unknown;
+      maximumCents?: unknown;
+    };
     if (typeof field === "string" && typeof code === "string")
-      issues.push({ field, code });
+      issues.push({
+        field,
+        code,
+        ...(typeof maximumCents === "number" ? { maximumCents } : {}),
+      });
   }
   return issues;
 }

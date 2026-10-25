@@ -236,7 +236,7 @@ describe("the settings page of a project", () => {
     const app = await openProject();
     await app.service.updateProjectSettings(app.first.id, { maxFindings: 3 });
     await app.service.updateGlobalSettings(
-      { maxFindings: 8, maxTokens: 50_000 },
+      { maxFindings: 8, maxCostCents: 50 },
       "octocat",
     );
 
@@ -244,14 +244,14 @@ describe("the settings page of a project", () => {
     if (data.kind !== "ready") throw new Error("expected a project");
 
     expect(data.model.effective.maxFindings).toBe(3);
-    expect(data.model.effective.maxTokens).toBe(50_000);
+    expect(data.model.effective.maxCostCents).toBe(50);
     renderReady(app, data);
     const own = screen
       .getByLabelText("Most findings per review")
       .closest("[data-field]") as HTMLElement;
     await openSection(user, "Limits");
     const inherited = screen
-      .getByLabelText("Token budget")
+      .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
     expect(within(own).getByText("Set for this project")).toBeTruthy();
     expect(within(inherited).getByText("Global default")).toBeTruthy();
@@ -266,10 +266,11 @@ describe("the settings page of a project", () => {
     const view = renderReady(app, before);
     await openSection(user, "Limits");
     expect(
-      (screen.getByLabelText("Token budget") as HTMLInputElement).value,
-    ).toBe("100000");
+      (screen.getByLabelText("Cost limit per review (USD)") as HTMLInputElement)
+        .value,
+    ).toBe("");
 
-    await app.service.updateGlobalSettings({ maxTokens: 70_000 }, "octocat");
+    await app.service.updateGlobalSettings({ maxCostCents: 70 }, "octocat");
     const after = await app.load();
     if (after.kind !== "ready") throw new Error("expected a project");
     view.rerender(
@@ -282,11 +283,12 @@ describe("the settings page of a project", () => {
 
     await openSection(user, "Limits");
     const field = screen
-      .getByLabelText("Token budget")
+      .getByLabelText("Cost limit per review (USD)")
       .closest("[data-field]") as HTMLElement;
     expect(
-      (screen.getByLabelText("Token budget") as HTMLInputElement).value,
-    ).toBe("70000");
+      (screen.getByLabelText("Cost limit per review (USD)") as HTMLInputElement)
+        .value,
+    ).toBe("0.70");
     expect(within(field).getByText("Global default")).toBeTruthy();
   });
 
@@ -322,26 +324,22 @@ describe("the settings page of a project", () => {
     const before = await app.projectRows();
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
-    // A budget the model cannot hold: the client check passes, the service refuses.
+    // A limit above the operator's maximum: the client check passes, the service refuses (#689).
     renderReady(app, data);
 
-    await openSection(user, "LLM");
-    await chooseOption(
-      user,
-      screen.getByLabelText("Model"),
-      "deepseek/deepseek-v3.2",
-    );
     await openSection(user, "Limits");
-    const tokens = screen.getByLabelText("Token budget");
-    await user.clear(tokens);
-    await user.type(tokens, "500000");
+    const limit = screen.getByLabelText("Cost limit per review (USD)");
+    await user.clear(limit);
+    await user.type(limit, "5");
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
 
-    const field = tokens.closest("[data-field]") as HTMLElement;
+    const field = limit.closest("[data-field]") as HTMLElement;
     expect(
-      await within(field).findByText(/context window of the chosen model/),
+      await within(field).findByText(
+        "The maximum cost per review is $1.00. Enter that or less.",
+      ),
     ).toBeTruthy();
     expect(await app.projectRows()).toEqual(before);
   });

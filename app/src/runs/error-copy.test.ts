@@ -51,6 +51,39 @@ describe("the sentences for error codes", () => {
     }
   });
 
+  // #689-T26
+  it("words the cost limit by whose limit it was, and says neither more than it knows", () => {
+    const project = describeErrorCode(
+      "cost_limit_reached",
+      "project_cost_limit",
+    );
+    const operator = describeErrorCode("cost_limit_reached", "cost_limit");
+    const unknown = describeErrorCode("cost_limit_reached");
+
+    // The customer's own limit: they can change it, and are told where.
+    expect(project.text).toContain("cost limit set for this project");
+    expect(project.text).toContain("Limits in the project settings");
+    // The operator's maximum: the customer cannot raise it, and is not sent to a field that would not help.
+    expect(operator.text).toContain(
+      "maximum cost per review set by code-review.com",
+    );
+    expect(operator.text).not.toMatch(/project settings|Limits/);
+    expect(operator.text).not.toMatch(/instance/i);
+    // A runner that does not say which limit bound (or a list row): true for both.
+    expect(unknown.text).toContain("project");
+    expect(unknown.text).toContain("code-review.com");
+    expect(unknown.text).not.toMatch(/instance/i);
+    expect(unknown.text).toBe(ERROR_COPY["cost_limit_reached"]);
+    for (const described of [project, operator, unknown]) {
+      expect(described.code).toBe("cost_limit_reached");
+      expect(described.known).toBe(true);
+    }
+    // Another code is not changed by a stop reason.
+    expect(describeErrorCode("timeout", "cost_limit").text).toBe(
+      ERROR_COPY["timeout"],
+    );
+  });
+
   // #499-T13
   it("gives the code of the hidden brake a sentence and shows no code, no number and no window", () => {
     const described = describeErrorCode("reviews_paused");

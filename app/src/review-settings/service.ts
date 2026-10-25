@@ -14,11 +14,8 @@ import type {
   ProjectSettings,
   StoredProject,
 } from "../db/repositories/projects-repository.ts";
-import {
-  estimateReviewCost,
-  modelsExceedingContext,
-  type ReviewCostGuard,
-} from "./cost.ts";
+import { estimateReviewCost, type ReviewCostGuard } from "./cost.ts";
+import { DEFAULT_OPERATOR_COST_LIMIT_CENTS } from "./operator-cost-limit.ts";
 import {
   readDefaultReviewSkill,
   type DefaultReviewSkill,
@@ -122,6 +119,11 @@ type ViewBase = {
    * catalog entry per project and the view carries no model field, no Dynamic model and no cost (#283, #433).
    */
   modelManagedByInstance: boolean;
+  /**
+   * #689: the most one review may cost, in whole US cents, as the operator set it. A cost limit above it can not be saved, and a
+   * stored one above it is cut to it when a review runs; the form shows the maximum and says so.
+   */
+  operatorMaxCostCents: number;
 };
 
 export type GlobalSettingsView = ViewBase & {
@@ -626,35 +628,6 @@ function mergeProjectSettings(
   return next;
 }
 
-/**
- * The token budget must fit into the context window of the models the settings would use. Only the
- * fields the request sets are blamed: a combination that was there before (a project's budget that a
- * later change of the global model made too large) is not this request's problem, the cost guard
- * shows it (`exceedsContext`).
- */
-function refuseBudgetAboveContext(
-  patch: ReviewSettingsOverrides,
-  effective: ReviewSettings,
-): void {
-  const issues: ReviewSettingIssue[] = [];
-  for (const field of modelsExceedingContext(effective)) {
-    const blamed: ReviewSettingField | undefined =
-      patch.maxTokens !== undefined
-        ? "maxTokens"
-        : patch[field] !== undefined
-          ? field
-          : undefined;
-    if (blamed !== undefined && !issues.some((i) => i.field === blamed))
-      issues.push({ field: blamed, code: "EXCEEDS_MODEL_CONTEXT" });
-  }
-  if (issues.length > 0)
-    throw new ReviewSettingsError(
-      "REVIEW_SETTINGS_INVALID",
-      "Some settings are not valid.",
-      issues,
-    );
-}
-
 export function createReviewSettingsService(deps: {
   appSettings: AppSettingsRepository;
   projects: ProjectsRepository;
@@ -691,6 +664,12 @@ export function createReviewSettingsService(deps: {
   /** Where a provider id is looked up; the registry of the app unless a test brings a second provider. */
   providers?: ProviderLookup;
   /**
+   * #689: the most one review may cost, in whole US cents, as the operator set it in the admin portal. A cost limit of a
+   * customer above it is refused at the save, and every view carries it for the form to show. Default: 1.00 USD, what the
+   * instance setting reads as until it is set.
+   */
+  operatorCostLimitCents?: () => Promise<number>;
+  /**
    * The models.dev catalog as far as a save needs it (#555): whether a Dynamic provider that is a catalog provider has this
    * model listed. Only read for a workspace on its own key and a Dynamic provider outside the registry. Default: an empty
    * catalog, so such a choice is refused.
@@ -712,6 +691,36 @@ export function createReviewSettingsService(deps: {
   const defaultSkill = deps.defaultSkill ?? readDefaultReviewSkill;
   const hooks = deps.hooks ?? noopReviewSettingsHooks;
   const operatorsModels = deps.operatorsModels ?? (async () => false);
+  const operatorCostLimitCents =
+    deps.operatorCostLimitCents ??
+    (async () => DEFAULT_OPERATOR_COST_LIMIT_CENTS);
+
+  /**
+   * The cost limit of a save may not be above the operator's maximum (#689). Only a limit this save sets is blamed: one that
+   * is already stored and above a maximum lowered since stays, and the lower maximum wins when a review runs, so a form that
+   * sends it back unchanged is not refused for it.
+   */
+  async function refuseCostAboveMaximum(
+    patch: ReviewSettingsOverrides,
+    stored: ReviewSettingsOverrides,
+  ): Promise<void> {
+    const wanted = patch.maxCostCents;
+    if (wanted === undefined || wanted === null) return;
+    if (wanted === stored.maxCostCents) return;
+    const maximumCents = await operatorCostLimitCents();
+    if (wanted <= maximumCents) return;
+    throw new ReviewSettingsError(
+      "REVIEW_SETTINGS_INVALID",
+      "Some settings are not valid.",
+      [
+        {
+          field: "maxCostCents",
+          code: "EXCEEDS_OPERATOR_MAXIMUM",
+          maximumCents,
+        },
+      ],
+    );
+  }
   const providers = deps.providers ?? llmProviderDescriptors;
   // Without a catalog nothing can be chosen: every id is unknown and the picker is empty.
   const catalog: CatalogSelectionSource = deps.catalog ?? {
@@ -773,6 +782,7 @@ export function createReviewSettingsService(deps: {
   ): Promise<ViewBase> {
     // A workspace on the operator's key does not know the model, so none of the views carries one, and the estimate
     // is for a model it does not use.
+    const operatorMaxCostCents = await operatorCostLimitCents();
     if (await operatorsModels())
       return {
         overrides: withoutModelFields(overrides),
@@ -780,6 +790,7 @@ export function createReviewSettingsService(deps: {
         sources: withoutModelFields(effective.sources),
         cost: null,
         modelManagedByInstance: true,
+        operatorMaxCostCents,
       };
     return {
       overrides,
@@ -787,6 +798,7 @@ export function createReviewSettingsService(deps: {
       sources: effective.sources,
       cost: estimateReviewCost(effective.settings),
       modelManagedByInstance: false,
+      operatorMaxCostCents,
     };
   }
 
@@ -1298,12 +1310,8 @@ export function createReviewSettingsService(deps: {
             ...requested.dynamic,
             ...catalogFieldsOf(stored.dynamic),
           };
+      await refuseCostAboveMaximum(review, stored.overrides);
       if (!managed) {
-        refuseBudgetAboveContext(
-          review,
-          resolveReviewSettings({ builtIn: deps.builtIn(), global: review })
-            .settings,
-        );
         await refuseGlobalChangeBreakingProjects(
           { review: stored.overrides, dynamic: stored.dynamic },
           { review, dynamic },
@@ -1416,15 +1424,10 @@ export function createReviewSettingsService(deps: {
       const warnings = await checkDynamicModel(
         toCheck !== null && isNativeProvider(toCheck.provider) ? null : toCheck,
       );
-      if (!managed)
-        refuseBudgetAboveContext(
-          patch.review,
-          resolveReviewSettings({
-            builtIn: deps.builtIn(),
-            global: (await readGlobal()).overrides,
-            project: patch.review,
-          }).settings,
-        );
+      await refuseCostAboveMaximum(
+        patch.review,
+        parseReview((await projects.get(repositoryId))?.settings),
+      );
       const workspace = await readGlobal();
       const workspaceLayer = managed ? {} : workspace.overrides;
       const workspaceDynamic = managed ? {} : workspace.dynamic;
