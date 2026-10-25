@@ -1,74 +1,66 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the workflow of the code-review.com landing page (.github/workflows/website.yml, #696): a lightweight check of
-// website/ (its own pnpm project, deployed by Cloudflare, not by a workflow) that runs next to the heavy CI of ci.yml and
-// shares nothing with it. It reads the file as YAML; that GitHub accepts a run is verified by the run itself.
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+// Pins down how CI checks the landing page (website/, #696): the job `website` of ci.yml (its own pnpm project, deployed by
+// Cloudflare, not by a workflow) and how it takes part in the required check. It reads the file as YAML; that GitHub
+// accepts a run is verified by the run itself.
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
+import { readText, readWorkflow, repoRoot } from "./workflow-support.ts";
 
-const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const source = readFileSync(`${repoRoot}.github/workflows/website.yml`, "utf8");
+const workflow = readWorkflow("ci.yml");
+const job = workflow.jobs.website;
+if (!job) throw new Error("ci.yml has no website job");
+const steps = job.steps ?? [];
+const aggregate = workflow.jobs["ci-passed"];
+const filter = (workflow.jobs.changes?.steps ?? []).find(
+  (step) => step.id === "filter",
+);
 
-type Step = {
-  name?: string;
-  uses?: string;
-  run?: string;
-  with?: Record<string, unknown>;
-} & Record<string, unknown>;
-type Job = {
-  "timeout-minutes"?: number;
-  defaults?: { run?: { "working-directory"?: string } };
-  permissions?: Record<string, string>;
-  steps: Step[];
-};
-type Workflow = {
-  on: {
-    pull_request?: { branches?: string[]; paths?: string[] };
-    push?: { branches?: string[]; paths?: string[] };
-  } & Record<string, unknown>;
-  permissions?: Record<string, string>;
-  jobs: Record<string, Job>;
-};
-
-const workflow = parse(source) as Workflow;
-const job = workflow.jobs.verify as Job;
-
-describe("the website workflow", () => {
+describe("the website job of ci.yml", () => {
   // #696
-  it("runs for pull requests into development and main and for pushes to them, only when website/ or this file changes", () => {
-    const paths = ["website/**", ".github/workflows/website.yml"];
+  it("has its own path output for website/**, which the job and nothing else of the website decides on", () => {
+    expect(workflow.jobs.changes?.outputs).toHaveProperty("website");
+    expect(String(filter?.with?.filters)).toMatch(
+      /website:\n\s+- 'website\/\*\*'/,
+    );
+    expect(job.needs).toBe("changes");
+    expect(job.if).toBe(
+      "${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.website == 'true' }}",
+    );
+  });
 
-    expect(workflow.on.pull_request?.branches).toEqual(["development", "main"]);
-    expect(workflow.on.push?.branches).toEqual(["development", "main"]);
-    expect(workflow.on.pull_request?.paths).toEqual(paths);
-    expect(workflow.on.push?.paths).toEqual(paths);
-    expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "push"]);
+  // #696
+  it("is part of the required check, so a failing website build blocks the merge", () => {
+    expect(aggregate?.needs).toContain("website");
+    expect(String(aggregate?.if)).toBe("${{ always() }}");
   });
 
   // #696
   it("has the read-only token, a timeout, and no secret and no deployment", () => {
+    const source = readText(".github/workflows/ci.yml");
+    const text = JSON.stringify(job);
+
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(job.permissions).toBeUndefined();
     expect(job["timeout-minutes"]).toBeLessThanOrEqual(15);
-    expect(source).not.toMatch(/secrets\./);
-    expect(source).not.toMatch(/wrangler deploy|^\s+environment:/m);
+    expect(text).not.toMatch(/secrets\./);
+    expect(text).not.toMatch(/wrangler deploy|environment/);
+    expect(source).not.toMatch(/wrangler deploy/);
   });
 
   // #696
   it("installs from the lockfile of website/ and runs pnpm verify there, with the versions website/ pins", () => {
-    const runs = job.steps.flatMap((step) =>
-      step.run ? [step.run.trim()] : [],
-    );
-    const pnpm = job.steps.find((step) =>
+    const runs = steps.flatMap((step) => (step.run ? [step.run.trim()] : []));
+    const pnpm = steps.find((step) =>
       step.uses?.startsWith("pnpm/action-setup@"),
     );
-    const node = job.steps.find((step) =>
+    const node = steps.find((step) =>
       step.uses?.startsWith("actions/setup-node@"),
     );
 
-    expect(job.defaults?.run?.["working-directory"]).toBe("website");
+    expect(job["defaults"]).toEqual({
+      run: { "working-directory": "website" },
+    });
     expect(runs).toEqual(["pnpm install --frozen-lockfile", "pnpm verify"]);
     expect(pnpm?.with?.package_json_file).toBe("website/package.json");
     expect(node?.with?.["node-version-file"]).toBe("website/.nvmrc");
@@ -80,13 +72,16 @@ describe("the website workflow", () => {
   });
 
   // #696
-  it("is not part of ci.yml, so the required check 'All checks passed?' never waits for it", () => {
-    const ci = readFileSync(`${repoRoot}.github/workflows/ci.yml`, "utf8");
-    const aggregate = (parse(ci) as Workflow).jobs["ci-passed"] as Job & {
-      needs: string[];
-    };
+  it("checks out the full history, which the sitemap takes the change dates of the pages from", () => {
+    const checkout = steps.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
 
-    expect(aggregate.needs).not.toContain("verify");
-    expect(aggregate.needs).not.toContain("website");
+    expect(checkout?.with?.["fetch-depth"]).toBe(0);
+  });
+
+  // #696
+  it("has no workflow file of its own any more, so a website change does not run twice", () => {
+    expect(existsSync(`${repoRoot}.github/workflows/website.yml`)).toBe(false);
   });
 });

@@ -437,6 +437,33 @@ describe("CI license job", () => {
     );
   });
 
+  // #696
+  it("also runs for a change to website/, because a website-only pull request skips app-fast and the checks of the whole tree must not be skipped with it", () => {
+    expect(String(jobNamed("licenses").if)).toContain(
+      "needs.changes.outputs.website == 'true'",
+    );
+  });
+
+  // #696
+  it("runs the scans of the whole tree: tracked secrets, repository identity, billing cleanup and legacy variables", () => {
+    const scan = commandLines(jobNamed("licenses")).find((line) =>
+      line.includes("src/ci/tracked-secrets"),
+    );
+
+    expect(scan).toBe(
+      "pnpm exec vitest run --project unit src/ci/tracked-secrets src/ci/repository-identity src/ci/billing-cleanup src/ci/legacy-variables",
+    );
+    for (const test of [
+      "tracked-secrets",
+      "repository-identity",
+      "billing-cleanup",
+      "legacy-variables",
+    ])
+      expect(existsSync(`${repoRoot}app/src/ci/${test}.test.ts`), test).toBe(
+        true,
+      );
+  });
+
   // #118-T01
   it("is a required part of the aggregate check, so a red license check blocks the merge", () => {
     expect(jobNamed("ci-passed").needs).toContain("licenses");
@@ -668,6 +695,22 @@ describe("CI workflow path filter", () => {
   });
 
   // #696
+  it("sends a change that touches website/ to the website job, whatever else it touches, and a change outside website/ not", () => {
+    for (const file of [
+      "website/src/pages/index.astro",
+      "website/pnpm-lock.yaml",
+      "website/README.md",
+    ])
+      expect(touched("website", file), file).toBe(true);
+    for (const file of [
+      "app/src/db/index.ts",
+      "README.md",
+      "THIRD_PARTY_LICENSES.md",
+    ])
+      expect(touched("website", file), file).toBe(false);
+  });
+
+  // #696
   it("sends a change that only touches website/ to no heavy job: not app, not Dispatcher, not runner, not licenses, not workflows", () => {
     for (const file of [
       "website/src/pages/index.astro",
@@ -811,13 +854,18 @@ describe("CI workflow installation and runtimes", () => {
 
   // CR-16-T07
   it("takes the Node version from .nvmrc and the Python version from the runner project", () => {
-    const setupNodeSteps = jobs.flatMap(([, job]) =>
-      steps(job).filter((step) => step.uses?.startsWith("actions/setup-node@")),
+    // The landing page is its own project with its own Node version (website/.nvmrc, #696).
+    const setupNodeSteps = jobs.flatMap(([id, job]) =>
+      steps(job)
+        .filter((step) => step.uses?.startsWith("actions/setup-node@"))
+        .map((step) => ({ id, step })),
     );
 
     expect(setupNodeSteps.length).toBeGreaterThan(0);
-    for (const step of setupNodeSteps) {
-      expect(step.with?.["node-version-file"]).toBe(".nvmrc");
+    for (const { id, step } of setupNodeSteps) {
+      expect(step.with?.["node-version-file"], id).toBe(
+        id === "website" ? "website/.nvmrc" : ".nvmrc",
+      );
       expect(step.with).not.toHaveProperty("node-version");
     }
     expect(workflowSource).not.toMatch(/\bnode-version:/);

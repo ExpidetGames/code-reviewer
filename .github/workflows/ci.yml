@@ -39,6 +39,7 @@ jobs:
       runner: ${{ steps.filter.outputs.runner }}
       workflows: ${{ steps.filter.outputs.workflows }}
       licenses: ${{ steps.filter.outputs.licenses }}
+      website: ${{ steps.filter.outputs.website }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -47,9 +48,10 @@ jobs:
         with:
           predicate-quantifier: every
           filters: |
-            # website/ (the code-review.com landing page, #696) is a project of its own with its own
-            # lightweight workflow (website.yml): none of the three filters below counts it, so a
-            # website-only pull request runs no app, dispatcher or runner job and ci-passed still reports.
+            # website/ (the code-review.com landing page, #696) is a project of its own: none of the three
+            # filters below counts it, so a website-only pull request runs no app, dispatcher or runner job.
+            # It runs the website job and the licenses job (the repository-wide checks), and ci-passed
+            # still reports.
             app:
               - '**'
               - '!runner/**'
@@ -76,6 +78,42 @@ jobs:
             # license-policy.json (policy-doc.test.ts).
             licenses:
               - 'THIRD_PARTY_LICENSES.md'
+            # The landing page (#696): its own job, and the repository-wide checks of the licenses job.
+            website:
+              - 'website/**'
+
+  # The code-review.com landing page (website/, #696): an Astro site and its own pnpm project, deployed by
+  # Cloudflare (Workers Builds, root directory website), not by a workflow. This job only proves that it
+  # builds: types, the generated legal Markdown, the build and the build check (`pnpm verify`). It needs
+  # nothing but the read-only token and no secret. It is part of ci-passed, so a failing website build
+  # blocks the merge; a pull request that does not touch website/ skips it.
+  website:
+    name: "Website: verify"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.website == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      # The full history: the sitemap takes the change date of each page from it (website/astro.config.ts).
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: website/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: website/.nvmrc
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # No PUBLIC_POSTHOG_KEY: the build has no banner and no tracking, like a preview build.
+      - name: Types, legal texts, build and build check
+        run: pnpm verify
 
   app-fast:
     name: "App: static, unit tests & build"
@@ -592,13 +630,15 @@ jobs:
   # package of pnpm-lock.yaml or uv.lock has a license outside the allow list. It reads the license
   # metadata that pnpm and uv installed, so it needs both parts installed from the lockfiles and no
   # network service. Runs for every code change, because the policy, the lockfiles and the check
-  # itself live in both parts, and for a change to THIRD_PARTY_LICENSES.md. Besides the check it runs
-  # the tests that keep that file and the policy together, and the SPDX header check, which are
-  # app tests that a runner-only pull request would otherwise skip.
+  # itself live in both parts, for a change to THIRD_PARTY_LICENSES.md and for a change to website/.
+  # Besides the check it runs the tests that keep that file and the policy together, the SPDX header
+  # check and the scans of the whole tree (tracked secrets, repository identity, billing, legacy
+  # variables), which are app tests that a runner-only or website-only pull request would otherwise
+  # skip.
   licenses:
     name: "Licenses: dependency check"
     needs: changes
-    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.dispatcher == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.dispatcher == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' || needs.changes.outputs.website == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -636,6 +676,10 @@ jobs:
         run: pnpm exec vitest run --project unit src/ci/license-check
       - name: Check the SPDX headers
         run: pnpm spdx:check
+      # The scans of the whole tree, which app-fast runs with the rest of the unit tests. A pull request that
+      # only touches website/ (or only the runner) skips app-fast, and these must not be skipped with it.
+      - name: Scan the whole tree (secrets, repository identity, billing, legacy variables)
+        run: pnpm exec vitest run --project unit src/ci/tracked-secrets src/ci/repository-identity src/ci/billing-cleanup src/ci/legacy-variables
 
   # The container images. A pull request builds each image, starts it and checks what a unit test
   # cannot (docker/smoke/*.sh). Nothing is pushed anywhere: the source is visible but not licensed
@@ -831,7 +875,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-int, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
+    needs: [changes, website, app-fast, app-int, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
