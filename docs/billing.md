@@ -12,7 +12,7 @@ what to set up in Stripe, how to set the rates, in which order to go live, and h
   [0006](decisions/0006-prepaid-billing-via-stripe-managed-payments.md). The code is described in
   `app/src/billing/README.md`.
 - The hosted deployment itself (the webhook route must be reachable) is in [Deploy on Vercel](deployment-vercel.md),
-  section 3.6. 
+  section 3.6.
 
 **Every number in this guide is made up.** They are examples to show the arithmetic. The real rates are your decision.
 They are never in the repository, and they are not in this guide.
@@ -115,7 +115,7 @@ does not send the maximum.
   but the wrap-up.
 - **Diff Review.** One model request is never cut short, so the limit decides about the _next_ request: once what the answers so
   far cost has reached it, the runner sends no further request (a fallback model, a retry of an unusable answer) and the run
-  ends `cost_limit_reached`. A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
+  ends `cost_limit_reached`, with `usage.stoppedEarly` naming the limit that bound (`project_cost_limit`, or `cost_limit` for the operator's maximum), so the run text says whether the customer can change it (#689). A Diff Review is one request in practice, so the limit rarely changes its outcome; the estimate
   under the field (a large pull request, warned above the limit) is how a customer judges a model before choosing it. Nothing is
   refused at the start on an estimate: the estimate is a typical review, and a small pull request costs far less.
 - **Billing.** A stopped run is billed like any other run: what the calls really cost (the exact cost the runner reports, never

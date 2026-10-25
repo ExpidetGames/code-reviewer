@@ -260,13 +260,47 @@ describe("the check run of a job that did not finish", () => {
   // #666-T04
   it("says that a Diff Review stopped at the cost limit of its project, and where to change it", () => {
     const check = describeCheck(
-      subject({ status: "failed", errorCode: "cost_limit_reached" }),
+      subject({
+        status: "failed",
+        errorCode: "cost_limit_reached",
+        stoppedEarly: "project_cost_limit",
+      }),
     );
 
     expect(check.conclusion).toBe("neutral");
     expect(check.summary).toContain("cost limit set for this project");
     expect(check.summary).toContain("Limits in the project settings");
     expect(check.summary).toContain("`cost_limit_reached`");
+  });
+
+  // #689-T26
+  it("says that a Diff Review stopped at the maximum cost per review of code-review.com, with no way to raise it", () => {
+    const check = describeCheck(
+      subject({
+        status: "failed",
+        errorCode: "cost_limit_reached",
+        stoppedEarly: "cost_limit",
+      }),
+    );
+
+    expect(check.summary).toContain(
+      "maximum cost per review set by code-review.com",
+    );
+    expect(check.summary).not.toContain("Limits in the project settings");
+    expect(check.summary).toContain("`cost_limit_reached`");
+  });
+
+  // #689-T26
+  it("keeps the project wording when the cost limit that stopped it was the project's", () => {
+    const check = describeCheck(
+      subject({
+        status: "failed",
+        errorCode: "cost_limit_reached",
+        stoppedEarly: "project_cost_limit",
+      }),
+    );
+
+    expect(check.summary).toContain("Limits in the project settings");
   });
 
   // #499-T13

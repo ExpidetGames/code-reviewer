@@ -28,6 +28,7 @@ import {
   createReviewSettingsService,
   type ReviewSettingsService,
 } from "./service.ts";
+import { operatorCostLimitCentsFrom } from "./operator-cost-limit-source.ts";
 import { builtInReviewSettings } from "./settings.ts";
 
 /** The review settings service of one workspace. */
@@ -78,6 +79,9 @@ export function reviewSettingsServiceFor(
     // #676: Dynamic Review as the workspace default needs a model to run on, judged the way a new project and the claim judge it.
     dynamicReady: (defaults) =>
       dynamicReviewCanResolve(db, workspaceId, defaults),
+    // #689: the operator's maximum per review, the instance setting of the admin portal. Read on every call, so a change
+    // reaches the next request; without it the page and the save would hold every customer to the default 1.00 USD.
+    operatorCostLimitCents: operatorCostLimitCentsFrom(db),
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });

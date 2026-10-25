@@ -19,6 +19,8 @@ import type {
 import { createAppSettingsRepository } from "../../src/db/repositories/app-settings-repository.ts";
 import { REVIEW_DEFAULTS_KEY } from "../../src/review-settings/service.ts";
 import type { ProjectSettings } from "../../src/db/repositories/projects-repository.ts";
+import type { StoredModel } from "../../src/models-dev/catalog.ts";
+import { createModelsDevRepository } from "../../src/db/repositories/models-dev-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
@@ -880,6 +882,102 @@ describe("the token budget of a job", () => {
     // The instance's window (LLM_MAX_TOKENS of the harness) is the only window an own Diff job knows.
     expect((await h.claimed()).job.input.llm.maxTokens).toBe(64_000);
     expect(meta.asked).toEqual([]);
+  });
+});
+
+// #689: a model of the workspace's own key is cut to the window the public catalog states for it, without asking the provider.
+describe("the token budget of a Diff job on the workspace's own key", () => {
+  const T = "2026-10-19T03:00:00.000Z";
+  const catalogModel = (id: string, context: number): StoredModel => ({
+    providerId: DEFAULT_PROVIDER,
+    id,
+    name: id,
+    family: null,
+    limit: { context, output: 8_000 },
+    reasoning: false,
+    temperature: true,
+    attachment: false,
+    modalities: { input: ["text"], output: ["text"] },
+    status: null,
+    cost: null,
+    lastUpdated: null,
+    interleaved: null,
+    firstSeenAt: T,
+    unlistedAt: null,
+    updatedAt: T,
+  });
+  async function startWith(
+    windows: Record<string, number>,
+    project: Record<string, unknown>,
+  ) {
+    const meta = metadata(() => supported(8_000));
+    const h = await start({
+      keyMode: "own",
+      project,
+      harness: { modelCapabilities: meta.checker },
+    });
+    await createModelsDevRepository(h.db).apply({
+      providers: [
+        {
+          id: DEFAULT_PROVIDER,
+          name: DEFAULT_PROVIDER,
+          url: {
+            state: "trusted",
+            trustedUrl: "https://openrouter.example",
+            pendingUrl: null,
+            problem: null,
+          },
+          urlChangedAt: null,
+          firstSeenAt: T,
+          unlistedAt: null,
+          updatedAt: T,
+        },
+      ],
+      models: Object.entries(windows).map(([id, context]) =>
+        catalogModel(id, context),
+      ),
+    });
+    return { h, meta };
+  }
+
+  // #689-T29
+  it("is cut to the window the catalog states for the model, and the provider is not asked", async () => {
+    const { h, meta } = await startWith(
+      { "vendor/own-model": 32_000 },
+      { model: "vendor/own-model" },
+    );
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(32_000);
+    expect(meta.asked).toEqual([]);
+  });
+
+  // #689-T29
+  it("is cut to the smallest window of the model and its fallback model", async () => {
+    const { h, meta } = await startWith(
+      { "vendor/own-model": 64_000, "vendor/small-fallback": 16_000 },
+      { model: "vendor/own-model", fallbackModel: "vendor/small-fallback" },
+    );
+
+    expect((await h.claimed()).job.input.llm.maxTokens).toBe(16_000);
+    expect(meta.asked).toEqual([]);
+  });
+
+  // #689-T29
+  it("is not made larger by a larger window, and is the instance's window when the catalog does not list the model", async () => {
+    const large = await startWith(
+      { "vendor/own-model": 1_000_000 },
+      { model: "vendor/own-model" },
+    );
+    expect((await large.h.claimed()).job.input.llm.maxTokens).toBe(
+      DEFAULT_REVIEW_TOKEN_BUDGET,
+    );
+
+    const unknown = await startWith(
+      { "vendor/other-model": 8_000 },
+      { model: "vendor/own-model" },
+    );
+    // The harness's LLM_MAX_TOKENS (64 000): the window of a model nobody states.
+    expect((await unknown.h.claimed()).job.input.llm.maxTokens).toBe(64_000);
   });
 });
 

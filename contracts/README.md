@@ -289,7 +289,7 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
   caller named `operator_cost_limit`; the app handles the three callers of a release in `runner-api/job-cost-limit.ts`: one that
   names `operator_cost_limit` gets the two values, one that names `cost_limit` alone (the runner of the release before) gets the
   smaller of the two in `llm.maxCostUsd` (its own limit and the environment variable can only narrow it further), and one that
-  names neither gets neither field and the log says `runs without its cost limit`. A runner that names `operator_cost_limit` also
+  names neither gets neither field and the log says `carries no cost limit`. A runner that names `operator_cost_limit` also
   reads a job from an app of the release before (no field: the environment variable applies), so the deploy order does not matter.
   #689 also removes the review setting behind `llm.maxTokens` (the "Token budget"): the field stays in the contract with its bounds,
   and the app now sends the value it decides itself (100000, or the context window of the model when that is smaller) with every job,

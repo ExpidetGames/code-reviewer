@@ -320,6 +320,17 @@ def operator_cost_limit(raw_environment: str | None, from_job: Decimal | None) -
     return max_cost_from_environment(raw_environment)
 
 
+def diff_cost_stop_reason(project: Decimal | None, operator: Decimal | None) -> str | None:
+    """The reason a Diff review names when its cost limit stops it (#689): `project_cost_limit` when
+    the customer's limit is the smaller or equal (the one they can change), `cost_limit` when the
+    operator's maximum is, None without either. The same names a Dynamic run reports."""
+    if project is None:
+        return STOPPED_EARLY_COST if operator is not None else None
+    if operator is None or project <= operator:
+        return STOPPED_EARLY_PROJECT_COST
+    return STOPPED_EARLY_COST
+
+
 def diff_cost_limit(project: Decimal | None, operator: Decimal | None) -> Decimal | None:
     """The limit a Diff review is held to (#666, #689): the smaller of the customer's and the
     operator's.

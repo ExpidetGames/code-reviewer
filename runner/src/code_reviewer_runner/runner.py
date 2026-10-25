@@ -61,6 +61,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     DynamicLimits,
     LimitError,
     diff_cost_limit,
+    diff_cost_stop_reason,
     effective_cost_limit,
     operator_cost_limit,
 )
@@ -217,6 +218,18 @@ class MeterSlot:
         self.meter: DiffCostMeter | None = None
 
 
+def _with_stop_reason(usage: Usage | None, meter: DiffCostMeter) -> Usage | None:
+    """The usage of a Diff run that was refused at its cost limit, naming the limit (#689).
+
+    The app words the failure by whose limit it was: the customer's (they can change it) or the
+    operator's maximum (they cannot). A run that was not refused for its cost is left as it is.
+    """
+    reason = meter.stop_reason
+    if usage is None or reason is None:
+        return usage
+    return replace(usage, stopped_early=reason)
+
+
 def _unreported_use(usage: Usage | None, meter: DiffCostMeter | None) -> str | None:
     """The reason of a failed Diff run whose model use PR-Agent did not measure (#363).
 
@@ -319,6 +332,9 @@ def _run_diff_job(
                 superseded=superseded,
                 provider=provider,
                 max_cost_usd=diff_cost_limit(job.llm.max_cost_usd, job.llm.operator_max_cost_usd),
+                stop_reason=diff_cost_stop_reason(
+                    job.llm.max_cost_usd, job.llm.operator_max_cost_usd
+                ),
             )
             patches.callback(undo_meter)
             patches.callback(lambda: _log_cache_use(capture, meter.cache_tally))
@@ -417,7 +433,7 @@ def _run_diff_job(
                 # A request was refused at the project's cost limit (#666): that is the cause,
                 # whatever PR-Agent made of the refusal.
                 code = ErrorCode.COST_LIMIT_REACHED
-            usage = probe.usage()
+            usage = _with_stop_reason(probe.usage(), meter)
             return _failure(
                 code or ErrorCode.UNKNOWN,
                 "the command raised",
@@ -456,7 +472,7 @@ def _run_diff_job(
         error_code = ErrorCode.COST_LIMIT_REACHED
     log_tail, log_truncated = capture.snapshot()
     # A failed command reports usage only when it reached the model.
-    reported = usage if ok else probe.usage()
+    reported = usage if ok else _with_stop_reason(probe.usage(), meter)
     return JobResult(
         ok=ok,
         duration_ms=_elapsed_ms(started),

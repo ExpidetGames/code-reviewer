@@ -254,6 +254,59 @@ def test_a_diff_job_stopped_by_the_operators_maximum_ends_with_the_limit_code(
     assert result.error_code is ErrorCode.COST_LIMIT_REACHED
     assert result.usage is not None
     assert result.usage.ai_calls == 2
+    # The customer set no limit: the operator's maximum is the one that stopped it.
+    assert result.usage.stopped_early == STOPPED_EARLY_COST
+
+
+# #689-T27
+@pytest.mark.parametrize(
+    ("customer", "operator", "expected"),
+    [
+        (0.10, 0.50, STOPPED_EARLY_PROJECT_COST),
+        (0.50, 0.10, STOPPED_EARLY_COST),
+        (0.10, 0.10, STOPPED_EARLY_PROJECT_COST),
+    ],
+)
+def test_a_diff_job_stopped_by_a_limit_names_the_limit_that_bound(
+    monkeypatch: pytest.MonkeyPatch, customer: float, operator: float, expected: str
+) -> None:
+    ask_model = provider(monkeypatch, 0.08, 0.08, 0.08)
+
+    async def double() -> bool:
+        await ask_model()
+        return True
+
+    use_double(monkeypatch, double)
+    document = job_json()
+    document["llm"]["maxCostUsd"] = customer
+    document["llm"]["operatorMaxCostUsd"] = operator
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+    result = runner.run_job(parse_job(json.dumps(document)), capture, time.monotonic())
+
+    assert result.error_code is ErrorCode.COST_LIMIT_REACHED
+    assert result.usage is not None
+    assert result.usage.stopped_early == expected
+    assert result.usage.to_json()["stoppedEarly"] == expected
+
+
+# #689-T28
+def test_a_diff_job_that_reaches_no_limit_reports_no_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ask_model = provider(monkeypatch, 0.01)
+
+    async def double() -> bool:
+        await ask_model()
+        return True
+
+    use_double(monkeypatch, double)
+    document = job_json()
+    document["llm"]["operatorMaxCostUsd"] = 5
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+    result = runner.run_job(parse_job(json.dumps(document)), capture, time.monotonic())
+
+    assert result.usage is not None
+    assert result.usage.stopped_early is None
 
 
 # #689-T25

@@ -192,8 +192,10 @@ No setting names the token budget since #689. The claim decides it (`token-budge
 (`DEFAULT_REVIEW_TOKEN_BUDGET`, what every workspace that never changed the old setting had), cut down to the context window of
 the entry's model when the provider's metadata states one and it is smaller (the same read serves the capabilities of a
 Dynamic job). When a fresh read fails, the window last read for that model (kept a day) is used; when none was ever read,
-the budget stays 100,000: it is never sent larger. The instance's `LLM_MAX_TOKENS` belongs to the instance's own model and is
-used only for a job on the workspace's own key, as the window of a model the provider's metadata does not state. The claim
+the budget stays 100,000: it is never sent larger. A job on the workspace's own key asks no provider (the claim would call the customer's provider with the customer's key): it is cut
+to the smallest window the models.dev catalog in the app's database states for its model and its fallback model
+(`runner-api/known-context-window.ts`). The instance's `LLM_MAX_TOKENS` belongs to the instance's own model and is used for such a
+job only as the window of a model the catalog does not list. The claim
 asks as a claim: an answer that is not `supported` is remembered 45 seconds (`src/llm/README.md`).
 
 ## The model never leaves the server

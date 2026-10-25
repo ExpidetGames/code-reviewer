@@ -63,6 +63,30 @@ describe("the cost limit of a job", () => {
   });
 
   // #689-T12
+  it("folds the customer's limit into the operator field for a caller that names only operator_cost_limit, so it is not lost", () => {
+    expect(
+      jobCostLimit({
+        customerCents: 50,
+        operatorCents: 100,
+        features: ["operator_cost_limit"],
+      }),
+    ).toEqual({ fields: { operatorMaxCostUsd: 0.5 }, enforced: "folded" });
+    expect(
+      jobCostLimit({
+        customerCents: 5000,
+        operatorCents: 100,
+        features: ["operator_cost_limit"],
+      }).fields,
+    ).toEqual({ operatorMaxCostUsd: 1 });
+    expect(
+      jobCostLimit({
+        operatorCents: 100,
+        features: ["operator_cost_limit"],
+      }).fields,
+    ).toEqual({ operatorMaxCostUsd: 1 });
+  });
+
+  // #689-T12
   it("sends nothing to a caller that names neither feature: its job is the job of before", () => {
     expect(
       jobCostLimit({ customerCents: 50, operatorCents: 100, features: [] }),

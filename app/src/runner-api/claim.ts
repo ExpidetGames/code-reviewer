@@ -61,6 +61,7 @@ import {
 } from "../native-cost/service.ts";
 import type { CostPolicyJson } from "../native-cost/policy.ts";
 import type { JobModelEntry } from "../models-dev/job-entry.ts";
+import type { KnownContextWindow } from "./known-context-window.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ProviderPins } from "./provider-pins.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
@@ -220,6 +221,12 @@ export type ClaimDeps = {
    * carries no capabilities, as before.
    */
   modelCapabilities?: ModelCapabilityChecker;
+  /**
+   * #689: the context window the public catalog (models.dev, in the app's database) states for a model, for a Diff job on the
+   * workspace's own key: such a job never asks the customer's provider, so this is how its token budget is cut to the window of
+   * its model. Left out, no window is known from the catalog and the instance's `LLM_MAX_TOKENS` or the built-in value is used.
+   */
+  knownContextWindow?: KnownContextWindow;
   /**
    * #553: the cost policy of a native job (a job whose selection names a catalog model, src/native-cost/). Left out, no job
    * is native: the claim is exactly the claim of today. The running server wires it (`getNativeCost()`).
@@ -456,6 +463,48 @@ function contextWindowOf(
   return result.outcome === "supported" || result.outcome === "unsupported"
     ? result.capabilities.contextLength
     : null;
+}
+
+/**
+ * The context window a job's token budget is cut to (#689), or null when none is known. Never read from the customer's
+ * provider for a job on the workspace's own key.
+ *
+ * - On the operator's key: the window the provider's metadata states for the entry's model, else the one last read for it.
+ * - On the workspace's own key: the smallest window the public catalog states for the model and its fallback model (a review
+ *   may run on either), else the window last read, else the instance's `LLM_MAX_TOKENS`, else none.
+ */
+async function reviewContextWindow(
+  deps: ClaimDeps,
+  input: {
+    selection: Selection;
+    metadata: ModelCapabilityResult | undefined;
+    fallbackModels: readonly string[];
+    managed: boolean;
+    instanceWindow: number | null;
+  },
+): Promise<number | null> {
+  const { selection, metadata, managed } = input;
+  const own =
+    contextWindowOf(metadata) ??
+    deps.modelCapabilities?.lastKnownContextLength?.(
+      selection.model,
+      selection.provider as LlmProvider,
+    ) ??
+    null;
+  if (managed) return own;
+  const lookup = deps.knownContextWindow;
+  const catalog =
+    lookup === undefined
+      ? []
+      : await Promise.all(
+          [selection.model, ...input.fallbackModels].map((model) =>
+            lookup(selection.provider, model),
+          ),
+        );
+  const known = [own, ...catalog].filter(
+    (window): window is number => window !== null,
+  );
+  return known.length > 0 ? Math.min(...known) : input.instanceWindow;
 }
 
 /** How `checkJob` is asked. */
@@ -828,7 +877,7 @@ export async function buildJobInput(
   });
   if (costLimit.enforced === "none")
     deps.logger.info(
-      `[runner-api] job=${job.id} runs without its cost limit: the runner names neither claim feature cost_limit nor operator_cost_limit`,
+      `[runner-api] job=${job.id} carries no cost limit: the runner names neither claim feature cost_limit nor operator_cost_limit, so a Dynamic Review is held only to the runner's own RUNNER_DYNAMIC_MAX_COST_USD and a Diff Review to none`,
     );
   const managed = selection.keyMode === "managed";
   const provider = deps.registry.resolve(integration.type);
@@ -887,16 +936,18 @@ export async function buildJobInput(
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
   // #689: no setting names the token budget; the app decides it from the context window of the model: the window the provider's
-  // metadata states, else the one last read for it (the provider may be down), else on the workspace's own key the instance's
-  // `LLM_MAX_TOKENS`, else the built-in value. Never sent unclamped. A native job (#578) states its window in its entry, but it
+  // metadata states, else the one last read for it (the provider may be down); on the workspace's own key, which asks nobody, the
+  // smallest window the public catalog states for the model and its fallback model, else the instance's `LLM_MAX_TOKENS`, else
+  // the built-in value. Never sent unclamped. A native job (#578) states its window in its entry, but it
   // runs no PR-Agent and never reads the field: it gets the built-in value like the others.
   const maxTokens = reviewTokenBudget(
-    contextWindowOf(metadata) ??
-      deps.modelCapabilities?.lastKnownContextLength?.(
-        selection.model,
-        selection.provider as LlmProvider,
-      ) ??
-      (managed ? null : llmAccess.contextWindowTokens),
+    await reviewContextWindow(deps, {
+      selection,
+      metadata,
+      fallbackModels: options.llm?.fallbackModels ?? [],
+      managed,
+      instanceWindow: llmAccess.contextWindowTokens,
+    }),
   );
   // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
   // can compare against it. A Diff job never carries a base, so it is not looked up.

@@ -161,13 +161,14 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    **Options** of the job come with the selection (`JobOptionsSource`, below): the options of the review settings go into
    `env`. **The token budget** (`llm.maxTokens`) is no setting since #689: the claim decides it for every job
    (`reviewTokenBudget`, `src/model-catalog/token-budget.ts`) as 100,000, cut to the context window of the job's model when
-   the provider's metadata states one (else to the window last read, else, on the workspace's own key, to the instance's
-   `LLM_MAX_TOKENS`; a Diff job on the workspace's own key asks no provider).
+   the provider's metadata states one (else to the window last read). A Diff job on the workspace's own key asks no provider
+   (`ClaimDeps.knownContextWindow`): it is cut to the smallest window the models.dev catalog in the database states for its
+   model and its fallback model, else to the instance's `LLM_MAX_TOKENS`, else it keeps the 100,000.
    **The cost limit** (`llm.maxCostUsd`, `llm.operatorMaxCostUsd`) is decided by `job-cost-limit.ts`: the customer's limit
    and the operator's maximum per review (#689, the admin portal, the instance setting `review_max_cost_cents`, read at
    each job through `ClaimDeps.operatorCostLimitCents`) go to a caller that names `operator_cost_limit` as two values; a caller
    that names `cost_limit` alone gets the smaller of the two in `llm.maxCostUsd`; a caller that names neither gets neither, and
-   the claim logs `runs without its cost limit`. **On the operator's
+   the claim logs `carries no cost limit` (a Dynamic Review is then held only to the runner's `RUNNER_DYNAMIC_MAX_COST_USD`, a Diff Review to none); a caller that names `operator_cost_limit` alone gets the smaller of the two in `llm.operatorMaxCostUsd`. **On the operator's
    key** the model of the job is the entry's, never the workspace's; the capabilities of #279 are read for it, from the
    selection's provider. The entry's model is remembered with the key,
    so the result a runner reports is stripped of it (`usage.model` becomes `null`, the model ids of every entry of every

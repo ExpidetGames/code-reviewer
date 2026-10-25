@@ -16,7 +16,7 @@ import type { Kysely } from "kysely";
 import { createTestDatabase } from "./test-database.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
-import { operatorCostLimitCentsOf } from "../review-settings/operator-cost-limit.ts";
+import { operatorCostLimitCentsFrom } from "../review-settings/operator-cost-limit-source.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { readDefaultReviewSkill } from "../review-settings/default-skill.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
@@ -113,12 +113,7 @@ export async function setupReviewSettings(
     defaultSkill: () => TEST_DEFAULT_SKILL,
     operatorsModels: async () => operatorsModels,
     // #689: as on the running server, the operator's maximum per review is the instance setting.
-    operatorCostLimitCents: async () =>
-      operatorCostLimitCentsOf(
-        await createInstanceSettingsRepository(database).get(
-          "review_max_cost_cents",
-        ),
-      ),
+    operatorCostLimitCents: operatorCostLimitCentsFrom(database),
     ...(options.newProjectSettings === undefined
       ? {}
       : {

@@ -134,7 +134,7 @@ describe.each([
     });
     expect(Object.keys(body.job.input.llm)).not.toContain("operatorMaxCostUsd");
     expect(h.logLines().join("\n")).toContain(
-      `job=${body.job.id} runs without its cost limit`,
+      `job=${body.job.id} carries no cost limit`,
     );
   });
 
