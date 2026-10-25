@@ -71,6 +71,12 @@ from a closed list, never an address from the request.
 `sign-in.integration.test.ts` (the sign in end to end through Better Auth and the fake GitHub), `link.integration.test.ts`
 (linking, the merge, the state, the handlers). Journey: `e2e/admin/github-integration.e2e.ts`.
 
+## The landing page's PostHog identity
+
+A visitor who comes from code-review.com with `ph_did` and `ph_sid` in the link has them stored on the user at the sign in or
+the sign-up (first touch, nothing else is done with them): `src/landing-identity/README.md`. For the GitHub sign in the
+values wait in a one hour cookie that the redirect to GitHub and back carries, and `session.create.after` stores them.
+
 ## An invitation link through the sign in
 
 A person who opens an invitation link without a session reaches `/login?invitation=<token>`. The GitHub button of that page
