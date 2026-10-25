@@ -11,7 +11,7 @@
 import "server-only";
 
 /** The version of the business terms the confirmation at the first top-up refers to; bumped when the terms change. */
-export const BILLING_TERMS_VERSION = "2026-10";
+export const BILLING_TERMS_VERSION = "2026-10-24";
 
 export const BILLING_PROFILE_FIELDS = [
   "legalName",
