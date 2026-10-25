@@ -337,7 +337,7 @@ test.describe("the project list and the settings pages", () => {
       await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
       await openSection(page, "Limits");
       await expect(
-        page.getByLabel("Token budget", { exact: true }),
+        page.getByLabel("Cost limit per review (USD)", { exact: true }),
       ).toBeVisible();
 
       expect(await overflow()).toBeLessThanOrEqual(0);
