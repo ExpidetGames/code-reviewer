@@ -210,8 +210,8 @@ describe("license metadata", () => {
     expect(pyproject).not.toMatch(/Apache/);
   });
 
-  it.each(["app", "runner"])("labels the %s image with the license", (part) => {
-    const dockerfile = read(`${part}/Dockerfile`).replace(/\\\n/g, " ");
+  it("labels the runner image with the license", () => {
+    const dockerfile = read("runner/Dockerfile").replace(/\\\n/g, " ");
 
     expect(dockerfile).toMatch(
       /org\.opencontainers\.image\.licenses="LicenseRef-Proprietary"/,

@@ -9,7 +9,7 @@ DISPATCHER := pnpm --dir dispatcher
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-dispatcher lint-runner typecheck typecheck-app typecheck-dispatcher typecheck-runner \
-	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-hosted test-e2e-dynamic test-sandbox-local test-images test-compose verify
+	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-hosted test-e2e-dynamic test-sandbox-local test-images verify
 
 help:
 	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles"
@@ -26,8 +26,7 @@ help:
 	@echo "make test-e2e-hosted   the hosted deployment on fakes: app, Dispatcher and Worker over loopback (needs E2E_DATABASE_URL, a Postgres server; ARGS=... to filter)"
 	@echo "make test-e2e-dynamic   the privileged Dynamic Review journey with the real OpenCode (root and nft, CI-first, ARGS=... to filter)"
 	@echo "make test-sandbox-local  the Sandbox-Launcher's local mode with a real Docker daemon and the Worker image (needs Docker, not part of verify)"
-	@echo "make test-images       build the container images (the Dynamic runner and Sandbox targets too) and run their smoke tests (needs Docker)"
-	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
+	@echo "make test-images       build the Worker image (the sandbox target) and run its smoke test (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests and the license check; run before every PR"
 
 install:
@@ -123,27 +122,11 @@ test-sandbox-local:
 	docker build --file runner/Dockerfile --target sandbox --tag code-reviewer-worker:local .
 	SANDBOX_LOCAL_IMAGE=code-reviewer-worker:local TEST_ALLOWED_HOSTS=$${SANDBOX_LOCAL_APP_HOST:-172.17.0.1} $(DISPATCHER) test:privileged
 
-# Builds both container images and runs docker/smoke/app.sh and docker/smoke/runner.sh against them.
-# Needs a running Docker daemon and fails without one. Not part of `make verify` (CI runs it for
-# pull requests that touch the images).
+# Builds the Worker image (the `sandbox` target of runner/Dockerfile, the only image of the project) and runs
+# docker/smoke/runner.sh against it. Needs a running Docker daemon and fails without one. Not part of
+# `make verify` (CI runs it for pull requests that touch the runner).
 test-images:
-	docker build --file app/Dockerfile --tag code-reviewer-app:local .
-	docker build --file runner/Dockerfile --tag code-reviewer-runner:local .
-	docker build --file runner/Dockerfile --target dynamic --tag code-reviewer-runner-dynamic:local .
 	docker build --file runner/Dockerfile --target sandbox --tag code-reviewer-runner-sandbox:local .
-	docker/smoke/app.sh code-reviewer-app:local
-	docker/smoke/upgrade.sh code-reviewer-app:local
-	docker/smoke/runner.sh code-reviewer-runner:local
-	docker/smoke/runner.sh code-reviewer-runner-dynamic:local dynamic
-	docker/smoke/runner.sh code-reviewer-runner-sandbox:local sandbox code-reviewer-runner-dynamic:local
-
-# Builds both images (under tags of their own, so images of other work stay untouched) and runs
-# docker/smoke/compose.sh against them: the stack starts with dummy settings, the runner waits for a
-# healthy app, the data survives down and up, a killed app restarts. Needs a running Docker daemon.
-# Not part of `make verify`; CI runs it for pull requests that touch app, runner or the compose files.
-test-compose:
-	docker build --file app/Dockerfile --tag code-reviewer-app:compose .
-	docker build --file runner/Dockerfile --tag code-reviewer-runner:compose .
-	docker/smoke/compose.sh code-reviewer-app:compose code-reviewer-runner:compose
+	docker/smoke/runner.sh code-reviewer-runner-sandbox:local
 
 verify: lint typecheck check-contracts test-unit test-integration check-licenses

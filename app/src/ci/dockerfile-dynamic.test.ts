@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the two images of runner/Dockerfile (#202): the default target is the PR-Agent-only
-// runner and carries nothing of the engine; the `dynamic` target adds the pinned OpenCode, `nft`, a
-// pinned `rg` and the dedicated engine user, installed root-owned from verified, checksum-pinned
-// downloads. Whether the built images behave (checksums, version as the engine user, the self-check)
-// is proven by docker/smoke/runner.sh, which CI runs on both.
+// Pins down the engine part of runner/Dockerfile (#202): the `sandbox` target, the one image of the
+// project, adds the pinned OpenCode, `nft`, a pinned `rg` and the dedicated engine user, installed
+// root-owned from verified, checksum-pinned downloads. Whether the built image behaves (checksums,
+// version as the engine user, the self-check) is proven by docker/smoke/runner.sh, which CI runs.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -44,55 +43,44 @@ function chain(name: string): string {
   return [parent ? chain(parent.name) : "", ...own.lines].join("\n");
 }
 
-describe("the default runner image", () => {
+describe("the Worker image", () => {
   // #202-T03
-  it("is the last stage, so a plain build gives the PR-Agent-only runner", () => {
-    expect(stages(dockerfile).at(-1)?.name).toBe("runtime");
-  });
-
-  // #202-T03
-  it("carries nothing of the engine: no OpenCode, no ripgrep, no nft, no engine user", () => {
-    const image = chain("runtime");
-
-    expect(image).not.toMatch(
-      /opencode|ripgrep|nftables|engine-tools|10101|\brg\b/i,
+  it("is the last stage, so a plain build gives the one image", () => {
+    expect(stages(dockerfile).at(-1)?.name).toBe("sandbox");
+    expect(stages(dockerfile).map((entry) => entry.name)).not.toContain(
+      "runtime",
     );
-    expect(image).not.toMatch(/useradd.*engine|groupadd.*engine/);
+    expect(stages(dockerfile).map((entry) => entry.name)).not.toContain(
+      "dynamic",
+    );
   });
 
   // #202-T03
-  it("enables nothing: no Dynamic variable is set in either image", () => {
-    for (const name of ["runtime", "dynamic"]) {
-      const settings = chain(name)
-        .split("\n")
-        .filter((line) => /^(ENV|ARG) /.test(line));
+  it("enables nothing: no Dynamic variable is set", () => {
+    const settings = chain("sandbox")
+      .split("\n")
+      .filter((line) => /^(ENV|ARG) /.test(line));
 
-      expect(settings.join("\n")).not.toMatch(
-        /RUNNER_DYNAMIC|RUNNER_OPENCODE|RUNNER_DIFF_JOB_USER|RUNNER_ADVERTISED/,
-      );
-    }
+    expect(settings.join("\n")).not.toMatch(
+      /RUNNER_DYNAMIC|RUNNER_OPENCODE|RUNNER_DIFF_JOB_USER|RUNNER_ADVERTISED/,
+    );
   });
 });
 
-describe("the dynamic runner image", () => {
-  const image = () => chain("dynamic");
+describe("the engine of the Worker image", () => {
+  const image = () => chain("sandbox");
 
   // #202-T01
-  it("is built from the same base as the default image, not from it", () => {
-    // The content stage is `dynamic-worker` (#324); `dynamic` and `sandbox` are built on it.
-    expect(stage("dynamic-worker").base).toBe("runtime-base");
-    expect(stage("dynamic").base).toBe("dynamic-worker");
-    expect(stage("runtime").base).toBe("runtime-base");
+  it("is built on the base stage that holds Python, the venv and the unprivileged user", () => {
+    expect(stage("sandbox").base).toBe("runtime-base");
   });
 
   // #202-T01
   it("installs the engine and ripgrep root-owned from the verified fetch stage, and nothing else", () => {
-    const copies = stage("dynamic-worker").lines.filter((line) =>
+    const copies = stage("sandbox").lines.filter((line) =>
       line.startsWith("COPY "),
     );
 
-    // The directory, not the two files (#264): on a platform without a pin the fetch stage installs
-    // nothing, and a COPY of a named file that is not there would fail the build.
     expect(copies).toContain(
       "COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/ /usr/local/bin/",
     );
@@ -101,38 +89,16 @@ describe("the dynamic runner image", () => {
     ).toHaveLength(1);
   });
 
-  // #264-T10
-  it("fails the build when the platform is x86_64 and the engine or ripgrep was not installed: the skip is only for platforms without a pin", () => {
-    const fetching = stage("engine-tools").lines.join("\n");
-
-    // The guard runs in the same stage, after both fetches, on the machine the pins are for.
-    expect(fetching).toMatch(/uname -m/);
-    expect(fetching).toMatch(/x86_64\|amd64\)/);
-    expect(fetching).toMatch(/! -x \/engine-tools\/opencode/);
-    expect(fetching).toMatch(/! -x \/engine-tools\/rg/);
-    expect(fetching).toMatch(/exit 1/);
-    expect(fetching.indexOf("uname -m")).toBeGreaterThan(
-      fetching.indexOf("fetch_ripgrep.py"),
-    );
-  });
-
-  // #264-T10
-  it("builds on a platform without a pin: the fetch stage installs nothing there and succeeds", () => {
+  // #264-T10: only linux-x64 is pinned; on another platform the fetch scripts fail the build, there is no
+  // image without an engine (the golden snapshot builds on x86_64).
+  it("fetches with the strict scripts: no flag lets a platform without a pin build an engine-less image", () => {
     const fetching = stage("engine-tools").lines.join("\n");
 
     for (const script of ["fetch_opencode.py", "fetch_ripgrep.py"])
-      expect(fetching).toMatch(
-        new RegExp(
-          `python /fetch/scripts/${script} --dest /engine-tools --allow-unpinned-platform`,
-        ),
+      expect(fetching).toContain(
+        `python /fetch/scripts/${script} --dest /engine-tools`,
       );
-    // Never the other way round: the flag is not for the CI engine jobs, which must stay strict.
-    expect(
-      readFileSync(`${repoRoot}.github/workflows/engine.yml`, "utf8"),
-    ).not.toContain("--allow-unpinned-platform");
-    expect(readFileSync(`${repoRoot}Makefile`, "utf8")).not.toContain(
-      "--allow-unpinned-platform",
-    );
+    expect(dockerfile).not.toContain("--allow-unpinned-platform");
   });
 
   // #202-T01
@@ -154,10 +120,10 @@ describe("the dynamic runner image", () => {
   it("ships the pins the runner's self-check compares the installed files with", () => {
     // The directory exists, root-owned and enterable, before the files go in: COPY would give a new
     // directory the mode of the files.
-    expect(stage("dynamic-worker").lines).toContain(
+    expect(stage("sandbox").lines).toContain(
       "RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins",
     );
-    expect(stage("dynamic-worker").lines).toContain(
+    expect(stage("sandbox").lines).toContain(
       "COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/",
     );
   });
@@ -165,7 +131,7 @@ describe("the dynamic runner image", () => {
   // #202-T01
   it("adds nft and the engine user 10101, distinct from the Diff job user 10001", () => {
     const base = chain("runtime-base");
-    const own = stage("dynamic-worker").lines.join("\n");
+    const own = stage("sandbox").lines.join("\n");
 
     expect(own).toContain(
       "apt-get install --yes --no-install-recommends nftables",
@@ -180,8 +146,8 @@ describe("the dynamic runner image", () => {
   });
 
   // #202-T01 / #202-T03: the image alone never makes the runner a root supervisor.
-  it("ends on the unprivileged user 10001: root and the capabilities come from compose.dynamic.yml", () => {
-    const users = stage("dynamic-worker").lines.filter((line) =>
+  it("ends on the unprivileged user 10001: root and the capabilities come from the hardened container spec", () => {
+    const users = stage("sandbox").lines.filter((line) =>
       line.startsWith("USER "),
     );
 
@@ -190,7 +156,7 @@ describe("the dynamic runner image", () => {
   });
 });
 
-describe("what the Dynamic image documentation claims about its build", () => {
+describe("what the documentation claims about the build of the Worker image", () => {
   const documents = {
     "runner/Dockerfile": dockerfile,
     "docs/dynamic-review.md": readFileSync(
@@ -222,13 +188,5 @@ describe("what the Dynamic image documentation claims about its build", () => {
     expect(install?.[0]).toBeDefined();
     expect(install?.[0]).not.toMatch(/nftables=/);
     expect(dockerfile).toMatch(/NOT version-pinned/);
-  });
-
-  // #202-T01: a failed `up --build` stops the new service only; running containers stay up.
-  it("does not claim that a failed build leaves nothing running", () => {
-    const guide = documents["docs/dynamic-review.md"].replace(/\s+/g, " ");
-
-    expect(guide).not.toMatch(/leaves nothing running/i);
-    expect(guide).toMatch(/already run[^.]*stay up/i);
   });
 });

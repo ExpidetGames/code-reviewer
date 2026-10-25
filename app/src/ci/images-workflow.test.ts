@@ -72,13 +72,7 @@ function buildSteps(job: Job): Step[] {
 
 const IMAGES = [
   {
-    job: "image-app",
-    context: "app",
-    dockerfile: "app/Dockerfile",
-    smoke: "docker/smoke/app.sh",
-  },
-  {
-    job: "image-runner",
+    job: "image-runner-sandbox",
     context: "runner",
     dockerfile: "runner/Dockerfile",
     smoke: "docker/smoke/runner.sh",
@@ -112,11 +106,8 @@ describe("CI image jobs", () => {
   });
 
   // CR-17-T01
-  it("skips an image when the path filter says nothing it is built from changed, except for pull requests into main", () => {
-    expect(jobNamed(ci.workflow, "image-app").if).toContain(
-      "needs.changes.outputs.app == 'true'",
-    );
-    expect(jobNamed(ci.workflow, "image-runner").if).toContain(
+  it("skips the image when the path filter says nothing it is built from changed, except for pull requests into main", () => {
+    expect(jobNamed(ci.workflow, "image-runner-sandbox").if).toContain(
       "needs.changes.outputs.runner == 'true'",
     );
     for (const { job } of IMAGES) {
@@ -134,7 +125,7 @@ describe("CI image jobs", () => {
       const build = buildSteps(jobNamed(ci.workflow, job))[0];
       const tags = String(build?.with?.tags);
 
-      expect(tags).toMatch(/^code-reviewer-(app|runner):ci$/);
+      expect(tags).toBe("code-reviewer-runner-sandbox:ci");
       expect(lines).toContain(`${smoke} ${tags}`);
     },
   );
@@ -158,11 +149,10 @@ describe("CI image jobs", () => {
     }
   });
 
-  it("lets the aggregate check wait for both image jobs", () => {
+  it("lets the aggregate check wait for the image job", () => {
     const needs = jobNamed(ci.workflow, "ci-passed").needs as string[];
 
-    expect(needs).toContain("image-app");
-    expect(needs).toContain("image-runner");
+    expect(needs).toContain("image-runner-sandbox");
   });
 });
 
@@ -199,7 +189,7 @@ describe("no image is published", () => {
 
 describe("the actions of the image jobs", () => {
   it("pins the third-party image actions of the CI workflow to a commit hash too", () => {
-    const uses = ["image-app", "image-runner"].flatMap((id) =>
+    const uses = ["image-runner-sandbox"].flatMap((id) =>
       steps(jobNamed(ci.workflow, id)).flatMap((step) =>
         step.uses?.startsWith("docker/") ? [step.uses] : [],
       ),

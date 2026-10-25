@@ -631,110 +631,14 @@ jobs:
       - name: Check the SPDX headers
         run: pnpm spdx:check
 
-  # The container images. A pull request builds each image, starts it and checks what a unit test
-  # cannot (docker/smoke/*.sh). Nothing is pushed anywhere: the source is visible but not licensed
-  # (LICENSE), so no image is published, and these jobs have no login and only the read-only token
-  # of the workflow. The hosted deployment builds what it runs from the repository.
-  image-app:
-    name: "Image: app build & smoke test"
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.app == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build the image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: app/Dockerfile
-          load: true
-          push: false
-          tags: code-reviewer-app:ci
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
-      - name: Smoke test the image
-        run: docker/smoke/app.sh code-reviewer-app:ci
-
-  image-runner:
-    name: "Image: runner build & smoke test"
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build the image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: runner/Dockerfile
-          load: true
-          push: false
-          tags: code-reviewer-runner:ci
-          cache-from: type=gha,scope=runner
-          cache-to: type=gha,mode=max,scope=runner
-      - name: Smoke test the image
-        run: docker/smoke/runner.sh code-reviewer-runner:ci
-
-  # The Dynamic runner image (#202): the `dynamic` target of the same Dockerfile. Its smoke test
-  # proves the exact pinned OpenCode and ripgrep, the engine user, and runs the real startup
-  # self-check in a container created like compose.dynamic.yml creates it (root, the capability
-  # list, no network): `opencode` is advertised, and not when NET_ADMIN, the engine user or the
-  # binary is wrong. It is not published (compose.dynamic.yml builds it from the checkout), so only
-  # this job and pull requests into main build it.
-  image-runner-dynamic:
-    name: "Image: Dynamic runner build & smoke test"
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-      # The smoke test runs the fake App (Node) on the host (worker-once, #324).
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build the image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: runner/Dockerfile
-          target: dynamic
-          load: true
-          push: false
-          tags: code-reviewer-runner-dynamic:ci
-          cache-from: type=gha,scope=runner-dynamic
-          cache-to: type=gha,mode=max,scope=runner-dynamic
-      - name: Smoke test the image
-        run: docker/smoke/runner.sh code-reviewer-runner-dynamic:ci dynamic
-      # Only linux-x64 is pinned (#264). The fetch stage must succeed on any other platform and
-      # install nothing, so that a Coolify server on arm64 can still build and deploy the stack: the
-      # image then has no engine and its runner serves Diff jobs only. Emulated, and only this stage.
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
-      - name: The engine stage builds on arm64 and installs nothing
-        run: |
-          docker buildx build --platform linux/arm64 --file runner/Dockerfile --target engine-tools \
-            --output type=tar,dest="$RUNNER_TEMP/engine-tools-arm64.tar" .
-          # No -q: grep reads the whole listing, so tar is never cut off by a closed pipe.
-          if tar -tf "$RUNNER_TEMP/engine-tools-arm64.tar" | grep -E '^engine-tools/.' > /dev/null; then
-            echo "an engine was installed on an unpinned platform" >&2
-            exit 1
-          fi
-
-  # The Sandbox image (#324): the `sandbox` target of the same Dockerfile, the Worker image of the
-  # hosted deployment. Its smoke test runs every check of the Dynamic image on it and proves the
-  # entry modes with the production flags (probe, worker-once against the fake App, the engines
-  # file), that it carries no Dispatcher bundle and that its layers are those of the `dynamic`
-  # image, which is built here too (from the cache of the job above). Not published: #330 builds
-  # and delivers it.
+  # The Worker image (#324): the `sandbox` target of runner/Dockerfile, the only image of the project. The golden
+  # snapshot of the hosted deployment builds the same file inside a Vercel Sandbox VM. A pull request builds it here,
+  # starts it and checks what a unit test cannot (docker/smoke/runner.sh): the pins, the user layout, the entry modes
+  # with the production flags (probe, worker-once against the fake App, the engines file), the secret scan and that it
+  # carries no Dispatcher bundle. Nothing is pushed anywhere: the source is visible but not licensed (LICENSE), so no
+  # image is published, and the job has no login and only the read-only token of the workflow.
   image-runner-sandbox:
-    name: "Image: Sandbox runner build & smoke test"
+    name: "Image: Worker build & smoke test"
     needs: changes
     if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
     runs-on: ubuntu-24.04
@@ -747,17 +651,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build the dynamic image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: runner/Dockerfile
-          target: dynamic
-          load: true
-          push: false
-          tags: code-reviewer-runner-dynamic:ci
-          cache-from: type=gha,scope=runner-dynamic
-      - name: Build the sandbox image
+      - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -766,48 +660,10 @@ jobs:
           load: true
           push: false
           tags: code-reviewer-runner-sandbox:ci
-          cache-from: type=gha,scope=runner-dynamic
+          cache-from: type=gha,scope=runner-sandbox
+          cache-to: type=gha,mode=max,scope=runner-sandbox
       - name: Smoke test the image
-        run: docker/smoke/runner.sh code-reviewer-runner-sandbox:ci sandbox code-reviewer-runner-dynamic:ci
-
-  # The Docker Compose stack (compose.yml): both images are built here and the stack is started
-  # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only
-  # the read-only token of the workflow. Pushes to development and main are covered by the publish
-  # workflow, which smoke tests the same images.
-  compose:
-    name: "Compose: stack smoke test"
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build the app image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: app/Dockerfile
-          load: true
-          push: false
-          tags: code-reviewer-app:ci
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
-      - name: Build the runner image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: runner/Dockerfile
-          load: true
-          push: false
-          tags: code-reviewer-runner:ci
-          cache-from: type=gha,scope=runner
-          cache-to: type=gha,mode=max,scope=runner
-      - name: Smoke test the stack
-        run: docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci
-      # The database and the environment of the previous release, started with the image just built.
-      - name: Smoke test the update from the previous release
-        run: docker/smoke/upgrade.sh code-reviewer-app:ci
+        run: docker/smoke/runner.sh code-reviewer-runner-sandbox:ci
 
   actionlint:
     name: Lint workflow files
@@ -825,7 +681,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, app-int, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, image-runner-sandbox, sandbox-local, compose, actionlint]
+    needs: [changes, app-fast, app-int, app-serverless, dispatcher-fast, runner-fast, engine, e2e, e2e-hosted, e2e-dynamic, licenses, image-runner-sandbox, sandbox-local, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

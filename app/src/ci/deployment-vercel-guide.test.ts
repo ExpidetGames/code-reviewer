@@ -847,15 +847,9 @@ describe("the hosted deployment guide as a document", () => {
   });
 
   // #333-T01
-  it("is linked from the README and from the other deployment guides", () => {
+  it("is linked from the README and from the golden snapshot runbook", () => {
     expect(readme).toContain("](docs/deployment-vercel.md)");
     expect(readme).toContain("](docs/dispatcher.md)");
-    expect(read("docs/deployment-coolify.md")).toContain(
-      "](deployment-vercel.md)",
-    );
-    expect(read("docs/deployment-large.md")).toContain(
-      "](deployment-vercel.md)",
-    );
     expect(read("docs/golden-snapshot.md")).toContain(
       "](deployment-vercel.md)",
     );

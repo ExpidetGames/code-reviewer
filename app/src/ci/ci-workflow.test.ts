@@ -268,46 +268,6 @@ describe("CI workflow triggers and jobs", () => {
   });
 });
 
-describe("CI compose job", () => {
-  // CR-37 (compose smoke test)
-  it("builds both images without pushing and smoke tests the stack against them", () => {
-    const job = jobNamed("compose");
-    const builds = steps(job).filter((step) =>
-      step.uses?.startsWith("docker/build-push-action@"),
-    );
-
-    expect(builds.map((step) => step.with?.file).sort()).toEqual([
-      "app/Dockerfile",
-      "runner/Dockerfile",
-    ]);
-    for (const build of builds) {
-      expect(build.with?.context).toBe(".");
-      expect(build.with?.load).toBe(true);
-      expect(build.with?.push).toBe(false);
-    }
-    expect(commandLines(job)).toContain(
-      "docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci",
-    );
-  });
-
-  // #106-IM-20
-  it("also starts the image it built on the database and the environment of the previous release", () => {
-    expect(commandLines(jobNamed("compose"))).toContain(
-      "docker/smoke/upgrade.sh code-reviewer-app:ci",
-    );
-  });
-
-  // CR-37 (compose smoke test)
-  it("runs on pull requests that touch the app or the runner, and on every pull request into main", () => {
-    const condition = jobNamed("compose").if ?? "";
-
-    expect(condition).toContain("github.event_name == 'pull_request'");
-    expect(condition).toContain("github.base_ref == 'main'");
-    expect(condition).toContain("needs.changes.outputs.app == 'true'");
-    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
-  });
-});
-
 describe("CI time limits", () => {
   const browserJobs = ["e2e", "e2e-hosted", "e2e-dynamic"];
 
@@ -577,7 +537,6 @@ describe("CI workflow aggregate check", () => {
       "engine",
       "e2e",
       "licenses",
-      "compose",
       "actionlint",
     ]) {
       expect(jobNamed(id).needs, id).toBe("changes");

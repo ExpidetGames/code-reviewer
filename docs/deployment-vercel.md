@@ -16,9 +16,6 @@ deployments and the snapshot it has. There is no staging environment and there a
 projects' Git integration is switched off. Section 2.1 lists everything to create once (GitHub, Infisical, Vercel);
 section 5.1 explains the snapshot, section 5.6 a release.
 
-A self-hosted installation (Docker Compose, Coolify) is not affected by anything here and keeps working
-unchanged: see section 8 and [`deployment-coolify.md`](deployment-coolify.md).
-
 ## Contents
 
 1. [What you are deploying](#1-what-you-are-deploying)
@@ -135,7 +132,7 @@ GitHub ──webhook──▶ App ──queues the job, then signed POST /dispat
   by the App and by the canary; if you protect it, use Protection Bypass for Automation and set the bypass secret in the two places
   named in section 3.
 
-**An external Postgres, version 15 or newer** (Postgres 18 is what CI tests against, see `compose.large.yml`),
+**An external Postgres, version 15 or newer** (Postgres 18 is what CI tests against),
 reachable from Vercel's `fra1` functions and from the machine that runs `pnpm migrate`, with TLS. You need **two
 roles** and **two URLs**:
 
@@ -205,8 +202,7 @@ The role split is exercised in CI (`app/src/db/role-split.integration.test.ts` r
 Postgres: migrate as `cr_migrate`, then health, read and write as `cr_app`, and the repair).
 
 Back up the database yourself (the App starts no backup scheduler with Postgres) and keep a copy of `APP_SECRET`
-**apart from it**: a database restored without its `APP_SECRET` loses every stored credential
-(`docs/deployment-large.md`, section 5).
+**apart from it**: a database restored without its `APP_SECRET` loses every stored credential.
 
 **A GitHub App for the hosted instance.** Not the one of any other installation: a GitHub App has exactly one webhook
 URL and one callback URL, so the hosted instance needs its own. It is created from the deployed App with one click
@@ -1165,8 +1161,7 @@ An installation on Docker Compose or Coolify keeps its runner as it is: `RUNNER_
 loop that claims with `RUNNER_TOKEN` and reviews inside the runner container), `RUNNER_DISPATCH` unset means
 `poll`, `APP_RUNTIME` unset means `server`. Updating such an installation to a release that contains the hosted
 deployment changes no behavior and needs no new variable, and the images, `compose.yml`, `compose.coolify.yml` and
-`/api/runners/v1` stay as they are ([`deployment-coolify.md`](deployment-coolify.md),
-[`deployment-large.md`](deployment-large.md)).
+`/api/runners/v1` stay as they are.
 
 The **split** for self-hosted installations (the Poll-Trigger and the Docker-Launcher: a Dispatcher that polls and
 starts a Worker as its own process and user inside the hardened container) is **#334** and later; the default flips

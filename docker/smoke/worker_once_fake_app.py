@@ -9,7 +9,7 @@ container reaches it through the host gateway on the bridge network, never throu
 network namespace (a container with `NET_ADMIN` would install its nft rules there). The Worker
 fetches its job, runs a stand-in for the job process (`PR_AGENT_COMMAND`, a test-stack setting; no
 GitHub, no model) and delivers the result with its per-job credential. The extra arguments describe
-the container (the smoke test passes the flags of compose.dynamic.yml for the Dynamic image).
+the container (the smoke test passes the flags of the hardened container spec).
 
 Checks, for a succeeding and a failing job: exit code 0 and 1, exactly one delivered result with
 the right outcome, and the credential in neither output of the container.

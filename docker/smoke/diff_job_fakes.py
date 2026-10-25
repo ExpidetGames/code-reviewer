@@ -7,8 +7,8 @@
 The fake GitHub and the fake LLM of `runner/tests/engine` (Python standard library only) listen on
 the loopback of the host; the container shares the host's network namespace, so the job reaches them
 and nothing else. The job is the real `code-reviewer-run-job` as the Diff job user 10001, with the
-home and working directory the runner loop gives it, in the container the extra arguments describe
-(the smoke test passes the read-only root filesystem and the three tmpfs of compose.dynamic.yml).
+home and working directory the Worker gives it, in the container the extra arguments describe
+(the smoke test passes the read-only root filesystem and the three tmpfs of the hardened container spec).
 A write to a path the layout does not allow fails the job with `Read-only file system` and fails
 this script, instead of the first real Diff job on a Dynamic runner. Today the job writes nothing at
 all (it also passes without any tmpfs, checked with temporary mutations in CI and locally with an

@@ -303,12 +303,9 @@ describe("the Playwright configuration of the lane", () => {
   it("does not turn on the Dynamic Review gate of any shipped configuration", () => {
     // The lane turns it on in its own database through the admin API (the journey), nowhere else.
     expect(config).not.toMatch(/dynamic_review|DYNAMIC_REVIEW/);
-    const shipped = [
-      read("compose.yml"),
-      read("compose.dynamic.yml"),
-      read("compose.coolify.yml"),
-      read("compose.large.yml"),
-    ].join("\n");
+    const shipped = read(
+      "contracts/examples/worker-container/WorkerContainerSpec.json",
+    );
     expect(shipped).not.toMatch(/dynamic_review|dynamicReview/);
   });
 });

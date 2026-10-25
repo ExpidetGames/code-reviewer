@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // No test lane reaches the internet through the models.dev catalog (#548): an app under test (an e2e server, the hosted
-// sweep, the upgrade lane, a smoke container) starts the daily fetch on its own, so every environment that starts one
+// sweep, the upgrade lane) starts the daily fetch on its own, so every environment that starts one
 // must switch the fetch off (`MODELS_DEV_FETCH=off`) or point `MODELS_DEV_URL` at a fake (`fakes/models-dev`). The check
 // counts the environments a file builds (each one has an anchor, the variable every app needs) against the lines that
 // switch the fetch off, so a lane added later without it fails here and not in the logs of a CI run.
@@ -21,7 +21,6 @@ function count(text: string, pattern: RegExp): number {
 
 // The line that keeps one environment off the internet.
 const TS_SWITCH = /^\s*MODELS_DEV_(FETCH: "off"|URL: )/gm;
-const SH_SWITCH = /MODELS_DEV_(FETCH=off|URL=http:\/\/127\.0\.0\.1)/g;
 
 // file → the anchor of one environment of an app under test, and what the file is.
 const TS_LANES: Record<string, { anchor: RegExp; what: string }> = {
@@ -42,21 +41,6 @@ const TS_LANES: Record<string, { anchor: RegExp; what: string }> = {
     what: "the app of the upgrade lane",
   },
 };
-const SH_LANES: Record<string, { anchor: RegExp; what: string }> = {
-  "docker/smoke/compose.sh": {
-    anchor: /export BETTER_AUTH_URL=/g,
-    what: "the compose smoke stack",
-  },
-  "docker/smoke/app.sh": {
-    anchor: /--env BETTER_AUTH_URL=/g,
-    what: "the image smoke container",
-  },
-  "docker/smoke/upgrade.sh": {
-    anchor: /--env BETTER_AUTH_URL=/g,
-    what: "the upgrade smoke containers (previous and new release)",
-  },
-};
-
 describe("no lane reaches models.dev", () => {
   // #548-T13
   for (const [file, { anchor, what }] of Object.entries(TS_LANES))
@@ -65,15 +49,6 @@ describe("no lane reaches models.dev", () => {
       const environments = count(text, anchor);
       expect(environments).toBeGreaterThan(0);
       expect(count(text, TS_SWITCH)).toBeGreaterThanOrEqual(environments);
-    });
-
-  // #548-T13
-  for (const [file, { anchor, what }] of Object.entries(SH_LANES))
-    it(`${file} switches the catalog fetch off (${what})`, () => {
-      const text = read(file);
-      const environments = count(text, anchor);
-      expect(environments).toBeGreaterThan(0);
-      expect(count(text, SH_SWITCH)).toBeGreaterThanOrEqual(environments);
     });
 
   // #548-T13
