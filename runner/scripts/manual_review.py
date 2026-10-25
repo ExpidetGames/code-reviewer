@@ -47,7 +47,7 @@ from typing import Any, cast
 
 import jwt
 
-ALLOWED_REPOSITORY = "ExpidetGames/code-reviewer-playground"
+ALLOWED_REPOSITORY = "Itegro-GmbH/code-reviewer-playground"
 # What a review needs; the token gets nothing else (metadata read is always included).
 TOKEN_PERMISSIONS = {"contents": "read", "pull_requests": "write"}
 DEFAULT_PR_URL = f"https://github.com/{ALLOWED_REPOSITORY}/pull/1"

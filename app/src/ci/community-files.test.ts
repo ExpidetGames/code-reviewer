@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { REPOSITORY } from "./workflow-support.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -76,7 +77,7 @@ describe("SECURITY.md", () => {
 
   it("asks for private reports through GitHub security advisories", () => {
     expect(text).toContain(
-      "https://github.com/ExpidetGames/code-reviewer/security/advisories/new",
+      `https://github.com/${REPOSITORY}/security/advisories/new`,
     );
     expect(text).toMatch(/do not (open|report)[^.]*public issue/i);
   });

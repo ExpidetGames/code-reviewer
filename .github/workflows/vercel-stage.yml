@@ -85,7 +85,7 @@ env:
 jobs:
   stage:
     name: Stage ${{ inputs.project }} on Vercel
-    if: ${{ github.repository == 'ExpidetGames/code-reviewer' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Holds the Infisical sign-in; its deployment branches are restricted to main.
