@@ -463,9 +463,10 @@ export function createProjectsRepository(
     },
 
     activate(repositoryId) {
-      // Transactions begin immediate (src/db/dialect.ts): the check of the repository and the write
-      // happen under the write lock, so a sync that deactivates the repository cannot slip in between
-      // and two activations cannot both insert.
+      // The repository row is locked (`FOR UPDATE`, only that row, not the integration's) before anything is read:
+      // the check of the repository and the write happen under it, so a sync that deactivates the repository cannot
+      // slip in between, two activations cannot both insert, and a first settings save (which takes the same lock)
+      // cannot insert next to an activation.
       return inTransaction(async (trx): Promise<ActivateResult> => {
         const repository = await trx
           .selectFrom("repositories")
@@ -481,6 +482,7 @@ export function createProjectsRepository(
           ])
           .where("repositories.workspace_id", "=", workspaceId)
           .where("repositories.id", "=", repositoryId)
+          .forUpdate("repositories")
           .executeTakeFirst();
         if (repository === undefined) return { kind: "repository_not_found" };
         if (!decodeBoolean(repository.active))
@@ -543,6 +545,7 @@ export function createProjectsRepository(
           .select("id")
           .where("workspace_id", "=", workspaceId)
           .where("id", "=", repositoryId)
+          .forUpdate()
           .executeTakeFirst();
         if (repository === undefined) return { kind: "repository_not_found" };
         const existing = await trx
