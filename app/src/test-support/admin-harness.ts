@@ -295,11 +295,14 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     secretsOn: (executor) =>
       createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
     publicUrl: options.billingPublicUrl ?? "https://reviews.example.test",
-    clientFor: (apiKey, environment) =>
+    clientFor: (apiKey, environment, clientOptions) =>
       createStripeClient({
         apiKey,
         baseUrl: options.stripe?.baseUrl ?? "http://127.0.0.1:1",
         environment,
+        ...(clientOptions?.managedPayments === undefined
+          ? {}
+          : { managedPayments: clientOptions.managedPayments }),
         maxRetries: 0,
         sleep: () => Promise.resolve(),
         ...(options.stripeFetch === undefined

@@ -124,7 +124,7 @@ describe("the play button and its dialog", () => {
     const user = renderDialog(
       fakeApi({
         ok: false,
-        status: 502,
+        status: 503,
         code: "MANUAL_REVIEW_GITHUB_UNAVAILABLE",
         issues: [],
       }).api,

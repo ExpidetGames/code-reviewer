@@ -228,11 +228,14 @@ export function getBillingAdminService(): BillingAdminService {
     db: getDatabase(),
     secretsOn: getSecretStoreOn,
     publicUrl: publicAddress(),
-    clientFor: (apiKey, environment) =>
+    clientFor: (apiKey, environment, options) =>
       createStripeClient({
         apiKey,
         baseUrl: stripeApiBaseUrl(),
         environment,
+        ...(options?.managedPayments === undefined
+          ? {}
+          : { managedPayments: options.managedPayments }),
       }),
   });
 }

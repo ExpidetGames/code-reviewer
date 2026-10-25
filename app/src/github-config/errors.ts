@@ -45,6 +45,6 @@ export const GITHUB_ERROR_STATUS: Record<GithubErrorCode, number> = {
   private_app_invalid: 422,
   not_configured: 409,
   app_auth_failed: 422,
-  github_unreachable: 502,
+  github_unreachable: 503,
   github_not_configured: 409,
 };

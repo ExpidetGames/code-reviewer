@@ -43,7 +43,7 @@ export function BillingSecretRemoval({
                 ? { kind: "ok", text: "Removed." }
                 : {
                     kind: "failed",
-                    text: describeBillingFailure(removed.code),
+                    text: describeBillingFailure(removed.code, removed.status),
                     issues: [],
                     missing: [],
                   };

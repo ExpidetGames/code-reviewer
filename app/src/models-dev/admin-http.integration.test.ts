@@ -341,8 +341,8 @@ describe("fetching now through the route", () => {
     ["models_dev_guard_unlisted_share", 409],
     ["models_dev_guard_url_changed_share", 409],
     ["models_dev_guard_provider_size", 409],
-    ["models_dev_timeout", 504],
-    ["models_dev_unreachable", 502],
+    ["models_dev_timeout", 503],
+    ["models_dev_unreachable", 503],
     ["models_dev_internal", 500],
   ] as const)(
     "answers a fetch that ended with %s with a stable code and status %s",
