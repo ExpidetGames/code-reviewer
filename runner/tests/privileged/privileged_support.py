@@ -68,7 +68,7 @@ CAPABILITIES = json.dumps(
     }
 )
 
-# What the Dynamic runner's container is created with (`compose.dynamic.yml` cap_add), by Linux
+# What the Worker's container is created with (the hardened container spec cap_add), by Linux
 # capability number, in two parts (#244). The job part is all that the loop, the job process and
 # the supervisor hold once startup is over; the startup part exists only until the engine user's
 # static nft rules are installed, and is then dropped from the bounding set for good.

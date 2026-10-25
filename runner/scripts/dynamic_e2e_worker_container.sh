@@ -21,8 +21,8 @@
 #     home, a directory only root can enter, which is right for a host process and wrong for a container.
 #
 # The same arrangement as `probe_as_container` of dynamic_e2e_namespace.sh, which proves the `probe` mode on the lane's
-# layout before any journey runs. The list of capabilities is the one of compose.dynamic.yml, kept equal by
-# app/src/ci/hosted-dynamic-lane.test.ts.
+# layout before any journey runs. The list of capabilities is the one of the hardened container spec, kept equal by
+# app/src/ci/hosted-lane.test.ts.
 set -euo pipefail
 program="${1:?the program is required}"
 mode="${2:?the entry mode is required}"

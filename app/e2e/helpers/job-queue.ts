@@ -14,7 +14,7 @@ const CHILD = resolve(process.cwd(), "src/test-support/e2e-queue-child.ts");
 async function queueCommand<T>(
   command: string,
   input: unknown,
-  databasePath: string = e2eEnv.databasePath,
+  databaseUrl: string = e2eEnv.databaseUrl,
 ): Promise<T> {
   const { stdout } = await run(
     process.execPath,
@@ -23,7 +23,7 @@ async function queueCommand<T>(
       "--conditions=react-server",
       CHILD,
       command,
-      resolve(process.cwd(), databasePath),
+      databaseUrl,
       JSON.stringify(input),
     ],
     { cwd: process.cwd() },
@@ -59,12 +59,12 @@ export async function enqueueManualRun(input: {
 /** What a runner does first: takes the oldest due job. */
 export async function claimNextRun(
   runnerId = "e2e-runner",
-  databasePath: string = e2eEnv.databasePath,
+  databaseUrl: string = e2eEnv.databaseUrl,
 ): Promise<{
   id: string;
   leaseToken: string;
 }> {
-  const claim = await queueCommand<Claim>("claim", { runnerId }, databasePath);
+  const claim = await queueCommand<Claim>("claim", { runnerId }, databaseUrl);
   if (claim.job === null || claim.leaseToken === undefined)
     throw new Error("There was no job to claim.");
   return { id: claim.job.id, leaseToken: claim.leaseToken };
@@ -78,10 +78,10 @@ export async function claimNextRun(
 export async function claimRun(
   jobId: string,
   runnerId = "e2e-runner",
-  databasePath: string = e2eEnv.databasePath,
+  databaseUrl: string = e2eEnv.databaseUrl,
 ): Promise<{ id: string; leaseToken: string }> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const claim = await claimNextRun(runnerId, databasePath);
+    const claim = await claimNextRun(runnerId, databaseUrl);
     if (claim.id === jobId) return claim;
   }
   throw new Error(`The job ${jobId} was never handed out.`);
@@ -93,7 +93,7 @@ export async function completeRun(
   outcome:
     | { ok: true; result: Record<string, unknown> }
     | { ok: false; errorCode: string; result?: Record<string, unknown> },
-  databasePath: string = e2eEnv.databasePath,
+  databaseUrl: string = e2eEnv.databaseUrl,
 ): Promise<void> {
   const result = await queueCommand<{ status: string }>(
     "complete",
@@ -102,7 +102,7 @@ export async function completeRun(
       leaseToken: claim.leaseToken,
       outcome,
     },
-    databasePath,
+    databaseUrl,
   );
   if (result.status !== "completed")
     throw new Error(`The run was not completed: ${result.status}`);

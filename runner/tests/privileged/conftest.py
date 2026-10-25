@@ -7,7 +7,7 @@ user's leftovers and the cleanup of a tree the engine user filled. It runs as ro
 namespace with nothing but loopback (`scripts/run_privileged_offline.sh` arranges that), in the two
 phases of the Dynamic runner's life, selected by `PRIVILEGED_PHASE`:
 
-* `startup` (`tests/privileged/startup`): exactly the capabilities `compose.dynamic.yml` adds,
+* `startup` (`tests/privileged/startup`): exactly the capabilities the hardened container spec adds,
   including the ones only startup holds (`NET_ADMIN`, `SETPCAP`). The rules and the drop are proven.
 * `job`: the process the script started is the Dynamic runner after its startup step, run by the
   production code: static rules installed, `NET_ADMIN` and `SETPCAP` gone from every set and from
@@ -70,7 +70,7 @@ def the_production_privileges() -> None:
         if value != expected:
             pytest.fail(
                 f"the {phase} phase must run with exactly the capabilities of "
-                f"compose.dynamic.yml ({', '.join(held)}); got {name} "
+                f"the hardened container spec ({', '.join(held)}); got {name} "
                 f"{'unknown' if value is None else f'{value:x}'}, wanted {expected:x}"
             )
     for uid in (ENGINE_UID, STRANGER_UID, JOB_UID):

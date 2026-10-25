@@ -23,9 +23,9 @@ import {
   changeAdminSetting,
   syncFromGithubAsAdmin,
 } from "../helpers/admin-api";
-import { engineProcesses } from "../helpers/dynamic-runner";
 import {
   assertNoExternalAttempts,
+  engineProcesses,
   readGuard,
 } from "../helpers/dynamic-lane-guard";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";

@@ -146,7 +146,7 @@ def test_the_engine_runs_as_the_dedicated_user_and_can_do_nothing_else(
             )
             assert facts["groups"] in ([], [ENGINE_GID])  # no supplementary group of the supervisor
             # Not one capability in any set the process can use or inherit, and no way to gain
-            # one (the compose-level `no-new-privileges` is what the suite itself runs under).
+            # one (the container-level `no-new-privileges` is what the suite itself runs under).
             status = facts["status"]
             assert isinstance(status, dict)
             for name in ("CapEff", "CapPrm", "CapAmb"):

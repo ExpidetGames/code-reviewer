@@ -283,7 +283,7 @@ test.describe("the billing journeys of a review", () => {
 
   /** The journal invariant (#508-T10): after a journey the journal's own check finds no difference and no stranded hold. */
   async function expectJournalConsistent(): Promise<JournalVerdict> {
-    const verdict = await verifyJournal(e2eEnv.catalogAdminDatabasePath);
+    const verdict = await verifyJournal(e2eEnv.catalogAdminDatabaseUrl);
     expect(verdict.verification).toMatchObject({
       differenceMicroUsd: 0,
       reservedDifferenceMicroUsd: 0,
@@ -334,7 +334,7 @@ test.describe("the billing journeys of a review", () => {
     await expect(
       keyForm.getByText(`A key is saved, ending in ${OPERATOR_KEY.slice(-4)}.`),
     ).toBeVisible();
-    const entries = await seedCatalog(e2eEnv.catalogAdminDatabasePath, [
+    const entries = await seedCatalog(e2eEnv.catalogAdminDatabaseUrl, [
       {
         name: "Journey model",
         modelId: "acme-labs/e2eproof-billing-journey-q7w8",
@@ -343,7 +343,7 @@ test.describe("the billing journeys of a review", () => {
     ]);
     const entryId = entries["Journey model"] ?? "";
     expect(entryId).not.toBe("");
-    await setCatalogDefaults(e2eEnv.catalogAdminDatabasePath, {
+    await setCatalogDefaults(e2eEnv.catalogAdminDatabaseUrl, {
       diff: entryId,
       dynamic: entryId,
     });

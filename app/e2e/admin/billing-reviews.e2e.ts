@@ -26,7 +26,7 @@ test.describe("the payment reviews in the admin portal", () => {
   test("the admin sees the open rows, closes one with a note and credits the workspace from the other", async ({
     page,
   }) => {
-    await seedBillingReviews(e2eEnv.catalogAdminDatabasePath);
+    await seedBillingReviews(e2eEnv.catalogAdminDatabaseUrl);
     await signInAsAdmin(page);
 
     // Seen without opening the list: the overview and the menu.
