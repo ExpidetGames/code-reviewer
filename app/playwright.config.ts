@@ -54,7 +54,7 @@ const appEnv = {
 // (`pnpm migrate` is a step of its own; the app never migrates). The set-up code of a new instance comes from
 // `pnpm setup-code` (e2e/helpers/setup.ts), not from the log.
 const PREPARE_DATABASE =
-  "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && pnpm migrate";
+  "mkdir -p test-results && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && pnpm migrate";
 function databaseEnv(app: string): Record<string, string> {
   const { name, url } = appDatabase(app);
   return {
