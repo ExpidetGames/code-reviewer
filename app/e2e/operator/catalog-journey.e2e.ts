@@ -641,13 +641,14 @@ test.describe("the catalog from the admin portal to a member's run", () => {
     await openProject(page, slugM, REPO_M.fullName);
     await openSection(page, "LLM");
     // Nothing is chosen yet. The provider dropdown names the maker of the released entries, never the product, next to the
-    // default; the draft's is not offered. The note says who bills.
+    // default; the draft's is not offered. This instance never switches billing on, and nothing is billed while it is off, so
+    // the note of who bills is not there (the unit tests of the LLM fieldset hold the note while billing is on).
     const provider = page.getByRole("combobox", {
       name: "Provider",
       exact: true,
     });
     await expect(provider).toHaveText("Default");
-    await expect(page.getByText("Billed via code-review.com")).toBeVisible();
+    await expect(page.getByText("Billed via code-review.com")).toHaveCount(0);
     await provider.click();
     await expect(page.getByRole("option")).toHaveCount(2);
     await expect(page.getByRole("option", { name: "Default" })).toBeVisible();
