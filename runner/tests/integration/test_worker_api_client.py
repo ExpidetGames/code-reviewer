@@ -1,0 +1,282 @@
+# SPDX-License-Identifier: LicenseRef-Proprietary
+
+"""Pins down the HTTP client of the Worker API against a real server on loopback: how it tells the
+answers apart, and that the credential goes nowhere but to the app."""
+
+import asyncio
+import json
+import socket
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+from worker_api_fake import CREDENTIAL, FakeWorkerApp, RawServer, Scripted, example
+
+from code_reviewer_runner.job_loop.api import parse_heartbeat
+from code_reviewer_runner.job_loop.http import ApiRejected, ApiUnavailable, LeaseLost, Reply
+from code_reviewer_runner.job_loop.worker_api import (
+    CredentialInvalid,
+    HttpWorkerApi,
+    JobEnded,
+    JobGivenBack,
+)
+from code_reviewer_runner.job_loop.worker_errors import WorkerFailure, WorkerSetupError
+
+JOB_ID: str = example("WorkerJobDetailsResponse")["job"]["id"]
+RESULT: dict[str, Any] = example("WorkerResultRequest")["result"]
+
+
+@pytest.fixture
+def app() -> Iterator[FakeWorkerApp]:
+    fake = FakeWorkerApp().start()
+    yield fake
+    fake.stop()
+
+
+def client(url: str, credential: str = CREDENTIAL) -> HttpWorkerApi:
+    return HttpWorkerApi(url, credential, request_timeout=5)
+
+
+def test_a_complete_answer_with_the_status_queued_is_understood(app: FakeWorkerApp) -> None:
+    app.complete_status = "queued"
+
+    reply = asyncio.run(client(app.url).complete(JOB_ID, CREDENTIAL, RESULT))
+
+    assert reply.status == "queued" and reply.already_completed is False
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 429, 408])
+def test_an_answer_that_may_pass_is_unavailable_and_keeps_the_retry_after(
+    app: FakeWorkerApp, status: int
+) -> None:
+    app.script(
+        "heartbeat",
+        Scripted(status, {"error": {"code": "X", "message": "m"}}, {"Retry-After": "7"}),
+    )
+
+    with pytest.raises(ApiUnavailable) as error:
+        asyncio.run(client(app.url).heartbeat(JOB_ID, CREDENTIAL))
+
+    assert (error.value.status, error.value.retry_after) == (status, 7)
+
+
+def test_a_conflict_or_an_unknown_job_means_the_lease_is_lost(app: FakeWorkerApp) -> None:
+    api = client(app.url)
+    app.script("heartbeat", Scripted(409, {"error": {"code": "RUNNER_LEASE_LOST", "message": "m"}}))
+    app.script("result", Scripted(404, {"error": {"code": "RUNNER_JOB_NOT_FOUND", "message": "m"}}))
+
+    with pytest.raises(LeaseLost):
+        asyncio.run(api.heartbeat(JOB_ID, CREDENTIAL))
+    with pytest.raises(LeaseLost):
+        asyncio.run(api.complete(JOB_ID, CREDENTIAL, RESULT))
+
+
+def test_the_app_ending_the_job_and_giving_it_back_are_told_apart(app: FakeWorkerApp) -> None:
+    app.script("heartbeat", Scripted(409, {"error": {"code": "RUNNER_JOB_ENDED", "message": "m"}}))
+    app.script(
+        "fetch", Scripted(503, {"error": {"code": "RUNNER_GIT_ACCESS_UNAVAILABLE", "message": "m"}})
+    )
+    api = client(app.url)
+
+    with pytest.raises(JobEnded):
+        asyncio.run(api.heartbeat(JOB_ID, CREDENTIAL))
+    with pytest.raises(JobGivenBack):
+        asyncio.run(api.fetch(JOB_ID))
+
+
+@pytest.mark.parametrize("status", [400, 413])
+def test_a_refusal_of_the_request_is_rejected_with_the_error_code(
+    app: FakeWorkerApp, status: int
+) -> None:
+    app.script(
+        "result", Scripted(status, {"error": {"code": "RUNNER_BODY_TOO_LARGE", "message": "m"}})
+    )
+
+    with pytest.raises(ApiRejected) as error:
+        asyncio.run(client(app.url).complete(JOB_ID, CREDENTIAL, RESULT))
+
+    assert (error.value.status, error.value.code) == (status, "RUNNER_BODY_TOO_LARGE")
+
+
+def test_a_route_the_app_does_not_have_is_an_unsupported_app_but_a_contract_404_is_not(
+    app: FakeWorkerApp,
+) -> None:
+    app.script("fetch", Scripted(404, None))
+    app.script("fetch", Scripted(404, {"error": {"code": "RUNNER_JOB_NOT_FOUND", "message": "m"}}))
+    api = client(app.url)
+
+    with pytest.raises(WorkerSetupError) as setup:
+        asyncio.run(api.fetch(JOB_ID))
+    with pytest.raises(LeaseLost):
+        asyncio.run(api.fetch(JOB_ID))
+
+    assert setup.value.code == WorkerFailure.APP_UNSUPPORTED
+
+
+def test_a_wrong_credential_is_not_accepted_and_the_error_does_not_show_it(
+    app: FakeWorkerApp,
+) -> None:
+    wrong = "crj_wrong-0123456789-abcdef-0123456789"
+
+    with pytest.raises(CredentialInvalid) as error:
+        asyncio.run(client(app.url, wrong).heartbeat(JOB_ID, wrong))
+
+    assert error.value.status == 401
+    assert wrong not in str(error.value)
+
+
+def test_an_app_that_cannot_be_reached_is_unavailable() -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    with pytest.raises(ApiUnavailable) as error:
+        asyncio.run(client(f"http://127.0.0.1:{port}").heartbeat(JOB_ID, CREDENTIAL))
+
+    assert error.value.status is None
+    assert str(port) not in str(error.value)
+
+
+def test_a_job_details_answer_that_breaks_the_contract_is_unavailable(app: FakeWorkerApp) -> None:
+    broken = example("WorkerJobDetailsResponse")
+    broken["job"]["heartbeatIntervalSeconds"] = 0
+    app.script("fetch", Scripted(200, broken))
+
+    with pytest.raises(ApiUnavailable):
+        asyncio.run(client(app.url).fetch(JOB_ID))
+
+
+def test_a_job_id_that_is_not_a_uuid_is_never_put_into_a_url(app: FakeWorkerApp) -> None:
+    with pytest.raises(ApiRejected):
+        asyncio.run(client(app.url).heartbeat("../../etc/passwd", CREDENTIAL))
+
+    assert app.requests == []
+
+
+def test_a_heartbeat_interval_longer_than_the_lease_allows_is_shortened(
+    app: FakeWorkerApp,
+) -> None:
+    long = example("WorkerJobDetailsResponse")
+    long["job"]["heartbeatIntervalSeconds"] = 600
+    app.script("fetch", Scripted(200, long))
+
+    job = asyncio.run(client(app.url).fetch(JOB_ID))
+
+    assert job.heartbeat_interval == 60
+
+
+@pytest.mark.parametrize("call", ["fetch", "heartbeat", "result"])
+def test_a_redirect_is_not_followed_so_the_credential_never_goes_elsewhere(
+    app: FakeWorkerApp, call: str
+) -> None:
+    other = FakeWorkerApp().start()
+    try:
+        app.script(call, Scripted(302, None, {"Location": f"{other.url}/api/workers/v1/jobs/x"}))
+        api = client(app.url)
+        calls = {
+            "fetch": lambda: api.fetch(JOB_ID),
+            "heartbeat": lambda: api.heartbeat(JOB_ID, CREDENTIAL),
+            "result": lambda: api.complete(JOB_ID, CREDENTIAL, RESULT),
+        }
+
+        with pytest.raises(ApiUnavailable) as error:
+            asyncio.run(calls[call]())
+
+        assert error.value.status == 302
+        assert other.requests == []
+    finally:
+        other.stop()
+
+
+GARBAGE = [
+    pytest.param(b"GARBAGE\r\n\r\n", id="not an HTTP answer"),
+    pytest.param(b"HTTP/1.1 2", id="status line cut off"),
+    pytest.param(b"", id="closed without an answer"),
+]
+
+
+@pytest.mark.parametrize("answer", GARBAGE)
+def test_an_answer_that_is_not_http_is_unavailable_for_every_call(answer: bytes) -> None:
+    server = RawServer(answer)
+    try:
+        api = client(server.url)
+
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.fetch(JOB_ID))
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.heartbeat(JOB_ID, CREDENTIAL))
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.complete(JOB_ID, CREDENTIAL, RESULT))
+    finally:
+        server.close()
+
+
+def test_a_job_details_answer_that_is_cut_off_is_unavailable() -> None:
+    server = RawServer(b'HTTP/1.1 200 OK\r\nContent-Length: 500\r\n\r\n{"version": 1, ')
+    try:
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(client(server.url).fetch(JOB_ID))
+    finally:
+        server.close()
+
+
+def test_a_text_with_a_lone_surrogate_is_sent_as_an_escape_and_arrives(
+    app: FakeWorkerApp,
+) -> None:
+    result = {**RESULT, "logTail": "broken \ud800 text"}
+
+    asyncio.run(client(app.url).complete(JOB_ID, CREDENTIAL, result))
+
+    assert app.completions[0]["result"]["logTail"] == "broken \ud800 text"
+
+
+def _answer_200(body: bytes) -> bytes:
+    return (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+        + str(len(body)).encode()
+        + b"\r\nConnection: close\r\n\r\n"
+        + body
+    )
+
+
+# #260: a 200 only means "held" when it is the answer of the contract for this very job. A gateway
+# or captive portal that answers 200 to everything must not authorize a write.
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b"OK", id="not JSON"),
+        pytest.param(b"{}", id="an empty object"),
+        pytest.param(b'{"version": 1}', id="no job"),
+        pytest.param(b'{"version": 2, "job": {"id": "' + JOB_ID.encode() + b'"}}', id="version"),
+        pytest.param(
+            b'{"version": 1, "job": {"id": "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b11"}}',
+            id="another job",
+        ),
+        pytest.param(b'{"version": 1, "job": {"id": 7}}', id="id is not text"),
+    ],
+)
+def test_a_200_that_is_not_the_heartbeat_answer_of_the_job_is_unavailable(body: bytes) -> None:
+    server = RawServer(_answer_200(body))
+    try:
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(client(server.url).heartbeat(JOB_ID, CREDENTIAL))
+    finally:
+        server.close()
+
+
+# #396-T01
+def test_a_heartbeat_answer_says_whether_the_run_was_superseded(app: FakeWorkerApp) -> None:
+    api = client(app.url)
+
+    assert asyncio.run(api.heartbeat(JOB_ID, CREDENTIAL)).superseded is False
+    app.superseded.add(JOB_ID)
+    assert asyncio.run(api.heartbeat(JOB_ID, CREDENTIAL)).superseded is True
+
+
+# #396-T01
+@pytest.mark.parametrize("value", ["true", 1, None, "yes", [True]])
+def test_only_the_boolean_true_means_superseded(value: object) -> None:
+    body = {"version": 1, "job": {"id": JOB_ID, "superseded": value}}
+    reply = Reply(200, {"content-type": "application/json"}, json.dumps(body).encode())
+
+    assert parse_heartbeat(reply, JOB_ID).superseded is False

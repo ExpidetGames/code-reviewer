@@ -13,7 +13,6 @@ import {
 const SECRET = "cli-secret-0123456789-0123456789-0123456789";
 const CODE = "482913";
 const ENV = {
-  APP_RUNTIME: "serverless",
   APP_SECRET: SECRET,
   DATABASE_URL_MIGRATE: "postgres://app:s3cr3t-pw@db.example.test/app",
 } as const;
@@ -138,27 +137,6 @@ describe("pnpm setup-code", () => {
     expect(stand.calls.closed).toBe(1);
   });
 
-  // #321-T04
-  it("refuses in server mode, where the code is printed by the app itself, and writes nothing", async () => {
-    const stand = backend();
-    const result = run({ ...ENV, APP_RUNTIME: "server" }, stand);
-
-    expect(await result.code).toBe(1);
-
-    expect(stand.calls.issue).toBe(0);
-    expect(result.err.join("\n")).toContain("SETUP_CODE_NOT_SERVERLESS");
-    expect(result.err.join("\n")).toContain("APP_RUNTIME=serverless");
-  });
-
-  // #321-T04
-  it("refuses with a message about APP_RUNTIME when it is not set and the platform marker is absent", async () => {
-    const stand = backend();
-    const result = run({ ...ENV, APP_RUNTIME: undefined }, stand);
-
-    expect(await result.code).toBe(1);
-    expect(result.err.join("\n")).toContain("SETUP_CODE_NOT_SERVERLESS");
-  });
-
   // #321-T05
   it("names the variable, never a value, when APP_SECRET is missing or short", async () => {
     for (const secret of [undefined, "short-secret-1234"]) {
@@ -224,7 +202,6 @@ describe("pnpm setup-code", () => {
       "SETUP_CODE_CONFIG_INVALID",
       "SETUP_CODE_FAILED",
       "SETUP_CODE_NOT_A_TERMINAL",
-      "SETUP_CODE_NOT_SERVERLESS",
       "SETUP_CODE_SCHEMA_BEHIND",
     ]);
   });

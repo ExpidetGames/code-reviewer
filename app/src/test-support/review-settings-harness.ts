@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Shared setup of the review settings integration tests: a real SQLite file with one repository, and
+// Shared setup of the review settings integration tests: a real Postgres database with one repository, and
 // the service on top of it. Not product code.
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
@@ -93,7 +93,6 @@ export async function setupReviewSettings(
   const projects = createProjectsRepository(
     database,
     workspaceId,
-    undefined,
     undefined,
     undefined,
     undefined,

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #605-T04 with real OS processes on one SQLite file: two app instances claim at the same moment on a balance of one cent and
+// #605-T04 with real OS processes on one database: two app instances claim at the same moment on a balance of one cent and
 // both jobs start, because nothing is held (before #605 the last of a balance went to exactly one of them, #498-T05).
-// better-sqlite3 blocks its thread, so only separate processes can overlap; the write lock of the claim transaction orders
-// them, and neither is refused. (The same case on Postgres, with connections of one pool, is in
-// claim-billing.integration.test.ts.)
+// Separate processes are what two app instances are, each with a pool of its own; the lock of the claim transaction orders
+// them, and neither is refused. (The same case with connections of one pool is in claim-billing.integration.test.ts.)
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
@@ -47,7 +46,7 @@ describe("claiming on a balance of one cent from two processes", () => {
     const answers = await runTogether<{ job: Job | null }>(
       ["runner-a", "runner-b"].map((runner) => [
         "claim",
-        fixture.databasePath,
+        fixture.databaseUrl,
         T0.toISOString(),
         runner,
       ]),

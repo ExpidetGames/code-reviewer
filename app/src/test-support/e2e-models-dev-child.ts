@@ -2,7 +2,7 @@
 
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are stripped;
 // `--conditions=react-server` lets `server-only` pass) to fill the models.dev catalog of the app under test the way the daily
-// fetch does: through the real fetch service (parse, address check, plan, guard, one transaction) on the app's SQLite file, with
+// fetch does: through the real fetch service (parse, address check, plan, guard, one transaction) on the app's database, with
 // the committed fixture of `fakes/fixtures/models-dev/` as the body and the names resolved to a public address, so nothing
 // leaves the machine and no row is written by hand. The app is a separate process with the same file open (WAL), so the
 // providers and models show up in its pages.
@@ -10,11 +10,11 @@
 //   fetch <db>    -> {"status": "applied" | "failed" | "skipped", ...}
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createModelsDevService } from "../models-dev/service.ts";
 
-const [command, databasePath] = process.argv.slice(2);
-if (command !== "fetch" || !databasePath)
+const [command, databaseUrl] = process.argv.slice(2);
+if (command !== "fetch" || !databaseUrl)
   throw new Error("Usage: e2e-models-dev-child.ts fetch <db>");
 
 const FIXTURE = join(
@@ -28,11 +28,7 @@ const FIXTURE = join(
   "api.json",
 );
 
-const db = openDatabase({
-  driver: "sqlite",
-  path: databasePath,
-  busyTimeoutMs: 5000,
-});
+const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
 try {
   const service = createModelsDevService({
     db,

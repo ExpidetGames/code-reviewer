@@ -80,25 +80,6 @@ def test_worker_once_runs_one_job_against_the_fake_app_and_exits_with_zero(
     assert credential not in done.stdout + done.stderr
 
 
-# #324-T04: the mode can come from the environment, as in a container without arguments.
-def test_runner_mode_worker_once_without_an_argument_is_the_same_worker(
-    app: FakeAppProcess, tmp_path: Path
-) -> None:
-    job = app.enqueue("diff")
-    credential = app.claim(job)
-
-    done = run(
-        [script("code-reviewer-runner")],
-        tmp_path,
-        start_document(app, job, credential),
-        RUNNER_MODE="worker-once",
-        **worker_environment(tmp_path),
-    )
-
-    assert done.returncode == 0, done.stderr
-    assert len(app.results(job)) == 1
-
-
 # #324-T04: the exit code of the job is the exit code of the container.
 def test_worker_once_exits_with_one_when_the_job_failed(
     app: FakeAppProcess, tmp_path: Path
@@ -150,24 +131,15 @@ def test_probe_of_a_dynamic_configuration_that_is_not_root_reports_the_reason_an
     assert secret not in done.stdout + done.stderr
 
 
-# #324-T08
-def test_without_a_mode_the_legacy_loop_refuses_to_start_without_its_configuration(
-    tmp_path: Path,
+# #324-T08: the mode is required; a retired mode is refused like an unknown one, without echoing it.
+@pytest.mark.parametrize("arguments", [[], ["legacy"], ["dispatch"]])
+def test_without_a_known_mode_the_entry_point_refuses_to_start(
+    tmp_path: Path, arguments: list[str]
 ) -> None:
-    done = run([script("code-reviewer-runner")], tmp_path, RUNNER_TOKEN="dummy-token-0123456789")
+    done = run([script("code-reviewer-runner"), *arguments], tmp_path, RUNNER_MODE="worker-once")
 
     assert done.returncode == 2
-    assert "RUNNER_API_URL is required" in done.stderr
-
-
-# #324-T08
-def test_dispatch_refuses_with_the_stable_code_while_the_image_has_no_dispatcher(
-    tmp_path: Path,
-) -> None:
-    done = run([script("code-reviewer-runner"), "dispatch"], tmp_path)
-
-    assert done.returncode == 2
-    assert "dispatcher_bundle_missing" in done.stderr
+    assert "invalid arguments" in done.stderr
 
 
 # #324-T10

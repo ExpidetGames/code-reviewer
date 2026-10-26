@@ -31,7 +31,6 @@ from code_reviewer_runner.dynamic_review.budget import (
 )
 from code_reviewer_runner.dynamic_review.native_job import build_native_job
 from code_reviewer_runner.job import JobError, parse_job
-from code_reviewer_runner.job_loop.api import CLAIM_FEATURES
 from code_reviewer_runner.job_loop.worker_api import WORKER_FEATURES
 from code_reviewer_runner.log_capture import LogCapture
 from code_reviewer_runner.redaction import Redactor
@@ -75,11 +74,9 @@ def test_an_unusable_operator_maximum_refuses_the_job_without_echoing_it(value: 
 
 
 # #689-T21
-def test_the_runner_names_the_operator_cost_limit_feature_in_claims_and_worker_fetches() -> None:
-    assert "operator_cost_limit" in CLAIM_FEATURES
+def test_the_runner_names_the_operator_cost_limit_feature_in_worker_fetches() -> None:
     assert "operator_cost_limit" in WORKER_FEATURES
     # The feature of the release before stays: an app of that release sends the customer's limit.
-    assert "cost_limit" in CLAIM_FEATURES
     assert "cost_limit" in WORKER_FEATURES
 
 

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""Pins down the rules of the job loop with a clock, a runner API and processes that the test
-controls: slots, heartbeats, outcomes, back-off, shutdown and what is reported when. Real processes
-and a real HTTP server are in tests/integration."""
+"""Pins down the rules of the job host with a clock, an API and a process that the test controls:
+heartbeats, outcomes, back-off, shutdown and what is reported when. Real processes and a real HTTP
+server are in tests/integration."""
 
 import json
 import logging
@@ -39,7 +39,7 @@ def test_a_free_slot_and_a_waiting_job_start_exactly_one_process_with_the_input_
     None
 ):
     async def scenario() -> None:
-        harness = Harness(concurrency=3)
+        harness = Harness()
         claim = make_claim(1)
         harness.api.claims = [claim]
         await harness.start()
@@ -169,160 +169,14 @@ def test_a_process_that_reports_a_failure_keeps_its_own_error_code() -> None:
     run(scenario)
 
 
-# CR-29-T05
-def test_no_more_processes_than_slots_run_and_a_full_loop_does_not_claim() -> None:
-    async def scenario() -> None:
-        harness = Harness(concurrency=2)
-        harness.api.claims = [make_claim(1), make_claim(2), make_claim(3)]
-        await harness.start()
-
-        assert len(harness.launcher.running) == 2
-        assert harness.api.claim_calls == 2
-        await harness.clock.advance(600)
-        assert harness.api.claim_calls == 2
-        assert len(harness.launcher.processes) == 2
-
-        harness.launcher.processes[0].finish()
-        await settle()
-
-        assert harness.api.claim_calls == 3
-        assert len(harness.launcher.processes) == 3
-        assert len(harness.launcher.running) == 2
-        await harness.stop()
-
-    run(scenario)
-
-
-# CR-29-T06
-def test_without_a_job_the_loop_waits_for_the_poll_interval_between_claims() -> None:
-    async def scenario() -> None:
-        harness = Harness(poll_interval=5.0)
-        await harness.start()
-        assert harness.api.claim_calls == 1
-
-        await harness.clock.advance(4.9)
-        assert harness.api.claim_calls == 1
-        await harness.clock.advance(0.2)
-        assert harness.api.claim_calls == 2
-        await harness.clock.advance(5)
-        assert harness.api.claim_times == [0.0, 5.0, 10.0]
-        await harness.stop()
-
-    run(scenario)
-
-
-def test_a_finished_job_makes_the_loop_ask_again_at_once() -> None:
-    async def scenario() -> None:
-        harness = Harness(concurrency=3, poll_interval=5.0)
-        harness.api.claims = [make_claim(1)]
-        await harness.start()
-        assert harness.api.claim_calls == 2  # the job, then 204
-
-        only(harness.launcher.processes).finish()
-        await settle()
-
-        assert harness.api.claim_calls == 3
-        assert harness.clock.now == 0.0
-        await harness.stop()
-
-    run(scenario)
-
-
-# CR-29-T08
-def test_after_a_stop_request_no_job_is_claimed_and_the_running_one_is_finished_and_reported() -> (
-    None
-):
-    async def scenario() -> None:
-        harness = Harness()
-        harness.api.claims = [make_claim(1)]
-        await harness.start()
-        process = only(harness.launcher.processes)
-        calls = harness.api.claim_calls
-
-        harness.loop.request_stop()
-        await settle()
-        assert harness.task is not None and not harness.task.done()
-        await harness.clock.advance(20)
-        assert harness.api.claim_calls == calls
-        assert not process.terminated
-
-        process.finish()
-        await settle()
-
-        assert harness.task.done()
-        assert harness.task.exception() is None
-        assert len(harness.api.completions) == 1
-        assert harness.api.completions[0][2]["ok"] is True
-        assert harness.api.claim_calls == calls
-
-    run(scenario)
-
-
-def test_a_stop_request_without_a_running_job_ends_the_loop_at_once() -> None:
-    async def scenario() -> None:
-        harness = Harness()
-        await harness.start()
-
-        harness.loop.request_stop()
-        await settle()
-
-        assert harness.task is not None and harness.task.done()
-
-    run(scenario)
-
-
-# CR-29-T09
-def test_a_job_that_outlasts_the_grace_period_is_ended_and_reported_as_a_shutdown() -> None:
-    async def scenario() -> None:
-        harness = Harness(shutdown_grace=60.0)
-        claim = make_claim(1)
-        harness.api.claims = [claim]
-        await harness.start()
-        process = only(harness.launcher.processes)
-
-        harness.loop.request_stop()
-        await harness.clock.advance(59)
-        assert not process.terminated
-        assert harness.api.completions == []
-        await harness.clock.advance(2)
-
-        assert process.terminated
-        assert harness.task is not None and harness.task.done()
-        (job_id, lease, result) = harness.api.completions[0]
-        assert (job_id, lease) == (claim.id, claim.lease_token)
-        assert result["ok"] is False
-        assert result["errorCode"] == "runner_shutdown"
-
-    run(scenario)
-
-
-def test_a_second_stop_request_ends_the_running_jobs_without_waiting() -> None:
-    async def scenario() -> None:
-        harness = Harness(shutdown_grace=600.0)
-        harness.api.claims = [make_claim(1)]
-        await harness.start()
-        process = only(harness.launcher.processes)
-
-        harness.loop.request_stop()
-        await settle()
-        assert not process.terminated
-        harness.loop.request_force()
-        await settle()
-
-        assert process.terminated
-        assert harness.api.completions[0][2]["errorCode"] == "runner_shutdown"
-
-    run(scenario)
-
-
 def test_a_shutdown_report_that_the_app_answers_with_conflict_is_not_an_error() -> None:
     async def scenario() -> None:
-        harness = Harness(shutdown_grace=0.0)
+        harness = Harness()
         harness.api.claims = [make_claim(1)]
         harness.api.complete_errors = [LeaseLost("conflict", 409)]
         await harness.start()
 
-        harness.loop.request_stop()
+        harness.loop.request_force()
         await settle()
 
         assert harness.task is not None and harness.task.done()
@@ -334,12 +188,12 @@ def test_a_shutdown_report_that_the_app_answers_with_conflict_is_not_an_error() 
 
 def test_a_complete_answer_saying_the_job_was_queued_again_is_accepted() -> None:
     async def scenario() -> None:
-        harness = Harness(shutdown_grace=0.0)
+        harness = Harness()
         harness.api.claims = [make_claim(1)]
         harness.api.complete_reply = CompleteReply("queued", False)
         await harness.start()
 
-        harness.loop.request_stop()
+        harness.loop.request_force()
         await settle()
 
         assert harness.task is not None and harness.task.done()
@@ -381,62 +235,6 @@ def test_a_failed_heartbeat_is_tried_again_at_the_next_beat_and_does_not_end_the
 
         assert len(harness.api.heartbeats) == 2
         assert not process.terminated
-        await harness.stop()
-
-    run(scenario)
-
-
-# CR-29-T11
-def test_an_app_that_is_down_makes_the_loop_wait_longer_each_time_and_leaves_the_running_job() -> (
-    None
-):
-    async def scenario() -> None:
-        harness = Harness(poll_interval=5.0, backoff_max=60.0, concurrency=3)
-        harness.api.claims = [make_claim(1)]
-        await harness.start()
-        process = only(harness.launcher.processes)
-        harness.api.claims = [ApiUnavailable("down", 503) for _ in range(8)]
-
-        await harness.clock.advance(400)
-
-        gaps = [
-            round(b - a)
-            for a, b in zip(harness.api.claim_times[2:], harness.api.claim_times[3:], strict=False)
-        ]
-        assert gaps[:6] == [5, 10, 20, 40, 60, 60]
-        assert process.running and not process.terminated
-        assert harness.api.completions == []
-        await harness.stop()
-
-    run(scenario)
-
-
-def test_a_retry_after_from_the_app_is_respected() -> None:
-    async def scenario() -> None:
-        harness = Harness(poll_interval=5.0)
-        harness.api.claims = [ApiUnavailable("busy", 503, retry_after=30.0)]
-        await harness.start()
-
-        await harness.clock.advance(29)
-        assert harness.api.claim_calls == 1
-        await harness.clock.advance(2)
-        assert harness.api.claim_calls == 2
-        await harness.stop()
-
-    run(scenario)
-
-
-def test_after_a_successful_claim_the_pause_after_a_failure_starts_small_again() -> None:
-    async def scenario() -> None:
-        harness = Harness(poll_interval=5.0)
-        harness.api.claims = [ApiUnavailable("down", 503), ApiUnavailable("down", 503), None]
-        await harness.start()
-        await harness.clock.advance(5 + 10)
-        harness.api.claims = [ApiUnavailable("down", 503)]
-        await harness.clock.advance(5)  # the poll after the 204
-        await harness.clock.advance(5)  # first pause of the new failure
-
-        assert harness.api.claim_times[-1] - harness.api.claim_times[-2] == 5.0
         await harness.stop()
 
     run(scenario)
@@ -690,21 +488,16 @@ def test_the_hard_timeout_ends_a_process_that_does_not_stop_and_reports_a_timeou
 # CR-29-T13
 def test_a_process_gets_only_plain_runtime_variables_and_never_the_runner_token() -> None:
     async def scenario() -> None:
-        harness = Harness(concurrency=2)
-        first, second = make_claim(1), make_claim(2)
-        second.input["git"]["token"] = "second-job-installation-token-9876543210"
-        harness.api.claims = [first, second]
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
         await harness.start()
 
-        assert len(harness.launcher.processes) == 2
-        for process in harness.launcher.processes:
-            names = set(process.spec.env)
-            assert names <= {*PASSTHROUGH_VARIABLES, "RUNNER_JOB_TIMEOUT_SECONDS"}
-            blob = json.dumps(dict(process.spec.env))
-            for secret in (RUNNER_TOKEN, TOKEN, API_KEY, "second-job-installation-token"):
-                assert secret not in blob
-        stdin_of_first = harness.launcher.processes[0].spec.stdin.decode()
-        assert "second-job-installation-token" not in stdin_of_first
+        process = only(harness.launcher.processes)
+        names = set(process.spec.env)
+        assert names <= {*PASSTHROUGH_VARIABLES, "RUNNER_JOB_TIMEOUT_SECONDS"}
+        blob = json.dumps(dict(process.spec.env))
+        for secret in (RUNNER_TOKEN, TOKEN, API_KEY):
+            assert secret not in blob
         await harness.stop()
 
     run(scenario)
@@ -813,15 +606,13 @@ def test_a_long_retry_after_is_bounded_by_the_retry_window() -> None:
     run(scenario)
 
 
-def test_a_second_stop_signal_ends_the_wait_between_two_attempts_to_send_a_result() -> None:
+def test_a_stop_signal_ends_the_wait_between_two_attempts_to_send_a_result() -> None:
     async def scenario() -> None:
-        harness = Harness(shutdown_grace=600.0)
+        harness = Harness()
         harness.api.claims = [make_claim(1)]
         harness.api.complete_errors = [ApiUnavailable("busy", 503, retry_after=900.0)]
         await harness.start()
         only(harness.launcher.processes).finish()
-        await settle()
-        harness.loop.request_stop()
         await settle()
         assert harness.task is not None and not harness.task.done()
 
@@ -890,53 +681,24 @@ def test_any_failure_to_start_the_process_is_reported_as_a_runner_error() -> Non
     run(scenario)
 
 
-def test_the_pause_after_a_failed_claim_never_starts_below_five_seconds() -> None:
-    async def scenario() -> None:
-        harness = Harness(poll_interval=0.1)
-        harness.api.claims = [ApiUnavailable("down", 503), ApiUnavailable("down", 503)]
-        await harness.start()
-
-        await harness.clock.advance(4.9)
-        assert harness.api.claim_calls == 1
-        await harness.clock.advance(0.2)
-        assert harness.api.claim_calls == 2
-        await harness.stop()
-
-    run(scenario)
-
-
-def test_a_job_command_other_than_the_entry_point_is_announced_with_a_warning(
-    caplog: Any,
-) -> None:
-    async def scenario() -> None:
-        harness = Harness(job_command=("/fakes/fake_pr_agent.py", "--mode", "succeed"))
-        await harness.start()
-
-        assert "PR_AGENT_COMMAND is set" in caplog.text
-        assert "/fakes/fake_pr_agent.py" in caplog.text
-        assert "--mode" not in caplog.text
-        await harness.stop()
-
-    caplog.set_level(logging.WARNING, logger="code_reviewer_runner.loop")
-    run(scenario)
-
-
 # #197-T04
-def test_a_root_loop_drops_diff_jobs_to_the_job_user_and_keeps_dynamic_jobs_as_the_supervisor() -> (
+def test_a_root_worker_drops_diff_jobs_to_the_job_user_and_keeps_dynamic_ones_as_supervisor() -> (
     None
 ):
     from test_dynamic_review_run import dynamic_document
 
     async def scenario() -> None:
-        harness = Harness(concurrency=3, diff_job_user=(10001, 10001))
-        harness.api.claims = [make_claim(1), make_claim(2, **dynamic_document())]
-        await harness.start()
-        await settle()
+        diff_harness = Harness(diff_job_user=(10001, 10001))
+        diff_harness.api.claims = [make_claim(1)]
+        await diff_harness.start()
+        dynamic_harness = Harness(diff_job_user=(10001, 10001))
+        dynamic_harness.api.claims = [make_claim(2, **dynamic_document())]
+        await dynamic_harness.start()
 
-        diff, dynamic = (process.spec for process in harness.launcher.processes)
-        assert diff.run_as == (10001, 10001)
-        assert dynamic.run_as is None
-        await harness.stop()
+        assert only(diff_harness.launcher.processes).spec.run_as == (10001, 10001)
+        assert only(dynamic_harness.launcher.processes).spec.run_as is None
+        await diff_harness.stop()
+        await dynamic_harness.stop()
 
     run(scenario)
 

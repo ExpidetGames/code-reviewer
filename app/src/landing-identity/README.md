@@ -54,7 +54,7 @@ retention; the redirect only keeps them out of the address bar, the history and 
 ## What is stored, and the first-touch rule
 
 `users.posthog_distinct_id`, `users.posthog_session_id`, `users.posthog_captured_at` (nullable text, migration
-`20261025140000_add_users_posthog_identity`, additive, SQLite and Postgres).
+`20261025140000_add_users_posthog_identity`, additive).
 
 - **A new account** (email sign-up, first GitHub sign-in) gets the identity that came with it.
 - **A known user** who signs in with a landing link gets it **only while `posthog_captured_at` is still empty** (one

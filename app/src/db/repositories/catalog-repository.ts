@@ -13,7 +13,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Kysely, Selectable } from "kysely";
 import { formatTimestamp, tryDecodeJson } from "../codecs.ts";
-import { errorCode } from "../errors.ts";
+import { errorCode, UNIQUE_VIOLATION } from "../errors.ts";
 import {
   CATALOG_KINDS,
   isCatalogStatus,
@@ -161,10 +161,9 @@ function toMember(row: MemberRow): MemberCatalogEntry {
   };
 }
 
-/** SQLite names the constraint kind, Postgres answers SQLSTATE 23505. */
+/** Postgres answers a unique violation with SQLSTATE 23505. */
 function isUniqueViolation(cause: unknown): boolean {
-  const code = errorCode(cause);
-  return code === "SQLITE_CONSTRAINT_UNIQUE" || code === "23505";
+  return errorCode(cause) === UNIQUE_VIOLATION;
 }
 
 /** The setting of a project that names its entry, per kind. */

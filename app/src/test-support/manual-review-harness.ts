@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Everything a test of the manual start needs: the webhook harness (a real SQLite file, the fake
+// Everything a test of the manual start needs: the webhook harness (a real Postgres database, the fake
 // GitHub API, the real GitHub App provider), an installation "acme" with the repository
 // "acme/widgets" as an active project, a clean fake GitHub, the real review settings service, the
 // real job queue and the manual review service wired to all of them.

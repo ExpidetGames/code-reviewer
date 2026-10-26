@@ -25,7 +25,6 @@ describe("SPDX license headers", () => {
       "runner/scripts/list_licenses.py",
       "fakes/github/server.ts",
       "docker/smoke/lib.sh",
-      "app/Dockerfile",
       "runner/Dockerfile",
       "Makefile",
     ]) {

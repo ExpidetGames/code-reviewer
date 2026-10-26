@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #497: the top-up intents (a repository of one workspace), the directory that finds an intent before the workspace is
-// known, and the record of provider events, on SQLite and on Postgres.
+// known, and the record of provider events.
 import { describe, expect, it } from "vitest";
 import {
   BILLING_ENGINES,
@@ -24,7 +24,7 @@ async function codeOf(run: Promise<unknown>): Promise<string | undefined> {
 }
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`top-up intents on ${engine.name}`, () => {
+  describe(`top-up intents on ${engine.name}`, () => {
     // #497-T03
     it("writes a pending intent for the amount that was asked for", async () => {
       const { db, workspaceId } = await engine.create();
@@ -583,7 +583,7 @@ function suite(engine: BillingEngine) {
     });
   });
 
-  describe.skipIf(engine.skip)(`webhook events on ${engine.name}`, () => {
+  describe(`webhook events on ${engine.name}`, () => {
     const AT = "2026-10-19T08:00:00.000Z";
 
     // #497-T04

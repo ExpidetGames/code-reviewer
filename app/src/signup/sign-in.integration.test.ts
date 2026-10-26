@@ -2,7 +2,7 @@
 
 // Pins down the email and password sign in of an account that has to verify its address: through the real
 // HTTP route and through the login form's function, with the real Better Auth, the real sign-up and a
-// real SQLite file. An unverified address does not sign in while the instance can send mail (no session,
+// real Postgres database. An unverified address does not sign in while the instance can send mail (no session,
 // no cookie), but only after the password was right, the instance admin signs in all the same, and a
 // verified account, or any account on an instance without mail, signs in as before.
 import { describe, expect, it } from "vitest";

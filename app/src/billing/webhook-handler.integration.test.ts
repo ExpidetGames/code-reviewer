@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #497: the generic billing webhook handler behind `POST /api/billing/webhook`, on SQLite and on Postgres, with the fake
+// #497: the generic billing webhook handler behind `POST /api/billing/webhook`, with the fake
 // adapter. It checks the signature through the adapter, applies the one normalized event in one transaction and answers a
 // code, never anything of the request.
 import type { Kysely, KyselyPlugin } from "kysely";
@@ -62,7 +62,7 @@ function tablesTouchedBy(db: Kysely<Database>, tables: string[]): KyselyPlugin {
 }
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`the billing webhook on ${engine.name}`, () => {
+  describe(`the billing webhook on ${engine.name}`, () => {
     async function setup(
       options: {
         adapter?: BillingAdapter | undefined;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the runs read side against a real SQLite file: the jobs are made through the job queue
+// Pins down the runs read side against a real Postgres database: the jobs are made through the job queue
 // (enqueue, claim, complete) and read back as the pages see them.
 import { describe, expect, it } from "vitest";
 import { sql } from "kysely";
@@ -634,16 +634,19 @@ describe("the read side with many jobs", () => {
     // milliseconds. The bound is generous so a loaded machine does not make this flaky.
     expect(took).toBeLessThan(1000);
 
-    const plan = await sql<{ detail: string }>`
-      explain query plan
-      select id from jobs where repository_id = ${f.repositoryId}
-      order by created_at desc, id desc limit 1`.execute(f.db);
-    expect(plan.rows.map((row) => row.detail).join("\n")).toContain(
-      "USING COVERING INDEX jobs_repository_recent",
-    );
-    expect(plan.rows.map((row) => row.detail).join("\n")).not.toContain(
-      "TEMP B-TREE",
-    );
+    // With the sequential and bitmap scans out of the way the planner reads the index in order wherever there is one.
+    const plan = await f.db.transaction().execute(async (trx) => {
+      await sql`set local enable_seqscan = off`.execute(trx);
+      await sql`set local enable_bitmapscan = off`.execute(trx);
+      return sql<Record<string, string>>`
+        explain
+        select id from jobs where repository_id = ${f.repositoryId}
+        order by created_at desc, id desc limit 1`.execute(trx);
+    });
+    const detail = plan.rows.map((row) => row["QUERY PLAN"]).join("\n");
+    expect(detail).toMatch(/Index (Only )?Scan/);
+    expect(detail).not.toContain("Seq Scan");
+    expect(detail).not.toMatch(/\bSort\b/);
   }, 120_000);
 
   it("reads the newest runs of one repository without sorting them all", async () => {

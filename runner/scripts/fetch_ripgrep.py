@@ -11,11 +11,9 @@ accepted only when its size and SHA-256 equal the pin, before anything is unpack
 pinned member is written, with a bounded copy, and checked against the executable digest; then
 `rg --version` must report the pinned version.
 
-    python scripts/fetch_ripgrep.py --dest DIR [--allow-unpinned-platform]
+    python scripts/fetch_ripgrep.py --dest DIR
 
-`--allow-unpinned-platform` is for the image build only: on a platform without a pin (anything but
-linux-x64) it installs nothing, says so and exits 0, so that the image still builds there and its
-runner serves Diff jobs only (#264).
+Only linux-x64 is pinned; on another platform the script fails (there is no engine-less image).
 
 Prints the path of the verified executable. The image build runs it in its own stage (the one step
 with the internet); nothing at run time downloads anything. The runner's startup self-check hashes
@@ -43,7 +41,6 @@ from fetch_opencode import (
     https_download,
     load_pin,
     platform_key,
-    unpinned_platform_notice,
     verify_archive,
 )
 
@@ -130,24 +127,14 @@ def install(
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dest", type=Path, required=True)
-    parser.add_argument(
-        "--allow-unpinned-platform",
-        action="store_true",
-        help="for the image build: on a platform without a pin install nothing and exit 0",
-    )
     args = parser.parse_args(argv)
     try:
         path = install(args.dest)
     except NoPinForPlatform:
-        if not args.allow_unpinned_platform:
-            sys.stderr.write(
-                f"cannot install the pinned ripgrep: there is no pinned artifact for "
-                f"{platform_key()}\n"
-            )
-            return 1
-        args.dest.mkdir(parents=True, exist_ok=True)
-        sys.stderr.write(unpinned_platform_notice("ripgrep", platform_key()))
-        return 0
+        sys.stderr.write(
+            f"cannot install the pinned ripgrep: there is no pinned artifact for {platform_key()}\n"
+        )
+        return 1
     except (PinError, OSError, tarfile.TarError, subprocess.SubprocessError) as error:
         sys.stderr.write(f"cannot install the pinned ripgrep: {error}\n")
         return 1

@@ -184,7 +184,7 @@ describe("the container flags of the self-check probe", () => {
   const args = probeRunArguments(config);
 
   // #330-extra-probe
-  it("mirror the hardening of the runner-dynamic service, plus the IPv6 sysctls the reduced ruleset needs", () => {
+  it("mirror the hardening of the container spec, plus the IPv6 sysctls the reduced ruleset needs", () => {
     const joined = args.join(" ");
     for (const flag of [
       "--user 0:0",
@@ -213,17 +213,34 @@ describe("the container flags of the self-check probe", () => {
   });
 
   // #330-extra-probe
-  it("use the same three tmpfs as compose.coolify.yml, and the compose file lists the same capabilities", () => {
-    const compose = readFileSync(join(REPO, "compose.coolify.yml"), "utf8");
+  it("use the tmpfs, capabilities and limits of the example spec of the hardened container contract", () => {
+    const spec = JSON.parse(
+      readFileSync(
+        join(
+          REPO,
+          "contracts/examples/worker-container/WorkerContainerSpec.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      capAdd: { name: string }[];
+      pids: { limit: number };
+      readOnly: boolean;
+      tmpfs: { path: string }[];
+    };
     const tmpfs = args.filter((_, index) => args[index - 1] === "--tmpfs");
-    expect(tmpfs).toHaveLength(3);
-    for (const mount of tmpfs) expect(compose, mount).toContain(mount);
-    for (const cap of args.filter(
-      (_, index) => args[index - 1] === "--cap-add",
-    ))
-      expect(compose, cap).toContain(`- ${cap}`);
-    expect(compose).toContain("pids_limit: 512");
-    expect(compose).toContain("read_only: true");
+    expect(tmpfs).toHaveLength(spec.tmpfs.length);
+    for (const mount of spec.tmpfs)
+      expect(
+        tmpfs.some((entry) => entry.startsWith(`${mount.path}:`)),
+        mount.path,
+      ).toBe(true);
+    expect(
+      args.filter((_, index) => args[index - 1] === "--cap-add").sort(),
+    ).toEqual(spec.capAdd.map((cap) => cap.name).sort());
+    expect(args.join(" ")).toContain(`--pids-limit ${String(spec.pids.limit)}`);
+    expect(spec.readOnly).toBe(true);
+    expect(args).toContain("--read-only");
   });
 
   // #330-extra-probe

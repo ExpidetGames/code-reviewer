@@ -1,18 +1,15 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""The real wiring of the job loop: logging, signals and the event loop."""
+"""The startup every entry mode of the Worker image runs once, and the logging they share."""
 
-import asyncio
 import logging
-import os
-import signal
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
 from code_reviewer_runner.capabilities import self_check_outcome
-from code_reviewer_runner.dynamic_review.netguard import EgressMode, IsolationError
+from code_reviewer_runner.dynamic_review.netguard import EgressMode
 from code_reviewer_runner.dynamic_review.self_check import (
     DEFAULT_TOOLS,
     SelfCheckReason,
@@ -26,16 +23,7 @@ from code_reviewer_runner.dynamic_review.static_isolation import (
     secure_startup,
 )
 from code_reviewer_runner.engines_file import remove_engines_file, write_engines_file
-from code_reviewer_runner.job_loop.api import HttpRunnerApi
-from code_reviewer_runner.job_loop.loop import RunnerLoop
-from code_reviewer_runner.job_loop.masking import SecretMasker
-from code_reviewer_runner.job_loop.process import ProcessLauncher, SubprocessLauncher
-from code_reviewer_runner.job_loop.settings import (
-    LoopSettings,
-    SettingsError,
-    WorkerSettings,
-    settings_from_environment,
-)
+from code_reviewer_runner.job_loop.settings import WorkerSettings
 from code_reviewer_runner.verdict import Verdict
 
 LOGGER_NAME = "code_reviewer_runner.loop"
@@ -52,7 +40,7 @@ def configure_logging(stream: object = None) -> None:
 
 
 def prepare_dynamic_runtime(
-    settings: LoopSettings | WorkerSettings,
+    settings: WorkerSettings,
     *,
     startup: Callable[[int, SlotPorts], EgressSetup] = secure_startup,
 ) -> EgressSetup:
@@ -70,14 +58,14 @@ def prepare_dynamic_runtime(
     return startup(user[0], ports)
 
 
-def decide_engines[Settings: (LoopSettings, WorkerSettings)](
-    settings: Settings,
+def decide_engines(
+    settings: WorkerSettings,
     rules_installed: bool,
     *,
     egress_mode: EgressMode = EgressMode.FULL,
     check: Callable[..., object] | None = None,
     require_read_only_root: bool = False,
-) -> tuple[Settings, str | None]:
+) -> tuple[WorkerSettings, str | None]:
     """The settings with the engines this runner may advertise, decided by the startup self-check,
     and the stable reason `opencode` is missing (None when it is advertised).
 
@@ -151,14 +139,14 @@ def decide_engines[Settings: (LoopSettings, WorkerSettings)](
     )
 
 
-def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
-    settings: Settings,
+def advertise_engines(
+    settings: WorkerSettings,
     rules_installed: bool,
     *,
     egress_mode: EgressMode = EgressMode.FULL,
     check: Callable[..., object] | None = None,
     require_read_only_root: bool = False,
-) -> Settings:
+) -> WorkerSettings:
     """`decide_engines` without the reason: the settings with the engines to advertise."""
     return decide_engines(
         settings,
@@ -169,13 +157,13 @@ def advertise_engines[Settings: (LoopSettings, WorkerSettings)](
     )[0]
 
 
-def run_startup[Settings: (LoopSettings, WorkerSettings)](
-    settings: Settings,
+def run_startup(
+    settings: WorkerSettings,
     *,
     require_read_only_root: bool = False,
     remove_verdict: Callable[[], object] | None = None,
     write_verdict: Callable[[Verdict], object] | None = None,
-) -> tuple[Settings, Verdict]:
+) -> tuple[WorkerSettings, Verdict]:
     """The startup every entry mode runs once at container start (#324).
 
     The verdict of an earlier start is removed first. Then the network setup and the end of
@@ -195,65 +183,3 @@ def run_startup[Settings: (LoopSettings, WorkerSettings)](
     verdict = Verdict(decided.engines, (reason,) if reason else ())
     (write_verdict or write_engines_file)(verdict)
     return decided, verdict
-
-
-async def serve(
-    settings: LoopSettings,
-    environment: Mapping[str, str],
-    *,
-    launcher: ProcessLauncher | None = None,
-) -> int:
-    """Run the loop until SIGTERM or SIGINT; a second signal ends the running jobs at once."""
-    api = HttpRunnerApi(
-        settings.api_url,
-        settings.token,
-        settings.runner_id,
-        engines=settings.engines,
-        request_timeout=settings.request_timeout,
-    )
-    loop = RunnerLoop(
-        settings,
-        api,
-        launcher or SubprocessLauncher(settings.terminate_grace),
-        logger=logging.getLogger(LOGGER_NAME),
-        environment=environment,
-        masker=SecretMasker([settings.token]),
-    )
-    signals_seen = 0
-
-    def on_signal() -> None:
-        nonlocal signals_seen
-        signals_seen += 1
-        if signals_seen == 1:
-            loop.request_stop()
-        else:
-            loop.request_force()
-
-    running = asyncio.get_running_loop()
-    for number in (signal.SIGTERM, signal.SIGINT):
-        running.add_signal_handler(number, on_signal)
-    try:
-        await loop.run()
-    finally:
-        for number in (signal.SIGTERM, signal.SIGINT):
-            running.remove_signal_handler(number)
-    return 0
-
-
-def run_from_environment(environment: Mapping[str, str] | None = None) -> int:
-    """Entry of `code-reviewer-runner` without arguments. Returns the process exit code."""
-    env = dict(os.environ if environment is None else environment)
-    configure_logging()
-    try:
-        settings = settings_from_environment(env)
-    except SettingsError as error:
-        logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
-        return 2
-    try:
-        # After the network setup and the end of NET_ADMIN, before the first claim: `opencode` is
-        # only ever in a claim after the self-check passed.
-        settings, _ = run_startup(settings)
-    except IsolationError as error:
-        logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
-        return 2
-    return asyncio.run(serve(settings, env))

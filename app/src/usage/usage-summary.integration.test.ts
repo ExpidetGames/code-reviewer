@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The plan view of a workspace read from real entitlements and real usage records on SQLite (#282): which runs
+// The plan view of a workspace read from real entitlements and real usage records (#282): which runs
 // count towards a limit, from when, and what the answer is allowed to hold. The page and the route on top are in
 // ui/plan-page.test.tsx and integration-tests/http/plan-route*.integration.test.ts.
 import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";

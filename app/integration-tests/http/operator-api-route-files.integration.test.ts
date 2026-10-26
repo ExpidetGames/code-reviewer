@@ -4,14 +4,9 @@
 // environment, the database opened at start. Without a usable token every method of every route ends in Next.js's
 // `notFound()` before the database is touched, so an instance that never set the variable has no extra surface; with
 // one, a call goes through the real repositories. The details are in operator-api.integration.test.ts.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { markInstanceSetUp } from "../../src/test-support/workspaces.ts";
 
 // `connection()` only works inside a Next.js request; here it just returns.
@@ -83,10 +78,7 @@ function request(method: string, token?: string, body?: unknown): Request {
 }
 
 async function startDatabase() {
-  const directory = await createTestDirectory();
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(directory, "app.db") },
-  });
+  await openRouteTestDatabase();
   return markInstanceSetUp(getDatabase());
 }
 

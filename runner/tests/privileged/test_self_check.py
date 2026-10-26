@@ -48,7 +48,7 @@ from code_reviewer_runner.dynamic_review.static_isolation import (
     SlotPorts,
 )
 from code_reviewer_runner.job_loop import service
-from code_reviewer_runner.job_loop.settings import settings_from_environment
+from code_reviewer_runner.job_loop.settings import worker_settings_from_environment
 
 PORTS = SlotPorts(PROXY_PORT, DEFAULT_ENGINE_PORT)
 PINNED_VERSION = "1.19.0"
@@ -116,10 +116,8 @@ def reason_of(installed: ToolPaths, **changes: Any) -> SelfCheckReason:
 def test_the_real_system_passes_the_check_and_advertises_opencode(tools: ToolPaths) -> None:
     # In either mode (#345-T18): the result names the ruleset the startup step installed.
     assert check(tools) == SelfCheckResult(egress_mode=EGRESS_MODE)
-    settings = settings_from_environment(
+    settings = worker_settings_from_environment(
         {
-            "RUNNER_API_URL": "http://app.invalid:3000",
-            "RUNNER_TOKEN": "dummy-runner-token-0123456789-abcdef-0123456789",
             "RUNNER_DIFF_JOB_USER": "10001:10001",
         }
     )
@@ -188,10 +186,8 @@ def test_an_engine_that_reports_another_version_than_the_pin_is_not_advertised(
 # #202-T09: the check ran in the job phase, where the startup capabilities are gone; no probe or
 # version of the engine was needed to see the runner is not Diff-only any more.
 def test_diff_stays_advertised_whatever_the_check_says(tools: ToolPaths) -> None:
-    settings = settings_from_environment(
+    settings = worker_settings_from_environment(
         {
-            "RUNNER_API_URL": "http://app.invalid:3000",
-            "RUNNER_TOKEN": "dummy-runner-token-0123456789-abcdef-0123456789",
             "RUNNER_DIFF_JOB_USER": "10001:10001",
             "RUNNER_DYNAMIC_ENGINE_UID": "10299",
             "RUNNER_DYNAMIC_ENGINE_GID": "10299",

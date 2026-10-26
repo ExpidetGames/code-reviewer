@@ -24,7 +24,7 @@ import {
   RESET_TOKEN_TTL_MS,
   hashResetToken,
   newResetToken,
-} from "../admin-cli/token.ts";
+} from "../auth/link-token.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
 import type { MailSender } from "../mail/sender.ts";

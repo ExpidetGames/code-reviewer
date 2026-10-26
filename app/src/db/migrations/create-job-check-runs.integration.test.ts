@@ -3,13 +3,13 @@
 // #405 (T36): the job check runs migration is expand only: it adds an empty table to a database made by the previous
 // release's migrations and changes no existing row, and the table holds the key and the checks the repository
 // relies on.
-import { sql } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { MigrationProvider } from "kysely/migration";
+import type { Database } from "../schema.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
-import { openDatabase } from "../connection.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const SPLIT = "20261017100000_create_job_check_runs";
@@ -28,7 +28,7 @@ const beforeThisMigration: MigrationProvider = {
 const T = "2026-10-12T08:00:00.000Z";
 
 async function rowsOfEveryTable(
-  db: ReturnType<typeof openDatabase>,
+  db: Kysely<Database>,
 ): Promise<Record<string, unknown[]>> {
   const result: Record<string, unknown[]> = {};
   for (const table of await db.introspection.getTables()) {
@@ -61,12 +61,7 @@ async function rowsOfEveryTable(
 describe("the job check runs migration", () => {
   // #405-T36
   it("adds an empty table to an existing database and changes no existing row", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, beforeThisMigration);
     await db
       .insertInto("workspaces")
@@ -88,19 +83,14 @@ describe("the job check runs migration", () => {
     expect(await rowsOfEveryTable(db)).toEqual(before);
     const { rows } = await sql<{
       count: number;
-    }>`select count(*) as count from job_check_runs`.execute(db);
+    }>`select count(*)::int as count from job_check_runs`.execute(db);
     expect(rows).toEqual([{ count: 0 }]);
     await db.destroy();
   });
 
   // #405-T36
   it("refuses a row for a job that does not exist", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, migrationProvider);
     await db
       .insertInto("workspaces")

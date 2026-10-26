@@ -75,9 +75,11 @@ async function signInAsAdmin(page: Page): Promise<void> {
 
 /** The balance on the page in micro-USD (`$1.887` is 1,887,000; `-$0.113` is -113,000). */
 async function balanceMicro(page: Page): Promise<number> {
-  const text = (
-    await page.locator("[data-slot=balance-amount]").innerText()
-  ).trim();
+  const amount = page.locator("[data-slot=balance-amount]");
+  // The page streams in behind a Suspense boundary: its content sits in a hidden element until the boundary is revealed, and `innerText`
+  // reads it there. Wait until it is shown so the rest of the page (role queries skip hidden content) is there too.
+  await expect(amount).toBeVisible();
+  const text = (await amount.innerText()).trim();
   const match = /^(-?)\$([\d,]+)\.(\d+)/.exec(text);
   if (match === null) throw new Error(`The balance reads ${text}.`);
   const micro =
@@ -283,7 +285,7 @@ test.describe("the billing journeys of a review", () => {
 
   /** The journal invariant (#508-T10): after a journey the journal's own check finds no difference and no stranded hold. */
   async function expectJournalConsistent(): Promise<JournalVerdict> {
-    const verdict = await verifyJournal(e2eEnv.catalogAdminDatabasePath);
+    const verdict = await verifyJournal(e2eEnv.catalogAdminDatabaseUrl);
     expect(verdict.verification).toMatchObject({
       differenceMicroUsd: 0,
       reservedDifferenceMicroUsd: 0,
@@ -334,7 +336,7 @@ test.describe("the billing journeys of a review", () => {
     await expect(
       keyForm.getByText(`A key is saved, ending in ${OPERATOR_KEY.slice(-4)}.`),
     ).toBeVisible();
-    const entries = await seedCatalog(e2eEnv.catalogAdminDatabasePath, [
+    const entries = await seedCatalog(e2eEnv.catalogAdminDatabaseUrl, [
       {
         name: "Journey model",
         modelId: "acme-labs/e2eproof-billing-journey-q7w8",
@@ -343,7 +345,7 @@ test.describe("the billing journeys of a review", () => {
     ]);
     const entryId = entries["Journey model"] ?? "";
     expect(entryId).not.toBe("");
-    await setCatalogDefaults(e2eEnv.catalogAdminDatabasePath, {
+    await setCatalogDefaults(e2eEnv.catalogAdminDatabaseUrl, {
       diff: entryId,
       dynamic: entryId,
     });
@@ -641,10 +643,10 @@ test.describe("the billing journeys of a review", () => {
     await signInAsAdmin(page);
     await page.goto(BILLING_PAGE);
     const balance = await balanceMicro(page);
-    const rowsBefore = await page
-      .getByRole("region", { name: "Journal" })
-      .locator("tr[data-entry-id]")
-      .count();
+    // The journal is counted once it is shown: a count taken while the streamed page is still hidden reads 0.
+    const journal = page.getByRole("region", { name: "Journal" });
+    await expect(journal).toBeVisible();
+    const rowsBefore = await journal.locator("tr[data-entry-id]").count();
     const verdictBefore = await expectJournalConsistent();
 
     await switchBillingOff(e2eEnv.catalogAdminAppUrl);

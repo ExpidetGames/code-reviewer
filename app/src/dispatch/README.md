@@ -123,18 +123,17 @@ A serverless deployment has no process that polls and none that lives long enoug
 is the safety net for what the requests above did not repair: `GET /api/internal/dispatch-sweep`, **every 2 hours**
 (`0 */2 * * *`, `app/vercel.json`; sparse on purpose, so that a database that scales to zero can sleep between
 webhooks), with
-`Authorization: Bearer <CRON_SECRET>` like the daily repository sync. The route exists only in serverless mode
-(`APP_RUNTIME=serverless`, a `404` anywhere else, so a Coolify installation is untouched), a missing or wrong
+`Authorization: Bearer <CRON_SECRET>` like the daily repository sync. A missing or wrong
 secret is `401` with no side effect, and nothing below `/api/internal` is open except the two exact paths of the
 two crons (`src/auth/access.ts`).
 
-| File                             | Role                                                                                                                                                               |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app/src/cron/dispatch-sweep.ts` | The route's handler: the secret, the try-lock, the answer (counts only)                                                                                            |
-| `app/src/db/try-lock.ts`         | `tryWithLock`: a Postgres transaction advisory try-lock (`pg_try_advisory_xact_lock(328, 1)`) on a dedicated connection, not the pool; an in-process set on SQLite |
-| `sweep.ts`                       | `createDispatchSweep(...).run()`: the steps of one run                                                                                                             |
-| `sweep-settings.ts`              | The two settings below                                                                                                                                             |
-| `sweep-shared.ts`                | The wiring of the running server                                                                                                                                   |
+| File                             | Role                                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/src/cron/dispatch-sweep.ts` | The route's handler: the secret, the try-lock, the answer (counts only)                                                               |
+| `app/src/db/try-lock.ts`         | `tryWithLock`: a Postgres transaction advisory try-lock (`pg_try_advisory_xact_lock(328, 1)`) on a dedicated connection, not the pool |
+| `sweep.ts`                       | `createDispatchSweep(...).run()`: the steps of one run                                                                                |
+| `sweep-settings.ts`              | The two settings below                                                                                                                |
+| `sweep-shared.ts`                | The wiring of the running server                                                                                                      |
 
 **Overlapping runs.** A run that starts while another one is still working (the platform retries, or a run
 outlasts its slot) does not queue behind it: it answers `{"status":"skipped","reason":"already_running"}` and
@@ -182,7 +181,7 @@ cause) and does not stop the others; the answer is then `500` with `failedSteps`
    unverified accounts, verification and reset links, signed states, remembered job keys, **and the `job_dispatches`
    rows of jobs that finished a week ago**) runs **once when the hour has changed**. The hour of the last
    successful run is kept in `app_meta` (`maintenance.sweep_cleanup_hour`), so every instance sees the same one; a run
-   that failed is tried again by the next run. On a server (Docker, Coolify) the timer stays as it was.
+   that failed is tried again by the next run.
 7. **`billing_holds`** (#591, legacy since #605): while billing is on, the old holds of jobs that ended while it was off are
    released (`src/billing/README.md`, "Old holds (legacy)"), at most 500 a run. No claim takes a hold any more, so on an
    instance that never took one the step finds nothing. It reads only the billing switch while billing is off. A failure is a
@@ -230,8 +229,8 @@ the call arrives. The VM of the lost attempt lives until its own timeout or unti
 job also ends it; the reaper ends it earlier only while the retry is not yet `running` (it keeps a VM whose job is `running`).
 
 **Which jobs.** Only a job whose wake-up a Dispatcher **acknowledged** (`job_dispatches.acked_at` is set). In poll mode
-(`RUNNER_DISPATCH=poll`, the default: a self-hosted runner, a Compose stack) there is no service and nothing is sent, and on an
-instance in webhook mode a job that a self-hosted runner took has no acknowledged row, so it gets no call either. The call
+(`RUNNER_DISPATCH=poll`, the default) there is no service and nothing is sent, and in webhook mode a job that was not
+woken through the Dispatcher has no acknowledged row, so it gets no call either. The call
 goes to the address of the wake-up (`RUNNER_WEBHOOK_URL`) with its last path segment `dispatch` replaced by `stop`
 (`stopUrlOf`); an address that does not end in `/dispatch` gets no stop and the job logs `DISPATCH_STOP_URL_INVALID`.
 

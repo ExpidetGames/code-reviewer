@@ -1,37 +1,27 @@
 # Code Reviewer runner
 
-Python worker that runs [PR-Agent](https://github.com/qodo-ai/pr-agent). `code-reviewer-runner` is
-the job loop: it claims jobs from the app and starts `code-reviewer-run-job`, the entry point of one
-job, as a process of its own for each of them. See the repository `README.md` for setup and
-`TESTING.md` for the tests.
+Python code that runs one review job with [PR-Agent](https://github.com/qodo-ai/pr-agent) or the Dynamic Review engine.
+`code-reviewer-runner worker-once` is the **Worker**: it runs in the Worker image inside a fresh Sandbox VM, fetches
+exactly one job from the app with a per-job credential and starts `code-reviewer-run-job`, the entry point of one job,
+as a process of its own. See the repository `README.md` for setup and `TESTING.md` for the tests.
 
-## The job loop
+## The Worker's settings
 
-`code-reviewer-runner` (the container's entry point) asks the app for work over HTTP
-(`contracts/runner-api.v1.json`, `app/src/runner-api/README.md`) and keeps up to `RUNNER_CONCURRENCY`
-jobs running. It is configured by environment variables:
+`code-reviewer-runner worker-once` (the container's command in the Sandbox VM) and `code-reviewer-runner probe` read
+these environment variables. The app address, the job id and the per-job credential are not settings: they come on stdin
+(see "The Worker" below).
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `RUNNER_API_URL` | Base URL of the app, for example `http://app:3000` | required |
-| `RUNNER_TOKEN` | The shared token of the runner API (the app's `RUNNER_TOKEN`) | required |
-| `RUNNER_CONCURRENCY` | Jobs at the same time, 1 to 32. One PR-Agent process needs about 320 MB (CR-13), so `floor((MiB - 256) / (321 * 1.5))` for the memory of the container; 3 for 2 GiB | 3 |
-| `RUNNER_POLL_INTERVAL_SECONDS` | Wait between two claims when nothing is waiting (after a job ends the loop asks again at once) | 5 |
 | `RUNNER_JOB_TIMEOUT_SECONDS` | Hard timeout of one job, see below | 1200 (20 minutes) |
-| `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after `SIGTERM` | 60 |
-| `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
 | `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
 | `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). The executable is the one `scripts/fetch_opencode.py` verified against `opencode-pin.json`. Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent. The engine also needs a trusted `rg` (ripgrep) on its `PATH`, or it is not started | unset |
 | `RUNNER_DYNAMIC_MAX_COST_USD` | #290: the most one Dynamic run may cost, in USD, a plain decimal number above 0 up to 20. Unset or empty: 1.00. Anything else ends the job with `dynamic_config_invalid`. Trusted operator configuration; nothing in a claim can set it. Since #689 the operator sets the maximum per review in the admin portal and the app sends it with every job (`llm.operatorMaxCostUsd`); a job that carries it ignores this variable, which stays only the fallback for a job from an app that does not send it | unset |
 | `RUNNER_DYNAMIC_CAPABILITIES` | #197, #279: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 32768}`, with `input_usd_per_mtok` and `output_usd_per_mtok`, optionally with `context_window_tokens` (#290). **A ceiling, and optional (#279):** the app sends the descriptor it read from OpenRouter's model metadata in `dynamic.capabilities` of the job, and the runner intersects it with this value (both must support the features, the smaller output limit and window win, the higher unit price wins), so a job can only narrow it. Unset or empty: the job's descriptor applies; without one, the descriptor built into the runner for exactly the shipped default model `deepseek/deepseek-v4.1-flash` (#264); for any other model the job ends with `dynamic_model_features_unsupported`, no fallback. A model with no unit prices anywhere ends with `dynamic_config_invalid`. A value that is set but unusable fails the job | unset |
 | `RUNNER_DYNAMIC_ENGINE_UID`, `RUNNER_DYNAMIC_ENGINE_GID` | #197: the numeric dedicated unprivileged user (and its own group) the engine runs as; it must exist in the image and be neither root nor the runner's own user. The Dynamic job process is the root supervisor that starts the engine as this user | `10101` and `10101` |
 | `RUNNER_DYNAMIC_PROXY_PORT`, `RUNNER_DYNAMIC_ENGINE_PORT` | #244: the two fixed loopback ports of the single Dynamic slot (model proxy, engine server), 1024 to 32767 and different. The engine user's static nft rules, installed once at container start, name exactly these; a stranger holding one makes the job fail closed | `10180` and `10181` |
-| `RUNNER_DIFF_JOB_USER` | #197: `uid:gid` the loop drops every non-Dynamic job process to, with no other group, in a working directory it owns. Set only on a loop that runs as root (`compose.dynamic.yml`), so PR-Agent never runs as root; unset runs jobs as the loop's own user | unset |
+| `RUNNER_DIFF_JOB_USER` | #197: `uid:gid` the Worker drops every non-Dynamic job process to, with no other group, in a working directory it owns. Set only on a Worker that runs as root (the hardened container spec), so PR-Agent never runs as root; unset runs jobs as the Worker's own user | unset |
 | `RUNNER_DYNAMIC_NODE_BIN` | #197: directory of the Node runtime the engine needs, if it is not on the runner's own `PATH` | unset |
-
-`compose.dynamic.yml` is the opt-in deployment of a separate Dynamic runner (one job at a time, memory
-limit, a root supervisor with a short capability list); it cannot claim Dynamic jobs yet. See
-`docs/dynamic-review.md`, "The engine boundary".
 
 **The Dynamic job process is the supervisor (#197 part 2b).** It runs as root with only the
 capabilities of that file (`SETUID`, `SETGID`, `KILL`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`;
@@ -41,7 +31,7 @@ installs the static nft rules for the single slot (new connections of the engine
 fixed proxy port `RUNNER_DYNAMIC_PROXY_PORT`, default 10180, and the engine's own port
 `RUNNER_DYNAMIC_ENGINE_PORT`, default 10181, on `127.0.0.1`) and then drops `NET_ADMIN` and `SETPCAP`
 from the bounding set and from its own sets: the container is created with them (`cap_add`), but the
-loop, every job process and the engine never hold them, so `nft` fails for all of them. If the drop
+Worker host, every job process and the engine never hold them, so `nft` fails for all of them. If the drop
 cannot be confirmed the runner does not start; if the rules cannot be installed the capabilities are
 dropped anyway and every Dynamic job fails with `dynamic_isolation_self_check_failed`. The ruleset is
 the full one (`table inet`, `reject`) wherever the kernel supports it; on a kernel with only the
@@ -56,83 +46,71 @@ environment, with its config file readable (not writable) by that user only, and
 else, listens on the engine's port (`engine_user.py`), and (4) at the end, on SIGTERM (lease loss,
 shutdown, timeout) and in the watchdog, kills the engine's process group and then every process of
 that user, including helpers that left the group, and removes the job's files (the rules are static
-and stay). The loop (root) sweeps that user after every Dynamic job process, and every job sweeps it
+and stay). The Worker host (root) sweeps that user after every Dynamic job process, and every job sweeps it
 right after taking the lease; a sweep that fails makes the next job refuse to start. Without root
 (or without the user) the production preparation refuses with `dynamic_isolation_self_check_failed`:
 the engine never runs unconfined. The proofs need root and live in `tests/privileged` (below).
 
-Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
+Rules (the CR-29 decisions, kept by the Worker host `job_loop/host.py`; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
 
 - **One process per job.** The job (with the git token and the LLM key) goes to the process on
   **stdin**, never in the arguments and never in the environment. The process gets a minimal
   environment (`PATH`, `HOME`, locale, proxy and certificate settings, the tiktoken cache and its
-  timeout), so it does not see `RUNNER_TOKEN` or the job of another process, and its own working
+  timeout), so it does not see the per-job credential or the job of another process, and its own working
   directory (empty, removed afterwards: PR-Agent reads a `pyproject.toml` there). It leads its own
   process group, so ending a job ends everything it started. The group is only signalled while the
   leader is still unreaped (`process_group.py`; the process is a `Popen` whose pipes are read through
   asyncio, because asyncio's own subprocess reaps the child at once), so a reused group id can never
   be signalled (#233).
-- **The engines of a claim (#195).** The loop sends `{"engines": [...]}` with every claim: `pr-agent`
-  always, `opencode` only after the startup self-check passed (#202): root supervisor, engine user,
-  static network rules installed, `NET_ADMIN`/`SETPCAP` dropped, pinned and trusted engine and `rg`,
-  and a probe run as the engine user (`dynamic_review/self_check.py`, run by `job_loop/service.py`
-  after the network setup and before the first claim). A failure logs a stable reason and leaves
-  `pr-agent` only; a runner without an engine user (every runner but the Dynamic one) never passes.
-  The loop gives the job process of a Dynamic job the advertised engines, the verified engine command
-  and `RUNNER_DYNAMIC_CAPABILITIES`; a Diff job process gets none of them. The claim names the feature
-  `dynamic_capabilities` (`features` next to `engines`), which tells the app this runner reads the model
-  descriptor of a Dynamic job (#279); an app from before ignores the key and sends none. The claim also names
-  `dynamic_cost_policy` (#553): the runner reads `dynamic.cost` (the price book of the managed key, the token cap of an own
-  key; `dynamic_review/passthrough/cost_policy.py`) and, next to it, `dynamic.modelEntry` (#578): a job with both is native and
-  runs through the passthrough proxy and the plain-final engine path (`dynamic_review/native_job.py`, `docs/dynamic-review.md`,
-  "The native path of a job"); a job that carries a cost policy but no entry would reach the legacy wire and is refused
-  with `dynamic_config_invalid`. It names `cost_limit` too (#666): it reads `llm.maxCostUsd` (the cost limit of the project) and holds a
-  Dynamic run to the smaller of that and `RUNNER_DYNAMIC_MAX_COST_USD` (`stoppedEarly: project_cost_limit` when the project's is
-  the smaller), and a Diff run sends no further model request once its calls cost that much (`diff_cost.py`, the result code
-  `cost_limit_reached`). It names `operator_cost_limit` too (#689): it reads `llm.operatorMaxCostUsd`, the most one review may cost
-  as the operator set it in the admin portal, and holds a review of either kind to the smaller of that and `llm.maxCostUsd`; a job
-  that carries it ignores `RUNNER_DYNAMIC_MAX_COST_USD`. A runner that cannot run a
-  kind is never handed such a job by the app; a Dynamic job that arrives anyway is refused locally and
-  never run by PR-Agent.
+- **The engines the Worker advertises (#195).** `pr-agent` always, `opencode` only after the startup self-check passed
+  (#202): root supervisor, engine user, static network rules installed, `NET_ADMIN`/`SETPCAP` dropped, pinned and
+  trusted engine and `rg`, and a probe run as the engine user (`dynamic_review/self_check.py`, run by
+  `job_loop/service.py` after the network setup and before the job is fetched). A failure logs a stable reason and
+  leaves `pr-agent` only; a Worker without an engine user never passes. The Worker gives the job process of a Dynamic
+  job the advertised engines, the verified engine command and `RUNNER_DYNAMIC_CAPABILITIES`; a Diff job process gets
+  none of them. The Worker reads from a Dynamic job the model descriptor (#279), `dynamic.cost` (the price book of the
+  managed key, the token cap of an own key; `dynamic_review/passthrough/cost_policy.py`, #553) and, next to it,
+  `dynamic.modelEntry` (#578): a job with both is native and runs through the passthrough proxy and the plain-final
+  engine path (`dynamic_review/native_job.py`, `docs/dynamic-review.md`, "The native path of a job"); a job that carries
+  a cost policy but no entry would reach the legacy wire and is refused with `dynamic_config_invalid`. It reads
+  `llm.maxCostUsd` too (#666, the cost limit of the project) and holds a Dynamic run to the smaller of that and
+  `RUNNER_DYNAMIC_MAX_COST_USD` (`stoppedEarly: project_cost_limit` when the project's is the smaller), and a Diff run
+  sends no further model request once its calls cost that much (`diff_cost.py`, the result code
+  `cost_limit_reached`). It reads `llm.operatorMaxCostUsd` as well (#689), the most one review may cost as the
+  operator set it in the admin portal, and holds a review of either kind to the smaller of that and `llm.maxCostUsd`; a
+  job that carries it ignores `RUNNER_DYNAMIC_MAX_COST_USD`. A Dynamic job that arrives at a Worker that cannot run it
+  is refused locally and never run by PR-Agent.
 - **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
   process is started: an unknown command (`invalid_command`) or platform and any other invalid input
-  (`invalid_job`) are reported with `complete` at once. The platforms are the table in
+  (`invalid_job`) are delivered at once. The platforms are the table in
   `platforms.py` (`git.provider` to PR-Agent settings; `github` only in the MVP).
 - **Heartbeat** every `heartbeatIntervalSeconds` (30) while the process runs, none after it ends. A
   `409` means the lease is lost: the process is ended and nothing is reported. Other failed heartbeats
   are tried again at the next beat.
 - **Hard timeout.** The process gets `RUNNER_JOB_TIMEOUT_SECONDS` as its own limit and reports `timeout`
-  with its log when it hits it. A process that does not stop (or a blocked one) is ended by the loop
+  with its log when it hits it. A process that does not stop (or a blocked one) is ended by the Worker
   10 seconds later: `SIGTERM` to its process group, `SIGKILL` 5 seconds after that, and the job is
   reported as `timeout`. So the effective limit is the timeout plus 10 seconds.
 - **The result** is the last line the process printed on stdout, checked against the contract. A
   process that ends without a usable line (crash, signal, no output) is reported as `runner_error` with
-  the end of its stderr. The log tail is redacted again with the secrets of the job, the runner token
-  and the lease tokens, and cut to 4 KB; the body of `complete` stays under 48 KB (the app refuses 64 KiB).
+  the end of its stderr. The log tail is redacted again with the secrets of the job, the per-job credential
+  and the lease tokens, and cut to 4 KB; the body of the result stays under 48 KB (the app refuses 64 KiB).
   Only the newest 256 KB of stdout and 64 KB of stderr are kept, however much the process writes.
-- **`complete` is repeated** with growing pauses while the app cannot be reached, for up to 10
-  minutes (the lease is 2 minutes, so the app has taken the job back by then). While the result is being resent the loop keeps sending heartbeats, so the lease cannot lapse and no other runner can take the job a second time; a lost lease (409) stops the attempts. A `409` ends the
-  attempts. A `400` or `413` is answered once with the bare verdict (no log). An answer that is not HTTP (garbage, a cut-off body) counts as the app being unavailable. The answer
+- **The result is delivered with repeats** with growing pauses while the app cannot be reached, for up to 10
+  minutes (the lease is 2 minutes, so the app has taken the job back by then). While the result is being resent the
+  Worker keeps sending heartbeats, so the lease cannot lapse and no other Worker can take the job a second time; a
+  lost lease (409) stops the attempts. A `400` or `413` is answered once with the bare verdict (no log). An answer
+  that is not HTTP (garbage, a cut-off body) counts as the app being unavailable. The answer
   `status: "queued"` (after a shutdown report) is accepted.
-- **Back-off.** When the app is down or answers 5xx, 429 or 401 to a claim, the loop waits 5, 10, 20, 40,
-  then 60 seconds (never below 5 seconds, even with a shorter poll interval; or the `Retry-After` of a `503`) and starts over after a successful claim. Running
-  jobs are not touched.
-- **Shutdown.** `SIGTERM` or `SIGINT`: no new claims, running jobs may finish for
-  `RUNNER_SHUTDOWN_GRACE_SECONDS`; then they are ended and reported as `failed` with `runner_shutdown`,
-  which the app gives back to the queue (a repeated report may be answered with `409`, which is fine).
-  A second signal skips the wait. The exit code is 0.
-- **No secrets in logs.** The loop logs ids, codes and counts, never the input of a job. Every line
-  passes a masker that knows the runner token, the lease tokens and the credentials of the running jobs.
-- **The image and compose.** The entry point is `tini` (PID 1) in front of the loop, so the helpers of a
-  killed job are reaped and `docker stop` reaches the loop as SIGTERM; `init: true` is not needed.
-  Compose must give the container a `stop_grace_period` of **at least 90 seconds** (60 s grace period
-  + 5 s between SIGTERM and SIGKILL + up to 10 s to report `runner_shutdown`; Docker's default of 10 s
-  would SIGKILL the runner before the jobs are reported). `PR_AGENT_COMMAND` must never be set in a
-  production compose file: the job, with its credentials, would go to that command (the loop logs a
-  warning at start when it is set). Only `docker/smoke/compose.fake-job.yml`, the override file of the compose
-  smoke test, sets it.
-- The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
-  `runner_error` are also reported by the loop itself.
+- **Shutdown.** `SIGTERM` or `SIGINT` while a job runs: the job is ended and reported as `failed` with
+  `runner_shutdown`, which the app gives back to the queue; there is no grace period. Exit code 0.
+- **No secrets in logs.** The Worker logs ids, codes and counts, never the input of a job. Every line
+  passes a masker that knows the per-job credential, the lease tokens and the credentials of the running job.
+- **The image.** The entry point is `tini` (PID 1) in front of the Worker, so the helpers of a
+  killed job are reaped and a stop of the container reaches the Worker as SIGTERM. `PR_AGENT_COMMAND` must never be
+  set in a real deployment: the job, with its credentials, would go to that command. Only test stacks set it.
+- The codes the Worker adds to the ones of the table below: `runner_shutdown`. `timeout` and
+  `runner_error` are also reported by the Worker itself.
 
 ### The Worker: `code-reviewer-worker --once` (#323)
 
@@ -140,9 +118,8 @@ The hosted deployment (#316) runs every job in a Worker that knows nothing but t
 **per-job credential**. `code-reviewer-worker --once` is that Worker: it reads one JSON document from **stdin**,
 `{"appUrl": "...", "jobId": "<uuid>", "credential": "crj_..."}` (never the arguments or the environment; other
 keys are ignored), fetches the job over the Worker API (`contracts/worker-api.v1.json`, `/api/workers/v1`), runs it
-through the same job host as the loop (`job_loop/host.py`: the same job process, heartbeats, hard timeout, lease check
-before the Dynamic summary, masking, delivery with retry and engine-user sweep), delivers the result and exits. The
-legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged and remains the default.
+through the job host (`job_loop/host.py`: the same job process, heartbeats, hard timeout, lease check
+before the Dynamic summary, masking, delivery with retry and engine-user sweep), delivers the result and exits.
 
 | Exit | Meaning |
 |---|---|
@@ -150,9 +127,9 @@ legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged 
 | 1 | the job failed, the app no longer held it (409 on a heartbeat: the process group is ended and nothing is delivered), or the result could not be delivered |
 | 2 | the Worker could not start the job; the log line names a stable code (`worker_input_invalid`, `worker_settings_invalid`, `worker_app_unsupported`, `worker_app_unreachable`, `worker_credential_invalid`, `worker_job_ended`, `worker_job_given_back`, `worker_fetch_refused`) |
 
-- **Settings** are the variables of the job process that the loop reads too (`RUNNER_JOB_TIMEOUT_SECONDS`,
-  `PR_AGENT_COMMAND` for test stacks, `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables), and the same
-  startup self-check decides whether `opencode` is advertised. There is no `RUNNER_TOKEN` and no `RUNNER_API_URL`.
+- **Settings** are the variables of the table above (`RUNNER_JOB_TIMEOUT_SECONDS`,
+  `PR_AGENT_COMMAND` for test stacks, `RUNNER_DIFF_JOB_USER` and the Dynamic slot's variables), and the startup
+  self-check decides whether `opencode` is advertised. There is no `RUNNER_TOKEN` and no `RUNNER_API_URL`.
 - **An app without the Worker API is refused** before anything is fetched or started: a `GET /api/runners/v1/version?jobId=<its job>` (the App accepts the job credential there only with the job id, #322)
   that lists no `worker_api`, or a Worker API route that answers with something other than the contract's error body
   (an app from before the hosted deployment), ends with `worker_app_unsupported`. The Worker holds the job credential,
@@ -162,28 +139,27 @@ legacy loop (`code-reviewer-runner`, claiming with `RUNNER_TOKEN`) is unchanged 
   credential the app does not accept, a job the app ended, and a `503` that gave the job back are final.
 - **The credential** is in memory only. It is a secret of the masker from the first log line, so no log line or result
   holds it, and it is never given to the job process: that gets the job (with the git token and the model key) on stdin
-  and a minimal environment, as in the loop. A usage error does not echo the arguments.
+  and a minimal environment, as in every job process. A usage error does not echo the arguments.
+
 
 ### Entry modes of the image, the engines file and `worker-reap` (#324)
 
-One image, one entry point, four modes. `code-reviewer-runner [mode]` takes the mode as its argument; without one
-it takes `RUNNER_MODE`; without that it is `legacy`, so an installation that sets nothing starts the job loop as it
-always did. An unknown mode is a usage error (exit 2) that does not echo what was typed.
+One image, one entry point, two modes. `code-reviewer-runner <mode>` takes the mode as its required argument (the
+Sandbox-Launcher passes it as the container's command). A missing or unknown mode is a usage error (exit 2) that does
+not echo what was typed.
 
 | Mode | What it does |
 |---|---|
-| `legacy` (default) | The job loop above: claims with `RUNNER_TOKEN` and runs jobs itself. |
 | `worker-once` | One Worker (above): `{appUrl, jobId, credential}` on stdin, one job, exit code 0, 1 or 2. Same as `code-reviewer-worker --once`. |
 | `probe` | Runs the startup and prints one line of JSON, the verdict, then exits. No token, URL or credential is read. |
-| `dispatch` | The Dispatcher. This image carries no Dispatcher bundle yet (#334): the startup runs, then exit 2, `dispatcher_bundle_missing`. |
 
 **The startup is the same in every mode** and runs once, first thing in the container, before any thread, job process
 or (in `worker-once`) the start document exists: the engine user's network rules, the end of `NET_ADMIN` and
 `SETPCAP`, then the self-check that decides whether `opencode` is advertised (`job_loop/service.py`, `run_startup`).
-`worker-once`, `probe` and `code-reviewer-worker --once` also require the **read-only root filesystem** of the
-hardened container spec: on a writable root `opencode` is not advertised (`root_filesystem_writable`). The legacy
-loop does not ask for it, as before. A container that cannot drop `NET_ADMIN` (no `SETPCAP`) does not start in
-`legacy` and `worker-once` (exit 2) and answers `probe` with `capabilities_not_dropped`.
+`worker-once`, `probe` and `code-reviewer-worker --once` require the **read-only root filesystem** of the
+hardened container spec: on a writable root `opencode` is not advertised (`root_filesystem_writable`). A container
+that cannot drop `NET_ADMIN` (no `SETPCAP`) does not start in `worker-once` (exit 2) and answers `probe` with
+`capabilities_not_dropped`.
 
 **The verdict** (`probe`'s one line of stdout; logs go to stderr):
 
@@ -199,7 +175,7 @@ passed: 0 with a verdict (also `pr-agent` only), 2 when the settings are unusabl
 that wants `opencode` checks that it is in `engines`.
 
 **The engines file.** Every start writes the same verdict to `/run/code-reviewer-engines.json` so that a launcher
-inside the container (#334) reads the result of the init self-check instead of repeating it, which would need the
+inside the container reads the result of the init self-check instead of repeating it, which would need the
 capabilities that are gone. It is written only by root on a `/run` that is a tmpfs, with mode 0600 (the three tmpfs of
 the hardened container spec make it so), by a temporary file and a rename, so a link planted at the name is replaced
 and never followed. The file of an earlier start is removed before the startup runs: a start that fails leaves none.
@@ -210,19 +186,18 @@ an aid, never a gate.
 of the Worker itself, while it still holds the group's leader (never signal a group id that is no longer yours,
 `process_group.py`), then runs `worker-reap`: a `kill(-1, SIGKILL)` made as the engine user, the same sweep the Worker
 host makes after a Dynamic job. It takes no target (no pid, no group id: the part of the process-group rules that is
-a launcher's stays with the launcher), reads the same variables as the runner, needs the root supervisor and exits
+a launcher's stays with the launcher), reads the same variables as the Worker, needs the root supervisor and exits
 0 (nothing of the engine user runs, or the container has no engine user), 1 (a process survived) or 2 (the sweep could not be made: not root, unusable settings, no `python3`,
 `sweep_unavailable`).
 
-**Images.** `runner/Dockerfile` makes `runtime` (the default target, PR-Agent only), `dynamic` (self-hosted
-Dynamic) and `sandbox`, the Worker image of the hosted deployment. `sandbox` has exactly the Worker layers of
-`dynamic` (the shared stage `dynamic-worker`: the same pins, user layout and self-check) and no Dispatcher bundle:
-the Sandbox VM runs `worker-once` or `probe`, nothing else. The bundle of #334 is added to `dynamic` and `runtime`
-after that stage, never to it. Build: `docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .`
-(`make test-images` builds and smoke tests all three). Publishing it is #330.
 
-The sizing of a container (memory per process, default concurrency) is in
-`docs/spike/cr-13-measurements.md`.
+**Image.** `runner/Dockerfile` has one target, `sandbox`, the Worker image of the hosted deployment and the only image of
+the project: the golden snapshot builds it and every review job runs it in a Vercel Sandbox VM, as `worker-once` or
+`probe`, nothing else. It carries no Dispatcher bundle and no Node.js. Build:
+`docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .` (`make test-images` builds it and
+runs its smoke test).
+
+The sizing of a container (memory per process) is in `docs/spike/cr-13-measurements.md`.
 
 ## One job
 
@@ -247,8 +222,7 @@ and reported as `skipped` (`binary`, `too_large`, `engine_discovery`, `credentia
 `.claude/skills`, `.agents/skills` or `.opencode/skill(s)` are exported with a rewritten manifest
 (#701, `repo_skills.py`). Oversized blobs are never downloaded (a
 `filter blob:limit` on the commit want). Every failure carries a stable `CheckoutReason`. It is an integration seam for #197; it does not launch an engine or enable the
-capability/gate. The default runner image is not the root supervisor; the `dynamic` image target run by
-`compose.dynamic.yml` is (#202).
+capability/gate. The Worker is the root supervisor in the hardened container (#202).
 Details, hard bounds, the v1.19.0 discovery deny-list and cleanup obligations:
 [Dynamic checkout](../docs/dynamic-checkout.md).
 
@@ -292,10 +266,10 @@ and never as void:
 - a Diff command fails (it raises, times out, or reports a failure) with no usage although a request was sent
   that the provider did not certainly refuse: one still in flight, cut off, or an answer PR-Agent did not count
   (`errorReason` `no_result_from_process`, #363; see "Cost of a Diff run", below);
-- the loop ends a job process at its hard timeout (`timeout`, reason `no_result_from_process`), the process
+- the Worker ends a job process at its hard timeout (`timeout`, reason `no_result_from_process`), the process
   is killed by a signal, exits without a result line, or prints a result that disagrees with its exit code
   (`runner_error`, the same reason);
-- a failed result carries a usage the loop cannot read (reason `unreadable_usage`);
+- a failed result carries a usage the Worker cannot read (reason `unreadable_usage`);
 - the runner prints nothing at all and the lease runs out on the last attempt, the app's own hard limit ends the
   job, or the runner is shut down on the last attempt (no `complete`, or `runner_shutdown`: the app decides).
 
@@ -502,9 +476,9 @@ The answer's schema is the packaged copy of `contracts/dynamic-review/schema.v1.
 (`dynamic_review/findings-schema.v1.json`), sent as the engine's `format`, and validated again by
 `parse_dynamic_findings`. Publication of the findings is #199 (below). The isolation (dedicated uid and the
 static network boundary) is part 2b of #197; whether a runner advertises `opencode` is decided once at
-start by the self-check above, and only the Dynamic image run as `compose.dynamic.yml` runs it can pass.
+start by the self-check above, and only the Worker image run with the flags of the hardened container spec can pass.
 The runner does not rely on the app alone: `run_dynamic_job` refuses a Dynamic job with
-`dynamic_engine_unavailable` unless the loop handed this job process `opencode` among the advertised
+`dynamic_engine_unavailable` unless the Worker handed this job process `opencode` among the advertised
 engines.
 
 What the real-binary engine suite (`tests/engine/test_engine_opencode.py`) proves today, with the
@@ -596,7 +570,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `invalid_command` | The command is not `review` |
 | `pr_agent_version_mismatch` | The installed PR-Agent is not the version the runner was written for |
 | `identity_patch_failed` | The method the identity patch replaces is missing or has changed |
-| `runner_error` | A failure inside the runner itself (also reported by the job loop for a process that ended without a result) |
+| `runner_error` | A failure inside the runner itself (also reported by the Worker for a process that ended without a result) |
 | `command_failed` | PR-Agent reported a failure it handled itself (failure comment, failed flag) and nothing more specific is known |
 | `review_not_published` | `review` returned normally but no review comment was recorded (for example an identity problem) |
 | `review_state_truncated` | `review` hit GitHub's comment size limit and PR-Agent's hidden record of findings no longer fits: it is not advanced any more, so findings are forgotten (the review is posted with the old record, or as a standalone copy). `commentUrl` is set when the review comment can be found |
@@ -629,7 +603,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires (a forced tool choice, #511), or OpenRouter found no provider that supports every parameter of a request (404, #270); there is no fallback model or provider |
 | `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |
 | `superseded` | A newer push replaced this run while it was running (#396): it finished the model requests in flight, sent no more, published nothing and reports what it used. Not a failure of the job ("A superseded run", below) |
-| `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
+| `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the Worker for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
 
 ## A superseded run (#396)
@@ -657,7 +631,7 @@ at once (see "The signal" below), keeps beating, and waits for the process to en
   would have been.
 
 The host delivers that result (the same call as any result), ends `SUPERSEDED`, the Worker exits `0` and the Sandbox
-or container is torn down; the loop of a self-hosted runner goes on to its next job. A runner or Worker of an earlier
+or container is torn down. A Worker of an earlier
 release never names the feature, so the app never supersedes its jobs and nothing changes for it.
 
 ### How long it takes (the drain model)
@@ -923,7 +897,7 @@ no sampling parameter, and its calls cost an unknown amount.
   `usage.callTrace` of the result. **Nothing from the repository or the model is stored**: no path, argument, result or
   text; a tool that is none of the engine's is `other`, a finish reason outside the protocol's is `other`, and a repeat
   is decided from a digest of the normalised arguments that is never written out. At most 100 entries of each kind are
-  kept (`truncated` says more happened). The job loop passes the trace on only when it is exactly the contract's
+  kept (`truncated` says more happened). The Worker passes the trace on only when it is exactly the contract's
   shape (`RESULT_CALL_TRACE_INVALID` in the log otherwise, the usage stays) and `fit_request` drops it, whole, before it shrinks
   the log when the body is too large (and `minimal()` has none). A call that ended the run without a usable answer (no
   usage, an answer over the byte bound) is in it with `null`s. Nothing in the run reads it back.
@@ -1200,8 +1174,7 @@ with a memory limit (`--docker IMAGE --memory 2g`), where it also reads the peak
 kills of the whole container. `--fake-llm` replaces the model with a canned local answer and puts a
 dummy key into the job, so a run costs nothing; but every run, fake or real, posts or edits the real
 review comment of the sandbox pull request, and the canned finding overwrites it. The script exits
-with 1 if a child failed or was killed, and limits repeats and processes to 10. The results and the numbers derived from them (default `RUNNER_CONCURRENCY`, server
-size) are in `docs/spike/cr-13-measurements.md`. Like the manual run it needs `--yes`.
+with 1 if a child failed or was killed, and limits repeats and processes to 10. The results and the numbers derived from them (memory per job process) are in `docs/spike/cr-13-measurements.md`. Like the manual run it needs `--yes`.
 
 ## Manual run
 

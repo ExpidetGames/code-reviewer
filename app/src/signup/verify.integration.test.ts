@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the verification link and the request for a new one through the real route handlers, the
-// real counters and a real SQLite file: a link verifies once, every way a link can be wrong is refused
+// real counters and a real Postgres database: a link verifies once, every way a link can be wrong is refused
 // with a stable code and changes nothing, nothing says whether an address has an account, and junk can
 // never use up the attempts of a valid link.
 import { describe, expect, it, vi } from "vitest";

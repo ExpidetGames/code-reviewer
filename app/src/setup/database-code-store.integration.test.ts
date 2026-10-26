@@ -2,15 +2,10 @@
 
 // The setup code of a serverless deployment, kept in the database so every instance sees the same
 // code and the same counters (#321). Every test here makes "another instance" by building a second
-// store over the same database: nothing is shared between two stores but the rows. The Postgres
-// variant at the end repeats the races on a real server and runs only when TEST_DATABASE_URL is set.
+// store over the same database: nothing is shared between two stores but the rows. The last
+// group repeats the races with concurrent submissions on connection pools of their own.
 import { describe, expect, it } from "vitest";
 import { createSetupCodesRepository } from "../db/repositories/setup-codes-repository.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import { createTestDatabase } from "../test-support/test-database.ts";
 import {
   SETUP_ATTEMPT_WINDOW_MS,
   SETUP_ATTEMPTS_PER_WINDOW,
@@ -18,6 +13,7 @@ import {
   SETUP_MAX_FAILURES,
 } from "./code-store.ts";
 import { createDatabaseSetupCodeStore } from "./database-code-store.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const SECRET = "database-code-store-secret-0123456789-0123456789";
 const CODE = "482913";
@@ -495,12 +491,10 @@ describe("a database that cannot be read", () => {
   });
 });
 
-const describePostgres = hasPostgres() ? describe : describe.skip;
-
-describePostgres("the database backed setup code on Postgres", () => {
+describe("the database backed setup code with concurrent instances", () => {
   // #321-T01
   it("is issued by one instance and accepted by another, each with a connection pool of its own", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const time = clock();
     const issued = await instance(postgres.db, time).issue();
 
@@ -511,7 +505,7 @@ describePostgres("the database backed setup code on Postgres", () => {
 
   // #321-T03
   it("lets exactly one of twenty concurrent correct submissions win", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 10 });
+    const postgres = await createTestDatabase({ poolMax: 10 });
     const time = clock();
     await instance(postgres.db, time).issue();
 
@@ -526,7 +520,7 @@ describePostgres("the database backed setup code on Postgres", () => {
 
   // #321-T02
   it("lets only the tenth wrong guess through to the comparison when several arrive at the same moment", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 10 });
+    const postgres = await createTestDatabase({ poolMax: 10 });
     const time = clock();
     const store = instance(postgres.db, time);
     await store.issue();
@@ -553,7 +547,7 @@ describePostgres("the database backed setup code on Postgres", () => {
 
   // #321-T02
   it("counts five attempts per minute across concurrent instances", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 10 });
+    const postgres = await createTestDatabase({ poolMax: 10 });
     const time = clock();
     await instance(postgres.db, time).issue();
 
@@ -653,10 +647,10 @@ describe("the setup codes repository", () => {
   });
 });
 
-describePostgres("the setup codes repository on Postgres", () => {
+describe("the setup codes repository on Postgres", () => {
   // #321-T01
   it("keeps exactly one row, matching the issuance, when several replace it at the same moment on an empty table", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 10 });
+    const postgres = await createTestDatabase({ poolMax: 10 });
     const repository = createSetupCodesRepository(postgres.db);
     const createdAt = new Date("2026-10-15T08:00:00.000Z");
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down what the GitHub App webhook route does with a delivery, through the real handler with
-// the real GitHub App provider, a real SQLite file and the fake GitHub API: refusals happen before
+// the real GitHub App provider, a real Postgres database and the fake GitHub API: refusals happen before
 // anything else, every accepted delivery is remembered by its id, a failure makes the delivery
 // retryable, and the response and the logs never carry a secret or a signature.
 import { createHmac } from "node:crypto";
@@ -707,8 +707,8 @@ describe("a delivery that was turned away for a reason that can change", () => {
 
 describe("a delivery whose handling fails", () => {
   const databaseError = () =>
-    Object.assign(new Error("SQLITE_ERROR: no such table: jobs"), {
-      code: "SQLITE_ERROR",
+    Object.assign(new Error('relation "jobs" does not exist'), {
+      code: "42P01",
     });
 
   // CR-22-T13

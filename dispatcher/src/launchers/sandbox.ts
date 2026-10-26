@@ -89,7 +89,7 @@ export const SANDBOX_KIND_DEFAULTS: Readonly<
   dynamic: { vcpus: 1, memory: { limit: "1536m", reservation: "1280m" } },
 };
 
-/** What every container is given, the same as the self-hosted compose service (names of the spec's allow-list). */
+/** What every container is given (names of the spec's allow-list). */
 export const CONTAINER_ENVIRONMENT = {
   HOME: "/home/runner",
   RUNNER_DIFF_JOB_USER: "10001:10001",
@@ -119,8 +119,7 @@ export type SandboxLauncherOptions = {
   now?: () => Date;
   /**
    * The operator's Dynamic configuration, given to the container of a Dynamic job only (#331):
-   * `RUNNER_DYNAMIC_CAPABILITIES` and `RUNNER_DYNAMIC_MAX_COST_USD`, as the self-hosted `runner-dynamic` service has
-   * them. Non-secret; names of the container spec's allow-list.
+   * `RUNNER_DYNAMIC_CAPABILITIES` and `RUNNER_DYNAMIC_MAX_COST_USD`. Non-secret; names of the container spec's allow-list.
    */
   dynamicEnvironment?: Readonly<Record<string, string>>;
 };

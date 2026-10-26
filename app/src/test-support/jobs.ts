@@ -87,11 +87,10 @@ export type JobQueueFixture = {
   db: Kysely<Database>;
   workspaceId: string;
   /**
-   * The path of the SQLite database file, for a second connection or a child process. A fixture on
-   * a supplied (Postgres) database has no file: reading this throws instead of handing out an empty
-   * path.
+   * The URL of the Postgres database, for a second connection or a child process. A fixture on a
+   * supplied connection does not know it: reading this throws instead of handing out an empty URL.
    */
-  databasePath: string;
+  databaseUrl: string;
   queue: TestQueue;
   clock: TestClock;
   /** The first repository (it gets all jobs of `enqueue` unless told otherwise). */
@@ -136,7 +135,7 @@ export type JobQueueFixture = {
 export async function createJobQueueFixture(
   options: {
     limits?: Partial<JobQueueLimits>;
-    /** A database to seed instead of a fresh SQLite one (for the Postgres tests). */
+    /** A database to seed instead of a fresh one (a pool of another size, for example). */
     database?: Kysely<Database>;
     /** #195: enable the Dynamic Review rollout gate for this fixture (default off). */
     dynamicReview?: boolean;
@@ -149,10 +148,10 @@ export async function createJobQueueFixture(
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
-    ? { db: options.database, databasePath: null as string | null }
+    ? { db: options.database, databaseUrl: null as string | null }
     : await (async () => {
         const test = await createTestDatabase();
-        return { db: test.db, databasePath: test.config.path as string | null };
+        return { db: test.db, databaseUrl: test.url as string | null };
       })();
   const { db } = created;
   const clock = createTestClock();
@@ -223,12 +222,12 @@ export async function createJobQueueFixture(
   return {
     db,
     workspaceId,
-    get databasePath(): string {
-      if (created.databasePath === null)
+    get databaseUrl(): string {
+      if (created.databaseUrl === null)
         throw new Error(
-          "A Postgres job queue fixture has no database file path; use its connection.",
+          "A job queue fixture on a supplied connection has no database URL; use its connection.",
         );
-      return created.databasePath;
+      return created.databaseUrl;
     },
     queue,
     clock,

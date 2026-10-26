@@ -7,7 +7,7 @@
 import { expect, test, type Response } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
 import { rawRequest } from "../helpers/raw-request";
-import { readSetupCode } from "../helpers/setup";
+import { makeSetupCode } from "../helpers/setup";
 
 test.use({ baseURL: e2eEnv.setupAppUrl });
 
@@ -74,10 +74,10 @@ test.describe("the first-run setup", () => {
   });
 
   // #97-SU-20
-  test("@smoke an operator reads the code from the log, walks through the three steps and lands in the admin area signed in", async ({
+  test("@smoke an operator makes the code with pnpm setup-code, walks through the three steps and lands in the admin area signed in", async ({
     page,
   }) => {
-    const code = readSetupCode(e2eEnv.logFiles.setup);
+    const code = await makeSetupCode(e2eEnv.setupDatabaseUrl);
 
     // Any page shows the setup, and the code is nowhere on it.
     const response = await page.goto("/");

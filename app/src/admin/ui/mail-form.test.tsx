@@ -69,7 +69,6 @@ function view(
     signUpRuleState: { failClosed: false },
     secrets: [],
     setupCompletedAt: "2026-10-12T08:00:00.000Z",
-    importNotice: null,
   };
 }
 

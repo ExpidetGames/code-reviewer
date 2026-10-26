@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the Worker API (#320) through the real handlers and a real SQLite file: the split claim
+// Pins down the Worker API (#320) through the real handlers and a real Postgres database: the split claim
 // (a Dispatcher gets a per-job credential and no job input), the three Worker calls under
 // `/api/workers/v1/jobs/:id` (details, heartbeat, result) and every rule around the credential: it is
 // 256 bits, stored only as a hash, valid for its own job and its own claim only, never logged, and
@@ -17,6 +17,7 @@ import {
   type RunnerApiHarness,
 } from "../../src/test-support/runner-api-harness.ts";
 import type { ModelCapabilityChecker } from "../../src/llm/model-capabilities.ts";
+import { tableNames } from "../../src/test-support/tables.ts";
 
 const MINUTE = 60 * 1000;
 const CREDENTIAL_FORM = /^crj_[A-Za-z0-9_-]{43}$/;
@@ -35,12 +36,8 @@ async function errorOf(response: Response) {
 
 /** Everything in the database as text, to look for a value anywhere. */
 async function dumpDatabase(h: RunnerApiHarness): Promise<string> {
-  const { rows: tables } = await sql<{ name: string }>`
-    select name from sqlite_master where type = 'table' and name not like 'sqlite_%'`.execute(
-    h.db,
-  );
   const parts: string[] = [];
-  for (const { name } of tables) {
+  for (const name of await tableNames(h.db)) {
     const { rows } = await sql`select * from ${sql.table(name)}`.execute(h.db);
     parts.push(JSON.stringify(rows));
   }

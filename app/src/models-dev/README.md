@@ -31,7 +31,6 @@ sees a model id from here (principle 2 of #420); the admin screens (#554, `src/a
 
 - **Hosted (serverless):** the cron sweep (`src/dispatch/sweep.ts`, step `models_dev`, every 2 hours) asks
   `refreshIfDue`. There is no cron of its own.
-- **A long-lived server (Docker, Coolify):** a timer (`startup.ts`) asks at the start and every hour, in production only.
 - `refreshIfDue` fetches when the last success is more than **23 hours** old and the last failure more than **an hour**
   old, so a tick every two hours gives about one fetch a day and a restart does not fetch again. The day is kept in
   `models_dev_fetch_state`, so every instance sees the same one; a database try-lock (`MODELS_DEV_LOCK`) lets one run work
@@ -137,7 +136,7 @@ a **real key is sent**, so it is untrusted (`upstream-url.ts`):
 
 **The admin's confirmation and the fetch.** A fetch reads the provider rows, plans and writes in one transaction, and reads
 them `FOR UPDATE` on Postgres, so an admin's confirmation (#554) made meanwhile waits and is applied after the fetch instead
-of being written over. On SQLite every transaction begins `begin immediate`, which serialises the two. The confirmation
+of being written over. The confirmation
 must be a guarded update of the one row in a transaction of its own (`update ... set trusted_url = pending_url, url_state =
 'trusted' ... where provider_id = ? and url_state = 'url_changed' and pending_url = ?`, and only when `url_problem` is null);
 it needs no other lock, in particular not `MODELS_DEV_LOCK`.
@@ -182,7 +181,6 @@ and Anthropic keep their adapters until #556.
 ## Tests
 
 `parse.test.ts`, `upstream-url.test.ts`, `plan.test.ts`, `job-entry.test.ts`, `generic-adapter.test.ts`, `fetch.test.ts`,
-`settings.test.ts`, `startup.test.ts`, `opencode-providers.test.ts` (unit); `service.integration.test.ts` (SQLite and
-Postgres, against the fake `fakes/models-dev/` with a real database); the repository and migration tests in `src/db/`; the
+`settings.test.ts`, `opencode-providers.test.ts` (unit); `service.integration.test.ts` (Postgres, against the fake `fakes/models-dev/` with a real database); the repository and migration tests in `src/db/`; the
 contract tests `integration-tests/compatibility/job-model-entry-contract.integration.test.ts` and
 `runner/tests/contract/test_job_model_entry_contract.py`. No test reaches the internet.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Signing in with GitHub through the GitHub App's user authorization, end to end through the real Better
-// Auth handler and the fake GitHub, against a real SQLite file: who is created, who is linked, who is
+// Auth handler and the fake GitHub, against a real Postgres database: who is created, who is linked, who is
 // refused, and what is written when somebody is refused (nothing). The sign-up rule is applied to the
 // verified primary email address of the GitHub account, an identity is matched by its numeric GitHub id,
 // and an address alone never links two accounts.

@@ -4,7 +4,7 @@
 // the claim fails with `llm_not_configured`, no credential created, no other key borrowed), a failure
 // the runner reports ends as a failed Run with a stable, translated code and starts no other review
 // (no fallback to another kind), and a secret that comes back in the result is gone from everything
-// stored and shown. The real claim, queue and Runs read side run over a real SQLite file; only GitHub is
+// stored and shown. The real claim, queue and Runs read side run over a real Postgres database; only GitHub is
 // the fake and the "runner" is the test.
 import { describe, expect, it } from "vitest";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";

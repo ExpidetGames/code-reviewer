@@ -5,7 +5,7 @@
 // the GitHub account of an installation, which no workspace owns, so "was this account granted before" has to be asked across
 // workspaces, and the row has to outlive the workspace it names. It holds a numeric id, a workspace id and a time: not customer
 // data. The one write is `claim`, and it is the lock of the whole grant: the primary key lets exactly one of two writers insert
-// an account, whatever their transactions do (Postgres makes the second wait for the first to commit; SQLite has one writer).
+// an account, whatever their transactions do (Postgres makes the second wait for the first to commit).
 import "server-only";
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";

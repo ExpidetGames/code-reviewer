@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Proves that no runtime source file of the app reads a legacy environment variable. The update of
-// an installation from before accounts imports `GITHUB_APP_*`, `LLM_PROVIDER` / `LLM_API_KEY` and
-// `ALLOWED_GITHUB_*` once (src/legacy-import/); afterwards nothing else may read them. The scan looks
+// Proves that no runtime source file of the app reads a legacy environment variable. The GitHub App and the LLM
+// key live in the database (entered in the admin portal); nothing may read `GITHUB_APP_*`, `LLM_PROVIDER` /
+// `LLM_API_KEY` or `ALLOWED_GITHUB_*` from the environment again. The scan looks
 // at tracked files, so a file that reads the variables and is not committed yet is not caught until
 // it is added; that is the same trade-off as the tracked-secrets scan (src/ci/tracked-secrets.test.ts).
 import { execFileSync } from "node:child_process";
@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
-/** The variables that only src/legacy-import/ may read after the update. */
+/** The variables that no runtime file may read from the environment. */
 const LEGACY_VARIABLES = [
   "GITHUB_APP_ID",
   "GITHUB_APP_SLUG",
@@ -29,16 +29,12 @@ const LEGACY_VARIABLES = [
 
 /**
  * The runtime files that may still read a legacy variable, and why:
- * - `src/legacy-import/` is the one place that reads them, once, to import an existing installation.
- * - `auth/access-config.ts` parses `ALLOWED_GITHUB_LOGINS` / `ALLOWED_GITHUB_ORG` for that import.
  * - `integrations/providers/github-app/config.ts` is the shared loader; the running server feeds it
- *   from the database, the import feeds it the environment.
+ *   from the database.
  * - `runner-api/redact.ts` masks a legacy `LLM_API_KEY` that may still sit in the environment of a
  *   running instance.
  */
 const RUNTIME_ALLOWED = [
-  "app/src/legacy-import/",
-  "app/src/auth/access-config.ts",
   "app/src/integrations/providers/github-app/config.ts",
   "app/src/runner-api/redact.ts",
 ];
@@ -94,7 +90,7 @@ function reads(files: { path: string; content: string }[]): string[] {
 
 describe("the runtime source of the app", () => {
   // #159-T02
-  it("reads no legacy environment variable outside the update import", () => {
+  it("reads no legacy environment variable", () => {
     const files = runtimeSourceFiles();
 
     expect(files.length).toBeGreaterThan(100);

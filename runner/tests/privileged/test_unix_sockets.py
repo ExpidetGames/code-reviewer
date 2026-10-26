@@ -4,8 +4,9 @@
 
 The nft rules cover TCP, UDP and IPv6 of the engine user, but not AF_UNIX: a unix socket reaches any
 listener in the container's network namespace, or any socket file on a filesystem the engine user
-can see. Today nothing in the container listens on one and nothing is mounted (the compose file has
-no `volumes`, `network_mode`, `pid`, `ipc` or Docker socket: `app/src/ci/compose-dynamic.test.ts`),
+can see. Today nothing in the container listens on one and nothing is mounted (the container spec
+has no volume, host network, pid or ipc namespace or Docker socket:
+contracts/worker-container.v1.json),
 so the gap is empty. These tests, run as the engine user while a real engine stand-in is running,
 keep it empty: they fail the day a listener (a unix-socket proxy, a credential helper) or a socket
 file appears, and they prove they would notice one.

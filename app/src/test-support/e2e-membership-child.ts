@@ -4,17 +4,17 @@
 // `--conditions=react-server` lets `server-only` pass) to make an account a member of a workspace of the app
 // under test, the way an import of an existing installation does (a person who signed in with GitHub before
 // workspaces existed belongs to the workspace of the installation): through the real repository on the app's
-// SQLite file, never by writing rows. The journeys of the invitations do not use it; they invite.
+// database, never by writing rows. The journeys of the invitations do not use it; they invite.
 //
 //   join <db> <json>   {login | email, role, workspace?}   -> {workspace, userId} (workspace: a slug; default: the oldest)
 //
 // Prints one JSON line.
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { WorkspaceRole } from "../workspaces/roles.ts";
 
-const [command, databasePath, argument] = process.argv.slice(2);
-if (command !== "join" || !databasePath || !argument)
+const [command, databaseUrl, argument] = process.argv.slice(2);
+if (command !== "join" || !databaseUrl || !argument)
   throw new Error("Usage: e2e-membership-child.ts join <db> <json>");
 
 const input = JSON.parse(argument) as {
@@ -23,11 +23,7 @@ const input = JSON.parse(argument) as {
   role: WorkspaceRole;
   workspace?: string;
 };
-const db = openDatabase({
-  driver: "sqlite",
-  path: databasePath,
-  busyTimeoutMs: 5000,
-});
+const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
 try {
   const user = await db
     .selectFrom("users")

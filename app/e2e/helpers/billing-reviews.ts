@@ -14,17 +14,11 @@ const CHILD = resolve(
 
 /** A refused payment of the default workspace's 25 USD top-up, and a refund of a payment that is none of ours. */
 export async function seedBillingReviews(
-  databasePath: string,
+  databaseUrl: string,
 ): Promise<{ workspaceId: string }> {
   const { stdout } = await run(
     process.execPath,
-    [
-      "--no-warnings",
-      "--conditions=react-server",
-      CHILD,
-      "seed",
-      resolve(process.cwd(), databasePath),
-    ],
+    ["--no-warnings", "--conditions=react-server", CHILD, "seed", databaseUrl],
     { cwd: process.cwd() },
   );
   const line = stdout.trim().split("\n").at(-1) ?? "{}";

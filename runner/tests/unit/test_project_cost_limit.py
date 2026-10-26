@@ -38,7 +38,6 @@ from code_reviewer_runner.dynamic_review.budget import (
 from code_reviewer_runner.dynamic_review.native_job import build_native_job
 from code_reviewer_runner.dynamic_review.proxy import capabilities_from_config
 from code_reviewer_runner.job import JobError, parse_job
-from code_reviewer_runner.job_loop.api import CLAIM_FEATURES
 from code_reviewer_runner.job_loop.reporting import STOPPED_EARLY_REASONS
 from code_reviewer_runner.job_loop.worker_api import WORKER_FEATURES
 from code_reviewer_runner.log_capture import LogCapture
@@ -114,10 +113,7 @@ def test_a_diff_job_carries_the_project_cost_limit_too() -> None:
 
 
 # #666-T03
-def test_the_runner_names_the_cost_limit_feature_where_it_claims_and_where_a_worker_fetches() -> (
-    None
-):
-    assert "cost_limit" in CLAIM_FEATURES
+def test_the_runner_names_the_cost_limit_feature_where_a_worker_fetches() -> None:
     assert "cost_limit" in WORKER_FEATURES
 
 

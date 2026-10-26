@@ -18,7 +18,7 @@ import {
   type JsonValue,
 } from "../../integrations/types.ts";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
-import { errorCode } from "../errors.ts";
+import { errorCode, UNIQUE_VIOLATION } from "../errors.ts";
 import type { Database, IntegrationsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 
@@ -166,7 +166,7 @@ export function createIntegrationsRepository(
       try {
         await db.insertInto("integrations").values(row).execute();
       } catch (cause) {
-        if (errorCode(cause) === "SQLITE_CONSTRAINT_UNIQUE")
+        if (errorCode(cause) === UNIQUE_VIOLATION)
           throw new IntegrationError(
             "INTEGRATION_ALREADY_EXISTS",
             `An integration of type "${input.type}" with this external id exists already.`,

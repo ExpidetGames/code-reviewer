@@ -3,9 +3,8 @@
 A workspace brings its own LLM key (bring your own key, BYOK; `docs/decisions/0001-editions-setup-and-accounts.md`,
 sections 2.7 and 2.8), or, where an operator has set its key mode to `managed`, uses the operator's own key (below). An Admin or an Owner enters it under **Settings → LLM** of the workspace
 (`/w/:workspace/settings/llm`), one card and one key for **each registered provider** (#426); removing a key is a danger zone under **Settings → Advanced**, one button for each provider that has a key. The app
-hands the key of the job's own workspace to the runner with every job. The legacy `LLM_PROVIDER` and `LLM_API_KEY`
-were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
-are not read any more; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
+hands the key of the job's own workspace to the runner with every job. The former `LLM_PROVIDER` and `LLM_API_KEY`
+variables are not read; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
 
 ## Providers
 
@@ -93,7 +92,7 @@ provider** since #426 (below, "The keys of a workspace").
 the workspace's own choice** (below, "The key mode a workspace chooses"); the entitlement's key mode is not consulted then.
 The three cases are the same:
 
-1. **`own`, or no entitlements at all** (an instance that never configured any, which is every self-hoster): the
+1. **`own`, or no entitlements at all** (an instance that never configured any): the
    workspace's own key **of the provider the job is for** (the default provider until a project can choose, #426),
    stored encrypted (below), bound to that provider. A key of another provider is never taken. **The operator's key is
    never read** for such a workspace, not even when it has no key of its own: the job then fails with `no_key`.
@@ -341,9 +340,7 @@ of the models.dev id is an underscore), `catalog.ts` reads what the catalog offe
 
 ## The variables
 
-`LLM_PROVIDER` and `LLM_API_KEY` are **legacy**: the update of an existing installation reads them once
-(`src/legacy-import/environment.ts`, through `checkLlmApiKey` and the same provider list) and saves the key as the default
-workspace's key, bound to the provider; a new instance ignores them, and nothing reads them afterwards. `LLM_MODEL` and
+`LLM_PROVIDER` and `LLM_API_KEY` are **retired**: nothing reads them. `LLM_MODEL` and
 `LLM_MAX_TOKENS` configure the built-in model and the context window of the instance; the import also copies a
 `LLM_MODEL` that differs from the default into the review defaults of the default workspace (unless the team chose a
 model), so the model survives the removal of the variable.
@@ -363,12 +360,12 @@ hand; a contract test belongs to the runner API contracts (CR-28).
 no model name, `LLM_MAX_TOKENS` that is no number in range) does not stop the reviews: it is ignored, the default is
 used, and it is reported as a _warning_ (`LLM_MODEL_INVALID`, `LLM_MAX_TOKENS_INVALID`).
 
-| File         | Role                                                                                                                                                                                                                                                                                                                                                           |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`  | `readLlmDefaults(env)`: the built-in model (`LLM_MODEL`) and the context window (`LLM_MAX_TOKENS`), a wrong one ignored with a warning; `configuredLlmModel`; `checkLlmApiKey` (the one rule for a key, shared with the key routes and the legacy import). The legacy `LLM_PROVIDER` / `LLM_API_KEY` are not read here (src/legacy-import/ imports them once). |
-| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                                                                                                                                |
-| `status.ts`  | `LlmStatus`: what the UI may know about the instance's LLM defaults (the built-in model and the warnings about an ignored option). The key is a matter of each workspace.                                                                                                                                                                                      |
-| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                                                                                                                                 |
+| File         | Role                                                                                                                                                                                                                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`  | `readLlmDefaults(env)`: the built-in model (`LLM_MODEL`) and the context window (`LLM_MAX_TOKENS`), a wrong one ignored with a warning; `configuredLlmModel`; `checkLlmApiKey` (the one rule for a key, shared with the key routes). The former `LLM_PROVIDER` / `LLM_API_KEY` are not read. |
+| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                                                              |
+| `status.ts`  | `LlmStatus`: what the UI may know about the instance's LLM defaults (the built-in model and the warnings about an ignored option). The key is a matter of each workspace.                                                                                                                    |
+| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                                                               |
 
 ## Model capabilities
 
@@ -401,7 +398,7 @@ states no window yields no descriptor. Nothing is invented. The claim of a Dynam
 
 The request goes to the provider's fixed address (`endpoint.ts`; the test stack points it at the fake LLM with
 the existing switch), sends no credential, follows no redirect, has a timeout and the size limit, and the fetch is
-a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`); the claim of a managed
+a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model and on every claim of a Dynamic job whose model is not in the cache (#279); a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning. The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`); the claim of a managed
 job (#280) passes `logAs` and the line names its tier (`model=tier=high`) instead of the id.
 `createModelCapabilityChecker` remembers a `supported` answer in memory for five minutes (at most 200 models), so
 saving the same model repeatedly asks once; for a settings save no other outcome is remembered. **The claim of a
@@ -449,7 +446,7 @@ workspace's key and on the operator's);
 `operator-key-test.integration.test.ts` (the operator's Test button and its own counters),
 `operator-access.integration.test.ts` (whose key a workspace gets, over a real database; a provider without a key is `operator_key_missing`),
 `key-mode.integration.test.ts`, `key-mode-http.integration.test.ts` and `ui/key-mode-card.test.tsx` (the key mode a workspace chooses while billing is on, #496; with `../workspaces/effective-key-mode.test.ts`, `../jobs/claim-key-mode.integration.test.ts` and `integration-tests/http/runner-api-key-mode.integration.test.ts`; journey `e2e/billing/key-mode.e2e.ts`),
-`key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
+`key-test.integration.test.ts` (real Postgres, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-keys-route.integration.test.ts` (the per-provider routes and the alias beside them, the shared limit of the test button, no key in any answer, log or page), `integration-tests/http/llm-key-route.integration.test.ts` (the alias routes, the real route files: roles, isolation, the request,
 the test button, no key in any answer or log; and a managed workspace's settings: no form, the same note for every
 role, the routes still working), `integration-tests/http/runner-api-llm-key.integration.test.ts` (the claim: each

@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { FakeSandboxService } from "../../../fakes/sandbox/service.ts";
-import { createBackgroundTracker } from "../background.ts";
+import { createBackgroundTracker } from "../test-support/background.ts";
 import { SandboxServiceError } from "../launchers/sandbox-service.ts";
 import {
   KEY_ID,

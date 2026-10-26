@@ -14,7 +14,7 @@ validate real answers against it (`app/integration-tests/compatibility/operator-
 
 `OPERATOR_API_TOKEN` is optional. While it is unset, blank or unusable, every path below `/api/operator/v1` (any
 method) ends in Next.js's `notFound()`: the answer of a path that does not exist, before the request is read and
-without opening the database. A self-hoster who never sets it has no extra surface.
+without opening the database. An instance that never sets it has no extra surface.
 
 The token follows the rules of `RUNNER_TOKEN`: at least 32 characters, no white space or control characters
 (`token.ts`). It must differ from `RUNNER_TOKEN`, `APP_SECRET` and `BETTER_AUTH_SECRET` (the deprecated name of the master key; it

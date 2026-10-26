@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the runner API and the Worker API tell the server when a job ends or a call touches the database (#395),
-// through the real handlers and a real SQLite file: the end of a job (a result, a job given back by a Worker or
+// through the real handlers and a real Postgres database: the end of a job (a result, a job given back by a Worker or
 // by a Dispatcher) is reported once, with the pull request, so the jobs that waited for the slot can be sent
 // without the sweep; a heartbeat and a result are the moments at which repair work may run.
 import { describe, expect, it, vi } from "vitest";

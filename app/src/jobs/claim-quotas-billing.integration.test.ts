@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The plan run quotas while billing is on (ADR 0006, D5; #499), on SQLite and, when TEST_DATABASE_URL is set, on Postgres: the
+// The plan run quotas while billing is on (ADR 0006, D5; #499), : the
 // run limits of an entitlements row (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`) are not enforced at the claim then, while the
 // suspension, unreadable entitlements and the cost limits are. With billing off nothing changes: a self-hosting operator keeps
 // the limits of epic #268 (src/usage/README.md).
-import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";
-import type { Database } from "../db/schema.ts";
 import {
   fundWorkspace,
   setBillingSwitch,
@@ -17,28 +15,15 @@ import {
   createJobQueueFixture,
   type JobQueueFixture,
 } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import type {
   EntitlementLimits,
   EntitlementsData,
 } from "../workspaces/entitlements.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
 function entitlements(
   overrides: {
@@ -62,200 +47,177 @@ function entitlements(
   };
 }
 
-describe.each(databases)(
-  "the plan run quotas at claim, billing on and off, on %s",
-  (name, open) => {
-    const run = name === "Postgres" && open === undefined ? it.skip : it;
-
-    async function start(billing: "on" | "off") {
-      const database = await open?.();
-      const fixture = await createJobQueueFixture({
-        ...(database === undefined ? {} : { database }),
-        dynamicReview: true,
-      });
-      if (billing === "on") {
-        await setBillingSwitch(fixture.db, true);
-        await fundWorkspace(
-          fixture.db,
-          fixture.workspaceId,
-          1_000_000_000,
-          fixture.clock.now,
-        );
-      }
-      return fixture;
-    }
-
-    const entitle = (
-      fixture: JobQueueFixture,
-      overrides: Parameters<typeof entitlements>[0],
-    ) =>
-      createWorkspaceEntitlementsRepository(
+describe("the plan run quotas at claim, billing on and off,", () => {
+  async function start(billing: "on" | "off") {
+    const database = await open();
+    const fixture = await createJobQueueFixture({
+      ...(database === undefined ? {} : { database }),
+      dynamicReview: true,
+    });
+    if (billing === "on") {
+      await setBillingSwitch(fixture.db, true);
+      await fundWorkspace(
         fixture.db,
         fixture.workspaceId,
+        1_000_000_000,
         fixture.clock.now,
-      ).put(entitlements(overrides), null);
-
-    let pr = 100;
-    function enqueue(
-      fixture: JobQueueFixture,
-      reviewKind: "diff" | "dynamic" = "diff",
-    ) {
-      pr += 1;
-      fixture.clock.advance(1);
-      return fixture.enqueueNew({ prNumber: pr, reviewKind });
+      );
     }
+    return fixture;
+  }
 
-    // #499-T08
-    run(
-      "does not refuse a job of a kind whose run limit is 0 while billing is on",
-      async () => {
-        const fixture = await start("on");
-        await entitle(fixture, {
-          limits: { diffRunsPerPeriod: 0, dynamicRunsPerPeriod: 0 },
-        });
-        const diff = await enqueue(fixture, "diff");
-        const dynamic = await enqueue(fixture, "dynamic");
+  const entitle = (
+    fixture: JobQueueFixture,
+    overrides: Parameters<typeof entitlements>[0],
+  ) =>
+    createWorkspaceEntitlementsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ).put(entitlements(overrides), null);
 
-        const first = await fixture.queue.claimNext("runner-a", ENGINES);
-        const second = await fixture.queue.claimNext("runner-a", ENGINES);
+  let pr = 100;
+  function enqueue(
+    fixture: JobQueueFixture,
+    reviewKind: "diff" | "dynamic" = "diff",
+  ) {
+    pr += 1;
+    fixture.clock.advance(1);
+    return fixture.enqueueNew({ prNumber: pr, reviewKind });
+  }
 
-        expect([first?.job.id, second?.job.id]).toEqual([diff.id, dynamic.id]);
-      },
-    );
-
-    // #499-T08
-    run(
-      "does not count the runs of the period against a limit while billing is on",
-      async () => {
-        const fixture = await start("on");
-        await entitle(fixture, { limits: { diffRunsPerPeriod: 1 } });
-        const jobs = [await enqueue(fixture), await enqueue(fixture)];
-
-        const claimed = [
-          await fixture.queue.claimNext("runner-a", ENGINES),
-          await fixture.queue.claimNext("runner-a", ENGINES),
-        ];
-
-        expect(claimed.map((answer) => answer?.job.id)).toEqual(
-          jobs.map((job) => job.id),
-        );
-      },
-    );
-
-    // #499-T08
-    run("still refuses a suspended workspace while billing is on", async () => {
-      const fixture = await start("on");
-      await entitle(fixture, { suspended: true });
-      const job = await enqueue(fixture);
-
-      expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
-
-      expect(await fixture.queue.get(job.id)).toMatchObject({
-        status: "failed",
-        errorCode: "workspace_suspended",
-      });
+  // #499-T08
+  it("does not refuse a job of a kind whose run limit is 0 while billing is on", async () => {
+    const fixture = await start("on");
+    await entitle(fixture, {
+      limits: { diffRunsPerPeriod: 0, dynamicRunsPerPeriod: 0 },
     });
+    const diff = await enqueue(fixture, "diff");
+    const dynamic = await enqueue(fixture, "dynamic");
 
-    // #499-T08
-    run(
-      "still fails a job whose entitlements cannot be read while billing is on",
-      async () => {
-        const fixture = await start("on");
-        await entitle(fixture, { limits: { diffRunsPerPeriod: 5 } });
-        await fixture.db
-          .updateTable("workspace_entitlements")
-          .set({ limits: "{not json" })
-          .execute();
-        const job = await enqueue(fixture);
+    const first = await fixture.queue.claimNext("runner-a", ENGINES);
+    const second = await fixture.queue.claimNext("runner-a", ENGINES);
 
-        expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+    expect([first?.job.id, second?.job.id]).toEqual([diff.id, dynamic.id]);
+  });
 
-        expect((await fixture.queue.get(job.id))?.errorCode).toBe(
-          "entitlements_invalid",
-        );
-      },
+  // #499-T08
+  it("does not count the runs of the period against a limit while billing is on", async () => {
+    const fixture = await start("on");
+    await entitle(fixture, { limits: { diffRunsPerPeriod: 1 } });
+    const jobs = [await enqueue(fixture), await enqueue(fixture)];
+
+    const claimed = [
+      await fixture.queue.claimNext("runner-a", ENGINES),
+      await fixture.queue.claimNext("runner-a", ENGINES),
+    ];
+
+    expect(claimed.map((answer) => answer?.job.id)).toEqual(
+      jobs.map((job) => job.id),
+    );
+  });
+
+  // #499-T08
+  it("still refuses a suspended workspace while billing is on", async () => {
+    const fixture = await start("on");
+    await entitle(fixture, { suspended: true });
+    const job = await enqueue(fixture);
+
+    expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+    expect(await fixture.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "workspace_suspended",
+    });
+  });
+
+  // #499-T08
+  it("still fails a job whose entitlements cannot be read while billing is on", async () => {
+    const fixture = await start("on");
+    await entitle(fixture, { limits: { diffRunsPerPeriod: 5 } });
+    await fixture.db
+      .updateTable("workspace_entitlements")
+      .set({ limits: "{not json" })
+      .execute();
+    const job = await enqueue(fixture);
+
+    expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+    expect((await fixture.queue.get(job.id))?.errorCode).toBe(
+      "entitlements_invalid",
+    );
+  });
+
+  // #499-T09
+  it("refuses a job at a run limit of 0 as before while billing is off", async () => {
+    const fixture = await start("off");
+    await entitle(fixture, { limits: { diffRunsPerPeriod: 0 } });
+    const job = await enqueue(fixture);
+
+    expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+    expect(await fixture.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "quota_exhausted",
+    });
+  });
+
+  // #499-T09
+  it("refuses at a run limit once the limit is used up while billing is off, and not once it is on", async () => {
+    const fixture = await start("off");
+    await entitle(fixture, { limits: { diffRunsPerPeriod: 1 } });
+    const first = await enqueue(fixture);
+    const second = await enqueue(fixture);
+    expect((await fixture.queue.claimNext("runner-a", ENGINES))?.job.id).toBe(
+      first.id,
+    );
+    expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+    expect((await fixture.queue.get(second.id))?.errorCode).toBe(
+      "quota_exhausted",
     );
 
-    // #499-T09
-    run(
-      "refuses a job at a run limit of 0 as before while billing is off",
-      async () => {
-        const fixture = await start("off");
-        await entitle(fixture, { limits: { diffRunsPerPeriod: 0 } });
-        const job = await enqueue(fixture);
-
-        expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
-
-        expect(await fixture.queue.get(job.id)).toMatchObject({
-          status: "failed",
-          errorCode: "quota_exhausted",
-        });
-      },
+    await setBillingSwitch(fixture.db, true);
+    await fundWorkspace(
+      fixture.db,
+      fixture.workspaceId,
+      1_000_000_000,
+      fixture.clock.now,
     );
+    const third = await enqueue(fixture);
 
-    // #499-T09
-    run(
-      "refuses at a run limit once the limit is used up while billing is off, and not once it is on",
-      async () => {
-        const fixture = await start("off");
-        await entitle(fixture, { limits: { diffRunsPerPeriod: 1 } });
-        const first = await enqueue(fixture);
-        const second = await enqueue(fixture);
-        expect(
-          (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
-        ).toBe(first.id);
-        expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
-        expect((await fixture.queue.get(second.id))?.errorCode).toBe(
-          "quota_exhausted",
-        );
-
-        await setBillingSwitch(fixture.db, true);
-        await fundWorkspace(
-          fixture.db,
-          fixture.workspaceId,
-          1_000_000_000,
-          fixture.clock.now,
-        );
-        const third = await enqueue(fixture);
-
-        expect(
-          (await fixture.queue.claimNext("runner-a", ENGINES))?.job.id,
-        ).toBe(third.id);
-      },
+    expect((await fixture.queue.claimNext("runner-a", ENGINES))?.job.id).toBe(
+      third.id,
     );
+  });
 
-    // #499-T11
-    run(
-      "still refuses at the own-key cost limit while billing is on",
-      async () => {
-        const fixture = await start("on");
-        await entitle(fixture, {
-          limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
-        });
-        // While billing is on the cost limit of the key the workspace CHOSE applies (#496), not the entitlement's key mode.
-        await createLlmKeyModeStore(fixture.db, fixture.workspaceId).set(
-          "own",
-          null,
-        );
-        const spent = await enqueue(fixture);
-        const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
-        expect(claimed?.job.id).toBe(spent.id);
-        await fixture.queue.complete(spent.id, claimed?.leaseToken ?? "", {
-          ok: true,
-          result: {
-            ok: true,
-            usage: { promptTokens: 100, completionTokens: 10, costUsd: 1.2 },
-          },
-        });
-        const next = await enqueue(fixture);
-
-        expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
-
-        expect(await fixture.queue.get(next.id)).toMatchObject({
-          status: "failed",
-          errorCode: "quota_exhausted",
-        });
-      },
+  // #499-T11
+  it("still refuses at the own-key cost limit while billing is on", async () => {
+    const fixture = await start("on");
+    await entitle(fixture, {
+      limits: { ownKeyCostLimitMicroUsd: 1_000_000 },
+    });
+    // While billing is on the cost limit of the key the workspace CHOSE applies (#496), not the entitlement's key mode.
+    await createLlmKeyModeStore(fixture.db, fixture.workspaceId).set(
+      "own",
+      null,
     );
-  },
-);
+    const spent = await enqueue(fixture);
+    const claimed = await fixture.queue.claimNext("runner-a", ENGINES);
+    expect(claimed?.job.id).toBe(spent.id);
+    await fixture.queue.complete(spent.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {
+        ok: true,
+        usage: { promptTokens: 100, completionTokens: 10, costUsd: 1.2 },
+      },
+    });
+    const next = await enqueue(fixture);
+
+    expect(await fixture.queue.claimNext("runner-a", ENGINES)).toBeNull();
+
+    expect(await fixture.queue.get(next.id)).toMatchObject({
+      status: "failed",
+      errorCode: "quota_exhausted",
+    });
+  });
+});

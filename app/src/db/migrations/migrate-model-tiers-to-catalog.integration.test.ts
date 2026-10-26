@@ -1,25 +1,17 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #434: the migration that turns the old managed model tiers into catalog entries, on SQLite and on Postgres. Every case
+// #434: the migration that turns the old managed model tiers into catalog entries. Every case
 // builds the database the previous release left (all migrations before this one), writes the old data into it as that
 // release wrote it, and runs the real migration runner. The data is never decrypted (nothing in it is secret) and the
 // old data stays where it is.
 import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import {
-  createTestDirectory,
-  track,
-} from "../../test-support/test-database.ts";
-import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
 import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
 import { entryIdOf } from "./model-tiers-to-catalog.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 
 const KEY = "20261018170000_migrate_model_tiers_to_catalog";
 const T = "2026-10-18T08:00:00.000Z";
@@ -36,37 +28,21 @@ const beforeThisMigration: MigrationProvider = {
 };
 
 type Engine = {
-  name: "sqlite" | "postgres";
+  name: "postgres";
   /** An empty database migrated to the state before this migration. */
   open: () => Promise<Kysely<Database>>;
-};
-
-const sqlite: Engine = {
-  name: "sqlite",
-  open: async () => {
-    const directory = await createTestDirectory();
-    const db = track(
-      openDatabase({
-        driver: "sqlite",
-        path: `${directory}/app.db`,
-        busyTimeoutMs: 5000,
-      }),
-    );
-    await migrateToLatest(db, beforeThisMigration);
-    return db;
-  },
 };
 
 const postgres: Engine = {
   name: "postgres",
   open: async () => {
-    const database = await createPostgresTestDatabase({ migrate: false });
+    const database = await createEmptyTestDatabase();
     await migrateToLatest(database.db, beforeThisMigration);
     return database.db;
   },
 };
 
-const engines: Engine[] = hasPostgres() ? [sqlite, postgres] : [sqlite];
+const engines: Engine[] = [postgres];
 
 type Fixture = {
   /** The stored `managed_model_tiers` (a value to encode, or raw text), or none. */

@@ -26,8 +26,8 @@ afterEach(() => {
 
 /** A deployment: the instance that made the code with the CLI, and a way to reach "another" one. */
 async function deployment() {
-  const first = await createSetupHarness({ codeStore: "database" });
-  const issued = await first.databaseStore?.issue();
+  const first = await createSetupHarness();
+  const issued = await first.databaseStore.issue();
   if (issued === undefined) throw new Error("not a database harness");
   return {
     first,
@@ -100,7 +100,7 @@ describe("a code made by the CLI", () => {
 
   // #321-T01
   it("answers setup_unavailable on every instance until a code was made", async () => {
-    const harness = await createSetupHarness({ codeStore: "database" });
+    const harness = await createSetupHarness();
 
     for (const instance of [harness, harness.restart()]) {
       const { response } = await instance.submitCode(SETUP_TEST_CODE);
@@ -115,7 +115,7 @@ describe("a code made by the CLI", () => {
     const second = another();
     const cookies = await enterCode(second);
 
-    await first.databaseStore?.issue();
+    await first.databaseStore.issue();
 
     const completion = await another().complete(cookies);
     expect(completion.status).toBe(401);
@@ -206,7 +206,7 @@ describe("wrong codes", () => {
       423,
     );
 
-    await first.databaseStore?.issue();
+    await first.databaseStore.issue();
 
     expect((await another().submitCode(SETUP_TEST_CODE)).response.status).toBe(
       200,
@@ -321,34 +321,7 @@ describe("a server", () => {
       await harness.db.selectFrom("setup_codes").select("id").execute(),
     ).toEqual([]);
   });
-
-  // #321-T04
-  it("does not read a code from the database, even one a CLI wrote there", async () => {
-    const harness = await createSetupHarness();
-    await harness.start();
-    // The same table in the server's database, as if somebody ran the CLI against it by mistake.
-    const issued = await createServerCliCode(harness);
-
-    const { response } = await harness.submitCode(issued);
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "invalid_code" });
-  });
 });
-
-/** Writes a database code into the database of `harness` the way the CLI would, and returns it. */
-async function createServerCliCode(harness: SetupHarness): Promise<string> {
-  const { createDatabaseSetupCodeStore } =
-    await import("./database-code-store.ts");
-  const { SETUP_TEST_SECRET } =
-    await import("../test-support/setup-harness.ts");
-  const store = createDatabaseSetupCodeStore({
-    db: harness.db,
-    appSecret: SETUP_TEST_SECRET,
-    randomCode: () => "246810",
-  });
-  return (await store.issue()).code;
-}
 
 // Not set up although the settings exist: the CLI's refusal is in setup-code-cli.integration.test.ts.
 describe("an instance that is set up", () => {

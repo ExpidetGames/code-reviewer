@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The workspaces assembled for integration tests: a real SQLite file with users, one workspace and its
+// The workspaces assembled for integration tests: a real Postgres database with users, one workspace and its
 // members, the real services (members, invitations) with the real counters, a mail double that can be
 // switched between "mail server" and "none", and a clock the test moves by hand. No Better Auth and no
 // HTTP here; the services decide for themselves who may do what, which is what these tests pin down.

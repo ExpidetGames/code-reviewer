@@ -31,8 +31,6 @@
 //                             { "operatorLlmKeys": { "<provider>": { "apiKey": "..." } | null } }   the operator's key of
 //                             one provider (#427): the provider is a registered id, exactly; the other providers' keys
 //                             are not touched. The settings answer carries `operatorLlmKeys: { <provider>: status }`
-//                             { "importNotice": { "dismiss": true } }   hides the notice that the import of an
-//                             existing installation left (src/legacy-import/)
 //   POST /api/admin/mail/test sends a test mail to the admin's own address with the saved settings;
 //                             answers { "ok": true } or { "ok": false, "error": <class>, "detail" }
 //   POST /api/admin/llm-keys/:provider/test  { apiKey? }  asks the provider whether the operator's key is accepted: the
@@ -131,7 +129,6 @@ const SETTING_KEYS = [
   "smtp",
   "operatorLlmKey",
   "operatorLlmKeys",
-  "importNotice",
 ] as const;
 
 export function createAdminRouteHandlers({
@@ -217,20 +214,6 @@ export function createAdminRouteHandlers({
               who.id,
               fields.operatorLlmKeys,
             );
-          case "importNotice": {
-            const change = fields.importNotice;
-            if (
-              typeof change !== "object" ||
-              change === null ||
-              (change as Record<string, unknown>).dismiss !== true
-            )
-              return {
-                ok: false,
-                error: "invalid_input",
-                issues: [{ field: "importNotice", code: "body_invalid" }],
-              } as const;
-            return service.dismissImportNotice(who.id);
-          }
           default: {
             const limits = fields.limits;
             if (

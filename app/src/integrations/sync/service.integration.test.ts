@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how installations and repositories are kept in line with GitHub: the real provider and
-// client talk over HTTP to the fake GitHub API, the tables are a real SQLite file. A failure of the
+// client talk over HTTP to the fake GitHub API, the tables are a real Postgres database. A failure of the
 // platform must never mark anything inactive, and repeating or overlapping syncs must be harmless.
 import { describe, expect, it } from "vitest";
 import { testAppKeys } from "../../test-support/github-app.ts";

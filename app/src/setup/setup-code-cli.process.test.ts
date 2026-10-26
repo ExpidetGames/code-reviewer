@@ -28,20 +28,9 @@ function runProgram(env: Record<string, string>, args: string[] = []) {
 }
 
 describe("the setup-code program", () => {
-  // #321-T04
-  it("refuses in server mode with exit code 1, one line on the error output and nothing on the output", () => {
-    const result = runProgram({ APP_RUNTIME: "server", APP_SECRET: SECRET });
-
-    expect(result.status).toBe(1);
-    expect(result.out).toBe("");
-    expect(result.err.trim().split("\n")).toHaveLength(1);
-    expect(result.err).toContain("SETUP_CODE_NOT_SERVERLESS");
-  });
-
   // #321-T05
   it("refuses to print to a pipe, before it connects to anything", () => {
     const result = runProgram({
-      APP_RUNTIME: "serverless",
       APP_SECRET: SECRET,
       DATABASE_URL_MIGRATE: "postgres://app:s3cr3t-pw@127.0.0.1:1/app",
     });
@@ -56,7 +45,6 @@ describe("the setup-code program", () => {
   it("with --allow-pipe fails on an unreachable database with one line, never the password", () => {
     const result = runProgram(
       {
-        APP_RUNTIME: "serverless",
         APP_SECRET: SECRET,
         DATABASE_URL_MIGRATE: "postgres://app:s3cr3t-pw@127.0.0.1:1/app",
       },

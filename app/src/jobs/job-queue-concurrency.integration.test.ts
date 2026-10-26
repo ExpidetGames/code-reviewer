@@ -2,8 +2,8 @@
 
 // Pins down the queue when several callers work on one database file at the same moment. The other
 // callers are real OS processes (a second app instance, a second runner API handler), started
-// together by a barrier: better-sqlite3 blocks its thread on a lock, so threads in one process could
-// not overlap, and a mock could not show what the write lock really does.
+// together by a barrier, each with a connection pool of its own, as two app instances have, and a mock could not show what
+// the locks of the database really do.
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { startDbProcess, type DbProcess } from "../test-support/db-process.ts";
@@ -52,8 +52,8 @@ describe("claiming from two processes", () => {
       job: Job | null;
       leaseToken: string | null;
     }>([
-      claimArgs(fixture.databasePath, T0, "runner-a"),
-      claimArgs(fixture.databasePath, T0, "runner-b"),
+      claimArgs(fixture.databaseUrl, T0, "runner-a"),
+      claimArgs(fixture.databaseUrl, T0, "runner-b"),
     ]);
 
     const winners = answers.filter((answer) => answer.job !== null);
@@ -73,8 +73,8 @@ describe("claiming from two processes", () => {
       job: Job | null;
       leaseToken: string | null;
     }>([
-      claimArgs(fixture.databasePath, T0, "runner-a"),
-      claimArgs(fixture.databasePath, T0, "runner-b"),
+      claimArgs(fixture.databaseUrl, T0, "runner-a"),
+      claimArgs(fixture.databaseUrl, T0, "runner-b"),
     ]);
 
     expect(answers.map((answer) => answer.job?.id).sort()).toEqual(
@@ -103,8 +103,8 @@ describe("claiming from two processes", () => {
       job: Job | null;
       leaseToken: string | null;
     }>([
-      claimArgs(fixture.databasePath, T0, "runner-a"),
-      claimArgs(fixture.databasePath, T0, "runner-b"),
+      claimArgs(fixture.databaseUrl, T0, "runner-a"),
+      claimArgs(fixture.databaseUrl, T0, "runner-b"),
     ]);
 
     expect(answers.filter((answer) => answer.job !== null)).toHaveLength(1);
@@ -122,8 +122,8 @@ describe("claiming from two processes", () => {
       job: Job | null;
       leaseToken: string | null;
     }>([
-      claimArgs(fixture.databasePath, later, "runner-b"),
-      claimArgs(fixture.databasePath, later, "runner-c"),
+      claimArgs(fixture.databaseUrl, later, "runner-b"),
+      claimArgs(fixture.databaseUrl, later, "runner-c"),
     ]);
 
     const winners = answers.filter((answer) => answer.job !== null);
@@ -158,8 +158,8 @@ describe("enqueueing from two processes", () => {
     };
 
     const answers = await runTogether<EnqueueResult>([
-      enqueueArgs(fixture.databasePath, T0, { ...input, deliveryId: "d-1" }),
-      enqueueArgs(fixture.databasePath, T0, { ...input, deliveryId: "d-2" }),
+      enqueueArgs(fixture.databaseUrl, T0, { ...input, deliveryId: "d-1" }),
+      enqueueArgs(fixture.databaseUrl, T0, { ...input, deliveryId: "d-2" }),
     ]);
 
     expect(answers.map((answer) => answer.status).sort()).toEqual([
@@ -184,8 +184,8 @@ describe("enqueueing from two processes", () => {
     };
 
     const answers = await runTogether<EnqueueResult>([
-      enqueueArgs(fixture.databasePath, T0, input),
-      enqueueArgs(fixture.databasePath, T0, input),
+      enqueueArgs(fixture.databaseUrl, T0, input),
+      enqueueArgs(fixture.databaseUrl, T0, input),
     ]);
 
     expect(answers.map((answer) => answer.status).sort()).toEqual([
@@ -209,8 +209,8 @@ describe("enqueueing from two processes", () => {
     };
 
     const answers = await runTogether<EnqueueResult>([
-      enqueueArgs(fixture.databasePath, T0, base),
-      enqueueArgs(fixture.databasePath, T0, { ...base, headSha: sha("c") }),
+      enqueueArgs(fixture.databaseUrl, T0, base),
+      enqueueArgs(fixture.databaseUrl, T0, { ...base, headSha: sha("c") }),
     ]);
 
     expect(answers.map((answer) => answer.status)).toEqual([
@@ -243,8 +243,8 @@ describe("removed commands in the queue", () => {
     const review = await fixture.enqueueNew({ prNumber: 7 });
 
     const answers = await runTogether<{ job: Job | null }>([
-      claimArgs(fixture.databasePath, T0, "runner-a"),
-      claimArgs(fixture.databasePath, T0, "runner-b"),
+      claimArgs(fixture.databaseUrl, T0, "runner-a"),
+      claimArgs(fixture.databaseUrl, T0, "runner-b"),
     ]);
 
     const winners = answers.filter((answer) => answer.job !== null);

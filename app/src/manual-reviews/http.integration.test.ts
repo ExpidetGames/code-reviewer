@@ -2,7 +2,7 @@
 
 // Pins down the handlers behind the two routes of the manual start: they ask for the user first,
 // check where the request comes from and what it carries, call the real service (real GitHub App
-// provider against the fake GitHub, real queue, real SQLite file) and answer with a stable code. The
+// provider against the fake GitHub, real queue, real Postgres database) and answer with a stable code. The
 // proxy in front of the real routes is tested in
 // integration-tests/http/manual-review-route.integration.test.ts.
 import { describe, expect, it } from "vitest";

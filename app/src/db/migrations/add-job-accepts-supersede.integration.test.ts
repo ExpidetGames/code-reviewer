@@ -7,8 +7,7 @@
 import { sql } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { createTestDirectory } from "../../test-support/test-database.ts";
-import { openDatabase } from "../connection.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
 
@@ -29,12 +28,7 @@ const T = "2026-10-16T08:00:00.000Z";
 describe("the migrations of the supersede", () => {
   // #397-T14
   it("give every job the flag 0, keep the reasons of the usage records and accept the new reason", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     try {
       await migrateToLatest(db, before);
       await db

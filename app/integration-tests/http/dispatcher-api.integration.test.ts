@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down what a Dispatcher (#316) does with the runner API through the real handlers and a real SQLite
+// Pins down what a Dispatcher (#316) does with the runner API through the real handlers and a real Postgres
 // file (#322): claiming exactly one job by its id, the pool cap, giving a job back with `release`, and
 // the version call that tells it what the app can do. The claim of a runner of the previous release is
 // pinned to be unchanged. The shape of the answers against the contract file is in

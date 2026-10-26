@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// A bounded wait for a row lock on Postgres. A write that must not run beside the daily models.dev fetch reads the
+// A bounded wait for a row lock. A write that must not run beside the daily models.dev fetch reads the
 // provider's row `FOR UPDATE` first, the lock the fetch holds while it writes (#548); without a bound it would wait for
-// as long as the fetch does. On SQLite every transaction begins `begin immediate`, so there is nothing to set.
+// as long as the fetch does.
 import { sql, type Kysely } from "kysely";
-import { databaseDriver } from "./driver.ts";
 import type { Database } from "./schema.ts";
 
 /** Postgres' error code for a lock that could not be taken within `lock_timeout`. */
@@ -15,7 +14,6 @@ export async function setLockTimeout(
   trx: Kysely<Database>,
   milliseconds: number,
 ): Promise<void> {
-  if (databaseDriver(trx) !== "postgres") return;
   await sql
     .raw(
       `set local lock_timeout = ${String(Math.max(1, Math.floor(milliseconds)))}`,

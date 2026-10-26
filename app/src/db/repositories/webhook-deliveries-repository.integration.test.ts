@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the webhook_deliveries table against a real SQLite file: the first request with a
+// Pins down the webhook_deliveries table against a real Postgres database: the first request with a
 // delivery id claims it, a delivery that succeeded is a duplicate, one that was turned away or failed
 // can be claimed again (GitHub's "Redeliver" keeps the id), a request that arrives during another is
 // "in progress", only the owner of a claim can finish it, and old rows disappear.

@@ -8,7 +8,7 @@
 // vercel.json files; each step of the first deployment contains what belongs to it; the error codes exist; the links
 // resolve; the README and the other deployment guides link to the guide; and none of the public files holds an account
 // id, a snapshot id, a digest, a secret shape, a price, a company name or a real host name. What only a real deployment
-// can show is listed in the guide's section 9 and stays manual.
+// can show is listed in the guide's section 8 and stays manual.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,8 +17,8 @@ import { loadAuthConfig } from "../auth/config.ts";
 import { refuseUnlessCron } from "../cron/auth.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import {
-  SERVERLESS_DEFAULT_POOL_MAX,
-  SERVERLESS_MAX_POOL_MAX,
+  DEFAULT_POOL_MAX,
+  MAX_POOL_MAX,
   loadDatabaseConfig,
 } from "../db/config.ts";
 import { findDeploymentConfigProblems } from "../deploy/startup.ts";
@@ -36,7 +36,6 @@ import {
 import { LLM_DEFAULT_VARIABLES } from "../llm/config.ts";
 import { operatorTokenProblem } from "../operator-api/token.ts";
 import { ERROR_COPY } from "../runs/error-copy.ts";
-import { resolveRuntimeMode } from "../runtime/mode.ts";
 import { SETUP_CODE_TTL_MS } from "../setup/code-store.ts";
 import { DEBOUNCE_VARIABLE } from "../webhooks/debounce-config.ts";
 
@@ -141,7 +140,6 @@ describe("the App section of the guide against the code", () => {
       "app/src/dispatch/config.ts",
       "app/src/dispatch/sweep-settings.ts",
       "app/src/cron/auth.ts",
-      "app/src/runtime/mode.ts",
       "app/src/db/config.ts",
       "app/src/llm/config.ts",
       "app/src/operator-api/token.ts",
@@ -212,7 +210,6 @@ describe("the App section of the guide against the code", () => {
     const base = {
       APP_SECRET: "m".repeat(40),
       BETTER_AUTH_URL: "https://reviews.example.com",
-      APP_RUNTIME: "serverless",
       DATABASE_URL: "postgres://app:pw@db.example.com/db",
       RUNNER_TOKEN: GOOD_TOKEN,
     };
@@ -234,9 +231,7 @@ describe("the App section of the guide against the code", () => {
     const cron = new Request(
       "https://app.example.com/api/internal/dispatch-sweep",
     );
-    expect(refuseUnlessCron(cron, { APP_RUNTIME: "serverless" })?.status).toBe(
-      401,
-    );
+    expect(refuseUnlessCron(cron, {})?.status).toBe(401);
     for (const name of [
       "APP_SECRET",
       "BETTER_AUTH_URL",
@@ -245,9 +240,6 @@ describe("the App section of the guide against the code", () => {
       "CRON_SECRET",
     ])
       expect(row(name).required, name).toMatch(/^yes/);
-    // APP_RUNTIME is selected by the platform's own marker, so the code does not demand it: the guide says "set it".
-    expect(resolveRuntimeMode({ VERCEL: "1" })).toBe("serverless");
-    expect(row("APP_RUNTIME").required).toBe("yes, set it");
     // RUNNER_DISPATCH is `poll` without it: the guide asks for it in step 5 only.
     expect(dispatchConfigProblems({})).toEqual([]);
     expect(row("RUNNER_DISPATCH").required).toContain("in step 5");
@@ -323,18 +315,17 @@ describe("the App section of the guide against the code", () => {
   // #333-T04
   it("states the ranges and defaults of the code", () => {
     expect(row("DATABASE_POOL_MAX").text).toContain(
-      `1 to ${String(SERVERLESS_MAX_POOL_MAX)}, default ${String(SERVERLESS_DEFAULT_POOL_MAX)}.`,
+      `1 to ${String(MAX_POOL_MAX)}, default ${String(DEFAULT_POOL_MAX)}.`,
     );
     const pool = (value: string) =>
       loadDatabaseConfig({
-        APP_RUNTIME: "serverless",
         DATABASE_URL: "postgres://app:pw@db.example.com/db",
         DATABASE_POOL_MAX: value,
       });
-    expect(pool(String(SERVERLESS_MAX_POOL_MAX))).toMatchObject({
-      poolMax: SERVERLESS_MAX_POOL_MAX,
+    expect(pool(String(MAX_POOL_MAX))).toMatchObject({
+      poolMax: MAX_POOL_MAX,
     });
-    expect(() => pool(String(SERVERLESS_MAX_POOL_MAX + 1))).toThrow();
+    expect(() => pool(String(MAX_POOL_MAX + 1))).toThrow();
     expect(() => pool("0")).toThrow();
 
     expect(row("RUNNER_DISPATCH_GIVE_UP_SECONDS").text).toContain(
@@ -679,7 +670,7 @@ describe("the hosted deployment guide as a procedure", () => {
 
   // #333-e2e
   it("points to the hosted e2e lane that exists, no longer calls #332 pending, and states what still relies on the lease after #375", () => {
-    const limits = flat(section("## 9. Known limits and what is not verified"));
+    const limits = flat(section("## 8. Known limits and what is not verified"));
     const ci = read(".github/workflows/ci.yml");
 
     expect(ci).toMatch(/^ {2}e2e-hosted:/m);
@@ -697,7 +688,7 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(limits).toContain("`lease_expired`");
     expect(limits).not.toContain("`worker_wait_failed`");
     expect(limits).not.toContain("follow-up #375");
-    expect(section("## 10. Follow-ups")).not.toContain("- #375:");
+    expect(section("## 9. Follow-ups")).not.toContain("- #375:");
     expect(limits).toContain("on **your** Postgres provider");
   });
 
@@ -763,18 +754,6 @@ describe("the hosted deployment guide as a procedure", () => {
     expect(text).not.toContain(
       "held in memory for `DISPATCHER_PROBE_TTL_SECONDS`",
     );
-  });
-
-  // #333-T04
-  it("keeps the self-hosted path unchanged and does not describe the split as existing", () => {
-    const selfHosted = section(
-      "## 8. Self-hosted and Coolify: nothing changes",
-    );
-
-    expect(selfHosted).toMatch(/`RUNNER_MODE` unset means\s+`legacy`/);
-    expect(selfHosted).toContain("#334");
-    expect(selfHosted).toContain("nothing to migrate to");
-    expect(dispatcherDoc).toMatch(/Poll-Trigger[^\n]*#334 \(not merged\)/);
   });
 
   // #333-T01
@@ -847,15 +826,9 @@ describe("the hosted deployment guide as a document", () => {
   });
 
   // #333-T01
-  it("is linked from the README and from the other deployment guides", () => {
+  it("is linked from the README and from the golden snapshot runbook", () => {
     expect(readme).toContain("](docs/deployment-vercel.md)");
     expect(readme).toContain("](docs/dispatcher.md)");
-    expect(read("docs/deployment-coolify.md")).toContain(
-      "](deployment-vercel.md)",
-    );
-    expect(read("docs/deployment-large.md")).toContain(
-      "](deployment-vercel.md)",
-    );
     expect(read("docs/golden-snapshot.md")).toContain(
       "](deployment-vercel.md)",
     );
@@ -1223,7 +1196,7 @@ describe("the snapshot keys, the rollback and the build in the guide", () => {
 
   // #403-T26
   it("lists what is accepted or not verified: the deployment records, the mixed trio, targets.production after a rollback", () => {
-    const followUps = flat(section("## 10. Follow-ups"));
+    const followUps = flat(section("## 9. Follow-ups"));
     expect(followUps).toContain(
       "**Accepted:** every job that runs in the environment `production`",
     );

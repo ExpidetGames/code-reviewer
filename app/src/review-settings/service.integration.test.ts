@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the review settings service against a real SQLite file: the global defaults and the
+// Pins down the review settings service against a real Postgres database: the global defaults and the
 // overrides of a project are two layers that are combined when they are read, a change of the global
 // defaults reaches every project that does not override the field, resetting an override brings the
 // project back to the global value, bad input is refused with the affected fields and stores nothing,
@@ -491,14 +491,16 @@ describe("the settings of a project", () => {
   it("are not found for an unknown repository, for read, save and reset alike", async () => {
     const app = await setupReviewSettings();
 
+    // One call after the other: a call that is started early and awaited late is an unhandled rejection while it waits.
     for (const call of [
-      app.service.getProjectSettings("no-such-repository"),
-      app.service.updateProjectSettings("no-such-repository", {
-        maxFindings: 2,
-      }),
-      app.service.resetProjectSettings("no-such-repository"),
+      () => app.service.getProjectSettings("no-such-repository"),
+      () =>
+        app.service.updateProjectSettings("no-such-repository", {
+          maxFindings: 2,
+        }),
+      () => app.service.resetProjectSettings("no-such-repository"),
     ])
-      expect((await refusal(call)).code).toBe(
+      expect((await refusal(call())).code).toBe(
         "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
       );
     expect(await app.projectRows()).toEqual([]);

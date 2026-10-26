@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The usage records on Postgres behave like the SQLite ones (#272-T10): the claim reserves, the completion
-// settles, a job that ends without reporting is voided, the checks of the table refuse the same direct writes,
-// and the page of settled records is ordered by `(settled_at, id)`. The columns and types are compared with
-// SQLite by the schema parity test in ../postgres.integration.test.ts. Runs only when TEST_DATABASE_URL is set.
+// The usage records (#272-T10): the claim reserves, the completion
+// settles, a job that ends without reporting is voided, the checks of the table refuse direct writes,
+// and the page of settled records is ordered by `(settled_at, id)`.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createUsageSeeder } from "../../test-support/usage-seed.ts";
 import {
@@ -18,8 +13,7 @@ import {
 } from "../../test-support/workspaces.ts";
 import { createUsageFeedRepository } from "./usage-feed-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import { createTestDatabase } from "../../test-support/test-database.ts";
 
 const MINUTE = 60 * 1000;
 
@@ -32,10 +26,10 @@ const REFUSED_UPDATES = [
   ["a reason the code does not write", "settled_reason = 'lost'"],
 ] as const;
 
-describePostgres("the usage records on Postgres", () => {
+describe("the usage records on Postgres", () => {
   // #272-T10
   it("reserves at the claim, settles at the completion and pages the settled records", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const records = createUsageRecordsRepository(
       postgres.db,
@@ -86,7 +80,7 @@ describePostgres("the usage records on Postgres", () => {
 
   // #272-T10
   it("sums the settled managed cost of a record as a number", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const records = createUsageRecordsRepository(
       postgres.db,
@@ -116,7 +110,7 @@ describePostgres("the usage records on Postgres", () => {
 
   // #273-T06
   it("settles the record of a job that lost its last attempt with an unknown cost and the reason no_result", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const records = createUsageRecordsRepository(
       postgres.db,
@@ -145,7 +139,7 @@ describePostgres("the usage records on Postgres", () => {
 
   // #272-T10
   it("voids the record of a job that was cancelled while it ran", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const records = createUsageRecordsRepository(
       postgres.db,
@@ -166,29 +160,26 @@ describePostgres("the usage records on Postgres", () => {
   });
 
   // #272-T10
-  it.each(REFUSED_UPDATES)(
-    "refuses %s, like SQLite",
-    async (_name, assignment) => {
-      const postgres = await createPostgresTestDatabase();
-      const fixture = await createJobQueueFixture({ database: postgres.db });
-      const job = await fixture.enqueueNew();
-      await createUsageRecordsRepository(
-        postgres.db,
-        fixture.workspaceId,
-        fixture.clock.now,
-      ).reserve(job.id, "own");
+  it.each(REFUSED_UPDATES)("refuses %s", async (_name, assignment) => {
+    const postgres = await createTestDatabase();
+    const fixture = await createJobQueueFixture({ database: postgres.db });
+    const job = await fixture.enqueueNew();
+    await createUsageRecordsRepository(
+      postgres.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ).reserve(job.id, "own");
 
-      await expect(
-        sql`update usage_records set ${sql.raw(assignment)} where job_id = ${job.id}`.execute(
-          postgres.db,
-        ),
-      ).rejects.toThrow();
-    },
-  );
+    await expect(
+      sql`update usage_records set ${sql.raw(assignment)} where job_id = ${job.id}`.execute(
+        postgres.db,
+      ),
+    ).rejects.toThrow();
+  });
 
   // #272-T10
   it("allows one record per job", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const job = await fixture.enqueueNew();
     const insert = () =>
@@ -203,7 +194,7 @@ describePostgres("the usage records on Postgres", () => {
 
   // #278-T01
   it("serves the feed of every workspace in (settled_at, id) order, bounded by the safety lag, and the page and summary of one", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const first = await defaultWorkspaceId(postgres.db);
     const second = await addWorkspace(postgres.db, "second");
     const seeder = createUsageSeeder(postgres.db);

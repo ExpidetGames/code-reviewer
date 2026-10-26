@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""The job loop advertises `opencode` only when the startup self-check passed (#202).
+"""The Worker advertises `opencode` only when the startup self-check passed (#202).
 
-The check itself is pinned in `test_dynamic_review_self_check.py`; here the loop's use of it: when
-it runs, what it changes in the settings, what it logs, and that a runner without an engine user
-(every runner that is not the Dynamic runner) can never pass.
+The check itself is pinned in `test_dynamic_review_self_check.py`; here the startup's use of it:
+when it runs, what it changes in the settings, what it logs, and that a runner without an engine
+user (every runner that is not the Dynamic runner) can never pass.
 """
 
 import logging
@@ -20,18 +20,17 @@ from code_reviewer_runner.dynamic_review.self_check import (
     SelfCheckReason,
     SelfCheckResult,
 )
-from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup, SlotPorts
-from code_reviewer_runner.job_loop import service
+from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts
 from code_reviewer_runner.job_loop.service import advertise_engines
-from code_reviewer_runner.job_loop.settings import LoopSettings, settings_from_environment
+from code_reviewer_runner.job_loop.settings import WorkerSettings, worker_settings_from_environment
 
 PORTS = SlotPorts(10180, 10181)
-BASE = {"RUNNER_API_URL": "http://app:3000", "RUNNER_TOKEN": "dummy-runner-token-0123456789"}
+BASE: dict[str, str] = {}
 DYNAMIC_RUNNER = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
 
 
-def dynamic_settings() -> LoopSettings:
-    return settings_from_environment(DYNAMIC_RUNNER)
+def dynamic_settings() -> WorkerSettings:
+    return worker_settings_from_environment(DYNAMIC_RUNNER)
 
 
 # #202-T01
@@ -108,7 +107,7 @@ def test_an_unexpected_error_in_the_check_does_not_advertise_or_stop_the_runner(
 def test_a_runner_without_an_engine_user_never_advertises_opencode(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    settings = settings_from_environment(BASE)
+    settings = worker_settings_from_environment(BASE)
 
     with caplog.at_level(logging.INFO, logger="code_reviewer_runner.loop"):
         advertised = advertise_engines(settings, True)
@@ -125,120 +124,6 @@ def test_the_real_check_on_a_host_that_is_not_the_dynamic_image_fails_closed() -
     advertised = advertise_engines(dynamic_settings(), True)
 
     assert advertised.engines == (ENGINE_DIFF,)
-
-
-# #202-T01: the startup order of the runner: network setup first, then the check, then the loop.
-def test_the_runner_sets_up_the_network_then_checks_then_serves(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[str] = []
-    served: list[LoopSettings] = []
-
-    def prepare(settings: LoopSettings) -> EgressSetup:
-        events.append("prepare")
-        return EgressSetup(True, EgressMode.FULL)
-
-    def check(**facts: Any) -> None:
-        events.append("check")
-
-    async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
-        events.append("serve")
-        served.append(settings)
-        return 0
-
-    monkeypatch.setattr(service, "prepare_dynamic_runtime", prepare)
-    monkeypatch.setattr(service, "check_dynamic_runner", check)
-    monkeypatch.setattr(service, "serve", serve)
-
-    assert service.run_from_environment(DYNAMIC_RUNNER) == 0
-
-    assert events == ["prepare", "check", "serve"]
-    assert served[0].engines == ALL_ENGINES
-
-
-def installed(settings: LoopSettings) -> EgressSetup:
-    return EgressSetup(True, EgressMode.FULL)
-
-
-# #202-T09: a check that fails still lets the runner serve Diff jobs.
-def test_a_runner_whose_check_failed_still_serves_diff_jobs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    served: list[LoopSettings] = []
-
-    def check(**facts: Any) -> None:
-        raise SelfCheckFailed(SelfCheckReason.ENGINE_BINARY_MISSING, "a required tool is missing")
-
-    async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
-        served.append(settings)
-        return 0
-
-    monkeypatch.setattr(service, "prepare_dynamic_runtime", installed)
-    monkeypatch.setattr(service, "check_dynamic_runner", check)
-    monkeypatch.setattr(service, "serve", serve)
-
-    assert service.run_from_environment(DYNAMIC_RUNNER) == 0
-    assert served[0].engines == (ENGINE_DIFF,)
-
-
-# #264-T06: the Dynamic runner of compose.coolify.yml shares its host with the app and Diff runner.
-# A host without nf_tables (the rules cannot be installed) leaves that runner serving Diff jobs
-# only, with the stable reason in its log; nothing else about the deployment depends on it.
-def test_a_host_without_nf_tables_leaves_a_runner_that_serves_diff_jobs_and_names_why(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    served: list[LoopSettings] = []
-
-    def rules_not_installed(settings: LoopSettings) -> EgressSetup:
-        # `secure_startup` says so when `nft` cannot install the rules
-        return EgressSetup(False, EgressMode.FULL)
-
-    def check(**facts: Any) -> None:
-        if not facts["rules_installed"]:
-            raise SelfCheckFailed(SelfCheckReason.NETWORK_RULES_NOT_INSTALLED, "no rules")
-
-    async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
-        served.append(settings)
-        return 0
-
-    monkeypatch.setattr(service, "prepare_dynamic_runtime", rules_not_installed)
-    monkeypatch.setattr(service, "check_dynamic_runner", check)
-    monkeypatch.setattr(service, "serve", serve)
-
-    # The loop's logger writes to stderr and does not propagate: read what an operator would read.
-    assert service.run_from_environment(DYNAMIC_RUNNER) == 0
-
-    assert served[0].engines == (ENGINE_DIFF,)
-    assert served[0].dynamic_command is None
-    message = capsys.readouterr().err
-    assert "opencode is not advertised, this runner serves Diff jobs only" in message
-    assert SelfCheckReason.NETWORK_RULES_NOT_INSTALLED.value in message
-
-
-# #264-T06: a capability Coolify dropped so that the startup capabilities cannot be ended (SETPCAP)
-# is the one case where the runner refuses to start: exit code 2, a log line that names the cause
-# and no claim. Only that container stops; the Diff runner and the app are other containers.
-def test_a_dynamic_runner_that_cannot_end_its_startup_capabilities_exits_without_serving(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    served: list[LoopSettings] = []
-
-    def cannot_drop(settings: LoopSettings) -> EgressSetup:
-        raise service.IsolationError("a capability could not be dropped from the bounding set")
-
-    async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
-        served.append(settings)
-        return 0
-
-    monkeypatch.setattr(service, "prepare_dynamic_runtime", cannot_drop)
-    monkeypatch.setattr(service, "serve", serve)
-
-    assert service.run_from_environment(DYNAMIC_RUNNER) == 2
-
-    assert served == []
-    log = capsys.readouterr().err
-    assert "cannot start" in log
-    assert "bounding set" in log
 
 
 # #345-T10: the mode is logged with the advertisement and kept for the job processes.
@@ -274,32 +159,9 @@ def test_a_failed_check_in_fallback_mode_is_not_advertised_and_names_the_ipv6_re
     assert "ipv6_not_disabled" in caplog.text
 
 
-# #345-T11: the startup of a runner follows the kernel, and no variable of the container changes it.
-def test_the_runner_hands_the_mode_of_the_startup_step_to_the_check_and_the_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    served: list[LoopSettings] = []
-    checked: list[Any] = []
+# #345-T11: the startup follows the kernel, and no variable of the container changes the mode: the
+# settings are built before startup has run and do not read it.
+def test_the_environment_does_not_choose_the_egress_mode() -> None:
+    environment = {**DYNAMIC_RUNNER, EGRESS_MODE_VARIABLE: "fallback"}
 
-    def prepare(settings: LoopSettings) -> EgressSetup:
-        return EgressSetup(True, EgressMode.FALLBACK)
-
-    def check(**facts: Any) -> SelfCheckResult:
-        checked.append(facts["egress_mode"])
-        return SelfCheckResult(egress_mode=facts["egress_mode"])
-
-    async def serve(settings: LoopSettings, environment: Any, **options: Any) -> int:
-        served.append(settings)
-        return 0
-
-    monkeypatch.setattr(service, "prepare_dynamic_runtime", prepare)
-    monkeypatch.setattr(service, "check_dynamic_runner", check)
-    monkeypatch.setattr(service, "serve", serve)
-
-    environment = {**DYNAMIC_RUNNER, EGRESS_MODE_VARIABLE: "full"}
-    assert service.run_from_environment(environment) == 0
-
-    assert checked == [EgressMode.FALLBACK]
-    assert served[0].dynamic_egress_mode is EgressMode.FALLBACK
-    # Nor does the environment reach the settings: they are built before startup has run.
-    assert settings_from_environment(environment).dynamic_egress_mode is EgressMode.FULL
+    assert worker_settings_from_environment(environment).dynamic_egress_mode is EgressMode.FULL

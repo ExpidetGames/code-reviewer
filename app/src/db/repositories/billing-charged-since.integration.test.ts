@@ -7,7 +7,7 @@ import { BILLING_ENGINES } from "../../test-support/billing-engines.ts";
 import { createBillingJournalRepository } from "./billing-journal-repository.ts";
 
 for (const engine of BILLING_ENGINES) {
-  describe.skipIf(engine.skip)(`the charged total on ${engine.name}`, () => {
+  describe(`the charged total on ${engine.name}`, () => {
     async function charge(
       db: Awaited<ReturnType<typeof engine.create>>["db"],
       workspaceId: string,

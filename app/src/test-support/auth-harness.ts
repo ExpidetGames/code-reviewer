@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// A complete sign in setup for integration tests: a real SQLite file, the real Better Auth
+// A complete sign in setup for integration tests: a real Postgres database, the real Better Auth
 // instance of the app, and the fake GitHub on a loopback port. The tests call `auth.handler`
 // with real `Request` objects, the same entry point the route handler uses, and walk the OAuth
 // flow the way a browser does (sign in request, authorize at the fake, callback), keeping cookies.

@@ -758,7 +758,7 @@ const CASES: Case[] = [
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({
         rejected: expect.objectContaining({
-          code: "SQLITE_CONSTRAINT_FOREIGNKEY",
+          code: "23503",
         }),
       }),
   },
@@ -1673,7 +1673,7 @@ describe("enqueueing under the scope of A against what B already has", () => {
     // A person's job would be "already active" and pull B's waiting job forward.
     await expect(
       reposA.jobs.enqueue(input(b.repository.id)),
-    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+    ).rejects.toMatchObject({ code: "23503" });
 
     expect(await rowsOf(db, b.workspaceId)).toEqual(before);
   });
@@ -1691,7 +1691,7 @@ describe("enqueueing under the scope of A against what B already has", () => {
       }),
       // The unique index of automatic jobs per head commit may refuse it before the foreign key does.
     ).rejects.toMatchObject({
-      code: expect.stringMatching(/^SQLITE_CONSTRAINT_(FOREIGNKEY|UNIQUE)$/),
+      code: expect.stringMatching(/^2350[35]$/),
     });
 
     expect(await rowsOf(db, b.workspaceId)).toEqual(before);
@@ -1710,7 +1710,7 @@ describe("enqueueing under the scope of A against what B already has", () => {
         prNumber: 55,
         deliveryId: "delivery-b",
       }),
-    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_UNIQUE" });
+    ).rejects.toMatchObject({ code: "23505" });
 
     expect(await rowsOf(db, b.workspaceId)).toEqual(before);
   });
@@ -1727,7 +1727,7 @@ describe("enqueueing under the scope of A against what B already has", () => {
         triggerKind: "comment",
         commentId: "comment-b",
       }),
-    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+    ).rejects.toMatchObject({ code: "23503" });
 
     expect(await rowsOf(db, b.workspaceId)).toEqual(before);
     expect(

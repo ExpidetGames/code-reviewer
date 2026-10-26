@@ -4,7 +4,7 @@
 // about 5 attempts per 15 minutes per email address, the same for an address nobody owns, a
 // generous limit for the whole instance, and a fresh start after a success or the end of the window.
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createTestDatabase, track } from "../test-support/test-database.ts";
 import { handleAuthRequest } from "./http.ts";
@@ -150,7 +150,7 @@ describe("the sign in limit across app instances", () => {
   it("counts the failed attempts of two app instances on one database together and answers 429 with Retry-After", async () => {
     const { db, config } = await createTestDatabase();
     // A second app instance: its own connection to the same file, its own limiter, no shared memory.
-    const second = track(openDatabase(config));
+    const second = track(openPostgresDatabase(config));
     const first = createSignInLimiter(createRateLimitsRepository(db));
     const other = createSignInLimiter(createRateLimitsRepository(second));
     const email = "admin@example.com";
@@ -169,7 +169,7 @@ describe("the sign in limit across app instances", () => {
   // #99-SR-19
   it("answers 429 with Retry-After through the HTTP route of whichever instance gets the request", async () => {
     const { db, config } = await createTestDatabase();
-    const second = track(openDatabase(config));
+    const second = track(openPostgresDatabase(config));
     const limiters = [
       createSignInLimiter(createRateLimitsRepository(db)),
       createSignInLimiter(createRateLimitsRepository(second)),

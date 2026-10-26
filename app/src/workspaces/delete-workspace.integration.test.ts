@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Deleting a workspace (#658), against a real database on SQLite and, with TEST_DATABASE_URL, on Postgres: the typed name
+// Deleting a workspace (#658), against a real database: the typed name
 // and the Owner role are needed, a positive balance refuses, everything of the workspace goes (checked over every table
 // that has a `workspace_id`, so a table added later cannot be forgotten), the money history stays, and a second workspace
 // is not touched by a single row.
@@ -108,7 +108,7 @@ async function snapshot(db: Kysely<Database>, workspaceId: string) {
 }
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`deleting a workspace on ${engine.name}`, () => {
+  describe(`deleting a workspace on ${engine.name}`, () => {
     async function start(
       options: { balanceMicroUsd?: number; otherBalanceMicroUsd?: number } = {},
     ) {

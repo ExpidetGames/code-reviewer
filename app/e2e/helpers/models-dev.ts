@@ -14,17 +14,11 @@ const CHILD = resolve(
 
 /** Runs the fetch of the catalog once on the database file of the app. */
 export async function fetchModelsDevCatalog(
-  databasePath: string,
+  databaseUrl: string,
 ): Promise<void> {
   await run(
     process.execPath,
-    [
-      "--no-warnings",
-      "--conditions=react-server",
-      CHILD,
-      "fetch",
-      resolve(process.cwd(), databasePath),
-    ],
+    ["--no-warnings", "--conditions=react-server", CHILD, "fetch", databaseUrl],
     { cwd: process.cwd() },
   );
 }

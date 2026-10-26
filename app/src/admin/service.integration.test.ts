@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the instance settings service against a real SQLite file: every change of a setting is
+// Pins down the instance settings service against a real Postgres database: every change of a setting is
 // validated, recorded with the admin and the time, and shown back; the rules for the sign-in methods
 // and the tenancy hold; two admins saving at once end with one complete write; and the saved secrets
 // show up as "configured" and never as a value.
@@ -146,62 +146,6 @@ describe("reading the settings", () => {
     await markWorkspaceDeleted(db, "w2");
 
     expect((await service.readSettings()).workspaceCount).toBe(1);
-  });
-});
-
-describe("the notice of the import", () => {
-  const NOTICE = {
-    createdAt: "2026-10-12T08:00:00.000Z",
-    dismissedAt: null,
-    memberCount: 1,
-    notMembers: [{ login: "dave", reason: "not_allowed" as const }],
-    notMembersTotal: 1,
-    neverSignedIn: ["gina"],
-    neverSignedInTotal: 1,
-    organization: "acme",
-    notImported: [],
-    oauthApp: false,
-    invalidLoginEntries: 0,
-  };
-
-  // #106-IM-07
-  it("is part of the settings until the admin hides it, and a later read does not bring it back", async () => {
-    const { service, settings } = await startService();
-    await settings.set("import_notice", NOTICE, null);
-
-    const shown = await service.readSettings();
-    const hidden = await service.dismissImportNotice("admin-1");
-    const after = await service.readSettings();
-
-    expect(shown.importNotice).toEqual(NOTICE);
-    expect(hidden).toEqual({ ok: true });
-    expect(after.importNotice).toBeNull();
-    expect(await settings.get("import_notice")).toMatchObject({
-      memberCount: 1,
-      dismissedAt: expect.any(String),
-    });
-  });
-
-  it("is none when the import left nothing, and hiding a notice that is not there is not an error", async () => {
-    const { service } = await startService();
-
-    expect((await service.readSettings()).importNotice).toBeNull();
-    expect(await service.dismissImportNotice("admin-1")).toEqual({ ok: true });
-  });
-
-  it("reads a stored value that is not a notice as no notice", async () => {
-    const { service, db } = await startService();
-    await db
-      .insertInto("instance_settings")
-      .values({
-        key: "import_notice",
-        value: JSON.stringify("not a notice"),
-        updated_by: null,
-        updated_at: "2026-10-12T08:00:00.000Z",
-      })
-      .execute();
-
-    expect((await service.readSettings()).importNotice).toBeNull();
   });
 });
 

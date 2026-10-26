@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The entitlements of a workspace against a real SQLite file: a row round-trips, a reset of the period
+// The entitlements of a workspace against a real Postgres database: a row round-trips, a reset of the period
 // never goes backwards (and a repeat is harmless), a suspension is set and cleared together with its code,
 // and the instance default is validated the same way. Isolation between workspaces is in
 // scoped-isolation.integration.test.ts.
@@ -100,7 +100,7 @@ describe("the entitlements repository of a workspace", () => {
       limits: string;
       suspended: number;
       kind: string;
-    }>`select limits, suspended, typeof(limits) as kind from workspace_entitlements`.execute(
+    }>`select limits, suspended, pg_typeof(limits)::text as kind from workspace_entitlements`.execute(
       db,
     );
     expect(rows).toHaveLength(1);

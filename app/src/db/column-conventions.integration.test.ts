@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down, against a real SQLite file, that the portable column conventions hold end to end:
+// Pins down, against a real Postgres database, that the portable column conventions hold end to end:
 // a repository that stores JSON as text and booleans as integers gives back exactly what it got.
 // The probe table is local to this test; the real schema has no JSON or boolean column yet.
 import { sql, type Kysely } from "kysely";
@@ -68,7 +68,9 @@ describe("a repository using the column conventions", () => {
     expect((await repository.load("one")).payload).toEqual(payload);
     const { rows } = await sql<{
       type: string;
-    }>`select typeof(payload) as type from probe`.execute(repository.db);
+    }>`select pg_typeof(payload)::text as type from probe`.execute(
+      repository.db,
+    );
     expect(rows[0]?.type).toBe("text");
   });
 
@@ -80,7 +82,7 @@ describe("a repository using the column conventions", () => {
     await repository.save("off", {}, false);
 
     const { rows } = await sql<{ id: string; enabled: number; type: string }>`
-      select id, enabled, typeof(enabled) as type from probe order by id`.execute(
+      select id, enabled, pg_typeof(enabled)::text as type from probe order by id`.execute(
       repository.db,
     );
     expect(rows).toEqual([

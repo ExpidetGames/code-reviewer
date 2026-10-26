@@ -1,38 +1,22 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The sweep route of a hosted deployment (#328) against a real database: only the platform's cron may call it,
-// a call without the right secret changes nothing, and two runs that overlap do not both work. On SQLite and,
-// when TEST_DATABASE_URL is set, on Postgres, where the second run is a second connection and the lock is the
+// a call without the right secret changes nothing, and two runs that overlap do not both work. , where the second run is a second connection and the lock is the
 // database's own (CI).
-import type { Kysely } from "kysely";
-import { describe, expect, it as vitestIt, vi } from "vitest";
-import type { Database } from "../db/schema.ts";
+import { describe, expect, it, vi } from "vitest";
 import { createAppMetaRepository } from "../db/repositories/app-meta-repository.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createRunnerQueue } from "../jobs/runner-queue.ts";
 import { createDispatchSweep } from "../dispatch/sweep.ts";
 import { createJobQueueFixture } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import { handleDispatchSweepCron } from "./dispatch-sweep.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const SECRET = "cron-secret-0123456789abcdef0123456789abcdef";
-const serverlessEnv = { APP_RUNTIME: "serverless", CRON_SECRET: SECRET };
+const serverlessEnv = { CRON_SECRET: SECRET };
 const MINUTE = 60 * 1000;
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 8 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 8 })).db;
 
 function request(authorization?: string): Request {
   return new Request(
@@ -43,10 +27,10 @@ function request(authorization?: string): Request {
   );
 }
 
-async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
-  const database = await open?.();
+async function setupOn() {
+  const database = await open();
   const fixture = await createJobQueueFixture({
-    ...(database === undefined ? {} : { database }),
+    database,
   });
   const queue = createRunnerQueue(fixture.db, { now: fixture.clock.now });
   const cleanup = vi.fn(async () => ({
@@ -82,10 +66,8 @@ async function setupOn(open: (() => Promise<Kysely<Database>>) | undefined) {
   return { fixture, queue, cleanup, sweep, lapsed, call };
 }
 
-describe.each(databases)("the dispatch sweep route on %s", (name, open) => {
-  const it =
-    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-  const setup = () => setupOn(open);
+describe("the dispatch sweep route", () => {
+  const setup = () => setupOn();
 
   // #328-T07
   it.each([
@@ -111,25 +93,11 @@ describe.each(databases)("the dispatch sweep route on %s", (name, open) => {
 
     for (const secret of [undefined, "", "short"]) {
       const response = await t.call(`Bearer ${secret ?? ""}`, {
-        APP_RUNTIME: "serverless",
         CRON_SECRET: secret,
       } as typeof serverlessEnv);
       expect(response.status).toBe(401);
     }
 
-    expect((await t.queue.get(job.id))?.status).toBe("running");
-  });
-
-  // #328-T07
-  it("does not exist outside serverless mode", async () => {
-    const t = await setup();
-    const job = await t.lapsed();
-
-    const response = await t.call(`Bearer ${SECRET}`, {
-      CRON_SECRET: SECRET,
-    } as typeof serverlessEnv);
-
-    expect(response.status).toBe(404);
     expect((await t.queue.get(job.id))?.status).toBe("running");
   });
 

@@ -14,7 +14,7 @@
 // One transaction does all of it (the claim's, when the caller hands one in): look for the workspace's entry; read the amount;
 // read the accounts of the bound installations; take the balance lock (the journal's rule: the lock before any write); take the
 // first bound account nobody was granted yet (an insert that the primary key lets exactly one writer win, so two workspaces of
-// one account meeting billing at the same moment get one grant between them, on Postgres and SQLite); write the entry. If
+// one account meeting billing at the same moment get one grant between them); write the entry. If
 // anything fails the row is not there either, and the next contact tries again. Nothing is ever granted a second time by
 // retrying, because every step is keyed.
 //

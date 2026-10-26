@@ -13,8 +13,8 @@
 #   3. the preflight, which names whatever is missing and stops;
 #   3b. the `probe` entry mode of the Worker image (#324, #331) on this layout: with a read-only root it must advertise
 #      `opencode`, with a writable one it must not (the capability probe of the hosted deployment is this verdict);
-#   4. the journeys (the runner inside them is started as root with the capabilities of compose.dynamic.yml
-#      and no-new-privileges: app/e2e/helpers/dynamic-runner.ts);
+#   4. the journeys (the Worker inside them is started as root with the capabilities of the hardened container
+#      spec and no-new-privileges: runner/scripts/dynamic_e2e_worker_container.sh);
 #   5. the last word of the guard, and a check that no process of the lane is left.
 set -euo pipefail
 
@@ -80,8 +80,8 @@ install -m 0644 -o root -g root "$LANE_RUNNER_DIR/opencode-pin.json" "$LANE_RUNN
 # only, so the lane proves both directions with the pinned tools and pins installed above: the hardened container's
 # read-only root passes, a writable root does not (`root_filesystem_writable`). The read-only root is made in a mount
 # namespace of its own (every disk filesystem read-only, like tests/privileged in run_privileged_offline.sh), so the
-# journeys below keep their writable one. The runner is started as root with exactly the capabilities of
-# compose.dynamic.yml and no-new-privileges; the verdict is the one line of its stdout.
+# journeys below keep their writable one. The Worker is started as root with exactly the capabilities of
+# the hardened container spec and no-new-privileges; the verdict is the one line of its stdout.
 probe_as_container() {
   (
     cd "$LANE_RUNNER_DIR"
@@ -95,7 +95,7 @@ probe_as_container() {
 }
 make_root_read_only() {
   local failed=0 mountpoint fstype
-  # The container's own writable paths (compose.dynamic.yml tmpfs): the engine's version check and the
+  # The container's own writable paths (the tmpfs of the hardened container spec): the engine's version check and the
   # startup write nowhere else once the disks are read-only.
   mount -t tmpfs -o rw,noexec,nosuid,nodev,size=512m,mode=1777 tmpfs /tmp || return 1
   while read -r mountpoint fstype; do

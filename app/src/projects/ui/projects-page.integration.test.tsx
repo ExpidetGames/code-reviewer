@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // @vitest-environment jsdom
-// Pins down the Projects page with real data: the list is built from a real SQLite file filled by the
+// Pins down the Projects page with real data: the list is built from a real Postgres database filled by the
 // sync against the fake GitHub, and the configuration hints follow the environment. The hints name
 // variables and never values; a complete configuration shows none; a missing GitHub App setting
 // blocks activating. Rendering is the real component tree; only the navigation hook is stood in.

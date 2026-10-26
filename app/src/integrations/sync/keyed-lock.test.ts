@@ -4,7 +4,7 @@
 // other in the order they were asked for, jobs with different keys do not wait for each other, a
 // failing job does not block the next, and the shared lock is one object per process.
 import { describe, expect, it } from "vitest";
-import { createKeyedLock, sharedKeyedLock } from "./keyed-lock.ts";
+import { createKeyedLock } from "./keyed-lock.ts";
 
 function deferred() {
   let resolve!: () => void;
@@ -65,9 +65,5 @@ describe("the keyed lock", () => {
 
     await expect(failing).rejects.toThrow("boom");
     expect(await next).toBe("result");
-  });
-
-  it("hands out one shared lock per process", () => {
-    expect(sharedKeyedLock()).toBe(sharedKeyedLock());
   });
 });

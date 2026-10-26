@@ -7,8 +7,8 @@
 // the other), so the clock here answers a different instant to each: the first call is the look, the
 // second the statement.
 import { describe, expect, it } from "vitest";
-import { runCli } from "../admin-cli/cli.ts";
-import { hashResetToken, RESET_TOKEN_TTL_MS } from "../admin-cli/token.ts";
+import { hashResetToken, RESET_TOKEN_TTL_MS } from "../auth/link-token.ts";
+import { makeResetLink } from "../test-support/reset-link.ts";
 import {
   createAdminHarness,
   ADMIN_TEST_BASE_URL,
@@ -23,19 +23,13 @@ const LAST_MOMENT = new Date(EXPIRES_AT.getTime() - 1);
 
 async function aLinkMadeByTheOperator() {
   const portal = await createAdminHarness();
-  const out: string[] = [];
-  const code = runCli(
-    ["reset-password", ADMIN_TEST_CREDENTIALS.email],
-    {
-      DATABASE_PATH: portal.databasePath,
-      BETTER_AUTH_URL: ADMIN_TEST_BASE_URL,
-    },
-    { out: (line) => out.push(line), err: () => undefined },
-    () => MADE_AT,
-  );
-  const link = out.find((line) => line.startsWith("http")) ?? "";
-  const token = new URL(link).searchParams.get("token") ?? "";
-  expect(code).toBe(0);
+  const made = await makeResetLink(portal.db, {
+    email: ADMIN_TEST_CREDENTIALS.email,
+    baseUrl: ADMIN_TEST_BASE_URL,
+    now: () => MADE_AT,
+  });
+  expect(made.ok).toBe(true);
+  const token = made.ok ? made.token : "";
   const hash = (await portal.auth.$context).password.hash;
 
   /**

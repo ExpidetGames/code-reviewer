@@ -31,15 +31,10 @@ function codeInput(): HTMLElement {
   return screen.getByRole("textbox", { name: "Setup code" });
 }
 
-describe("the setup code form in a serverless deployment", () => {
+describe("the setup code form", () => {
   // #321-T01
   it("points at pnpm setup-code instead of the log of the app", () => {
-    render(
-      <CodeForm
-        hosting="serverless"
-        api={{ submitCode: vi.fn(), complete: vi.fn() }}
-      />,
-    );
+    render(<CodeForm api={{ submitCode: vi.fn(), complete: vi.fn() }} />);
 
     expect(screen.getByText(/pnpm setup-code/)).toBeTruthy();
     expect(screen.queryByText(/docker compose logs app/)).toBeNull();
@@ -50,7 +45,6 @@ describe("the setup code form in a serverless deployment", () => {
     const user = userEvent.setup();
     render(
       <CodeForm
-        hosting="serverless"
         api={{
           submitCode: vi.fn(async () => ({
             ok: false as const,
@@ -69,13 +63,6 @@ describe("the setup code form in a serverless deployment", () => {
     expect((await screen.findByText(/already used/)).textContent).toMatch(
       /pnpm setup-code/,
     );
-  });
-
-  // #321-T04
-  it("keeps the instruction of a server by default", () => {
-    render(<CodeForm api={{ submitCode: vi.fn(), complete: vi.fn() }} />);
-
-    expect(screen.getByText(/docker compose logs app/)).toBeTruthy();
   });
 });
 
@@ -129,7 +116,7 @@ describe("the setup code form", () => {
   });
 
   // #97-SU-08
-  it("tells the person to restart the app when the setup is locked", async () => {
+  it("sends the person to pnpm setup-code when the setup is locked", async () => {
     const user = userEvent.setup();
     renderForm({ ok: false, status: 423, code: "setup_locked", issues: [] });
 
@@ -137,14 +124,14 @@ describe("the setup code form", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect((await screen.findByRole("alert")).textContent).toMatch(
-      /Restart the app/,
+      /pnpm setup-code/,
     );
   });
 
-  it("says where to find the code, and mentions kept data on an existing installation", () => {
+  it("says where the code comes from, and mentions kept data on an existing installation", () => {
     render(<CodeForm existingInstallation />);
 
-    expect(screen.getByText(/docker compose logs app/)).toBeTruthy();
+    expect(screen.getByText(/pnpm setup-code/)).toBeTruthy();
     expect(screen.getByText(/data from before the setup existed/)).toBeTruthy();
   });
 

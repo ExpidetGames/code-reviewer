@@ -3,7 +3,7 @@
 // Pins down who sees the pages inside the app frame (Projects, Runs, Settings): a visitor without a
 // session is sent to the login page and gets neither navigation nor user data, from the proxy and
 // again from the page itself (the second guard), and the "Sign out" action ends the session on the
-// server so the next request to an app page is turned away. Real Better Auth and SQLite; only the
+// server so the next request to an app page is turned away. Real Better Auth and Postgres; only the
 // Next.js request context (headers, cookies) is stood in for, and the process-wide auth singletons
 // are pointed at the test instance.
 import { NextRequest } from "next/server";

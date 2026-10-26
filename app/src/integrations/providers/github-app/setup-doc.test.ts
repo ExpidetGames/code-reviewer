@@ -2,8 +2,7 @@
 
 // Keeps docs/github-app.md (the guide for creating the team's GitHub App) in step with the code: the
 // permissions and webhook events the guide tells people to set are exactly the ones the code works
-// with, the webhook path is the route that exists, and every environment variable the loader reads
-// is explained. A change to the code that is not mirrored in the guide fails here.
+// with, and the webhook path is the route that exists. A change to the code that is not mirrored in the guide fails here.
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -151,19 +150,5 @@ describe("the GitHub App setup guide", () => {
 
     expect(existsSync(`${repoRoot}${route}`)).toBe(true);
     expect(guide).toContain("/api/webhooks/github-app");
-  });
-
-  // CR-38-T01
-  it("names every environment variable the loader still reads for an installation that was not imported", () => {
-    for (const name of [
-      "GITHUB_APP_ID",
-      "GITHUB_APP_SLUG",
-      "GITHUB_APP_WEBHOOK_SECRET",
-      "GITHUB_APP_PRIVATE_KEY",
-      "GITHUB_APP_PRIVATE_KEY_PATH",
-    ])
-      expect(guide, name).toContain(name);
-    // The variables of the separate OAuth app are documented as no longer used.
-    expect(guide).toMatch(/GITHUB_OAUTH_CLIENT_ID[\s\S]*?not used any more/);
   });
 });

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/worker-container.v1.json",
   "title": "Code Reviewer hardened Worker container, version 1",
-  "description": "The hardened container spec (#316, #318): one definition of the flags of the container a Worker runs in, so that the self-hosted compose files and the container the Sandbox-Launcher starts inside a VM cannot drift apart. The schema is the hardening floor: a document that weakens it (privileged, a bind or volume, a device, host namespaces, host networking, an unconfined seccomp or AppArmor profile, a writable root, a weaker tmpfs, another user, another capability set, a credential in the environment) is refused, because the weakening has no key to live in or a value the schema does not allow. examples/worker-container/WorkerContainerSpec.json is the spec and equals compose.dynamic.yml and the runner-dynamic service of compose.coolify.yml (tests in the app, #325 extends them); the renderer to `docker run` arguments is #325. Per Worker kind a launcher may override only what WorkerContainerOverrides names (the memory limit: the self-hosted default is the spec's, the Sandbox sizes differ). The per-job credential is never part of a container: it goes to the Worker on stdin.",
+  "description": "The hardened container spec (#316, #318): one definition of the flags of the container a Worker runs in: the container the Sandbox-Launcher starts inside a VM, the probe of the golden snapshot and the privileged test lanes all take them from here. The schema is the hardening floor: a document that weakens it (privileged, a bind or volume, a device, host namespaces, host networking, an unconfined seccomp or AppArmor profile, a writable root, a weaker tmpfs, another user, another capability set, a credential in the environment) is refused, because the weakening has no key to live in or a value the schema does not allow. examples/worker-container/WorkerContainerSpec.json is the spec (the Dispatcher's copy and its test keep them equal); the renderer to `docker run` arguments is #325. Per Worker kind a launcher may override only what WorkerContainerOverrides names (the memory limit: the spec's is the default, the Sandbox sizes differ). The per-job credential is never part of a container: it goes to the Worker on stdin.",
   "version": 1,
   "$defs": {
     "MemorySize": {
@@ -203,7 +203,7 @@
       }
     },
     "WorkerContainerOverrides": {
-      "description": "What a launcher may change per Worker kind (ADR of the hosted deployment, #325): the memory limit, because the self-hosted default is not the size of a Sandbox VM. Nothing else.",
+      "description": "What a launcher may change per Worker kind (ADR of the hosted deployment, #325): the memory limit, because the spec's default is not the size of a Sandbox VM. Nothing else.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -219,7 +219,7 @@
       }
     },
     "WorkerContainerLauncherAdditions": {
-      "description": "What one launcher variant adds to the spec and the self-hosted compose files do not carry (#325, #345): the two switches that turn IPv6 off in the container's network namespace. Needed where the kernel has only the nf_tables `ip` family, such as the Sandbox VM: the Dynamic-Worker then installs its egress rules as a fallback `ip` table, which does not see IPv6, so IPv6 has to be off and proven off, and the container's /proc/sys is read-only (docker `--sysctl`). The Sandbox-Launcher always adds them; the self-hosted Docker-Launcher and the compose files do not, so a full-mode host changes nothing (the spec has no sysctls key, the parity test with the compose files fails on one). Exactly these two names with the value 1, both together; no other sysctl can be added.",
+      "description": "What one launcher variant adds to the spec (#325, #345): the two switches that turn IPv6 off in the container's network namespace. Needed where the kernel has only the nf_tables `ip` family, such as the Sandbox VM: the Dynamic-Worker then installs its egress rules as a fallback `ip` table, which does not see IPv6, so IPv6 has to be off and proven off, and the container's /proc/sys is read-only (docker `--sysctl`). The Sandbox-Launcher always adds them; the spec itself has no sysctls key (a test fails on one). Exactly these two names with the value 1, both together; no other sysctl can be added.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

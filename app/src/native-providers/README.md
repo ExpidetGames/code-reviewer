@@ -50,6 +50,6 @@ the admin's (`visibility.test.ts`).
 
 `lookup.test.ts`, `key-test.test.ts`, `form-data.test.ts`, `ui/*.test.tsx` (component), `catalog.integration.test.ts`,
 `workspace-keys.integration.test.ts`, `access.integration.test.ts`, `http.integration.test.ts`, `key-test-service.integration.test.ts`,
-`models-http.integration.test.ts` (integration, a real SQLite file; the catalog ones also on Postgres when `TEST_DATABASE_URL` is set),
+`models-http.integration.test.ts` (integration, a real Postgres database; the catalog ones also on Postgres when `TEST_DATABASE_URL` is set),
 the claim in `integration-tests/http/runner-api-native-own.integration.test.ts`, the save in
 `src/review-settings/native-model.integration.test.ts`, and one journey, `e2e/settings/native-provider.e2e.ts`.

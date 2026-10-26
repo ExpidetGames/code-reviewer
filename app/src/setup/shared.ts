@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The wiring of the running server for the first-run setup: the one setup code store of the process
-// (kept on globalThis, because the instrumentation, the proxy and the route bundles do not share
-// modules), the state reader on the server's database, and the route handlers with the real hash and
+// The wiring of the running server for the first-run setup: the setup code store on the database
+// (kept on globalThis, because the proxy and the route bundles do not share modules), the state reader on the server's database, and the route handlers with the real hash and
 // the real sign in.
 import "server-only";
 import { getGithubCredentialStore } from "../github-config/shared.ts";
@@ -10,12 +9,7 @@ import { loadAuthConfig } from "../auth/config.ts";
 import { getAuth } from "../auth/auth.ts";
 import { getDatabase } from "../db/startup.ts";
 import { checkSetupSession, type SetupSessionCheck } from "./setup-session.ts";
-import {
-  createSetupCodeStore,
-  type SetupCodeGuard,
-  type SetupCodeStore,
-} from "./code-store.ts";
-import { selectSetupCodeGuard } from "./code-guard.ts";
+import type { SetupCodeGuard } from "./code-store.ts";
 import { createDatabaseSetupCodeStore } from "./database-code-store.ts";
 import { completeSetup } from "./complete.ts";
 import { createCredentialCheck } from "./credential-check.ts";
@@ -28,7 +22,6 @@ import {
 
 const globalKey = Symbol.for("code-reviewer.setup");
 type SetupGlobals = {
-  store: SetupCodeStore;
   databaseStore?: SetupCodeGuard;
   readState?: SetupStateReader;
 };
@@ -36,32 +29,18 @@ type GlobalWithSetup = typeof globalThis & { [globalKey]?: SetupGlobals };
 
 function globals(): SetupGlobals {
   const holder = globalThis as GlobalWithSetup;
-  holder[globalKey] ??= { store: createSetupCodeStore() };
+  holder[globalKey] ??= {};
   return holder[globalKey];
 }
 
-/** The setup code store of this process (a server only). On a server the code lives nowhere else. */
-export function getSetupCodeStore(): SetupCodeStore {
-  return globals().store;
-}
-
-/**
- * The setup code the routes check: the one in the memory of this process on a server, the one in the
- * database in a serverless deployment (`pnpm setup-code` made it; #321).
- */
+/** The setup code the routes check: the one in the database (`pnpm setup-code` made it; #321). */
 export function getSetupCodeGuard(): SetupCodeGuard {
   const state = globals();
-  return selectSetupCodeGuard({
-    env: process.env,
-    memory: () => state.store,
-    database: () => {
-      state.databaseStore ??= createDatabaseSetupCodeStore({
-        db: getDatabase(),
-        appSecret: loadAuthConfig(process.env).secret,
-      });
-      return state.databaseStore;
-    },
+  state.databaseStore ??= createDatabaseSetupCodeStore({
+    db: getDatabase(),
+    appSecret: loadAuthConfig(process.env).secret,
   });
+  return state.databaseStore;
 }
 
 /** Whether the instance is set up, read from the database until it is. */
@@ -135,7 +114,7 @@ function runSyncAfterSetup(): void {
     .then(async (snapshot) => {
       if (snapshot.source === "none") return;
       const { runStartupSync } =
-        await import("../integrations/sync/startup.ts");
+        await import("../integrations/sync/run-sync.ts");
       await runStartupSync();
     })
     .catch(() => {

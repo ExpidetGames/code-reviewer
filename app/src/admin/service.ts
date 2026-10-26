@@ -40,10 +40,6 @@ import {
   MAX_WORKSPACES_PER_USER,
   MIN_WORKSPACES_PER_USER,
 } from "../workspaces/limits.ts";
-import {
-  readImportNotice,
-  type ImportNotice,
-} from "../legacy-import/notice.ts";
 import type { CatalogSummary } from "../model-catalog/service.ts";
 import { savePlanManagementUrl } from "../plan-handoff/settings.ts";
 import { checkPlanManagementUrl } from "../plan-handoff/url.ts";
@@ -147,7 +143,6 @@ export type AdminSettingsView = {
    * What the import of an existing installation could not migrate, until the admin dismisses it; null when
    * there is nothing to tell or it was dismissed (src/legacy-import/).
    */
-  importNotice: ImportNotice | null;
 };
 
 export type InvalidInput = {
@@ -220,7 +215,6 @@ export type AdminService = {
   /** Sends the test mail to the acting admin's own address. */
   sendTestMail(actor: { id: string; email: string }): Promise<TestMailResult>;
   /** Hides the notice of the import. A notice that is not there is not an error. */
-  dismissImportNotice(actorId: string): Promise<ChangeResult>;
 };
 
 /** What the Test button answers: the class of the result, or the issue with the typed key. */
@@ -329,7 +323,6 @@ export function createAdminService({
         "own_key_max_total_tokens",
         "review_max_cost_cents",
         "setup_completed_at",
-        "import_notice",
         "dynamic_review",
         "plan_management_url",
       ];
@@ -341,11 +334,9 @@ export function createAdminService({
         ownKeyTokenCap,
         reviewMaxCost,
         completed,
-        notice,
         dynamicReview,
         planManagementUrl,
       ] = await Promise.all(keys.map((key) => settings.getWithMeta(key)));
-      const importNotice = readImportNotice(notice?.value);
       const mailServer = await smtp.view();
       const ids = [
         tenancy?.updatedBy,
@@ -441,10 +432,6 @@ export function createAdminService({
         secrets: await secrets.statuses(),
         setupCompletedAt:
           typeof completed?.value === "string" ? completed.value : null,
-        importNotice:
-          importNotice === null || importNotice.dismissedAt !== null
-            ? null
-            : importNotice,
       };
     },
 
@@ -571,17 +558,6 @@ export function createAdminService({
     },
 
     sendTestMail: (actor) => testMail.send(actor),
-
-    async dismissImportNotice(actorId) {
-      const stored = readImportNotice(await settings.get("import_notice"));
-      if (stored === null || stored.dismissedAt !== null) return { ok: true };
-      await settings.set(
-        "import_notice",
-        { ...stored, dismissedAt: now().toISOString() },
-        actorId,
-      );
-      return { ok: true };
-    },
 
     async changeLimits(actorId, limits) {
       const value = limits.maxWorkspacesPerUser;

@@ -2,7 +2,7 @@
 
 A job is one requested run of a command (`review`; `/ask`, `/improve` and `/describe` were removed)
 on one pull request.
-The queue lives in SQLite (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
+The queue lives in Postgres (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
 from it through the runner API (CR-28), webhooks and the UI put jobs in. Everything goes through
 `createJobQueue` (`job-queue.ts`, scoped to one workspace) and `createRunnerQueue` (`runner-queue.ts`, the
 lease side, for the whole instance). They call the jobs repositories
@@ -62,8 +62,7 @@ A job is queued for exactly one review kind, `diff` (PR-Agent) or `dynamic` (the
 the epic), stored in `jobs.review_kind`. It is resolved when the job is enqueued, from the project's
 stored settings, **inside the enqueue transaction** (`review-kind.ts`). Before resolving the kind,
 `jobs-repository.ts` locks the workspace-scoped repository row, the same row settings saves lock
-with `FOR UPDATE` on PostgreSQL (including before the first project row exists). SQLite uses its
-immediate transaction write lock. Both retain the lock through commit, so a concurrent kind change
+with `FOR UPDATE` on PostgreSQL (including before the first project row exists). The lock is retained through commit, so a concurrent kind change
 can never leave a stale-kind job waiting. A producer never passes a kind; a repository without a project row is Diff.
 
 The rollout gate: Dynamic Review is only **queued** when the instance setting `dynamic_review` says
@@ -248,7 +247,7 @@ statuses from that table and must never cancel a running job.
 ## Tests
 
 `job-status.test.ts` and `job-input.test.ts` are unit tests of the pure rules. The queue itself is
-tested against a real SQLite file in `job-queue.integration.test.ts` (time is moved by a hand-set
+tested against a real Postgres database in `job-queue.integration.test.ts` (time is moved by a hand-set
 clock) and `job-queue-concurrency.integration.test.ts` (callers that overlap are real child
 processes). `list` returns at most 100 jobs (500 at most) unless told otherwise. `integration-tests/webhooks/review-trigger-jobs.integration.test.ts` runs a signed
 delivery through the webhook route into the queue. That the claim is the only dialect specific code is

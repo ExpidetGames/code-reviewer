@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The usage record of a job from the claim to the end (src/usage/README.md), through the real runner API over
-// a real SQLite file: the claim reserves it in its own transaction, the completion settles it from the result,
+// a real Postgres database: the claim reserves it in its own transaction, the completion settles it from the result,
 // and a job that ends without a model call voids it. The record is a bookkeeping side effect: what a runner
 // is handed and what a job does are pinned by the other runner API tests.
 import { describe, expect, it } from "vitest";

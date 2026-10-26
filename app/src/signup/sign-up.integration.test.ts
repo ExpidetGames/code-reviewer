@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the sign-up with email and password through the real route handler, the real Better Auth
-// password hash, the real counters and a real SQLite file: who may sign up, what is created, what is sent,
+// password hash, the real counters and a real Postgres database: who may sign up, what is created, what is sent,
 // and that no answer says whether an address has an account or is allowed.
 import { describe, expect, it, vi } from "vitest";
 import {

@@ -356,7 +356,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     // the instance default. Then the script: the page "Manage plan" leads to, the entitlements of workspace B (its own
     // key, no limit) and the default for everybody else.
     entryIds = await seedCatalog(
-      e2eEnv.operatorDatabasePath,
+      e2eEnv.operatorDatabaseUrl,
       Object.values(ENTRIES).map((entry, index) => ({
         name: entry.name,
         description: entry.description,
@@ -365,7 +365,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
         sortOrder: (index % 2) + 1,
       })),
     );
-    await setCatalogDefaults(e2eEnv.operatorDatabasePath, {
+    await setCatalogDefaults(e2eEnv.operatorDatabaseUrl, {
       diff: entryId(ENTRIES.quick.name),
       dynamic: entryId(ENTRIES.explorer.name),
     });

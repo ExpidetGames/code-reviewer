@@ -279,11 +279,6 @@ test.describe("an Owner invites a colleague who accepts", () => {
     const missing = await page.request.post("/api/there-is-no-such-route");
     expect(sync.status()).toBe(404);
     expect(await sync.text()).toBe(await missing.text());
-    // The status of the backups is the instance admin's alone as well.
-    const backups = await page.request.get("/api/backup/status");
-    const missingGet = await page.request.get("/api/there-is-no-such-route");
-    expect(backups.status()).toBe(404);
-    expect(await backups.text()).toBe(await missingGet.text());
     await page.goto("/w/default/projects");
     await expect(
       page.getByRole("heading", { level: 1, name: "Projects" }),

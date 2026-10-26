@@ -101,7 +101,6 @@ describe("CONTRIBUTING.md", () => {
     expect(text).toContain("make install");
     expect(text).toContain("make verify");
     expect(text).toContain("make test-images");
-    expect(text).toContain("make test-compose");
   });
 
   it("points to the test levels in TESTING.md", () => {

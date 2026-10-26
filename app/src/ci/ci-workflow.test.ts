@@ -114,7 +114,7 @@ describe("CI workflow triggers and jobs", () => {
   });
 
   // #105-PG-04, moved to app-int by #641
-  it("runs the database integration tests against a Postgres service container as well as SQLite", () => {
+  it("runs the database integration tests against a Postgres service container", () => {
     const job = jobNamed("app-int");
     const services = job.services as
       Record<string, { image?: string }> | undefined;
@@ -125,20 +125,6 @@ describe("CI workflow triggers and jobs", () => {
 
     expect(services?.postgres?.image).toMatch(/^postgres:/);
     expect(environment?.TEST_DATABASE_URL).toMatch(/^postgres:\/\//);
-  });
-
-  // #319-T06
-  it("runs the unit suite a second time in serverless mode, so the two runtime modes cannot drift", () => {
-    const job = jobNamed("app-serverless");
-    const unit = steps(job).find((step) => step.run === "pnpm test");
-    const environment = unit?.env as Record<string, string> | undefined;
-
-    expect(environment?.APP_RUNTIME).toBe("serverless");
-    expect(String(job.if)).toContain("needs.changes.outputs.app == 'true'");
-    expect(jobNamed("ci-passed").needs).toContain("app-serverless");
-    // Nothing here may be able to reach a database: the suite is the unit one.
-    expect(job.services).toBeUndefined();
-    expect(commandLines(job)).not.toContain("pnpm test:int");
   });
 
   // CR-16-T01
@@ -265,46 +251,6 @@ describe("CI workflow triggers and jobs", () => {
     expect(
       readFileSync(`${repoRoot}.github/actionlint.yaml`, "utf8"),
     ).toContain("self-hosted-runner");
-  });
-});
-
-describe("CI compose job", () => {
-  // CR-37 (compose smoke test)
-  it("builds both images without pushing and smoke tests the stack against them", () => {
-    const job = jobNamed("compose");
-    const builds = steps(job).filter((step) =>
-      step.uses?.startsWith("docker/build-push-action@"),
-    );
-
-    expect(builds.map((step) => step.with?.file).sort()).toEqual([
-      "app/Dockerfile",
-      "runner/Dockerfile",
-    ]);
-    for (const build of builds) {
-      expect(build.with?.context).toBe(".");
-      expect(build.with?.load).toBe(true);
-      expect(build.with?.push).toBe(false);
-    }
-    expect(commandLines(job)).toContain(
-      "docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci",
-    );
-  });
-
-  // #106-IM-20
-  it("also starts the image it built on the database and the environment of the previous release", () => {
-    expect(commandLines(jobNamed("compose"))).toContain(
-      "docker/smoke/upgrade.sh code-reviewer-app:ci",
-    );
-  });
-
-  // CR-37 (compose smoke test)
-  it("runs on pull requests that touch the app or the runner, and on every pull request into main", () => {
-    const condition = jobNamed("compose").if ?? "";
-
-    expect(condition).toContain("github.event_name == 'pull_request'");
-    expect(condition).toContain("github.base_ref == 'main'");
-    expect(condition).toContain("needs.changes.outputs.app == 'true'");
-    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
   });
 });
 
@@ -604,7 +550,6 @@ describe("CI workflow aggregate check", () => {
       "engine",
       "e2e",
       "licenses",
-      "compose",
       "actionlint",
     ]) {
       expect(jobNamed(id).needs, id).toBe("changes");

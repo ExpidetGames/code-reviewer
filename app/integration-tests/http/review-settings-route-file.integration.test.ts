@@ -7,18 +7,13 @@
 // review-settings-route.integration.test.ts; this file proves the pieces are connected, that the defaults
 // of a workspace are for Admins and Owners and the settings of a project for every member, and that the
 // workspace is the one in the address.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { createModelsDevRepository } from "../../src/db/repositories/models-dev-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { seedRepositories } from "../../src/test-support/review-settings-harness.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import {
   DELETE,
   GET as GET_PROJECT,
@@ -42,9 +37,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 async function startRoutes() {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const { first, second } = await seedRepositories(db);
   const workspaceId = await defaultWorkspaceId(db);

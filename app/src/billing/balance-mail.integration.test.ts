@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #506: the delivery of the balance mails, on SQLite and on Postgres, with the fake mail sender (no real mail is sent): who
+// #506: the delivery of the balance mails, with the fake mail sender (no real mail is sent): who
 // gets one (Owners and Admins, never Members), what it says, that a failing mail server fails nothing but the delivery itself,
 // and that one crossing is mailed once however many deliveries run.
 import { describe, expect, it } from "vitest";
@@ -22,7 +22,7 @@ const USD = 1_000_000;
 const BASE_URL = "https://reviews.example.com";
 
 for (const engine of BILLING_ENGINES) {
-  describe.skipIf(engine.skip)(`the balance mails on ${engine.name}`, () => {
+  describe(`the balance mails on ${engine.name}`, () => {
     async function start() {
       const { db, workspaceId, otherWorkspaceId } = await engine.create();
       await setBillingSwitch(db, true);

@@ -6,9 +6,9 @@
 // **Confirming an address** is the guarded update of the one provider row, in a transaction of its own
 // (`confirmPendingUrl`, src/db/repositories/models-dev-repository.ts): only the address the admin saw, only while it is
 // waiting for a decision, never a refused one. It does not take `MODELS_DEV_LOCK`. The fetch reads the provider rows
-// `FOR UPDATE` on Postgres inside the transaction that writes them, so this transaction reads the row `FOR UPDATE` first,
+// `FOR UPDATE` inside the transaction that writes them, so this transaction reads the row `FOR UPDATE` first,
 // waits for a fetch that is writing for at most `lockTimeoutMs` (then `fetch_in_progress`, nothing written) and is applied
-// after it; on SQLite every transaction begins `begin immediate`.
+// after it.
 //
 // **Fetch now** is `refresh()` with a deadline that fits the function limit of the route (`FETCH_NOW_DEADLINE_MS`, below
 // the 60 seconds of `vercel.json`), counted in the shared rate limits. A fetch the guard refused is answered with every

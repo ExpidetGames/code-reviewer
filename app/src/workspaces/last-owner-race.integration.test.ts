@@ -19,13 +19,13 @@ async function race(round: number) {
 
   const first = startDbProcess([
     "leave-workspace",
-    h.config.path,
+    h.config.url,
     workspace.id,
     "owner-a",
   ]);
   const second = startDbProcess([
     "leave-workspace",
-    h.config.path,
+    h.config.url,
     workspace.id,
     "owner-b",
   ]);

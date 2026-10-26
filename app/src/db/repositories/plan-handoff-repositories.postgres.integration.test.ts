@@ -1,27 +1,22 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The handoff tokens on Postgres behave like the SQLite ones (#284-T04, T05, T12): of several simultaneous
+// The handoff tokens (#284-T04, T05, T12): of several simultaneous
 // redemptions exactly one answers, a token whose person lost the role is used up and answers nothing, making a token
 // revokes the older unused ones of the same person, and the check of the table refuses a role that may not manage the
-// plan. Runs only when TEST_DATABASE_URL is set.
+// plan.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { signedInMember } from "../../test-support/session-lookup.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import { addWorkspace } from "../../test-support/workspaces.ts";
 import { createPlanHandoffRedeemRepository } from "./plan-handoff-redeem-repository.ts";
 import { createPlanHandoffTokensRepository } from "./plan-handoff-tokens-repository.ts";
 import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import { createTestDatabase } from "../../test-support/test-database.ts";
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 
 async function setup() {
-  const { db } = await createPostgresTestDatabase({ poolMax: 12 });
+  const { db } = await createTestDatabase({ poolMax: 12 });
   const workspaceId = await addWorkspace(db, "alpha");
   await signedInMember(db, { id: "owner", workspaceId, role: "owner" });
   await signedInMember(db, { id: "admin", workspaceId, role: "admin" });
@@ -34,7 +29,7 @@ async function setup() {
   };
 }
 
-describePostgres("the handoff tokens on Postgres", () => {
+describe("the handoff tokens on Postgres", () => {
   // #284-T04
   it("answers exactly one of several simultaneous redemptions", async () => {
     const t = await setup();

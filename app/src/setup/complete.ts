@@ -3,8 +3,8 @@
 // Completion of the first-run setup (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.2, point 4): one transaction that creates the instance admin, stores the choices, creates or
 // uses the workspace the tenancy calls for, and marks the instance as set up. Two people finishing at
-// the same moment cannot both win: the second finds the marker set and gets `already_set_up`, and
-// the transaction (which takes the write lock up front) rolls back whatever it did.
+// the same moment cannot both win: the transaction takes the setup lock first (src/db/setup-lock.ts), so the second finds the marker set and gets
+// `already_set_up`, and a transaction that fails rolls back whatever it did.
 //
 // The password is hashed before the transaction opens, never inside it: hashing is slow on purpose
 // and a write transaction must not be held open across it. The hash is Better Auth's (its
@@ -13,6 +13,7 @@ import type { Kysely } from "kysely";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { formatTimestamp } from "../db/codecs.ts";
+import { lockSetupCompletion } from "../db/setup-lock.ts";
 import type { Database } from "../db/schema.ts";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { SetupError } from "./errors.ts";
@@ -63,6 +64,7 @@ export async function completeSetup(
     throw new SetupError("admin_unusable");
 
   return db.transaction().execute(async (trx) => {
+    await lockSetupCompletion(trx);
     const at = now();
     const timestamp = formatTimestamp(at);
     const settings = createInstanceSettingsRepository(trx, () => at);

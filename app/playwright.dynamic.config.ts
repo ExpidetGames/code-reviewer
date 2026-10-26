@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The privileged Dynamic e2e lane (#253): one fake GitHub and one app under test (a production build,
-// made once by runner/scripts/run_dynamic_e2e.sh before this runs), and the journeys of e2e/dynamic, which
-// start the real Dynamic runner as root and the pinned OpenCode as its engine user. It is a configuration of
-// its own because the lane needs root, nft, an engine user and a network namespace that nothing of
-// `playwright.config.ts` has: the other journeys never run it, and the lane never runs theirs. Run it with
-// `make test-e2e-dynamic` (it uses sudo), not directly.
+// The privileged Dynamic e2e lane (#253): one fake GitHub and one app under test (a production build, made once by
+// runner/scripts/run_dynamic_e2e.sh before this runs, over a Postgres database of its own), and the journey of
+// e2e/dynamic: a signed webhook wakes the real Dispatcher, whose Sandbox-Launcher starts the real Worker in the
+// container's root, capabilities and read-only root (runner/scripts/dynamic_e2e_worker_container.sh), with the pinned
+// OpenCode as its engine user. It is a configuration of its own because the lane needs root, nft, an engine user and a
+// network namespace that nothing of `playwright.config.ts` has: the other journeys never run it, and the lane never
+// runs theirs. Run it with `make test-e2e-dynamic` (it uses sudo), not directly.
 //
-// Ports: the app listens on E2E_PIPELINE_PORT (default E2E_PORT + 1) and nothing else of the lane listens
-// on a fixed port (the fake GitHub takes a random one, the fake LLM another); never 3000 or 3100. The hosted
-// journey (#332, e2e/dynamic/hosted-dynamic.e2e.ts) has a second app, in the hosted deployment's dispatch mode, on
-// E2E_HOSTED_PORT (default 3617) with the Dispatcher on the next one: the Dispatcher starts the Worker in the container's
-// root, capabilities and read-only root (runner/scripts/dynamic_e2e_worker_container.sh), with the pinned OpenCode.
+// Ports: the app listens on E2E_HOSTED_PORT (default 3617) with the Dispatcher on the next one, and nothing else of
+// the lane listens on a fixed port (the fake GitHub takes a random one, the fake LLM another); never 3000 or 3100.
+// The lane's namespace has loopback only, so the Postgres server is reached through a Unix socket
+// (e2e/pg-bridge.ts, E2E_DATABASE_URL).
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv, llmEnv } from "./e2e/helpers/e2e-env";
-import { hostedEnv } from "./e2e/helpers/hosted-env";
+import { hostedDatabaseUrls, hostedEnv } from "./e2e/helpers/hosted-env";
 
-for (const port of [e2eEnv.appPort, e2eEnv.pipelineAppPort])
+for (const port of [hostedEnv.appPort, hostedEnv.dispatcherPort])
   if (port === 3000 || port === 3100)
     throw new Error(
       `The lane must not use port ${String(port)}: other work runs there. Set E2E_PORT to a private one.`,
@@ -39,8 +39,9 @@ const githubAppPublicKey = createPublicKey(
 const browser = {
   ...devices["Desktop Chrome"],
   channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
-  baseURL: e2eEnv.pipelineAppUrl,
+  baseURL: hostedEnv.appUrl,
 };
+const database = hostedDatabaseUrls();
 
 export default defineConfig({
   testDir: "e2e/dynamic",
@@ -51,17 +52,17 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // No retry: the journey and its fixtures are written once per run, and a retry would hide what failed.
   retries: 0,
-  // One runner, one slot, one database: nothing of the lane runs next to anything else.
+  // One app, one Worker slot, one database: nothing of the lane runs next to anything else.
   workers: 1,
   timeout: 240_000,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
-    baseURL: e2eEnv.pipelineAppUrl,
+    baseURL: hostedEnv.appUrl,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   projects: [
-    // The app starts without a database: the first-run setup and the GitHub App, once per run.
+    // The app starts on a migrated, empty database: the first-run setup and the GitHub App, once per run.
     {
       name: "prepare",
       use: browser,
@@ -75,19 +76,13 @@ export default defineConfig({
       testMatch: /network-guard\.e2e\.ts$/,
       dependencies: ["prepare"],
     },
-    {
-      name: "journey",
-      use: browser,
-      testMatch: /dynamic-review\.e2e\.ts$/,
-      dependencies: ["prepare"],
-    },
-    // The hosted deployment's Dynamic journey (#332): the same lane, the real Dispatcher and a Worker that is started
-    // by its Sandbox-Launcher instead of polling. It runs after the journey of the runner, never next to it.
+    // The hosted deployment's Dynamic journey (#332): the real Dispatcher and a Worker that is started by its
+    // Sandbox-Launcher.
     {
       name: "hosted",
-      use: { ...browser, baseURL: hostedEnv.appUrl },
+      use: browser,
       testMatch: /hosted-dynamic\.e2e\.ts$/,
-      dependencies: ["prepare", "journey"],
+      dependencies: ["prepare", "guard"],
     },
   ],
   webServer: [
@@ -112,40 +107,14 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      // The build is made once, before the lane starts (one production build per worktree).
+      // The app (the production build made once, before the lane starts) over a database of its own, migrated like a
+      // deployment does, in the hosted deployment's dispatch mode (a queued job wakes the Dispatcher with a signed
+      // call). There is no sweep in this lane, which the journey does not need: the probe has passed before the call
+      // comes.
       command:
-        "rm -rf test-results/e2e-pipeline-data && mkdir -p test-results/e2e-pipeline-data && " +
-        `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${e2eEnv.pipelineAppPort} > ${e2eEnv.logFiles.pipeline} 2>&1`,
-      env: {
-        APP_SECRET: e2eEnv.appSecret,
-        // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
-        MODELS_DEV_FETCH: "off",
-        GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
-        GITHUB_API_BASE_URL: e2eEnv.githubUrl,
-        RUNNER_TOKEN: e2eEnv.runnerToken,
-        // Without this flag the server refuses the two overrides above.
-        ALLOW_TEST_GITHUB_ENDPOINTS: "true",
-        DATABASE_PATH: e2eEnv.pipelineDatabasePath,
-        BETTER_AUTH_URL: e2eEnv.pipelineAppUrl,
-        // Saving the Dynamic model asks the provider's model metadata: the fake LLM of the journey answers (#269).
-        LLM_API_BASE_URL: e2eEnv.modelLlmFakeApiUrl,
-        ALLOW_TEST_LLM_ENDPOINTS: "true",
-        LLM_MODEL: llmEnv.model,
-        LLM_MAX_TOKENS: llmEnv.maxTokens,
-        // A push is reviewed after a second instead of after 90.
-        NEXT_TELEMETRY_DISABLED: "1",
-      },
-      url: e2eEnv.pipelineAppUrl,
-      reuseExistingServer: false,
-      timeout: 60_000,
-    },
-    {
-      // The second app: the same build, a database of its own, and the hosted deployment's dispatch mode (a queued job
-      // wakes the Dispatcher with a signed call). There is no sweep in this mode (the cron route is the serverless
-      // mode's), which the journey does not need: the probe has passed before the call comes.
-      command:
-        `rm -rf test-results/e2e-hosted-dynamic-data ${hostedEnv.directory} && ` +
-        `mkdir -p test-results/e2e-hosted-dynamic-data ${hostedEnv.directory} && ` +
+        `rm -rf ${hostedEnv.directory} && mkdir -p ${hostedEnv.directory} && ` +
+        "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && " +
+        "node --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/db/migrate-cli.ts && " +
         `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
       env: {
         APP_SECRET: e2eEnv.appSecret,
@@ -155,7 +124,10 @@ export default defineConfig({
         GITHUB_API_BASE_URL: e2eEnv.githubUrl,
         RUNNER_TOKEN: hostedEnv.dispatcherToken,
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
-        DATABASE_PATH: "test-results/e2e-hosted-dynamic-data/app.db",
+        E2E_ADMIN_DATABASE_URL: database.admin,
+        E2E_DATABASE_NAME: database.name,
+        DATABASE_URL: database.app,
+        DATABASE_URL_MIGRATE: database.app,
         BETTER_AUTH_URL: hostedEnv.appUrl,
         RUNNER_DISPATCH: "webhook",
         RUNNER_WEBHOOK_URL: `${hostedEnv.dispatcherUrl}/dispatch`,

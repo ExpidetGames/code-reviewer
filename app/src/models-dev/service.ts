@@ -240,7 +240,7 @@ export function createModelsDevService(
     // made to a provider in between (an admin's confirmation, #554) from being written over: on Postgres (read committed)
     // the plan would be made on rows that have changed since. So the provider rows are read `FOR UPDATE`: a confirmation
     // made meanwhile waits for this transaction and is applied after it (its guard, `pending_url = ?`, is judged on what
-    // this fetch wrote), one made before is seen by the plan. SQLite serialises writers by `begin immediate`.
+    // this fetch wrote), one made before is seen by the plan.
     let planned: Awaited<ReturnType<typeof applyPlan>>;
     try {
       planned = await applyPlan(parsed, urlChecks, cut, options, remaining);

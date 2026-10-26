@@ -8,7 +8,6 @@
 // scope). The behavior of the handlers is in src/manual-reviews/http.integration.test.ts and the proxy in
 // front is in manual-review-route.integration.test.ts; this file proves the pieces are connected, that
 // every member may start a review, and that the workspace is the one in the address.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
@@ -17,18 +16,14 @@ import {
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createIntegrationsRepository } from "../../src/db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import {
   TEST_APP_ID,
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
@@ -57,9 +52,7 @@ async function startRoutes() {
   });
   for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   await saveGithubAppFromEnv(db, env);
   const integration = await createIntegrationsRepository(

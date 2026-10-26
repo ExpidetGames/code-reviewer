@@ -396,7 +396,7 @@ lease token it can neither guess nor serve; its lease runs out and the job is tr
 A Dispatcher (#316) is woken by the dispatch webhook for one job, claims exactly that job and starts a
 Worker. It cannot count what runs, so the app counts for it. Three additions, all optional on the wire:
 
-- **Claim by id.** `jobId` in the claim body adds `id = :jobId` to the claim SQL (SQLite and Postgres) and
+- **Claim by id.** `jobId` in the claim body adds `id = :jobId` to the claim SQL (Postgres) and
   nothing else: the job must be `queued`, due, of a kind the advertised `engines` can run, and its pull
   request must have no running job. Anything else (unknown, running, finished, cancelled, superseded, not
   due yet, another kind) is `204`, with no attempt counted and no other job handed out, also when the named
@@ -406,7 +406,7 @@ Worker. It cannot count what runs, so the app counts for it. Three additions, al
   `X-Runner-Id` (the pool) inside the claim transaction, after lapsed leases were requeued, and answers `204`
   at or above the cap. Another pool is unaffected. Atomic because a claim is the only way a job becomes
   running and every claim holds the exclusive Dynamic-gate lock on Postgres (`pg_advisory_xact_lock(195, 1)`,
-  `db/dynamic-review-lock.ts`) or the write lock of the connection on SQLite, so two claims of one pool cannot
+  `db/dynamic-review-lock.ts`), so two claims of one pool cannot
   both see room for one more; `claim-by-id-queue.integration.test.ts` (#322-T06) keeps it that way, on Postgres in CI.
   A `maxRunning` of 0, a negative or fractional one, one over 1000 and a `jobId` that is no UUID are
   `400 RUNNER_REQUEST_INVALID` before any job is claimed.
@@ -542,7 +542,7 @@ jobs the policy let through.
 
 - `integration-tests/http/runner-api-usage.integration.test.ts`: the usage record from claim to completion.
 - `integration-tests/http/runner-api-claim.integration.test.ts`, `-report`, `-security` and
-  `-route-files`: the real handlers with a real SQLite file and the fake GitHub; the route files with
+  `-route-files`: the real handlers with a real Postgres database and the fake GitHub; the route files with
   the wiring of the running server and a delivery that goes through the webhook route first.
 - `integration-tests/http/runner-api-native-own.integration.test.ts` (#555): a catalog model on the own key: the entry, the one key revealed,
   `llm_not_configured` for a key of another provider, `llm_model_unavailable`, an unlisted model still served.

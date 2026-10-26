@@ -2,43 +2,25 @@
 
 // The queue tells its owner which jobs lost their running claim (#487), so that the Dispatcher can be told to stop their
 // VMs: a result, a failure, a cancel, a job given back, a superseded run's report, a lease that ran out (in the expiry
-// call and in the expiry step of a claim) and a runtime past the hard limit. On SQLite and, when TEST_DATABASE_URL is
-// set, on Postgres. The callback runs after the transaction committed, once per call, and never for a call that ended
+// call and in the expiry step of a claim) and a runtime past the hard limit.  The callback runs after the transaction committed, once per call, and never for a call that ended
 // nothing.
-import type { Kysely } from "kysely";
 import { describe, expect, it, vi } from "vitest";
-import type { Database } from "../db/schema.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
 const OK = { ok: true, result: {} } as const;
 const FAILED = { ok: false, errorCode: "unknown", result: null } as const;
 
-describe.each(databases)("the claims a call ended on %s", (name, open) => {
-  const run = name === "Postgres" && open === undefined ? it.skip : it;
-
+describe("the claims a call ended", () => {
   async function start(
     options: Parameters<typeof createJobQueueFixture>[0] = {},
   ) {
-    const database = await open?.();
+    const database = await open();
     const ended: string[][] = [];
     const fixture = await createJobQueueFixture({
       ...(database === undefined ? {} : { database }),
@@ -61,7 +43,7 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
   }
 
   // #487-T06
-  run("names the job whose result was delivered", async () => {
+  it("names the job whose result was delivered", async () => {
     const { fixture, ended, running } = await start();
     const job = await running();
 
@@ -76,7 +58,7 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
   });
 
   // #487-T06
-  run("names the job that failed", async () => {
+  it("names the job that failed", async () => {
     const { fixture, ended, running } = await start();
     const job = await running();
 
@@ -87,7 +69,7 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
   });
 
   // #487-T06
-  run("names the job that was cancelled while it ran", async () => {
+  it("names the job that was cancelled while it ran", async () => {
     const { fixture, ended, running } = await start();
     const job = await running();
 
@@ -102,99 +84,90 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
   });
 
   // #487-T06
-  run(
-    "names a superseded job when its holder reports, and not when it is superseded",
-    async () => {
-      const { fixture, ended, running } = await start();
-      const old = await running(
-        { headSha: sha("a") },
-        { acceptsSupersede: true },
-      );
-      await fixture.enqueue({ headSha: sha("b") });
-      expect((await fixture.queue.get(old.id))?.status).toBe("superseded");
-      expect(ended).toEqual([]);
+  it("names a superseded job when its holder reports, and not when it is superseded", async () => {
+    const { fixture, ended, running } = await start();
+    const old = await running(
+      { headSha: sha("a") },
+      { acceptsSupersede: true },
+    );
+    await fixture.enqueue({ headSha: sha("b") });
+    expect((await fixture.queue.get(old.id))?.status).toBe("superseded");
+    expect(ended).toEqual([]);
 
-      const result = await fixture.queue.complete(
-        old.id,
-        await fixture.tokenOf(old.id),
-        FAILED,
-      );
+    const result = await fixture.queue.complete(
+      old.id,
+      await fixture.tokenOf(old.id),
+      FAILED,
+    );
 
-      expect(result.status).toBe("completed");
-      expect(ended).toEqual([[old.id]]);
-    },
-  );
+    expect(result.status).toBe("completed");
+    expect(ended).toEqual([[old.id]]);
+  });
 
   // #487-T06
-  run(
-    "names a job given back on its last attempt, and not one that went back to the queue",
-    async () => {
-      const { fixture, ended, running } = await start({
-        limits: { maxAttempts: 2 },
-      });
-      const job = await running();
+  it("names a job given back on its last attempt, and not one that went back to the queue", async () => {
+    const { fixture, ended, running } = await start({
+      limits: { maxAttempts: 2 },
+    });
+    const job = await running();
 
-      expect(
-        (
-          await fixture.queue.release(
-            job.id,
-            await fixture.tokenOf(job.id),
-            "launch_failed",
-          )
-        ).status,
-      ).toBe("requeued");
-      // The next attempt may have its VM already when the Dispatcher is told: a requeued job is not stopped.
-      expect(ended).toEqual([]);
+    expect(
+      (
+        await fixture.queue.release(
+          job.id,
+          await fixture.tokenOf(job.id),
+          "launch_failed",
+        )
+      ).status,
+    ).toBe("requeued");
+    // The next attempt may have its VM already when the Dispatcher is told: a requeued job is not stopped.
+    expect(ended).toEqual([]);
 
-      const again = await fixture.queue.claimNext("pool", undefined, {
-        jobId: job.id,
-      });
-      expect(again?.job.id).toBe(job.id);
-      expect(
-        (
-          await fixture.queue.release(
-            job.id,
-            await fixture.tokenOf(job.id),
-            "launch_failed",
-          )
-        ).status,
-      ).toBe("failed");
-      expect(ended).toEqual([[job.id]]);
-    },
-  );
+    const again = await fixture.queue.claimNext("pool", undefined, {
+      jobId: job.id,
+    });
+    expect(again?.job.id).toBe(job.id);
+    expect(
+      (
+        await fixture.queue.release(
+          job.id,
+          await fixture.tokenOf(job.id),
+          "launch_failed",
+        )
+      ).status,
+    ).toBe("failed");
+    expect(ended).toEqual([[job.id]]);
+  });
 
   // #487-T06
-  run(
-    "names the jobs whose lease ran out and ended them, and not the one that went back to the queue",
-    async () => {
-      const { fixture, ended, running } = await start({
-        limits: { maxAttempts: 2 },
-      });
-      const lastTry = await running({
-        prNumber: 1,
-        prUrl: "https://github.test/acme/widgets/pull/1",
-      });
-      fixture.clock.advance(3 * MINUTE);
-      await fixture.queue.expireStaleJobs();
-      expect((await fixture.queue.get(lastTry.id))?.status).toBe("queued");
-      expect(ended).toEqual([]);
-      await fixture.queue.claimNext("pool", undefined, { jobId: lastTry.id });
-      const fresh = await running({
-        prNumber: 2,
-        prUrl: "https://github.test/acme/widgets/pull/2",
-      });
-      fixture.clock.advance(3 * MINUTE);
+  it("names the jobs whose lease ran out and ended them, and not the one that went back to the queue", async () => {
+    const { fixture, ended, running } = await start({
+      limits: { maxAttempts: 2 },
+    });
+    const lastTry = await running({
+      prNumber: 1,
+      prUrl: "https://github.test/acme/widgets/pull/1",
+    });
+    fixture.clock.advance(3 * MINUTE);
+    await fixture.queue.expireStaleJobs();
+    expect((await fixture.queue.get(lastTry.id))?.status).toBe("queued");
+    expect(ended).toEqual([]);
+    await fixture.queue.claimNext("pool", undefined, { jobId: lastTry.id });
+    const fresh = await running({
+      prNumber: 2,
+      prUrl: "https://github.test/acme/widgets/pull/2",
+    });
+    fixture.clock.advance(3 * MINUTE);
 
-      const report = await fixture.queue.expireStaleJobs();
+    const report = await fixture.queue.expireStaleJobs();
 
-      expect(report).toMatchObject({ requeued: 1, leaseExpired: 1 });
-      expect(ended).toEqual([[lastTry.id]]);
-      expect((await fixture.queue.get(fresh.id))?.status).toBe("queued");
-    },
-  );
+    expect(report).toMatchObject({ requeued: 1, leaseExpired: 1 });
+    expect(ended).toEqual([[lastTry.id]]);
+    expect((await fixture.queue.get(fresh.id))?.status).toBe("queued");
+  });
 
   // #487-T06
-  run("names the job whose lapsed lease a claim found", async () => {
+  it("names the job whose lapsed lease a claim found", async () => {
     const { fixture, ended, running } = await start({
       limits: { maxAttempts: 1 },
     });
@@ -209,60 +182,54 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
   });
 
   // #487-T06
-  run(
-    "names nothing for a lapsed lease of a job that a claim found and handed to a new holder",
-    async () => {
-      const { fixture, ended, running } = await start();
-      const job = await running();
-      fixture.clock.advance(3 * MINUTE);
+  it("names nothing for a lapsed lease of a job that a claim found and handed to a new holder", async () => {
+    const { fixture, ended, running } = await start();
+    const job = await running();
+    fixture.clock.advance(3 * MINUTE);
 
-      const claimed = await fixture.queue.claimNext("other-pool");
+    const claimed = await fixture.queue.claimNext("other-pool");
 
-      expect(claimed?.job.id).toBe(job.id);
-      expect(ended).toEqual([]);
-    },
-  );
+    expect(claimed?.job.id).toBe(job.id);
+    expect(ended).toEqual([]);
+  });
 
   // #487-T06
-  run(
-    "names the job that ran past the hard limit, found by a heartbeat and by the expiry",
-    async () => {
-      const { fixture, ended, running } = await start();
-      const first = await running({
-        prNumber: 1,
-        prUrl: "https://github.test/acme/widgets/pull/1",
-      });
-      const second = await running({
-        prNumber: 2,
-        prUrl: "https://github.test/acme/widgets/pull/2",
-      });
-      for (let minute = 1; minute <= 25; minute++) {
-        fixture.clock.advance(MINUTE);
-        if (minute < 25) {
-          await fixture.queue.heartbeat(
-            second.id,
-            await fixture.tokenOf(second.id),
-          );
-          await fixture.queue.heartbeat(
-            first.id,
-            await fixture.tokenOf(first.id),
-          );
-        }
+  it("names the job that ran past the hard limit, found by a heartbeat and by the expiry", async () => {
+    const { fixture, ended, running } = await start();
+    const first = await running({
+      prNumber: 1,
+      prUrl: "https://github.test/acme/widgets/pull/1",
+    });
+    const second = await running({
+      prNumber: 2,
+      prUrl: "https://github.test/acme/widgets/pull/2",
+    });
+    for (let minute = 1; minute <= 25; minute++) {
+      fixture.clock.advance(MINUTE);
+      if (minute < 25) {
+        await fixture.queue.heartbeat(
+          second.id,
+          await fixture.tokenOf(second.id),
+        );
+        await fixture.queue.heartbeat(
+          first.id,
+          await fixture.tokenOf(first.id),
+        );
       }
-      expect(ended).toEqual([]);
+    }
+    expect(ended).toEqual([]);
 
-      await fixture.queue.heartbeat(first.id, await fixture.tokenOf(first.id));
-      expect(ended).toEqual([[first.id]]);
-      expect((await fixture.queue.get(first.id))?.errorCode).toBe("timeout");
+    await fixture.queue.heartbeat(first.id, await fixture.tokenOf(first.id));
+    expect(ended).toEqual([[first.id]]);
+    expect((await fixture.queue.get(first.id))?.errorCode).toBe("timeout");
 
-      const report = await fixture.queue.expireStaleJobs();
-      expect(report.timedOut).toBe(1);
-      expect(ended).toEqual([[first.id], [second.id]]);
-    },
-  );
+    const report = await fixture.queue.expireStaleJobs();
+    expect(report.timedOut).toBe(1);
+    expect(ended).toEqual([[first.id], [second.id]]);
+  });
 
   // #487-T06
-  run("names nothing for a call that ended no claim", async () => {
+  it("names nothing for a call that ended no claim", async () => {
     const { fixture, ended, running } = await start();
     const job = await running();
     const token = await fixture.tokenOf(job.id);
@@ -285,8 +252,8 @@ describe.each(databases)("the claims a call ended on %s", (name, open) => {
   });
 
   // #487-T07
-  run("does not fail the call when the callback throws", async () => {
-    const database = await open?.();
+  it("does not fail the call when the callback throws", async () => {
+    const database = await open();
     const fixture = await createJobQueueFixture({
       ...(database === undefined ? {} : { database }),
       onClaimsEnded: () => {

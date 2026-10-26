@@ -84,7 +84,7 @@ async function openProject(page: Page) {
 
 test.describe("a provider of the catalog for Dynamic Review", () => {
   test.beforeAll(async ({ request }) => {
-    await fetchModelsDevCatalog(e2eEnv.databasePath);
+    await fetchModelsDevCatalog(e2eEnv.databaseUrl);
     await addGithubAccount(request, account);
     await addGithubInstallation(
       request,

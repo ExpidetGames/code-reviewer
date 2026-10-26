@@ -1,108 +1,50 @@
 # Database layer
 
-Kysely on SQLite (better-sqlite3). The whole layer lives in this folder; nothing else in the app
-opens a database or writes SQL. The one exception is `src/backup/` (backup and restore: `VACUUM INTO`,
-`integrity_check`, a command line that runs without Next.js; see its README).
+Kysely on Postgres (the `pg` driver). The whole layer lives in this folder; nothing else in the app
+opens a database or writes SQL.
 
-| File                        | Role                                                                                                                                                                                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`                 | Reads `DATABASE_URL` (SQLite or Postgres), `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` / `DATABASE_POOL_MAX` from the environment; `describeDatabaseTarget` is the safe form for a log line                                                                      |
-| `connection.ts`             | `openDatabase(config)`: SQLite (checks the directory, opens the file, sets the pragmas) or Postgres (`postgres.ts`)                                                                                                                                                 |
-| `postgres.ts`               | Kysely's Postgres dialect over the `pg` driver's pool (with a connect timeout, so an exhausted pool fails), the startup reachability check (`assertPostgresReachable`) and the dedicated advisory-lock connection (`withPostgresAdvisoryLock`, never the main pool) |
-| `driver.ts`                 | `databaseDriver(db)`: which engine a connection speaks, for the one dialect-specific statement (the claim)                                                                                                                                                          |
-| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                                                                                                                                   |
-| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                                                                                                            |
-| `schema-status.ts`          | `readSchemaStatus(db)`: whether every migration of this version has been applied, read-only (serverless `/api/health`)                                                                                                                                              |
-| `migrate-cli.ts`            | `pnpm migrate`: the migrations against `DATABASE_URL_MIGRATE` behind a session advisory lock, for the serverless mode                                                                                                                                               |
-| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                                                                                                                             |
-| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                                                                                                               |
-| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                                                                                                               |
-| `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`)                                                                                        |
-| `workspace-scope.ts`        | `WorkspaceId`, the type of the workspace parameter every scoped repository takes (see "Workspace scoping")                                                                                                                                                          |
-| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)                                                                                                      |
+| File                             | Role                                                                                                                                                                                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                      | Reads `DATABASE_URL` (Postgres) and `DATABASE_POOL_MAX` from the environment (`loadDatabaseConfig`), `DATABASE_URL_MIGRATE` for the migration command (`loadMigrationDatabaseConfig`); `describeDatabaseTarget` is the safe form for a log line                     |
+| `postgres.ts`                    | Kysely's Postgres dialect over the `pg` driver's pool (with a connect timeout, so an exhausted pool fails), the startup reachability check (`assertPostgresReachable`) and the dedicated advisory-lock connection (`withPostgresAdvisoryLock`, never the main pool) |
+| `driver.ts`                      | `databaseDriver(db)`: which engine a connection speaks. Kept because migrations written when the app also ran on SQLite call it; migration files are never edited                                                                                                   |
+| `migrate.ts`, `migrations/`      | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                                                                                                            |
+| `schema-status.ts`               | `readSchemaStatus(db)`: whether every migration of this version has been applied, read-only (`/api/health`)                                                                                                                                                         |
+| `migrate-cli.ts`                 | `pnpm migrate`: the migrations against `DATABASE_URL_MIGRATE` behind a session advisory lock                                                                                                                                                                        |
+| `try-lock.ts`, `lock-timeout.ts` | A transaction advisory lock that is tried and not waited for (the sweep), and a bounded wait for a row lock                                                                                                                                                         |
+| `startup.ts`                     | `getDatabase()` hands the connection of this instance out (the pool opens on the first call)                                                                                                                                                                        |
+| `schema.ts`                      | Row types of every table (`Database`)                                                                                                                                                                                                                               |
+| `codecs.ts`                      | The only code that knows how JSON, booleans and timestamps are stored                                                                                                                                                                                               |
+| `repositories/`                  | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`)                                                                                        |
+| `workspace-scope.ts`             | `WorkspaceId`, the type of the workspace parameter every scoped repository takes (see "Workspace scoping")                                                                                                                                                          |
+| `errors.ts`                      | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_OPEN_FAILED`, `MIGRATION_FAILED`)                                                                                                                                                           |
 
-## Why better-sqlite3
+## Postgres
 
-Kysely needs a driver, and its own SQLite dialect is built for better-sqlite3. It is the most
-widely used and actively maintained SQLite driver for Node, is synchronous (no connection pool to
-reason about for a single-file database), ships prebuilt binaries for Node 24, and Next.js already
-lists it in its default `serverExternalPackages`, so it works in the server bundle without extra
-configuration. The alternative, Node's built-in `node:sqlite`, has no Kysely dialect yet.
-`pnpm-workspace.yaml` allows its install script (`onlyBuiltDependencies`) so the native binary is
-available after `pnpm install --frozen-lockfile`.
-
-## SQLite and Postgres
-
-`DATABASE_URL` selects the engine (docs/decisions/0001-editions-setup-and-accounts.md, section 2.1;
-docs/deployment-large.md): empty, a path or a `sqlite:` URL means SQLite (the default file stays
-`/data/app.db`), `postgres://` or `postgresql://` means an external Postgres. `DATABASE_PATH` keeps
-working for installations that never set `DATABASE_URL`. An invalid value stops the start with
-`DATABASE_CONFIG_INVALID`; the message never repeats the URL (a Postgres URL carries the password).
-
-The schema, the migrations, the codecs and the query builder are the same on both. A schema parity
-test (`postgres.integration.test.ts`) compares the tables, columns, nullability and mapped types of
-the two. What differs, and why:
+`DATABASE_URL` (`postgres://` or `postgresql://`) names the database; anything else stops the start with
+`DATABASE_CONFIG_INVALID`, and the message never repeats the URL (it carries the password). A deployment uses a direct or
+session-mode connection, never a transaction pooler (`docs/deployment-vercel.md`, section 2).
 
 - **Queue/gate transactions** take the instance gate advisory lock before repository/project and
   job rows (multi-row transitions lock jobs by ascending id). Enqueue/settings share it; gate changes
   and runner mutations take it exclusively. Disable cancels waiting Dynamic work while running
   leases stay valid; release/expiry read the gate atomically and fail instead of requeueing Dynamic
   work while off. Exact order and process-quiescence rollback boundary: `contracts/README.md`.
-- The **claim** of a job (`repositories/jobs-claim.ts`): SQLite relies on its single write lock and
-  `begin immediate`, Postgres on `FOR UPDATE SKIP LOCKED` plus the partial unique index
-  `jobs_one_running_per_pull_request_unique` (present on both) and a savepoint retry when a
-  concurrent claim is rejected by it.
-- **Migrations** run behind Postgres' advisory lock (Kysely's own), so several instances starting at
-  once take turns and each migration is applied once; a failure rolls the whole batch back
-  (transactional DDL). SQLite's equivalent is its write lock (see "Migrations").
-- The **backup scheduler** starts only for SQLite. With Postgres the operator backs up the database,
-  one log line says so, and `/api/backup/status` reports backups as not applicable (`src/backup/`).
-
-## SQLite: connection settings
-
-Applied by `openDatabase` on every connection: `busy_timeout` from the configuration (default
-5000 ms, set before anything else so even the switch to WAL waits for a lock), `journal_mode = WAL`,
-`foreign_keys = ON`. Kysely transactions start with `begin immediate`, so a transaction takes the
-write lock up front, waits for it up to the busy timeout, and never fails halfway with
-`SQLITE_BUSY_SNAPSHOT`.
-
-Switching a brand-new file to WAL while another process does the same fails at once with
-`SQLITE_BUSY` (the busy timeout does not apply there), so `openDatabase` retries that one step
-until the busy timeout has passed.
-
-`journal_mode = WAL` is checked: if SQLite answers with another mode (an in-memory database, a file
-system without shared memory), opening fails with `DATABASE_OPEN_FAILED` instead of running in a
-mode the rest of this document does not describe.
-
-**Inside a transaction, always use `trx`, never the outer `db`.** The app has one connection and
-Kysely serializes access to it with a mutex. A query on `db` inside `db.transaction().execute(async
-(trx) => ...)` waits for the transaction to finish while the transaction waits for that query: it
-hangs forever, with no timeout and no error. Repositories take the executor (`Kysely<Database>` or
-the transaction) as a parameter for this reason: pass `trx` to them inside a transaction.
-
-better-sqlite3 is synchronous: while a write waits for a lock held by another connection, the whole
-Node thread waits. That is fine for the short transactions in this app. Keep transactions short and
-never hold one open across an `await` on something slow (network, model, subprocess).
-
-## Serverless mode
-
-`APP_RUNTIME=serverless` (selected by itself when the hosting platform sets `VERCEL=1`; `src/runtime/mode.ts`)
-is for functions that start cold, many at a time. The default, `server`, is the long-lived process
-described everywhere else in this file and is unchanged. In serverless mode:
-
-- **Postgres only.** SQLite is refused (`DATABASE_SERVERLESS_NEEDS_POSTGRES`; the message names no value),
-  and the SQLite driver is never loaded (`startup.ts` imports `connection.ts` only when a server starts).
+- The **claim** of a job (`repositories/jobs-claim.ts`): `FOR UPDATE SKIP LOCKED` plus the partial unique index
+  `jobs_one_running_per_pull_request_unique` and a savepoint retry when a concurrent claim is rejected by it.
+- **Migrations** run behind a session advisory lock (`pnpm migrate`), so several runs at once take turns and each
+  migration is applied once; a failure rolls the whole batch back (transactional DDL).
 - **A lazy, small pool.** `getDatabase()` opens the pool on its first call, and the pool connects on the first
   query, so a cold instance that never reads the database never connects. `DATABASE_POOL_MAX` defaults to 3
   (1 to 20: every instance has its own pool), idle connections close after 5 seconds, and the pool is
   handed to the platform's hook (`attachDatabasePool` of `@vercel/functions`), which keeps the instance
   alive until they have closed.
-- **No start-up work.** `src/startup-serverless.ts` only checks the settings, and a bad one throws (it never
-  calls `process.exit`, which would end the function). No migration, no backup of an old database, no
-  legacy import, no setup code in memory (it lives in the database: `pnpm setup-code`, `src/setup/README.md`), no sync with GitHub, no
-  cleanup or backup timer. The repositories are synchronized by the webhooks and by a daily cron
-  (`src/cron/`, route `/api/internal/repository-sync`, `CRON_SECRET`); the hourly cleanup, the expiry of lapsed leases and
-  the resends are done by a once-a-minute sweep (`/api/internal/dispatch-sweep`, #328, `src/dispatch/README.md`).
+- **No start-up work.** `src/instrumentation.ts` only checks the settings, and a bad one throws (it never
+  calls `process.exit`, which would end the function). No migration, no setup code in memory (it lives in the
+  database: `pnpm setup-code`, `src/setup/README.md`), no sync with GitHub, no timer. The repositories are
+  synchronized by the webhooks and by a daily cron (`src/cron/`, route `/api/internal/repository-sync`,
+  `CRON_SECRET`); the hourly cleanup, the expiry of lapsed leases and the resends are done by the
+  every-two-hours sweep (`/api/internal/dispatch-sweep`, #328, `src/dispatch/README.md`).
 - **Migrations are a command.** `pnpm migrate` connects with `DATABASE_URL_MIGRATE` (a DIRECT Postgres
   connection: a pooler that ends the session between statements would drop the advisory lock), takes the
   session advisory lock `code-reviewer:migrate` for the whole run, applies what is pending and exits 0, or
@@ -119,6 +61,12 @@ described everywhere else in this file and is unchanged. In serverless mode:
   when it is built, whatever `/api/health` says. So the order is a rule for the operator, not something the platform
   enforces: run `pnpm migrate` first, then deploy (`docs/deployment-vercel.md`, section 5.6).
 
+**Inside a transaction, always use `trx`, never the outer `db`.** Repositories take the executor
+(`Kysely<Database>` or the transaction) as a parameter for this reason: pass `trx` to them inside a transaction. A query on
+the outer `db` inside `db.transaction().execute(async (trx) => ...)` runs on another connection, outside the
+transaction, and with a pool of one it waits for the transaction forever. Keep transactions short and never hold one open
+across an `await` on something slow (network, model, subprocess).
+
 ## Migrations
 
 - Written in TypeScript with Kysely's schema builder, one file per migration in `migrations/`,
@@ -128,25 +76,14 @@ described everywhere else in this file and is unchanged. In serverless mode:
   keep parallel branches from picking the same number. When a branch merges after another one added
   migrations, check the order: a migration must never sort before one that is already merged, because
   Kysely refuses to run it. A database that applied a migration under an old name must be recreated.
-- They run automatically when the server starts: `src/instrumentation.ts` (`register`, which Next.js
-  calls once before the server accepts requests) calls `initializeDatabaseOnStart`. It is not run by
-  `next build`.
-- All pending migrations of one start run in a single transaction. If one fails, nothing of the
-  batch is applied or recorded, and the start ends with exit code 1 and one line naming the
-  migration (`MIGRATION_FAILED`). Two instances starting on the same file take turns on the write
-  lock; each migration runs exactly once.
-- If another process holds the write lock for longer than the busy timeout (for example a second
-  instance that is still migrating a big file), the start ends with `DATABASE_LOCKED` and a message
-  that says nothing is broken, not with `MIGRATION_FAILED`.
-- Migrations run inside a transaction, where `PRAGMA foreign_keys` is a no-op. The usual SQLite recipe
-  for changing a table (create new table, copy, drop, rename, with `foreign_keys = OFF` around it)
-  therefore does not work as written: either avoid rebuilds (add columns, create new tables) or use
-  `PRAGMA defer_foreign_keys = ON` inside the migration and let the check run at commit.
-- A migration that has run anywhere is never edited. Add a new one instead. There is no automatic
-  `down`; write one only if it is useful for a developer.
-- A missing database directory, an unwritable directory or a file that is not a database also stop
-  the start with a clear message that names the path. The directory is not created for you: a wrong
-  `DATABASE_PATH` or an unmounted volume must not silently create a new, empty database.
+- They run with `pnpm migrate` (a step of the deployment, `docs/deployment-vercel.md`), never when the app starts and
+  not in `next build`.
+- All pending migrations of one run happen in a single transaction. If one fails, nothing of the
+  batch is applied or recorded, and the command ends with exit code 1 and one line naming the
+  migration (`MIGRATION_FAILED`).
+- A migration that has run anywhere is never edited or deleted: production's chain must keep running. Add a new one
+  instead. There is no automatic `down`; write one only if it is useful for a developer. The older migration files
+  still carry branches for SQLite (the app ran on it until #700); they are history and never run on Postgres.
 
 ### Workspaces and the migration that introduced them
 
@@ -170,8 +107,8 @@ Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_
   `jobs` or `app_settings`) gets one workspace, "Default workspace" (slug `default`), and every row of
   the four tables moves into it; no row is lost or changed otherwise. A database without data gets no
   workspace: the first-run setup makes it. **The migration creates no membership**; who becomes a member
-  is decided by the import of an existing installation (`src/legacy-import/`, it looks at the allow list of that
-  day).
+  was decided by the import of an existing installation (removed in #700) from the allow list of that
+  day.
 - **How the tables are rebuilt.** SQLite cannot add a NOT NULL column that references another table,
   and the usual rebuild recipe needs `PRAGMA foreign_keys = OFF`, which does nothing inside the
   migration transaction. So the chain `integrations`, `repositories`, `projects`, `jobs`, `job_comments`
@@ -202,9 +139,9 @@ sections 2.2, 2.3 and 2.10):
 - `instance_settings` (key, JSON value, `updated_by` user id or null, `updated_at`): the settings of the
   whole instance (`instance-settings-repository.ts`, typed by key). The first-run setup state is two
   explicit rows, `setup_completed_at` and `import_state`; a database from before them reads as null and
-  `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup; `import_state`, `github_app`,
-  `sign_in_methods` and `import_notice` (what the import could not migrate, for the admin portal) by the import of an
-  existing installation (`src/legacy-import/`).
+  `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup; `github_app` and
+  `sign_in_methods` by the admin portal. (`import_state` and `import_notice` belonged to the import of an existing
+  installation, removed in #700; old rows may still exist.)
 - `rate_limits` (key, `window_started_at`, `count`): shared counters with a window for the endpoints that
   must limit the same way whichever app instance a request reaches (`rate-limits-repository.ts`, `hit` is
   one statement, so attempts that arrive together are all counted). The email and password sign in
@@ -466,16 +403,12 @@ existing row, so an app of the previous release on the same database is unaffect
   all entries (a reservation is a debit, so it already excludes held money); `reserved` is the open reservations.
   The repository (`billing-journal-repository.ts`, scoped) updates it in the transaction of every entry; `verify()` compares
   it with the journal.
-- **Immutability.** Triggers refuse an `UPDATE` and a `DELETE` of an entry on every connection: on Postgres a function
-  (`billing_journal_entries_guard`) and a row trigger for update and delete plus a statement trigger for `TRUNCATE`; on
-  SQLite one trigger each for update and delete. Every refusal carries `billing_journal_entries_immutable`. A mistake is a
-  new `correction` entry. SQLite fires a delete trigger for `insert or replace` only with recursive triggers on, and
-  that is a **per-connection** pragma: `openDatabase` turns it on (`connection.ts`), but the tools that open the file
-  themselves (`admin-cli`, `backup`, `restore`, the legacy import) and the `sqlite3` shell do not, so on those an
-  `insert or replace` could still overwrite an entry. No code does that; update and delete are refused everywhere. The down migration drops the guard function on Postgres, which a
+- **Immutability.** Triggers refuse an `UPDATE` and a `DELETE` of an entry on every connection: a function
+  (`billing_journal_entries_guard`) and a row trigger for update and delete plus a statement trigger for `TRUNCATE` (the
+  migration also created one trigger each for update and delete on SQLite, which no longer runs). Every refusal carries
+  `billing_journal_entries_immutable`. A mistake is a new `correction` entry. The down migration drops the guard function on Postgres, which a
   table drop leaves behind (the same note as the removed billing migrations below).
 - **Money is an integer** in micro-USD, never a float and never a 32 bit column (it would stop at about USD 2,147):
-  `integer` on SQLite, which is 64 bit already, so the "text and integer columns only" convention holds there, and
   `bigint` on Postgres. Postgres returns a `bigint` as text, so the repository converts every amount with `Number`
   (exact up to 2^53).
 - **Concurrency.** Everything that writes is one transaction and idempotent on the key. `reserve` (an old hold) and `charge` (the price of a job, #605) take
@@ -611,7 +544,7 @@ file, and the migrator refuses to start (`previously executed migration ... is m
 
 1. Look first, read-only: `SELECT name FROM kysely_migration WHERE name LIKE '%billing%';`. No row: nothing to do. Check
    `SELECT count(*) FROM billing_plans;` too: the tables hold only what an admin typed into the removed plans page.
-2. Back the database up (`src/backup/`), then run, in one transaction (the tests run these very statements,
+2. Back the database up, then run, in one transaction (the tests run these very statements,
    `migrations/upgrade-from-main.integration.test.ts`):
 
    ```sql
@@ -695,8 +628,8 @@ and the question "which invitations wait for this address?" is answered by the i
 
 ## Portable schema conventions
 
-The MVP runs on SQLite only, but the schema stays portable so that Postgres remains possible later.
-Every table follows these rules; `migrate.integration.test.ts` checks the ones it can on the real
+The schema was written to be portable between SQLite and Postgres, and keeps those conventions: the migrations, the
+codecs and the repositories are written to them. Every table follows these rules; `migrate.integration.test.ts` checks the ones it can on the real
 schema.
 
 | Kind            | Column type          | Stored as                                                                                                                                      |
@@ -707,8 +640,7 @@ schema.
 | Boolean         | `integer`            | `1` or `0` (`encodeBoolean` / `decodeBoolean`)                                                                                                 |
 | Everything else | `text` or `integer`  | Numbers that are not booleans are `integer`; no floating point, no `blob`, no dates or booleans as native types                                |
 
-More rules: foreign keys are declared and enforced; use only schema builder features that exist on
-both SQLite and Postgres (no `STRICT`, no SQLite-only pragmas in migrations); keep SQL out of
+More rules: foreign keys are declared and enforced; use plain schema builder features (no database specific pragmas in migrations); keep SQL out of
 repositories where the query builder can express it.
 
 Kysely's own bookkeeping tables (`kysely_migration`, `kysely_migration_lock`) use `varchar` columns
@@ -762,9 +694,8 @@ redelivery produces no second trigger; rows are pruned after 7 days; see `src/we
 `jobs` (migration `20261010191500_create_jobs`, rebuilt by `20261011160100_add_workspace_to_customer_data`;
 the scoped repository `jobs-repository.ts` creates, drops and reads jobs, the instance level
 `runner-jobs-repository.ts` with the claim in `jobs-claim.ts` hands them to runners) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
-in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for a dialect (SQLite's
-single write lock or Postgres' `FOR UPDATE SKIP LOCKED` plus a savepoint retry; see its head
-comment); everything else is query builder code.
+in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement that needs more than the query builder (Postgres' `FOR UPDATE SKIP LOCKED`
+plus a savepoint retry; see its head comment); everything else is query builder code.
 
 `app_settings` (migration `20261010201500_create_app_settings`, rebuilt per workspace by
 `20261011160100_add_workspace_to_customer_data`, repository `app-settings-repository.ts`) holds settings of
@@ -807,21 +738,10 @@ repository in the same change.
 `server-only` throws when it is imported outside Next.js server code, so Vitest resolves it to an
 empty module (`vitest.config.mts`) and the child process runs with `--conditions=react-server`.
 
-Anything that touches this layer is an `*.integration.test.ts` against a real SQLite file (see
-`TESTING.md`). `src/test-support/db-template.global-setup.ts` migrates one template file per run,
-`createTestDatabase()` copies it into a fresh temporary directory for each test and removes it
-afterwards, so workers never share data. Tests that need a second connection or a second app
-instance use a real child process (`db-process.ts`, `db-child.ts`).
-
-Postgres tests run only when `TEST_DATABASE_URL` points at a Postgres server (CI provides a service
-container; a developer starts a throwaway `postgres:18`). `src/test-support/postgres-test-database.ts`
-creates one database per test (`createPostgresTestDatabase`), migrated to the latest schema and
-dropped afterwards; `connectPostgres` opens a second connection to the same database for
-two-instance tests. `pg` is the Postgres driver, in the app image next to `better-sqlite3`.
-
-The serverless mode is tested at three levels: the unit suite also runs in CI with `APP_RUNTIME=serverless`
-(job `app-serverless`; the tests of the server start pin `APP_RUNTIME=server`), the lazy database and the
-refusals are unit tests (`startup.serverless.test.ts`, `config.serverless.test.ts`,
-`../instrumentation.serverless.test.ts`), and `pnpm migrate`, the schema check and the cold-instance health
-answer are Postgres integration tests (`migrate-cli.integration.test.ts`, `schema-status.integration.test.ts`,
+Anything that touches this layer is an `*.integration.test.ts` against a real Postgres database (see
+`TESTING.md`, "Integration tests and Postgres"). `src/test-support/db-template.global-setup.ts` migrates one template
+database per run, `createTestDatabase()` clones it into a database of its own for each test and drops it afterwards, so
+workers never share data. Tests that need a second connection or a second app instance use a real child process
+(`db-process.ts`, `db-child.ts`). `pnpm migrate`, the schema check and the cold-instance health answer are integration
+tests too (`migrate-cli.integration.test.ts`, `schema-status.integration.test.ts`,
 `../health/health-schema.integration.test.ts`).

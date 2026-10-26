@@ -48,9 +48,7 @@ export type SettingChange =
   /** `null` removes the mail server. */
   | { smtp: SmtpChange | null }
   /** The operator's own LLM key of one provider (write-only, #427); `null` removes it. */
-  | { operatorLlmKeys: Record<string, { apiKey: string } | null> }
-  /** Hides the notice that the import of an existing installation left. */
-  | { importNotice: { dismiss: true } };
+  | { operatorLlmKeys: Record<string, { apiKey: string } | null> };
 
 /** The answer of the Test button of an operator key: it worked, or a class of failure with a safe detail. */
 export type TestLlmKeyAnswer =

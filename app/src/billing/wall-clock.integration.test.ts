@@ -2,44 +2,26 @@
 
 // The measure of a job without a VM (#493): where billing is on, the wall clock of a job on a runner (a self-hosted
 // runner, Compose) is recorded when its claim ends. Billing off: nothing is read and nothing is written. A job that a
-// Dispatcher started has a VM and is measured by the VM. On SQLite and, when TEST_DATABASE_URL is set, on Postgres.
-import type { Kysely } from "kysely";
-import { describe, expect, it as vitestIt } from "vitest";
+// Dispatcher started has a VM and is measured by the VM.
+import { describe, expect, it } from "vitest";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
-import type { Database } from "../db/schema.ts";
 import { decideOutcome } from "../dispatch/outcome.ts";
 import {
   fundWorkspace,
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
 import { createJobQueueFixture } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const SECOND = 1000;
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
-describe.each(databases)("the wall clock of a job on %s", (name, open) => {
-  const it =
-    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-
+describe("the wall clock of a job", () => {
   async function setup(options: { billing: boolean }) {
-    const database = await open?.();
+    const database = await open();
     const fixture = await createJobQueueFixture({
       ...(database === undefined ? {} : { database }),
     });

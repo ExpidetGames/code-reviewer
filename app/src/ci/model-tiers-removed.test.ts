@@ -59,7 +59,7 @@ const ALLOWED: ReadonlyArray<{ path: string; why: string }> = [
   },
   {
     path: "app/src/db/migrations/migrate-model-tiers-to-catalog.integration.test.ts",
-    why: "the migration's test, on both engines",
+    why: "the migration's test",
   },
   {
     path: "app/integration-tests/http/model-tiers-migration-claim.integration.test.ts",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The record of the check runs and review verdicts of the jobs of a workspace against a real SQLite file (#405):
+// The record of the check runs and review verdicts of the jobs of a workspace against a real Postgres database (#405):
 // one row per job, taken by one caller at a time, retried a bounded number of times, and never changed once
 // settled or dropped. Isolation between workspaces is in scoped-isolation.integration.test.ts; what the service does
 // with the row is in src/check-runs/service.integration.test.ts.

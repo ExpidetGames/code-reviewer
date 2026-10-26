@@ -131,19 +131,30 @@ def test_a_dynamic_job_process_gets_the_egress_mode_startup_decided() -> None:
 # (and a Diff job process gets none).
 def test_the_egress_mode_in_the_container_environment_is_ignored_and_a_diff_job_gets_none() -> None:
     async def scenario() -> None:
-        harness = Harness(
+        dynamic_harness = Harness(
             **USERS,
             engines=ALL_ENGINES,
             dynamic_command=("/usr/local/bin/opencode",),
             dynamic_egress_mode=EgressMode.FULL,
             environment={**OPERATOR, EGRESS_MODE_VARIABLE: "fallback"},
         )
-        harness.api.claims = [make_claim(1, **dynamic_document()), make_claim(2)]
-        await harness.start()
+        dynamic_harness.api.claims = [make_claim(1, **dynamic_document())]
+        await dynamic_harness.start()
+        diff_harness = Harness(
+            **USERS,
+            engines=ALL_ENGINES,
+            dynamic_command=("/usr/local/bin/opencode",),
+            dynamic_egress_mode=EgressMode.FULL,
+            environment={**OPERATOR, EGRESS_MODE_VARIABLE: "fallback"},
+        )
+        diff_harness.api.claims = [make_claim(2)]
+        await diff_harness.start()
 
-        dynamic, diff = (process.spec.env for process in harness.launcher.processes[:2])
+        dynamic = dynamic_harness.launcher.processes[0].spec.env
+        diff = diff_harness.launcher.processes[0].spec.env
         assert dynamic[EGRESS_MODE_VARIABLE] == "full"
         assert EGRESS_MODE_VARIABLE not in diff
-        await harness.stop()
+        await dynamic_harness.stop()
+        await diff_harness.stop()
 
     run(scenario)

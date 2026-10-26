@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The operator's LLM key over a real SQLite file (docs/decisions/0001-editions-setup-and-accounts.md, section
+// The operator's LLM key over a real Postgres database (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.8): what a save accepts and refuses (the rules of the workspace key), that the answers carry the status and the
 // last four characters only, that the stored value is encrypted, and that a key another APP_SECRET sealed is
 // reported as unreadable instead of being used.

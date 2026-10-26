@@ -3,7 +3,7 @@
 // Linking a GitHub identity to the signed-in account, and the one merge the decision record defines: the
 // instance admin links the GitHub identity of an imported operator who has no other credential, and the two
 // accounts become one. Against the fake GitHub (authorization with PKCE, the token, the profile) and a real
-// SQLite file. Every refusal leaves the database exactly as it was; the merge is one transaction.
+// database. Every refusal leaves the database exactly as it was; the merge is one transaction.
 import { describe, expect, it } from "vitest";
 import { githubIdentityLinked } from "../admin/github-identity.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
@@ -359,7 +359,7 @@ describe("merging the instance admin with an imported operator", () => {
         .selectFrom("billing_workspace_settings")
         .select(["updated_by", "monthly_limit_micro_usd"])
         .execute(),
-    ).toEqual([{ updated_by: "admin", monthly_limit_micro_usd: 50_000_000 }]);
+    ).toEqual([{ updated_by: "admin", monthly_limit_micro_usd: "50000000" }]);
   });
 
   // #102-GH-25
@@ -537,23 +537,18 @@ describe("merging the instance admin with an imported operator", () => {
   it("covers every table that refers to a user, so a later feature cannot forget the merge", async () => {
     const { db } = await createTestDatabase();
     const { sql } = await import("kysely");
-    const tables = await sql<{
-      name: string;
-    }>`select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like 'kysely_%'`.execute(
+    const { rows } = await sql<{
+      table: string;
+      column: string;
+    }>`select cl.relname as "table", a.attname as "column"
+      from pg_constraint c
+      join pg_class cl on cl.oid = c.conrelid
+      join pg_class target on target.oid = c.confrelid
+      join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+      where c.contype = 'f' and target.relname = 'users' and cl.relnamespace = 'public'::regnamespace`.execute(
       db,
     );
-    const found: Array<{ table: string; column: string }> = [];
-    for (const { name } of tables.rows) {
-      const keys = await sql<{
-        table: string;
-        from: string;
-      }>`select "table", "from" from pragma_foreign_key_list(${name})`.execute(
-        db,
-      );
-      for (const key of keys.rows)
-        if (key.table === "users")
-          found.push({ table: name, column: key.from });
-    }
+    const found = rows.filter((row) => !row.table.startsWith("kysely_"));
     const { USER_REFERENCES } = await import("./merge.ts");
 
     expect(found.map((f) => `${f.table}.${f.column}`).sort()).toEqual(

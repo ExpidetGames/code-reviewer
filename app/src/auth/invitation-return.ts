@@ -5,7 +5,7 @@
 // sign-in they land on the page of the invitation again (src/app/invitation) to accept it. Only a value
 // shaped like a link token is ever carried, and the only place it leads to is that page, so the parameter
 // can not be used to send a person anywhere else.
-import { isWellFormedLinkToken } from "../admin-cli/token.ts";
+import { isWellFormedLinkToken } from "../auth/link-token.ts";
 
 /** The path of the invitation page for a token, or null when the value is not a token. */
 export function invitationReturnPath(token: unknown): string | null {

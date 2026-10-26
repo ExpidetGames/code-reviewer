@@ -75,6 +75,6 @@ refuses the click.
 `smtp-settings.test.ts`, `smtp-failure.test.ts`, `password-reset-message.test.ts`: the pure logic.
 `smtp-delivery.integration.test.ts`, `smtp-sender.integration.test.ts`, `test-mail.integration.test.ts`,
 `smtp-config.integration.test.ts`: the real protocol against the fake SMTP server (`fakes/smtp`, started in the test by
-`src/test-support/smtp-fake.ts`), a real SQLite file and the real secret store. Callers that only need "a mail was
+`src/test-support/smtp-fake.ts`), a real Postgres database and the real secret store. Callers that only need "a mail was
 sent" (the sign-up) use the double in `src/test-support/fake-mail.ts`: an outbox, a switch between "mail server" and
 "none", and a failure on demand. The browser journeys use the fake SMTP server too.

@@ -12,11 +12,8 @@ import type { Database } from "./schema.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
 import {
   connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+  createTestDatabase,
+} from "../test-support/test-database.ts";
 
 function signal() {
   let resolve!: () => void;
@@ -82,7 +79,7 @@ async function lockWait(db: Kysely<Database>, waiter: string, holder: string) {
 }
 
 async function enabledFixture() {
-  const postgres = await createPostgresTestDatabase();
+  const postgres = await createTestDatabase();
   const fixture = await createJobQueueFixture({ database: postgres.db });
   await createInstanceSettingsRepository(postgres.db, fixture.clock.now).set(
     "dynamic_review",
@@ -92,7 +89,7 @@ async function enabledFixture() {
   return { postgres, fixture };
 }
 
-describePostgres("disabling Dynamic Review with running work", () => {
+describe("disabling Dynamic Review with running work", () => {
   // #195-T04: reproduce the window after the queued drain and before the old running drain.
   it.each([
     ["release", 0],

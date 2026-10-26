@@ -165,7 +165,6 @@ describe("the inputs of the Worker image", () => {
   it("take nothing else of the image's folders: no tests, no README, nothing the build does not copy", () => {
     // The context files that decide what the build sees, the VM script, and the build tool's own files.
     const EXTRA = new Set([
-      ".dockerignore",
       "runner/Dockerfile",
       "runner/Dockerfile.dockerignore",
       "docker/sandbox/vm-prepare.sh",
