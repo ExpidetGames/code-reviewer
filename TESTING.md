@@ -85,7 +85,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard, Postgres template database and child process helpers, the sign in harness: database, real Better Auth and the fake GitHub); not product code
-  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens
+  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens, and the import cycle check of `app/src` (`src/ci/import-cycles/`: cycles between files and between top-level modules, with an allow-list of today's cycles that only shrinks, #715)
   integration-tests/               cross-owner integration tests (exists: webhooks/, http/: the route files, and `http/workspace-isolation.integration.test.ts`, every data route of a workspace against a second workspace and against every role)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, dynamic/ (the privileged lane, own config), hosted/ (the hosted lane, own config), operator/, billing/, reviews/, jobs/, runs/, settings/, setup/, workspaces/
