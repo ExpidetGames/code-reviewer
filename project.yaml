@@ -1,7 +1,7 @@
 # project.yaml – Projekt-Manifest für den Itegro-Projekt-Index (ExpidetGames/itegro-gmbh).
 
 name: Code Reviewer
-description: "Automatische Code-Reviews für GitHub-Pull-Requests mit kleiner Web-Oberfläche."
+description: "Automatische Code-Reviews für GitHub-Pull-Requests mit kleiner Web-Oberfläche. Und noch vieles Mehr..."
 
 # Quadratisches PNG, Pfad relativ zum Repo-Root.
 icon: docs/design/icon.png
