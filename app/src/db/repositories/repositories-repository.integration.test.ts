@@ -184,6 +184,38 @@ describe("reconciling the repositories of an integration", () => {
   });
 });
 
+describe("listing the repositories", () => {
+  it("orders the names without regard to case, and names that differ only by case by id", async () => {
+    const { db, first } = await setup();
+    // The same creation time for every row: only the name and the id decide.
+    const sameTime = () => new Date(Date.UTC(2026, 9, 10, 12, 0, 0));
+    const repositories = createRepositoriesRepository(
+      db,
+      await defaultWorkspaceId(db),
+      sameTime,
+    );
+    await repositories.reconcile(first.id, [
+      repo(first.id, 1, "acme/Zeta"),
+      repo(first.id, 2, "acme/alpha"),
+      repo(first.id, 3, "acme/Beta"),
+      repo(first.id, 4, "acme/GAMMA"),
+      repo(first.id, 5, "acme/gamma"),
+    ]);
+
+    const listed = await repositories.list();
+
+    const names = listed.map((row) => row.fullName);
+    expect(names.slice(0, 2)).toEqual(["acme/alpha", "acme/Beta"]);
+    expect(names.slice(-1)).toEqual(["acme/Zeta"]);
+    const gammas = listed.filter(
+      (row) => row.fullName.toLowerCase() === "acme/gamma",
+    );
+    expect(gammas.map((row) => row.id)).toEqual(
+      gammas.map((row) => row.id).sort(),
+    );
+  });
+});
+
 describe("deactivating all repositories of an integration", () => {
   // CR-21-T05
   it("marks every active repository inactive and deletes nothing", async () => {

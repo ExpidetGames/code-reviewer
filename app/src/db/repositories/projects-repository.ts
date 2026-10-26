@@ -318,8 +318,8 @@ export function createProjectsRepository(
             eb("projects.id", "is not", null),
           ]),
         )
-        // The byte order of the name, whatever collation the database was made with: the list reads the same everywhere.
-        .orderBy(sql`repositories.full_name collate "C"`)
+        // Case-insensitive, with the id as the tie-breaker: names that differ only by case keep a stable place.
+        .orderBy(sql`lower(repositories.full_name)`)
         .orderBy("repositories.id")
     );
   }

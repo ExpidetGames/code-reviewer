@@ -96,8 +96,8 @@ export function createRepositoriesRepository(
         query = query.where("active", "=", encodeBoolean(filter.active));
       const rows = await query
         .orderBy("created_at")
-        // The byte order of the name, whatever collation the database was made with.
-        .orderBy(sql`full_name collate "C"`)
+        // Case-insensitive, with the id as the tie-breaker: names that differ only by case keep a stable place.
+        .orderBy(sql`lower(full_name)`)
         .orderBy("id")
         .execute();
       return rows.map(toStored);

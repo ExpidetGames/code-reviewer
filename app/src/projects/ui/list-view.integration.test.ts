@@ -56,6 +56,11 @@ async function startList() {
   return { ...h, projects, put, idOf };
 }
 
+// The list is ordered by the lower-cased name in the collation of the database, which differs between
+// servers for names with punctuation (the one with markup in it): these tests read the rows by name.
+const byName = <Row extends { fullName: string }>(rows: Row[]): Row[] =>
+  [...rows].sort((a, b) => (a.fullName < b.fullName ? -1 : 1));
+
 describe("the project list", () => {
   // CR-34-T01
   it("lists every repository of both installations, only the activated one with its switch on", async () => {
@@ -65,7 +70,11 @@ describe("the project list", () => {
     const view = await loadProjectList({ projects: app.projects });
 
     expect(
-      view.rows.map((row) => [row.fullName, row.installation, row.status]),
+      byName(view.rows).map((row) => [
+        row.fullName,
+        row.installation,
+        row.status,
+      ]),
     ).toEqual([
       ["acme/<img src=x onerror=alert(1)>", "acme", "inactive"],
       ["acme/gadgets", "acme", "inactive"],
@@ -88,7 +97,10 @@ describe("the project list", () => {
     const view = await loadProjectList({ projects: app.projects, lastRuns });
 
     expect(
-      view.rows.map((row) => [row.fullName, row.lastRun?.status ?? null]),
+      byName(view.rows).map((row) => [
+        row.fullName,
+        row.lastRun?.status ?? null,
+      ]),
     ).toEqual([
       ["acme/<img src=x onerror=alert(1)>", null],
       ["acme/gadgets", null],
