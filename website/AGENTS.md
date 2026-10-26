@@ -27,7 +27,9 @@ pnpm preview             # build + wrangler dev: like production, with /ingest, 
 pnpm legal:md            # regenerate legal/*.md after a change to the legal texts
 ```
 
-Node 24 (`.nvmrc`), pnpm 10.33.0. Use your own port for `wrangler dev` (`--port`), never 3000, 3100, 4319 or 8787.
+Node 24.21.0 (`.nvmrc`), pnpm 10.33.0 (`packageManager`), both pinned exactly; Cloudflare reads them from the root
+directory, so its only build variable is `PUBLIC_POSTHOG_KEY` (production builds only), never `NODE_VERSION` or
+`PNPM_VERSION` (README, "Versions"). Use your own port for `wrangler dev` (`--port`), never 3000, 3100, 4319 or 8787.
 
 ## Where things are
 
