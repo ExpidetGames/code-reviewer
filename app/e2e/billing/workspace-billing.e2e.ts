@@ -29,9 +29,11 @@ async function signInAsAdmin(page: Page): Promise<void> {
 
 /** The balance on the page in whole cents (`$1,234.50` is 123450). */
 async function balanceCents(page: Page): Promise<number> {
-  const text = (
-    await page.locator("[data-slot=balance-amount]").innerText()
-  ).trim();
+  const amount = page.locator("[data-slot=balance-amount]");
+  // The page streams in behind a Suspense boundary and its content sits in a hidden element until it is revealed; `innerText` reads it
+  // there, role queries do not. Wait until it is shown.
+  await expect(amount).toBeVisible();
+  const text = (await amount.innerText()).trim();
   const match = /^(-?)\$([\d,]+)\.(\d{2})/.exec(text);
   if (match === null) throw new Error(`The balance reads ${text}.`);
   const cents = Number(match[2]?.replace(/,/g, "")) * 100 + Number(match[3]);
