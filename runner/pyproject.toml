@@ -27,6 +27,7 @@ dev = [
     "pytest",
     "pytest-socket",
     "pytest-timeout",
+    "pytest-xdist",
     "ruff",
     "pyright",
     "jsonschema",
@@ -59,6 +60,7 @@ markers = [
     "integration: real processes or real sockets on loopback",
     "contract: pins the runner API and webhook shapes against the shared contract files",
     "engine: real PR-Agent against the loopback fakes (deselected by default)",
+    "smoke: the few engine tests that prove the runner end to end (run with -m \"engine and smoke\", #713)",
     "privileged: root with the production capabilities, the dedicated engine user and nft (deselected by default)",
 ]
 

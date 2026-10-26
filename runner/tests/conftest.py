@@ -10,8 +10,11 @@ every level.
 
 import os
 from pathlib import Path
+from typing import cast
 
 import pytest
+
+from engine_shards import SHARDS, split_by_shard
 
 # LiteLLM fetches its price list from GitHub when it is imported, unless told to use the bundled
 # one. Tests import PR-Agent (and with it LiteLLM) while the collection of tests is still running,
@@ -25,7 +28,21 @@ _TESTS_ROOT = Path(__file__).parent
 _TIMEOUTS = {"unit": 10, "integration": 60, "contract": 60, "engine": 180, "privileged": 180}
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--engine-shard",
+        choices=SHARDS,
+        default=None,
+        help="run only this half of tests/engine: the files that start OpenCode, or all the others",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    shard = cast("str | None", config.getoption("--engine-shard"))  # pyright: ignore[reportUnknownMemberType]
+    kept, dropped = split_by_shard(items, shard, _TESTS_ROOT)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
     for item in items:
         relative = Path(item.path).relative_to(_TESTS_ROOT)
         level = relative.parts[0]

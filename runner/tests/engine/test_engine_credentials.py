@@ -7,12 +7,14 @@ or LiteLLM passes a key then shows up here and not in production."""
 
 import json
 
+import pytest
 from fake_github import FakeGithub
 from fake_llm import FakeLlm
 from harness import API_KEY, MODEL, Engine
 
 
 # CR-41-T01 (the key and the token travel in the right header to the right host)
+@pytest.mark.smoke
 def test_the_llm_key_arrives_as_a_bearer_token_and_only_at_the_llm(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
@@ -30,6 +32,7 @@ def test_the_llm_key_arrives_as_a_bearer_token_and_only_at_the_llm(
 
 
 # CR-41-T01
+@pytest.mark.smoke
 def test_the_github_token_arrives_in_the_authorization_header_of_every_github_request(
     engine: Engine, github: FakeGithub
 ) -> None:
