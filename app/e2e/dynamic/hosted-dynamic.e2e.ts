@@ -10,6 +10,11 @@
 // per-job credential and runs the REAL OpenCode as the engine user behind its model proxy; one summary comment lands on
 // the fake pull request. Nothing is replaced but the container itself and the platform behind it; the network guard of
 // the lane counts every attempt to leave loopback, of the Dispatcher, the Worker and the engine alike.
+//
+// The journeys of the former single-process lane (#253, #201-T01, #299-T09) run here on the hosted flow: the Runs page of
+// a finished review (kind, model, usage, link), a pushed fix that edits the same comment and resolves the finding, and a
+// checkout that fails and leaves one short note. The advertisement of `opencode` by the Worker's own startup self-check
+// (#253-L01) is read from the Worker's log in the first journey.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -51,7 +56,12 @@ import {
   signInAsAdmin,
   switchProjectOn,
 } from "../helpers/hosted-instance";
-import { openRuns, required, runsOf } from "../helpers/hosted-journey";
+import {
+  expectNoCredentials,
+  openRuns,
+  required,
+  runsOf,
+} from "../helpers/hosted-journey";
 import {
   allSecrets,
   containsSecret,
@@ -71,12 +81,15 @@ const MODEL = "deepseek/deepseek-v4-pro";
 const TITLE = "Add a user handler";
 const BODY = "Shows a user by the name in the request.";
 const FINDING_TITLE = "SQL text is built from the user name";
+const FINDING_ID = "f-1";
 const IDENTITY_MARKER = "<!-- code-reviewer:dynamic-review:summary -->";
 const WORKSPACE_KEY = "sk-or-v1-e2e-workspace-key-of-the-hosted-dynamic-0001";
 // A real engine run takes a few seconds; the first one also starts the engine cold.
 const RUN_TIMEOUT = { timeout: 200_000 };
 const LOOKUP_BUGGY =
   'def find_user(connection, name):\n    query = "SELECT * FROM users WHERE name = \'" + name + "\'"\n    return connection.execute(query)\n';
+const LOOKUP_FIXED =
+  'def find_user(connection, name):\n    return connection.execute("SELECT * FROM users WHERE name = ?", (name,))\n';
 const HANDLER =
   'from lookup import find_user\n\n\ndef show(connection, request):\n    return find_user(connection, request["name"])\n';
 
@@ -210,7 +223,7 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
         resolvedIds: [],
         findings: [
           {
-            id: "f-1",
+            id: FINDING_ID,
             priority: "P2",
             confidence: 0.8,
             title: FINDING_TITLE,
@@ -296,7 +309,10 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
     expect(flags).toContain("--cap-drop ALL");
     expect(flags).toContain("--read-only");
     expect(worker.environment).toContain("RUNNER_DIFF_JOB_USER=10001:10001");
+    // #253-L01: the Worker's own startup self-check advertised `opencode`, on its own merits.
     expect(worker.log()).toContain("opencode is advertised");
+    expect(worker.log()).not.toContain("is not advertised");
+    expect(worker.log()).not.toContain("cannot start");
     expect(worker.log()).toContain("worker done: ok");
 
     // No credential in the page, the Dispatcher's output, the Worker's log or what the model was shown, and nothing
@@ -337,6 +353,285 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       "the engine's processes to be gone",
       async () => engineProcesses().length === 0,
     );
+    assertNoExternalAttempts(readGuard());
+  });
+
+  // #201-T01
+  test("@smoke a person opens a pull request and the real OpenCode reads beyond the diff; the Runs page shows kind, model, usage and link; a pushed fix edits the same comment and resolves the finding", async ({
+    page,
+    request,
+  }) => {
+    const theDispatcher = required(dispatcher, "The Dispatcher");
+    const theLlm = required(llm, "The fake LLM");
+    const repo = required(repository, "The repository");
+    const number = 8;
+    const requestsBefore = theLlm.requests().length;
+    const head = repo.commit({ "src/handlers.py": HANDLER }, "Add a handler");
+    repo.setRef(`refs/pull/${String(number)}/head`, head);
+    // The model: reads the file the pull request does not touch, then reports the finding in it.
+    theLlm.scriptAgent({
+      steps: [[{ name: "read", arguments: { filePath: "src/lookup.py" } }]],
+      final: {
+        schemaVersion: 1,
+        reviewedSha: head,
+        resolvedIds: [],
+        findings: [
+          {
+            id: FINDING_ID,
+            priority: "P2",
+            confidence: 0.8,
+            title: FINDING_TITLE,
+            body: "The SQL text is built by joining the name into it.",
+            path: "src/lookup.py",
+            lineStart: 2,
+            lineEnd: 2,
+            evidence: ["src/lookup.py:2"],
+            reviewedSha: head,
+          },
+        ],
+      },
+    });
+    await addGithubPullRequest(request, WIDGETS.fullName, {
+      number,
+      title: TITLE,
+      body: BODY,
+      headSha: head,
+    });
+    await openRuns(page);
+
+    const answer = await deliverPullRequestEvent(request, {
+      action: "opened",
+      installationId: INSTALLATION_ID,
+      repository: { ...WIDGETS, owner: OWNER_OF_WIDGETS },
+      number,
+      title: TITLE,
+      headSha: head,
+    });
+    expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+
+    const run = runsOf(page, WIDGETS.fullName, number);
+    await expect(run.locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+
+    const [summary, ...others] = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
+    expect(others).toEqual([]);
+    expect(summary?.login).toBe(e2eEnv.githubBotLogin);
+    expect(summary?.revision).toBe(1);
+    expect(summary?.body).toContain(IDENTITY_MARKER);
+    expect(summary?.body).toContain("**1 active finding(s)**");
+    expect(summary?.body).toContain(FINDING_TITLE);
+    expect(summary?.body).toContain("src/lookup.py:2-2");
+
+    // The real engine read the file outside the diff through its read tool, and the model saw its text.
+    const first = theLlm.requests().slice(requestsBefore);
+    expect(first.length).toBeGreaterThanOrEqual(2);
+    expect(first.every((item) => item.model.includes(MODEL))).toBe(true);
+    expect(
+      first.every((item) => item.authorization === `Bearer ${WORKSPACE_KEY}`),
+    ).toBe(true);
+    expect(first[0]?.tools).toContain("read");
+    expect(first[0]?.tools).toContain("StructuredOutput");
+    expect(
+      first.flatMap((item) => Object.values(item.toolResults)).join("\n"),
+    ).toContain("def find_user(connection, name):");
+    // The title and the description of the pull request reached the prompt (through the escaped, fenced untrusted
+    // block), and the diff names the file the pull request changes and not the one it reads.
+    expect(first[0]?.prompt).toContain(TITLE);
+    expect(first[0]?.prompt).toContain(BODY);
+    expect(first[0]?.prompt).toContain("src/handlers.py");
+
+    // The Runs page: the kind, the model the person chose, what the engine used, and the comment.
+    await run
+      .getByRole("link", { name: `${WIDGETS.fullName} #${String(number)}` })
+      .click();
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(
+      detail.getByText("Dynamic Review", { exact: true }),
+    ).toBeVisible();
+    await expect(detail.locator('[data-slot="run-model"]')).toHaveText(MODEL);
+    // The tokens and calls are not on the page (#657): the data route of the run carries what the proxy summed.
+    const runId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    const stored = (await (
+      await page.request.get(`/api/w/default/runs/${runId}`)
+    ).json()) as { run: { usage: { totalTokens: number; aiCalls: number } } };
+    const { totalTokens: tokens, aiCalls: calls } = stored.run.usage;
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(calls).toBeLessThanOrEqual(first.length);
+    // The fake LLM reports 100 + 20 tokens for every answer; the data shows what the proxy summed.
+    expect(tokens).toBe(120 * calls);
+    // The Findings show what the review posted. The app reads the comment right after the run ended and the page asks
+    // again until the text is there.
+    await expect(
+      detail.getByRole("region", { name: "Findings" }),
+    ).toContainText(FINDING_TITLE, { timeout: 60_000 });
+    await expect(
+      detail.getByRole("link", { name: "Open the review on GitHub" }),
+    ).toHaveAttribute("href", summary?.htmlUrl ?? "missing");
+    expect(summary?.htmlUrl).toMatch(
+      /^https:\/\/github\.com\/hosted-dynamic\/widgets\/pull\/\d+#issuecomment-\d+$/,
+    );
+    await expect(
+      detail.getByRole("link", { name: `#${String(number)} on GitHub` }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/${WIDGETS.fullName}/pull/${String(number)}`,
+    );
+
+    // The fix is pushed: the same comment is edited and shows the finding as resolved.
+    const fixed = repo.commit(
+      { "src/lookup.py": LOOKUP_FIXED },
+      "Use a parameter",
+    );
+    repo.setRef(`refs/pull/${String(number)}/head`, fixed);
+    theLlm.scriptAgent({
+      steps: [[{ name: "read", arguments: { filePath: "src/lookup.py" } }]],
+      final: {
+        schemaVersion: 1,
+        reviewedSha: fixed,
+        resolvedIds: [FINDING_ID],
+        findings: [],
+      },
+    });
+    await addGithubPullRequest(request, WIDGETS.fullName, {
+      number,
+      title: TITLE,
+      body: BODY,
+      headSha: fixed,
+    });
+    await page.goto("/w/default/runs");
+    const requestsBeforeFix = theLlm.requests().length;
+
+    const pushed = await deliverPullRequestEvent(request, {
+      action: "synchronize",
+      installationId: INSTALLATION_ID,
+      repository: { ...WIDGETS, owner: OWNER_OF_WIDGETS },
+      number,
+      title: TITLE,
+      headSha: fixed,
+    });
+    expect(pushed).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+
+    const runs = runsOf(page, WIDGETS.fullName, number);
+    await expect(runs).toHaveCount(2, RUN_TIMEOUT);
+    await expect(runs.nth(0).locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+    await expect(runs.nth(1).locator("[data-status]")).toContainText(
+      "Succeeded",
+      RUN_TIMEOUT,
+    );
+
+    const [edited, ...rest] = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
+    expect(rest).toEqual([]);
+    expect(edited?.id).toBe(summary?.id);
+    expect(edited?.revision).toBe(2);
+    expect(edited?.body).toContain(IDENTITY_MARKER);
+    expect(edited?.body).toContain("**0 active finding(s)**");
+    expect(edited?.body).toContain("No active findings.");
+    expect(edited?.body).toContain("### Resolved findings (1)");
+    expect(edited?.body).toContain(`~~${FINDING_TITLE}~~`);
+
+    // The second review saw the first one's state: the finding it had to reassess is in its prompt.
+    const second = theLlm.requests().slice(requestsBeforeFix);
+    expect(second[0]?.prompt).toContain(FINDING_TITLE);
+
+    // Not a key or a token anywhere a person, a log or the model could read it, and nothing left running.
+    await expectNoCredentials(
+      page,
+      request,
+      {
+        "the Dispatcher's output": theDispatcher.output(),
+        "the Workers' logs": theDispatcher
+          .containers()
+          .map((container) => container.log())
+          .join("\n"),
+        "what the model was shown": theLlm
+          .requests()
+          .map(
+            (item) =>
+              `${item.prompt}\n${Object.values(item.toolResults).join("\n")}`,
+          )
+          .join("\n"),
+      },
+      [WORKSPACE_KEY],
+    );
+    await eventually(
+      "the engine's processes to be gone",
+      async () => engineProcesses().length === 0,
+    );
+    assertNoExternalAttempts(readGuard());
+  });
+
+  // #299-T09
+  test("a pull request whose checkout fails gets one short failure note in the summary comment, and the run keeps its failure", async ({
+    page,
+    request,
+  }) => {
+    const repo = required(repository, "The repository");
+    const number = 9;
+    // The pull request ref is never advertised for this head, so the real preparation refuses it
+    // (`checkout_incomplete`, reason `ref_moved`) before any engine starts.
+    const head = repo.commit(
+      { "src/other.py": HANDLER },
+      "A head without a ref",
+    );
+    await addGithubPullRequest(request, WIDGETS.fullName, {
+      number,
+      title: TITLE,
+      body: BODY,
+      headSha: head,
+    });
+    await openRuns(page);
+
+    const answer = await deliverPullRequestEvent(request, {
+      action: "opened",
+      installationId: INSTALLATION_ID,
+      repository: { ...WIDGETS, owner: OWNER_OF_WIDGETS },
+      number,
+      title: TITLE,
+      headSha: head,
+    });
+    expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
+
+    // The note is the only visible sign on the pull request, and the Runs view still says failed.
+    await expect(
+      runsOf(page, WIDGETS.fullName, number).locator("[data-status]"),
+    ).toContainText("Failed", RUN_TIMEOUT);
+    const [note, ...others] = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
+    expect(others).toEqual([]);
+    expect(note?.login).toBe(e2eEnv.githubBotLogin);
+    expect(note?.body).toContain(IDENTITY_MARKER);
+    expect(note?.body).toContain("Dynamic Review did not complete");
+    expect(note?.body).toContain("`checkout_incomplete`");
+    expect(note?.body).toContain("`ref_moved`");
+    expect(note?.body).toContain(head);
+    // Nothing of the repository, the pull request text or a credential is in the note.
+    for (const text of [
+      TITLE,
+      BODY,
+      "src/other.py",
+      WORKSPACE_KEY,
+      hostedEnv.dispatcherToken,
+      ...allSecrets(),
+    ])
+      expect(note?.body).not.toContain(text);
     assertNoExternalAttempts(readGuard());
   });
 });
