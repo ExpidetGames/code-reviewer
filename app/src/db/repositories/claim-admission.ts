@@ -22,7 +22,7 @@ import {
 import { databaseDriver } from "../driver.ts";
 import type { Database, JobsTable } from "../schema.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import { readEffectiveEntitlements } from "../../workspaces/effective-entitlements.ts";
 import { keyModeAtClaim } from "../../billing/claim-key-mode.ts";
 import type { KeyMode } from "../../workspaces/entitlements.ts";

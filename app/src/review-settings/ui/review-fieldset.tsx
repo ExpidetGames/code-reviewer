@@ -4,7 +4,8 @@
 // The "Review" card of the review settings form (#174): how many findings one review may raise,
 // whether a large pull request is reviewed in chunks, whether every finding is also posted inline,
 // and the free-text project rules added to every review prompt.
-import { REVIEW_SETTING_LIMITS, type ProjectReviewKind } from "../settings.ts";
+import { REVIEW_SETTING_LIMITS } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import {
   SettingsCard,
   SettingsCheckboxField,

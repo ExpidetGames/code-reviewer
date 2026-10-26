@@ -12,8 +12,8 @@ import {
 import {
   builtInProjectDynamicSettings,
   builtInReviewSettings,
-  type ProjectReviewKind,
 } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { Job } from "../jobs/job-types.ts";
 import { createReviewSettingsJobOptionsSource } from "./review-settings-job-options.ts";
 

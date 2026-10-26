@@ -18,10 +18,12 @@ import {
 } from "../validate.ts";
 import {
   CATALOG_FIELD_OF_KIND,
-  PROJECT_REVIEW_KINDS,
-  type ProjectReviewKind,
   type ReviewSettingsOverrides,
 } from "../settings.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../../job-kind/job-kind.ts";
 import { initialDynamicValues } from "./dynamic-form-state.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { diffPatch, initialFormState, type FormState } from "./form-state.ts";

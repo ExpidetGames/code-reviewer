@@ -10,7 +10,7 @@
 // makes that recoverable: a Postgres transaction that hit an error cannot run another statement until
 // it is rolled back to a savepoint.
 import { sql, type Kysely, type Selectable } from "kysely";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import { formatTimestamp } from "../codecs.ts";
 import { errorCode, UNIQUE_VIOLATION } from "../errors.ts";
 import type { Database, JobsTable } from "../schema.ts";

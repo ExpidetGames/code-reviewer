@@ -23,7 +23,7 @@ import {
 } from "../../model-catalog/entries.ts";
 import type { MemberCatalogEntry } from "../../model-catalog/member.ts";
 import { providerLabelOf } from "../../model-catalog/provider-label.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import { readEntitlements } from "../../workspaces/entitlements-validation.ts";
 import type { Database, ModelCatalogEntriesTable } from "../schema.ts";
 

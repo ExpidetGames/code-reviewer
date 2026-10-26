@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { browserGlobalSettingsApi, type SettingsApi } from "./api.ts";
 import { followersText } from "./followers-text.ts";
 import { describeWholeRefusal } from "./messages.ts";
-import type { ProjectReviewKind } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 
 type Outcome = { kind: "reset" } | { kind: "failed"; text: string } | null;
 

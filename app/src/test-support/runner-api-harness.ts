@@ -21,7 +21,7 @@ import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import type { LlmProviderDescriptor } from "../llm/providers/types.ts";
 import { createCatalogFixture } from "./review-settings-harness.ts";
 import type { CatalogEntry } from "../model-catalog/entries.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi } from "../runner-api/api.ts";

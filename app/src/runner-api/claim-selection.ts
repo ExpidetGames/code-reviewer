@@ -22,7 +22,7 @@ import {
   type SelectableEntry,
 } from "../llm/selection.ts";
 import type { CatalogService } from "../model-catalog/service.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {
   noLimits,
   type ResolvedEntitlements,

@@ -15,7 +15,7 @@ import {
   decodeReviewKind,
   toJob,
 } from "./jobs-repository.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
 import { NOT_DELETED } from "./workspaces-repository.ts";
 

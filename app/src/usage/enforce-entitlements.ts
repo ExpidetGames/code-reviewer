@@ -5,7 +5,7 @@
 // interface, and only as far as the answer needs it, so a workspace without limits reads nothing. The queue's claim
 // (src/db/repositories/claim-admission.ts) feeds it inside the transaction that reserves the usage record.
 import type { JobErrorCode } from "../jobs/job-types.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {
   ENTITLEMENTS_INVALID_CODE,
   type EntitlementLimits,

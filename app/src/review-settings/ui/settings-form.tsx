@@ -36,9 +36,9 @@ import {
   CATALOG_FIELD_OF_KIND,
   PROJECT_DYNAMIC_SETTING_FIELDS,
   REVIEW_SETTING_FIELDS,
-  type ProjectReviewKind,
   type ReviewSettingField,
 } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import { estimateReviewCost } from "../cost.ts";
 import { llmProviderDescriptors } from "../../llm/providers/index.ts";

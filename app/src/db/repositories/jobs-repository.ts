@@ -24,7 +24,7 @@ import {
 import {
   PROJECT_REVIEW_KINDS,
   type ProjectReviewKind,
-} from "../../review-settings/settings.ts";
+} from "../../job-kind/job-kind.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
   createInstanceDynamicReviewGate,

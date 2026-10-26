@@ -61,7 +61,6 @@ import {
   MODEL_SETTING_FIELDS,
   PROJECT_CATALOG_FIELDS,
   PROJECT_DYNAMIC_LIMITS,
-  PROJECT_REVIEW_KINDS,
   withoutModelFields,
   type ProjectCatalogField,
   type ProjectDynamicOverrides,
@@ -69,12 +68,15 @@ import {
   type ProjectDynamicSettingField,
   type ProjectDynamicSettings,
   type ReviewVerdictMode,
-  type ProjectReviewKind,
   type ReadableReviewSettings,
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
 } from "./settings.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../job-kind/job-kind.ts";
 import {
   parseStoredOverrides,
   parseStoredProjectDynamicOverrides,

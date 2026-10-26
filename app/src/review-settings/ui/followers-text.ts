@@ -3,7 +3,7 @@
 // What a change of the kind of the workspace defaults does to the projects that follow it (#676), said before the
 // change is confirmed: by the settings form when the kind is switched and by the reset of every default.
 import { KIND_NAMES } from "../kind-names.ts";
-import type { ProjectReviewKind } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 
 const SUMMARY_COMMENT_NOTE =
   "The next review of such a project posts a new summary comment on the pull request; the findings of the current comment are not carried over.";

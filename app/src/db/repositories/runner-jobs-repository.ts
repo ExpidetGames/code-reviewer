@@ -29,7 +29,7 @@ import {
   type RunnerEngine,
 } from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import {
   newLeaseToken,
   newWorkerCredential,

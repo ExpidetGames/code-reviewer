@@ -9,7 +9,10 @@
 import type { CatalogStatus } from "../model-catalog/entries.ts";
 import type { MemberCatalogEntry } from "../model-catalog/member.ts";
 import type { CatalogService } from "../model-catalog/service.ts";
-import { PROJECT_REVIEW_KINDS, type ProjectReviewKind } from "./settings.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../job-kind/job-kind.ts";
 
 /** What a check of a choice needs to know about an entry, and nothing about the model behind it. */
 export type CatalogEntryFacts = {

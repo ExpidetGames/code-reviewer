@@ -7,7 +7,7 @@ import type {
   StoredReviewCommand,
 } from "../integrations/types.ts";
 import type { JsonValue } from "../integrations/types.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { JobStatus } from "./job-status.ts";
 
 /**
