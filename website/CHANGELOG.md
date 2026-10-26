@@ -3,6 +3,12 @@
 Jede Landingpage trägt in `package.json` unter `itegroVorlage` die Version, mit der sie gestartet ist.
 Änderungen, die bestehende Seiten nachziehen sollten, sind mit **Nachziehen** markiert.
 
+## 1.0.1 (2026-10-25)
+
+- Node fest auf `24.21.0` in `.nvmrc`, pnpm über `packageManager`. Cloudflare braucht keine Variablen
+  `NODE_VERSION`/`PNPM_VERSION` mehr. **Nachziehen:** bei bestehenden Seiten die Variablen im Dashboard löschen
+  und die Versionen in die Dateien schreiben.
+
 ## 1.0.0 (2026-10-25)
 
 Erste Version.

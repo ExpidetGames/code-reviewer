@@ -16,7 +16,7 @@ How the site is built and hosted follows the process "Landingpages" in `Itegro-G
 
 ## Develop
 
-Node 24 (`.nvmrc`) and pnpm 10.33.0 (`packageManager`).
+Node and pnpm in the pinned versions (see [Versions](#versions)).
 
 ```sh
 cd website
@@ -61,16 +61,18 @@ Set up the Workers project once (the Worker is named `code-review-landing`, the 
 match the Worker in the Cloudflare dashboard):
 
 1. Cloudflare → **Workers & Pages** → the existing Worker `code-review-landing` → **Settings** → **Build**
-   → connect the repository `Itegro-GmbH/code-reviewer` instead of `Itegro-GmbH/code-review-landing`. **Production
+   → connect the repository `Itegro-GmbH/code-reviewer` instead of `Itegro-GmbH/code-review-landing` (switched on
+   2026-10-26; until then the Worker still built from the old repository). **Production
    branch:** `main` (decided by the owner), so a change to the site goes live with the next release of this repository
    (`development` → `main`); to publish a site change earlier, release it like a hotfix. **Branch control → builds for
    non-production branches: off**, so `development` and feature branches publish nothing and build no preview (if previews
    are ever switched on, they have no `PUBLIC_POSTHOG_KEY` and no tracking, and `workers.dev` addresses send
    `X-Robots-Tag: noindex`, see below).
 2. **Root directory:** `website`. **Build command:** `pnpm build`. **Deploy command:** `npx wrangler deploy`.
-3. **Build variables and secrets:** `NODE_VERSION` = `24`, `PNPM_VERSION` = `10.33.0`, and
-   `PUBLIC_POSTHOG_KEY` = the key of the PostHog main project (vault entry "Posthog Landingpage Key"), for
-   **production builds only**, so previews never track. The key is inlined at build time: build again after changing it.
+3. **Build variable:** only `PUBLIC_POSTHOG_KEY` = the key of the PostHog main project (vault entry "Posthog
+   Landingpage Key"), for **production builds only**, so previews never track. The key is inlined at build time: build
+   again after changing it. Set no `NODE_VERSION` or `PNPM_VERSION`: Cloudflare reads the Node version from `.nvmrc` and
+   the pnpm version from `packageManager`, both in the root directory (see [Versions](#versions)).
 4. **Build watch paths** (Build → Build watch paths): include `website/*` so only changes to the site build it.
 5. **Custom domain** `code-review.com` (Settings → Domains & Routes) stays on this Worker; `www` → apex is a Redirect
    Rule in the zone (301, keep path and query), as before.
@@ -78,6 +80,21 @@ match the Worker in the Cloudflare dashboard):
    Rocket Loader, Bot Fight Mode (it sets a cookie), Zaraz, and Logpush of request logs.
 
 `*.workers.dev` and preview addresses send `X-Robots-Tag: noindex`.
+
+## Versions
+
+Node and pnpm are pinned in the repository, not in environment variables:
+
+| What | Where | Version |
+| --- | --- | --- |
+| Node | `.nvmrc` (exact version) | `24.21.0` |
+| pnpm | `packageManager` in `package.json` (exact version, no `^`) | `pnpm@10.33.0` |
+
+Cloudflare Workers Builds reads both files from the root directory of the build (`website`); locally `nvm`/`fnm` use
+`.nvmrc` and Corepack uses the `packageManager` field; CI takes them from the same files. So everyone builds with the
+same versions.
+
+To change a version: edit the file, run `pnpm install` (updates the lockfile) and `pnpm verify`, commit.
 
 ## Tracking
 
