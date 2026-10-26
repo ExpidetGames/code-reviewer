@@ -75,9 +75,11 @@ async function signInAsAdmin(page: Page): Promise<void> {
 
 /** The balance on the page in micro-USD (`$1.887` is 1,887,000; `-$0.113` is -113,000). */
 async function balanceMicro(page: Page): Promise<number> {
-  const text = (
-    await page.locator("[data-slot=balance-amount]").innerText()
-  ).trim();
+  const amount = page.locator("[data-slot=balance-amount]");
+  // The page streams in behind a Suspense boundary: its content sits in a hidden element until the boundary is revealed, and `innerText`
+  // reads it there. Wait until it is shown so the rest of the page (role queries skip hidden content) is there too.
+  await expect(amount).toBeVisible();
+  const text = (await amount.innerText()).trim();
   const match = /^(-?)\$([\d,]+)\.(\d+)/.exec(text);
   if (match === null) throw new Error(`The balance reads ${text}.`);
   const micro =
@@ -641,10 +643,10 @@ test.describe("the billing journeys of a review", () => {
     await signInAsAdmin(page);
     await page.goto(BILLING_PAGE);
     const balance = await balanceMicro(page);
-    const rowsBefore = await page
-      .getByRole("region", { name: "Journal" })
-      .locator("tr[data-entry-id]")
-      .count();
+    // The journal is counted once it is shown: a count taken while the streamed page is still hidden reads 0.
+    const journal = page.getByRole("region", { name: "Journal" });
+    await expect(journal).toBeVisible();
+    const rowsBefore = await journal.locator("tr[data-entry-id]").count();
     const verdictBefore = await expectJournalConsistent();
 
     await switchBillingOff(e2eEnv.catalogAdminAppUrl);
