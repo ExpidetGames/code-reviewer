@@ -61,7 +61,8 @@ Set up the Workers project once (the Worker is named `code-review-landing`, the 
 match the Worker in the Cloudflare dashboard):
 
 1. Cloudflare → **Workers & Pages** → the existing Worker `code-review-landing` → **Settings** → **Build**
-   → connect the repository `Itegro-GmbH/code-reviewer` instead of `Itegro-GmbH/code-review-landing`. **Production
+   → connect the repository `Itegro-GmbH/code-reviewer` instead of `Itegro-GmbH/code-review-landing` (switched on
+   2026-10-26; until then the Worker still built from the old repository). **Production
    branch:** `main` (decided by the owner), so a change to the site goes live with the next release of this repository
    (`development` → `main`); to publish a site change earlier, release it like a hotfix. **Branch control → builds for
    non-production branches: off**, so `development` and feature branches publish nothing and build no preview (if previews
