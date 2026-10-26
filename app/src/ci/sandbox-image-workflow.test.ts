@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down how CI proves the Sandbox image and the entry modes of the runner image (#324): a job of
-// its own builds the `sandbox` target (and the `dynamic` one, to compare their layers) and runs the
-// smoke test in `sandbox` mode; the smoke test proves the three modes (`probe`, `worker-once`,
-// `dispatch`), the legacy default and the stable reasons of a failed probe. Docker itself runs in CI;
-// here the wiring is judged.
+// Pins down how CI proves the Worker image and its entry modes (#324): a job of its own builds the
+// `sandbox` target, the only image of the project, and runs the smoke test; the smoke test proves the
+// modes (`probe`, `worker-once`), the refusal of a missing or unknown mode and the stable reasons of a
+// failed probe. Docker itself runs in CI; here the wiring is judged.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -43,49 +42,45 @@ describe("the CI job of the Sandbox image", () => {
   const sandbox = () => job("image-runner-sandbox");
 
   // #324-T09
-  it("builds the sandbox target and the dynamic target, loads them and does not push", () => {
+  it("builds the sandbox target, loads it and does not push", () => {
     const builds = (sandbox().steps ?? []).filter((step) =>
       step.uses?.startsWith("docker/build-push-action@"),
     );
 
-    expect(builds.map((step) => step.with?.["target"])).toEqual([
-      "dynamic",
-      "sandbox",
-    ]);
-    for (const build of builds)
-      expect(build.with).toMatchObject({
-        context: ".",
-        file: "runner/Dockerfile",
-        load: true,
-        push: false,
-      });
-    expect(builds[1]?.with?.["tags"]).toBe("code-reviewer-runner-sandbox:ci");
+    expect(builds.map((step) => step.with?.["target"])).toEqual(["sandbox"]);
+    expect(builds[0]?.with).toMatchObject({
+      context: ".",
+      file: "runner/Dockerfile",
+      load: true,
+      push: false,
+    });
+    expect(builds[0]?.with?.["tags"]).toBe("code-reviewer-runner-sandbox:ci");
   });
 
   // #324-T09
-  it("smoke tests the sandbox image in sandbox mode against the dynamic image", () => {
+  it("smoke tests the sandbox image it just built", () => {
     const commands = (sandbox().steps ?? []).flatMap((step) =>
       (step.run ?? "").split("\n").map((line) => line.trim()),
     );
 
     expect(commands).toContain(
-      "docker/smoke/runner.sh code-reviewer-runner-sandbox:ci sandbox code-reviewer-runner-dynamic:ci",
+      "docker/smoke/runner.sh code-reviewer-runner-sandbox:ci",
     );
   });
 
   // #324-T04: the smoke test runs the fake App, which is Node.
-  it("has the Node version of the repository for the fake App, as the other jobs that run the smoke test", () => {
-    for (const id of ["image-runner-sandbox", "image-runner-dynamic"]) {
-      const setup = (job(id).steps ?? []).find((step) =>
-        step.uses?.startsWith("actions/setup-node@"),
-      );
-      expect(setup?.with, id).toMatchObject({ "node-version-file": ".nvmrc" });
-    }
+  it("has the Node version of the repository for the fake App", () => {
+    const setup = (sandbox().steps ?? []).find((step) =>
+      step.uses?.startsWith("actions/setup-node@"),
+    );
+    expect(setup?.with).toMatchObject({ "node-version-file": ".nvmrc" });
   });
 
   // #324-T09
-  it("runs under the same conditions as the Dynamic image job, has no more rights and no login", () => {
-    expect(sandbox().if).toBe(job("image-runner-dynamic").if);
+  it("runs on pull requests that change the runner and on those into main, has no more rights and no login", () => {
+    expect(sandbox().if).toContain("github.event_name == 'pull_request'");
+    expect(sandbox().if).toContain("github.base_ref == 'main'");
+    expect(sandbox().if).toContain("needs.changes.outputs.runner == 'true'");
     expect(sandbox().permissions).toBeUndefined();
     expect(JSON.stringify(sandbox())).not.toMatch(
       /docker\s+(push|login)|login-action/,
@@ -100,18 +95,17 @@ describe("the CI job of the Sandbox image", () => {
   it("is built and smoke tested by make test-images as well", () => {
     expect(makefile).toContain("--target sandbox");
     expect(makefile).toContain(
-      "docker/smoke/runner.sh code-reviewer-runner-sandbox:local sandbox code-reviewer-runner-dynamic:local",
+      "docker/smoke/runner.sh code-reviewer-runner-sandbox:local",
     );
   });
 });
 
 describe("the smoke test of the entry modes", () => {
   // #324-T01 #324-T03 #324-T04 #324-T08
-  it("proves probe, worker-once, dispatch and the legacy default in every image", () => {
+  it("proves probe, worker-once and worker-reap, and the refusal of a missing or unknown mode", () => {
     expect(smoke).toContain("assert_probe pr-agent not_a_dynamic_runner");
     expect(smoke).toContain("worker_once_fake_app.py");
-    expect(smoke).toContain("RUNNER_MODE=legacy");
-    expect(smoke).toContain("dispatcher_bundle_missing");
+    expect(smoke).toContain("smoke-secret-mode-0123456789");
     expect(smoke).toContain("worker-reap");
   });
 
@@ -137,10 +131,8 @@ describe("the smoke test of the entry modes", () => {
   });
 
   // #324-T09
-  it("compares the layers of the sandbox image with those of the dynamic image and looks for a Dispatcher", () => {
-    expect(smoke).toContain(".RootFS.Layers");
+  it("looks for a Dispatcher bundle in the image", () => {
     expect(smoke).toContain("/opt/code-reviewer/dispatcher");
-    expect(smoke).toMatch(/sandbox mode needs the dynamic image/);
   });
 
   // #324-T06

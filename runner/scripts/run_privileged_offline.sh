@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Runs the privileged suite (pytest -m privileged, #197, #244) as the Dynamic runner would run: as
-# root with exactly the capabilities of compose.dynamic.yml (cap_add) and nothing else, with
+# root with exactly the capabilities of the hardened container spec (cap_add) and nothing else, with
 # no-new-privileges, in a Linux network namespace that has a loopback interface and no route out,
 # and in a mount namespace laid out like the container (#249): every disk filesystem read-only, a
-# fresh tmpfs on /run and /tmp with the options of compose.dynamic.yml, a throwaway HOME. Nothing is
+# fresh tmpfs on /run and /tmp with the options of the hardened container spec, a throwaway HOME. Nothing is
 # mounted from the host, so there is no Docker socket (a CI host has one), and the suite runs on the
 # only writable paths the container has. The suite starts the engine as a dedicated unprivileged
 # user, installs the per-user nft rules and kills that user's processes; none of it can run as an
@@ -39,14 +39,14 @@ done
 
 # Inside the namespace: the users the suite needs, then the production privileges and the suite.
 # `env PATH=...` because sudo replaces PATH. The capability list is the cap_add of
-# compose.dynamic.yml; the suite refuses to run with any other (tests/privileged/conftest.py), and a
-# test (app/src/ci/compose-dynamic.test.ts) keeps this list and that file equal.
+# the hardened container spec; the suite refuses to run with any other (tests/privileged/conftest.py), and a
+# test (the container spec contract) keeps this list and that file equal.
 sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=$OPENCODE_BIN" \
   unshare --net --mount -- bash -c '
     set -euo pipefail
     ip link set lo up
-    # The writable paths of the container (#249): the same tmpfs options as compose.dynamic.yml
-    # (`tmpfs`, pinned by app/src/ci/compose-dynamic.test.ts). A container mounts nothing from the
+    # The writable paths of the container (#249): the same tmpfs options as the hardened container spec
+    # (`tmpfs`, pinned by the container spec contract). A container mounts nothing from the
     # host: nothing of the /run of the CI host (its Docker socket among it) is visible to the suite,
     # and the AF_UNIX test (#244) judges the container. The HOME of the Diff job user is the CI
     # host'"'"'s own directory and cannot be hidden, so the suite gets a throwaway one in /tmp instead.

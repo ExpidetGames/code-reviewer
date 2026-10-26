@@ -9,7 +9,7 @@
 // The command `admin reset-password` (src/admin-cli/) makes the links today; the mail issue sends them
 // by mail. Both end here.
 import type { Kysely } from "kysely";
-import { hashResetToken, isWellFormedResetToken } from "../admin-cli/token.ts";
+import { hashResetToken, isWellFormedResetToken } from "../auth/link-token.ts";
 import type { Database } from "../db/schema.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import { checkPassword, type PasswordErrorCode } from "./password-policy.ts";

@@ -6,7 +6,7 @@
 // only.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { isPublicPath } from "../auth/access.ts";
 
 const appRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -144,33 +144,10 @@ describe("app/vercel.json", () => {
 });
 
 describe("next.config.ts output", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  async function outputIn(env: Record<string, string>): Promise<unknown> {
-    vi.resetModules();
-    for (const name of ["APP_RUNTIME", "VERCEL"]) vi.stubEnv(name, "");
-    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
-    return (await import("../../next.config.ts")).default.output;
-  }
-
   // #319-T08
-  it("stays standalone for the Docker image, which is the default", async () => {
-    expect(await outputIn({})).toBe("standalone");
-  });
-
-  // #319-T08
-  it("leaves the output to the platform in serverless mode", async () => {
-    expect(await outputIn({ APP_RUNTIME: "serverless" })).toBeUndefined();
-    expect(await outputIn({ VERCEL: "1" })).toBeUndefined();
-  });
-
-  // #319-T08
-  it("stays standalone when APP_RUNTIME=server overrides the platform marker", async () => {
-    expect(await outputIn({ VERCEL: "1", APP_RUNTIME: "server" })).toBe(
-      "standalone",
-    );
+  it("leaves the output to the platform, which packages every function itself (no standalone server)", async () => {
+    expect(
+      (await import("../../next.config.ts")).default.output,
+    ).toBeUndefined();
   });
 });

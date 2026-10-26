@@ -13,7 +13,7 @@ import {
 } from "../db/repositories/jobs-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { WorkspaceId } from "../db/workspace-scope.ts";
-import { errorCode } from "../db/errors.ts";
+import { errorCode, FOREIGN_KEY_VIOLATION } from "../db/errors.ts";
 import { JobQueueError } from "./errors.ts";
 import { validateEnqueueInput } from "./job-input.ts";
 import type { EnqueueJobInput, EnqueueResult, Job } from "./job-types.ts";
@@ -103,7 +103,7 @@ export function createJobQueue(
       try {
         result = await jobs.enqueue(checked.value);
       } catch (error) {
-        if (errorCode(error) === "SQLITE_CONSTRAINT_FOREIGNKEY")
+        if (errorCode(error) === FOREIGN_KEY_VIOLATION)
           throw repositoryUnknown(checked.value.repositoryId, error);
         throw error;
       }

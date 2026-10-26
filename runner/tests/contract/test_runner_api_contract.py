@@ -1063,10 +1063,8 @@ def test_the_claim_request_may_advertise_that_the_runner_enforces_the_cost_polic
     )
     schema: Document = _load(SCHEMA_PATH)
     assert COST_POLICY_ADVERTISEMENT in schema["$defs"]["KnownClaimFeature"]["enum"]
-    from code_reviewer_runner.job_loop.api import CLAIM_FEATURES
     from code_reviewer_runner.job_loop.worker_api import WORKER_FEATURES
 
-    assert COST_POLICY_ADVERTISEMENT in CLAIM_FEATURES
     assert COST_POLICY_ADVERTISEMENT in WORKER_FEATURES
 
 

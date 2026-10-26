@@ -10,14 +10,14 @@
 //   claim <db> <nowIso> <runnerId>      -> {"job": <Job> | null}
 //   enqueue <db> <nowIso> <inputJson>   -> <EnqueueResult>
 import { createInterface } from "node:readline";
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue } from "../jobs/runner-queue.ts";
 import type { EnqueueJobInput } from "../jobs/job-types.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 
-const [command, databasePath, nowIso, argument] = process.argv.slice(2);
-if (!databasePath || !nowIso)
+const [command, databaseUrl, nowIso, argument] = process.argv.slice(2);
+if (!databaseUrl || !nowIso)
   throw new Error("Usage: jobs-child.ts <claim|enqueue> <db> <nowIso> <arg>");
 
 console.log("ready");
@@ -25,11 +25,7 @@ const lines = createInterface({ input: process.stdin });
 lines.once("line", async (line) => {
   const startAt = Number(line.split(" ")[1]);
   while (Date.now() < startAt);
-  const db = openDatabase({
-    driver: "sqlite",
-    path: databasePath,
-    busyTimeoutMs: 5000,
-  });
+  const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
   try {
     const options = { now: () => new Date(nowIso) };
     if (command === "claim") {

@@ -2,7 +2,12 @@
 
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
-import { e2eEnv, llmEnv } from "./e2e/helpers/e2e-env";
+import {
+  adminDatabaseUrl,
+  appDatabase,
+  e2eEnv,
+  llmEnv,
+} from "./e2e/helpers/e2e-env";
 
 // Own ports per checkout (E2E_PORT, default 3417; the fake GitHub gets a random one, see
 // e2e/helpers/e2e-env.ts); never 3000 or 3100 so parallel work in other worktrees is safe.
@@ -44,6 +49,21 @@ const appEnv = {
   // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
   MODELS_DEV_FETCH: "off",
 };
+
+// The database of an app under test: made fresh and migrated before the app starts, like a deployment does
+// (`pnpm migrate` is a step of its own; the app never migrates). The set-up code of a new instance comes from
+// `pnpm setup-code` (e2e/helpers/setup.ts), not from the log.
+const PREPARE_DATABASE =
+  "mkdir -p test-results && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && pnpm migrate";
+function databaseEnv(app: string): Record<string, string> {
+  const { name, url } = appDatabase(app);
+  return {
+    E2E_ADMIN_DATABASE_URL: adminDatabaseUrl().toString(),
+    E2E_DATABASE_NAME: name,
+    DATABASE_URL: url,
+    DATABASE_URL_MIGRATE: url,
+  };
+}
 
 export default defineConfig({
   testDir: "e2e",
@@ -96,7 +116,6 @@ export default defineConfig({
         /e2e\/settings\/llm-key\.e2e\.ts$/,
         /e2e\/settings\/workspace-defaults\.e2e\.ts$/,
         /e2e\/settings\/native-provider\.e2e\.ts$/,
-        /e2e\/upgrade\//,
         /e2e\/operator\//,
       ],
     },
@@ -292,16 +311,6 @@ export default defineConfig({
       testMatch: /e2e\/billing-journeys\/.*\.e2e\.ts$/,
       dependencies: ["billing-key-mode"],
     },
-    // The update of an installation of the previous release (a database and an environment made like the
-    // previous release's): the journey starts and restarts the app itself, with a database of its own, and
-    // runs the real runner and the real PR-Agent against the fake GitHub, so it only needs the fake GitHub and
-    // the build of the first app.
-    {
-      name: "upgrade",
-      use: { ...browser, baseURL: e2eEnv.upgradeAppUrl },
-      testMatch: /e2e\/upgrade\/.*\.e2e\.ts$/,
-      dependencies: ["prepare"],
-    },
     // The journey with the real runner and the real PR-Agent. It has an app of its own (its own
     // database, the LLM configured, a real runner polling it), so it cannot disturb the queue of the
     // other journeys and they cannot disturb it, and it runs next to them.
@@ -355,8 +364,8 @@ export default defineConfig({
   // fake servers they share, GitHub and SMTP; the journeys start their own fake LLMs. The apps take consecutive ports
   // from `E2E_PORT` up to `E2E_PORT` + 7. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
-  // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
-  // test-results folder; the app migrates it on start. All values are fixed dummies.
+  // production build, never the dev server, with a fresh Postgres database each (E2E_DATABASE_URL names the server;
+  // `pnpm migrate` migrates it before the app starts). All values are fixed dummies.
   //
   // Each app's output goes to a log file in test-results: a new instance prints its setup code only
   // there, and the journeys read it from the file (e2e/helpers/setup.ts).
@@ -425,11 +434,11 @@ export default defineConfig({
     },
     {
       command:
-        "pnpm build && rm -rf test-results/e2e-data && mkdir -p test-results/e2e-data && " +
+        `pnpm build && ${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.appPort} > ${e2eEnv.logFiles.app} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.databasePath,
+        ...databaseEnv("main"),
         BETTER_AUTH_URL: e2eEnv.appUrl,
         // Saving a Dynamic model asks the provider's model metadata: the fake LLM answers (#269).
         LLM_API_BASE_URL: e2eEnv.modelLlmFakeApiUrl,
@@ -441,11 +450,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-pipeline-data && mkdir -p test-results/e2e-pipeline-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.pipelineAppPort} > ${e2eEnv.logFiles.pipeline} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.pipelineDatabasePath,
+        ...databaseEnv("pipeline"),
         BETTER_AUTH_URL: e2eEnv.pipelineAppUrl,
         // The key is not an environment setting any more: the journey saves it for the workspace, as an Owner
         // does. The model and the context window of a model PR-Agent does not know still are.
@@ -458,11 +467,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-setup-data && mkdir -p test-results/e2e-setup-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.setupAppPort} > ${e2eEnv.logFiles.setup} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.setupDatabasePath,
+        ...databaseEnv("setup"),
         BETTER_AUTH_URL: e2eEnv.setupAppUrl,
       },
       url: e2eEnv.setupAppUrl,
@@ -471,11 +480,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-signup-data && mkdir -p test-results/e2e-signup-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.signupAppPort} > ${e2eEnv.logFiles.signup} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.signupDatabasePath,
+        ...databaseEnv("signup"),
         BETTER_AUTH_URL: e2eEnv.signupAppUrl,
       },
       url: e2eEnv.signupAppUrl,
@@ -484,11 +493,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-multi-data && mkdir -p test-results/e2e-multi-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.multiAppPort} > ${e2eEnv.logFiles.multi} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.multiDatabasePath,
+        ...databaseEnv("multi"),
         BETTER_AUTH_URL: e2eEnv.multiAppUrl,
         // The "test key" button of the LLM key journey asks the fake LLM, not the provider.
         LLM_API_BASE_URL: e2eEnv.llmFakeApiUrl,
@@ -500,11 +509,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-operator-data && mkdir -p test-results/e2e-operator-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.operatorAppPort} > ${e2eEnv.logFiles.operator} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.operatorDatabasePath,
+        ...databaseEnv("operator"),
         BETTER_AUTH_URL: e2eEnv.operatorAppUrl,
         // The operator API: the journey's script is the external service (e2e/operator/).
         OPERATOR_API_TOKEN: e2eEnv.operatorApiToken,
@@ -522,11 +531,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-catalog-data && mkdir -p test-results/e2e-catalog-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.catalogAppPort} > ${e2eEnv.logFiles.catalog} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.catalogDatabasePath,
+        ...databaseEnv("catalog"),
         BETTER_AUTH_URL: e2eEnv.catalogAppUrl,
         OPERATOR_API_TOKEN: e2eEnv.operatorApiToken,
         // The model metadata the catalog is released and claimed with, the key tests and the reviews of the real
@@ -542,11 +551,11 @@ export default defineConfig({
     },
     {
       command:
-        "rm -rf test-results/e2e-catalog-admin-data && mkdir -p test-results/e2e-catalog-admin-data && " +
+        `${PREPARE_DATABASE} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.catalogAdminAppPort} > ${e2eEnv.logFiles.catalogAdmin} 2>&1`,
       env: {
         ...appEnv,
-        DATABASE_PATH: e2eEnv.catalogAdminDatabasePath,
+        ...databaseEnv("catalog_admin"),
         BETTER_AUTH_URL: e2eEnv.catalogAdminAppUrl,
         // This app fetches the catalog, from the fake models.dev of the journey (#554).
         MODELS_DEV_FETCH: "on",

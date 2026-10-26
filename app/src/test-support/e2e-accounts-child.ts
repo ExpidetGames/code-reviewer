@@ -10,21 +10,17 @@
 //
 // The first sign in with GitHub as that account then finds the user by the numeric GitHub id and replaces the
 // placeholder address by the verified one (src/github-signin/decide.ts). Prints one JSON line.
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { WorkspaceRole } from "../workspaces/roles.ts";
 import { insertUser } from "./users.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 
-const [command, databasePath, argument] = process.argv.slice(2);
-if (!command || !databasePath || !argument)
+const [command, databaseUrl, argument] = process.argv.slice(2);
+if (!command || !databaseUrl || !argument)
   throw new Error("Usage: e2e-accounts-child.ts <command> <db> <json>");
 
-const db = openDatabase({
-  driver: "sqlite",
-  path: databasePath,
-  busyTimeoutMs: 5000,
-});
+const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
 try {
   if (command !== "import-user") throw new Error(`Unknown command: ${command}`);
   const input = JSON.parse(argument) as {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the race the switch to single-tenant has with the creation of a workspace: two real
-// processes, each with its own connection to one database file, start together. However they
+// processes, each with its own connection to one database, start together. However they
 // interleave, the instance never ends up single-tenant with two workspaces; one of the two is refused
 // because it saw the result of the other. (A lock held in the test's own process could not be
 // released while a write waits for it, so the two sides are processes, see TESTING.md.)
@@ -31,13 +31,13 @@ async function race(round: number) {
 
   const switcher = startDbProcess([
     "set-tenancy",
-    config.path,
+    config.url,
     "admin-1",
     "single",
   ]);
   const creator = startDbProcess([
     "create-workspace",
-    config.path,
+    config.url,
     "user-1",
     `new-${round}`,
   ]);

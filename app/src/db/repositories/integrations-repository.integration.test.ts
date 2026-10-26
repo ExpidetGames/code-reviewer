@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the integrations repository against a real SQLite file: what goes in comes out
+// Pins down the integrations repository against a real Postgres database: what goes in comes out
 // unchanged, a GitHub App row never holds a secret, and bad input is refused with a stable code.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -49,7 +49,7 @@ describe("the integrations repository", () => {
       config_type: string;
       created_at: string;
       updated_at: string;
-    }>`select config, typeof(config) as config_type, created_at, updated_at
+    }>`select config, pg_typeof(config)::text as config_type, created_at, updated_at
        from integrations where id = ${saved.id}`.execute(db);
     expect(rows).toEqual([
       {

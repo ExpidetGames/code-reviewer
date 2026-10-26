@@ -10,7 +10,7 @@
 // not exist gets the same generic answer and touches no counter. Order: where the request comes from,
 // its content type and body, the token, the limit, then the reset. Every refusal is `{ "error": <code> }`
 // with a stable code, `Cache-Control: no-store`, and never the token or the password.
-import { RESET_TOKEN_TTL_MS, hashResetToken } from "../admin-cli/token.ts";
+import { RESET_TOKEN_TTL_MS, hashResetToken } from "../auth/link-token.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import type { RateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";

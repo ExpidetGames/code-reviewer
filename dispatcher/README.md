@@ -20,20 +20,18 @@ App ──signed POST /dispatch──▶ Trigger ──▶ core ──claim─�
 | Webhook-Trigger: `POST /dispatch`, `GET /health`                                  | `src/triggers/webhook.ts`, `src/dispatcher-app.ts` | here                                                                               |
 | Stop route: signed `POST /stop` (#487)                                            | `src/triggers/stop.ts`, `src/stop/`                | here                                                                               |
 | Fake Launcher (tests)                                                             | `src/launchers/fake.ts`                            | here                                                                               |
-| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                      | here, used by the Sandbox-Launcher (#329) and the Docker-Launcher (#334)           |
+| Hardened container spec renderer and `ContainerLauncher` (#325)                   | `src/launchers/container*.ts`                      | here, used by the Sandbox-Launcher (#329)                                          |
 | Sandbox-Launcher over the Vercel Sandbox SDK (#329)                               | `src/launchers/sandbox*.ts`, `vercel-sandbox.ts`   | here, wired into the Vercel entry when `SANDBOX_SNAPSHOT_ID` is set                |
 | Canary probe, `POST /probe`, canary VM, deploy canary command (#331, #479)        | `src/probe/`, `src/launchers/sandbox-canary.ts`    | here: the deploy canary's only way in; dispatch never runs a probe                 |
 | Vercel entry, a default export                                                    | `src/index.ts`                                     | here: the Sandbox-Launcher when a golden snapshot is configured, else `noLauncher` |
-| Node entry, `@hono/node-server` and a graceful shutdown                           | `src/node.ts` (`pnpm start`)                       | here, with no engine until the Docker-Launcher (#334) is wired in                  |
-| Poll-Trigger, Docker-Launcher                                                     | `src/triggers/poll.ts`, `src/launchers/`           | #334                                                                               |
+| Node test host, `@hono/node-server` and a graceful shutdown                       | `src/test-support/node-host.ts`                    | tests only: the hosted e2e lane and the integration tests, never a deployment      |
 | Golden snapshot pipeline (a command, not a runtime part)                          | `src/snapshot/`, `pnpm snapshot:build`             | here (#330), `docs/golden-snapshot.md`                                             |
 
-Two entry files keep `node:child_process` (the Docker-Launcher's way of starting a process) out of the serverless
-bundle (none of ours: the Sandbox SDK's dependency tree holds `execa` for a local-development token fetch and `undici`; the
+The Vercel entry never imports the Node test host or `node:child_process`
+(none of ours: the Sandbox SDK's dependency tree holds `execa` for a local-development token fetch and `undici`; the
 test leaves out exactly those two, each only as imported by its known importer); `src/bundle/serverless-bundle.test.ts` follows the import graph of `src/index.ts` to prove it. Without a real
 Launcher an entry uses `noLauncher`: it advertises no engine, so every wake-up call is answered `200 ignored` with the
-reason `not_capable` and nothing is claimed. The Node entry keeps it until the Docker-Launcher (#334); the Vercel entry
-uses it until `SANDBOX_SNAPSHOT_ID` is set.
+reason `not_capable` and nothing is claimed. The Vercel entry uses it until `SANDBOX_SNAPSHOT_ID` is set.
 
 ## The wake-up call
 
@@ -68,7 +66,7 @@ and holds only the App's address and the job credential, and nothing in it can c
   tagged `{app, kind, job}` for that job and stops those, nothing else (`src/stop/job-stopper.ts`); a VM of another job, a
   canary or a foreign VM is never touched. No VM means `200 {"status":"ignored","reason":"no_vm"}`: a stop is idempotent.
 - **Answers.** `202 {"status":"stopping","vms":[...]}` when VMs are being stopped in the background (`waitUntil` on the platform, the
-  tracker of the Node entry): stopping a VM with a running container takes 20 seconds or more, and the App does not wait for
+  tracker of the Node test host): stopping a VM with a running container takes 20 seconds or more, and the App does not wait for
   it. `vms` (#493) names the VMs, so the App can take the moment of the answer as the end of their billable minutes; it is
   additive and optional for the reader. `503` with `Retry-After` when the platform could not be asked; the App repeats it. A stop that fails later is logged
   (`vm_stop_failed`, the job and the VM name) and left to the reaper.
@@ -99,7 +97,7 @@ timeoutSeconds })` (the platform's name, the Dispatcher's clock and the VM's own
   logs `vm_report_failed` with the job id and nothing else (never the credential, the URL or the App's text), and **never fails or
   delays a launch, a heartbeat or a job transition**: the App then measures the VM by the backstop of its own, or counts
   0 minutes when it got no report at all.
-- A Launcher that creates no VM (the Docker-Launcher, the fake) never calls the callback.
+- A Launcher that creates no VM (the fake) never calls the callback.
 
 ## What the core does
 
@@ -154,8 +152,8 @@ Launcher change, the memory limit) and `launcher` (the Launcher's own options, w
 
 ## The container spec renderer
 
-`src/launchers/container.ts` renders the hardened container spec (`contracts/worker-container.v1.json`, one
-definition shared with `compose.dynamic.yml` and the `runner-dynamic` service of `compose.coolify.yml`) to
+`src/launchers/container.ts` renders the hardened container spec (`contracts/worker-container.v1.json`, the one
+definition of the container) to
 `docker run` arguments: foreground with stdin attached, `--rm`, the user, `--cap-drop ALL` and the eight
 `--cap-add`, `no-new-privileges`, a read-only root, the three tmpfs, memory, reservation, swap, pids, stop timeout
 and the default bridge. No `--privileged`, no mount, no device, no host namespace. `renderDockerRunArguments`
@@ -171,8 +169,8 @@ could become a flag, with the stable codes of `CONTAINER_ERROR_CODES`.
   contract's `WorkerContainerLauncherAdditions`: exactly the two `net.ipv6.conf.{all,default}.disable_ipv6=1`
   switches, rendered as `--sysctl`, nothing else (`additions_not_allowed`). The Sandbox-Launcher passes
   `SANDBOX_LAUNCHER_ADDITIONS` for every Worker kind, because the Sandbox kernel only supports the nft `ip` family
-  and the Dynamic-Worker then needs IPv6 off from the container spec. The shared spec and the self-hosted
-  compose files do not have them (a full-mode host behaves as before); the default is no additions.
+  and the Dynamic-Worker then needs IPv6 off from the container spec. The shared spec does not have them
+  (a full-mode host behaves as before); the default is no additions.
 - The entry mode of the image (`worker-once`, `probe`) is a placeholder until the image has its entry modes (#324); the
   names are those #324 proposes, and nothing else changes when it fixes them.
 - `seccomp.ts` derives, from Docker's default profile, a profile that denies chosen socket families (AF_VSOCK);
@@ -266,7 +264,7 @@ starts.
 
 **The Dynamic configuration of the container.** The container of a Dynamic job (not a Diff job's) is given the operator's
 `RUNNER_DYNAMIC_CAPABILITIES` (the model's descriptor, a JSON object) and `RUNNER_DYNAMIC_MAX_COST_USD` (the cost limit of
-a run) from the Dispatcher's own environment, as the self-hosted `runner-dynamic` service has them: both names are on the
+a run) from the Dispatcher's own environment: both names are on the
 container spec's allow-list, both are non-secret, and a value that is not of the right form fails the deployment at start,
 not the first Dynamic job. The runner reads them again and decides what they mean. The canary gets the same. They are read, and refused when malformed, only by a deployment that serves Dynamic jobs
 (`DISPATCHER_ENGINES` includes `opencode`): a typo there does not take a Diff-only Dispatcher down.
@@ -359,7 +357,7 @@ step is blocked; it changes nothing about what the running Dispatcher dispatches
 | `503`  | the same with `ok: false`; `status` is `denied` (with `reasons`) or `failed` (with `failure`) | the canary did not pass, or could not run: block the release      |
 | `401`  | `RUNNER_UNAUTHORIZED`                                                                         | no, a wrong or a malformed credential                             |
 
-`status: failed` with `failure: probe_not_supported` is a Launcher that has no probe (the Node entry's `noLauncher`, or a
+`status: failed` with `failure: probe_not_supported` is a Launcher that has no probe (`noLauncher`, or a
 Diff-only deployment): it proves nothing and advertises what it advertises.
 
 ### The deploy canary
@@ -498,8 +496,7 @@ Names only: a refusal names the variable, never the value.
 | `RUNNER_DYNAMIC_CAPABILITIES`, `RUNNER_DYNAMIC_MAX_COST_USD`               | The operator's Dynamic configuration for the container of a Dynamic job and for the canary: a JSON object (no line breaks, at most 4096 characters) and a plain positive decimal              | none         |
 | `CRON_SECRET`                                                              | Vercel entry: the secret of the platform's cron for the reaper route (#364), at least 32 characters, different from every other secret. Unset: the route refuses everyone                     | none         |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`                      | Platform access by token (all three). Without a token the OIDC token is used                                                                                                                  | OIDC         |
-| `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node entry: how long launches may finish after SIGTERM, 0 to 600                                                                                                                              | `60`         |
-| `PORT`                                                                     | Node entry                                                                                                                                                                                    | `8080`       |
+| `DISPATCHER_SHUTDOWN_GRACE_SECONDS`                                        | Node test host only: how long launches may finish after SIGTERM, 0 to 600                                                                                                                     | `60`         |
 
 ## The golden snapshot pipeline
 
@@ -512,13 +509,13 @@ rebuild, rollback, retention, the scan and the failure codes are in `docs/golden
 ## Working here
 
 From the repository root: `make lint`, `make typecheck`, `make test-unit`, `make test-integration`, `make verify`.
-Inside `dispatcher/`: `pnpm test`, `pnpm test:int`, `pnpm test:privileged` (a Docker daemon and the Worker image, `make test-sandbox-local`), `pnpm exec vitest run <path>`, `pnpm start` (the Node entry).
+Inside `dispatcher/`: `pnpm test`, `pnpm test:int`, `pnpm test:privileged` (a Docker daemon and the Worker image, `make test-sandbox-local`), `pnpm exec vitest run <path>`.
 `src/contracts/` is generated from `contracts/` (`make generate-contracts`) and never edited by hand. The project
 imports nothing from `app/` or `runner/`; what is shared is the contracts and `fakes/` (`fakes/dispatcher-app` is the
 fake App every test here runs against). See `TESTING.md` for the test rules.
 
 The hosted end-to-end lane (#332, `TESTING.md`, "Hosted e2e lane") runs this project as a process: `src/test-support/hosted-e2e-main.ts` is the
-Node entry's composition with the Sandbox-Launcher and the canary probe (`POST /probe`) over the local mode of the Sandbox double
+Node test host's composition with the Sandbox-Launcher and the canary probe (`POST /probe`) over the local mode of the Sandbox double
 (`fakes/sandbox/local.ts`) and `fakes/sandbox/bin/docker-worker.sh`, which runs the real Worker as a local process in place of the
 container. It repeats the wiring of `sandboxFromEnvironment` with that one platform, so a change to the wiring is a change there too. It
 is test code: no entry of a deployment imports it.

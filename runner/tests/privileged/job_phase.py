@@ -25,7 +25,7 @@ from privileged_support import EGRESS_MODE, RUNNER_ENVIRONMENT
 from code_reviewer_runner.dynamic_review.netguard import EgressMode
 from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup, secure_startup
 from code_reviewer_runner.job_loop import service
-from code_reviewer_runner.job_loop.settings import settings_from_environment
+from code_reviewer_runner.job_loop.settings import worker_settings_from_environment
 
 PYTEST_ARGUMENTS = [
     "-m",
@@ -66,7 +66,7 @@ def startup_step() -> Any:
 def start_and_run(pytest_arguments: list[str], argv: list[str]) -> int:
     """The production startup step, then pytest in the same process."""
     setup = service.prepare_dynamic_runtime(
-        settings_from_environment(RUNNER_ENVIRONMENT), startup=startup_step()
+        worker_settings_from_environment(RUNNER_ENVIRONMENT), startup=startup_step()
     )
     if not setup.rules_installed:
         print("the static network rules could not be installed", file=sys.stderr)

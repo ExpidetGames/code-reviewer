@@ -43,8 +43,7 @@ export type WorkspaceMembersRepository = {
   remove(userId: string): Promise<boolean>;
   /**
    * Takes the lock that serializes changes of the members of this workspace for the rest of the
-   * transaction. SQLite already holds its single write lock for every transaction (`begin immediate`,
-   * src/db/dialect.ts); this write is what makes the same code safe on a database that locks by row.
+   * transaction (a write to the workspace row, which every other change of the members waits for).
    * Call it first in a transaction that reads the owners and then changes them.
    */
   lock(): Promise<void>;

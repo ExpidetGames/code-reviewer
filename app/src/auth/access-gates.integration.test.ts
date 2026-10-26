@@ -290,7 +290,6 @@ describe("an email and password account without a workspace", () => {
       ["/api/w/default/runs", "GET"],
       ["/api/w/default/review-settings", "PUT"],
       ["/api/w/default/invitations", "POST"],
-      ["/api/backup/status", "GET"],
     ] as const) {
       const response = await portal.visit(path, { cookies, method });
       expect(response.status, path).toBe(403);

@@ -237,7 +237,6 @@ describe("the Dispatcher section of the guide", () => {
           "INFISICAL_CLIENT_SECRET",
           "INFISICAL_PROJECT_SLUG",
           "VERCEL_AUTOMATION_BYPASS_SECRET",
-          "PORT",
           "DISPATCHER_SHUTDOWN_GRACE_SECONDS",
           "VERCEL_OIDC_TOKEN",
         ].includes(name),

@@ -8,12 +8,16 @@ those licenses require us to keep, and the result of the last license review of 
 None of this software is copied into the repository, except the shadcn/ui components (see that
 section): they are copied under `app/src/components/ui/` and keep their MIT header and notice. The
 app installs its packages with pnpm and the runner installs its packages with uv, both from the
-lockfiles, and both container images are built from the same lockfiles. The runner image of
-Dynamic Review also carries two prebuilt binaries, OpenCode and ripgrep; they are not copied into the
-repository but pinned by version, source commit and digest (see "OpenCode and ripgrep").
+lockfiles. The app is a Next.js build that runs on Vercel and the Dispatcher a serverless bundle;
+neither is a container image. The one container image of the project is the Worker image (the
+`sandbox` target of `runner/Dockerfile`, built inside the golden snapshot of the sandbox VM, one
+container per review job). It is built from the lockfile of the runner and carries both review
+engines: PR-Agent (Diff) and, for Dynamic Review, two prebuilt binaries, OpenCode and ripgrep; they
+are not copied into the repository but pinned by version, source commit and digest (see "OpenCode
+and ripgrep").
 
-Both container images (app and runner) carry `LICENSE`, `NOTICE` and this file in `/licenses`; the
-image smoke tests check that they are there and identical to the files of the repository.
+The Worker image carries `LICENSE`, `NOTICE` and this file in `/licenses`; the image smoke test checks
+that they are there and identical to the files of the repository.
 
 ## PR-Agent
 
@@ -113,9 +117,9 @@ shadcn runtime dependencies (`clsx`, `tailwind-merge`, `class-variance-authority
 `radix-ui`) are MIT/Apache-2.0/ISC and need no exception. The app's icons come from
 `@phosphor-icons/react` (MIT, as on the landing page) and need no exception either.
 
-## OpenCode and ripgrep (prebuilt binaries of the Dynamic runner image)
+## OpenCode and ripgrep (prebuilt binaries of the Worker image)
 
-The runner image of Dynamic Review carries two prebuilt, unmodified upstream release binaries:
+The Worker image carries two prebuilt, unmodified upstream release binaries for Dynamic Review:
 OpenCode, the review engine, and ripgrep, its search helper. Neither is copied into the repository.
 Each is named by an exact version, a source commit and SHA-256 digests in a pin file
 (`runner/opencode-pin.json`, `runner/ripgrep-pin.json`), and a download is accepted only when it
@@ -317,7 +321,7 @@ were read from the npm registry when the entries were added and are judged like 
 
 No package of the app uses a license that conflicts with running it as a proprietary hosted service.
 The weak copyleft exceptions above (LGPL, MPL) are used unmodified; they are not a problem because
-the images and the build output are never given to a third party (see "Copyleft and distribution").
+the Worker image and the build output are never given to a third party (see "Copyleft and distribution").
 
 ### Runner (`runner/`)
 
@@ -348,10 +352,10 @@ the exceptions:
 
 Our own source code is not linked with these packages: PR-Agent imports them at runtime and we do
 not copy or modify any of them. The service runs them on its own servers and does not hand the
-runner image to anyone (see "Copyleft and distribution").
+Worker image to anyone (see "Copyleft and distribution").
 
 `html2text` 2024.2.26 (GPL-3.0, https://github.com/Alir3z4/html2text) is installed unmodified from
-PyPI into the runner image. It is pure Python (a `py3-none-any` wheel), so its complete source code
+PyPI into the Worker image. It is pure Python (a `py3-none-any` wheel), so its complete source code
 is included in the image as installed, in `/opt/venv/lib/python3.13/site-packages/html2text/`. The
 GPL-3.0 text is in the same environment, in
 `/opt/venv/lib/python3.13/site-packages/html2text-2024.2.26.dist-info/licenses/COPYING`. Because the
@@ -360,7 +364,7 @@ the version and the paths here.
 
 ### Bundled binaries (`runner/`)
 
-The prebuilt binaries of the Dynamic runner image are audited from their pin files, not from an
+The prebuilt binaries of the Worker image are audited from their pin files, not from an
 installed tree (see "OpenCode and ripgrep" above). The binaries and the exceptions for the npm
 packages inside OpenCode (`runner/opencode-bundled-licenses.json`, reviewed 2026-10-14, ecosystem
 `bun`) are kept in `license-policy.json`, and `policy-doc.test.ts` compares these tables with it.
@@ -390,7 +394,7 @@ packages inside OpenCode (`runner/opencode-bundled-licenses.json`, reviewed 2026
 - Creator: Alexis Deveria and the caniuse-lite contributors, https://github.com/browserslist/caniuse-lite.
 - License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/. The license text is at that address; this file gives the credit it
   asks for, the link to the license and the statements below.
-- Changes: none. Code Reviewer uses the data unmodified and only as published on the npm registry. It appears in the build tooling of the app (not shipped to users) and inside the OpenCode executable of the Dynamic runner image, where it is bundled as published by the OpenCode release, unmodified.
+- Changes: none. Code Reviewer uses the data unmodified and only as published on the npm registry. It appears in the build tooling of the app (not shipped to users) and inside the OpenCode executable of the Worker image, where it is bundled as published by the OpenCode release, unmodified.
 - No warranties: the data is provided "as is". The licensor makes no warranties of any kind about it,
   and the license disclaims implied warranties of merchantability, fitness for a particular purpose
   and non-infringement; the licensor is not liable for any damages arising from its use.
@@ -402,7 +406,7 @@ packages inside OpenCode (`runner/opencode-bundled-licenses.json`, reviewed 2026
 - Creator: The Linux Foundation, https://github.com/kemitchell/spdx-exceptions.json.
 - License: Creative Commons Attribution 3.0 Unported, https://creativecommons.org/licenses/by/3.0/. The license text is at that address; this file gives the credit it
   asks for, the link to the license and the statements below.
-- Changes: none. Code Reviewer uses the data unmodified and only as published on the npm registry. It appears only inside the OpenCode executable of the Dynamic runner image, bundled as published by the OpenCode release, unmodified.
+- Changes: none. Code Reviewer uses the data unmodified and only as published on the npm registry. It appears only inside the OpenCode executable of the Worker image, bundled as published by the OpenCode release, unmodified.
 - No warranties: the data is provided "as is". The licensor makes no warranties of any kind about it,
   and the license disclaims implied warranties of merchantability, fitness for a particular purpose
   and non-infringement; the licensor is not liable for any damages arising from its use.
@@ -411,10 +415,10 @@ packages inside OpenCode (`runner/opencode-bundled-licenses.json`, reviewed 2026
 
 The exceptions above include weak and strong copyleft packages (LGPL: sharp/libvips, python-gitlab,
 PyGithub; MPL-2.0; GPL-3.0: html2text). They are acceptable only because code-review.com is a hosted
-service: the container images, the Vercel build output and the sandbox snapshots stay on the
+service: the Worker image, the Vercel build output and the sandbox snapshots stay on the
 operator's own infrastructure and are never given to a customer or published, so the distribution
-duties of those licenses (source offer, relinking) are not triggered. The images are therefore not
-published to a public registry. If an image or a build were ever delivered to anyone outside Itegro
+duties of those licenses (source offer, relinking) are not triggered. The image is therefore not
+published to a public registry. If the image or a build were ever delivered to anyone outside Itegro
 GmbH, review these exceptions again first.
 
 ## Updating this file

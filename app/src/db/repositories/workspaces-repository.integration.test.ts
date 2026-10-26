@@ -285,83 +285,78 @@ describe("the workspaces repository, count and search by name", () => {
 
 for (const engine of BILLING_ENGINES) {
   // #658-T03
-  describe.skipIf(engine.skip)(
-    `the workspaces repository and a deleted workspace on ${engine.name}`,
-    () => {
-      /** Three workspaces; the oldest, which is the default one, is deleted. */
-      async function start() {
-        const { db, workspaceId, otherWorkspaceId } = await engine.create();
-        await insertUser(db, "member");
-        const repository = createWorkspacesRepository(db);
-        // The three workspaces are made within the same millisecond now and then, and then the order of their ids, which are
-        // random, decides which is "the oldest": the default one is made older on purpose.
-        await db
-          .updateTable("workspaces")
-          .set({ created_at: "2026-10-01T00:00:00.000Z" })
-          .where("slug", "=", DEFAULT_WORKSPACE_SLUG)
-          .execute();
-        const deletedId = (await repository.findDefault())?.id ?? "none";
-        expect(deletedId).not.toBe("none");
-        expect([workspaceId, otherWorkspaceId]).not.toContain(deletedId);
-        await repository.addMember(deletedId, "member", "owner");
-        await repository.addMember(workspaceId, "member", "member");
-        await markWorkspaceDeleted(db, deletedId);
-        return {
-          repository,
-          deletedId,
-          liveIds: [workspaceId, otherWorkspaceId].sort(),
-          workspaceId,
-        };
-      }
+  describe(`the workspaces repository and a deleted workspace on ${engine.name}`, () => {
+    /** Three workspaces; the oldest, which is the default one, is deleted. */
+    async function start() {
+      const { db, workspaceId, otherWorkspaceId } = await engine.create();
+      await insertUser(db, "member");
+      const repository = createWorkspacesRepository(db);
+      // The three workspaces are made within the same millisecond now and then, and then the order of their ids, which are
+      // random, decides which is "the oldest": the default one is made older on purpose.
+      await db
+        .updateTable("workspaces")
+        .set({ created_at: "2026-10-01T00:00:00.000Z" })
+        .where("slug", "=", DEFAULT_WORKSPACE_SLUG)
+        .execute();
+      const deletedId = (await repository.findDefault())?.id ?? "none";
+      expect(deletedId).not.toBe("none");
+      expect([workspaceId, otherWorkspaceId]).not.toContain(deletedId);
+      await repository.addMember(deletedId, "member", "owner");
+      await repository.addMember(workspaceId, "member", "member");
+      await markWorkspaceDeleted(db, deletedId);
+      return {
+        repository,
+        deletedId,
+        liveIds: [workspaceId, otherWorkspaceId].sort(),
+        workspaceId,
+      };
+    }
 
-      it("does not count, find, list or search a tombstone, and does not return it by id", async () => {
-        const { repository, deletedId, liveIds } = await start();
+    it("does not count, find, list or search a tombstone, and does not return it by id", async () => {
+      const { repository, deletedId, liveIds } = await start();
 
-        expect(await repository.count()).toBe(2);
-        expect(
-          (await repository.listPage({ limit: 10 })).workspaces.map(
-            (w) => w.id,
-          ),
-        ).toEqual(liveIds);
-        expect(await repository.search("deleted", 10)).toEqual([]);
-        expect(
-          (await repository.search("", 10)).map((w) => w.id).sort(),
-        ).toEqual(liveIds);
-        expect(await repository.get(deletedId)).toBeUndefined();
-        expect((await repository.get(liveIds[0] ?? ""))?.deletedAt).toBeNull();
+      expect(await repository.count()).toBe(2);
+      expect(
+        (await repository.listPage({ limit: 10 })).workspaces.map((w) => w.id),
+      ).toEqual(liveIds);
+      expect(await repository.search("deleted", 10)).toEqual([]);
+      expect((await repository.search("", 10)).map((w) => w.id).sort()).toEqual(
+        liveIds,
+      );
+      expect(await repository.get(deletedId)).toBeUndefined();
+      expect((await repository.get(liveIds[0] ?? ""))?.deletedAt).toBeNull();
+    });
+
+    it("keeps the tombstone readable by id for the one reader that shows a past payment", async () => {
+      const { repository, deletedId } = await start();
+
+      const tombstone = await repository.getIncludingDeleted(deletedId);
+
+      expect(tombstone).toMatchObject({
+        id: deletedId,
+        name: "Deleted workspace",
+        deletedAt: "2026-10-23T12:00:00.000Z",
       });
+      expect(isDeleted(tombstone ?? { deletedAt: null })).toBe(true);
+    });
 
-      it("keeps the tombstone readable by id for the one reader that shows a past payment", async () => {
-        const { repository, deletedId } = await start();
+    it("never makes a tombstone the default workspace, and finds no membership through it", async () => {
+      const { repository, deletedId, workspaceId } = await start();
 
-        const tombstone = await repository.getIncludingDeleted(deletedId);
+      expect((await repository.findDefault())?.id).not.toBe(deletedId);
+      expect(
+        await repository.findMembershipById("member", deletedId),
+      ).toBeUndefined();
+      expect(
+        (await repository.listForUser("member")).map((m) => m.workspace.id),
+      ).toEqual([workspaceId]);
+    });
 
-        expect(tombstone).toMatchObject({
-          id: deletedId,
-          name: "Deleted workspace",
-          deletedAt: "2026-10-23T12:00:00.000Z",
-        });
-        expect(isDeleted(tombstone ?? { deletedAt: null })).toBe(true);
-      });
+    it("still reports the tombstone's own address as taken (the unique index holds it) and the old one as free", async () => {
+      const { repository, deletedId } = await start();
 
-      it("never makes a tombstone the default workspace, and finds no membership through it", async () => {
-        const { repository, deletedId, workspaceId } = await start();
-
-        expect((await repository.findDefault())?.id).not.toBe(deletedId);
-        expect(
-          await repository.findMembershipById("member", deletedId),
-        ).toBeUndefined();
-        expect(
-          (await repository.listForUser("member")).map((m) => m.workspace.id),
-        ).toEqual([workspaceId]);
-      });
-
-      it("still reports the tombstone's own address as taken (the unique index holds it) and the old one as free", async () => {
-        const { repository, deletedId } = await start();
-
-        expect(await repository.slugExists(`deleted-${deletedId}`)).toBe(true);
-        expect(await repository.slugExists("default")).toBe(false);
-      });
-    },
-  );
+      expect(await repository.slugExists(`deleted-${deletedId}`)).toBe(true);
+      expect(await repository.slugExists("default")).toBe(false);
+    });
+  });
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The first-run setup, assembled for integration tests: a real SQLite file, the real Better Auth
+// The first-run setup, assembled for integration tests: a real Postgres database, the real Better Auth
 // instance (email and password only), the real completion, the real route handlers, the real setup
-// gate and access proxy in front of them, and a code store with a clock the test moves. The tests
+// gate and access proxy in front of them, and a database code store with a clock the test moves. The tests
 // send real `Request` objects and keep cookies, the way a browser does. Nothing listens on a port.
 import { NextRequest } from "next/server";
 import type { AccessGates } from "../auth/access-gates.ts";
@@ -10,10 +10,7 @@ import { createAccessProxy } from "../auth/access-proxy.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
-import {
-  createSetupCodeStore,
-  type SetupCodeGuard,
-} from "../setup/code-store.ts";
+import { SETUP_CODE_TTL_MS } from "../setup/code-store.ts";
 import { createDatabaseSetupCodeStore } from "../setup/database-code-store.ts";
 import { completeSetup } from "../setup/complete.ts";
 import { createCredentialCheck } from "../setup/credential-check.ts";
@@ -21,7 +18,6 @@ import { createSetupGate } from "../setup/gate-proxy.ts";
 import { createSetupRouteHandlers } from "../setup/http.ts";
 import { SETUP_PAGE, SETUP_REWRITE_HEADER } from "../setup/paths.ts";
 import { createSetupStateReader, readSetupState } from "../setup/state.ts";
-import { startSetupOnStart } from "../setup/start.ts";
 import { SETUP_SESSION_COOKIE } from "../setup/setup-session.ts";
 import { cookieHeader, remember, type CookieJar } from "./auth-harness.ts";
 import { createTestDatabase } from "./test-database.ts";
@@ -44,12 +40,7 @@ export const WIZARD_BODY = {
 export type SetupHarnessOptions = {
   /** Cookies get the `Secure` attribute, as over https. */
   secureCookies?: boolean;
-  /**
-   * `database`: the code lives in the database, as in a serverless deployment (#321). Every instance the
-   * harness makes (`restart()`) shares the database and one clock, and nothing else. Default `memory`.
-   */
-  codeStore?: "memory" | "database";
-  /** The clock the instances of a `database` harness share; made by `createSetupHarness`. */
+  /** The clock the instances of the harness share; made by `createSetupHarness`. */
   clock?: { time: number };
 };
 
@@ -90,26 +81,17 @@ function assemble(
     verificationRequired: () => Promise.resolve(gateState.mail),
   });
   const logs: string[] = [];
-  // A memory harness keeps the clock of its process; the instances of a database harness share one.
-  const shared = options.codeStore === "database";
-  const clock = shared
-    ? (options.clock ?? { time: Date.parse("2026-10-11T08:00:00.000Z") })
-    : { time: Date.parse("2026-10-11T08:00:00.000Z") };
-  const databaseStore =
-    options.codeStore === "database"
-      ? createDatabaseSetupCodeStore({
-          db,
-          appSecret: SETUP_TEST_SECRET,
-          now: () => clock.time,
-          randomCode: () => firstCode,
-          log: (line) => logs.push(line),
-        })
-      : null;
-  const memoryStore = createSetupCodeStore({
+  // The instances of the harness share one clock.
+  const clock = options.clock ?? {
+    time: Date.parse("2026-10-11T08:00:00.000Z"),
+  };
+  const store = createDatabaseSetupCodeStore({
+    db,
+    appSecret: SETUP_TEST_SECRET,
     now: () => clock.time,
     randomCode: () => firstCode,
+    log: (line) => logs.push(line),
   });
-  const store: SetupCodeGuard = databaseStore ?? memoryStore;
   const readState = createSetupStateReader(() => readSetupState(db));
   let afterCompletedCalls = 0;
 
@@ -249,22 +231,23 @@ function assemble(
     /** The access gates the proxy uses; `gateState.mail` says whether the instance can send mail. */
     gates,
     gateState,
-    /** What the server does at start: reads the state and prints the code (to `logs`). */
+    /** What `pnpm setup-code` does: while the instance is not set up, it makes a code and prints it (to `printed`). */
     async start() {
       const printed: string[] = [];
-      const result = await startSetupOnStart({
-        db,
-        store: memoryStore,
-        log: (line) => printed.push(line),
-      });
-      return { ...result, printed };
+      const state = await readSetupState(db);
+      if (state.kind === "completed") return { setUp: true as const, printed };
+      const issued = await store.issue();
+      printed.push(
+        `[setup] Setup code: ${issued.code}  (valid for ${String(SETUP_CODE_TTL_MS / 60_000)} minutes)`,
+      );
+      return { setUp: false as const, state, printed };
     },
     /** Moves the clock of this process. */
     advance(ms: number) {
       clock.time += ms;
     },
-    /** The code store of this instance, if the code lives in the database. */
-    databaseStore,
+    /** The code store of this instance. */
+    databaseStore: store,
     /** The time this instance sees. */
     now: () => clock.time,
     /** The same database, a new process: another code store and another state cache. */

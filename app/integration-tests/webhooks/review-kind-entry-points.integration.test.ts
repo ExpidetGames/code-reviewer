@@ -5,7 +5,7 @@
 // nothing a pull request or a comment says can change that. The kind is not decided by the entry
 // points: the queue resolves it inside the enqueue transaction (#195). These tests run the real
 // webhook handler, the real GitHub App provider, the real review settings service, the real queue, the
-// real instance gate and a real SQLite file, so a producer that started to pass a kind of its own, or a
+// real instance gate and a real Postgres database, so a producer that started to pass a kind of its own, or a
 // resolver that forgot a producer, turns them red.
 import { describe, expect, it } from "vitest";
 import {

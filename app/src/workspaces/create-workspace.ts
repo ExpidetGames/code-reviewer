@@ -7,20 +7,15 @@
 // another creation by the same person: an instance never ends up single-tenant with two workspaces, and
 // nobody gets past "workspaces per user" by asking twice at once.
 //
-// Concurrency, and what changes with Postgres (#105): the transaction is `begin immediate` on SQLite, so two
-// creations are serialized by the database and "the slug is free" and "the person owns fewer workspaces than the
-// limit" are still true when the insert runs. Under Postgres' default isolation (READ COMMITTED) that is no
-// longer so: two requests with the same name can both see the slug free and both insert, and two requests of one
-// person can both pass the limit. The port must (a) take a lock around the check and the insert (an advisory
-// lock on the creator, `pg_advisory_xact_lock`, which also serializes the limit) and (b) treat the unique
-// violation on `workspaces.slug` (SQLSTATE 23505) as "take the next suffix and try again", never as an error
-// that reaches the person as a 500. The tests "creations at the same moment" in
-// create-workspace.integration.test.ts run both races (in one process, which SQLite serializes) and are the
-// ones to port, against Postgres and over two connections.
+// Concurrency (#105): under Postgres' default isolation (READ COMMITTED) two requests with the same name could both see
+// the slug free and both insert, and two requests of one person could both pass the limit. The transaction therefore takes
+// the workspace creation lock first (src/db/workspace-creation-lock.ts), which serializes every creation and the switch of
+// the tenancy (src/admin/tenancy.ts).
 //
 // This is the one place that creates a workspace for a user; the page, the route and the rate limit are
 // around it (src/workspaces/service.ts).
 import type { Kysely } from "kysely";
+import { lockWorkspaceCreation } from "../db/workspace-creation-lock.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import {
   createWorkspacesRepository,
@@ -62,6 +57,7 @@ export async function createWorkspaceUnderTenancy(
   if (!name.ok) return { ok: false, error: "invalid_name" };
 
   return db.transaction().execute(async (trx) => {
+    await lockWorkspaceCreation(trx);
     const settings = createInstanceSettingsRepository(trx, now);
     // No setting reads as single-tenant, like everywhere else: only multi lets users create.
     if ((await settings.get("tenancy")) !== "multi")

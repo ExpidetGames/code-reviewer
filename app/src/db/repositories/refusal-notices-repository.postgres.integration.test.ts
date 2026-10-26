@@ -1,20 +1,15 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The record of the notices of refused reviews on Postgres behaves like the SQLite one (#281-T08): one statement
+// The record of the notices of refused reviews (#281-T08): one statement
 // takes the notice of a pull request and period, so several app instances at once get exactly one, a failed notice
-// is taken again only after its wait and up to its attempts, and the checks of the table refuse the same direct
-// writes. Runs only when TEST_DATABASE_URL is set.
+// is taken again only after its wait and up to its attempts, and the checks of the table refuse direct
+// writes.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createRefusalNoticesRepository } from "./refusal-notices-repository.ts";
 import { listDueRefusalNotices } from "./refusal-notices-sweep.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import { createTestDatabase } from "../../test-support/test-database.ts";
 
 const MINUTE = 60 * 1000;
 const PERIOD = "2026-10-01T00:00:00.000Z";
@@ -32,7 +27,7 @@ const REFUSED_UPDATES = [
 ] as const;
 
 async function setup() {
-  const postgres = await createPostgresTestDatabase({ poolMax: 12 });
+  const postgres = await createTestDatabase({ poolMax: 12 });
   const fixture = await createJobQueueFixture({ database: postgres.db });
   let now = new Date("2026-10-14T12:00:00.000Z");
   const notices = createRefusalNoticesRepository(
@@ -56,7 +51,7 @@ async function setup() {
   };
 }
 
-describePostgres("the refusal notices on Postgres", () => {
+describe("the refusal notices on Postgres", () => {
   // #281-T08
   it("hands the pull request and period to one of several concurrent callers", async () => {
     const t = await setup();

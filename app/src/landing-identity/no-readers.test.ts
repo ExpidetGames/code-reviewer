@@ -19,7 +19,7 @@ const ALLOWED = new Set([
   "landing-identity/store.ts",
   // The list of columns that migrations after an older one added (its tests compare rows without them).
   "test-support/columns-added-later.ts",
-  // The program the sign-up journey runs to read the stored values from the SQLite file (the app shows them nowhere).
+  // The program the sign-up journey runs to read the stored values from the Postgres database (the app shows them nowhere).
   "test-support/e2e-landing-identity-child.ts",
 ]);
 

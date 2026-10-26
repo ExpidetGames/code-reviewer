@@ -2,7 +2,7 @@
 
 // The landing identity through the real sign-in (#692): the cookie the proxy set travels with the browser through the
 // redirect to GitHub and back, and the callback (or the email form) stores it on the user, once, and clears the cookie.
-// Real Better Auth, the fake GitHub and a real SQLite file.
+// Real Better Auth, the fake GitHub and a real Postgres database.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OCTOCAT,

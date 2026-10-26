@@ -5,11 +5,9 @@ import type {
   WorkerContainerSpec,
 } from "../contracts/worker-container.ts";
 
-// The hardened container spec the launchers render (contracts/worker-container.v1.json, #316): the
-// self-hosted default. It is the example spec of the contract, value for value; container-spec.test.ts
-// fails when the two differ, and app/src/ci/worker-container-parity.test.ts fails when compose.dynamic.yml
-// or the runner-dynamic service of compose.coolify.yml differ from the example. A change of a flag is
-// therefore made in all of them in one pull request.
+// The hardened container spec the launchers render (contracts/worker-container.v1.json, #316). It is the
+// example spec of the contract, value for value; container-spec.test.ts fails when the two differ. A change of
+// a flag is therefore made in both in one pull request.
 export const WORKER_CONTAINER_SPEC: WorkerContainerSpec = {
   version: 1,
   user: "0:0",
@@ -79,8 +77,8 @@ export const WORKER_CONTAINER_SPEC: WorkerContainerSpec = {
 // the container. The Sandbox VM kernel only has the nf_tables `ip` family, so the Dynamic-Worker installs
 // its fallback egress rules there; an `ip` table does not see IPv6, so the Worker must prove IPv6 is off, and
 // the container's /proc/sys is read-only: the switches have to come from `docker run --sysctl`. The Sandbox-
-// Launcher (#329) passes this to its ContainerLauncher for every Worker kind; the shared spec and the
-// self-hosted compose files have no sysctl, so a host with the full ruleset behaves as before.
+// Launcher (#329) passes this to its ContainerLauncher for every Worker kind; the shared spec
+// has no sysctl.
 export const SANDBOX_LAUNCHER_ADDITIONS: WorkerContainerLauncherAdditions = {
   sysctls: {
     "net.ipv6.conf.all.disable_ipv6": "1",

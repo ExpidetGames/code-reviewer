@@ -11,18 +11,16 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { PRODUCT_NAME } from "@/copy/product-name.ts";
 import { browserSetupApi, type SetupApi } from "./api.ts";
-import { describeSetupFailure, type SetupHosting } from "./messages.ts";
+import { describeSetupFailure } from "./messages.ts";
 
 export function CodeForm({
   existingInstallation = false,
-  hosting = "server",
   api = browserSetupApi,
   onAccepted = () => window.location.reload(),
 }: {
   /** The instance has data from before the setup existed. */
   existingInstallation?: boolean;
   /** Where the code comes from: the log of a server, or `pnpm setup-code` of a serverless deployment. */
-  hosting?: SetupHosting;
   /** Only tests pass these two. */
   api?: SetupApi;
   onAccepted?: () => void;
@@ -39,7 +37,7 @@ export function CodeForm({
     const result = await api.submitCode(code.trim());
     setPending(false);
     if (!result.ok) {
-      setProblem(describeSetupFailure(result.code, hosting));
+      setProblem(describeSetupFailure(result.code));
       return;
     }
     onAccepted();
@@ -52,21 +50,10 @@ export function CodeForm({
           {`Set up ${PRODUCT_NAME}`}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {hosting === "serverless" ? (
-            <>
-              Enter the setup code that this command printed in your terminal:{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">
-                pnpm setup-code
-              </code>
-            </>
-          ) : (
-            <>
-              Enter the setup code from the app log:{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">
-                docker compose logs app
-              </code>
-            </>
-          )}
+          Enter the setup code that this command printed in your terminal:{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">
+            pnpm setup-code
+          </code>
         </p>
       </div>
       {existingInstallation ? (

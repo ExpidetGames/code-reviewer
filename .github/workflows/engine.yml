@@ -57,7 +57,7 @@ jobs:
       # namespace that has a loopback interface and nothing else.
       - name: Engine tests without network
         run: scripts/run_engine_offline.sh
-      # The privileged suite (#197): root with exactly the capabilities of compose.dynamic.yml, the
+      # The privileged suite (#197): root with exactly the capabilities of the hardened container spec, the
       # dedicated engine user, the per-user nft rules and the kill of that user's processes, in a
       # namespace with nothing but loopback. Uses the pinned OpenCode fetched above.
       - name: Privileged tests (dedicated engine user, network rules)

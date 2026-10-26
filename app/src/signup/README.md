@@ -111,7 +111,7 @@ comes from an invitation link signs up at `/sign-up?invitation=<token>` and sign
 
 `rule.test.ts`, `availability.test.ts`, `github.test.ts`, `ui/forms.test.tsx`: the pure logic and the forms.
 `verification-tokens.integration.test.ts`, `limits.integration.test.ts`: the token and the counters over a real
-SQLite file. `sign-up.integration.test.ts`, `verify.integration.test.ts`, `sign-in.integration.test.ts`: the
+Postgres database. `sign-up.integration.test.ts`, `verify.integration.test.ts`, `sign-in.integration.test.ts`: the
 whole flow through the real handlers, Better Auth and a mail double (`src/test-support/fake-mail.ts`), including
 what no answer and no log line may contain. `src/auth/access-gates.integration.test.ts`: the gates behind the
 real proxy. Journey: `e2e/auth/sign-up.e2e.ts` (its own app, whose mail server the journey of the mail page configured in the admin portal; the mail goes over SMTP to the fake SMTP server and the journey reads the link from its inbox).

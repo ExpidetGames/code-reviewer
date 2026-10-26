@@ -2,22 +2,18 @@
 
 // The sync lock of the large topology (PG-12): on Postgres two app instances serialize on the same
 // installation through an advisory lock, so a reconciliation that runs at the same moment cannot
-// insert the same repository twice (which would abort one instance with a unique violation). Runs
-// only when TEST_DATABASE_URL is set.
+// insert the same repository twice (which would abort one instance with a unique violation).
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createIntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../db/repositories/repositories-repository.ts";
 import type { Database } from "../../db/schema.ts";
-import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { defaultKeyedLock } from "./keyed-lock.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import {
+  connectPostgres,
+  createTestDatabase,
+} from "../../test-support/test-database.ts";
 
 function withApplicationName(url: string, name: string): string {
   const parsed = new URL(url);
@@ -44,10 +40,10 @@ async function waitForLockWait(
   }
 }
 
-describePostgres("the sync lock on Postgres", () => {
+describe("the sync lock on Postgres", () => {
   // #105-PG-12
   it("makes a second instance wait for the one that holds the installation", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const first = connectPostgres(postgres.url);
     const second = connectPostgres(
       withApplicationName(postgres.url, "cr_sync"),
@@ -87,7 +83,7 @@ describePostgres("the sync lock on Postgres", () => {
 
   // #105-PG-12
   it("reconciles one installation from two instances without a duplicate row or an abort", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const workspaceId = await defaultWorkspaceId(postgres.db);
     const integration = await createIntegrationsRepository(
       postgres.db,
@@ -140,7 +136,7 @@ describePostgres("the sync lock on Postgres", () => {
   // #105-PG-12 (review): the lock must not hold a pooled connection, or the job's own DB work
   // deadlocks the main pool when about `poolMax` runs happen at once.
   it("completes many concurrent runs on a pool of two, keeping the same key exclusive", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 2 });
+    const postgres = await createTestDatabase({ poolMax: 2 });
     const lock = defaultKeyedLock(postgres.db);
 
     let onSameKey = 0;
@@ -174,7 +170,7 @@ describePostgres("the sync lock on Postgres", () => {
 
   // #105-PG-12 (review): a throwing job releases its lock.
   it("releases the lock when the job throws", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const lock = defaultKeyedLock(postgres.db);
 
     await expect(

@@ -8,7 +8,6 @@
 // of a path that does not exist, and GitHub is not called. The behavior of the handler is in
 // src/integrations/sync/http.integration.test.ts; this file proves the pieces are connected, that the
 // guard is there, and that the route uses the shared sync service rather than a new one.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
@@ -16,11 +15,7 @@ import {
 } from "../../../fakes/github/server.ts";
 import { adminAccessOf, type AdminAccess } from "../../src/admin/access.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import {
   TEST_APP_ID,
   testAppKeys,
@@ -28,7 +23,7 @@ import {
 } from "../../src/test-support/github-app.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
   linkTestInstallation,
@@ -70,9 +65,7 @@ async function startRoute() {
   // The portal's routes build the settings service: the master key and the address the app is reached at.
   vi.stubEnv("BETTER_AUTH_URL", "https://app.test");
   vi.stubEnv("APP_SECRET", "sync-route-test-secret-0123456789-0123456789");
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
   await saveGithubAppFromEnv(getDatabase(), {

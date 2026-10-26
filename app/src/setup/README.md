@@ -27,9 +27,8 @@ implementation.
 | completed | `setup_completed_at` set                                          | `/setup` and `/api/setup/**` answer 404; nothing else is touched.                                                                                        |
 
 The state is never inferred from whether a row exists: a database from before the markers reads as
-`setup_completed_at` null and `import_state` `none`. `import_state` is written by the import of an existing
-installation (`src/legacy-import/`, which runs right after the migrations, before the code is printed), never by the
-setup.
+`setup_completed_at` null and `import_state` `none`. `import_state` was written by the import of an existing
+installation (removed in #700; the marker may still be in old rows), never by the setup.
 
 ## The code
 
@@ -50,7 +49,7 @@ setup.
 
 ## The code in a serverless deployment
 
-`APP_RUNTIME=serverless` (`src/runtime/mode.ts`) has no process to hold a code and no log the operator reads, so
+The hosted deployment has no process to hold a code and no log the operator reads, so
 the code lives in the database (#321, table `setup_codes`, at most one row) and every instance checks it there.
 Everything above holds, with these differences:
 
@@ -58,7 +57,7 @@ Everything above holds, with these differences:
   terminal:
 
   ```sh
-  APP_RUNTIME=serverless APP_SECRET=... DATABASE_URL_MIGRATE=... pnpm setup-code
+  APP_SECRET=... DATABASE_URL_MIGRATE=... pnpm setup-code
   ```
 
   `APP_SECRET` must be the one of the deployment (the code is stored as an HMAC-SHA256 under a key derived from it,
@@ -83,10 +82,7 @@ Everything above holds, with these differences:
   (the copy follows the runtime mode: `ui/messages.ts`). A database that cannot be read (the table is missing)
   answers the same, with the log line `SETUP_CODE_STORE_UNAVAILABLE`.
 - The code is never in an HTTP response or a log; the start of a serverless instance prints nothing
-  (`src/startup-serverless.ts`).
-
-A server (`APP_RUNTIME=server`, the default) is unchanged: the code is printed in its log and kept in memory, and
-it never reads `setup_codes`.
+  (`src/instrumentation.ts`).
 
 ## The setup session
 

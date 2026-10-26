@@ -21,7 +21,7 @@ export type CatalogSeed = {
 
 /** Creates and releases the entries; returns the id of each by its name. */
 export async function seedCatalog(
-  databasePath: string,
+  databaseUrl: string,
   entries: readonly CatalogSeed[],
 ): Promise<Record<string, string>> {
   const { stdout } = await run(
@@ -31,7 +31,7 @@ export async function seedCatalog(
       "--conditions=react-server",
       CHILD,
       "seed",
-      resolve(process.cwd(), databasePath),
+      databaseUrl,
       JSON.stringify(entries),
     ],
     { cwd: process.cwd() },
@@ -42,7 +42,7 @@ export async function seedCatalog(
 
 /** Sets the instance defaults (an entry id per kind, or null) the way the operator does in the admin portal. */
 export async function setCatalogDefaults(
-  databasePath: string,
+  databaseUrl: string,
   defaults: { diff: string | null; dynamic: string | null },
 ): Promise<void> {
   await run(
@@ -52,7 +52,7 @@ export async function setCatalogDefaults(
       "--conditions=react-server",
       CHILD,
       "defaults",
-      resolve(process.cwd(), databasePath),
+      databaseUrl,
       JSON.stringify(defaults),
     ],
     { cwd: process.cwd() },

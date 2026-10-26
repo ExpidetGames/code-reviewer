@@ -1,26 +1,23 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the schema bootstrap: a missing file is created and fully migrated, a second start
-// changes nothing, a failing migration leaves no trace, and the migrated schema follows the
-// portable column conventions.
-import { existsSync, readdirSync } from "node:fs";
+// Pins down the schema bootstrap: an empty database is fully migrated, a second start changes nothing, a failing
+// migration leaves no trace, and the migrated schema follows the column conventions.
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { startDbProcess } from "../test-support/db-process.ts";
 import {
+  createEmptyTestDatabase,
   createTestDatabase,
-  createTestDirectory,
   track,
 } from "../test-support/test-database.ts";
-import { openDatabase } from "./connection.ts";
 import { DatabaseError } from "./errors.ts";
 import { migrateToLatest } from "./migrate.ts";
 import { migrationProvider } from "./migrations/index.ts";
 import { createAppMetaRepository } from "./repositories/app-meta-repository.ts";
 import type { Database } from "./schema.ts";
-import { startDatabase } from "./startup.ts";
+import { startDatabase } from "../test-support/start-database.ts";
 
 async function names(db: Kysely<Database>, query: string): Promise<string[]> {
   const { rows } = await sql<{ name: string }>`${sql.raw(query)}`.execute(db);
@@ -30,7 +27,7 @@ async function names(db: Kysely<Database>, query: string): Promise<string[]> {
 async function userTables(db: Kysely<Database>): Promise<string[]> {
   return names(
     db,
-    "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name",
+    "select table_name as name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name",
   );
 }
 
@@ -47,11 +44,9 @@ describe("the list of migrations", () => {
 describe("the migrations of both epics", () => {
   // CR-43-T01
   it("run on an empty database in one fixed, ascending order: login tables first, then the GitHub integration", async () => {
-    const { migrationsApplied } = await startDatabase({
-      driver: "sqlite",
-      path: join(await createTestDirectory(), "app.db"),
-      busyTimeoutMs: 1000,
-    });
+    const { db } = await createEmptyTestDatabase();
+
+    const { executed: migrationsApplied } = await migrateToLatest(db);
 
     expect(migrationsApplied).toEqual([
       "0001_create_app_meta",
@@ -144,21 +139,14 @@ describe("the migrations of both epics", () => {
 
 describe("starting the database", () => {
   // CR-15-T01
-  it("creates a missing file and applies every migration in order", async () => {
-    const directory = await createTestDirectory();
-    const path = join(directory, "app.db");
+  it("applies every migration in order to an empty database", async () => {
     const expectedMigrations = Object.keys(
       await migrationProvider.getMigrations(),
     ).sort();
 
-    const { db, migrationsApplied } = await startDatabase({
-      driver: "sqlite",
-      path,
-      busyTimeoutMs: 1000,
-    });
-    track(db);
+    const { db } = await createEmptyTestDatabase();
+    const { executed: migrationsApplied } = await migrateToLatest(db);
 
-    expect(existsSync(path)).toBe(true);
     expect(migrationsApplied).toEqual(expectedMigrations);
     expect(
       await names(db, "select name from kysely_migration order by name"),
@@ -218,16 +206,15 @@ describe("starting the database", () => {
     const { rows } = await sql<{
       name: string;
       type: string;
-      notnull: number;
-      pk: number;
-    }>`
-      select name, type, "notnull", pk from pragma_table_info('app_meta') order by cid`.execute(
-      db,
-    );
+      nullable: string;
+    }>`select column_name as name, data_type as type, is_nullable as nullable
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'app_meta'
+       order by ordinal_position`.execute(db);
     expect(rows).toEqual([
-      { name: "key", type: "TEXT", notnull: 0, pk: 1 },
-      { name: "value", type: "TEXT", notnull: 1, pk: 0 },
-      { name: "updated_at", type: "TEXT", notnull: 1, pk: 0 },
+      { name: "key", type: "text", nullable: "NO" },
+      { name: "value", type: "text", nullable: "NO" },
+      { name: "updated_at", type: "text", nullable: "NO" },
     ]);
   });
 
@@ -274,16 +261,7 @@ describe("a failing migration", () => {
 
   // CR-15-T09
   it("stops with an error naming it, and rolls back the half-built table and the record", async () => {
-    const directory = await createTestDirectory();
-    const db = track(
-      (
-        await startDatabase({
-          driver: "sqlite",
-          path: join(directory, "app.db"),
-          busyTimeoutMs: 1000,
-        })
-      ).db,
-    );
+    const { db } = await createTestDatabase();
     const before = await userTables(db);
     const recordedBefore = await names(
       db,
@@ -303,14 +281,7 @@ describe("a failing migration", () => {
 
   // CR-15-T09
   it("does not keep the migrations of the same start that ran before it", async () => {
-    const directory = await createTestDirectory();
-    const db = track(
-      openDatabase({
-        driver: "sqlite",
-        path: join(directory, "app.db"),
-        busyTimeoutMs: 1000,
-      }),
-    );
+    const { db } = await createEmptyTestDatabase();
 
     await expect(migrateToLatest(db, provider)).rejects.toMatchObject({
       code: "MIGRATION_FAILED",
@@ -322,31 +293,11 @@ describe("a failing migration", () => {
   });
 });
 
-describe("migrating while another process holds the write lock", () => {
-  it("reports DATABASE_LOCKED, not a broken migration, when the lock outlasts the busy timeout", async () => {
-    const directory = await createTestDirectory();
-    const path = join(directory, "app.db");
-    const db = track(
-      openDatabase({ driver: "sqlite", path, busyTimeoutMs: 200 }),
-    );
-    const holder = startDbProcess(["hold-lock", path, "0"]);
-    expect(await holder.nextLine()).toBe("locked");
-
-    const run = migrateToLatest(db);
-
-    await expect(run).rejects.toBeInstanceOf(DatabaseError);
-    await expect(run).rejects.toMatchObject({ code: "DATABASE_LOCKED" });
-    await expect(run).rejects.not.toThrow(/rolled back/);
-    holder.closeInput();
-    expect(await holder.nextLine()).toBe("released");
-  });
-});
-
 describe("the migrated schema", () => {
   const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
   // CR-15-T06
-  it("uses only text and integer columns, text ids, and text timestamps", async () => {
+  it("uses only text and integer columns (bigint for a sequence), text ids, and text timestamps", async () => {
     const { db } = await createTestDatabase();
     // Kysely's own bookkeeping tables are not ours to shape (varchar columns).
     const tables = (await userTables(db)).filter(
@@ -354,24 +305,22 @@ describe("the migrated schema", () => {
     );
     expect(tables.length).toBeGreaterThan(0);
 
-    for (const table of tables) {
-      const { rows: columns } = await sql<{ name: string; type: string }>`
-        select name, type from pragma_table_info(${table})`.execute(db);
-      for (const column of columns) {
-        expect(["TEXT", "INTEGER"], `${table}.${column.name}`).toContain(
-          column.type,
-        );
-        if (column.name === "id" || column.name.endsWith("_id")) {
-          expect(column.type, `${table}.${column.name}`).toBe("TEXT");
-        }
-        if (column.name.endsWith("_at")) {
-          expect(column.type, `${table}.${column.name}`).toBe("TEXT");
-        }
-      }
-      const { rows } = await sql<{
-        sql: string;
-      }>`select sql from sqlite_master where name = ${table}`.execute(db);
-      expect(rows[0]?.sql.toLowerCase(), table).not.toContain("autoincrement");
+    const { rows: columns } = await sql<{
+      table_name: string;
+      column_name: string;
+      data_type: string;
+    }>`select table_name, column_name, data_type from information_schema.columns
+       where table_schema = 'public' and table_name = any(${tables}::text[])`.execute(
+      db,
+    );
+    expect(columns.length).toBeGreaterThan(0);
+    for (const column of columns) {
+      const where = `${column.table_name}.${column.column_name}`;
+      expect(["text", "integer", "bigint"], where).toContain(column.data_type);
+      if (column.column_name === "id" || column.column_name.endsWith("_id"))
+        expect(column.data_type, where).toBe("text");
+      if (column.column_name.endsWith("_at"))
+        expect(column.data_type, where).toBe("text");
     }
   });
 
@@ -384,7 +333,9 @@ describe("the migrated schema", () => {
     ).set("k", "v");
 
     const { rows } = await sql<{ updated_at: string; type: string }>`
-      select updated_at, typeof(updated_at) as type from app_meta`.execute(db);
+      select updated_at, pg_typeof(updated_at)::text as type from app_meta`.execute(
+      db,
+    );
 
     expect(rows[0]?.type).toBe("text");
     expect(rows[0]?.updated_at).toBe("2026-10-10T12:30:15.042Z");

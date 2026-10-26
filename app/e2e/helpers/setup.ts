@@ -1,39 +1,57 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Helpers for the first-run setup. A new instance prints its setup code in the log of the app and
-// nowhere else, so the journeys read it from the log file the app's output is redirected to
-// (playwright.config.ts), the way an operator reads `docker compose logs`.
-import { readFileSync } from "node:fs";
+// Helpers for the first-run setup. A new instance has no setup code until the operator makes one with
+// `pnpm setup-code` against its database, so the journeys run the same command.
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { expect, request, type APIRequestContext } from "@playwright/test";
 import { e2eEnv, githubAppPrivateKey } from "./e2e-env";
 
-/** The setup code the app under test printed. Fails when the log has none, or more than one line. */
-export function readSetupCode(logFile: string): string {
-  const lines = readFileSync(logFile, "utf8")
-    .split("\n")
-    .filter((line) => /Setup code: \d{6}\b/.test(line));
-  expect(
-    lines,
-    `${logFile} must hold exactly one setup code line (a restart prints another)`,
-  ).toHaveLength(1);
-  const match = /Setup code: (\d{6})\b/.exec(lines[0] ?? "");
-  return match?.[1] ?? "";
+const run = promisify(execFile);
+
+/**
+ * What the operator's `pnpm setup-code` does against the database of an app of the run: a new code, valid for the next
+ * `setUpApp` or the first-run journey. The code is read from the output of the command, nowhere else.
+ */
+export async function makeSetupCode(databaseUrl: string): Promise<string> {
+  const { stdout } = await run(
+    process.execPath,
+    [
+      "--conditions=react-server",
+      "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+      "src/setup/setup-code-cli.ts",
+      // The output is a pipe here, which the command refuses unless it is told where the output goes.
+      "--allow-pipe",
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        APP_SECRET: e2eEnv.appSecret,
+        DATABASE_URL_MIGRATE: databaseUrl,
+      },
+    },
+  );
+  const code = /Setup code: (\d{6})\b/.exec(stdout)?.[1];
+  if (code === undefined) throw new Error("setup-code printed no code.");
+  return code;
 }
 
 /**
- * Sets the app at `baseURL` up the way the wizard would, through the same two routes: enters the
- * code from `logFile` and finishes the wizard as single-tenant with the admin of `e2eEnv`. Each app
- * under test is set up once per run, before the journeys that use it (e2e/setup/prepare-apps.e2e.ts).
+ * Sets the app at `baseURL` up the way the wizard would, through the same two routes: enters a code from
+ * `pnpm setup-code` against `databaseUrl` and finishes the wizard as single-tenant (or multi-tenant) with the admin
+ * of `e2eEnv`. Each app under test is set up once per run, before the journeys that use it
+ * (e2e/setup/prepare-apps.e2e.ts).
  */
 export async function setUpApp(
   baseURL: string,
-  logFile: string,
+  databaseUrl: string,
   tenancy: "single" | "multi" = "single",
 ): Promise<void> {
   const client: APIRequestContext = await request.newContext({ baseURL });
   try {
     const accepted = await client.post("/api/setup/code", {
-      data: { code: readSetupCode(logFile) },
+      data: { code: await makeSetupCode(databaseUrl) },
     });
     expect(accepted.status()).toBe(200);
     const completed = await client.post("/api/setup/complete", {

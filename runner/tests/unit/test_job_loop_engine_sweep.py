@@ -90,26 +90,6 @@ def test_a_diff_job_or_a_loop_without_an_engine_user_sweeps_nothing() -> None:
 
 
 # #197-T07
-def test_the_sweep_waits_for_the_last_dynamic_job_so_it_never_kills_a_running_engine() -> None:
-    async def scenario() -> None:
-        harness = Harness(**USERS)
-        harness.api.claims = [dynamic_claim(1), dynamic_claim(2)]  # type: ignore[list-item]
-        await harness.start()
-        first, second = harness.launcher.processes
-
-        first.finish()
-        await settle()
-        assert harness.sweeps == []  # the second job's engine may be running as that user now
-
-        second.finish()
-        await settle()
-        assert harness.sweeps == [(10101, 10102)]
-        await harness.stop()
-
-    run(scenario)
-
-
-# #197-T07
 @pytest.mark.parametrize("works", [False, True])
 def test_a_failed_sweep_does_not_stop_the_result_from_being_reported(works: bool) -> None:
     async def scenario() -> None:

@@ -12,9 +12,6 @@ describe("which database errors are worth another try", () => {
     ["57014", "a statement that timed out or was cancelled"],
     ["53300", "too many connections"],
     ["08006", "a connection that failed"],
-    ["SQLITE_BUSY", "a busy SQLite database"],
-    ["SQLITE_BUSY_SNAPSHOT", "a busy SQLite snapshot"],
-    ["SQLITE_LOCKED", "a locked SQLite table"],
   ])("takes %s (%s) as transient", (code) => {
     expect(
       isTransientDatabaseError(Object.assign(new Error("x"), { code })),
@@ -27,8 +24,6 @@ describe("which database errors are worth another try", () => {
     ["42703", "a column that does not exist"],
     ["22P02", "a value of the wrong shape"],
     ["23505", "a unique violation"],
-    ["SQLITE_ERROR", "a SQLite error in the statement"],
-    ["SQLITE_CONSTRAINT", "a violated constraint"],
   ])("takes %s (%s) as deterministic", (code) => {
     expect(
       isTransientDatabaseError(Object.assign(new Error("x"), { code })),

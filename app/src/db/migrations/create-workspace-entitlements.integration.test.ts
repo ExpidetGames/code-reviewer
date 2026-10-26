@@ -2,13 +2,13 @@
 
 // #271-T07: the entitlements migration adds the table to a database made by the previous release's
 // migrations and changes no existing row. A workspace without a row stays unlimited.
-import { sql } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { MigrationProvider } from "kysely/migration";
+import type { Database } from "../schema.ts";
 import { migrateToLatest } from "../migrate.ts";
 import { migrationProvider } from "./index.ts";
-import { openDatabase } from "../connection.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const SPLIT = "20261014120000_create_workspace_entitlements";
@@ -27,7 +27,7 @@ const beforeThisMigration: MigrationProvider = {
 const T = "2026-10-12T08:00:00.000Z";
 
 async function snapshot(
-  db: ReturnType<typeof openDatabase>,
+  db: Kysely<Database>,
 ): Promise<Record<string, unknown[]>> {
   const tables = await db.introspection.getTables();
   const result: Record<string, unknown[]> = {};
@@ -68,12 +68,7 @@ async function snapshot(
 describe("the entitlements migration", () => {
   // #271-T07
   it("adds the table to an existing database and changes no existing row", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, beforeThisMigration);
     await db
       .insertInto("workspaces")
@@ -113,7 +108,7 @@ describe("the entitlements migration", () => {
     expect(await snapshot(db)).toEqual(before);
     const { rows } = await sql<{
       count: number;
-    }>`select count(*) as count from workspace_entitlements`.execute(db);
+    }>`select count(*)::int as count from workspace_entitlements`.execute(db);
     expect(rows).toEqual([{ count: 0 }]);
     await db.destroy();
   });

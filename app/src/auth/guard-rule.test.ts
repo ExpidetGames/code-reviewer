@@ -24,8 +24,7 @@ const PUBLIC_SERVER_FUNCTION_FILES = ["auth/actions.ts"];
 // a 404 for somebody who is not an instance admin; src/admin/guard.integration.test.ts), and the admin
 // pages call `requireAdmin()`. The routes of a workspace run their handler through `withWorkspace(...)`
 // (the membership and the role of the person, src/workspaces/access-runtime.ts) and the routes that are
-// not about one workspace through `withSignedIn(...)`. The backup status is for the instance admin
-// (`adminAccessOf`).
+// not about one workspace through `withSignedIn(...)`.
 function callsRequireUser(source: string): boolean {
   return /\brequireUser\(\)|\brequireAdmin\(\)|\baccess:\s*lookupAdmin\b|\bwithWorkspace\(|\bwithSignedIn\(|\badminAccessOf\(/.test(
     source,

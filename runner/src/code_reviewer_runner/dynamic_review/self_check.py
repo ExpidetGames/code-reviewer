@@ -5,7 +5,7 @@ It runs once, in the root supervisor, after the one-time network setup (`static_
 before the job loop claims anything. `opencode` is advertised only when every property holds:
 
 * the process is the root supervisor and an engine user and the slot's ports are configured (only
-  the Dynamic runner of `compose.dynamic.yml` has them; the default runner never passes);
+  the Dynamic runner of the hardened container spec has them; the default runner never passes);
 * the engine user exists, with its own group, and is not root;
 * the static network rules were installed and `NET_ADMIN`/`SETPCAP` are gone from this process;
 * where the kernel gave only the `ip`-family fallback ruleset (#345), IPv6 is off and proven so

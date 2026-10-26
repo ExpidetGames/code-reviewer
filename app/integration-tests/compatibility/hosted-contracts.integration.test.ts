@@ -426,29 +426,11 @@ describe("the hardened container spec", () => {
   });
 
   // #318-T05
-  it("equals the flags of compose.dynamic.yml", () => {
-    const compose = readFileSync(
-      join(CONTRACTS_DIRECTORY, "..", "compose.dynamic.yml"),
-      "utf8",
-    );
+  it("marks the two capabilities that exist for the start of the container only", () => {
     const body = spec() as {
-      user: string;
       capAdd: Array<{ name: string; startupOnly: boolean }>;
-      tmpfs: Array<{ path: string; size: string }>;
-      pids: { limit: number };
-      stopTimeoutSeconds: number;
     };
 
-    expect(compose).toContain(`user: "${body.user}"`);
-    expect(compose).toContain(`pids_limit: ${body.pids.limit}`);
-    expect(compose).toContain(`stop_grace_period: ${body.stopTimeoutSeconds}s`);
-    for (const cap of body.capAdd)
-      expect(compose).toMatch(new RegExp(`- ${cap.name} `));
-    for (const entry of body.tmpfs) {
-      expect(compose).toContain(
-        `- ${entry.path}:rw,noexec,nosuid,nodev,size=${entry.size},`,
-      );
-    }
     expect(
       body.capAdd.filter((c) => c.startupOnly).map((c) => c.name),
     ).toStrictEqual(["NET_ADMIN", "SETPCAP"]);

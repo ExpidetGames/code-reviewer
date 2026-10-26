@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the verification token against a real SQLite file: random and long enough, only its hash is
+// Pins down the verification token against a real Postgres database: random and long enough, only its hash is
 // stored, valid for 24 hours, used once (also when two requests race), bound to the address and to the
 // password of the sign-up that made it, and a refusal changes nothing. A link is used with that password,
 // and then that password is the password of the account and no other link of the account works.

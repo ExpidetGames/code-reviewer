@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""Doubles for the job loop tests (not a test file): a clock that only moves when told to, an
-in-memory runner API and a process launcher whose processes end when the test says so."""
+"""Doubles for the job host tests (not a test file): a clock that only moves when told to, an
+in-memory API and a process launcher whose processes end when the test says so. The `Harness`
+runs the first job of the API's queue through the same `JobHost` the Worker runs."""
 
 import asyncio
 import heapq
@@ -12,9 +13,10 @@ from typing import Any
 from support import API_KEY, TOKEN, make_job_dict
 
 from code_reviewer_runner.job_loop.api import ApiError, ClaimedJob, CompleteReply, HeartbeatReply
-from code_reviewer_runner.job_loop.loop import RunnerLoop
+from code_reviewer_runner.job_loop.host import JobEnd, JobHost
+from code_reviewer_runner.job_loop.masking import SecretMasker
 from code_reviewer_runner.job_loop.process import ProcessOutcome, ProcessSpec, RunningProcess
-from code_reviewer_runner.job_loop.settings import LoopSettings
+from code_reviewer_runner.job_loop.settings import WorkerSettings
 
 RUNNER_TOKEN = "dummy-runner-token-0123456789-abcdef-0123456789"
 
@@ -67,15 +69,9 @@ class ManualClock:
         await settle()
 
 
-def make_settings(**overrides: Any) -> LoopSettings:
+def make_settings(**overrides: Any) -> WorkerSettings:
     values: dict[str, Any] = {
-        "api_url": "http://127.0.0.1:9",
-        "token": RUNNER_TOKEN,
-        "runner_id": "test-runner",
-        "concurrency": 3,
-        "poll_interval": 5.0,
         "job_timeout": 1200.0,
-        "shutdown_grace": 60.0,
         "kill_margin": 10.0,
         "terminate_grace": 5.0,
         "backoff_max": 60.0,
@@ -83,7 +79,7 @@ def make_settings(**overrides: Any) -> LoopSettings:
         "job_command": ("fake-job-process",),
     }
     values.update(overrides)
-    return LoopSettings(**values)
+    return WorkerSettings(**values)
 
 
 def make_claim(number: int = 1, **job_overrides: Any) -> ClaimedJob:
@@ -171,8 +167,8 @@ class FakeLauncher:
 
 
 class FakeApi:
-    """The runner API in memory. `claims` is a queue of what the next claims answer (a job, None
-    for 204, or an exception to raise); an empty queue answers 204."""
+    """The API in memory. `claims` is the queue of jobs the harness hands to the host (the first one
+    is run); an empty queue means no job."""
 
     def __init__(self) -> None:
         self.claims: list[ClaimedJob | ApiError | None] = []
@@ -222,11 +218,22 @@ class FakeApi:
         return self.complete_reply
 
 
+class _Control:
+    """What a test may do to the running host."""
+
+    def __init__(self, host: JobHost) -> None:
+        self._host = host
+
+    def request_force(self) -> None:
+        """A signal of the Worker: end the job and give it back."""
+        self._host.request_hard_stop()
+
+
 class Harness:
-    """A loop with fakes, started as a task on the running event loop."""
+    """A job host with fakes: the first job of the API's queue runs as a task on the event loop."""
 
     def __init__(self, **settings: Any) -> None:
-        # `environment` is the loop's environment (the rest of the keywords are its settings).
+        # `environment` is the host's environment (the rest of the keywords are its settings).
         environment: Mapping[str, str] = settings.pop("environment", {})
         # The kill of the engine user's leftovers: calls are recorded, the answer is `sweeps_ok`.
         self.sweeps: list[tuple[int, int]] = []
@@ -236,10 +243,11 @@ class Harness:
         self.api.clock = self.clock
         self.launcher = FakeLauncher()
         self.settings = make_settings(**settings)
-        self.loop = RunnerLoop(
+        self.host = JobHost(
             self.settings,
             self.api,
             self.launcher,
+            masker=SecretMasker([RUNNER_TOKEN]),
             clock=self.clock,
             sweeper=self._sweep,
             environment={
@@ -251,18 +259,25 @@ class Harness:
                 **environment,
             },
         )
+        self.loop = _Control(self.host)
+        self.end: JobEnd | None = None
         self.task: asyncio.Task[None] | None = None
 
     def _sweep(self, uid: int, gid: int) -> bool:
         self.sweeps.append((uid, gid))
         return self.sweeps_ok
 
+    async def _run(self) -> None:
+        claimed = await self.api.claim()
+        if claimed is not None:
+            self.end = await self.host.run_job(claimed)
+
     async def start(self) -> None:
-        self.task = asyncio.create_task(self.loop.run())
+        self.task = asyncio.create_task(self._run())
         await settle()
 
     async def stop(self) -> None:
-        self.loop.request_force()
+        self.host.request_hard_stop()
         if self.task is not None:
             await asyncio.wait_for(self.task, 5)
 

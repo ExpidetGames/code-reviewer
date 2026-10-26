@@ -25,7 +25,6 @@ export function projectServiceFor(workspaceId: string): ProjectService {
       undefined,
       undefined,
       undefined,
-      undefined,
       newProjectSettings,
     ),
     hooks: getProjectHooks(workspaceId),

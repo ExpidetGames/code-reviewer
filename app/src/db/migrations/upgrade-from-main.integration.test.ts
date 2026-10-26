@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #491: the billing plan migrations are gone from `development`. They never reached `main`, so a database of the last
-// release must migrate to latest, and so must a fresh one, on SQLite and on Postgres, with none of the billing plan
+// release must migrate to latest, and so must a fresh one, with none of the billing plan
 // tables. A database that ran `development` while the three migrations existed has them recorded without a file: the
 // migrator refuses it, and the reset documented in src/db/README.md ("A database that ran the removed billing
 // migrations") makes it migrate again. The reset is run as written in that README (its fenced SQL is the one source),
-// against a frozen copy of the schema the three migrations left: tables, foreign keys, triggers and, on Postgres, the
-// guard functions. The names of the removed tables and migrations are built from parts: nothing else in the repository
+// against a frozen copy of the schema the three migrations left: tables, foreign keys, triggers and the guard functions. The names of the removed tables and migrations are built from parts: nothing else in the repository
 // names that vendor's design.
 import { readFileSync } from "node:fs";
 import { sql, type Kysely } from "kysely";
@@ -14,19 +13,10 @@ import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
 import { isBillingOn, readBillingSwitch } from "../../billing/enabled.ts";
 import { createInstanceSettingsRepository } from "../repositories/instance-settings-repository.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import {
-  createTestDirectory,
-  track,
-} from "../../test-support/test-database.ts";
-import { openDatabase } from "../connection.ts";
-import { databaseDriver } from "../driver.ts";
 import { migrateToLatest } from "../migrate.ts";
 import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 
 /** The migrations of `main`: everything a database of the last release has run, newest last. */
 const MAIN_MIGRATIONS = [
@@ -102,23 +92,22 @@ const REMOVED_FUNCTIONS = [
 const V = ["pad", "dle"].join("");
 
 /**
- * The reset of src/db/README.md, read from the fenced SQL of that section: the first block runs on every engine, the
- * block tagged `sql postgres` only on Postgres. The documented statements are the ones the test runs.
+ * The reset of src/db/README.md, read from the fenced SQL of that section. The documented statements are the ones the
+ * test runs.
  */
 const README = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const RESET_HEADING = "### A database that ran the removed billing migrations";
 
-function resetStatements(driver: "sqlite" | "postgres"): string[] {
+function resetStatements(): string[] {
   const start = README.indexOf(RESET_HEADING);
   expect(start, "the reset section of src/db/README.md").toBeGreaterThan(-1);
   const rest = README.slice(start + RESET_HEADING.length);
   const end = rest.search(/\n##? /);
   const section = end === -1 ? rest : rest.slice(0, end);
   const statements: string[] = [];
-  for (const [, tag, body] of section.matchAll(
+  for (const [, , body] of section.matchAll(
     /```sql( postgres)?\n([\s\S]*?)```/g,
   )) {
-    if (tag !== undefined && driver !== "postgres") continue;
     const text = (body ?? "")
       .split("\n")
       .filter((line) => !line.trim().startsWith("--"))
@@ -133,8 +122,7 @@ function resetStatements(driver: "sqlite" | "postgres"): string[] {
  * The schema a database that ran the three removed migrations holds on top of the current one, frozen here as SQL (the
  * migrations are gone, so nothing is imported): `billing_plans`, `billing_plan_versions` and `billing_plan_prices` with
  * their checks and indexes, the columns that make the versions point at the prices and the plans at a product, and the
- * guards against changing a version or a price (triggers on SQLite; a function and a trigger each on Postgres, and the
- * function outlives its table). Taken from the three migrations as they were on `development`, in their order.
+ * guards against changing a version or a price (a function and a trigger each, and the function outlives its table). Taken from the three migrations as they were on `development`, in their order.
  */
 const REMOVED_SCHEMA_COMMON = [
   `create table billing_plans ("id" text not null primary key, "plan_key" text not null, "name" text not null, "description" text default '' not null, "sort" integer default 0 not null, "kind" text not null, "offered" integer default 0 not null, "popular" integer default 0 not null, "contact_target" text, "archived_at" text, "created_at" text not null, "updated_at" text not null, "updated_by" text references "users" ("id") on delete set null, constraint "billing_plans_kind_check" check (kind in ('free', 'paid', 'contact')), constraint "billing_plans_flags_check" check (offered in (0, 1) and popular in (0, 1)), constraint "billing_plans_popular_paid_check" check (popular = 0 or kind = 'paid'), constraint "billing_plans_contact_target_check" check (contact_target is null or kind = 'contact'))`,
@@ -153,17 +141,6 @@ const REMOVED_SCHEMA_COMMON = [
   // The foreign keys that make the versions point at the prices, the reverse of what the prices point at.
   `alter table billing_plan_versions add column "monthly_price_id" text references "billing_plan_prices" ("id") on delete restrict`,
   `alter table billing_plan_versions add column "yearly_price_id" text references "billing_plan_prices" ("id") on delete restrict`,
-];
-
-const REMOVED_SCHEMA_SQLITE = [
-  `create trigger billing_plan_versions_never_deleted before delete on billing_plan_versions begin select raise(abort, 'billing_plan_versions_immutable: a plan version is never deleted'); end`,
-  `create trigger billing_plan_versions_terms_frozen before update of id, plan_id, number, key_mode, limits, model_access, monthly_amount_minor, yearly_amount_minor, created_at on billing_plan_versions begin select raise(abort, 'billing_plan_versions_immutable: a plan version changes only its role'); end`,
-  ...["monthly_price_id", "yearly_price_id"].map(
-    (column) =>
-      `create trigger billing_plan_versions_${column}_kept before update of ${column} on billing_plan_versions when new.${column} is null and (select ${column} from billing_plan_versions where id = new.id) is not null begin select raise(abort, 'billing_plan_versions_immutable: a price link is replaced, never cleared'); end`,
-  ),
-  `create trigger billing_plan_prices_identity_frozen before update of id, plan_id, ${V}_env, origin, created_at on billing_plan_prices begin select raise(abort, 'billing_plan_prices_immutable: the identity of a price never changes'); end`,
-  `create trigger billing_plan_prices_${V}_id_once before update of ${V}_price_id on billing_plan_prices when (select ${V}_price_id from billing_plan_prices where id = new.id) is not null begin select raise(abort, 'billing_plan_prices_immutable: the ${V} price id is set once'); end`,
 ];
 
 const REMOVED_SCHEMA_POSTGRES = [
@@ -201,12 +178,9 @@ async function createRemovedSchema(
   db: Kysely<Database>,
   withRows: boolean,
 ): Promise<void> {
-  const driver = databaseDriver(db);
   for (const statement of [
     ...REMOVED_SCHEMA_COMMON,
-    ...(driver === "postgres"
-      ? REMOVED_SCHEMA_POSTGRES
-      : REMOVED_SCHEMA_SQLITE),
+    ...REMOVED_SCHEMA_POSTGRES,
   ])
     await sql.raw(statement).execute(db);
   for (const name of REMOVED_MIGRATIONS)
@@ -230,7 +204,7 @@ async function createRemovedSchema(
 
 /** Runs the documented reset in one transaction, as the README says. */
 async function runDocumentedReset(db: Kysely<Database>): Promise<void> {
-  const statements = resetStatements(databaseDriver(db));
+  const statements = resetStatements();
   await db.transaction().execute(async (trx) => {
     for (const statement of statements) await sql.raw(statement).execute(trx);
   });
@@ -240,20 +214,12 @@ async function leftovers(db: Kysely<Database>): Promise<string[]> {
   const found = (await tableNames(db)).filter((name) =>
     REMOVED_TABLES.includes(name),
   );
-  if (databaseDriver(db) === "postgres") {
-    const { rows } = await sql<{
-      proname: string;
-    }>`select proname from pg_proc where proname = any(${REMOVED_FUNCTIONS})`.execute(
-      db,
-    );
-    return [...found, ...rows.map((row) => row.proname)];
-  }
   const { rows } = await sql<{
-    name: string;
-  }>`select name from sqlite_master where name like 'billing\_plan%' escape '\\'`.execute(
+    proname: string;
+  }>`select proname from pg_proc where proname = any(${REMOVED_FUNCTIONS})`.execute(
     db,
   );
-  return [...found, ...rows.map((row) => row.name)];
+  return [...found, ...rows.map((row) => row.proname)];
 }
 
 const T = "2026-10-18T08:00:00.000Z";
@@ -268,32 +234,9 @@ const upToMain: MigrationProvider = {
   },
 };
 
-type Engine = {
-  name: "sqlite" | "postgres";
-  /** An empty database that is not migrated. */
-  open: () => Promise<Kysely<Database>>;
-};
-
-const sqlite: Engine = {
-  name: "sqlite",
-  open: async () => {
-    const directory = await createTestDirectory();
-    return track(
-      openDatabase({
-        driver: "sqlite",
-        path: `${directory}/app.db`,
-        busyTimeoutMs: 5000,
-      }),
-    );
-  },
-};
-
-const postgres: Engine = {
-  name: "postgres",
-  open: async () => (await createPostgresTestDatabase({ migrate: false })).db,
-};
-
-const engines: Engine[] = hasPostgres() ? [sqlite, postgres] : [sqlite];
+/** An empty database that is not migrated. */
+const open = async (): Promise<Kysely<Database>> =>
+  (await createEmptyTestDatabase()).db;
 
 async function tableNames(db: Kysely<Database>): Promise<string[]> {
   return (await db.introspection.getTables()).map((table) => table.name);
@@ -306,7 +249,7 @@ async function recorded(db: Kysely<Database>): Promise<string[]> {
   return rows.map((row) => row.name);
 }
 
-describe.each(engines)("the migrations on $name", ({ open }) => {
+describe("the migrations", () => {
   // #491-T02
   it("take an empty database to latest without a billing plan table", async () => {
     const db = await open();

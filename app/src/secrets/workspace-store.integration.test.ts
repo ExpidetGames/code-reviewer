@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the encrypted secret store of a workspace against a real SQLite file: the LLM key goes in
+// Pins down the encrypted secret store of a workspace against a real Postgres database: the LLM key goes in
 // encrypted and comes back exactly, a ciphertext copied to another workspace or another name is worthless,
 // a value that cannot be read is a stable state and never an exception, one workspace never sees the secret
 // of another, and the saved value is in no status and no result that can be printed.

@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the data migration that removes /ask, /improve and /describe (#203) against a real
-// SQLite file: it cancels waiting removed commands with `command_removed` while keeping history and
+// database: it cancels waiting removed commands with `command_removed` while keeping history and
 // running jobs, and it intersects stored `allowedCommands` with the command that still exists without
 // touching any other field. A failure rolls the whole start back, and a restart after a successful
 // migration changes nothing and never resurrects a cancelled job.
-import { join } from "node:path";
 import { sql } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "./connection.ts";
 import { migrateToLatest } from "./migrate.ts";
 import { migrationProvider } from "./migrations/index.ts";
 import { createIntegrationsRepository } from "./repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "./repositories/repositories-repository.ts";
-import { createTestDirectory, track } from "../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 
 const REMOVE_COMMANDS = "20261012160000_remove_commands";
@@ -31,14 +29,7 @@ const providerBefore: MigrationProvider = {
 };
 
 async function startPreviousRelease() {
-  const directory = await createTestDirectory();
-  const db = track(
-    openDatabase({
-      driver: "sqlite",
-      path: join(directory, "app.db"),
-      busyTimeoutMs: 1000,
-    }),
-  );
+  const db = (await createEmptyTestDatabase()).db;
   await migrateToLatest(db, providerBefore);
   const workspaceId = await defaultWorkspaceId(db);
   const integration = await createIntegrationsRepository(

@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the app_settings repository against a real SQLite file: reading a setting that was never
+// Pins down the app_settings repository against a real Postgres database: reading a setting that was never
 // saved, saving and replacing a value with the time and the person, JSON values of every shape, and
 // removing a setting.
 import { sql } from "kysely";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import { createTestDatabase } from "../../test-support/test-database.ts";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { createAppSettingsRepository } from "./app-settings-repository.ts";
+import { createTestDatabase } from "../../test-support/test-database.ts";
 
 describe("the app settings repository", () => {
   it("returns undefined for a setting that was never saved", async () => {
@@ -54,9 +50,8 @@ describe("the app settings repository", () => {
       updatedAt: "2026-10-10T09:00:00.000Z",
       updatedBy: "hubot",
     });
-    const { rows } = await sql`select count(*) as n from app_settings`.execute(
-      db,
-    );
+    const { rows } =
+      await sql`select count(*)::int as n from app_settings`.execute(db);
     expect(rows).toEqual([{ n: 1 }]);
   });
 
@@ -141,20 +136,10 @@ describe("a stored value that is not valid JSON", () => {
   });
 });
 
-// #676: a save of the workspace defaults over defaults that were saved meanwhile is refused (review fix 4), on both engines.
-describe.each([
-  { name: "SQLite", database: async () => (await createTestDatabase()).db },
-  ...(hasPostgres()
-    ? [
-        {
-          name: "Postgres",
-          database: async () => (await createPostgresTestDatabase()).db,
-        },
-      ]
-    : []),
-])("saving a setting only while it is unchanged on $name", (engine) => {
+// #676: a save of the workspace defaults over defaults that were saved meanwhile is refused (review fix 4).
+describe("saving a setting only while it is unchanged", () => {
   async function start() {
-    const db = await engine.database();
+    const db = (await createTestDatabase()).db;
     const workspaceId = await defaultWorkspaceId(db);
     let tick = 0;
     const repository = createAppSettingsRepository(

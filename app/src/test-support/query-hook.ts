@@ -2,8 +2,8 @@
 
 // Lets a test run something between two statements of a transaction: a Kysely plugin that awaits a callback after a query has
 // answered, before the caller sees the answer. The callback does its work on another connection of the same database (a
-// second admin saving, a second request inserting a row), so it is for Postgres, where connections run in parallel; on SQLite
-// one connection serves everything and the callback would wait for the transaction it interrupts.
+// second admin saving, a second request inserting a row), so it relies on connections that run in parallel; a callback that
+// used the transaction's own connection would wait for the transaction it interrupts.
 import type {
   KyselyPlugin,
   PluginTransformQueryArgs,

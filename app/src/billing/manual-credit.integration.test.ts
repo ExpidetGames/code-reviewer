@@ -28,7 +28,7 @@ async function codeOf(run: Promise<unknown>): Promise<string | undefined> {
 }
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`manual credits on ${engine.name}`, () => {
+  describe(`manual credits on ${engine.name}`, () => {
     async function setup() {
       const { db, workspaceId, otherWorkspaceId } = await engine.create();
       const lines: string[] = [];

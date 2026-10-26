@@ -49,7 +49,7 @@ def main(argv: list[str]) -> int:
     except (ValueError, KeyError, TypeError):
         # Not a job this wrapper can extend: let the real entry point report it, as it would.
         text = raw
-    # The job loop hands a Dynamic job one descriptor to ask whether the job is still its own
+    # The Worker hands a Dynamic job one descriptor to ask whether the job is still its own
     # (#260); `subprocess` would close it, and the entry point then never allows the write.
     lease_check = os.environ.get("RUNNER_LEASE_CHECK_FD", "")
     environment = dict(os.environ)

@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-# Smoke test of the runner image. Usage: docker/smoke/runner.sh <image> [diff|dynamic|sandbox] [<dynamic image>]
-# (defaults: code-reviewer-runner:local, diff). `diff` is the default, PR-Agent-only image and proves
-# that it holds nothing of the engine; `dynamic` is the `dynamic` target of runner/Dockerfile and
-# proves the engine is the pinned one, runs as its own user, and that the startup self-check
-# advertises `opencode` exactly when it should (#202). `sandbox` is the `sandbox` target, the Worker
-# image of the hosted deployment: every check of `dynamic` and, besides, no Dispatcher bundle and the
-# same layers as the `dynamic` image given as the third argument (#324).
+# Smoke test of the Worker image, the `sandbox` target of runner/Dockerfile and the only image of the project: the
+# golden snapshot of the hosted deployment builds it and every review job runs it in a Vercel Sandbox VM.
+# Usage: docker/smoke/runner.sh [<image>]   (default: code-reviewer-runner-sandbox:local)
 #
-# All modes prove the entry modes of the image (#324): `probe` prints a JSON verdict, `worker-once`
-# runs one job against the fake App (dynamic and sandbox; the fake App is Node), `dispatch` refuses while the image has no Dispatcher, the
-# default and RUNNER_MODE=legacy are the job loop, and `worker-reap` is on the PATH.
-#
-# The entry point of the image is the job loop (CR-29), which needs a running app, so this test does
-# not start it for real; it proves that it refuses to start without its configuration. The test
-# proves that the image starts, runs unprivileged, can write to its temporary directory and holds
-# nothing that must stay out of an image, and that the pinned PR-Agent is installed and works
-# offline: the version equals the pin, its tiktoken encodings are baked in, and a job run through
-# the real PR-Agent (no network at all) ends in a well formed failure result without a secret in it.
+# It proves that the image starts, runs unprivileged, can write to its temporary directory and holds nothing that
+# must stay out of an image; that the pinned PR-Agent is installed and works offline (the version equals the pin, its
+# tiktoken encodings are baked in, and a job run through the real PR-Agent with no network at all ends in a well
+# formed failure result without a secret in it); that the engine is the pinned one, runs as its own user, and that
+# the startup self-check advertises `opencode` exactly when it should (#202). The entry modes are proven with the
+# flags of the hardened container spec (#324): `probe` prints a JSON verdict, `worker-once` runs one job against the
+# fake App (Node) and `worker-reap` is on the PATH; the image carries no Dispatcher bundle.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -26,16 +19,8 @@ repo_root=$(cd "$here/../.." && pwd)
 # shellcheck source=docker/smoke/lib.sh
 source "$here/lib.sh"
 
-image=${1:-code-reviewer-runner:local}
-mode=${2:-diff}
-dynamic_image=${3:-}
-[ "$mode" = diff ] || [ "$mode" = dynamic ] || [ "$mode" = sandbox ] ||
-  fail "unknown mode '$mode' (expected diff, dynamic or sandbox)"
+image=${1:-code-reviewer-runner-sandbox:local}
 require_image "$image"
-if [ "$mode" = sandbox ]; then
-  [ -n "$dynamic_image" ] || fail "the sandbox mode needs the dynamic image to compare its layers with"
-  require_image "$dynamic_image"
-fi
 
 # Number of lines in a string (wc pads its output on macOS, hence tr).
 line_count() { printf '%s\n' "$1" | wc -l | tr -d ' '; }
@@ -52,7 +37,7 @@ printf '    %s\n' "$output"
 step "the entry point starts with tini, so killed helpers do not stay as zombies"
 entrypoint=$(docker inspect --format '{{json .Config.Entrypoint}}' "$image")
 [[ "$entrypoint" == '["/usr/bin/tini","--","code-reviewer-runner"]' ]] ||
-  fail "expected tini in front of the job loop, got $entrypoint"
+  fail "expected tini in front of the Worker, got $entrypoint"
 # A job's helpers are killed with their process group and re-parented to PID 1; none may stay a zombie.
 zombie_check='
 import os, signal, subprocess, time
@@ -68,14 +53,14 @@ print(len(zombies))
 zombies=$(docker run --rm --entrypoint /usr/bin/tini "$image" -- python -c "$zombie_check")
 [ "$zombies" = "0" ] || fail "$zombies zombie process(es) after ending a process group under tini"
 
-# CR-29: the entry point is the job loop; without its configuration it says so and stops.
-step "the job loop refuses to start without its configuration and does not leak the token"
-loop_token="smoke-runner-token-0123456789-abcdef-0123456789"
-loop_errors=$(docker run --rm -e RUNNER_TOKEN="$loop_token" -e RUNNER_CONCURRENCY=many "$image" 2>&1) && status=0 || status=$?
-[ "$status" = "2" ] || fail "the job loop without a URL must exit with 2, got $status"
-grep -q "RUNNER_API_URL is required" <<<"$loop_errors" || fail "expected a message about RUNNER_API_URL, got: $loop_errors"
-if grep -qF "$loop_token" <<<"$loop_errors"; then fail "the runner token is in the output of the job loop"; fi
-printf '    %s\n' "$loop_errors"
+# The entry point takes the mode as its argument; without one, or with an unknown one, it says so and stops.
+step "the entry point refuses to start without a mode and does not echo an unknown one"
+no_mode_errors=$(docker run --rm "$image" 2>&1) && status=0 || status=$?
+[ "$status" = "2" ] || fail "the entry point without a mode must exit with 2, got $status"
+grep -q "invalid arguments" <<<"$no_mode_errors" || fail "expected a refusal that names the usage, got: $no_mode_errors"
+unknown_errors=$(docker run --rm "$image" smoke-secret-mode-0123456789 2>&1) && status=0 || status=$?
+[ "$status" = "2" ] || fail "an unknown mode must exit with 2, got $status"
+if grep -qF "smoke-secret-mode-0123456789" <<<"$unknown_errors"; then fail "the unknown mode is in the output"; fi
 
 # CR-17-T06
 step "the installed PR-Agent is the pinned version"
@@ -148,7 +133,7 @@ step "the image ships the license files and carries the license label"
 assert_image_ships_license_files "$image"
 
 step "the process of the entry point runs as a non-root user"
-# The entry point exits at once, so the same image user is asked from inside a container.
+# The entry point exits at once without a mode, so the same image user is asked from inside a container.
 uid=$(in_image "$image" id -u)
 [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" != "0" ] || fail "a process in the image runs with uid '$uid'"
 printf '    process uid: %s\n' "$uid"
@@ -174,39 +159,21 @@ $SCAN_OUTPUT"
 
 # ---- #202: what the image holds of the engine, and what the startup self-check says ----------------
 
-# The log of a detached runner container, waited for until a line matches. Fails with the log.
-# Usage: wait_for_log <container> <extended regex> <seconds>
-wait_for_log() {
-  local container=$1 pattern=$2 seconds=$3 waited=0
-  until docker logs "$container" 2>&1 | grep -Eq -e "$pattern"; do
+# A file in a detached container, waited for until it exists. Fails with the log of the container.
+# Usage: wait_for_file <container> <path> <seconds>
+wait_for_file() {
+  local container=$1 path=$2 seconds=$3 waited=0
+  until docker exec "$container" test -f "$path" 2>/dev/null; do
     [ "$waited" -lt "$seconds" ] || {
       docker logs "$container" >&2 || true
-      fail "$container did not log '$pattern' within ${seconds}s"
+      fail "$container did not write $path within ${seconds}s"
     }
     sleep 1
     waited=$((waited + 1))
   done
 }
 
-# Starts the runner loop detached with no network at all (the app is an address nothing answers on),
-# so it only gets as far as its startup and its first, refused, claim.
-# Usage: start_loop <container> <docker run arguments...>   (the image is added)
-loop_token="smoke-runner-token-0123456789-abcdef-0123456789"
-start_loop() {
-  local name=$1
-  shift
-  CLEANUP_CONTAINERS+=("$name")
-  docker run --detach --name "$name" --network none \
-    --env RUNNER_API_URL=http://127.0.0.1:9 --env RUNNER_TOKEN="$loop_token" \
-    --env RUNNER_POLL_INTERVAL_SECONDS=1 "$@" "$image" >/dev/null
-}
-
-assert_no_token_in_log() {
-  if docker logs "$1" 2>&1 | grep -qF "$loop_token"; then fail "the runner token is in the log of $1"; fi
-}
-
-
-# ---- #324: the entry modes of the image, in every mode -----------------------------------------
+# ---- #324: the entry modes of the image -----------------------------------------------------------
 
 # One field of the JSON verdict of `probe`, read on the host: <json text> <python expression of v>
 json_value() {
@@ -216,8 +183,8 @@ print(eval(sys.argv[2]))' "$1" "$2"
 }
 
 # Runs `probe` in a container made with the given arguments and checks the verdict: exactly one line
-# of JSON with the three keys, the expected engines and reasons, and no value of the environment.
-# Usage: assert_probe <engines> <reasons> <docker run arguments...>   (e.g. "pr-agent" "network_rules_not_installed")
+# of JSON with the three keys, the expected engines, a reason that matches, and no value of the environment.
+# Usage: assert_probe <engines> <reasons, an extended regex> <docker run arguments...>   (e.g. "pr-agent" "network_rules_not_installed")
 probe_token="smoke-probe-token-0123456789-abcdef-0123456789"
 assert_probe() {
   local engines=$1 reasons=$2 output status=0
@@ -227,44 +194,16 @@ assert_probe() {
   [ "$(line_count "$output")" = "1" ] || fail "probe must print one line, got: $output"
   [ "$(json_value "$output" 'sorted(v)')" = "['engines', 'reasons', 'version']" ] || fail "unexpected probe keys: $output"
   [ "$(json_value "$output" '",".join(v["engines"])')" = "$engines" ] || fail "probe engines: expected '$engines', got: $output"
-  [ "$(json_value "$output" '",".join(v["reasons"])')" = "$reasons" ] || fail "probe reasons: expected '$reasons', got: $output"
+  [[ "$(json_value "$output" '",".join(v["reasons"])')" =~ ^($reasons)$ ]] || fail "probe reasons: expected '$reasons', got: $output"
   if grep -qF "$probe_token" <<<"$output"; then fail "a value of the environment is in the probe verdict"; fi
   printf '    %s\n' "$output"
 }
 
-entry_mode_checks() {
-  # #324-T03: without an engine user and capabilities, probe says so and never advertises opencode.
-  step "probe on a container with the image's own settings advertises pr-agent only"
-  assert_probe pr-agent not_a_dynamic_runner
+step "probe on a container with the image's own settings advertises pr-agent only"
+assert_probe pr-agent not_a_dynamic_runner
 
-  # #324-T08: the job loop is the default and RUNNER_MODE=legacy; an unknown mode is refused.
-  step "RUNNER_MODE=legacy is the job loop, and an unknown mode is refused without echoing it"
-  legacy_errors=$(docker run --rm --env RUNNER_MODE=legacy "$image" 2>&1) && status=0 || status=$?
-  [ "$status" = "2" ] || fail "the legacy loop without a URL must exit with 2, got $status"
-  grep -q "RUNNER_API_URL is required" <<<"$legacy_errors" || fail "expected the legacy loop, got: $legacy_errors"
-  unknown_errors=$(docker run --rm --env RUNNER_MODE=smoke-secret-mode-0123456789 "$image" 2>&1) && status=0 || status=$?
-  [ "$status" = "2" ] || fail "an unknown RUNNER_MODE must exit with 2, got $status"
-  if grep -qF "smoke-secret-mode-0123456789" <<<"$unknown_errors"; then fail "the value of RUNNER_MODE is in the output"; fi
-  grep -q "RUNNER_MODE" <<<"$unknown_errors" || fail "the refusal does not name RUNNER_MODE: $unknown_errors"
-
-  step "dispatch refuses with a stable code while the image carries no Dispatcher bundle"
-  dispatch_errors=$(docker run --rm "$image" dispatch 2>&1) && status=0 || status=$?
-  [ "$status" = "2" ] || fail "dispatch must exit with 2, got $status"
-  grep -q "dispatcher_bundle_missing" <<<"$dispatch_errors" || fail "expected dispatcher_bundle_missing, got: $dispatch_errors"
-
-  step "worker-reap is on the PATH and has nothing to do without an engine user"
-  docker run --rm --entrypoint worker-reap "$image" || fail "worker-reap failed in a container without an engine user"
-}
-
-# The default user of both images: nothing makes the runner a Dynamic runner by itself.
-step "a runner started with the image's own settings serves Diff jobs only and says why"
-start_loop smoke-runner-default
-wait_for_log smoke-runner-default 'serves Diff jobs only \(not_a_dynamic_runner\)' 60
-if docker logs smoke-runner-default 2>&1 | grep -q "opencode is advertised"; then
-  fail "a runner without Dynamic configuration advertised opencode"
-fi
-assert_no_token_in_log smoke-runner-default
-docker rm --force smoke-runner-default >/dev/null
+step "worker-reap is on the PATH and has nothing to do without an engine user"
+docker run --rm --entrypoint worker-reap "$image" || fail "worker-reap failed in a container without an engine user"
 
 step "the image sets no variable that enables Dynamic Review"
 image_env=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image")
@@ -272,19 +211,7 @@ if grep -Eq '^(RUNNER_DYNAMIC|RUNNER_OPENCODE|RUNNER_ADVERTISED|RUNNER_DIFF_JOB_
   fail "the image sets a Dynamic variable: $(grep -E '^RUNNER_' <<<"$image_env")"
 fi
 
-if [ "$mode" = diff ]; then
-  # #202-T03: the default image is the PR-Agent-only runner.
-  step "the default image holds no engine, no ripgrep, no nft and no engine user"
-  scan_in_image "$image" "0" sh -c \
-    'for path in /usr/local/bin/opencode /usr/local/bin/rg /usr/sbin/nft /sbin/nft /usr/bin/nft /opt/code-reviewer; do [ ! -e "$path" ] || echo "$path"; done; getent passwd 10101 || true; getent group 10101 || true'
-  [ -z "$SCAN_OUTPUT" ] || fail "the default image holds parts of the Dynamic engine:
-$SCAN_OUTPUT"
-  entry_mode_checks
-  step "runner image smoke test passed (diff)"
-  exit 0
-fi
-
-# ---- the dynamic image ---------------------------------------------------------------------------
+# ---- the engine ----------------------------------------------------------------------------------
 
 # A value of a pin file, read on the host: <file> <key>...
 pin_value() {
@@ -357,7 +284,7 @@ in_image "$image" getent passwd 10101 | grep -q ':/usr/sbin/nologin$' || fail "t
 [ "$(in_image "$image" id -u runner)" = "10001" ] || fail "the Diff job user is not 10001"
 
 # #202-T01 / #195-T09: the startup self-check, run for real in a container created like the one
-# compose.dynamic.yml creates (same user, capabilities, no-new-privileges), without any network.
+# Sandbox-Launcher creates (same user, capabilities, no-new-privileges), without any network.
 dynamic_caps=(
   --user 0:0 --cap-drop ALL
   --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN --cap-add DAC_OVERRIDE
@@ -366,7 +293,7 @@ dynamic_caps=(
 )
 dynamic_env=(--env HOME=/home/runner --env RUNNER_DIFF_JOB_USER=10001:10001)
 # #249: the root filesystem is read-only, and the only writable paths are three private tmpfs (the
-# `read_only` and `tmpfs` of compose.dynamic.yml; app/src/ci/compose-dynamic.test.ts keeps them equal).
+# `readOnlyRoot` and `tmpfs` of contracts/worker-container.v1.json).
 dynamic_rootfs=(
   --read-only
   --tmpfs "/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777"
@@ -374,42 +301,53 @@ dynamic_rootfs=(
   --tmpfs "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"
 )
 
-step "the self-check of the Dynamic runner passes and opencode is advertised"
-start_loop smoke-runner-capable "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
-wait_for_log smoke-runner-capable 'opencode is advertised' 90
-[ "$(docker inspect --format '{{.State.Running}}' smoke-runner-capable)" = true ] || fail "the capable runner stopped"
-assert_no_token_in_log smoke-runner-capable
+# A Worker with the production flags that has done its startup (rules, end of NET_ADMIN, self-check) and now waits
+# for its start document on stdin: its verdict is in the engines file on the /run tmpfs.
+# Usage: start_worker <container> <docker run arguments...>   (the image and `worker-once` are added)
+start_worker() {
+  local name=$1
+  shift
+  CLEANUP_CONTAINERS+=("$name")
+  docker run --detach --name "$name" --network none --interactive "$@" "$image" worker-once >/dev/null
+}
+
+# The engines the verdict of a started Worker names, read from its engines file.
+worker_engines() {
+  json_value "$(docker exec "$1" cat /run/code-reviewer-engines.json)" '",".join(v["engines"])'
+}
+
+step "the self-check of the Worker passes and opencode is advertised"
+start_worker smoke-worker-capable "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
+wait_for_file smoke-worker-capable /run/code-reviewer-engines.json 90
+[ "$(worker_engines smoke-worker-capable)" = "pr-agent,opencode" ] || fail "the capable Worker did not advertise opencode"
+[ "$(docker inspect --format '{{.State.Running}}' smoke-worker-capable)" = true ] || fail "the capable Worker stopped"
 
 # #249-T01: what a compromised root supervisor can leave behind does not survive a restart. A root
 # process inside the container cannot change the tools that run with NET_ADMIN at the next start, and
 # what it writes into the three tmpfs is gone after the restart, which runs the self-check again.
 step "a restart gives back the same clean container: tools unchanged, tmpfs empty, Docker's /etc files read-only, opencode advertised again"
-tools_hash() { docker exec smoke-runner-capable sha256sum /usr/sbin/nft /usr/bin/tini; }
+tools_hash() { docker exec smoke-worker-capable sha256sum /usr/sbin/nft /usr/bin/tini; }
 tools_before=$(tools_hash) || fail "cannot hash nft and tini"
-docker exec smoke-runner-capable sh -c 'touch /tmp/planted /run/planted /home/runner/planted' ||
+docker exec smoke-worker-capable sh -c 'touch /tmp/planted /run/planted /home/runner/planted' ||
   fail "root cannot write to the tmpfs of the container"
 # The three files Docker binds into /etc (hosts, hostname, resolv.conf) live in the host's container
 # directory and would outlive a restart if root could write them. With `read_only` they are read-only
 # too; a root that could append would be a persistence path, so it is checked, not assumed.
-docker exec smoke-runner-capable sh -c 'for f in /etc/hosts /etc/hostname /etc/resolv.conf; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
+docker exec smoke-worker-capable sh -c 'for f in /etc/hosts /etc/hostname /etc/resolv.conf; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
   fail "root can write to /etc/hosts, /etc/hostname or /etc/resolv.conf, or one of them is missing"
 # Exit status 0 only if both files exist and neither can be appended to (a missing path also fails).
-docker exec smoke-runner-capable sh -c 'for f in /usr/sbin/nft /usr/bin/tini; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
+docker exec smoke-worker-capable sh -c 'for f in /usr/sbin/nft /usr/bin/tini; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
   fail "root changed nft or tini on the root filesystem, or one of them is missing"
-docker restart smoke-runner-capable >/dev/null
-waited=0
-until [ "$(docker logs smoke-runner-capable 2>&1 | grep -c 'opencode is advertised')" -ge 2 ]; do
-  [ "$waited" -lt 90 ] || { docker logs smoke-runner-capable >&2 || true; fail "opencode was not advertised again after the restart"; }
-  sleep 1
-  waited=$((waited + 1))
-done
-docker exec smoke-runner-capable sh -c '[ ! -e /tmp/planted ] && [ ! -e /run/planted ] && [ ! -e /home/runner/planted ]' ||
+docker restart smoke-worker-capable >/dev/null
+# The tmpfs is empty again after the restart, so the engines file is the Worker's new start.
+wait_for_file smoke-worker-capable /run/code-reviewer-engines.json 90
+[ "$(worker_engines smoke-worker-capable)" = "pr-agent,opencode" ] || fail "opencode was not advertised again after the restart"
+docker exec smoke-worker-capable sh -c '[ ! -e /tmp/planted ] && [ ! -e /run/planted ] && [ ! -e /home/runner/planted ]' ||
   fail "a file written into a tmpfs survived the restart"
 [ "$(tools_hash)" = "$tools_before" ] || fail "nft or tini differ after the restart"
-assert_no_token_in_log smoke-runner-capable
-docker rm --force smoke-runner-capable >/dev/null
+docker rm --force smoke-worker-capable >/dev/null
 
-# #249-T01 / T02: the layout, judged from inside a container created like compose.dynamic.yml creates
+# #249-T01 / T02: the layout, judged from inside a container created like the Sandbox-Launcher creates
 # it, by the strongest process of a job: root with its capabilities (DAC_OVERRIDE, CHOWN, FOWNER).
 readonly_check='
 import errno, os, shutil, subprocess
@@ -495,8 +433,8 @@ problems=$(docker run --rm --network none "${dynamic_caps[@]}" "${dynamic_rootfs
 [ -z "$problems" ] || fail "the root filesystem is not read-only as configured:
 $problems"
 
-# #249 (review of #259, minor 1): a Dynamic runner serves Diff jobs as well. One job through the real
-# PR-Agent, the way the loop runs it (user 10001, HOME in the tmpfs, working directory in /tmp), in the
+# #249 (review of #259, minor 1): a Dynamic Worker serves Diff jobs as well. One job through the real
+# PR-Agent, the way the Worker runs it (user 10001, HOME in the tmpfs, working directory in /tmp), in the
 # read-only layout: a library or git that writes where nothing is writable fails here, not on the first
 # real Diff job. The fake GitHub and LLM are the engine suite's, on the loopback of the host. The job
 # writes nothing today (see the script); the step is the guard for a future dependency that does.
@@ -505,7 +443,7 @@ python3 -B "$here/diff_job_fakes.py" "$image" "${dynamic_rootfs[@]}" ||
   fail "a Diff job does not run in the read-only layout"
 
 # #249-T01: the engine user (and the Diff job user) gain no write path from the layout. The paths a
-# user can write in the container, with the settings of compose.dynamic.yml, must be among those it
+# user can write in the container, with the settings of the hardened container spec, must be among those it
 # can write in the same image without them.
 writable_by() {
   local user=$1
@@ -528,27 +466,10 @@ step "the engine user can write only in /tmp, besides Docker's own /dev mounts"
 engine_writable=$(writable_by 10101:10101 "${dynamic_rootfs[@]}" | grep -vE '^/dev/(shm|mqueue)$' || true)
 [ "$engine_writable" = "/tmp" ] || fail "the engine user can write in: $engine_writable"
 
-# #202-T09: each broken prerequisite is "not advertised", with its stable reason, and the runner
-# keeps running to serve Diff jobs.
-expect_not_advertised() {
-  local name=$1 reason=$2
-  shift 2
-  start_loop "$name" "$@"
-  wait_for_log "$name" "opencode is not advertised.*$reason" 90
-  if docker logs "$name" 2>&1 | grep -q "opencode is advertised"; then fail "$name advertised opencode ($reason)"; fi
-  [ "$(docker inspect --format '{{.State.Running}}' "$name")" = true ] || fail "$name stopped; Diff jobs would no longer be served"
-  assert_no_token_in_log "$name"
-  docker rm --force "$name" >/dev/null
-}
-
-step "without NET_ADMIN the network rules cannot be installed: not advertised"
-expect_not_advertised smoke-runner-no-rules network_rules_not_installed \
-  --user 0:0 --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN \
-  --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETPCAP --security-opt no-new-privileges:true \
-  "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
-
+# #202-T09: each broken prerequisite is "not advertised", with its stable reason, and the Worker
+# still serves Diff jobs.
 step "with an engine user that does not exist: not advertised"
-expect_not_advertised smoke-runner-wrong-user engine_user_invalid \
+assert_probe pr-agent engine_user_invalid \
   "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --env RUNNER_DYNAMIC_ENGINE_UID=10999 --env RUNNER_DYNAMIC_ENGINE_GID=10999
 
 step "with an engine binary that is not the pinned one: not advertised"
@@ -556,19 +477,17 @@ replaced=$(mktemp)
 extra_cleanup() { rm -f "$replaced"; }
 printf '#!/bin/sh\necho 1.19.0\n' >"$replaced"
 chmod 755 "$replaced"
-expect_not_advertised smoke-runner-wrong-binary 'engine_binary_(untrusted|checksum_mismatch)' \
+assert_probe pr-agent 'engine_binary_(untrusted|checksum_mismatch)' \
   "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --volume "$replaced:/usr/local/bin/opencode:ro"
 
-# ---- #324: probe and worker-once with the production flags; the Sandbox target --------------------
-
-entry_mode_checks
+# ---- #324: probe and worker-once with the production flags ----------------------------------------
 
 # #324-T04: a Worker with the image's own settings (user 10001, Diff only): one job against the fake
 # App (Node, on the host; the container reaches it through the host gateway), exit codes 0 and 1.
 step "worker-once runs one job against the fake App and exits with the job's outcome"
 python3 -B "$here/worker_once_fake_app.py" "$image" || fail "worker-once did not run the job as expected"
 
-# #324-T01: the same container as the capable runner above, asked for its verdict.
+# #324-T01: the same container as the capable Worker above, asked for its verdict.
 step "probe with the production flags advertises opencode and names no reason"
 assert_probe "pr-agent,opencode" "" "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
 
@@ -607,47 +526,28 @@ python3 -B "$here/worker_once_fake_app.py" "$image" "${dynamic_caps[@]}" "${dyna
   fail "worker-once with the production flags did not run the job as expected"
 
 step "the startup of the Worker leaves the verdict in a root-only file on the /run tmpfs"
-engines_container=smoke-runner-engines-file
-CLEANUP_CONTAINERS+=("$engines_container")
-docker run --detach --name "$engines_container" --network none --env RUNNER_MODE=worker-once --interactive \
-  "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" "$image" >/dev/null
-waited=0
-until docker exec "$engines_container" test -f /run/code-reviewer-engines.json 2>/dev/null; do
-  [ "$waited" -lt 90 ] || { docker logs "$engines_container" >&2 || true; fail "no engines file within 90s"; }
-  sleep 1
-  waited=$((waited + 1))
-done
-[ "$(docker exec "$engines_container" stat -c '%u:%g %a' /run/code-reviewer-engines.json)" = "0:0 600" ] ||
+start_worker smoke-worker-engines-file "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
+wait_for_file smoke-worker-engines-file /run/code-reviewer-engines.json 90
+[ "$(docker exec smoke-worker-engines-file stat -c '%u:%g %a' /run/code-reviewer-engines.json)" = "0:0 600" ] ||
   fail "the engines file is not owned by root with mode 600"
-run_mounts=$(docker exec "$engines_container" cat /proc/self/mountinfo)
+run_mounts=$(docker exec smoke-worker-engines-file cat /proc/self/mountinfo)
 grep -Eq '^[0-9]+ [0-9]+ [0-9]+:[0-9]+ [^ ]+ /run .* - tmpfs ' <<<"$run_mounts" || fail "/run is not a tmpfs in the container"
-engines_document=$(docker exec "$engines_container" cat /run/code-reviewer-engines.json)
-[ "$(json_value "$engines_document" '",".join(v["engines"])')" = "pr-agent,opencode" ] || fail "unexpected engines file: $engines_document"
-docker rm --force "$engines_container" >/dev/null
+[ "$(worker_engines smoke-worker-engines-file)" = "pr-agent,opencode" ] || fail "unexpected engines file"
+docker rm --force smoke-worker-engines-file >/dev/null
 
 # #324-T10: the sweep helper works in the hardened container (nothing of the engine user runs).
 step "worker-reap in the hardened container finds nothing of the engine user to end"
 docker run --rm --network none "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" \
   --entrypoint worker-reap "$image" || fail "worker-reap failed in the hardened container"
 
-if [ "$mode" = sandbox ]; then
-  # #324-T09: the Sandbox target is the Dynamic image's Worker layers and nothing of a Dispatcher.
-  step "the sandbox image carries no Dispatcher bundle and no Node.js"
-  scan_in_image "$image" "0" sh -c 'for path in /opt/code-reviewer/dispatcher /usr/local/bin/node /usr/bin/node /usr/bin/nodejs; do [ ! -e "$path" ] || echo "$path"; done'
-  [ -z "$SCAN_OUTPUT" ] || fail "the sandbox image holds parts of a Dispatcher:
+# #324-T09: the Worker image carries nothing of a Dispatcher.
+step "the image carries no Dispatcher bundle and no Node.js"
+scan_in_image "$image" "0" sh -c 'for path in /opt/code-reviewer/dispatcher /usr/local/bin/node /usr/bin/node /usr/bin/nodejs; do [ ! -e "$path" ] || echo "$path"; done'
+[ -z "$SCAN_OUTPUT" ] || fail "the image holds parts of a Dispatcher:
 $SCAN_OUTPUT"
 
-  step "every layer of the dynamic image is a layer of the sandbox image, in the same order"
-  dynamic_layers=$(docker image inspect --format '{{json .RootFS.Layers}}' "$dynamic_image")
-  sandbox_layers=$(docker image inspect --format '{{json .RootFS.Layers}}' "$image")
-  [ "$dynamic_layers" = "$sandbox_layers" ] || fail "the sandbox image has other layers than the dynamic image:
-dynamic: $dynamic_layers
-sandbox: $sandbox_layers"
-  printf '    %s layers, all shared\n' "$(python3 -I -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$sandbox_layers")"
+step "the image is labelled as the Worker image"
+title=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image")
+[[ "$title" == *Sandbox* ]] || fail "unexpected image title: $title"
 
-  step "the sandbox image is labelled as the Worker image"
-  title=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image")
-  [[ "$title" == *Sandbox* ]] || fail "unexpected image title: $title"
-fi
-
-step "runner image smoke test passed"
+step "Worker image smoke test passed"

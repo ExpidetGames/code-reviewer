@@ -31,7 +31,7 @@ export const PAIR_META = {
  * logic of the deployment steps) does not rebuild anything. Three groups:
  *  - the files `runner/Dockerfile` copies out of the build context (a test parses its `COPY` lines and fails when one is
  *    missing here, and when this list names something the build does not copy), and the files that decide what the
- *    build context holds (`.dockerignore`, `runner/Dockerfile.dockerignore`, the Dockerfile itself);
+ *    build context holds (`runner/Dockerfile.dockerignore`, the Dockerfile itself);
  *  - the script the snapshot's VM runs on every start (`docker/sandbox/vm-prepare.sh`);
  *  - the files of the build tool that decide what is installed and checked in the snapshot (the pinned Docker
  *    versions and the default build target live in `config.ts`; a test follows the imports of `pipeline.ts`).
@@ -40,7 +40,6 @@ export const IMAGE_INPUT_PATHS = [
   "LICENSE",
   "NOTICE",
   "THIRD_PARTY_LICENSES.md",
-  ".dockerignore",
   "runner/Dockerfile",
   "runner/Dockerfile.dockerignore",
   "runner/pyproject.toml",

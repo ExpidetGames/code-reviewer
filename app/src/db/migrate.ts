@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Brings the database to the latest schema. All pending migrations run in one transaction (see
-// dialect.ts): if one fails, nothing of the batch is applied or recorded, and the error names the
-// migration. Two instances starting at once take turns on the write lock; the second finds nothing
-// left to do.
+// Brings the database to the latest schema. All pending migrations run in one transaction (Postgres has
+// transactional DDL): if one fails, nothing of the batch is applied or recorded, and the error names the
+// migration. Two runs at once take turns on the migration lock; the second finds nothing left to do.
 import type { Kysely } from "kysely";
 import { Migrator, type MigrationProvider } from "kysely/migration";
-import { DatabaseError, describeError, errorCode } from "./errors.ts";
+import { DatabaseError, describeError } from "./errors.ts";
 import { migrationProvider } from "./migrations/index.ts";
 
 export type MigrationOutcome = {
@@ -26,17 +25,6 @@ export async function migrateToLatest(
 
   if (error) {
     const failed = results.find((result) => result.status === "Error");
-    // No migration failed, the database was busy: another instance is still migrating (or holds a
-    // write lock) for longer than the busy timeout. Nothing is broken; starting again will work.
-    if (!failed && errorCode(error) === "SQLITE_BUSY") {
-      throw new DatabaseError(
-        "DATABASE_LOCKED",
-        "The database is locked by another process for longer than the busy timeout, so the " +
-          "migrations could not start. Nothing was changed. Is another instance still starting up? " +
-          "Try again, or raise DATABASE_BUSY_TIMEOUT_MS.",
-        { cause: error },
-      );
-    }
     const which = failed
       ? `Migration "${failed.migrationName}"`
       : "Running the migrations";

@@ -101,3 +101,18 @@ export function readGuard(): GuardReading {
     );
   return parseGuard(JSON.parse(done.stdout));
 }
+
+/** The engine user of the Worker image: its processes must not outlive the Worker. */
+const ENGINE_UID = 10101;
+
+/** The processes of the engine user, `pid command` per line. */
+export function engineProcesses(): string[] {
+  const done = spawnSync("ps", ["-u", String(ENGINE_UID), "-o", "pid=,args="], {
+    encoding: "utf8",
+  });
+  // ps exits 1 when no process matches.
+  return done.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}

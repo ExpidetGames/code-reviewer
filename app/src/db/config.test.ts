@@ -1,187 +1,147 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down how the database settings are read from the environment: the database URL (SQLite or
-// Postgres), the SQLite defaults and overrides, the pool size, and the refusal of values that
-// cannot be used. A refused value never repeats the password of a Postgres URL.
+// Pins down the database settings (#319): Postgres only, a small pool with a short idle timeout, and the
+// separate direct URL of the migration command. A refused value never repeats a
+// URL: it carries the password.
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_BUSY_TIMEOUT_MS,
-  DEFAULT_DATABASE_PATH,
   DEFAULT_POOL_MAX,
   loadDatabaseConfig,
+  loadMigrationDatabaseConfig,
+  MAX_POOL_MAX,
+  POOL_IDLE_TIMEOUT_MS,
 } from "./config.ts";
 import { DatabaseError } from "./errors.ts";
 
-describe("loadDatabaseConfig: SQLite", () => {
-  it("uses /data/app.db and a 5000 ms busy timeout when nothing is configured", () => {
-    expect(loadDatabaseConfig({})).toEqual({
-      driver: "sqlite",
-      path: "/data/app.db",
-      busyTimeoutMs: 5000,
+const URL_WITH_PASSWORD = "postgres://app:s3cr3t-pw@db.example.test:5432/app";
+
+function failureOf(load: () => unknown): DatabaseError {
+  try {
+    load();
+  } catch (error) {
+    if (error instanceof DatabaseError) return error;
+    throw error;
+  }
+  throw new Error("expected the settings to be refused");
+}
+
+describe("loadDatabaseConfig", () => {
+  // #319-T07
+  it("uses a pool of 3 with a short idle timeout and the platform pool hook by default", () => {
+    expect(DEFAULT_POOL_MAX).toBe(3);
+    expect(loadDatabaseConfig({ DATABASE_URL: URL_WITH_PASSWORD })).toEqual({
+      url: URL_WITH_PASSWORD,
+      poolMax: 3,
+      idleTimeoutMs: POOL_IDLE_TIMEOUT_MS,
+      attachPlatformPool: true,
     });
-    expect(DEFAULT_DATABASE_PATH).toBe("/data/app.db");
-    expect(DEFAULT_BUSY_TIMEOUT_MS).toBe(5000);
+    expect(POOL_IDLE_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
   });
 
-  // #105-PG-01
-  it("keeps DATABASE_PATH working for existing installations", () => {
+  // #319-T07
+  it("takes DATABASE_POOL_MAX up to the serverless limit and refuses more", () => {
+    const env = { DATABASE_URL: URL_WITH_PASSWORD };
+    expect(
+      loadDatabaseConfig({ ...env, DATABASE_POOL_MAX: "1" }),
+    ).toMatchObject({ poolMax: 1 });
     expect(
       loadDatabaseConfig({
-        DATABASE_PATH: "/tmp/other.db",
-        DATABASE_BUSY_TIMEOUT_MS: "250",
+        ...env,
+        DATABASE_POOL_MAX: String(MAX_POOL_MAX),
       }),
-    ).toEqual({
-      driver: "sqlite",
-      path: "/tmp/other.db",
-      busyTimeoutMs: 250,
-    });
-  });
-
-  it("treats an empty database path as not configured", () => {
-    expect(loadDatabaseConfig({ DATABASE_PATH: "  " })).toMatchObject({
-      driver: "sqlite",
-      path: "/data/app.db",
-    });
-  });
-
-  // #105-PG-01
-  it.each([
-    ["an empty value", ""],
-    ["just whitespace", "   "],
-  ])("treats %s of DATABASE_URL as SQLite", (_label, value) => {
-    expect(loadDatabaseConfig({ DATABASE_URL: value })).toEqual({
-      driver: "sqlite",
-      path: "/data/app.db",
-      busyTimeoutMs: 5000,
-    });
-  });
-
-  // #105-PG-01
-  it("takes a sqlite: URL as SQLite", () => {
-    expect(loadDatabaseConfig({ DATABASE_URL: "sqlite:/data/app.db" })).toEqual(
-      {
-        driver: "sqlite",
-        path: "/data/app.db",
-        busyTimeoutMs: 5000,
-      },
-    );
-    expect(
-      loadDatabaseConfig({ DATABASE_URL: "sqlite:///srv/app.db" }),
-    ).toMatchObject({ driver: "sqlite", path: "/srv/app.db" });
-  });
-
-  // #105-PG-01
-  it("takes a plain path as SQLite", () => {
-    expect(loadDatabaseConfig({ DATABASE_URL: "/srv/app.db" })).toMatchObject({
-      driver: "sqlite",
-      path: "/srv/app.db",
-    });
-    expect(loadDatabaseConfig({ DATABASE_URL: "./local.db" })).toMatchObject({
-      driver: "sqlite",
-      path: "./local.db",
-    });
-  });
-
-  // #105-PG-01
-  it("lets an explicit DATABASE_URL win over DATABASE_PATH", () => {
-    expect(
-      loadDatabaseConfig({
-        DATABASE_PATH: "/data/app.db",
-        DATABASE_URL: "sqlite:/srv/other.db",
-      }),
-    ).toMatchObject({ driver: "sqlite", path: "/srv/other.db" });
-  });
-
-  it.each(["abc", "-1", "1.5", "0", "1e3", "0x10", "+5", "99999999999"])(
-    "rejects the busy timeout %j with a stable error code",
-    (value) => {
-      const load = () =>
-        loadDatabaseConfig({ DATABASE_BUSY_TIMEOUT_MS: value });
-
-      expect(load).toThrow(DatabaseError);
-      expect(load).toThrow(
-        expect.objectContaining({ code: "DATABASE_CONFIG_INVALID" }),
+    ).toMatchObject({ poolMax: MAX_POOL_MAX });
+    for (const value of ["0", String(MAX_POOL_MAX + 1), "abc"]) {
+      const error = failureOf(() =>
+        loadDatabaseConfig({ ...env, DATABASE_POOL_MAX: value }),
       );
-      expect(load).toThrow(/DATABASE_BUSY_TIMEOUT_MS/);
-    },
-  );
+      expect(error.code).toBe("DATABASE_CONFIG_INVALID");
+      expect(error.message).toContain("DATABASE_POOL_MAX");
+      expect(error.message).not.toContain("s3cr3t-pw");
+    }
+  });
+
+  // #319-T04
+  it.each([
+    ["nothing", {}],
+    ["a path", { DATABASE_URL: "/data/app.db" }],
+    ["a sqlite: URL", { DATABASE_URL: "sqlite:///data/secret-name.db" }],
+  ])("refuses %s with a clear message that names no value", (_, env) => {
+    const error = failureOf(() => loadDatabaseConfig(env));
+
+    expect(error.code).toBe("DATABASE_CONFIG_INVALID");
+    expect(error.message).toContain("DATABASE_URL");
+    expect(error.message).toContain("postgres://");
+    expect(error.message).not.toContain("secret-name");
+    expect(error.message).not.toContain("/data");
+  });
 });
 
-describe("loadDatabaseConfig: Postgres", () => {
-  // #105-PG-01
-  it("takes a postgres:// URL with its options", () => {
-    expect(
-      loadDatabaseConfig({
-        DATABASE_URL: "postgres://u:p@h:5432/db?sslmode=require",
-      }),
-    ).toEqual({
-      driver: "postgres",
-      url: "postgres://u:p@h:5432/db?sslmode=require",
-      poolMax: DEFAULT_POOL_MAX,
+describe("loadDatabaseConfig: a URL that names no known database", () => {
+  // #319-T04
+  it("asks for Postgres, not for SQLite, and repeats nothing of the URL", () => {
+    for (const url of [
+      "mysql://app:s3cr3t-pw@db.example.test/app",
+      "postgres://app:s3cr3t-pw@",
+    ]) {
+      const error = failureOf(() => loadDatabaseConfig({ DATABASE_URL: url }));
+
+      expect(error.code).toBe("DATABASE_CONFIG_INVALID");
+      expect(error.message).toContain("DATABASE_URL");
+      expect(error.message).toContain("postgres://");
+      expect(error.message.toLowerCase()).not.toContain("sqlite");
+      expect(error.message).not.toContain("s3cr3t-pw");
+    }
+  });
+});
+
+describe("loadMigrationDatabaseConfig", () => {
+  // #319-T03
+  it("reads the direct URL from DATABASE_URL_MIGRATE and ignores DATABASE_URL", () => {
+    const config = loadMigrationDatabaseConfig({
+      DATABASE_URL_MIGRATE: URL_WITH_PASSWORD,
+      DATABASE_URL: "postgres://pooled.example.test/app",
     });
+
+    expect(config).toMatchObject({
+      url: URL_WITH_PASSWORD,
+    });
+    expect(config.poolMax).toBeLessThanOrEqual(2);
   });
 
-  // #105-PG-01
-  it("accepts postgresql:// too", () => {
-    expect(
-      loadDatabaseConfig({
-        DATABASE_URL: "postgresql://u:p@h/db",
-      }),
-    ).toMatchObject({ driver: "postgres", url: "postgresql://u:p@h/db" });
-  });
-
-  // #105-PG-01
-  it("reads the optional pool size", () => {
-    expect(
-      loadDatabaseConfig({
-        DATABASE_URL: "postgres://u:p@h/db",
-        DATABASE_POOL_MAX: "5",
-      }),
-    ).toMatchObject({ driver: "postgres", poolMax: 5 });
-  });
-
-  // #105-PG-02
-  it.each([
-    ["a URL of another scheme", "mysql://u:secret@h/db"],
-    ["an http address", "http://u:secret@h/db"],
-  ])("refuses %s with DATABASE_CONFIG_INVALID", (_label, value) => {
-    const load = () => loadDatabaseConfig({ DATABASE_URL: value });
-
-    expect(load).toThrow(
-      expect.objectContaining({ code: "DATABASE_CONFIG_INVALID" }),
+  // #319-T03
+  it("refuses a missing or non-Postgres URL without repeating it", () => {
+    const missing = failureOf(() =>
+      loadMigrationDatabaseConfig({ DATABASE_URL: URL_WITH_PASSWORD }),
     );
-    expect(load).not.toThrow(/secret/);
+    expect(missing.code).toBe("DATABASE_CONFIG_INVALID");
+    expect(missing.message).toContain("DATABASE_URL_MIGRATE");
+    expect(missing.message).not.toContain("s3cr3t-pw");
+
+    const sqlite = failureOf(() =>
+      loadMigrationDatabaseConfig({
+        DATABASE_URL_MIGRATE: "sqlite:///data/secret-name.db",
+      }),
+    );
+    expect(sqlite.code).toBe("DATABASE_CONFIG_INVALID");
+    expect(sqlite.message).toContain("DATABASE_URL_MIGRATE");
+    expect(sqlite.message).not.toContain("secret-name");
   });
 
-  // #105-PG-02
-  it.each(["postgres://", "postgres://u:secret@", "postgresql://:secret@"])(
-    "refuses the invalid Postgres URL %j without echoing the password",
-    (value) => {
-      let message = "";
-      try {
-        loadDatabaseConfig({ DATABASE_URL: value });
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-
-      expect(message).toMatch(/DATABASE_URL/);
-      expect(message).not.toMatch(/secret/);
-    },
-  );
-
-  it.each(["abc", "-1", "0", "1.5"])(
-    "rejects the pool size %j with a stable error code",
-    (value) => {
-      const load = () =>
-        loadDatabaseConfig({
-          DATABASE_URL: "postgres://u:p@h/db",
-          DATABASE_POOL_MAX: value,
-        });
-
-      expect(load).toThrow(
-        expect.objectContaining({ code: "DATABASE_CONFIG_INVALID" }),
+  // #319-T03
+  it("names DATABASE_URL_MIGRATE, not DATABASE_URL or SQLite, for a URL that is malformed, and repeats nothing of it", () => {
+    for (const url of [
+      "postgres://app:s3cr3t-pw@",
+      "postgres://app:s3cr3t-pw@:5432/app",
+    ]) {
+      const error = failureOf(() =>
+        loadMigrationDatabaseConfig({ DATABASE_URL_MIGRATE: url }),
       );
-      expect(load).toThrow(/DATABASE_POOL_MAX/);
-    },
-  );
+
+      expect(error.code).toBe("DATABASE_CONFIG_INVALID");
+      expect(error.message).toContain("DATABASE_URL_MIGRATE");
+      expect(error.message).not.toMatch(/DATABASE_URL(?!_MIGRATE)/);
+      expect(error.message.toLowerCase()).not.toContain("sqlite");
+      expect(error.message).not.toContain("s3cr3t-pw");
+    }
+  });
 });

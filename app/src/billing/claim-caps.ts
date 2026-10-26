@@ -16,7 +16,7 @@
 //   job starts while the charges are below the limit even when its own cost would take the month above it, and a run that
 //   started is never cut short.
 //
-// Exact: the claim runs under the instance gate lock (Postgres) or the write lock of the connection (SQLite), and the record of
+// Exact: the claim runs under the instance gate lock, and the record of
 // a started review is written in the same transaction, so two claims never both take the last start of the hour.
 //
 // Robust: the evaluation runs in a savepoint. Anything that goes wrong in it (a table that cannot be read, a stored value that

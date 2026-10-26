@@ -2,12 +2,12 @@
 
 """The root filesystem is read-only; only the tmpfs are writable (#249, ADR 0003 decision 5).
 
-The container restarts with `NET_ADMIN` (`restart: unless-stopped`), so whatever a compromised root
+The container runs with `NET_ADMIN`, so whatever a compromised root
 supervisor could change in the image (`nft`, `tini`, the runner source) would run with it. The
-Dynamic runner therefore runs with `read_only: true` and three private tmpfs (`compose.dynamic.yml`,
-pinned by `app/src/ci/compose-dynamic.test.ts`). `scripts/run_privileged_offline.sh` builds the same
+Worker therefore runs with `read_only: true` and three private tmpfs (the hardened container spec,
+pinned by contracts/worker-container.v1.json). `scripts/run_privileged_offline.sh` builds the same
 layout in its mount namespace (every disk filesystem read-only, a tmpfs on `/tmp` and `/run` with
-the options of the compose file), so the whole suite runs on it: that the other tests pass is the
+the options of the container spec), so the whole suite runs on it: that the other tests pass is the
 proof that the job directories, the leases, the export and the engine's home need nothing else.
 These tests judge the layout itself, as the supervisor (root with the job capabilities, among them
 `DAC_OVERRIDE` and `CHOWN`) and as the engine user.

@@ -2,19 +2,17 @@
 
 // #498 (the gate of the review of #524): `job_vm_runs.end_source` takes two more values, `app_stop_unreported` and
 // `claim_wall_clock`. The rows of an existing database survive the change with their key, checks and index, and a source that
-// is none of the five is still refused. SQLite rebuilds the table (a check cannot be changed in place); Postgres replaces the
-// constraint.
-import { sql } from "kysely";
+// is none of the five is still refused. Postgres replaces the constraint.
+import { sql, type Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "../connection.ts";
-import { migrateToLatest } from "../migrate.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../../test-support/postgres-test-database.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import type { Database } from "../schema.ts";
 import { migrationProvider } from "./index.ts";
+import {
+  createEmptyTestDatabase,
+  createTestDatabase,
+} from "../../test-support/test-database.ts";
+import { migrateToLatest } from "../migrate.ts";
 
 const SPLIT = "20261021090100_widen_job_vm_runs_end_source";
 const T = "2026-10-12T08:00:00.000Z";
@@ -29,7 +27,7 @@ const beforeThisMigration: MigrationProvider = {
   },
 };
 
-type Db = ReturnType<typeof openDatabase>;
+type Db = Kysely<Database>;
 
 async function seedJob(db: Db) {
   await sql`insert into workspaces (id, name, slug, created_by, created_at) values ('w-1', 'acme', 'acme', null, ${T}) on conflict do nothing`.execute(
@@ -59,13 +57,8 @@ async function seedRun(db: Db, name: string, source: string | null) {
 
 describe("the job VM end source migration", () => {
   // #498-B1
-  it("keeps the rows of an existing SQLite database and accepts the two new sources", async () => {
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+  it("keeps the rows of an existing database and accepts the two new sources", async () => {
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, beforeThisMigration);
     await seedRun(db, "vm-1", "timeout_backstop");
 
@@ -90,26 +83,22 @@ describe("the job VM end source migration", () => {
     ).rejects.toThrow();
     const indexes = await sql<{
       name: string;
-    }>`select name from sqlite_master where type = 'index' and tbl_name = 'job_vm_runs'`.execute(
+    }>`select indexname as name from pg_indexes where tablename = 'job_vm_runs'`.execute(
       db,
     );
     expect(indexes.rows.map((row) => row.name)).toContain(
       "job_vm_runs_workspace_job",
     );
-    await db.destroy();
   });
 
   // #498-B1
-  it.skipIf(!hasPostgres())(
-    "accepts the two new sources on Postgres and still refuses any other",
-    async () => {
-      const { db } = await createPostgresTestDatabase();
+  it("accepts the two new sources on Postgres and still refuses any other", async () => {
+    const { db } = await createTestDatabase();
 
-      await seedRun(db as unknown as Db, "vm-1", "app_stop_unreported");
-      await seedRun(db as unknown as Db, "vm-2", "claim_wall_clock");
-      await expect(
-        seedRun(db as unknown as Db, "vm-3", "not_a_source"),
-      ).rejects.toThrow();
-    },
-  );
+    await seedRun(db as unknown as Db, "vm-1", "app_stop_unreported");
+    await seedRun(db as unknown as Db, "vm-2", "claim_wall_clock");
+    await expect(
+      seedRun(db as unknown as Db, "vm-3", "not_a_source"),
+    ).rejects.toThrow();
+  });
 });

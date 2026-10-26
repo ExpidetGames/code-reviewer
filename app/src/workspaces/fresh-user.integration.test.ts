@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What a person sees who has an account but no workspace, through the real proxy, the real Better Auth and a
-// real SQLite file: in a single-tenant instance, which has the one workspace its setup made, they see
+// real Postgres database: in a single-tenant instance, which has the one workspace its setup made, they see
 // nothing of it and are never joined to it. The interim guard that kept new accounts away from the data is
 // gone; this is what keeps them away now (the membership). The routes and pages made for exactly this
 // person stay open to them, and nothing else does.

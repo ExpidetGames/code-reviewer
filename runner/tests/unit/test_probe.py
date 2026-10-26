@@ -22,7 +22,7 @@ from code_reviewer_runner.dynamic_review.self_check import (
 )
 from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup
 from code_reviewer_runner.job_loop import service
-from code_reviewer_runner.job_loop.settings import LoopSettings, WorkerSettings
+from code_reviewer_runner.job_loop.settings import WorkerSettings
 from code_reviewer_runner.probe import run_probe
 
 DYNAMIC = {"RUNNER_DIFF_JOB_USER": "10001:10001"}
@@ -44,7 +44,7 @@ class World:
         monkeypatch.setattr(service, "write_engines_file", self.write)
         monkeypatch.setattr(service, "remove_engines_file", lambda: None)
 
-    def prepare(self, settings: LoopSettings | WorkerSettings) -> EgressSetup:
+    def prepare(self, settings: WorkerSettings) -> EgressSetup:
         if self.cannot_drop:
             raise IsolationError("a capability could not be dropped from the bounding set")
         return EgressSetup(True, EgressMode.FULL)

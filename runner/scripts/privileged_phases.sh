@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
 # The phases of the privileged suite (#244), run by run_privileged_offline.sh with the
-# capabilities of compose.dynamic.yml, no-new-privileges, in the namespaces it sets up. Not meant
+# capabilities of the hardened container spec, no-new-privileges, in the namespaces it sets up. Not meant
 # to be started by hand. All phases always run; the exit code is non-zero if any failed.
 #
 #   startup  the rules and the startup step, with NET_ADMIN and SETPCAP still in the bounding set;

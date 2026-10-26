@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Who may change the members of a workspace, through the real service over a real SQLite file: nobody can
+// Who may change the members of a workspace, through the real service over a real Postgres database: nobody can
 // hand out a rank, an Admin cannot touch an Owner or another Admin, and the last Owner stays. Every refusal
 // leaves the table exactly as it was, and the role that counts is the one in the database at that moment.
 import { describe, expect, it } from "vitest";

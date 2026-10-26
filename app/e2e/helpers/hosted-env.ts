@@ -5,7 +5,7 @@
 // fakes. Shared by the configuration (which starts the app and the fake GitHub) and the journeys (which start the
 // Dispatcher and the fake LLM). Nothing here is a secret: the values only have to match between the processes under
 // test, and they differ from each other (the app refuses a signing secret that is another credential).
-import { e2eEnv } from "./e2e-env";
+import { adminDatabaseUrl, e2eEnv } from "./e2e-env";
 
 const appPort = Number(process.env.E2E_HOSTED_PORT) || 3617;
 // The Dispatcher listens on the next port; the app is told its address at start (RUNNER_WEBHOOK_URL), and the
@@ -17,25 +17,6 @@ for (const port of [appPort, dispatcherPort])
     throw new Error(
       `The hosted lane must not use port ${String(port)}: other work runs there. Set E2E_HOSTED_PORT to a private one.`,
     );
-
-/**
- * The Postgres server the lane makes its database on: `E2E_DATABASE_URL`, a URL whose user may create and drop
- * databases (CI: the service container of the job; on a machine: any server you own). A missing value is a failure
- * that says so, never a skip.
- */
-function adminDatabaseUrl(): URL {
-  const value = process.env.E2E_DATABASE_URL?.trim();
-  if (!value)
-    throw new Error(
-      "E2E_DATABASE_URL is not set: the hosted lane needs a Postgres server it may create a database on (for example postgres://postgres:postgres@127.0.0.1:5432/postgres).",
-    );
-  const url = new URL(value);
-  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")
-    throw new Error(
-      "E2E_DATABASE_URL must point at this machine (127.0.0.1): a test never uses a database somewhere else.",
-    );
-  return url;
-}
 
 /** The server URL with the database of this run's app (`cr_e2e_hosted_<port>`, dropped and made again at start). */
 export function hostedDatabaseUrls(): {

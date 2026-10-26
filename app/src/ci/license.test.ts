@@ -2,7 +2,7 @@
 
 // Pins down the licensing of the repository (#677): the proprietary, source-visible LICENSE, the
 // NOTICE with the attribution that the license of PR-Agent demands, and the license declared in
-// every place that carries metadata (package.json, pyproject.toml, both container images). Whether
+// every place that carries metadata (package.json, pyproject.toml, the Worker image). Whether
 // the dependencies of the app and the runner are acceptable is decided by license-policy.json and
 // enforced by the CI job
 // "Licenses: dependency check" (app/src/ci/license-check, which needs the package managers and so
@@ -210,8 +210,8 @@ describe("license metadata", () => {
     expect(pyproject).not.toMatch(/Apache/);
   });
 
-  it.each(["app", "runner"])("labels the %s image with the license", (part) => {
-    const dockerfile = read(`${part}/Dockerfile`).replace(/\\\n/g, " ");
+  it("labels the runner image with the license", () => {
+    const dockerfile = read("runner/Dockerfile").replace(/\\\n/g, " ");
 
     expect(dockerfile).toMatch(
       /org\.opencontainers\.image\.licenses="LicenseRef-Proprietary"/,

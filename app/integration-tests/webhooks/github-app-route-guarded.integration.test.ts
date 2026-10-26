@@ -5,7 +5,6 @@
 // the real route file answers it exactly as it does without the protection in front. The guard must
 // neither redirect nor answer 401 for it; only the route's own signature check may refuse.
 import { NextRequest } from "next/server";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   webhookDelivery,
@@ -13,18 +12,14 @@ import {
   type WebhookDeliveryOptions,
 } from "../../../fakes/github/webhooks.ts";
 import { createAccessProxy } from "../../src/auth/access-proxy.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { createAuthHarness } from "../../src/test-support/auth-harness.ts";
 import {
   TEST_WEBHOOK_SECRET,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { openGates } from "../../src/test-support/open-gates.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
@@ -40,11 +35,7 @@ async function startGuardedRoute() {
   const env = testGithubAppEnv();
   for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
-  await initializeDatabaseOnStart({
-    env: {
-      DATABASE_PATH: join(await createTestDirectory(), "app.db"),
-    },
-  });
+  await openRouteTestDatabase();
   await saveGithubAppFromEnv(getDatabase(), env);
   vi.resetModules();
   const route: Route =

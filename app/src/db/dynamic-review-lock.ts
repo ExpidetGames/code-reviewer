@@ -6,14 +6,12 @@
 // upgrade is allowed after a row lock. All locks last through the short database transaction.
 import "server-only";
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
-import { databaseDriver } from "./driver.ts";
 import type { Database } from "./schema.ts";
 
 export async function lockDynamicReviewGate(
   executor: Kysely<Database>,
   exclusive: boolean,
 ): Promise<void> {
-  if (databaseDriver(executor) !== "postgres") return;
   if (!executor.isTransaction)
     throw new Error("The Dynamic gate lock requires a transaction.");
   // Reserved application advisory-lock namespace and gate id, identical across app instances.
@@ -27,6 +25,5 @@ export async function lockJobRowsInOrder(
   executor: Kysely<Database>,
   candidates: SelectQueryBuilder<Database, "jobs", { id: string }>,
 ): Promise<void> {
-  if (databaseDriver(executor) !== "postgres") return;
   await candidates.orderBy("id").forUpdate().execute();
 }

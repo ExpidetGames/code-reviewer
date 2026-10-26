@@ -50,7 +50,7 @@ from code_reviewer_runner.dynamic_review.static_isolation import (
     secure_startup,
 )
 from code_reviewer_runner.job_loop import service
-from code_reviewer_runner.job_loop.settings import settings_from_environment
+from code_reviewer_runner.job_loop.settings import worker_settings_from_environment
 
 CAPABILITIES_OF_A_PROCESS = (
     "print(''.join(line for line in open('/proc/self/status') if line.startswith('Cap')))"
@@ -117,7 +117,7 @@ def main(argv: list[str]) -> int:
 
     nft = shutil.which("nft", path="/usr/sbin:/sbin:" + TRUSTED_PATH)
     assert nft is not None, "nft is not installed"
-    settings = settings_from_environment(RUNNER_ENVIRONMENT)
+    settings = worker_settings_from_environment(RUNNER_ENVIRONMENT)
     startup = service.secure_startup
     if "--fallback" in argv:
         # The test seam of the startup step; the production entry point never passes it.

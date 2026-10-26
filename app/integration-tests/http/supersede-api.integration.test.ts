@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the runner API and the Worker API do for a run that a newer push replaced (#397), through the real handlers
-// and a real SQLite file: the feature `supersede` is noted from the claim (a runner) or the job details request (a
+// and a real Postgres database: the feature `supersede` is noted from the claim (a runner) or the job details request (a
 // Worker), the heartbeat of the superseded claim says so, its report is stored once and the job stays superseded,
 // and the job state call says that it drains.
 import { describe, expect, it } from "vitest";

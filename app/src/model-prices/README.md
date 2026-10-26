@@ -96,8 +96,7 @@ reference is different now (the daily fetch moved it), nothing is written and th
   a fetch writes waits, then reads what the fetch wrote and is refused with `price_changed`; one that comes first is kept, and
   a price the fetch moves afterwards makes it `stale`. **The wait is bounded on Postgres**: the transaction sets
   `lock_timeout` (5 seconds, `DEFAULT_LOCK_TIMEOUT_MS`), and a fetch that holds its lock for longer ends the confirmation
-  with the stable code `fetch_in_progress` (409), nothing written; the admin tries again. On SQLite every transaction begins
-  `begin immediate`. The fetch never writes the confirmation tables, so it cannot overwrite a confirmation. Tested on both
+  with the stable code `fetch_in_progress` (409), nothing written; the admin tries again. The fetch never writes the confirmation tables, so it cannot overwrite a confirmation. Tested on both
   engines (`service.integration.test.ts`, "a confirmation and the daily fetch").
 - **History.** Every confirmation is a new row; the latest counts; the database refuses to change or delete one. Confirming
   again what is confirmed already writes nothing.

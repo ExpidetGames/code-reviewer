@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down how a verified delivery ends up in the job queue: through the real webhook handler, the
-// real GitHub App provider, the real queue and a real SQLite file. The intake is a thin mapping from
+// real GitHub App provider, the real queue and a real Postgres database. The intake is a thin mapping from
 // a trigger to a job; what the queue does with it (supersede, dedupe) is covered in
 // src/jobs/job-queue.integration.test.ts, so these tests only show that the pieces are connected and
 // that a redelivery or a replay produces no second job.

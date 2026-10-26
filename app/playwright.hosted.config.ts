@@ -101,13 +101,12 @@ export default defineConfig({
       command:
         `${process.env.E2E_REUSE_BUILD === "1" ? "true" : "pnpm build"} && ` +
         `rm -rf ${hostedEnv.directory} && mkdir -p ${hostedEnv.directory} && ` +
-        "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/hosted/prepare-database.ts && pnpm migrate && " +
+        "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && pnpm migrate && " +
         `pnpm start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
       env: {
         NEXT_TELEMETRY_DISABLED: "1",
-        E2E_HOSTED_ADMIN_DATABASE_URL: database.admin,
-        E2E_HOSTED_DATABASE_NAME: database.name,
-        APP_RUNTIME: "serverless",
+        E2E_ADMIN_DATABASE_URL: database.admin,
+        E2E_DATABASE_NAME: database.name,
         DATABASE_URL: database.app,
         DATABASE_URL_MIGRATE: database.app,
         APP_SECRET: hostedEnv.appSecret,

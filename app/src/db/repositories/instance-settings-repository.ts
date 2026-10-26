@@ -34,7 +34,6 @@ import type { StoredJournalCheck } from "../../billing/journal-check.ts";
 import type { BillingSettings } from "../../billing/settings.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
-import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
@@ -43,11 +42,6 @@ import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 export type InstanceSettingValues = {
   /** ISO 8601 UTC time the first-run wizard finished; null (or no row) until then. */
   setup_completed_at: string | null;
-  /**
-   * `none`: the import of an existing installation has not run (or was not needed). `done`: it has.
-   * No row reads as `none`. Written by the import, never by the setup.
-   */
-  import_state: "none" | "done";
   /** `single`: one workspace for the whole instance. `multi`: users create workspaces. */
   tenancy: "single" | "multi";
   /** Who may sign up. The entries are lower case. */
@@ -85,11 +79,6 @@ export type InstanceSettingValues = {
    * environment of an installation that was not imported yet is the fallback).
    */
   github_app: StoredGithubApp;
-  /**
-   * What the import of an existing installation could not migrate (src/legacy-import/notice.ts); shown on the
-   * overview of the admin portal until the admin dismisses it. No row: nothing to tell.
-   */
-  import_notice: ImportNotice;
   /**
    * #195 rollout gate: whether Dynamic Review may be queued. No row (or `enabled: false`) means every
    * Dynamic project gets a run that fails visibly with `dynamic_review_disabled` instead of being
@@ -271,8 +260,8 @@ export function createInstanceSettingsRepository(
 
   /**
    * The default entitlements are validated like a workspace row, and the period start is checked against the
-   * stored one under a lock (an advisory transaction lock on Postgres, where the value is JSON and there may
-   * be no row to lock; SQLite's transactions take the write lock up front).
+   * stored one under a lock (an advisory transaction lock: the value is JSON and there may be no row to
+   * lock).
    */
   async function setDefaultEntitlements(
     value: EntitlementsData,

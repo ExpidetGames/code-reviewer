@@ -92,7 +92,8 @@ def run_entry(
 
 # #331-privileged-probe
 def test_probe_prints_one_closed_verdict_and_fails_closed_on_the_missing_tools_only() -> None:
-    done = run_entry("probe")
+    secret = "dummy-runner-token-0123456789-abcdef-0123456789"
+    done = run_entry("probe", extra={"RUNNER_TOKEN": secret})
 
     assert done.returncode == 0, done.stderr
     lines = done.stdout.strip().splitlines()
@@ -105,7 +106,7 @@ def test_probe_prints_one_closed_verdict_and_fails_closed_on_the_missing_tools_o
     assert len(verdict["reasons"]) == 1, verdict
     assert verdict["reasons"][0] not in HARDENING_REASONS, verdict
     # The verdict holds no value of the environment.
-    assert RUNNER_ENVIRONMENT["RUNNER_TOKEN"] not in done.stdout + done.stderr
+    assert secret not in done.stdout + done.stderr
 
 
 # #331-privileged-probe

@@ -5,16 +5,13 @@
 // migration ends in a message and an exit code, never in `process.exit`.
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it, vi } from "vitest";
-import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import { withPostgresAdvisoryLock } from "./postgres.ts";
 import { MIGRATE_LOCK_KEY, runMigrateCommand } from "./migrate-cli.ts";
 import { readSchemaStatus } from "./schema-status.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import {
+  connectPostgres,
+  createEmptyTestDatabase,
+} from "../test-support/test-database.ts";
 
 function recorder() {
   const out: string[] = [];
@@ -26,10 +23,10 @@ function recorder() {
   };
 }
 
-describePostgres("pnpm migrate", () => {
+describe("pnpm migrate", () => {
   // #319-T03
   it("applies every migration over DATABASE_URL_MIGRATE and says so, then finds nothing to do", async () => {
-    const { db, url } = await createPostgresTestDatabase({ migrate: false });
+    const { db, url } = await createEmptyTestDatabase();
     const { out, err, io } = recorder();
     const exit = vi.spyOn(process, "exit");
 
@@ -51,7 +48,7 @@ describePostgres("pnpm migrate", () => {
 
   // #319-T03
   it("waits behind the advisory lock another deployment holds, and migrates once it is released", async () => {
-    const { db, url } = await createPostgresTestDatabase({ migrate: false });
+    const { db, url } = await createEmptyTestDatabase();
     const other = connectPostgres(url, 2);
     const { io } = recorder();
     let release: () => void = () => undefined;
@@ -88,7 +85,7 @@ describePostgres("pnpm migrate", () => {
 
   // #319-T03
   it("reports a failing migration by name, rolls it back and returns 1", async () => {
-    const { db, url } = await createPostgresTestDatabase({ migrate: false });
+    const { db, url } = await createEmptyTestDatabase();
     const broken: Migration = {
       async up() {
         throw new Error("boom");

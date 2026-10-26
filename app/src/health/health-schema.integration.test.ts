@@ -3,25 +3,18 @@
 // The health answer in serverless mode (#319): a database that is behind this version's migrations is a
 // 503 with a stable code, and nothing is migrated, created or ended on the way. In server mode the answer
 // is exactly what it was.
-import { join } from "node:path";
 import type { Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openDatabase } from "../db/connection.ts";
 import { migrateToLatest } from "../db/migrate.ts";
 import { closeDatabase } from "../db/startup.ts";
 import type { Database } from "../db/schema.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import {
-  createTestDatabase,
-  createTestDirectory,
-  track,
-} from "../test-support/test-database.ts";
 import { checkHealth } from "./health.ts";
 import { healthResponse } from "./response.ts";
+import {
+  createEmptyTestDatabase,
+  createTestDatabase,
+} from "../test-support/test-database.ts";
 
 const ahead: MigrationProvider = {
   getMigrations: async () => ({
@@ -64,14 +57,7 @@ describe("checkHealth with the schema check", () => {
 
   // #319-T02
   it("reports a database that was never migrated as behind, not as a crash", async () => {
-    const directory = await createTestDirectory();
-    const db = track(
-      openDatabase({
-        driver: "sqlite",
-        path: join(directory, "app.db"),
-        busyTimeoutMs: 1000,
-      }),
-    );
+    const { db } = await createEmptyTestDatabase();
 
     expect(
       await checkHealth(() => db, { checkSchema: true, log: vi.fn() }),
@@ -116,18 +102,15 @@ describe("checkHealth with the schema check", () => {
   });
 });
 
-const describePostgres = hasPostgres() ? describe : describe.skip;
-
-describePostgres("the health response of a cold serverless instance", () => {
+describe("the health response of a cold serverless instance", () => {
   async function pointAt(url: string): Promise<void> {
-    vi.stubEnv("APP_RUNTIME", "serverless");
     vi.stubEnv("DATABASE_URL", url);
     await closeDatabase();
   }
 
   // #319-T02
   it("is 503 with the code while the database is behind, still 503 on the next probe, and 200 once pnpm migrate ran", async () => {
-    const { db, url } = await createPostgresTestDatabase({ migrate: false });
+    const { db, url } = await createEmptyTestDatabase();
     await pointAt(url);
     const exit = vi.spyOn(process, "exit");
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -152,7 +135,7 @@ describePostgres("the health response of a cold serverless instance", () => {
 
   // #319-T05
   it("opens the database on the first request of a cold instance and not before", async () => {
-    const { url } = await createPostgresTestDatabase();
+    const { url } = await createTestDatabase();
     await pointAt(url);
     const holder = globalThis as Record<symbol, unknown>;
     const key = Symbol.for("code-reviewer.database");

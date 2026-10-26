@@ -5,7 +5,7 @@
 // header (a forged `Host` header must not make the app mail a link to another site). The page behind the link
 // is the one `admin reset-password` prints a link to: the token is a link of 256 random bits that works
 // once within 30 minutes (src/auth/password-reset.ts).
-import { RESET_PAGE_PATH } from "../admin-cli/reset-link.ts";
+import { RESET_PAGE_PATH } from "../auth/reset-paths.ts";
 import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 

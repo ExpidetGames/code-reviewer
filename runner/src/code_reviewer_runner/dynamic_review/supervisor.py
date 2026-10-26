@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 """The production preparation of one Dynamic job: the root supervisor's side of the boundary (#197).
 
-The job process runs as root in the Dynamic runner container (`compose.dynamic.yml`). For one job it
+The job process runs as root in the Worker's container (the hardened container spec). For one job it
 
 1. prepares the sanitised, read-only export out of Git objects and seals it for the dedicated
    engine user (`export_isolation.prepared_checkout`, #196), which also takes the exclusive lease

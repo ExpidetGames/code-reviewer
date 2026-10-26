@@ -28,7 +28,7 @@ export type JournalVerdict = {
 };
 
 export async function verifyJournal(
-  databasePath: string,
+  databaseUrl: string,
 ): Promise<JournalVerdict> {
   const { stdout } = await run(
     process.execPath,
@@ -37,7 +37,7 @@ export async function verifyJournal(
       "--conditions=react-server",
       CHILD,
       "verify",
-      resolve(process.cwd(), databasePath),
+      databaseUrl,
     ],
     { cwd: process.cwd() },
   );

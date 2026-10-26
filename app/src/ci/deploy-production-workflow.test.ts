@@ -7,7 +7,7 @@
 // Only after the Dispatcher is live is the snapshot pair written to Infisical, and only after that are old snapshots
 // removed. A failure before the promotion leaves production on the old deployments and the old pair. It reads the
 // files as YAML and runs the shell of the steps against stand-ins; that the platform accepts the run is verified by
-// the first real one (docs/deployment-vercel.md, section 9).
+// the first real one (docs/deployment-vercel.md, section 8).
 import { describe, expect, it } from "vitest";
 import { runStep } from "./shell-support.ts";
 import {

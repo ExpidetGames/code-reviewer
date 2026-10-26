@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The per-call trace of a Dynamic Review (#541) from the runner to the Runs view, through the real runner API
-// over a real SQLite file: it is stored with the result of the job and read back as the page shows it, a job
+// over a real Postgres database: it is stored with the result of the job and read back as the page shows it, a job
 // without one reads as none, and one that is not the contract's is dropped, the usage and the verdict stay.
 import { describe, expect, it } from "vitest";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";

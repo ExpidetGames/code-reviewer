@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The rules of invitations through the real service over a real SQLite file, a real clock moved by hand,
+// The rules of invitations through the real service over a real Postgres database, a real clock moved by hand,
 // the real counters and a mail double: who may invite whom, which addresses may be invited, what is stored
 // (a hash, never the token), how a link is used up, expires and is revoked, and who may accept. The
 // refusals matter as much as the successes: each one leaves the tables as they were.

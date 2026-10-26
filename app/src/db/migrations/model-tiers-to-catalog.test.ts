@@ -2,7 +2,7 @@
 
 // The pure mapper of the tier migration (#434, `model-tiers-to-catalog.ts`): which catalog entries the old tier
 // configuration becomes, which are the instance defaults, and how a project's stored settings change. No database here;
-// `migrate-model-tiers-to-catalog.integration.test.ts` runs the migration on both engines.
+// `migrate-model-tiers-to-catalog.integration.test.ts` runs the migration.
 import { describe, expect, it } from "vitest";
 import {
   checkDescription,

@@ -12,6 +12,7 @@ import {
   type RequestOptions,
   type RunnerApiHarness,
 } from "../../src/test-support/runner-api-harness.ts";
+import { tableNames } from "../../src/test-support/tables.ts";
 
 const UNKNOWN_JOB = "11111111-2222-4333-8444-555555555555";
 
@@ -50,12 +51,8 @@ async function withJobs(h: RunnerApiHarness) {
 
 /** Everything in the database as text, to look for a value anywhere. */
 async function dumpDatabase(h: RunnerApiHarness): Promise<string> {
-  const { rows: tables } = await sql<{ name: string }>`
-    select name from sqlite_master where type = 'table' and name not like 'sqlite_%'`.execute(
-    h.db,
-  );
   const parts: string[] = [];
-  for (const { name } of tables) {
+  for (const name of await tableNames(h.db)) {
     const { rows } = await sql`select * from ${sql.table(name)}`.execute(h.db);
     parts.push(JSON.stringify(rows));
   }

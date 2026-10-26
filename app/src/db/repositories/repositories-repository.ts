@@ -5,7 +5,7 @@
 // deleted: when the platform stops listing it, it becomes inactive, and it becomes active again
 // (same row) if it comes back.
 import "server-only";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type { RepoRef } from "../../integrations/types.ts";
 import { decodeBoolean, encodeBoolean, formatTimestamp } from "../codecs.ts";
 import { IntegrationError } from "../../integrations/errors.ts";
@@ -96,7 +96,8 @@ export function createRepositoriesRepository(
         query = query.where("active", "=", encodeBoolean(filter.active));
       const rows = await query
         .orderBy("created_at")
-        .orderBy("full_name")
+        // Case-insensitive, with the id as the tie-breaker: names that differ only by case keep a stable place.
+        .orderBy(sql`lower(full_name)`)
         .orderBy("id")
         .execute();
       return rows.map(toStored);

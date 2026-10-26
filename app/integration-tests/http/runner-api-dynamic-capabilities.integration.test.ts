@@ -3,7 +3,7 @@
 // The model capabilities a Dynamic claim carries (#279): the app reads the metadata of the job's model
 // when it builds the claim, puts the descriptor into `dynamic.capabilities` for a runner that said it
 // understands it, fails a model without tool choice before any credential exists, and never invents
-// anything when the metadata cannot be read. The real claim over a real SQLite file; the provider's
+// anything when the metadata cannot be read. The real claim over a real Postgres database; the provider's
 // metadata is a scripted fetch.
 import { describe, expect, it } from "vitest";
 import {

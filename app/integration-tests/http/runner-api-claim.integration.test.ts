@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down `POST /api/runners/v1/claim` through the real handler: a real SQLite file with the job
+// Pins down `POST /api/runners/v1/claim` through the real handler: a real Postgres database with the job
 // queue, the real GitHub App provider against the fake GitHub, and the API wired to both. It covers
 // what a runner is handed and when (credentials only at claim time, one token per claim, the guard,
 // the settings), and what happens to a job when credentials cannot be made. The answers to heartbeat

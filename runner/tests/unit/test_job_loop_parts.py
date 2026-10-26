@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""Pins down the small parts of the job loop: output buffers, log masking and back-off."""
+"""Pins down the small parts of the job host: output buffers and log masking."""
 
 import logging
 from typing import Any
 
 import pytest
 
-from code_reviewer_runner.job_loop.loop import Backoff
 from code_reviewer_runner.job_loop.masking import SafeLog, SecretMasker
 from code_reviewer_runner.job_loop.process import StreamTail
 
@@ -51,21 +50,6 @@ def test_the_safe_log_masks_after_formatting(caplog: pytest.LogCaptureFixture) -
     log.warning("plain")
 
     assert caplog.messages == ["value [REDACTED]", "plain"]
-
-
-def test_the_backoff_doubles_up_to_its_maximum_and_starts_over_after_a_reset() -> None:
-    backoff = Backoff(base=5, maximum=40)
-
-    assert [backoff.next() for _ in range(5)] == [5, 10, 20, 40, 40]
-    backoff.reset()
-    assert backoff.next() == 5
-
-
-def test_a_retry_after_longer_than_the_backoff_wins_but_is_capped() -> None:
-    backoff = Backoff(base=5, maximum=40)
-
-    assert backoff.next(retry_after=100) == 100
-    assert backoff.next(retry_after=10_000) == 15 * 60
 
 
 # #197-T04

@@ -12,7 +12,6 @@ import { Suspense } from "react";
 import { AuthCard } from "@/components/auth-card";
 import { PageLoading } from "@/components/page-loading";
 import { SETUP_SESSION_COOKIE } from "@/setup/setup-session";
-import { isServerless } from "@/runtime/mode";
 import { checkCurrentSetupSession, getSetupStateReader } from "@/setup/shared";
 import { CodeForm } from "@/setup/ui/code-form";
 import { Wizard } from "@/setup/ui/wizard";
@@ -41,14 +40,7 @@ async function SetupContent() {
   const session = await checkCurrentSetupSession(
     (await cookies()).get(SETUP_SESSION_COOKIE)?.value,
   );
-  // Where the code comes from decides the instructions: the log of a server, `pnpm setup-code` otherwise.
-  const hosting = isServerless() ? "serverless" : "server";
   const existingInstallation = state.kind === "existing";
-  if (session.ok)
-    return (
-      <Wizard existingInstallation={existingInstallation} hosting={hosting} />
-    );
-  return (
-    <CodeForm existingInstallation={existingInstallation} hosting={hosting} />
-  );
+  if (session.ok) return <Wizard existingInstallation={existingInstallation} />;
+  return <CodeForm existingInstallation={existingInstallation} />;
 }

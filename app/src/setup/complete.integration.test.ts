@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the completion of the first-run setup against a real SQLite file: the admin is created
+// Pins down the completion of the first-run setup against a real Postgres database: the admin is created
 // with a hashed password and the instance admin flag, the choices are stored, the workspace follows
 // the tenancy (a fresh instance, an existing one with an imported workspace, with and without an
 // owner), the instance is marked as set up, and two completions at the same moment end with exactly
@@ -379,9 +379,12 @@ describe("completing the setup twice", () => {
     const { db, complete } = await fixture();
     // The last step of the completion, the marker, fails: the admin and the workspace made before
     // it must not stay.
+    await sql`create function fail_marker() returns trigger language plpgsql as $$ begin raise exception 'boom'; end $$`.execute(
+      db,
+    );
     await sql`create trigger fail_marker before insert on instance_settings
-      when new.key = 'setup_completed_at'
-      begin select raise(abort, 'boom'); end`.execute(db);
+      for each row when (new.key = 'setup_completed_at')
+      execute function fail_marker()`.execute(db);
 
     await expect(complete()).rejects.toThrow();
 

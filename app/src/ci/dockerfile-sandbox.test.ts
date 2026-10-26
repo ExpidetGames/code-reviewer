@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Pins down the Sandbox target of runner/Dockerfile (#324): the Worker image of the hosted
-// deployment. It is the Dynamic image's Worker layers plus labels, so it keeps the pins, the user
-// layout and the fail-closed self-check of #202, and it carries no Dispatcher bundle. The built
-// image is judged by docker/smoke/runner.sh in `sandbox` mode (layers shared, nothing of a
-// Dispatcher inside), which CI runs; here the Dockerfile that makes it is.
+// deployment and the only image of the project. It keeps the pins, the user layout and the
+// fail-closed self-check of #202, and it carries no Dispatcher bundle. The built image is judged by
+// docker/smoke/runner.sh (nothing of a Dispatcher inside), which CI runs; here the Dockerfile that
+// makes it is.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -45,28 +45,14 @@ function lineage(name: string): Stage[] {
 
 describe("the Sandbox image target", () => {
   // #324-T09
-  it("is a stage of its own, and the default target stays the last stage", () => {
-    expect(stages(dockerfile).map((entry) => entry.name)).toContain("sandbox");
-    expect(stages(dockerfile).at(-1)?.name).toBe("runtime");
+  it("is the last stage, so the default target is the Worker image", () => {
+    expect(stages(dockerfile).at(-1)?.name).toBe("sandbox");
   });
 
   // #324-T09
-  it("adds nothing but labels to the Worker layers of the Dynamic image, which it shares", () => {
-    expect(stage("sandbox").base).toBe("dynamic-worker");
-    expect(stage("dynamic").base).toBe("dynamic-worker");
-    for (const target of ["sandbox", "dynamic"])
-      for (const line of stage(target).lines)
-        expect(line.startsWith("LABEL ")).toBe(true);
-  });
-
-  // #324-T09
-  it("is not built on the dynamic target, so what is added to that one later cannot reach it", () => {
-    expect(lineage("sandbox").map((entry) => entry.name)).not.toContain(
-      "dynamic",
-    );
+  it("is built on the shared base stage and on nothing else of the file", () => {
     expect(lineage("sandbox").map((entry) => entry.name)).toEqual([
       "runtime-base",
-      "dynamic-worker",
       "sandbox",
     ]);
   });
@@ -83,7 +69,7 @@ describe("the Sandbox image target", () => {
     );
   });
 
-  // #324-T09: the target keeps the entry point and the user of the Dynamic image.
+  // #324-T09: the target keeps the entry point and ends on the unprivileged user.
   it("keeps the entry point of the image and ends on the unprivileged user", () => {
     const own = lineage("sandbox").flatMap((entry) => entry.lines);
 
@@ -95,7 +81,7 @@ describe("the Sandbox image target", () => {
     );
   });
 
-  // #324-T09: the image is not an alias with the Dynamic title.
+  // #324-T09: the image has its own title.
   it("has its own title and enables nothing", () => {
     const labels = stage("sandbox").lines.join("\n");
 

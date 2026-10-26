@@ -26,12 +26,12 @@ export type GithubAccount = {
   emails?: Array<{ email: string; primary: boolean; verified: boolean }>;
 };
 
-/** The apps a journey can sign an account into: the SQLite file of each. */
+/** The apps a journey can sign an account into: the database of each. */
 export type AppUnderTest = "main" | "pipeline" | "setup";
 const DATABASES: Record<AppUnderTest, string> = {
-  main: e2eEnv.databasePath,
-  pipeline: e2eEnv.pipelineDatabasePath,
-  setup: e2eEnv.setupDatabasePath,
+  main: e2eEnv.databaseUrl,
+  pipeline: e2eEnv.pipelineDatabaseUrl,
+  setup: e2eEnv.setupDatabaseUrl,
 };
 
 /**
@@ -51,7 +51,7 @@ export async function importGithubUser(
       "--conditions=react-server",
       ACCOUNTS_CHILD,
       "import-user",
-      resolve(process.cwd(), DATABASES[app]),
+      DATABASES[app],
       JSON.stringify({
         githubId: account.id,
         login: account.login,
@@ -114,22 +114,22 @@ export async function signInThroughTheForm(
   await expect(userMenuButton(page, account)).toBeVisible();
 }
 
-/** The SQLite file of the app a page is open at (the apps of a run each have their own). */
+/** The database of the app a page is open at (the apps of a run each have their own). */
 function databaseOf(page: Page): string {
   const origin = new URL(page.url()).origin;
   const file =
     origin === e2eEnv.pipelineAppUrl
-      ? e2eEnv.pipelineDatabasePath
+      ? e2eEnv.pipelineDatabaseUrl
       : origin === e2eEnv.signupAppUrl
-        ? e2eEnv.signupDatabasePath
+        ? e2eEnv.signupDatabaseUrl
         : origin === e2eEnv.multiAppUrl
-          ? e2eEnv.multiDatabasePath
+          ? e2eEnv.multiDatabaseUrl
           : origin === e2eEnv.operatorAppUrl
-            ? e2eEnv.operatorDatabasePath
+            ? e2eEnv.operatorDatabaseUrl
             : origin === e2eEnv.catalogAppUrl
-              ? e2eEnv.catalogDatabasePath
-              : e2eEnv.databasePath;
-  return resolve(process.cwd(), file);
+              ? e2eEnv.catalogDatabaseUrl
+              : e2eEnv.databaseUrl;
+  return file;
 }
 
 /** Makes the account a member of a workspace of the app the page is open at (the first one by default). */

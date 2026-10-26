@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The GitHub integration of the admin portal assembled for integration tests: a real SQLite file, the
+// The GitHub integration of the admin portal assembled for integration tests: a real Postgres database, the
 // encrypted secret store and the credential store on it, the service with a clock, and the fake GitHub on a
 // loopback port (with the manifest flow switched on) as `github.com` and `api.github.com`. Every address the
 // service builds is made from `GITHUB_CONFIG_TEST_PUBLIC_URL`.

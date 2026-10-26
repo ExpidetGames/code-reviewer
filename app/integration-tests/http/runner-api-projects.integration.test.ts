@@ -3,7 +3,7 @@
 // Pins down how the runner API and the job queue are wired to the projects and the settings (CR-46):
 // the claim only hands out jobs of repositories with an active project, deactivating a project
 // cancels its waiting jobs, the options of a job are the review settings of its project, and the LLM
-// part of a job is the shared LLM configuration. The pieces are the real ones (SQLite file, project
+// part of a job is the shared LLM configuration. The pieces are the real ones (database, project
 // service, review settings service, claim); only GitHub is the fake.
 import { describe, expect, it } from "vitest";
 import { toRunnerSettings } from "../../src/review-settings/runner-settings.ts";

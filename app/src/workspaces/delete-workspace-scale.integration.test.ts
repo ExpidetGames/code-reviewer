@@ -7,25 +7,20 @@
 // generous bound that the quadratic version exceeds several times over on any machine this runs on.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import { seedWorkspaceForDeletion } from "../test-support/workspace-deletion-fixture.ts";
 import {
   addWorkspace,
   defaultWorkspaceId,
 } from "../test-support/workspaces.ts";
 import { createWorkspaceDeletion } from "./delete-workspace.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const JOBS_PER_WORKSPACE = 8000;
 // Linear: well under a second here. Without the index about 12 s, and growing with the square.
 const BOUND_MS = 4000;
 
 async function bulkJobs(
-  db: Awaited<ReturnType<typeof createPostgresTestDatabase>>["db"],
+  db: Awaited<ReturnType<typeof createTestDatabase>>["db"],
   workspaceId: string,
   repositoryId: string,
   tag: string,
@@ -41,10 +36,10 @@ async function bulkJobs(
     from generate_series(1, ${JOBS_PER_WORKSPACE}) as n`.execute(db);
 }
 
-describePostgres("deleting a workspace with many jobs", () => {
+describe("deleting a workspace with many jobs", () => {
   // #658-T04
   it("deletes 8 000 jobs next to 8 000 jobs of another workspace within the bound, and leaves the other ones", async () => {
-    const postgres = await createPostgresTestDatabase({ poolMax: 4 });
+    const postgres = await createTestDatabase({ poolMax: 4 });
     const workspaceId = await defaultWorkspaceId(postgres.db);
     const seeded = await seedWorkspaceForDeletion(
       postgres.db,

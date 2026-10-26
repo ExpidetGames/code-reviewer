@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #502: Stripe's webhooks end to end, on SQLite and on Postgres: the fake Stripe makes the events of a payment, a refund and a
+// #502: Stripe's webhooks end to end: the fake Stripe makes the events of a payment, a refund and a
 // dispute, they are signed the way Stripe signs them and posted to the real handler (`POST /api/billing/webhook`) with the
 // Stripe adapter and a real database. This is the money trust root: crediting happens only here, once per payment, from our own
 // intent row, however Stripe delivers (twice, at once, late, in the wrong order).
@@ -60,7 +60,7 @@ function failingOn(table: string, armed: { on: boolean }): KyselyPlugin {
 }
 
 function suite(engine: BillingEngine) {
-  describe.skipIf(engine.skip)(`Stripe webhooks on ${engine.name}`, () => {
+  describe(`Stripe webhooks on ${engine.name}`, () => {
     async function setup() {
       const { db, workspaceId, otherWorkspaceId } = await engine.create();
       await setBillingSwitch(db, true);

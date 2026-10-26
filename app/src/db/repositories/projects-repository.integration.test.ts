@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the projects table against a real SQLite file: activating a repository creates its one
+// Pins down the projects table against a real Postgres database: activating a repository creates its one
 // project, deactivating keeps the row and its settings, activating again reuses the row, a repository
 // the platform no longer lists cannot be activated but keeps its project row, and two simultaneous
 // activations end in exactly one project.
@@ -88,7 +88,6 @@ describe("activating a repository", () => {
       now,
       undefined,
       undefined,
-      undefined,
       async () => ({ reviewKind: "dynamic" }),
     );
 
@@ -114,7 +113,6 @@ describe("activating a repository", () => {
       db,
       workspaceId,
       now,
-      undefined,
       undefined,
       undefined,
       async () => ({ reviewKind: "dynamic" }),
@@ -473,6 +471,29 @@ describe("listing the repositories with their projects", () => {
       displayName: "acme",
       status: "active",
     });
+  });
+
+  it("orders the names without regard to case, and names that differ only by case by id", async () => {
+    const { integration, repositories, projects, remote } = await setup();
+    await repositories.reconcile(integration.id, [
+      remote(10, "acme/Zeta"),
+      remote(11, "acme/alpha"),
+      remote(12, "acme/Beta"),
+      remote(13, "acme/GAMMA"),
+      remote(14, "acme/gamma"),
+    ]);
+
+    const entries = await projects.list();
+
+    const names = entries.map((entry) => entry.repository.fullName);
+    expect(names.slice(0, 2)).toEqual(["acme/alpha", "acme/Beta"]);
+    expect(names.slice(-1)).toEqual(["acme/Zeta"]);
+    const gammas = entries.filter(
+      (entry) => entry.repository.fullName.toLowerCase() === "acme/gamma",
+    );
+    expect(gammas.map((entry) => entry.repository.id)).toEqual(
+      gammas.map((entry) => entry.repository.id).sort(),
+    );
   });
 
   it("shows a deactivated project as inactive", async () => {

@@ -289,12 +289,12 @@ describe("the Playwright configuration of the lane", () => {
   });
 
   // #253-N07
-  it("runs one worker, has the preflight as its global setup and starts the fake GitHub and two apps (the second is the hosted journey's, #332)", () => {
+  it("runs one worker, has the preflight as its global setup and starts the fake GitHub and the hosted journey's app (#332)", () => {
     expect(config).toContain("workers: 1");
     expect(config).toContain(
       'globalSetup: "./e2e/dynamic/preflight.global-setup.ts"',
     );
-    expect(config.match(/command:/g)).toHaveLength(3);
+    expect(config.match(/command:/g)).toHaveLength(2);
     expect(config).toContain("fakes/github/main.ts");
     expect(config).toContain("next start");
   });
@@ -303,12 +303,9 @@ describe("the Playwright configuration of the lane", () => {
   it("does not turn on the Dynamic Review gate of any shipped configuration", () => {
     // The lane turns it on in its own database through the admin API (the journey), nowhere else.
     expect(config).not.toMatch(/dynamic_review|DYNAMIC_REVIEW/);
-    const shipped = [
-      read("compose.yml"),
-      read("compose.dynamic.yml"),
-      read("compose.coolify.yml"),
-      read("compose.large.yml"),
-    ].join("\n");
+    const shipped = read(
+      "contracts/examples/worker-container/WorkerContainerSpec.json",
+    );
     expect(shipped).not.toMatch(/dynamic_review|dynamicReview/);
   });
 });

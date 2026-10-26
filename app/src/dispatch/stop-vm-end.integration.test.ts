@@ -2,23 +2,17 @@
 
 // The end of a VM's billable minutes (#493): when the Dispatcher's answer to the App's stop call names the VMs it is
 // stopping, the App's clock at that moment is their end (`app_stop_confirmed`). Any other answer, or none, leaves the end
-// to the bounded backstop that `measure` applies (`timeout_backstop`); the stop never fails or delays anything. On SQLite
-// and, when TEST_DATABASE_URL is set, on Postgres.
-import type { Kysely } from "kysely";
-import { describe, expect, it as vitestIt } from "vitest";
+// to the bounded backstop that `measure` applies (`timeout_backstop`); the stop never fails or delays anything.
+import { describe, expect, it } from "vitest";
 import { STOP_RETRY_WINDOW_SECONDS } from "../billing/minutes.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
-import type { Database } from "../db/schema.ts";
 import { createFakeDispatchReceiver } from "../test-support/fake-dispatch-receiver.ts";
 import { createJobQueueFixture } from "../test-support/jobs.ts";
-import {
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
 import type { WebhookDispatchConfig } from "./config.ts";
 import { decideOutcome } from "./outcome.ts";
 import { createStopService } from "./stop.ts";
+import { createTestDatabase } from "../test-support/test-database.ts";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -43,24 +37,11 @@ const stoppingVms = (...vms: unknown[]) => ({
   body: JSON.stringify({ version: 1, status: "stopping", vms }),
 });
 
-const databases: Array<
-  [string, (() => Promise<Kysely<Database>>) | undefined]
-> = [
-  ["SQLite", undefined],
-  [
-    "Postgres",
-    hasPostgres()
-      ? async () => (await createPostgresTestDatabase({ poolMax: 12 })).db
-      : undefined,
-  ],
-];
+const open = async () => (await createTestDatabase({ poolMax: 12 })).db;
 
-describe.each(databases)("the end of a VM on %s", (name, open) => {
-  const it =
-    name === "Postgres" && open === undefined ? vitestIt.skip : vitestIt;
-
+describe("the end of a VM", () => {
   async function setup() {
-    const database = await open?.();
+    const database = await open();
     const fixture = await createJobQueueFixture({
       ...(database === undefined ? {} : { database }),
     });

@@ -47,7 +47,6 @@ import type {
   ReleaseResult,
 } from "../../jobs/job-types.ts";
 import { encodeJson, formatTimestamp } from "../codecs.ts";
-import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
 import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
 import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
@@ -66,7 +65,7 @@ import {
   type CapOutcome,
 } from "../../billing/claim-caps.ts";
 import { headNoticeKey } from "../../refusal-notices/notice-key.ts";
-import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
+import { claimOldestDueJob } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
@@ -100,8 +99,6 @@ export type RunnerJobsRepositoryOptions = {
   /** #320: the per-job credential of a claim made with `workerCredential`; tests only. */
   newCredential?: () => string;
   limits?: Partial<JobQueueLimits>;
-  /** Overrides the engine read from the connection; tests only. */
-  driver?: DatabaseDriver;
   /**
    * #277: called for every job a claim refused for the entitlements of its workspace (suspended, a limit used
    * up, entitlements that cannot be read), after the transaction of the claim committed. The job is `failed`
@@ -310,7 +307,6 @@ export function createRunnerJobsRepository(
   const newToken = options.newToken ?? newLeaseToken;
   const newCredential = options.newCredential ?? newWorkerCredential;
   const limits = { ...DEFAULT_JOB_QUEUE_LIMITS, ...options.limits };
-  const driver = options.driver ?? databaseDriver(db);
   // The transaction guard already holds the exclusive gate lock; read without taking another lock
   // after job rows. This keeps every transition on the documented gate-before-rows order.
   async function dynamicReviewAllowed(
@@ -769,8 +765,7 @@ export function createRunnerJobsRepository(
           let billing: ClaimBilling | undefined;
           const startCreditTried = new Set<string>();
           // #322: the pool cap. Atomic because a claim is the only way a job becomes running and every
-          // claim runs under the exclusive gate lock of `inTransaction` (Postgres) or the write lock of the
-          // connection (SQLite): two claims of one pool cannot both count below the cap and then both
+          // claim runs under the exclusive gate lock of `inTransaction`: two claims of one pool cannot both count below the cap and then both
           // claim. The count follows `expire`, so a lapsed lease does not hold a slot.
           if (
             claimOptions.maxRunning !== undefined &&
@@ -778,11 +773,12 @@ export function createRunnerJobsRepository(
           )
             return null;
           for (let refused = 0; refused < MAX_REFUSED_PER_CLAIM; refused += 1) {
-            const row = await (
-              driver === "postgres"
-                ? claimOldestDueJobPostgres
-                : claimOldestDueJob
-            )(trx, claim, reviewKinds, claimOptions.jobId);
+            const row = await claimOldestDueJob(
+              trx,
+              claim,
+              reviewKinds,
+              claimOptions.jobId,
+            );
             if (row === undefined) return null;
             // #498: read once per claim, for the first job that is taken (a claim that finds no job reads nothing). #499
             // needs it before the admission: while billing is on, the run quotas of the plan are not enforced.

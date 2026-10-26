@@ -6,11 +6,8 @@ each window constant, so a counter in force is never removed) and the verificati
 used more than a week ago (a week, so that someone who holds a link and its password is still told "used" or
 "expired"), and the password reset links the same way. A signed state (the single-use side of a round trip through GitHub, `src/signed-state/`) is removed once it has expired. It also removes the encrypted LLM keys that were remembered for jobs
 (`job_claimed_keys`, `src/runner-api/claimed-keys.ts`) a week after the job finished, so a key that was rotated away
-does not stay in the database for ever. `startup.ts` runs it when the production server starts and then every hour, from
-`src/instrumentation.ts`, like the backup timer (no timer in other environments); a failing run is logged by its
-code and tried again at the next hour. A serverless instance (`APP_RUNTIME=serverless`) runs no timer: the cron sweep of
-a hosted deployment (#328, `src/dispatch/README.md`) runs the same cleanup once when the hour has changed, so the work is
-the same and only the clock differs. It also removes the `job_dispatches` rows (#326) of jobs that finished a week ago
+does not stay in the database for ever. The cron sweep of
+the hosted deployment (#328, `src/dispatch/README.md`) runs it once when the hour has changed; the app runs no timer of its own. It also removes the `job_dispatches` rows (#326) of jobs that finished a week ago
 (`JOB_DISPATCH_KEEP_MS`).
 
 ## Sign-ups that never verified

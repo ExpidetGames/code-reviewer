@@ -14,7 +14,7 @@
 // - `payment_open`: a top-up checkout was started within the window a late payment is still credited in
 //   (`PENDING_TOP_UP_WINDOW_MS`) and has no end yet (`paid`, `failed`), so a payment may still arrive: it would credit nobody.
 //
-// The locks, in this order (Postgres; SQLite has one writer): the Dynamic gate, shared; the workspace row (the members, like every
+// The locks, in this order: the Dynamic gate, shared; the workspace row (the members, like every
 // writer that follows); the repositories and the waiting, running and superseded jobs of the workspace (`lockActiveJobs`); the
 // balance row last (a top-up or a charge cannot slip in between the check and the deletion).
 //

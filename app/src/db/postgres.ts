@@ -25,8 +25,15 @@ import type { Database } from "./schema.ts";
 const CONNECT_TIMEOUT_MS = 10_000;
 
 // The configuration behind each open connection, so the lock can open its dedicated client from the
-// same URL. A WeakMap keeps nothing alive on its own.
-const CONFIG_OF = new WeakMap<Kysely<Database>, PostgresDatabaseConfig>();
+// same URL. A WeakMap keeps nothing alive on its own. It lives on `globalThis`, like the connection itself
+// (src/db/startup.ts): the bundles of the routes do not share modules, and a connection opened by one of them is used
+// by the others.
+const configKey = Symbol.for("code-reviewer.database-config");
+type GlobalWithConfig = typeof globalThis & {
+  [configKey]?: WeakMap<Kysely<Database>, PostgresDatabaseConfig>;
+};
+const holder = globalThis as GlobalWithConfig;
+const CONFIG_OF = (holder[configKey] ??= new WeakMap());
 
 type PoolHooks = {
   /** Tells the hosting platform when the pool is idle, so it waits for the connections to close. */

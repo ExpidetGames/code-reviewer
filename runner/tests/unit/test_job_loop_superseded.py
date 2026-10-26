@@ -219,26 +219,6 @@ def test_a_signal_that_could_not_be_sent_is_logged_and_the_drain_bound_still_end
     run(scenario)
 
 
-# #396-T12
-def test_the_loop_goes_on_to_the_next_job_after_a_superseded_one() -> None:
-    async def scenario() -> None:
-        harness = Harness()
-        harness.api.claims = [make_claim(1), make_claim(2)]
-        harness.api.superseded_from = 1
-        await harness.start()
-        first = harness.launcher.processes[0]
-        first.on_superseded = lambda p: p.finish(outcome(exit_code=1, stdout=superseded_line()))
-
-        await harness.clock.advance(30)
-        await settle()
-
-        assert len(harness.api.completions) == 1
-        assert len(harness.launcher.processes) == 2
-        await harness.stop()
-
-    run(scenario)
-
-
 # #396-T13
 def test_a_heartbeat_without_the_field_changes_nothing() -> None:
     async def scenario() -> None:

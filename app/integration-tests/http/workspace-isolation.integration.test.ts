@@ -15,7 +15,6 @@
 //
 // The table must hold every method of every route below `/api/w/[workspace]`, so a route added later
 // without a row here fails the last test.
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
@@ -29,11 +28,7 @@ import { createProjectsRepository } from "../../src/db/repositories/projects-rep
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { createSecretsRepository } from "../../src/db/repositories/secrets-repository.ts";
 import { createWorkspacesRepository } from "../../src/db/repositories/workspaces-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { jobQueueFor } from "../../src/jobs/shared.ts";
 import { createWorkspaceLlm } from "../../src/llm/assemble.ts";
 import {
@@ -42,7 +37,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { discoverRoutes } from "../../src/test-support/routes.ts";
 import { MINIMUM_ROLE } from "../../src/workspaces/permissions.ts";
 import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
@@ -715,9 +710,7 @@ async function start() {
   // The address the app is reached at (the links of invitations are made from it) and the master key.
   vi.stubEnv("BETTER_AUTH_URL", "https://app.test");
   vi.stubEnv("APP_SECRET", "isolation-test-secret-0123456789-0123456789");
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   // Anybody may sign up, so anybody may be invited.
   await createInstanceSettingsRepository(getDatabase()).set(
     "sign_up_rule",

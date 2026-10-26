@@ -6,18 +6,13 @@
 // behavior of the handlers is in src/runs/http.ts and the proxy in front is in
 // runs-route.integration.test.ts; this file proves the pieces are connected, and that the workspace comes
 // from the address and from the membership of the person, not from anywhere else.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createIntegrationsRepository } from "../../src/db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { jobQueueFor } from "../../src/jobs/shared.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { GET as getList } from "../../src/app/api/w/[workspace]/runs/route.ts";
 import { GET as getOne } from "../../src/app/api/w/[workspace]/runs/[id]/route.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
@@ -34,9 +29,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 async function startRoutes() {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const workspaceId = await defaultWorkspaceId(db);
   session.currentLookup.mockResolvedValue(

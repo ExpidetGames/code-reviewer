@@ -4,18 +4,13 @@
 // database opened at start, the plan view and the workspace access. Only the session lookup and `connection()` are
 // replaced (they need Next.js's request scope). Every member may read it; a workspace the person does not belong to
 // answers like one that does not exist; the answer is never cached and holds no amount, model or job data.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createWorkspaceEntitlementsRepository } from "../../src/db/repositories/workspace-entitlements-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { GET } from "../../src/app/api/w/[workspace]/plan/route.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { createUsageSeeder } from "../../src/test-support/usage-seed.ts";
 import {
   addWorkspace,
@@ -48,9 +43,7 @@ const ENTITLEMENTS: EntitlementsData = {
 };
 
 async function startRoute(role: "member" | "admin" | "owner" = "member") {
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   const db = getDatabase();
   const workspaceId = await defaultWorkspaceId(db);
   session.currentLookup.mockResolvedValue(

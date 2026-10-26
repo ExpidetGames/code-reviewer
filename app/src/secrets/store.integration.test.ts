@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the encrypted secret store against a real SQLite file: a value goes in encrypted and
+// Pins down the encrypted secret store against a real Postgres database: a value goes in encrypted and
 // comes back exactly, a copy of the stored ciphertext under another name is worthless, a value that
 // cannot be read (changed, wrong APP_SECRET) is a stable error state and never an exception, and
 // the saved value is in no status, no result that can be printed, and no log line.

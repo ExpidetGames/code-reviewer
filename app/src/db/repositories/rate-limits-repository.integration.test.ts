@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Pins down the shared rate limit counters against a real SQLite file: attempts are counted per key
+// Pins down the shared rate limit counters against a real Postgres database: attempts are counted per key
 // inside a window, a new window starts the count again, keys do not share a counter, and attempts
 // that arrive together are all counted.
 import { describe, expect, it } from "vitest";

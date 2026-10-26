@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The LLM key of a workspace over a real SQLite file: what a save accepts and refuses (the same rules as the
+// The LLM key of a workspace over a real Postgres database: what a save accepts and refuses (the same rules as the
 // legacy variable), that an empty field keeps the stored key of that provider, that the
 // answers carry no key, and that the stored value is encrypted.
 import { sql } from "kysely";

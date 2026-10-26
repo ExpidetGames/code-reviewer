@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The record of the notices of refused reviews of a workspace against a real SQLite file (#281): one row per pull
+// The record of the notices of refused reviews of a workspace against a real Postgres database (#281): one row per pull
 // request and period, taken once, retried a bounded number of times, and never changed once posted. Isolation
 // between workspaces is in scoped-isolation.integration.test.ts; the notice itself is in
 // src/refusal-notices/service.integration.test.ts.

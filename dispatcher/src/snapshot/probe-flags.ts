@@ -2,7 +2,7 @@
 
 // The flags of the self-check probe container (#330): the arguments of `docker run` that the shared renderer of
 // the hardened container spec (#325) makes for the Sandbox variant, never flags written here. That is the
-// hardening of the `runner-dynamic` service of compose.coolify.yml plus the two IPv6 sysctls that the reduced
+// hardening of the example spec of the hardened container contract plus the two IPv6 sysctls that the reduced
 // egress ruleset needs (#345, SANDBOX_LAUNCHER_ADDITIONS). The probe is given no token, URL or credential, only the
 // two variables its settings read, and the image's `probe` mode (#324) as its command.
 import {

@@ -3,16 +3,10 @@
 // The migration that introduces workspaces (migrations 20261011160000 to 20261011160200): an
 // installation that holds data keeps every row and gets one default workspace, an empty one gets
 // none, nobody becomes a member by migration, and a failure leaves the file as it was.
-import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import {
-  createTestDatabase,
-  createTestDirectory,
-  track,
-} from "../test-support/test-database.ts";
-import { openDatabase } from "./connection.ts";
+import { createEmptyTestDatabase } from "../test-support/test-database.ts";
 import { migrateToLatest } from "./migrate.ts";
 import { migrationProvider } from "./migrations/index.ts";
 
@@ -36,14 +30,7 @@ const JOB_MIGRATION_BUDGET_MS = 10_000;
 type OldDb = Kysely<any>;
 
 async function openAtPreviousVersion(): Promise<OldDb> {
-  const directory = await createTestDirectory();
-  const db: OldDb = track(
-    openDatabase({
-      driver: "sqlite",
-      path: join(directory, "app.db"),
-      busyTimeoutMs: 5000,
-    }),
-  );
+  const db: OldDb = (await createEmptyTestDatabase()).db;
   await migrateToLatest(db, previousVersion);
   return db;
 }
@@ -193,9 +180,9 @@ async function counts(db: OldDb): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
   for (const table of CUSTOMER_TABLES) {
     const { rows } = await sql<{
-      count: number;
+      count: string;
     }>`select count(*) as count from ${sql.table(table)}`.execute(db);
-    result[table] = rows[0]?.count ?? -1;
+    result[table] = Number(rows[0]?.count ?? -1);
   }
   return result;
 }
@@ -278,39 +265,6 @@ describe("migrating an installation that holds data", () => {
     expect(await db.selectFrom("sessions").select("id").execute()).toEqual([
       { id: "s1" },
     ]);
-    expect(
-      await sql`pragma foreign_key_check`.execute(db).then((r) => r.rows),
-    ).toEqual([]);
-  });
-
-  it("keeps the indexes the tables had and every foreign key resolves to the rebuilt tables", async () => {
-    const db = await openAtPreviousVersion();
-    const indexesBefore = await column(
-      db,
-      "select name as value from sqlite_master where type = 'index' and name not like 'sqlite_%' order by name",
-    );
-
-    await migrateToLatest(db);
-
-    const indexesAfter = await column(
-      db,
-      "select name as value from sqlite_master where type = 'index' and name not like 'sqlite_%' order by name",
-    );
-    for (const name of indexesBefore) expect(indexesAfter).toContain(name);
-    expect(indexesAfter).toEqual(
-      expect.arrayContaining([
-        "integrations_workspace",
-        "repositories_workspace",
-        "jobs_workspace_recent",
-      ]),
-    );
-    // No foreign key may still point at a table of the rebuild.
-    expect(
-      await column(
-        db,
-        "select name as value from sqlite_master where sql like '%_old%' or name like '%_old'",
-      ),
-    ).toEqual([]);
   });
 
   // DM-02
@@ -451,7 +405,7 @@ describe("the workspace tables", () => {
           created_at: T,
         })
         .execute(),
-    ).rejects.toThrow(/CHECK constraint/);
+    ).rejects.toThrow(/violates check constraint/);
   });
 
   // DM-11
@@ -498,7 +452,7 @@ describe("the workspace tables", () => {
         .insertInto("workspace_members")
         .values({ ...member, role: "owner" })
         .execute(),
-    ).rejects.toThrow(/UNIQUE constraint/);
+    ).rejects.toThrow(/duplicate key value violates unique constraint/);
   });
 
   it("refuse a member for a workspace or a user that does not exist", async () => {
@@ -514,7 +468,7 @@ describe("the workspace tables", () => {
           created_at: T,
         })
         .execute(),
-    ).rejects.toThrow(/FOREIGN KEY/);
+    ).rejects.toThrow(/violates foreign key constraint/);
     await expect(
       db
         .insertInto("workspace_members")
@@ -525,7 +479,7 @@ describe("the workspace tables", () => {
           created_at: T,
         })
         .execute(),
-    ).rejects.toThrow(/FOREIGN KEY/);
+    ).rejects.toThrow(/violates foreign key constraint/);
   });
 
   it("refuse a repository that names an integration of another workspace, and a job a repository of another workspace", async () => {
@@ -556,13 +510,13 @@ describe("the workspace tables", () => {
           updated_at: T,
         })
         .execute(),
-    ).rejects.toThrow(/FOREIGN KEY/);
+    ).rejects.toThrow(/violates foreign key constraint/);
     await expect(
       db
         .insertInto("jobs")
         .values({ ...oldJob("jx", "r1", 9), workspace_id: "w2" })
         .execute(),
-    ).rejects.toThrow(/FOREIGN KEY/);
+    ).rejects.toThrow(/violates foreign key constraint/);
     await expect(
       db
         .insertInto("jobs")
@@ -574,13 +528,15 @@ describe("the workspace tables", () => {
   it("have the same list of roles as the code", async () => {
     const { WORKSPACE_ROLES } = await import("../workspaces/roles.ts");
     const { db } = await migrated();
-    const { rows } = await sql<{ sql: string }>`
-      select sql from sqlite_master where name = 'workspace_members'`.execute(
+    const { rows } = await sql<{ definition: string }>`
+      select pg_get_constraintdef(oid) as definition from pg_constraint
+      where conrelid = 'workspace_members'::regclass and contype = 'c'`.execute(
       db,
     );
+    const definitions = rows.map((row) => row.definition).join("\n");
 
     for (const role of WORKSPACE_ROLES)
-      expect(rows[0]?.sql).toContain(`'${role}'`);
+      expect(definitions).toContain(`'${role}'`);
     expect(WORKSPACE_ROLES).toHaveLength(3);
   });
 });
@@ -616,10 +572,10 @@ describe("migrating a big database", () => {
     expect(
       await db
         .selectFrom("jobs")
-        .select((eb) => eb.fn.count<number>("id").as("count"))
+        .select((eb) => eb.fn.count<string>("id").as("count"))
         .where("workspace_id", "is not", null)
         .executeTakeFirstOrThrow(),
-    ).toEqual({ count: 10_003 });
+    ).toEqual({ count: "10003" });
     expect(elapsed).toBeLessThan(JOB_MIGRATION_BUDGET_MS);
   });
 });
@@ -631,15 +587,21 @@ describe("a failing step of the migration", () => {
     },
   };
 
+  /** Every column of every table, as the database reports it. */
+  async function schemaOf(db: OldDb): Promise<string[]> {
+    return column(
+      db,
+      `select table_name || '.' || column_name || ' ' || data_type as value from information_schema.columns
+       where table_schema = 'public' order by 1`,
+    );
+  }
+
   // DM-13
   it("applies nothing of the batch, keeps every row where it was, and ends with MIGRATION_FAILED", async () => {
     const db = await openAtPreviousVersion();
     await seedInstallation(db);
     const before = await counts(db);
-    const schemaBefore = await column(
-      db,
-      "select sql as value from sqlite_master where sql is not null order by name",
-    );
+    const schemaBefore = await schemaOf(db);
     const provider: MigrationProvider = {
       async getMigrations() {
         return {
@@ -655,41 +617,12 @@ describe("a failing step of the migration", () => {
     await expect(run).rejects.toMatchObject({ code: "MIGRATION_FAILED" });
     await expect(run).rejects.toThrow(/99999999999999_injected_failure/);
     expect(await counts(db)).toEqual(before);
-    expect(
-      await column(
-        db,
-        "select sql as value from sqlite_master where sql is not null order by name",
-      ),
-    ).toEqual(schemaBefore);
-    expect(
-      await column(
-        db,
-        "select name as value from sqlite_master where name = 'workspaces'",
-      ),
-    ).toEqual([]);
+    expect(await schemaOf(db)).toEqual(schemaBefore);
     expect(
       await column(
         db,
         "select name as value from kysely_migration order by name",
       ),
     ).not.toContain(FIRST_WORKSPACE_MIGRATION);
-  });
-});
-
-describe("the shipped SQLite schema object order", () => {
-  // #105-PG-05
-  it("creates the integrations unique index after the repositories table, as shipped", async () => {
-    const { db } = await createTestDatabase();
-    const { rows } = await sql<{ name: string }>`
-      select name from sqlite_master
-      where type in ('table', 'index') and name not like 'sqlite_%'
-      order by rowid`.execute(db);
-    const names = rows.map((row) => row.name);
-
-    // The migration runs the Postgres-only early index on Postgres only; on SQLite the object order
-    // is exactly the shipped one (the index follows the table it was created after).
-    expect(names.indexOf("integrations_id_workspace_unique")).toBeGreaterThan(
-      names.indexOf("repositories"),
-    );
   });
 });

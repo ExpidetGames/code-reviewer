@@ -19,7 +19,7 @@ the first-run setup that creates the admin is `src/setup/`.
 | Billing                             | `/admin/billing` (#504): the switch of billing with the statement of what it does, the payment adapter (`manual` or `stripe`) with the write-only Stripe API key and webhook secret, the connection check, the webhook endpoint, the rates and numbers (A, B per kind, the Diff AI reserve, the start credit, the low-balance threshold, the hourly brake), the links to the operator's terms and privacy statement (#626; the terms link is required for Stripe) and the result of the daily journal check ("Journal check: ok / inconsistent (date)") and the manual credit and correction of any workspace; below it **Payment reviews** (`/admin/billing/reviews`, #603): the billing events that moved money and changed nothing in the ledger, to close with a note, repair with a manual credit or check at Stripe, with their count on the menu and the overview. The screens are `src/admin/ui/billing-*`, the data routes are below `/api/admin/billing` (`src/billing/admin-http.ts`), and the logic and its rules are in `src/billing/README.md` ("The billing page") |
 | GitHub                              | The Integrations page (the GitHub App, the one-click and the manual way, the sign in with GitHub, the admin's own GitHub account) is `src/github-config/`; its data routes are below `/api/admin/github`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-The command line for a lost admin password is `src/admin-cli/` (below).
+A lost admin password is reset by mail (below).
 
 ## Who gets in
 
@@ -69,8 +69,6 @@ forms call the data route, which is also where the cross-site check lives).
 
 ## The settings
 
-The overview also shows the **notice of the import** (`import_notice`, `src/legacy-import/notice.ts`) of an installation that was updated from the release before accounts, until the admin hides it (`{ "importNotice": { "dismiss": true } }` on the settings route): who was not made a member and why, the allowed logins that never signed in, the organization that is not migrated into a rule, what could not be imported (variable names only).
-
 Stored in `instance_settings` (JSON values; `updated_by` and `updated_at` on every row, shown under each
 setting). Nothing saved reads as the default.
 
@@ -92,8 +90,7 @@ value and the admin belong together.
 
 `src/workspaces/create-workspace.ts` (`createWorkspaceUnderTenancy`) is the one place that creates a
 workspace for a user: it reads the tenancy in the same transaction that inserts the workspace, and refuses
-on a single-tenant instance. The switch to single-tenant counts the workspaces in its transaction. On SQLite
-every transaction takes the write lock when it begins (`BEGIN IMMEDIATE`, set in `src/db/dialect.ts`), so the two cannot interleave and an instance never
+on a single-tenant instance. The switch to single-tenant counts the workspaces in its transaction. The two cannot interleave and an instance never
 ends up single-tenant with two workspaces (`tenancy-race.integration.test.ts` races two real processes).
 A Postgres port needs a row lock on the tenancy setting in both places.
 
@@ -132,7 +129,7 @@ identity linked to the acting admin (`github-identity.ts`: a row in `accounts`),
 `/admin/billing` is in the group of the LLM keys and is the instance admin's alone, like every page of the portal:
 `requireAdmin()` on the page and `lookupAdmin` handed to `createBillingRouteHandlers` in every data route
 (`portal-guards.test.ts` finds one that forgot it; `protection.integration.test.ts` and `guard.integration.test.ts` list the
-routes). Opening the page changes nothing and calls nobody; a self-hoster who never opens it sees no change. Nothing here is
+routes). Opening the page changes nothing and calls nobody; an admin who never opens it sees no change. Nothing here is
 served to a workspace. The Stripe API key and the webhook secret are secrets of the store above (`stripe_api_key`,
 `stripe_webhook_secret`): write-only, the answers say whether each is stored and the last four characters. The wording of every
 code is in `src/admin/ui/billing-messages.ts`; the page names no payment vendor but Stripe and no plan.
@@ -189,9 +186,7 @@ served to a workspace (`src/model-prices/visibility.test.ts` fails when anything
 
 ## A lost admin password
 
-`docker compose exec app admin reset-password <email>` (`src/admin-cli/`, the image puts the short name
-`admin` on the PATH; without it `node admin-cli/cli.ts reset-password <email>`). It prints a single-use link
-valid for 30 minutes: a random 256-bit token, stored only as a SHA-256 hash in `password_reset_tokens`. A
+A password is reset with a single-use link valid for 30 minutes: a random 256-bit token, stored only as a SHA-256 hash in `password_reset_tokens` (`src/auth/link-token.ts`). A
 new link replaces the unused ones of the account. The link opens `/reset-password`, which posts to
 `POST /api/password-reset` (`src/auth/password-reset*.ts`): the new password must pass the password rule,
 the token is used up by one statement, and every session of the account ends in the same transaction. An
@@ -201,11 +196,8 @@ are counted in `rate_limits` (key `password-reset:<hash>`, 10 in the 30 minutes 
 does not exist gets the same generic answer and touches no counter, so junk requests cannot lock the
 operator out of the recovery path. With a mail server the reset mail (`POST /api/password-reset/request`, `src/auth/password-reset-request.ts`) ends in the same function.
 
-If the admin had switched email with password sign-in off, the command switches it back on, prints one line
-saying so, and records the system (`updated_by` null) as the one who changed it: a new password is of no
-use otherwise, and the shell operator is trusted with exactly this recovery.
-
-The command runs without Next.js and imports only its own folder and better-sqlite3, like `src/backup/`.
+The link is asked for on the login page and arrives by mail, so it needs a mail server (admin portal, Mail). There is no
+command line that makes a link any more (#700).
 
 ## Tests
 
@@ -215,7 +207,7 @@ The command runs without Next.js and imports only its own folder and better-sqli
 - `http.integration.test.ts`, `service.integration.test.ts`, `tenancy.integration.test.ts`,
   `tenancy-race.integration.test.ts`: the settings, their rules, the concurrency and what is never in an
   answer or a log line. `src/secrets/store.integration.test.ts` and `secret-value.test.ts`: the store.
-- `src/admin-cli/*.test.ts`, `src/auth/password-reset.integration.test.ts`: the lost password.
+- `src/auth/password-reset.integration.test.ts`: the lost password.
   `src/auth/password-reset-expiry.integration.test.ts`: the exact 30:00 end of a link, held by the look before
   the reset and by the statement that uses the link up, each on its own (the clock answers a different instant
   to each).
@@ -226,4 +218,3 @@ The command runs without Next.js and imports only its own folder and better-sqli
 - `src/auth/access-proxy.test.ts`: the rewrite mark (random per proxy, constant-time comparison, any length
   refused) and the marking of the files by their own address. `portal-rewrites.test.ts`: the rewrites of
   `next.config.ts` (the portal's, in front of the one for a missing path).
-- The image smoke test (`docker/smoke/app.sh`) runs `admin reset-password` in the built image.

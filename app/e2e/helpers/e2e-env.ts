@@ -17,11 +17,8 @@ const signupAppPort = Number(process.env.E2E_SIGNUP_PORT) || appPort + 3;
 // The fifth app of the run, for the journeys of the workspaces in a multi-tenant instance (people create
 // workspaces and switch between them): the port after the fourth one unless E2E_MULTI_PORT says otherwise.
 const multiAppPort = Number(process.env.E2E_MULTI_PORT) || appPort + 4;
-// The app of the journey of the update from the previous release (e2e/upgrade/): the journey starts and restarts
-// it itself, on the port after the fifth app unless E2E_UPGRADE_PORT says otherwise.
-const upgradeAppPort = Number(process.env.E2E_UPGRADE_PORT) || appPort + 5;
 // The app of the journey of the operator limits (e2e/operator/, #285): multi-tenant, with the operator API on and a
-// real runner polling it. The port after the upgrade app unless E2E_OPERATOR_PORT says otherwise.
+// real Worker driver (e2e/helpers/runner-process.ts) claiming for it. The port six after the first app unless E2E_OPERATOR_PORT says otherwise.
 const operatorAppPort = Number(process.env.E2E_OPERATOR_PORT) || appPort + 6;
 // The app of the catalog journey (e2e/operator/catalog-journey.e2e.ts, #435): a fresh multi-tenant instance with the operator API on,
 // so the catalog starts empty and the admin builds it in the portal. The port after the operator app unless
@@ -78,41 +75,70 @@ process.env.E2E_MODELS_DEV_PORT ||= String(
 );
 const modelsDevFakePort = Number(process.env.E2E_MODELS_DEV_PORT);
 
+/**
+ * The Postgres server the apps under test make their databases on: `E2E_DATABASE_URL`, a URL whose user may create and
+ * drop databases (CI: the service container of the job; on a machine: any server you own). The default is the one of
+ * the usual throwaway container. Every app has a database of its own, fresh for every run
+ * (`cr_e2e_<app>_<port>`, dropped and made again by e2e/prepare-database.ts when the app starts).
+ */
+export function adminDatabaseUrl(): URL {
+  const url = new URL(
+    process.env.E2E_DATABASE_URL?.trim() ||
+      "postgres://postgres:postgres@127.0.0.1:5432/postgres",
+  );
+  // A Unix socket (the privileged lane reaches the server through one, e2e/pg-bridge.ts) names its directory as the host.
+  const local =
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "localhost" ||
+    url.hostname.toLowerCase().startsWith("%2f");
+  if (!local)
+    throw new Error(
+      "E2E_DATABASE_URL must point at this machine (127.0.0.1): a test never uses a database somewhere else.",
+    );
+  return url;
+}
+
+/** The name and the URL of the database of one app of the run. */
+export function appDatabase(app: string): { name: string; url: string } {
+  const name = `cr_e2e_${app}_${String(appPort)}`;
+  const url = adminDatabaseUrl();
+  url.pathname = `/${name}`;
+  return { name, url: url.toString() };
+}
+
 export const e2eEnv = {
   appPort,
-  /** The SQLite file of the app under test, relative to the app folder (fresh for every run). */
-  databasePath: "test-results/e2e-data/app.db",
+  /** The database of the app under test (fresh for every run). */
+  databaseUrl: appDatabase("main").url,
   githubPort,
   appUrl: `http://127.0.0.1:${appPort}`,
   pipelineAppPort,
-  /** The SQLite file of the second app, relative to the app folder (fresh for every run). */
-  pipelineDatabasePath: "test-results/e2e-pipeline-data/app.db",
+  /** The database of the second app, which runs the real review (fresh for every run). */
+  pipelineDatabaseUrl: appDatabase("pipeline").url,
   pipelineAppUrl: `http://127.0.0.1:${pipelineAppPort}`,
   setupAppPort,
-  /** The SQLite file of the third app, which the setup journey sets up (fresh for every run). */
-  setupDatabasePath: "test-results/e2e-setup-data/app.db",
+  /** The database of the third app, which the setup journey sets up (fresh for every run). */
+  setupDatabaseUrl: appDatabase("setup").url,
   setupAppUrl: `http://127.0.0.1:${setupAppPort}`,
   signupAppPort,
-  /** The SQLite file of the fourth app, which the sign-up journey uses (fresh for every run). */
-  signupDatabasePath: "test-results/e2e-signup-data/app.db",
+  /** The database of the fourth app, which the sign-up journey uses (fresh for every run). */
+  signupDatabaseUrl: appDatabase("signup").url,
   signupAppUrl: `http://127.0.0.1:${signupAppPort}`,
   multiAppPort,
-  /** The SQLite file of the fifth app, which is multi-tenant (fresh for every run). */
-  multiDatabasePath: "test-results/e2e-multi-data/app.db",
+  /** The database of the fifth app, which is multi-tenant (fresh for every run). */
+  multiDatabaseUrl: appDatabase("multi").url,
   multiAppUrl: `http://127.0.0.1:${multiAppPort}`,
-  upgradeAppPort,
-  upgradeAppUrl: `http://127.0.0.1:${upgradeAppPort}`,
   operatorAppPort,
-  /** The SQLite file of the operator app (#285), fresh for every run. */
-  operatorDatabasePath: "test-results/e2e-operator-data/app.db",
+  /** The database of the operator app (#285) (fresh for every run). */
+  operatorDatabaseUrl: appDatabase("operator").url,
   operatorAppUrl: `http://127.0.0.1:${operatorAppPort}`,
   catalogAppPort,
-  /** The SQLite file of the catalog app (#435), fresh for every run. */
-  catalogDatabasePath: "test-results/e2e-catalog-data/app.db",
+  /** The database of the catalog app (#435) (fresh for every run). */
+  catalogDatabaseUrl: appDatabase("catalog").url,
   catalogAppUrl: `http://127.0.0.1:${catalogAppPort}`,
   catalogAdminAppPort,
-  /** The SQLite file of the catalog admin app (#554), fresh for every run. */
-  catalogAdminDatabasePath: "test-results/e2e-catalog-admin-data/app.db",
+  /** The database of the catalog admin app (#554) (fresh for every run). */
+  catalogAdminDatabaseUrl: appDatabase("catalog_admin").url,
   catalogAdminAppUrl: `http://127.0.0.1:${catalogAdminAppPort}`,
   stripeFakePort,
   /** The fake Stripe (`fakes/stripe`): the address of the catalog admin app's Stripe API calls (`STRIPE_API_BASE_URL`, test stack only). */
@@ -142,11 +168,7 @@ export const e2eEnv = {
     user: "e2e-mailer",
     password: "e2e-smtp-password-0123456789",
   },
-  /**
-   * Where each app's output goes (relative to the app folder). The first-run setup prints its code
-   * in the log only, so the journeys read it from there, the way an operator reads `docker compose
-   * logs`. The files are fresh for every run.
-   */
+  /** Where each app's output goes (relative to the app folder). The files are fresh for every run. */
   logFiles: {
     app: "test-results/e2e-app.log",
     pipeline: "test-results/e2e-pipeline.log",
@@ -209,19 +231,3 @@ export function githubAppPrivateKey(): string {
     throw new Error("playwright.config.ts did not make the GitHub App key.");
   return key;
 }
-
-/**
- * What the journey of the update from the previous release (e2e/upgrade/) needs besides the shared values: where
- * its files are (relative to the app folder, fresh for every run) and the secrets of the installation that is
- * updated. The master key is the one the previous release ran with (`BETTER_AUTH_SECRET`); the LLM key is the
- * one of its environment. Dummies that must never show up in a log.
- */
-export const upgradeEnv = {
-  directory: "test-results/e2e-upgrade",
-  databasePath: "test-results/e2e-upgrade/data/app.db",
-  backupDir: "test-results/e2e-upgrade/backups",
-  legacySecret: "e2e-legacy-better-auth-secret-0123456789-abcdef",
-  llmKey: "e2e-legacy-llm-key-0123456789-0123456789-abcdef",
-  oauthClientId: "e2e-legacy-oauth-client-id",
-  oauthClientSecret: "e2e-legacy-oauth-client-secret-0123456789",
-};

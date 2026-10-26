@@ -76,7 +76,7 @@ addresses.
 ## Tests
 
 Unit: `start-input.test.ts`, `ui/*.test.ts(x)`. Integration: `service.integration.test.ts` (real
-SQLite, the real GitHub App provider and client against the fake GitHub, the real queue),
+Postgres, the real GitHub App provider and client against the fake GitHub, the real queue),
 `http.integration.test.ts` (the handlers), `integration-tests/http/manual-review-route.integration.test.ts`
 (the access proxy in front), `integration-tests/http/manual-review-route-file.integration.test.ts` (the
 real route files). Journeys: `e2e/reviews/manual-start.e2e.ts`; the runner is stood in for by the job

@@ -4,13 +4,10 @@
 // installation (a start-up sync and a webhook, say) must not interleave: each reads GitHub's current
 // list inside the lock, so the one that runs last also saw the newest list.
 //
-// On SQLite the lock is in-process (`sharedKeyedLock`, kept on `globalThis`): the single writer and
-// `begin immediate` already serialize writers across processes. On Postgres several app instances run
-// at once, so the lock is in the database: `createPostgresKeyedLock` holds a session-level advisory
-// lock keyed on the installation, on a connection of its own, which every instance sees.
-// `defaultKeyedLock` picks.
+// Several app instances run at once, so the lock is in the database: `createPostgresKeyedLock` holds a
+// session-level advisory lock keyed on the installation, on a connection of its own, which every instance
+// sees. `createKeyedLock` is the in-process version that tests with one process use.
 import type { Kysely } from "kysely";
-import { databaseDriver } from "../../db/driver.ts";
 import { withPostgresAdvisoryLock } from "../../db/postgres.ts";
 import type { Database } from "../../db/schema.ts";
 
@@ -35,21 +32,8 @@ export function createKeyedLock(): KeyedLock {
   };
 }
 
-// One lock for the whole process. Next.js may load `instrumentation.ts` and the route handlers as
-// separate module graphs, each with its own copy of this module, so the lock lives on `globalThis`
-// (like the database connection): the start-up sync, a webhook and the button all queue on it.
-const SHARED_LOCK = Symbol.for("code-reviewer.integration-sync-lock");
-
-export function sharedKeyedLock(): KeyedLock {
-  const holder = globalThis as typeof globalThis & {
-    [SHARED_LOCK]?: KeyedLock;
-  };
-  holder[SHARED_LOCK] ??= createKeyedLock();
-  return holder[SHARED_LOCK];
-}
-
 /**
- * The database lock of the large topology: a session-level Postgres advisory lock keyed on
+ * The database lock: a session-level Postgres advisory lock keyed on
  * `hashtextextended(key, 0)` (the installation). Two app instances that take the same key run one
  * after the other, whichever process they are in. The lock is held on a dedicated connection of its
  * own (`withPostgresAdvisoryLock`), never the main pool: the job keeps doing its own database work
@@ -64,9 +48,7 @@ export function createPostgresKeyedLock(db: Kysely<Database>): KeyedLock {
   };
 }
 
-/** The lock a service on this connection uses: the advisory lock on Postgres, the shared one on SQLite. */
+/** The lock a service on this connection uses: the advisory lock. */
 export function defaultKeyedLock(db: Kysely<Database>): KeyedLock {
-  return databaseDriver(db) === "postgres"
-    ? createPostgresKeyedLock(db)
-    : sharedKeyedLock();
+  return createPostgresKeyedLock(db);
 }

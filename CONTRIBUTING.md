@@ -14,7 +14,7 @@ The rest of this file is the workflow of the team that develops the service.
 ## Set up the development environment
 
 You need Node.js 24 or newer with pnpm 10 (`corepack enable` is enough), [uv](https://docs.astral.sh/uv/)
-0.5 or newer, and `make`. Docker is only needed for the image and stack smoke tests below.
+0.5 or newer, and `make`. Docker is needed for the image smoke test below, and to run a throwaway Postgres for the integration and browser tests.
 
 ```sh
 git clone https://github.com/Itegro-GmbH/code-reviewer.git
@@ -24,7 +24,7 @@ make install
 
 `make install` installs the app (`app/`, Next.js, TypeScript, pnpm) and the runner (`runner/`,
 Python, uv) from their lockfiles. The [README](README.md) explains how to run the app and the
-runner locally, which settings they need, and how to build the container images. Use your own
+runner locally, which settings they need, and how to build the container image. Use your own
 port for the dev server (`pnpm dev --port 3417`) so that you do not clash with other processes.
 
 ## Tests
@@ -42,9 +42,9 @@ make verify
 - Prove each behavior at the lowest level that can show it, and at one level only.
 - Write the failing test first, then the code. A bug fix starts with a test that is red before
   the fix.
-- Levels, from cheap to expensive: unit tests, integration tests (real SQLite file, real
+- Levels, from cheap to expensive: unit tests, integration tests (real Postgres database, real
   processes and sockets on loopback), contract tests (the runner API), engine tests (the real
-  PR-Agent against fakes), image and stack smoke tests, and end-to-end tests with Playwright.
+  PR-Agent against fakes), the image smoke test, and end-to-end tests with Playwright.
   TESTING.md lists what belongs where and which tests a type of change needs.
 - No automated test calls a real service. There is no real GitHub, no real model and no internet in
   tests: the fakes in `fakes/` replace them. No secret belongs in a test, a log or a fixture.
@@ -65,8 +65,7 @@ pull requests that touch the matching parts:
 |---|---|---|
 | `make test-engine` | you change the runner, the PR-Agent version or its settings | internet once (a tokenizer file), about 4 minutes |
 | `make test-e2e` | you change a user flow in the web UI | a browser (`PLAYWRIGHT_CHANNEL=chrome` uses an installed Chrome) |
-| `make test-images` | you change a Dockerfile, or the app or runner in a way that affects the image | Docker |
-| `make test-compose` | you change `compose.yml` or how the app and runner start together | Docker |
+| `make test-images` | you change the Dockerfile, or the runner in a way that affects the image | Docker |
 
 ## Branches, commits and pull requests
 

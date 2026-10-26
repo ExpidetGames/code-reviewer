@@ -4,17 +4,12 @@
 // src/llm/http.ts are replaced by ones that answer 200 to everyone, so a Member is refused only if the route file
 // itself asks for `manage_llm_key`. The handlers repeat that check (llm-keys-route.integration.test.ts covers it);
 // this test is for the day a refactor drops that second line and the route files stand alone.
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createWorkspacesRepository } from "../../src/db/repositories/workspaces-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
 
 const session = vi.hoisted(() => ({
@@ -59,9 +54,7 @@ type RouteFile = Record<"GET" | "PUT" | "DELETE" | "POST", Handler | undefined>;
 
 async function start() {
   vi.stubEnv("APP_SECRET", APP_SECRET);
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   vi.resetModules();
   const db = getDatabase();
   const alpha = await createWorkspacesRepository(db).create({

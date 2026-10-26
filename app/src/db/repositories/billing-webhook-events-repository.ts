@@ -2,8 +2,7 @@
 
 // The record of provider events, by `(provider, event id)` (table `billing_webhook_events`; ADR 0006, 2.12). The first
 // idempotency layer: an event id is claimed inside the transaction that applies it, so two deliveries of one event, even
-// at the same moment, apply it once (the second waits for the first on Postgres and finds its outcome; SQLite has one
-// writer). The row holds an id, an outcome and, for a refund or a dispute, the order of its states: no payload, no
+// at the same moment, apply it once (the second waits for the first and finds its outcome). The row holds an id, an outcome and, for a refund or a dispute, the order of its states: no payload, no
 // amount, nothing of the customer, which is why the table is instance level (src/db/repositories/scoping.test.ts).
 //
 // An event that moved money (or claimed to) and changed nothing in the ledger is recorded with `review_state = 'open'`

@@ -2,8 +2,8 @@
 
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are
 // stripped; `--conditions=react-server` lets `server-only` pass) to act on the job queue of the app
-// under test the way the running app and a runner do: through the real job queue on the app's SQLite
-// file, never by writing rows. The app is a separate process with the same file open (WAL), so what
+// under test the way the running app and a runner do: through the real job queue on the app's
+// database, never by writing rows. The app is a separate process with the same database open, so what
 // happens here shows up in the pages through the app's own reads.
 //
 //   enqueue  <db> <json>   {repository: "owner/name", ...EnqueueJobInput without repositoryId}
@@ -11,22 +11,18 @@
 //   complete <db> <json>   {jobId, leaseToken, outcome}      -> the CompleteResult
 //
 // Every command prints one JSON line. The id of a repository is looked up by its name.
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue } from "../jobs/runner-queue.ts";
 import type { EnqueueJobInput, JobOutcome } from "../jobs/job-types.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 
-const [command, databasePath, argument] = process.argv.slice(2);
-if (!command || !databasePath || !argument)
+const [command, databaseUrl, argument] = process.argv.slice(2);
+if (!command || !databaseUrl || !argument)
   throw new Error("Usage: e2e-queue-child.ts <command> <db> <json>");
 
-const db = openDatabase({
-  driver: "sqlite",
-  path: databasePath,
-  busyTimeoutMs: 5000,
-});
+const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
 try {
   const workspaceId = await defaultWorkspaceId(db);
   const queue = {

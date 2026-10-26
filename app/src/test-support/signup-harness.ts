@@ -3,7 +3,7 @@
 // The sign-up and the email verification assembled for integration tests: an instance set up through the
 // real first-run setup (so the instance admin is made by the same code as in production), the real
 // Better Auth, a mail double that keeps an outbox and can be switched between "mail server" and "none",
-// the real counters over a real SQLite file, and the real route handlers. Requests are real `Request`
+// the real counters over a real Postgres database, and the real route handlers. Requests are real `Request`
 // objects with a JSON body, the way a browser sends them; nothing listens on a port.
 import {
   createInstanceSettingsRepository,

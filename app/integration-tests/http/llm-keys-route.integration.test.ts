@@ -4,25 +4,20 @@
 // the real route files with the wiring the running server uses. The old `/llm-key` routes stay as an alias for
 // the default provider and are pinned down by llm-key-route.integration.test.ts; here: the new routes by role
 // and workspace, the alias beside them, the shared limit of the test button and that no key is ever shown.
-import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createWorkspacesRepository } from "../../src/db/repositories/workspaces-repository.ts";
-import {
-  closeDatabase,
-  getDatabase,
-  initializeDatabaseOnStart,
-} from "../../src/db/startup.ts";
+import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { createModelsDevRepository } from "../../src/db/repositories/models-dev-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { KEY_TEST_WORKSPACE_MAX } from "../../src/llm/key-test.ts";
 import { seedRepositories } from "../../src/test-support/review-settings-harness.ts";
 import { LlmAccessSection } from "../../src/llm/ui/llm-access-section.tsx";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
-import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
 
 const session = vi.hoisted(() => ({
@@ -61,9 +56,7 @@ async function start() {
   vi.stubEnv("APP_SECRET", APP_SECRET);
   vi.stubEnv("LLM_API_BASE_URL", fake.baseUrl);
   vi.stubEnv("ALLOW_TEST_LLM_ENDPOINTS", "true");
-  await initializeDatabaseOnStart({
-    env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
-  });
+  await openRouteTestDatabase();
   vi.resetModules();
   const db = getDatabase();
   const workspaces = createWorkspacesRepository(db);

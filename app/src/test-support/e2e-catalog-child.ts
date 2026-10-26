@@ -2,7 +2,7 @@
 
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are stripped;
 // `--conditions=react-server` lets `server-only` pass) to fill the model catalog of the app under test the way the
-// admin portal will: through the real catalog service on the app's SQLite file, never by writing rows. The provider's
+// admin portal will: through the real catalog service on the app's database, never by writing rows. The provider's
 // metadata check is answered "supported" here (the journey has no provider to ask), everything else is the service's
 // own rules. The app is a separate process with the same file open (WAL), so the entries show up in its pages.
 //
@@ -10,18 +10,14 @@
 //   defaults <db> <json>   {diff: <entry id> | null, dynamic: <entry id> | null}          -> {defaults: {diff, dynamic}}
 //
 // Every entry is created for the default provider and released. Prints one JSON line.
-import { openDatabase } from "../db/connection.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { DEFAULT_LLM_PROVIDER } from "../llm/providers/index.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 
-const [command, databasePath, argument] = process.argv.slice(2);
-if (
-  (command !== "seed" && command !== "defaults") ||
-  !databasePath ||
-  !argument
-)
+const [command, databaseUrl, argument] = process.argv.slice(2);
+if ((command !== "seed" && command !== "defaults") || !databaseUrl || !argument)
   throw new Error("Usage: e2e-catalog-child.ts seed|defaults <db> <json>");
 
 type Seed = {
@@ -32,11 +28,7 @@ type Seed = {
   sortOrder?: number;
 };
 
-const db = openDatabase({
-  driver: "sqlite",
-  path: databasePath,
-  busyTimeoutMs: 5000,
-});
+const db = openPostgresDatabase({ url: databaseUrl, poolMax: 2 });
 try {
   const service = createCatalogService({
     catalog: createCatalogRepository(db),

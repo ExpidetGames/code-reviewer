@@ -5,9 +5,8 @@
 import { sql } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "../connection.ts";
 import { migrateToLatest } from "../migrate.ts";
-import { createTestDirectory } from "../../test-support/test-database.ts";
+import { createEmptyTestDatabase } from "../../test-support/test-database.ts";
 import { migrationProvider } from "./index.ts";
 import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
@@ -36,12 +35,7 @@ describe("the model decisions migration", () => {
       "20261019200000_create_models_dev_catalog",
     );
 
-    const directory = await createTestDirectory();
-    const db = openDatabase({
-      driver: "sqlite",
-      path: `${directory}/app.db`,
-      busyTimeoutMs: 5000,
-    });
+    const { db } = await createEmptyTestDatabase();
     await migrateToLatest(db, beforeThisMigration);
     await db
       .insertInto("workspaces")
@@ -71,7 +65,7 @@ describe("the model decisions migration", () => {
       expect(await tables()).toContain(name);
       const { rows } = await sql<{
         count: number;
-      }>`select count(*) as count from ${sql.table(name)}`.execute(db);
+      }>`select count(*)::int as count from ${sql.table(name)}`.execute(db);
       expect(rows).toEqual([{ count: 0 }]);
     }
     await db.destroy();

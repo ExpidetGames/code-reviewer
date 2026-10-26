@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The key mode at the claim (#496): the admission and the check of the balance work with the key mode that applies. While billing is
-// off that is the entitlement's, whatever the workspace chose (nothing changes for a self-hoster); while billing is on it is the
-// workspace's choice, our models by default. The rest of the entitlements (suspension, cost limits) is enforced either way. On SQLite
-// (the claim is the same code on both databases; `claim-billing.integration.test.ts` runs the balance on Postgres too).
+// off that is the entitlement's, whatever the workspace chose; while billing is on it is the
+// workspace's choice, our models by default. The rest of the entitlements (suspension, cost limits) is enforced either way.
 import { describe, expect, it } from "vitest";
 import { createLlmKeyModeStore } from "../llm/key-mode-store.ts";
 import { createWorkspaceEntitlementsRepository } from "../db/repositories/workspace-entitlements-repository.ts";

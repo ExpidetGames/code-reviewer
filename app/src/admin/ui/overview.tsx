@@ -23,7 +23,6 @@ import { llmProviderDescriptors } from "../../llm/providers/index.ts";
 import { CATALOG_KINDS } from "../../model-catalog/entries.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
-import { ImportNotice } from "./import-notice.tsx";
 import { FAIL_CLOSED_TITLE, failClosedAttention } from "./notices.tsx";
 
 type RowStatus = "ok" | "warn";
@@ -350,9 +349,6 @@ export function Overview({
           </ul>
         </CardContent>
       </Card>
-      {settings.importNotice !== null ? (
-        <ImportNotice notice={settings.importNotice} />
-      ) : null}
     </>
   );
 }

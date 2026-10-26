@@ -3,8 +3,7 @@
 Issue #196 supplies trusted preparation in
 `runner/src/code_reviewer_runner/dynamic_review/`. It launches no OpenCode engine and does not
 advertise `opencode`, enable the instance gate, compose a prompt or publish a comment. Those
-boundaries are #197–#202. The default runner image runs as its existing non-root runner user; the
-`dynamic` image target run by `compose.dynamic.yml` supplies the root supervisor and the dedicated
+boundaries are #197–#202. The Worker image run with the flags of the hardened container spec supplies the root supervisor and the dedicated
 engine user (#202) that this preparation is used under.
 
 ## Integration and lifetime

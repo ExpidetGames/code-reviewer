@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The admin's price confirmation and enablement of catalog models (#549), end to end over a real database on both engines,
+// The admin's price confirmation and enablement of catalog models (#549), end to end over a real database,
 // with the catalog filled by the real fetch against the models.dev fake: a confirmation is kept and compared with today's
 // reference price, a changed price makes it stale, a confirmation racing the daily fetch is never lost and never confirms
 // a price the admin did not see, and every write leaves one audit line.
@@ -50,8 +50,6 @@ const SONNET = { providerId: "anthropic", modelId: "claude-sonnet-5-5" };
 const DEEPSEEK = { providerId: "deepseek", modelId: "deepseek-v4-pro" };
 
 describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
-  const it_ = engine.skip ? it.skip : it;
-
   async function setup(
     options: {
       overrides?: Record<string, ModelOverride>;
@@ -120,72 +118,66 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
 
   describe("the view", () => {
     // #549-T02
-    it_(
-      "shows each model with its price status, its sources and its reference hash",
-      async () => {
-        const t = await setup();
+    it("shows each model with its price status, its sources and its reference hash", async () => {
+      const t = await setup();
 
-        const model = await view(t);
+      const model = await view(t);
 
-        expect(model).toMatchObject({
-          providerId: "anthropic",
-          modelId: "claude-sonnet-5-5",
-          enabled: null,
-          price: {
-            status: "unconfirmed",
-            book: {
-              input: "2000000",
-              output: "10000000",
-              cacheRead: "100000",
-              cacheWrite5m: "2500000",
-              cacheWrite1h: null,
-            },
-            reference: { hash: expect.stringMatching(/^v2:[0-9a-f]{64}$/) },
-            confirmation: null,
+      expect(model).toMatchObject({
+        providerId: "anthropic",
+        modelId: "claude-sonnet-5-5",
+        enabled: null,
+        price: {
+          status: "unconfirmed",
+          book: {
+            input: "2000000",
+            output: "10000000",
+            cacheRead: "100000",
+            cacheWrite5m: "2500000",
+            cacheWrite1h: null,
           },
-          managed: { selectable: false, reason: "model_not_enabled" },
-        });
-        expect(model.price.sources).toMatchObject({
-          input: "catalog",
-          cacheWrite1h: null,
-        });
-      },
-    );
+          reference: { hash: expect.stringMatching(/^v2:[0-9a-f]{64}$/) },
+          confirmation: null,
+        },
+        managed: { selectable: false, reason: "model_not_enabled" },
+      });
+      expect(model.price.sources).toMatchObject({
+        input: "catalog",
+        cacheWrite1h: null,
+      });
+    });
 
     // #549-T03
-    it_(
-      "takes the 1-hour cache write from the committed override file",
-      async () => {
-        const fake = await startModelsDevFake();
-        fakes.push(fake);
-        const { db } = await engine.create();
-        await createModelsDevService({
-          db,
-          settings: () => ({ enabled: true, url: fake.url, warnings: [] }),
-          resolveHost: PUBLIC,
-          now: () => T1,
-          log: { info: () => undefined, error: () => undefined },
-        }).refresh();
-        const service = createModelPriceService({
-          db,
-          now: () => T1,
-          log: { info: () => undefined },
-        });
+    it("takes the 1-hour cache write from the committed override file", async () => {
+      const fake = await startModelsDevFake();
+      fakes.push(fake);
+      const { db } = await engine.create();
+      await createModelsDevService({
+        db,
+        settings: () => ({ enabled: true, url: fake.url, warnings: [] }),
+        resolveHost: PUBLIC,
+        now: () => T1,
+        log: { info: () => undefined, error: () => undefined },
+      }).refresh();
+      const service = createModelPriceService({
+        db,
+        now: () => T1,
+        log: { info: () => undefined },
+      });
 
-        const result = await service.get("anthropic", "claude-sonnet-5-5");
+      const result = await service.get("anthropic", "claude-sonnet-5-5");
 
-        expect(result).toMatchObject({
-          ok: true,
-          model: { price: { book: { cacheWrite1h: "4000000" } } },
-        });
-        expect(result.ok && result.model.price.sources?.cacheWrite1h).toBe(
-          "override",
-        );
-      },
-    );
+      expect(result).toMatchObject({
+        ok: true,
+        model: { price: { book: { cacheWrite1h: "4000000" } } },
+      });
+      expect(result.ok && result.model.price.sources?.cacheWrite1h).toBe(
+        "override",
+      );
+    });
 
     // #549-T02
-    it_("shows a model the catalog does not price as unpriced", async () => {
+    it("shows a model the catalog does not price as unpriced", async () => {
       const t = await setup();
       await t.fetchChanged((body) => {
         delete body.deepseek!.models["deepseek-v4-pro"]!.cost;
@@ -197,141 +189,125 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T06
-    it_(
-      "calls a model new when it appeared after the first fetch and nobody decided on it",
-      async () => {
-        const t = await setup();
-        expect((await t.service.list({})).newCount).toBe(0);
-        await t.fetchChanged((body) => {
-          body.deepseek!.models["deepseek-v5"] = {
+    it("calls a model new when it appeared after the first fetch and nobody decided on it", async () => {
+      const t = await setup();
+      expect((await t.service.list({})).newCount).toBe(0);
+      await t.fetchChanged((body) => {
+        body.deepseek!.models["deepseek-v5"] = {
+          ...body.deepseek!.models["deepseek-v4-pro"],
+          id: "deepseek-v5",
+          name: "DeepSeek V5",
+        };
+      });
+
+      const list = await t.service.list({});
+
+      expect(list.newCount).toBe(1);
+      expect(list.models.find((m) => m.modelId === "deepseek-v5")?.isNew).toBe(
+        true,
+      );
+      expect(
+        list.models.find((m) => m.modelId === "deepseek-v4-pro")?.isNew,
+      ).toBe(false);
+      expect(
+        (await t.service.list({ onlyNew: true })).models.map((m) => m.modelId),
+      ).toEqual(["deepseek-v5"]);
+    });
+
+    // #549-T06
+    it("stops calling a model new once the admin enabled or disabled it, whichever", async () => {
+      const t = await setup();
+      await t.fetchChanged((body) => {
+        for (const id of ["a-new", "b-new"])
+          body.deepseek!.models[id] = {
             ...body.deepseek!.models["deepseek-v4-pro"],
-            id: "deepseek-v5",
-            name: "DeepSeek V5",
+            id,
+            name: id,
           };
-        });
+      });
+      expect((await t.service.list({})).newCount).toBe(2);
 
-        const list = await t.service.list({});
+      await t.service.setEnabled(ADMIN, {
+        providerId: "deepseek",
+        modelId: "a-new",
+        enabled: true,
+      });
+      await t.service.setEnabled(ADMIN, {
+        providerId: "deepseek",
+        modelId: "b-new",
+        enabled: false,
+      });
 
-        expect(list.newCount).toBe(1);
-        expect(
-          list.models.find((m) => m.modelId === "deepseek-v5")?.isNew,
-        ).toBe(true);
-        expect(
-          list.models.find((m) => m.modelId === "deepseek-v4-pro")?.isNew,
-        ).toBe(false);
-        expect(
-          (await t.service.list({ onlyNew: true })).models.map(
-            (m) => m.modelId,
-          ),
-        ).toEqual(["deepseek-v5"]);
-      },
-    );
+      expect((await t.service.list({})).newCount).toBe(0);
+    });
 
     // #549-T06
-    it_(
-      "stops calling a model new once the admin enabled or disabled it, whichever",
-      async () => {
-        const t = await setup();
-        await t.fetchChanged((body) => {
-          for (const id of ["a-new", "b-new"])
-            body.deepseek!.models[id] = {
-              ...body.deepseek!.models["deepseek-v4-pro"],
-              id,
-              name: id,
-            };
-        });
-        expect((await t.service.list({})).newCount).toBe(2);
+    it("calls a decided model new again when the admin resets the decision, and does not select it", async () => {
+      const t = await setup();
+      await t.fetchChanged((body) => {
+        for (const id of ["a-new", "b-new"])
+          body.deepseek!.models[id] = {
+            ...body.deepseek!.models["deepseek-v4-pro"],
+            id,
+            name: id,
+          };
+      });
+      const a = { providerId: "deepseek", modelId: "a-new" };
+      const b = { providerId: "deepseek", modelId: "b-new" };
+      await t.service.setEnabled(ADMIN, { ...a, enabled: true });
+      await t.service.setEnabled(ADMIN, { ...b, enabled: false });
+      expect((await t.service.list({})).newCount).toBe(0);
+      t.lines.length = 0;
 
-        await t.service.setEnabled(ADMIN, {
-          providerId: "deepseek",
-          modelId: "a-new",
-          enabled: true,
-        });
-        await t.service.setEnabled(ADMIN, {
-          providerId: "deepseek",
-          modelId: "b-new",
-          enabled: false,
-        });
+      const resetA = await t.service.resetDecision(ADMIN, a);
+      const resetB = await t.service.resetDecision(ADMIN, b);
 
-        expect((await t.service.list({})).newCount).toBe(0);
-      },
-    );
-
-    // #549-T06
-    it_(
-      "calls a decided model new again when the admin resets the decision, and does not select it",
-      async () => {
-        const t = await setup();
-        await t.fetchChanged((body) => {
-          for (const id of ["a-new", "b-new"])
-            body.deepseek!.models[id] = {
-              ...body.deepseek!.models["deepseek-v4-pro"],
-              id,
-              name: id,
-            };
-        });
-        const a = { providerId: "deepseek", modelId: "a-new" };
-        const b = { providerId: "deepseek", modelId: "b-new" };
-        await t.service.setEnabled(ADMIN, { ...a, enabled: true });
-        await t.service.setEnabled(ADMIN, { ...b, enabled: false });
-        expect((await t.service.list({})).newCount).toBe(0);
-        t.lines.length = 0;
-
-        const resetA = await t.service.resetDecision(ADMIN, a);
-        const resetB = await t.service.resetDecision(ADMIN, b);
-
-        expect(resetA).toMatchObject({
-          ok: true,
-          model: { enabled: null, enablement: null, isNew: true },
-        });
-        expect(resetB).toMatchObject({ ok: true, model: { isNew: true } });
-        expect((await t.service.list({})).newCount).toBe(2);
-        expect(await t.service.availability("deepseek", "a-new")).toMatchObject(
-          { selectable: false, reason: "model_not_enabled" },
-        );
-        expect(t.lines).toEqual([
-          `model prices: MODEL_DECISION_RESET by=${ADMIN} model=deepseek/a-new`,
-          `model prices: MODEL_DECISION_RESET by=${ADMIN} model=deepseek/b-new`,
-        ]);
-      },
-    );
+      expect(resetA).toMatchObject({
+        ok: true,
+        model: { enabled: null, enablement: null, isNew: true },
+      });
+      expect(resetB).toMatchObject({ ok: true, model: { isNew: true } });
+      expect((await t.service.list({})).newCount).toBe(2);
+      expect(await t.service.availability("deepseek", "a-new")).toMatchObject({
+        selectable: false,
+        reason: "model_not_enabled",
+      });
+      expect(t.lines).toEqual([
+        `model prices: MODEL_DECISION_RESET by=${ADMIN} model=deepseek/a-new`,
+        `model prices: MODEL_DECISION_RESET by=${ADMIN} model=deepseek/b-new`,
+      ]);
+    });
 
     // #549-T06
-    it_(
-      "keeps the price confirmation when a decision is reset, so enabling again needs nothing more",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+    it("keeps the price confirmation when a decision is reset, so enabling again needs nothing more", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
 
-        await t.service.resetDecision(ADMIN, SONNET);
+      await t.service.resetDecision(ADMIN, SONNET);
 
-        expect((await view(t)).price.status).toBe("confirmed");
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({ selectable: true });
-      },
-    );
+      expect((await view(t)).price.status).toBe("confirmed");
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({ selectable: true });
+    });
 
     // #549-T06
-    it_(
-      "resets a model without a decision to nothing and writes no audit line",
-      async () => {
-        const t = await setup();
+    it("resets a model without a decision to nothing and writes no audit line", async () => {
+      const t = await setup();
 
-        const result = await t.service.resetDecision(ADMIN, SONNET);
+      const result = await t.service.resetDecision(ADMIN, SONNET);
 
-        expect(result).toMatchObject({ ok: true, model: { enabled: null } });
-        expect(t.lines).toEqual([]);
-      },
-    );
+      expect(result).toMatchObject({ ok: true, model: { enabled: null } });
+      expect(t.lines).toEqual([]);
+    });
 
     // #549-T10
-    it_.each([
+    it.each([
       [
         "a model the catalog does not have",
         { providerId: "deepseek", modelId: "nobody" },
@@ -349,50 +325,47 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T06
-    it_(
-      "filters by provider, search text, price status, enablement and page",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.service.setEnabled(ADMIN, { ...DEEPSEEK, enabled: false });
+    it("filters by provider, search text, price status, enablement and page", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.service.setEnabled(ADMIN, { ...DEEPSEEK, enabled: false });
 
-        const ids = async (query: Parameters<typeof t.service.list>[0]) =>
-          (await t.service.list(query)).models.map(
-            (m) => `${m.providerId}/${m.modelId}`,
-          );
+      const ids = async (query: Parameters<typeof t.service.list>[0]) =>
+        (await t.service.list(query)).models.map(
+          (m) => `${m.providerId}/${m.modelId}`,
+        );
 
-        expect(await ids({ provider: "anthropic" })).toEqual(
-          expect.arrayContaining(["anthropic/claude-sonnet-5-5"]),
-        );
-        expect(
-          (await ids({ provider: "anthropic" })).every((id) =>
-            id.startsWith("anthropic/"),
-          ),
-        ).toBe(true);
-        expect(await ids({ search: "SONNET-5" })).toEqual([
-          "anthropic/claude-sonnet-5-5",
-        ]);
-        expect(await ids({ enabled: "yes" })).toEqual([
-          "anthropic/claude-sonnet-5-5",
-        ]);
-        expect(await ids({ enabled: "no" })).toEqual([
-          "deepseek/deepseek-v4-pro",
-        ]);
-        expect((await ids({ enabled: "undecided" })).length).toBeGreaterThan(2);
-        expect((await t.service.list({ priceStatus: "confirmed" })).total).toBe(
-          0,
-        );
-        const all = await t.service.list({});
-        const page = await t.service.list({ limit: 2, offset: 1 });
-        expect(page.total).toBe(all.total);
-        expect(page.models.map((m) => m.modelId)).toEqual(
-          all.models.slice(1, 3).map((m) => m.modelId),
-        );
-      },
-    );
+      expect(await ids({ provider: "anthropic" })).toEqual(
+        expect.arrayContaining(["anthropic/claude-sonnet-5-5"]),
+      );
+      expect(
+        (await ids({ provider: "anthropic" })).every((id) =>
+          id.startsWith("anthropic/"),
+        ),
+      ).toBe(true);
+      expect(await ids({ search: "SONNET-5" })).toEqual([
+        "anthropic/claude-sonnet-5-5",
+      ]);
+      expect(await ids({ enabled: "yes" })).toEqual([
+        "anthropic/claude-sonnet-5-5",
+      ]);
+      expect(await ids({ enabled: "no" })).toEqual([
+        "deepseek/deepseek-v4-pro",
+      ]);
+      expect((await ids({ enabled: "undecided" })).length).toBeGreaterThan(2);
+      expect((await t.service.list({ priceStatus: "confirmed" })).total).toBe(
+        0,
+      );
+      const all = await t.service.list({});
+      const page = await t.service.list({ limit: 2, offset: 1 });
+      expect(page.total).toBe(all.total);
+      expect(page.models.map((m) => m.modelId)).toEqual(
+        all.models.slice(1, 3).map((m) => m.modelId),
+      );
+    });
 
     // #549-T11
-    it_("carries the state of the last fetch", async () => {
+    it("carries the state of the last fetch", async () => {
       const t = await setup();
 
       expect((await t.service.list({})).fetch).toMatchObject({
@@ -402,22 +375,19 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T10
-    it_(
-      "answers model_unknown for a model the catalog does not have",
-      async () => {
-        const t = await setup();
+    it("answers model_unknown for a model the catalog does not have", async () => {
+      const t = await setup();
 
-        expect(await t.service.get("anthropic", "nobody")).toEqual({
-          ok: false,
-          code: "model_unknown",
-        });
-      },
-    );
+      expect(await t.service.get("anthropic", "nobody")).toEqual({
+        ok: false,
+        code: "model_unknown",
+      });
+    });
   });
 
   describe("enablement", () => {
     // #549-T06
-    it_("enables and disables a model and keeps who and when", async () => {
+    it("enables and disables a model and keeps who and when", async () => {
       const t = await setup();
 
       const enabled = await t.service.setEnabled(ADMIN, {
@@ -444,7 +414,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T10
-    it_.each([
+    it.each([
       ["a missing flag", { ...SONNET }],
       ["a flag that is text", { ...SONNET, enabled: "yes" }],
       [
@@ -463,41 +433,38 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T10
-    it_(
-      "refuses a model the catalog does not have, and enabling a model the override file blocks",
-      async () => {
-        const t = await setup({
-          overrides: {
-            "anthropic/claude-sonnet-5-5": {
-              reason: "Blocked.",
-              cacheWrite1h: null,
-              retiresNotBefore: null,
-              blocked: true,
-            },
+    it("refuses a model the catalog does not have, and enabling a model the override file blocks", async () => {
+      const t = await setup({
+        overrides: {
+          "anthropic/claude-sonnet-5-5": {
+            reason: "Blocked.",
+            cacheWrite1h: null,
+            retiresNotBefore: null,
+            blocked: true,
           },
-        });
+        },
+      });
 
-        expect(
-          await t.service.setEnabled(ADMIN, {
-            providerId: "anthropic",
-            modelId: "nobody",
-            enabled: true,
-          }),
-        ).toEqual({
-          ok: false,
-          code: "model_unknown",
-        });
-        expect(
-          await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true }),
-        ).toMatchObject({
-          ok: false,
-          code: "model_blocked",
-        });
-        expect(
-          await t.service.setEnabled(ADMIN, { ...SONNET, enabled: false }),
-        ).toMatchObject({ ok: true });
-      },
-    );
+      expect(
+        await t.service.setEnabled(ADMIN, {
+          providerId: "anthropic",
+          modelId: "nobody",
+          enabled: true,
+        }),
+      ).toEqual({
+        ok: false,
+        code: "model_unknown",
+      });
+      expect(
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true }),
+      ).toMatchObject({
+        ok: false,
+        code: "model_blocked",
+      });
+      expect(
+        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: false }),
+      ).toMatchObject({ ok: true });
+    });
   });
 
   describe("confirming a price", () => {
@@ -508,166 +475,151 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
       });
 
     // #549-T04
-    it_(
-      "confirms the price as shown and keeps the hash of the catalog price",
-      async () => {
-        const t = await setup();
-        const shown = await view(t);
+    it("confirms the price as shown and keeps the hash of the catalog price", async () => {
+      const t = await setup();
+      const shown = await view(t);
 
-        const result = await confirm(t);
+      const result = await confirm(t);
 
-        expect(result).toMatchObject({
-          ok: true,
-          model: {
-            price: {
-              status: "confirmed",
-              confirmation: {
-                source: "catalog",
-                confirmedBy: ADMIN,
-                reason: null,
-              },
+      expect(result).toMatchObject({
+        ok: true,
+        model: {
+          price: {
+            status: "confirmed",
+            confirmation: {
+              source: "catalog",
+              confirmedBy: ADMIN,
+              reason: null,
             },
           },
-        });
-        const stored = await t.confirmations.latest(
-          "anthropic",
-          "claude-sonnet-5-5",
-        );
-        expect(stored).not.toHaveProperty("unreadable");
-        expect(
-          stored && "referenceHash" in stored && stored.referenceHash,
-        ).toBe(shown.price.reference.hash);
-        expect(stored).toMatchObject({
-          source: "catalog",
-          confirmedAt: T1.toISOString(),
-        });
-      },
-    );
+        },
+      });
+      const stored = await t.confirmations.latest(
+        "anthropic",
+        "claude-sonnet-5-5",
+      );
+      expect(stored).not.toHaveProperty("unreadable");
+      expect(stored && "referenceHash" in stored && stored.referenceHash).toBe(
+        shown.price.reference.hash,
+      );
+      expect(stored).toMatchObject({
+        source: "catalog",
+        confirmedAt: T1.toISOString(),
+      });
+    });
 
     // #549-T04
-    it_(
-      "confirms as shown a model whose catalog lists its tiers from the largest context down",
-      async () => {
-        const t = await setup();
-        await t.fetchChanged((body) => {
-          body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-            input: 2,
-            output: 10,
-            tiers: [
-              {
-                input: 6,
-                output: 30,
-                tier: { type: "context", size: 400000 },
-              },
-              {
-                input: 4,
-                output: 20,
-                tier: { type: "context", size: 200000 },
-              },
-            ],
-          };
-        });
-        const shown = await view(t);
-
-        const result = await confirm(t);
-
-        expect(result).toMatchObject({
-          ok: true,
-          model: { price: { status: "confirmed" } },
-        });
-        expect(
-          shown.price.reference.book?.tiers.map((t) => t.contextOver),
-        ).toEqual([200000, 400000]);
-        expect(
-          (await view(t)).price.confirmation?.book.tiers.map((t) => t.input),
-        ).toEqual(["4000000", "6000000"]);
-      },
-    );
-
-    // #549-T04
-    it_(
-      "keeps both rows when the price is corrected afterwards, and the latest counts",
-      async () => {
-        const t = await setup();
-        await confirm(t);
-        const shown = await view(t);
-        const book = { ...shown.price.book!, input: "2500000" };
-
-        const corrected = await t.service.correctPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: shown.price.reference.hash,
-          price: book,
-          reason: "Invoice of October.",
-        });
-
-        expect(corrected).toMatchObject({
-          ok: true,
-          model: {
-            price: {
-              status: "confirmed",
-              book: { input: "2500000" },
-              sources: { input: "admin", output: "catalog" },
-              confirmation: { source: "admin", reason: "Invoice of October." },
+    it("confirms as shown a model whose catalog lists its tiers from the largest context down", async () => {
+      const t = await setup();
+      await t.fetchChanged((body) => {
+        body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+          input: 2,
+          output: 10,
+          tiers: [
+            {
+              input: 6,
+              output: 30,
+              tier: { type: "context", size: 400000 },
             },
-          },
-        });
-        const history = await t.confirmations.history(
-          "anthropic",
-          "claude-sonnet-5-5",
-        );
-        expect(history.map((row) => row.source)).toEqual(["admin", "catalog"]);
-        expect(history[1]?.book.input).toBe(BigInt(2_000_000));
-      },
-    );
+            {
+              input: 4,
+              output: 20,
+              tier: { type: "context", size: 200000 },
+            },
+          ],
+        };
+      });
+      const shown = await view(t);
+
+      const result = await confirm(t);
+
+      expect(result).toMatchObject({
+        ok: true,
+        model: { price: { status: "confirmed" } },
+      });
+      expect(
+        shown.price.reference.book?.tiers.map((t) => t.contextOver),
+      ).toEqual([200000, 400000]);
+      expect(
+        (await view(t)).price.confirmation?.book.tiers.map((t) => t.input),
+      ).toEqual(["4000000", "6000000"]);
+    });
 
     // #549-T04
-    it_(
-      "writes nothing when the model is confirmed again as it already is",
-      async () => {
-        const t = await setup();
-        await confirm(t);
+    it("keeps both rows when the price is corrected afterwards, and the latest counts", async () => {
+      const t = await setup();
+      await confirm(t);
+      const shown = await view(t);
+      const book = { ...shown.price.book!, input: "2500000" };
 
-        const again = await confirm(t);
+      const corrected = await t.service.correctPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: shown.price.reference.hash,
+        price: book,
+        reason: "Invoice of October.",
+      });
 
-        expect(again).toMatchObject({
-          ok: true,
-          model: { price: { status: "confirmed" } },
-        });
-        expect(
-          await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
-        ).toHaveLength(1);
-      },
-    );
+      expect(corrected).toMatchObject({
+        ok: true,
+        model: {
+          price: {
+            status: "confirmed",
+            book: { input: "2500000" },
+            sources: { input: "admin", output: "catalog" },
+            confirmation: { source: "admin", reason: "Invoice of October." },
+          },
+        },
+      });
+      const history = await t.confirmations.history(
+        "anthropic",
+        "claude-sonnet-5-5",
+      );
+      expect(history.map((row) => row.source)).toEqual(["admin", "catalog"]);
+      expect(history[1]?.book.input).toBe(BigInt(2_000_000));
+    });
+
+    // #549-T04
+    it("writes nothing when the model is confirmed again as it already is", async () => {
+      const t = await setup();
+      await confirm(t);
+
+      const again = await confirm(t);
+
+      expect(again).toMatchObject({
+        ok: true,
+        model: { price: { status: "confirmed" } },
+      });
+      expect(
+        await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
+      ).toHaveLength(1);
+    });
 
     // #549-T05
-    it_(
-      "refuses to confirm a price the admin did not see, because it changed meanwhile",
-      async () => {
-        const t = await setup();
-        const seen = (await view(t)).price.reference.hash;
-        await t.fetchChanged((body) => {
-          body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-            input: 2.2,
-            output: 10,
-            cache_read: 0.1,
-            cache_write: 2.5,
-          };
-        });
+    it("refuses to confirm a price the admin did not see, because it changed meanwhile", async () => {
+      const t = await setup();
+      const seen = (await view(t)).price.reference.hash;
+      await t.fetchChanged((body) => {
+        body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+          input: 2.2,
+          output: 10,
+          cache_read: 0.1,
+          cache_write: 2.5,
+        };
+      });
 
-        const result = await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: seen,
-        });
+      const result = await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: seen,
+      });
 
-        expect(result).toMatchObject({ ok: false, code: "price_changed" });
-        expect(
-          await t.confirmations.latest("anthropic", "claude-sonnet-5-5"),
-        ).toBeUndefined();
-      },
-    );
+      expect(result).toMatchObject({ ok: false, code: "price_changed" });
+      expect(
+        await t.confirmations.latest("anthropic", "claude-sonnet-5-5"),
+      ).toBeUndefined();
+    });
 
     // #549-T10
-    it_("refuses to confirm a price the catalog does not state", async () => {
+    it("refuses to confirm a price the catalog does not state", async () => {
       const t = await setup();
       await t.fetchChanged((body) => {
         delete body.deepseek!.models["deepseek-v4-pro"]!.cost;
@@ -686,7 +638,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T10
-    it_.each([
+    it.each([
       ["no hash", {}],
       ["a hash that is no string", { referenceHash: 1 }],
       ["an unknown field", { referenceHash: "a".repeat(64), reason: "x" }],
@@ -702,7 +654,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T10
-    it_("refuses a model the catalog does not have", async () => {
+    it("refuses a model the catalog does not have", async () => {
       const t = await setup();
 
       expect(
@@ -732,7 +684,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     }
 
     // #549-T10
-    it_.each([
+    it.each([
       ["a negative price", (book: PriceBookJson) => ({ ...book, input: "-1" })],
       ["NaN", (book: PriceBookJson) => ({ ...book, output: "NaN" })],
       [
@@ -781,7 +733,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     );
 
     // #549-T10
-    it_.each([
+    it.each([
       ["no reason", { reason: undefined }],
       ["an empty reason", { reason: "  " }],
       ["a reason that is no text", { reason: 5 }],
@@ -801,7 +753,7 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T10
-    it_("lets the admin price a model the catalog does not price", async () => {
+    it("lets the admin price a model the catalog does not price", async () => {
       const t = await setup();
       await t.fetchChanged((body) => {
         delete body.deepseek!.models["deepseek-v4-pro"]!.cost;
@@ -827,233 +779,209 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T05
-    it_(
-      "refuses a correction made against a price that changed meanwhile",
-      async () => {
-        const t = await setup();
-        const shown = await view(t);
-        await t.fetchChanged((body) => {
-          body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-            input: 2.2,
-            output: 10,
-          };
-        });
+    it("refuses a correction made against a price that changed meanwhile", async () => {
+      const t = await setup();
+      const shown = await view(t);
+      await t.fetchChanged((body) => {
+        body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+          input: 2.2,
+          output: 10,
+        };
+      });
 
-        const result = await t.service.correctPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: shown.price.reference.hash,
-          price: shown.price.book,
-          reason: "Invoice.",
-        });
+      const result = await t.service.correctPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: shown.price.reference.hash,
+        price: shown.price.book,
+        reason: "Invoice.",
+      });
 
-        expect(result).toMatchObject({ ok: false, code: "price_changed" });
-      },
-    );
+      expect(result).toMatchObject({ ok: false, code: "price_changed" });
+    });
   });
 
   describe("a price that changes after the confirmation", () => {
     // #549-T05
-    it_(
-      "counts as stale, shows the old and the new price, and is confirmed again by the admin",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
+    it("counts as stale, shows the old and the new price, and is confirmed again by the admin", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
 
-        await t.fetchChanged((body) => {
-          body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-            input: 2.2,
-            output: 10,
-            cache_read: 0.1,
-            cache_write: 2.5,
-          };
-        });
+      await t.fetchChanged((body) => {
+        body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+          input: 2.2,
+          output: 10,
+          cache_read: 0.1,
+          cache_write: 2.5,
+        };
+      });
 
-        const stale = await view(t);
-        expect(stale.price.status).toBe("stale");
-        expect(stale.price.book?.input).toBe("2000000");
-        expect(stale.price.reference.book?.input).toBe("2200000");
-        expect(stale.price.confirmation?.confirmedBy).toBe(ADMIN);
+      const stale = await view(t);
+      expect(stale.price.status).toBe("stale");
+      expect(stale.price.book?.input).toBe("2000000");
+      expect(stale.price.reference.book?.input).toBe("2200000");
+      expect(stale.price.confirmation?.confirmedBy).toBe(ADMIN);
 
-        const again = await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: stale.price.reference.hash,
-        });
-        expect(again).toMatchObject({
-          ok: true,
-          model: { price: { status: "confirmed", book: { input: "2200000" } } },
-        });
-        expect(
-          await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
-        ).toHaveLength(2);
-      },
-    );
+      const again = await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: stale.price.reference.hash,
+      });
+      expect(again).toMatchObject({
+        ok: true,
+        model: { price: { status: "confirmed", book: { input: "2200000" } } },
+      });
+      expect(
+        await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
+      ).toHaveLength(2);
+    });
 
     // #549-T05
-    it_(
-      "counts as stale when only the price of reasoning tokens changed",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...DEEPSEEK,
-          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
-        });
-        expect((await view(t, DEEPSEEK)).price.status).toBe("confirmed");
+    it("counts as stale when only the price of reasoning tokens changed", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...DEEPSEEK,
+        referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+      });
+      expect((await view(t, DEEPSEEK)).price.status).toBe("confirmed");
 
-        await t.fetchChanged((body) => {
-          const cost = body.deepseek!.models["deepseek-v4-pro"]!.cost as Record<
-            string,
-            unknown
-          >;
-          cost.reasoning = 2.5;
-        });
+      await t.fetchChanged((body) => {
+        const cost = body.deepseek!.models["deepseek-v4-pro"]!.cost as Record<
+          string,
+          unknown
+        >;
+        cost.reasoning = 2.5;
+      });
 
-        const stale = await view(t, DEEPSEEK);
-        expect(stale.price.status).toBe("stale");
-        expect(stale.price.book?.reasoning).toBe("1980000");
-        expect(stale.price.reference.book?.reasoning).toBe("2500000");
-      },
-    );
+      const stale = await view(t, DEEPSEEK);
+      expect(stale.price.status).toBe("stale");
+      expect(stale.price.book?.reasoning).toBe("1980000");
+      expect(stale.price.reference.book?.reasoning).toBe("2500000");
+    });
 
     // #549-T05
-    it_(
-      "counts as stale when only the reasoning flag of the model changed",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...DEEPSEEK,
-          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
-        });
+    it("counts as stale when only the reasoning flag of the model changed", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...DEEPSEEK,
+        referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+      });
 
-        await t.fetchChanged((body) => {
-          body.deepseek!.models["deepseek-v4-pro"]!.reasoning = false;
-        });
+      await t.fetchChanged((body) => {
+        body.deepseek!.models["deepseek-v4-pro"]!.reasoning = false;
+      });
 
-        expect((await view(t, DEEPSEEK)).price.status).toBe("stale");
-      },
-    );
+      expect((await view(t, DEEPSEEK)).price.status).toBe("stale");
+    });
 
     // #549-T05
-    it_(
-      "refuses the managed key when the catalog adds a price we cannot read, and prices nothing new from it",
-      async () => {
-        const t = await setup();
+    it("refuses the managed key when the catalog adds a price we cannot read, and prices nothing new from it", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({
+        selectable: true,
+      });
+
+      await t.fetchChanged((body) => {
+        const cost = body.anthropic!.models["claude-sonnet-5-5"]!
+          .cost as Record<string, unknown>;
+        cost.tiers = [
+          { input: 4, output: 20, tier: { type: "time_of_day", size: 12 } },
+        ];
+      });
+
+      const model = await view(t);
+      expect(model.price.status).toBe("stale");
+      expect(model.price.reference.book).toBeNull();
+      expect(model.managed).toEqual({
+        selectable: false,
+        reason: "price_unconfirmed",
+      });
+      expect(
         await t.service.confirmPrice(ADMIN, {
           ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({
-          selectable: true,
-        });
-
-        await t.fetchChanged((body) => {
-          const cost = body.anthropic!.models["claude-sonnet-5-5"]!
-            .cost as Record<string, unknown>;
-          cost.tiers = [
-            { input: 4, output: 20, tier: { type: "time_of_day", size: 12 } },
-          ];
-        });
-
-        const model = await view(t);
-        expect(model.price.status).toBe("stale");
-        expect(model.price.reference.book).toBeNull();
-        expect(model.managed).toEqual({
-          selectable: false,
-          reason: "price_unconfirmed",
-        });
-        expect(
-          await t.service.confirmPrice(ADMIN, {
-            ...SONNET,
-            referenceHash: model.price.reference.hash,
-          }),
-        ).toEqual({ ok: false, code: "price_missing" });
-      },
-    );
+          referenceHash: model.price.reference.hash,
+        }),
+      ).toEqual({ ok: false, code: "price_missing" });
+    });
 
     // #549-T13
-    it_(
-      "counts a confirmation of the first hash version as stale until it is confirmed again",
-      async () => {
-        const t = await setup();
-        const shown = await view(t);
-        await t.confirmations.append(
-          {
-            providerId: "anthropic",
-            modelId: "claude-sonnet-5-5",
-            source: "catalog",
-            book: parsedBook(shown.price.book) as PriceBook,
-            reference: parsedBook(shown.price.reference.book),
-            // What the first version wrote: the bare digest.
-            referenceHash: shown.price.reference.hash.replace(/^v2:/, ""),
-            reason: null,
-            confirmedBy: ADMIN,
-          },
-          T1,
-        );
+    it("counts a confirmation of the first hash version as stale until it is confirmed again", async () => {
+      const t = await setup();
+      const shown = await view(t);
+      await t.confirmations.append(
+        {
+          providerId: "anthropic",
+          modelId: "claude-sonnet-5-5",
+          source: "catalog",
+          book: parsedBook(shown.price.book) as PriceBook,
+          reference: parsedBook(shown.price.reference.book),
+          // What the first version wrote: the bare digest.
+          referenceHash: shown.price.reference.hash.replace(/^v2:/, ""),
+          reason: null,
+          confirmedBy: ADMIN,
+        },
+        T1,
+      );
 
-        const old = await view(t);
-        expect(old.price.status).toBe("stale");
-        expect(old.managed).toMatchObject({ selectable: false });
+      const old = await view(t);
+      expect(old.price.status).toBe("stale");
+      expect(old.managed).toMatchObject({ selectable: false });
 
-        const again = await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: old.price.reference.hash,
-        });
-        expect(again).toMatchObject({
-          ok: true,
-          model: { price: { status: "confirmed" } },
-        });
-        expect(
-          await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
-        ).toHaveLength(2);
-      },
-    );
+      const again = await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: old.price.reference.hash,
+      });
+      expect(again).toMatchObject({
+        ok: true,
+        model: { price: { status: "confirmed" } },
+      });
+      expect(
+        await t.confirmations.history("anthropic", "claude-sonnet-5-5"),
+      ).toHaveLength(2);
+    });
 
     // #549-T05
-    it_(
-      "keeps the confirmation when the daily fetch changes nothing about the price",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
+    it("keeps the confirmation when the daily fetch changes nothing about the price", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
 
-        await t.fetchChanged((body) => {
-          body.anthropic!.models["claude-sonnet-5-5"]!.name =
-            "Claude Sonnet 5.5 (renamed)";
-        });
+      await t.fetchChanged((body) => {
+        body.anthropic!.models["claude-sonnet-5-5"]!.name =
+          "Claude Sonnet 5.5 (renamed)";
+      });
 
-        expect((await view(t)).price.status).toBe("confirmed");
-      },
-    );
+      expect((await view(t)).price.status).toBe("confirmed");
+    });
 
     // #548-T11
-    it_(
-      "keeps the confirmation of a model models.dev no longer lists",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+    it("keeps the confirmation of a model models.dev no longer lists", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
 
-        await t.fetchChanged((body) => {
-          delete body.anthropic!.models["claude-sonnet-5-5"];
-        });
+      await t.fetchChanged((body) => {
+        delete body.anthropic!.models["claude-sonnet-5-5"];
+      });
 
-        const model = await view(t);
-        expect(model.listed).toBe(false);
-        expect(model.price.status).toBe("confirmed");
-        expect(model.managed).toMatchObject({ selectable: true });
-      },
-    );
+      const model = await view(t);
+      expect(model.listed).toBe(false);
+      expect(model.price.status).toBe("confirmed");
+      expect(model.managed).toMatchObject({ selectable: true });
+    });
   });
 
   describe("a confirmation that cannot be read", () => {
@@ -1074,148 +1002,136 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
         .execute();
 
     // #549-T04
-    it_(
-      "shows that one row with a warning and leaves the rest of the list as it is",
-      async () => {
-        const t = await setup();
-        await t.service.confirmPrice(ADMIN, {
-          ...DEEPSEEK,
-          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
-        });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        await damage(t);
+    it("shows that one row with a warning and leaves the rest of the list as it is", async () => {
+      const t = await setup();
+      await t.service.confirmPrice(ADMIN, {
+        ...DEEPSEEK,
+        referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+      });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      await damage(t);
 
-        const list = await t.service.list({});
+      const list = await t.service.list({});
 
-        const broken = list.models.find((m) => m.modelId === SONNET.modelId);
-        expect(broken?.price).toMatchObject({
-          status: "unconfirmed",
-          warnings: ["confirmation_unreadable"],
-          confirmation: null,
-        });
-        expect(broken?.managed).toEqual({
-          selectable: false,
-          reason: "model_not_enabled",
-        });
-        const fine = list.models.find((m) => m.modelId === DEEPSEEK.modelId);
-        expect(fine?.price).toMatchObject({
-          status: "confirmed",
-          warnings: [],
-        });
-        expect(list.total).toBeGreaterThan(2);
-      },
-    );
+      const broken = list.models.find((m) => m.modelId === SONNET.modelId);
+      expect(broken?.price).toMatchObject({
+        status: "unconfirmed",
+        warnings: ["confirmation_unreadable"],
+        confirmation: null,
+      });
+      expect(broken?.managed).toEqual({
+        selectable: false,
+        reason: "model_not_enabled",
+      });
+      const fine = list.models.find((m) => m.modelId === DEEPSEEK.modelId);
+      expect(fine?.price).toMatchObject({
+        status: "confirmed",
+        warnings: [],
+      });
+      expect(list.total).toBeGreaterThan(2);
+    });
 
     // #549-T07
-    it_(
-      "does not select the model, and a new confirmation repairs it",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        await damage(t);
+    it("does not select the model, and a new confirmation repairs it", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      await damage(t);
 
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({
-          selectable: false,
-          code: "catalog_price_unconfirmed",
-        });
-        const repaired = await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({
+        selectable: false,
+        code: "catalog_price_unconfirmed",
+      });
+      const repaired = await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
 
-        expect(repaired).toMatchObject({
-          ok: true,
-          model: { price: { status: "confirmed", warnings: [] } },
-        });
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({ selectable: true });
-      },
-    );
+      expect(repaired).toMatchObject({
+        ok: true,
+        model: { price: { status: "confirmed", warnings: [] } },
+      });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({ selectable: true });
+    });
   });
 
   describe("selection on the managed key", () => {
     // #549-T07
-    it_(
-      "selects a model only when it is enabled and its price is confirmed",
-      async () => {
-        const t = await setup();
-        const hash = async () => (await view(t)).price.reference.hash;
+    it("selects a model only when it is enabled and its price is confirmed", async () => {
+      const t = await setup();
+      const hash = async () => (await view(t)).price.reference.hash;
 
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({
-          selectable: false,
-          reason: "model_not_enabled",
-          code: "catalog_model_unavailable",
-        });
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({
-          selectable: false,
-          reason: "price_unconfirmed",
-          code: "catalog_price_unconfirmed",
-        });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: await hash(),
-        });
-        const open = await t.service.availability(
-          "anthropic",
-          "claude-sonnet-5-5",
-        );
-        expect(open).toMatchObject({ selectable: true });
-        expect(open.selectable && open.book.output).toBe("10000000");
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: false });
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({
-          selectable: false,
-          reason: "model_not_enabled",
-          code: "catalog_model_unavailable",
-        });
-      },
-    );
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toEqual({
+        selectable: false,
+        reason: "model_not_enabled",
+        code: "catalog_model_unavailable",
+      });
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toEqual({
+        selectable: false,
+        reason: "price_unconfirmed",
+        code: "catalog_price_unconfirmed",
+      });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: await hash(),
+      });
+      const open = await t.service.availability(
+        "anthropic",
+        "claude-sonnet-5-5",
+      );
+      expect(open).toMatchObject({ selectable: true });
+      expect(open.selectable && open.book.output).toBe("10000000");
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: false });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toEqual({
+        selectable: false,
+        reason: "model_not_enabled",
+        code: "catalog_model_unavailable",
+      });
+    });
 
     // #549-T07
-    it_(
-      "answers in a form that survives JSON: prices as decimal strings, with the confirmation and the hash version",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        const confirmation = (await view(t)).price.confirmation;
+    it("answers in a form that survives JSON: prices as decimal strings, with the confirmation and the hash version", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      const confirmation = (await view(t)).price.confirmation;
 
-        const answer = await t.service.availability(
-          "anthropic",
-          "claude-sonnet-5-5",
-        );
+      const answer = await t.service.availability(
+        "anthropic",
+        "claude-sonnet-5-5",
+      );
 
-        expect(JSON.parse(JSON.stringify(answer))).toEqual(answer);
-        expect(answer).toMatchObject({
-          selectable: true,
-          confirmationId: confirmation?.id,
-          hashVersion: 2,
-          book: { input: "2000000", output: "10000000", cacheWrite1h: null },
-        });
-      },
-    );
+      expect(JSON.parse(JSON.stringify(answer))).toEqual(answer);
+      expect(answer).toMatchObject({
+        selectable: true,
+        confirmationId: confirmation?.id,
+        hashVersion: 2,
+        book: { input: "2000000", output: "10000000", cacheWrite1h: null },
+      });
+    });
 
     // #549-T07
-    it_("refuses with the stable code of an unconfirmed price", async () => {
+    it("refuses with the stable code of an unconfirmed price", async () => {
       const t = await setup();
       await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
 
@@ -1229,386 +1145,350 @@ describe.each(MODELS_DEV_ENGINES)("the model prices on $name", (engine) => {
     });
 
     // #549-T07
-    it_(
-      "counts a database that cannot be read as a refusal with a stable code, not a throw, and logs no detail",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.db.destroy();
+    it("counts a database that cannot be read as a refusal with a stable code, not a throw, and logs no detail", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.db.destroy();
 
-        const answer = await t.service.availability(
-          "anthropic",
-          "claude-sonnet-5-5",
-        );
+      const answer = await t.service.availability(
+        "anthropic",
+        "claude-sonnet-5-5",
+      );
 
-        expect(answer).toEqual({
-          selectable: false,
-          reason: "check_failed",
-          code: "catalog_model_unavailable",
-        });
-        expect(t.errors).toEqual([
-          "model prices: AVAILABILITY_CHECK_FAILED: the managed key is refused for this model.",
-        ]);
-      },
-    );
+      expect(answer).toEqual({
+        selectable: false,
+        reason: "check_failed",
+        code: "catalog_model_unavailable",
+      });
+      expect(t.errors).toEqual([
+        "model prices: AVAILABILITY_CHECK_FAILED: the managed key is refused for this model.",
+      ]);
+    });
 
     // #549-T01
-    it_(
-      "refuses the managed key, with a stable code, when the override file names a provider that is no longer supported",
-      async () => {
-        const t = await setup({
-          overrideOf: () => {
-            throw new ModelOverridesError(["anthropic"]);
-          },
-        });
+    it("refuses the managed key, with a stable code, when the override file names a provider that is no longer supported", async () => {
+      const t = await setup({
+        overrideOf: () => {
+          throw new ModelOverridesError(["anthropic"]);
+        },
+      });
 
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({
-          selectable: false,
-          reason: "check_failed",
-          code: "catalog_model_unavailable",
-        });
-      },
-    );
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toEqual({
+        selectable: false,
+        reason: "check_failed",
+        code: "catalog_model_unavailable",
+      });
+    });
 
     // #549-T07
-    it_(
-      "stops selecting a model whose price changed after the confirmation",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        await t.fetchChanged((body) => {
-          body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-            input: 2.2,
-            output: 10,
-            cache_read: 0.1,
-            cache_write: 2.5,
-          };
-        });
+    it("stops selecting a model whose price changed after the confirmation", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      await t.fetchChanged((body) => {
+        body.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+          input: 2.2,
+          output: 10,
+          cache_read: 0.1,
+          cache_write: 2.5,
+        };
+      });
 
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toEqual({
-          selectable: false,
-          reason: "price_unconfirmed",
-          code: "catalog_price_unconfirmed",
-        });
-      },
-    );
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toEqual({
+        selectable: false,
+        reason: "price_unconfirmed",
+        code: "catalog_price_unconfirmed",
+      });
+    });
 
     // #549-T07
-    it_(
-      "answers model_unknown for a model the catalog does not have",
-      async () => {
-        const t = await setup();
+    it("answers model_unknown for a model the catalog does not have", async () => {
+      const t = await setup();
 
-        expect(await t.service.availability("anthropic", "nobody")).toEqual({
-          selectable: false,
-          reason: "model_unknown",
-          code: "catalog_model_unavailable",
-        });
-      },
-    );
+      expect(await t.service.availability("anthropic", "nobody")).toEqual({
+        selectable: false,
+        reason: "model_unknown",
+        code: "catalog_model_unavailable",
+      });
+    });
 
     // #548-T08
-    it_(
-      "stops selecting a model of a provider whose address changed, until an admin confirms the address",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...DEEPSEEK, enabled: true });
-        await t.service.confirmPrice(ADMIN, {
-          ...DEEPSEEK,
-          referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
-        });
-        expect(
-          await t.service.availability("deepseek", "deepseek-v4-pro"),
-        ).toMatchObject({ selectable: true });
+    it("stops selecting a model of a provider whose address changed, until an admin confirms the address", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...DEEPSEEK, enabled: true });
+      await t.service.confirmPrice(ADMIN, {
+        ...DEEPSEEK,
+        referenceHash: (await view(t, DEEPSEEK)).price.reference.hash,
+      });
+      expect(
+        await t.service.availability("deepseek", "deepseek-v4-pro"),
+      ).toMatchObject({ selectable: true });
 
-        await t.fetchChanged((body) => {
-          body.deepseek!.api = "https://api.deepseek.moved.example/v1";
-        });
+      await t.fetchChanged((body) => {
+        body.deepseek!.api = "https://api.deepseek.moved.example/v1";
+      });
 
-        expect(
-          await t.service.availability("deepseek", "deepseek-v4-pro"),
-        ).toEqual({
-          selectable: false,
-          reason: "provider_url_blocked",
-          code: "catalog_model_unavailable",
-        });
-      },
-    );
+      expect(
+        await t.service.availability("deepseek", "deepseek-v4-pro"),
+      ).toEqual({
+        selectable: false,
+        reason: "provider_url_blocked",
+        code: "catalog_model_unavailable",
+      });
+    });
   });
 
   describe("the price an own key runs on", () => {
     // #553-T04
-    it_(
-      "is the confirmed book when there is one, else the price the catalog states, else none",
-      async () => {
-        const t = await setup();
-        // Never confirmed: the catalog's own price, which is all an own key needs (nobody pays but its user).
-        expect(
-          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({
-          input: "2000000",
-          output: "10000000",
-        });
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        expect(
-          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({
-          output: "10000000",
-        });
-        // The catalog moves: the confirmation is stale for the managed key, an own key follows today's price.
-        await t.fetchChanged((body) => {
-          const model = body.anthropic?.models["claude-sonnet-5-5"] as
-            { cost: { output: number } } | undefined;
-          if (model !== undefined) model.cost.output = 11;
-        });
-        expect(
-          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({
-          output: "11000000",
-        });
-        expect(
-          await t.service.availability("anthropic", "claude-sonnet-5-5"),
-        ).toMatchObject({
-          selectable: false,
-        });
-      },
-    );
+    it("is the confirmed book when there is one, else the price the catalog states, else none", async () => {
+      const t = await setup();
+      // Never confirmed: the catalog's own price, which is all an own key needs (nobody pays but its user).
+      expect(
+        await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({
+        input: "2000000",
+        output: "10000000",
+      });
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      expect(
+        await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({
+        output: "10000000",
+      });
+      // The catalog moves: the confirmation is stale for the managed key, an own key follows today's price.
+      await t.fetchChanged((body) => {
+        const model = body.anthropic?.models["claude-sonnet-5-5"] as
+          { cost: { output: number } } | undefined;
+        if (model !== undefined) model.cost.output = 11;
+      });
+      expect(
+        await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({
+        output: "11000000",
+      });
+      expect(
+        await t.service.availability("anthropic", "claude-sonnet-5-5"),
+      ).toMatchObject({
+        selectable: false,
+      });
+    });
 
     // #553-T05
-    it_(
-      "is none for a model nobody priced, for an unknown model and when the database cannot be read",
-      async () => {
-        const t = await setup();
-        expect(await t.service.catalogPrice("anthropic", "nobody")).toBeNull();
-        await t.fetchChanged((body) => {
-          const model = body.anthropic?.models["claude-sonnet-5-5"] as
-            { cost?: unknown } | undefined;
-          if (model !== undefined) delete model.cost;
-        });
-        expect(
-          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
-        ).toBeNull();
-        await t.db.destroy();
-        expect(
-          await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
-        ).toBeNull();
-      },
-    );
+    it("is none for a model nobody priced, for an unknown model and when the database cannot be read", async () => {
+      const t = await setup();
+      expect(await t.service.catalogPrice("anthropic", "nobody")).toBeNull();
+      await t.fetchChanged((body) => {
+        const model = body.anthropic?.models["claude-sonnet-5-5"] as
+          { cost?: unknown } | undefined;
+        if (model !== undefined) delete model.cost;
+      });
+      expect(
+        await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+      ).toBeNull();
+      await t.db.destroy();
+      expect(
+        await t.service.catalogPrice("anthropic", "claude-sonnet-5-5"),
+      ).toBeNull();
+    });
   });
 
   describe("the audit", () => {
     // #549-T09
-    it_(
-      "writes one line for each write, with the person, the model and the old and new price",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
-        await t.service.confirmPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: (await view(t)).price.reference.hash,
-        });
-        const shown = await view(t);
-        await t.service.correctPrice("admin-2", {
-          ...SONNET,
-          referenceHash: shown.price.reference.hash,
-          price: { ...shown.price.book, input: "2500000" },
-          reason: "Invoice of October.",
-        });
+    it("writes one line for each write, with the person, the model and the old and new price", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, { ...SONNET, enabled: true });
+      await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: (await view(t)).price.reference.hash,
+      });
+      const shown = await view(t);
+      await t.service.correctPrice("admin-2", {
+        ...SONNET,
+        referenceHash: shown.price.reference.hash,
+        price: { ...shown.price.book, input: "2500000" },
+        reason: "Invoice of October.",
+      });
 
-        expect(t.lines).toHaveLength(3);
-        expect(t.lines[0]).toBe(
-          `model prices: MODEL_ENABLED by=${ADMIN} model=anthropic/claude-sonnet-5-5`,
-        );
-        expect(t.lines[1]).toContain(
-          `PRICE_CONFIRMED by=${ADMIN} model=anthropic/claude-sonnet-5-5 source=catalog`,
-        );
-        expect(t.lines[1]).toContain("old=none");
-        expect(t.lines[1]).toContain('"input":"2000000"');
-        expect(t.lines[2]).toContain(
-          "PRICE_CORRECTED by=admin-2 model=anthropic/claude-sonnet-5-5",
-        );
-        expect(t.lines[2]).toContain('old={"input":"2000000"');
-        expect(t.lines[2]).toContain('"input":"2500000"');
-        expect(t.lines[2]).toContain('reason="Invoice of October."');
-      },
-    );
+      expect(t.lines).toHaveLength(3);
+      expect(t.lines[0]).toBe(
+        `model prices: MODEL_ENABLED by=${ADMIN} model=anthropic/claude-sonnet-5-5`,
+      );
+      expect(t.lines[1]).toContain(
+        `PRICE_CONFIRMED by=${ADMIN} model=anthropic/claude-sonnet-5-5 source=catalog`,
+      );
+      expect(t.lines[1]).toContain("old=none");
+      expect(t.lines[1]).toContain('"input":"2000000"');
+      expect(t.lines[2]).toContain(
+        "PRICE_CORRECTED by=admin-2 model=anthropic/claude-sonnet-5-5",
+      );
+      expect(t.lines[2]).toContain('old={"input":"2000000"');
+      expect(t.lines[2]).toContain('"input":"2500000"');
+      expect(t.lines[2]).toContain('reason="Invoice of October."');
+    });
 
     // #549-T09
-    it_(
-      "writes no line for a refused write, and keeps a reason with a line break out of the log",
-      async () => {
-        const t = await setup();
-        await t.service.setEnabled(ADMIN, {
-          providerId: "anthropic",
-          modelId: "nobody",
-          enabled: true,
-        });
-        const shown = await view(t);
-        await t.service.correctPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: shown.price.reference.hash,
-          price: shown.price.book,
-          reason: "line one\nline two",
-        });
-        expect(t.lines).toEqual([]);
+    it("writes no line for a refused write, and keeps a reason with a line break out of the log", async () => {
+      const t = await setup();
+      await t.service.setEnabled(ADMIN, {
+        providerId: "anthropic",
+        modelId: "nobody",
+        enabled: true,
+      });
+      const shown = await view(t);
+      await t.service.correctPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: shown.price.reference.hash,
+        price: shown.price.book,
+        reason: "line one\nline two",
+      });
+      expect(t.lines).toEqual([]);
 
-        await t.service.correctPrice(ADMIN, {
-          ...SONNET,
-          referenceHash: shown.price.reference.hash,
-          price: shown.price.book,
-          reason: 'He said "ok" <b>',
-        });
-        expect(t.lines).toHaveLength(1);
-        expect(t.lines[0]).not.toContain("\n");
-      },
-    );
+      await t.service.correctPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: shown.price.reference.hash,
+        price: shown.price.book,
+        reason: 'He said "ok" <b>',
+      });
+      expect(t.lines).toHaveLength(1);
+      expect(t.lines[0]).not.toContain("\n");
+    });
   });
 
   describe("a confirmation and the daily fetch", () => {
     // #549-T05
-    it_(
-      "waits for a fetch that is writing and then refuses a price the admin did not see",
-      async () => {
-        const t = await setup();
-        const seen = (await view(t)).price.reference.hash;
-        const moved = t.body();
-        moved.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-          input: 2.2,
-          output: 10,
-          cache_read: 0.1,
-          cache_write: 2.5,
-        };
+    it("waits for a fetch that is writing and then refuses a price the admin did not see", async () => {
+      const t = await setup();
+      const seen = (await view(t)).price.reference.hash;
+      const moved = t.body();
+      moved.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+        input: 2.2,
+        output: 10,
+        cache_read: 0.1,
+        cache_write: 2.5,
+      };
 
-        // What the fetch does: lock the provider rows, then write the model's new price in the same transaction.
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => (release = resolve));
-        let written!: () => void;
-        const hasWritten = new Promise<void>((resolve) => (written = resolve));
-        const fetching = t.db.transaction().execute(async (trx) => {
-          await createModelsDevRepository(trx).listProviders({
-            forUpdate: true,
-          });
-          const row = await createModelsDevRepository(trx).getModel(
-            "anthropic",
-            "claude-sonnet-5-5",
-          );
-          await createModelsDevRepository(trx).apply({
-            providers: [],
-            models: [
-              {
-                ...row!,
-                cost: {
-                  input: "2.2",
-                  output: "10",
-                  cacheRead: "0.1",
-                  cacheWrite: "2.5",
-                },
-              },
-            ],
-          });
-          written();
-          await gate;
+      // What the fetch does: lock the provider rows, then write the model's new price in the same transaction.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let written!: () => void;
+      const hasWritten = new Promise<void>((resolve) => (written = resolve));
+      const fetching = t.db.transaction().execute(async (trx) => {
+        await createModelsDevRepository(trx).listProviders({
+          forUpdate: true,
         });
-        await hasWritten;
+        const row = await createModelsDevRepository(trx).getModel(
+          "anthropic",
+          "claude-sonnet-5-5",
+        );
+        await createModelsDevRepository(trx).apply({
+          providers: [],
+          models: [
+            {
+              ...row!,
+              cost: {
+                input: "2.2",
+                output: "10",
+                cacheRead: "0.1",
+                cacheWrite: "2.5",
+              },
+            },
+          ],
+        });
+        written();
+        await gate;
+      });
+      await hasWritten;
 
-        let settled = false;
-        const confirming = t.service
-          .confirmPrice(ADMIN, { ...SONNET, referenceHash: seen })
-          .finally(() => (settled = true));
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        expect(settled).toBe(false);
-        release();
-        await fetching;
-        const result = await confirming;
+      let settled = false;
+      const confirming = t.service
+        .confirmPrice(ADMIN, { ...SONNET, referenceHash: seen })
+        .finally(() => (settled = true));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(settled).toBe(false);
+      release();
+      await fetching;
+      const result = await confirming;
 
-        expect(result).toMatchObject({ ok: false, code: "price_changed" });
-        expect((await view(t)).price.status).toBe("unconfirmed");
-      },
-    );
+      expect(result).toMatchObject({ ok: false, code: "price_changed" });
+      expect((await view(t)).price.status).toBe("unconfirmed");
+    });
 
     // #549-T05
-    it.skipIf(engine.name !== "postgres" || engine.skip)(
-      "gives up with a stable code when the fetch holds its lock for longer than the timeout, and writes nothing",
-      async () => {
-        const t = await setup({ lockTimeoutMs: 300 });
-        const seen = (await view(t)).price.reference.hash;
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => (release = resolve));
-        let locked!: () => void;
-        const hasLocked = new Promise<void>((resolve) => (locked = resolve));
-        const fetching = t.db.transaction().execute(async (trx) => {
-          await createModelsDevRepository(trx).listProviders({
-            forUpdate: true,
-          });
-          locked();
-          await gate;
+    it("gives up with a stable code when the fetch holds its lock for longer than the timeout, and writes nothing", async () => {
+      const t = await setup({ lockTimeoutMs: 300 });
+      const seen = (await view(t)).price.reference.hash;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let locked!: () => void;
+      const hasLocked = new Promise<void>((resolve) => (locked = resolve));
+      const fetching = t.db.transaction().execute(async (trx) => {
+        await createModelsDevRepository(trx).listProviders({
+          forUpdate: true,
         });
-        await hasLocked;
+        locked();
+        await gate;
+      });
+      await hasLocked;
 
-        const refused = await t.service.confirmPrice(ADMIN, {
+      const refused = await t.service.confirmPrice(ADMIN, {
+        ...SONNET,
+        referenceHash: seen,
+      });
+      release();
+      await fetching;
+
+      expect(refused).toEqual({ ok: false, code: "fetch_in_progress" });
+      expect((await view(t)).price.status).toBe("unconfirmed");
+      expect(
+        await t.service.confirmPrice(ADMIN, {
           ...SONNET,
           referenceHash: seen,
-        });
-        release();
-        await fetching;
-
-        expect(refused).toEqual({ ok: false, code: "fetch_in_progress" });
-        expect((await view(t)).price.status).toBe("unconfirmed");
-        expect(
-          await t.service.confirmPrice(ADMIN, {
-            ...SONNET,
-            referenceHash: seen,
-          }),
-        ).toMatchObject({ ok: true });
-      },
-    );
+        }),
+      ).toMatchObject({ ok: true });
+    });
 
     // #549-T05
-    it_(
-      "is never confirmed at a price other than the one confirmed, whichever of a confirmation and a fetch comes first",
-      async () => {
-        const t = await setup();
-        const seen = (await view(t)).price.reference.hash;
-        const moved = t.body();
-        moved.anthropic!.models["claude-sonnet-5-5"]!.cost = {
-          input: 2.2,
-          output: 10,
-          cache_read: 0.1,
-          cache_write: 2.5,
-        };
-        t.fake.respondWith(moved);
-        t.advance(DAY);
+    it("is never confirmed at a price other than the one confirmed, whichever of a confirmation and a fetch comes first", async () => {
+      const t = await setup();
+      const seen = (await view(t)).price.reference.hash;
+      const moved = t.body();
+      moved.anthropic!.models["claude-sonnet-5-5"]!.cost = {
+        input: 2.2,
+        output: 10,
+        cache_read: 0.1,
+        cache_write: 2.5,
+      };
+      t.fake.respondWith(moved);
+      t.advance(DAY);
 
-        const [confirmation, fetch] = await Promise.all([
-          t.service.confirmPrice(ADMIN, { ...SONNET, referenceHash: seen }),
-          t.modelsDev.refresh({ acceptReasons: GUARD_REASONS }),
-        ]);
+      const [confirmation, fetch] = await Promise.all([
+        t.service.confirmPrice(ADMIN, { ...SONNET, referenceHash: seen }),
+        t.modelsDev.refresh({ acceptReasons: GUARD_REASONS }),
+      ]);
 
-        expect(fetch).toMatchObject({ status: "applied" });
-        const model = await view(t);
-        expect(model.price.reference.book?.input).toBe("2200000");
-        if (confirmation.ok) {
-          // The confirmation came first: it is kept, and it is stale because the fetch moved the price after it.
-          expect(model.price.status).toBe("stale");
-          expect(model.price.confirmation?.reference?.input).toBe("2000000");
-        } else {
-          // The fetch came first: the admin is told the price changed and nothing was written.
-          expect(confirmation).toMatchObject({ code: "price_changed" });
-          expect(model.price.status).toBe("unconfirmed");
-        }
-      },
-    );
+      expect(fetch).toMatchObject({ status: "applied" });
+      const model = await view(t);
+      expect(model.price.reference.book?.input).toBe("2200000");
+      if (confirmation.ok) {
+        // The confirmation came first: it is kept, and it is stale because the fetch moved the price after it.
+        expect(model.price.status).toBe("stale");
+        expect(model.price.confirmation?.reference?.input).toBe("2000000");
+      } else {
+        // The fetch came first: the admin is told the price changed and nothing was written.
+        expect(confirmation).toMatchObject({ code: "price_changed" });
+        expect(model.price.status).toBe("unconfirmed");
+      }
+    });
   });
 });

@@ -232,113 +232,110 @@ export function describeAdapterApplication(
   const amount = 25_000_000;
 
   for (const engine of engines) {
-    describe.skipIf(engine.skip)(
-      `applying the events of ${subject.name} on ${engine.name}`,
-      () => {
-        async function prepare() {
-          const { db, workspaceId } = await engine.create();
-          const adapter = subject.create();
-          const intent = await createBillingTopUpIntentsRepository(
-            db,
-            workspaceId,
-          ).create({
-            adapter: adapter.id,
-            amountMicroUsd: amount,
-          });
-          const fixtures = subject.fixtures({ intentId: intent.id, amount });
-          const parse = async (
-            request: WebhookRequest,
-          ): Promise<BillingEvent> => {
-            const result = await adapter.verifyAndParseWebhook?.({
-              ...request,
-              now: subject.now,
-            });
-            if (result === undefined || !result.ok)
-              throw new Error("a fixture of the adapter was not accepted");
-            return result.event;
-          };
-          const apply = async (request: WebhookRequest) =>
-            applyBillingEvent(db, {
-              provider: adapter.id,
-              event: await parse(request),
-            });
-          const journal = createBillingJournalRepository(db, workspaceId);
-          return { db, adapter, fixtures, apply, journal, intentId: intent.id };
-        }
-
-        // #497-T14
-        it("credits a payment once, however often and under whichever event id it arrives, also at once", async () => {
-          const { fixtures, apply, journal } = await prepare();
-
-          const results = await Promise.all([
-            apply(fixtures.paid),
-            apply(fixtures.paid),
-            apply(fixtures.paidAgain),
-            apply(fixtures.paidAgain),
-          ]);
-          await apply(fixtures.paid);
-
-          expect(
-            results.filter((result) => result.outcome === "applied"),
-          ).toHaveLength(1);
-          expect((await journal.balance()).balanceMicroUsd).toBe(amount);
-          expect(
-            (await journal.entries({ limit: 20 })).entries.filter(
-              (entry) => entry.type === "top_up",
-            ),
-          ).toHaveLength(1);
-          expect((await journal.verify()).consistent).toBe(true);
+    describe(`applying the events of ${subject.name} on ${engine.name}`, () => {
+      async function prepare() {
+        const { db, workspaceId } = await engine.create();
+        const adapter = subject.create();
+        const intent = await createBillingTopUpIntentsRepository(
+          db,
+          workspaceId,
+        ).create({
+          adapter: adapter.id,
+          amountMicroUsd: amount,
         });
-
-        // #497-T14
-        it("credits a payment found by lookup and the same payment delivered by webhook once", async () => {
-          const { adapter, db, fixtures, apply, journal, intentId } =
-            await prepare();
-          if (adapter.lookupTopUp === undefined) return;
-
-          const found = await adapter.lookupTopUp({
-            intentId,
-            checkout: fixtures.lookupRefs?.checkout ?? null,
-            payment: fixtures.lookupRefs?.payment ?? null,
+        const fixtures = subject.fixtures({ intentId: intent.id, amount });
+        const parse = async (
+          request: WebhookRequest,
+        ): Promise<BillingEvent> => {
+          const result = await adapter.verifyAndParseWebhook?.({
+            ...request,
+            now: subject.now,
           });
-          if (found === null) throw new Error("the lookup found nothing");
-          const first = await applyBillingEvent(db, {
+          if (result === undefined || !result.ok)
+            throw new Error("a fixture of the adapter was not accepted");
+          return result.event;
+        };
+        const apply = async (request: WebhookRequest) =>
+          applyBillingEvent(db, {
             provider: adapter.id,
-            event: found,
+            event: await parse(request),
           });
-          const second = await apply(fixtures.paid);
+        const journal = createBillingJournalRepository(db, workspaceId);
+        return { db, adapter, fixtures, apply, journal, intentId: intent.id };
+      }
 
-          expect(first.outcome).toBe("applied");
-          expect(second.outcome).toBe("duplicate_ignored");
-          expect((await journal.balance()).balanceMicroUsd).toBe(amount);
+      // #497-T14
+      it("credits a payment once, however often and under whichever event id it arrives, also at once", async () => {
+        const { fixtures, apply, journal } = await prepare();
+
+        const results = await Promise.all([
+          apply(fixtures.paid),
+          apply(fixtures.paid),
+          apply(fixtures.paidAgain),
+          apply(fixtures.paidAgain),
+        ]);
+        await apply(fixtures.paid);
+
+        expect(
+          results.filter((result) => result.outcome === "applied"),
+        ).toHaveLength(1);
+        expect((await journal.balance()).balanceMicroUsd).toBe(amount);
+        expect(
+          (await journal.entries({ limit: 20 })).entries.filter(
+            (entry) => entry.type === "top_up",
+          ),
+        ).toHaveLength(1);
+        expect((await journal.verify()).consistent).toBe(true);
+      });
+
+      // #497-T14
+      it("credits a payment found by lookup and the same payment delivered by webhook once", async () => {
+        const { adapter, db, fixtures, apply, journal, intentId } =
+          await prepare();
+        if (adapter.lookupTopUp === undefined) return;
+
+        const found = await adapter.lookupTopUp({
+          intentId,
+          checkout: fixtures.lookupRefs?.checkout ?? null,
+          payment: fixtures.lookupRefs?.payment ?? null,
         });
-
-        // #497-T14
-        it("leaves the state of one correct delivery when the refund arrives first and is delivered again", async () => {
-          const ordered = await prepare();
-          await ordered.apply(ordered.fixtures.paid);
-          await ordered.apply(ordered.fixtures.refunded);
-
-          const reordered = await prepare();
-          // Not final: the refund waits for the credit of its payment and the provider is asked to deliver it again (#502).
-          await expect(
-            reordered.apply(reordered.fixtures.refunded),
-          ).rejects.toBeInstanceOf(BillingEventRetryError);
-          await reordered.apply(reordered.fixtures.paid);
-          // The provider delivers the refund again; it applies now that the payment is known.
-          await reordered.apply(reordered.fixtures.refunded);
-          await reordered.apply(reordered.fixtures.refunded);
-
-          const expected = amount - ordered.fixtures.refundAmount;
-          expect((await ordered.journal.balance()).balanceMicroUsd).toBe(
-            expected,
-          );
-          expect((await reordered.journal.balance()).balanceMicroUsd).toBe(
-            expected,
-          );
-          expect((await reordered.journal.verify()).consistent).toBe(true);
+        if (found === null) throw new Error("the lookup found nothing");
+        const first = await applyBillingEvent(db, {
+          provider: adapter.id,
+          event: found,
         });
-      },
-    );
+        const second = await apply(fixtures.paid);
+
+        expect(first.outcome).toBe("applied");
+        expect(second.outcome).toBe("duplicate_ignored");
+        expect((await journal.balance()).balanceMicroUsd).toBe(amount);
+      });
+
+      // #497-T14
+      it("leaves the state of one correct delivery when the refund arrives first and is delivered again", async () => {
+        const ordered = await prepare();
+        await ordered.apply(ordered.fixtures.paid);
+        await ordered.apply(ordered.fixtures.refunded);
+
+        const reordered = await prepare();
+        // Not final: the refund waits for the credit of its payment and the provider is asked to deliver it again (#502).
+        await expect(
+          reordered.apply(reordered.fixtures.refunded),
+        ).rejects.toBeInstanceOf(BillingEventRetryError);
+        await reordered.apply(reordered.fixtures.paid);
+        // The provider delivers the refund again; it applies now that the payment is known.
+        await reordered.apply(reordered.fixtures.refunded);
+        await reordered.apply(reordered.fixtures.refunded);
+
+        const expected = amount - ordered.fixtures.refundAmount;
+        expect((await ordered.journal.balance()).balanceMicroUsd).toBe(
+          expected,
+        );
+        expect((await reordered.journal.balance()).balanceMicroUsd).toBe(
+          expected,
+        );
+        expect((await reordered.journal.verify()).consistent).toBe(true);
+      });
+    });
   }
 }

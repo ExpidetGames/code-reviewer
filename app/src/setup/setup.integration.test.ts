@@ -125,20 +125,6 @@ describe("the setup code at start", () => {
     });
     expect((await second.submitCode("135790")).response.status).toBe(200);
   });
-
-  // #97-SU-16
-  it("gives two processes over one database each their own code and counters, so a code of one is refused by the other", async () => {
-    const { harness } = await started();
-    const other = harness.restart("246810");
-    await other.start();
-
-    expect((await other.submitCode(SETUP_TEST_CODE)).response.status).toBe(403);
-    expect((await harness.submitCode("246810")).response.status).toBe(403);
-    expect((await harness.submitCode(SETUP_TEST_CODE)).response.status).toBe(
-      200,
-    );
-    expect((await other.submitCode("246810")).response.status).toBe(200);
-  });
 });
 
 describe("the gate on a fresh installation", () => {
@@ -615,11 +601,6 @@ describe("an existing installation that is not set up", () => {
   async function existing() {
     const { harness } = await started();
     await insertImportedUser(harness, "imported-a");
-    await createInstanceSettingsRepository(harness.db).set(
-      "import_state",
-      "done",
-      null,
-    );
     const workspace = await createWorkspacesRepository(harness.db).create({
       name: "Default workspace",
       slug: "default",

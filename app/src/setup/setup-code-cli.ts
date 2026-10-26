@@ -25,7 +25,6 @@ import {
 } from "../db/postgres.ts";
 import { readSchemaStatus } from "../db/schema-status.ts";
 import type { Database } from "../db/schema.ts";
-import { resolveRuntimeMode, RuntimeConfigError } from "../runtime/mode.ts";
 import {
   createDatabaseSetupCodeStore,
   type IssuedSetupCode,
@@ -34,7 +33,6 @@ import { SETUP_CODE_TTL_MS } from "./code-store.ts";
 import { readSetupState } from "./state.ts";
 
 export const SETUP_CODE_CLI_ERROR_CODES = [
-  "SETUP_CODE_NOT_SERVERLESS",
   "SETUP_CODE_CONFIG_INVALID",
   "SETUP_CODE_NOT_A_TERMINAL",
   "SETUP_CODE_SCHEMA_BEHIND",
@@ -110,12 +108,6 @@ export async function runSetupCodeCommand(
   options: SetupCodeOptions,
 ): Promise<number> {
   try {
-    if (resolveRuntimeMode(env) !== "serverless")
-      return fail(
-        io,
-        "SETUP_CODE_NOT_SERVERLESS",
-        "this command is for APP_RUNTIME=serverless. A server prints its setup code in its own log when it starts. Set APP_RUNTIME=serverless for this command if the database is the one of a serverless deployment.",
-      );
     const secret = resolveAppSecret(env);
     if (!secret.ok)
       return fail(io, "SETUP_CODE_CONFIG_INVALID", secret.problem);
@@ -154,8 +146,6 @@ export async function runSetupCodeCommand(
   } catch (error) {
     if (error instanceof DatabaseError)
       return fail(io, "SETUP_CODE_FAILED", `${error.code}: ${error.message}`);
-    if (error instanceof RuntimeConfigError)
-      return fail(io, "SETUP_CODE_CONFIG_INVALID", error.message);
     // The cause is not repeated: it could carry a connection string or the code.
     return fail(
       io,

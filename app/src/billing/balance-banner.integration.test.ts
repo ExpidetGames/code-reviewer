@@ -13,7 +13,7 @@ import { loadBalanceBanner } from "./balance-banner.ts";
 const USD = 1_000_000;
 
 for (const engine of BILLING_ENGINES) {
-  describe.skipIf(engine.skip)(`the balance banner on ${engine.name}`, () => {
+  describe(`the balance banner on ${engine.name}`, () => {
     async function start(options: { billing?: boolean } = {}) {
       const { db, workspaceId, otherWorkspaceId } = await engine.create();
       if (options.billing !== false) await setBillingSwitch(db, true);

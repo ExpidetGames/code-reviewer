@@ -80,9 +80,9 @@ describe("the serverless bundle", () => {
 
     expect(bundle.code).toContain("hono");
     expect(offenders(bundle)).toStrictEqual([]);
-    expect(bundle.modules.some((path) => path.endsWith("src/node.ts"))).toBe(
-      false,
-    );
+    expect(
+      bundle.modules.some((path) => path.endsWith("test-support/node-host.ts")),
+    ).toBe(false);
     expect(
       bundle.modules.some((path) => path.includes("@hono/node-server")),
     ).toBe(false);

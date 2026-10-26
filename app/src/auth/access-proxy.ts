@@ -10,7 +10,6 @@ import {
   PORTAL_DENIED_HEADER,
   PORTAL_REWRITE_HEADER,
   isAdminPath,
-  isInstanceAdminOnlyPath,
   isInternalPortalPath,
   portalRewriteTarget,
 } from "../admin/paths.ts";
@@ -125,17 +124,6 @@ export function createAccessProxy({
       });
     }
 
-    // What is about the instance and not about a workspace (the backup status) is for the instance admin. For
-    // every other person who is let into the app it is a path that does not exist, whatever their role in a
-    // workspace is: the same answer, so nothing says the route is there. (A person who still has to verify
-    // the address or has no workspace gets the answer every other path gets, below.)
-    if (
-      isInstanceAdminOnlyPath(pathname) &&
-      lookup.kind === "user" &&
-      !lookup.user.isInstanceAdmin
-    )
-      return treatAsMissing(request);
-
     // The instance admin whose address is not verified yet keeps the admin portal, so that a problem with
     // the mail server can always be repaired; everything else of the app waits for the verification
     // (src/auth/access-gates.ts). The portal's own files count too: Next.js does not run the proxy on the path a rewrite of next.config.ts
@@ -147,9 +135,7 @@ export function createAccessProxy({
       (lookup.kind === "no_workspace" && isNoWorkspacePath(pathname)) ||
       (lookup.kind === "unverified" &&
         lookup.user.isInstanceAdmin &&
-        (isAdminPath(pathname) ||
-          isInternalPortalPath(pathname) ||
-          isInstanceAdminOnlyPath(pathname)))
+        (isAdminPath(pathname) || isInternalPortalPath(pathname)))
         ? lookup.user
         : null;
 

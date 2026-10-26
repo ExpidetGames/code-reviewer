@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The job queue on Postgres: the partial unique index on running jobs per pull request exists on both
-// dialects, many runners never get the same job and never start two jobs of one pull request, and a
-// unique violation inside the claim (the slot was taken at the same moment) is skipped, not raised.
-// The Postgres tests run only when TEST_DATABASE_URL is set.
+// The job queue on Postgres: the partial unique index on running jobs per pull request exists, many runners never get
+// the same job and never start two jobs of one pull request, and a unique violation inside the claim (the slot was taken
+// at the same moment) is skipped, not raised.
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -21,12 +20,8 @@ import type { Database } from "./schema.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
 import {
   connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import { createTestDatabase } from "../test-support/test-database.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+  createTestDatabase,
+} from "../test-support/test-database.ts";
 
 const RUNNING_INDEX = "jobs_one_running_per_pull_request_unique";
 const T = "2026-10-10T12:00:00.000Z";
@@ -73,24 +68,10 @@ async function waitForLockWait(
   }
 }
 
-describe("the index that keeps one running job per pull request", () => {
+describe("the job queue on Postgres", () => {
   // #105-PG-20
-  it("exists on SQLite", async () => {
-    const { db } = await createTestDatabase();
-    const { rows } = await sql<{ present: boolean }>`
-      select exists(
-        select 1 from sqlite_master
-        where type = 'index' and name = ${RUNNING_INDEX}
-      ) as present`.execute(db);
-
-    expect(Boolean(rows[0]?.present)).toBe(true);
-  });
-});
-
-describePostgres("the job queue on Postgres", () => {
-  // #105-PG-20
-  it("has the partial unique index, on a running status, like SQLite", async () => {
-    const postgres = await createPostgresTestDatabase();
+  it("has the partial unique index on a running status, one running job per pull request", async () => {
+    const postgres = await createTestDatabase();
     const { rows } = await sql<{ definition: string }>`
       select indexdef as definition from pg_indexes
       where indexname = ${RUNNING_INDEX}`.execute(postgres.db);
@@ -101,7 +82,7 @@ describePostgres("the job queue on Postgres", () => {
 
   // #105-PG-07
   it("never gives one job to two runners and never runs two jobs of one pull request", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     for (let pr = 1; pr <= 4; pr += 1)
       for (const head of ["a", "b", "c"] as const)
@@ -141,7 +122,7 @@ describePostgres("the job queue on Postgres", () => {
 
   // #105-PG-20
   it("gives only one of two jobs of one pull request to two runners at the same moment", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const first = await fixture.enqueueNew({ prNumber: 7, headSha: sha("a") });
     const second = await fixture.enqueueNew({ prNumber: 7, headSha: sha("b") });
@@ -165,7 +146,7 @@ describePostgres("the job queue on Postgres", () => {
 
   // #105-PG-21
   it("skips a job whose running slot was taken at the same moment and claims the next one", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     await fixture.enqueueNew({ prNumber: 7, headSha: sha("a") });
     // A later created_at makes the pull request 7 job unambiguously the oldest due job; the claim
@@ -210,7 +191,7 @@ describePostgres("the job queue on Postgres", () => {
 
   // #105-PG-09
   it("claims on one instance and heartbeats and completes on another", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const job = await fixture.enqueueNew({ prNumber: 7, headSha: sha("a") });
 
@@ -241,7 +222,7 @@ describePostgres("the job queue on Postgres", () => {
 
   // #195-T02, #195 finding 9: the capability predicate is inside the atomic claim on Postgres too.
   it("hands each capability only the kinds it can run and keeps one holder per pull request", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({
       database: postgres.db,
       dynamicReview: true,
@@ -270,7 +251,7 @@ describePostgres("the job queue on Postgres", () => {
 
   // #195-T02, #195 finding 9
   it("never gives two capabilities a job of one pull request across kinds", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({
       database: postgres.db,
       dynamicReview: true,
@@ -342,7 +323,7 @@ describePostgres("the job queue on Postgres", () => {
   it.each(["webhook", "manual", "comment"] as const)(
     "serializes a %s enqueue with a kind change",
     async (triggerKind) => {
-      const postgres = await createPostgresTestDatabase();
+      const postgres = await createTestDatabase();
       const fixture = await createJobQueueFixture({
         database: postgres.db,
         dynamicReview: true,
@@ -428,7 +409,7 @@ describePostgres("the job queue on Postgres", () => {
   it.each([true, false])(
     "serializes gate disable with an in-flight Dynamic enqueue when a saved enabled gate exists: %s",
     async (savedGate) => {
-      const postgres = await createPostgresTestDatabase();
+      const postgres = await createTestDatabase();
       const fixture = await createJobQueueFixture({ database: postgres.db });
       const settings = createInstanceSettingsRepository(
         postgres.db,
@@ -500,7 +481,7 @@ describePostgres("the job queue on Postgres", () => {
   );
   // #195-T04: PostgreSQL rollback must leave no live Dynamic row an older app could reclaim.
   it("preserves the running Dynamic lease on disable and fails its expiry before rollback", async () => {
-    const postgres = await createPostgresTestDatabase();
+    const postgres = await createTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const settings = createInstanceSettingsRepository(
       postgres.db,

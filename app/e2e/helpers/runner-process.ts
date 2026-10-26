@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// Starts the real runner (the job loop, `code-reviewer-runner`) as a process of its own, polling an
-// app under test, and stops it again. Every job it claims runs the real PR-Agent through the real
-// job entry point; only the address of the fake LLM is added to the job on the way (see
-// fakes/pr-agent/run_job_against_fake_llm.py), because the app has no setting for it.
+// Runs the jobs of an app under test with the real Worker (`code-reviewer-runner worker-once`), the way the hosted
+// deployment does, without a Dispatcher: a small driver in the journey's process claims the next job like a
+// Dispatcher does (with the dispatcher credential, asking for a per-job credential) and starts one Worker per job with
+// the start document on stdin. Every job runs the real PR-Agent through the real job entry point; only the address of
+// the fake LLM is added to the job on the way (see fakes/pr-agent/run_job_against_fake_llm.py), because the app has no
+// setting for it. `stop()` ends the driver and gives the running job back, as a signal does a Worker.
 //
 // The runner comes from the Python environment of the runner project (`make install`, or
 // `uv sync --locked` in runner/), and PR-Agent counts tokens with an encoding that has to be in
@@ -52,14 +54,39 @@ export function assertTiktokenCache(): void {
 }
 
 export type RunnerProcess = {
-  /** Everything the runner wrote to stdout and stderr so far (its log and the jobs' diagnostics). */
+  /** Everything the Workers wrote to stdout and stderr so far (their log and the jobs' diagnostics). */
   output(): string;
-  /** SIGTERM, then SIGKILL if it does not end by itself. Removes the runner's home directory. */
+  /** Stops claiming, ends the running Worker with SIGTERM (SIGKILL if it does not end by itself) and removes the home. */
   stop(): Promise<void>;
 };
 
+type Claim = { job: { id: string; credential: string } } | null;
+
+/** The next job as a Dispatcher claims it: 200 with the per-job credential, 204 for none. */
+async function claimNext(appUrl: string): Promise<Claim> {
+  const response = await fetch(`${appUrl}/api/runners/v1/claim`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${e2eEnv.runnerToken}`,
+      "content-type": "application/json",
+      "x-runner-id": "e2e-runner",
+    },
+    body: JSON.stringify({
+      engines: ["pr-agent"],
+      features: ["worker_credential"],
+    }),
+  });
+  if (response.status === 204) return null;
+  if (response.status !== 200)
+    throw new Error(`The claim was answered with ${String(response.status)}.`);
+  return (await response.json()) as Claim;
+}
+
+const pause = (milliseconds: number) =>
+  new Promise<void>((done) => setTimeout(done, milliseconds));
+
 export async function startRunner(options: {
-  /** The app to poll. */
+  /** The app to claim from. */
   appUrl: string;
   /** The `llm.baseUrl` the jobs get, the address of the fake LLM. */
   llmBaseUrl: string;
@@ -80,44 +107,68 @@ export async function startRunner(options: {
     TMPDIR: process.env.TMPDIR ?? tmpdir(),
     LANG: "C.UTF-8",
     TIKTOKEN_CACHE_DIR: tiktokenCacheDirectory(),
-    RUNNER_API_URL: options.appUrl,
-    RUNNER_TOKEN: e2eEnv.runnerToken,
-    RUNNER_ID: "e2e-runner",
-    RUNNER_CONCURRENCY: "1",
-    RUNNER_POLL_INTERVAL_SECONDS: "0.2",
     RUNNER_JOB_TIMEOUT_SECONDS: "150",
-    RUNNER_SHUTDOWN_GRACE_SECONDS: "5",
     PR_AGENT_COMMAND: [python, WRAPPER, options.llmBaseUrl]
       .map(quoted)
       .join(" "),
   };
-  const child: ChildProcess = spawn(program, [], {
-    cwd: home,
-    // Next's types make NODE_ENV a required variable; the runner does not read it.
-    env: env as NodeJS.ProcessEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
 
   let output = "";
-  const collect = (chunk: Buffer) => {
-    output += chunk.toString("utf8");
-  };
-  child.stdout?.on("data", collect);
-  child.stderr?.on("data", collect);
-  const exited = new Promise<void>((resolveExit) => {
-    child.once("exit", () => {
-      resolveExit();
+  let stopping = false;
+  let running: ChildProcess | undefined;
+
+  /** One Worker for one claimed job; resolves when it has ended. */
+  function runWorker(claimed: NonNullable<Claim>): Promise<void> {
+    const child = spawn(program, ["worker-once"], {
+      cwd: home,
+      // Next's types make NODE_ENV a required variable; the runner does not read it.
+      env: env as NodeJS.ProcessEnv,
+      stdio: ["pipe", "pipe", "pipe"],
     });
-  });
+    running = child;
+    const collect = (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+    child.stdin.end(
+      JSON.stringify({
+        appUrl: options.appUrl,
+        jobId: claimed.job.id,
+        credential: claimed.job.credential,
+      }),
+    );
+    return new Promise<void>((done) => {
+      child.once("exit", () => {
+        running = undefined;
+        done();
+      });
+    });
+  }
 
-  const isRunning = () => child.exitCode === null && child.signalCode === null;
+  const driver = (async () => {
+    while (!stopping) {
+      let claimed: Claim;
+      try {
+        claimed = await claimNext(options.appUrl);
+      } catch {
+        // The app is not reachable (yet, or any more): ask again.
+        await pause(500);
+        continue;
+      }
+      if (claimed === null) {
+        await pause(200);
+        continue;
+      }
+      await runWorker(claimed);
+    }
+  })();
 
-  // A worker that ends without `stop()` (a crash, process.exit, Ctrl+C) must not leave a runner
-  // polling the app: SIGTERM lets it end its job within its own grace period (5 s) and exit. A
-  // SIGKILL of the worker itself cannot be handled; the runner then ends when its job is done or
-  // the app is gone, but it keeps polling until then.
+  // A driver that ends without `stop()` (a crash, process.exit, Ctrl+C) must not leave a Worker running: SIGTERM lets
+  // it give its job back and exit.
   const onExit = () => {
-    if (isRunning()) child.kill("SIGTERM");
+    stopping = true;
+    running?.kill("SIGTERM");
     rmSync(home, { recursive: true, force: true });
   };
   const signals = ["SIGINT", "SIGTERM"] as const;
@@ -143,12 +194,16 @@ export async function startRunner(options: {
     output: () => output,
     async stop() {
       detach();
+      stopping = true;
       try {
-        if (isRunning()) {
+        const child = running;
+        if (child !== undefined) {
           child.kill("SIGTERM");
           const killer = setTimeout(() => child.kill("SIGKILL"), 15_000);
-          await exited;
+          await driver;
           clearTimeout(killer);
+        } else {
+          await driver;
         }
       } finally {
         rmSync(home, { recursive: true, force: true });

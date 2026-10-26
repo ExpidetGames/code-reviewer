@@ -7,11 +7,6 @@
 import { describe, expect, it } from "vitest";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import {
-  connectPostgres,
-  createPostgresTestDatabase,
-  hasPostgres,
-} from "../test-support/postgres-test-database.ts";
-import {
   waitForLockWait,
   withApplicationName,
 } from "../test-support/postgres-lock-wait.ts";
@@ -22,13 +17,15 @@ import {
   createManualCreditService,
   ManualCreditError,
 } from "./manual-credit.ts";
-
-const describePostgres = hasPostgres() ? describe : describe.skip;
+import {
+  connectPostgres,
+  createTestDatabase,
+} from "../test-support/test-database.ts";
 
 const USD = 1_000_000;
 
 async function start() {
-  const postgres = await createPostgresTestDatabase({ poolMax: 4 });
+  const postgres = await createTestDatabase({ poolMax: 4 });
   const workspaceId = await defaultWorkspaceId(postgres.db);
   const seeded = await seedWorkspaceForDeletion(postgres.db, workspaceId, "a", {
     balanceMicroUsd: 0,
@@ -90,67 +87,64 @@ async function start() {
   return { postgres, workspaceId, seeded, remove, grant, hold, entryCount };
 }
 
-describePostgres(
-  "a manual credit against the deletion of its workspace",
-  () => {
-    // #658-T04
-    it("refuses a credit that arrives while the deletion is in flight, and writes no entry", async () => {
-      const t = await start();
-      const before = await t.entryCount();
-      // The deletion stops at the first row it removes (the dispatch of the waiting job), after it took the workspace and balance rows.
-      const blocker = t.hold(async (trx) => {
-        await trx
-          .selectFrom("job_dispatches")
-          .select("job_id")
-          .where("job_id", "=", t.seeded.queuedJobId)
-          .forUpdate()
-          .execute();
-      });
-      await blocker.done;
-      const deletion = t.remove();
-      const release = (error: unknown) => {
-        blocker.release();
-        throw error;
-      };
-      await waitForLockWait(t.postgres.db, "cr_delete").catch(release);
-      const grant = t.grant();
-      await waitForLockWait(t.postgres.db, "cr_operator").catch(release);
+describe("a manual credit against the deletion of its workspace", () => {
+  // #658-T04
+  it("refuses a credit that arrives while the deletion is in flight, and writes no entry", async () => {
+    const t = await start();
+    const before = await t.entryCount();
+    // The deletion stops at the first row it removes (the dispatch of the waiting job), after it took the workspace and balance rows.
+    const blocker = t.hold(async (trx) => {
+      await trx
+        .selectFrom("job_dispatches")
+        .select("job_id")
+        .where("job_id", "=", t.seeded.queuedJobId)
+        .forUpdate()
+        .execute();
+    });
+    await blocker.done;
+    const deletion = t.remove();
+    const release = (error: unknown) => {
       blocker.release();
-      await blocker.transaction;
+      throw error;
+    };
+    await waitForLockWait(t.postgres.db, "cr_delete").catch(release);
+    const grant = t.grant();
+    await waitForLockWait(t.postgres.db, "cr_operator").catch(release);
+    blocker.release();
+    await blocker.transaction;
 
-      expect(await deletion).toEqual({ ok: true });
-      const outcome = await grant;
-      expect(outcome).toBeInstanceOf(ManualCreditError);
-      expect((outcome as ManualCreditError).code).toBe("workspace_not_found");
-      expect(await t.entryCount()).toBe(before);
+    expect(await deletion).toEqual({ ok: true });
+    const outcome = await grant;
+    expect(outcome).toBeInstanceOf(ManualCreditError);
+    expect((outcome as ManualCreditError).code).toBe("workspace_not_found");
+    expect(await t.entryCount()).toBe(before);
+  });
+
+  // #658-T04
+  it("makes the deletion wait for a credit that is being written, and then refuse with balance_positive", async () => {
+    const t = await start();
+    // The balance row is held, so the credit has read the workspace and waits to write.
+    const balance = t.hold(async (trx) => {
+      await createBillingJournalRepository(trx, t.workspaceId).lockBalance();
     });
-
-    // #658-T04
-    it("makes the deletion wait for a credit that is being written, and then refuse with balance_positive", async () => {
-      const t = await start();
-      // The balance row is held, so the credit has read the workspace and waits to write.
-      const balance = t.hold(async (trx) => {
-        await createBillingJournalRepository(trx, t.workspaceId).lockBalance();
-      });
-      await balance.done;
-      const grant = t.grant();
-      const release = (error: unknown) => {
-        balance.release();
-        throw error;
-      };
-      await waitForLockWait(t.postgres.db, "cr_operator").catch(release);
-      let settled = false;
-      const deletion = t.remove().then((result) => {
-        settled = true;
-        return result;
-      });
-      await waitForLockWait(t.postgres.db, "cr_delete").catch(release);
-      expect(settled).toBe(false);
+    await balance.done;
+    const grant = t.grant();
+    const release = (error: unknown) => {
       balance.release();
-      await balance.transaction;
-
-      expect(await grant).toMatchObject({ type: "top_up" });
-      expect(await deletion).toEqual({ ok: false, error: "balance_positive" });
+      throw error;
+    };
+    await waitForLockWait(t.postgres.db, "cr_operator").catch(release);
+    let settled = false;
+    const deletion = t.remove().then((result) => {
+      settled = true;
+      return result;
     });
-  },
-);
+    await waitForLockWait(t.postgres.db, "cr_delete").catch(release);
+    expect(settled).toBe(false);
+    balance.release();
+    await balance.transaction;
+
+    expect(await grant).toMatchObject({ type: "top_up" });
+    expect(await deletion).toEqual({ ok: false, error: "balance_positive" });
+  });
+});

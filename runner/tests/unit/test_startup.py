@@ -18,19 +18,12 @@ from code_reviewer_runner.dynamic_review.self_check import SelfCheckFailed, Self
 from code_reviewer_runner.dynamic_review.static_isolation import EgressSetup
 from code_reviewer_runner.job_loop import service
 from code_reviewer_runner.job_loop.settings import (
-    LoopSettings,
     WorkerSettings,
-    settings_from_environment,
     worker_settings_from_environment,
 )
 from code_reviewer_runner.verdict import Verdict
 
 DYNAMIC = {"RUNNER_DIFF_JOB_USER": "10001:10001"}
-LOOP = {
-    "RUNNER_API_URL": "http://app:3000",
-    "RUNNER_TOKEN": "dummy-runner-token-0123456789",
-    **DYNAMIC,
-}
 
 
 class Steps:
@@ -46,7 +39,7 @@ class Steps:
         monkeypatch.setattr(service, "prepare_dynamic_runtime", self.prepare)
         monkeypatch.setattr(service, "check_dynamic_runner", self.check)
 
-    def prepare(self, settings: LoopSettings | WorkerSettings) -> EgressSetup:
+    def prepare(self, settings: WorkerSettings) -> EgressSetup:
         self.events.append("prepare")
         if self.cannot_drop:
             raise IsolationError("a capability could not be dropped from the bounding set")
@@ -66,9 +59,7 @@ class Steps:
         self.written.append(verdict)
         return None
 
-    def run[Settings: (LoopSettings, WorkerSettings)](
-        self, settings: Settings, **options: Any
-    ) -> tuple[Settings, Verdict]:
+    def run(self, settings: WorkerSettings, **options: Any) -> tuple[WorkerSettings, Verdict]:
         return service.run_startup(
             settings, remove_verdict=self.remove, write_verdict=self.write, **options
         )
@@ -83,7 +74,7 @@ def steps(monkeypatch: pytest.MonkeyPatch) -> Steps:
 def test_the_startup_removes_the_old_verdict_sets_up_the_network_checks_and_writes_the_verdict(
     steps: Steps,
 ) -> None:
-    settings, verdict = steps.run(settings_from_environment(LOOP))
+    settings, verdict = steps.run(worker_settings_from_environment(DYNAMIC))
 
     assert steps.events == ["remove", "prepare", "check", "write"]
     assert settings.engines == ALL_ENGINES
@@ -109,7 +100,7 @@ def test_a_failed_check_leaves_pr_agent_and_the_stable_reason_in_the_verdict(
 def test_a_runner_without_an_engine_user_is_pr_agent_only_with_the_reason_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def installed(settings: LoopSettings | WorkerSettings) -> EgressSetup:
+    def installed(settings: WorkerSettings) -> EgressSetup:
         return EgressSetup(True, EgressMode.FULL)
 
     monkeypatch.setattr(service, "prepare_dynamic_runtime", installed)
@@ -149,7 +140,7 @@ def test_rules_that_were_not_installed_are_the_reason_in_the_verdict(steps: Step
     assert steps.check_facts[0]["rules_installed"] is False
 
 
-# #324-T02: the entry modes of the Worker image ask for a read-only root, the legacy loop does not.
+# #324-T02: the entry modes of the Worker image ask for a read-only root.
 def test_the_read_only_root_is_asked_of_the_check_only_when_the_mode_requires_it(
     steps: Steps,
 ) -> None:
@@ -162,6 +153,6 @@ def test_the_read_only_root_is_asked_of_the_check_only_when_the_mode_requires_it
 
 # #324-T08: unchanged behaviour of the existing function for its existing callers.
 def test_advertise_engines_still_returns_only_the_settings(steps: Steps) -> None:
-    settings = service.advertise_engines(settings_from_environment(LOOP), True)
+    settings = service.advertise_engines(worker_settings_from_environment(DYNAMIC), True)
 
     assert settings.engines == ALL_ENGINES

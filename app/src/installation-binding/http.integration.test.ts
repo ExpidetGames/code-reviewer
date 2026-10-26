@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// The routes of the binding through the real services over a real SQLite file and the fake GitHub
+// The routes of the binding through the real services over a real Postgres database and the fake GitHub
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.9): how a request is read (same site, JSON only,
 // a size limit, read once), who may use each route, that a Member is refused, that the two redirects of GitHub
 // end on fixed pages whatever the query says, and that the counters limit every route that starts a flow or

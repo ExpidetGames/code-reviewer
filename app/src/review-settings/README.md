@@ -476,8 +476,7 @@ always merged over the stored ones, so a request that does not mention them keep
 `reviewSkill` or `dynamicModel` of `""`/`null` clears only that override.
 
 The write goes through `projects.updateSettingsWith` in one transaction. The stored settings are read
-under a lock on the workspace-scoped repository row: SQLite already holds the single write lock
-(`begin immediate`), Postgres takes the row's `FOR UPDATE` lock before the read, so two instances
+under a lock on the workspace-scoped repository row: Postgres takes the row's `FOR UPDATE` lock before the read, so two instances
 cannot lose an update by reading the same settings and writing them back
 (`projects-repository.postgres.integration.test.ts`). The same transaction calls `hooks.ts`
 `onProjectSettingsChanged`, for a save **and** for a full reset, so #195 can cancel the project's
@@ -582,7 +581,7 @@ The claim of the runner API and the webhook intake use `service.resolveForReposi
 `validate.test.ts`, `effective.test.ts`, `runner-settings.test.ts`, `cost.test.ts`, `catalog-selection.test.ts` and
 `dynamic-check.test.ts` (unit, pure),
 `service.integration.test.ts`, `selection.integration.test.ts` (the provider and catalog selection, a real catalog),
-`validate-native.test.ts` and `native-model.integration.test.ts` (#555: a catalog provider and model, the refusal of a model outside the catalog, a managed workspace refused; SQLite), `dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
+`validate-native.test.ts` and `native-model.integration.test.ts` (#555: a catalog provider and model, the refusal of a model outside the catalog, a managed workspace refused), `dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real Postgres, the metadata from the fake LLM), the repositories' own tests in
 `src/db/repositories/`, and in `integration-tests/http/` the proxy in front of the routes
 (`review-settings-route.integration.test.ts`) and the real route files
 (`review-settings-route-file.integration.test.ts`). The test cases that need the real PR-Agent against the

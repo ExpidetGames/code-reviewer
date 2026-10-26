@@ -54,9 +54,7 @@ export type ModelsDevRepository = {
   /**
    * Every provider, listed or not. `forUpdate` locks the rows until the transaction ends on Postgres (`FOR UPDATE`; no
    * effect outside a transaction), so that a write made by someone else in between, an admin's confirmation of a changed
-   * address (#554), waits and is not written over by a plan made on the old rows. On SQLite every transaction begins with
-   * `begin immediate` (src/db/dialect.ts), so a second writer waits for the whole transaction anyway and the option does
-   * nothing. A confirmation is a guarded update of the one row (`... where provider_id = ? and pending_url = ?`), made in
+   * address (#554), waits and is not written over by a plan made on the old rows. A confirmation is a guarded update of the one row (`... where provider_id = ? and pending_url = ?`), made in
    * its own transaction; it needs no other lock.
    */
   listProviders(options?: { forUpdate?: boolean }): Promise<StoredProvider[]>;
@@ -72,8 +70,7 @@ export type ModelsDevRepository = {
   /**
    * One provider. `forUpdate` locks the row until the transaction ends on Postgres, as for `listProviders`: a write to a
    * model of the provider that must not run beside a fetch (an admin's price confirmation, #549) takes this lock first, so
-   * that it waits for a fetch that is writing and then reads what the fetch wrote. On SQLite every transaction begins
-   * with `begin immediate`, so the option does nothing.
+   * that it waits for a fetch that is writing and then reads what the fetch wrote.
    */
   getProvider(
     id: string,
