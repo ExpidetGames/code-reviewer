@@ -16,7 +16,7 @@ import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { PLAN_HANDOFF_MAX } from "../../src/plan-handoff/limits.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
-import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
+import type { WorkspaceRole } from "../../src/db/workspace-roles.ts";
 
 const session = vi.hoisted(() => ({
   currentLookup: vi.fn<() => Promise<SessionLookup>>(),

@@ -15,7 +15,7 @@
 import type { Kysely, Transaction } from "kysely";
 import { GITHUB_PROVIDER_ID } from "../auth/github-provider.ts";
 import type { Database } from "../db/schema.ts";
-import { WORKSPACE_ROLES, type WorkspaceRole } from "../workspaces/roles.ts";
+import { WORKSPACE_ROLES, type WorkspaceRole } from "../db/workspace-roles.ts";
 
 export const MERGE_ERROR_CODES = [
   /** The acting user is not the instance admin. */

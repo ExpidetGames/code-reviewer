@@ -5,7 +5,7 @@
 // job is.
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
-import type { ProjectReviewKind } from "./settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 export type ProjectSettingsChangedEvent = {
   projectId: string;

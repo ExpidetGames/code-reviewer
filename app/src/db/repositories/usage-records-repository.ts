@@ -11,7 +11,7 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database, UsageRecordsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type {
   SettledReason,
   UsageKeyMode,
@@ -194,7 +194,7 @@ export function afterUsageCursor(after: UsageCursor) {
   return sql<boolean>`(settled_at > ${after.settledAt} or (settled_at = ${after.settledAt} and id > ${after.id}))`;
 }
 
-/** The statuses a job never leaves (src/jobs/job-status.ts). */
+/** The statuses a job never leaves (src/db/job-status.ts). */
 const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
 
 export function createUsageRecordsRepository(

@@ -6,12 +6,12 @@ import {
   REVIEW_SETTING_FIELDS,
   type ProjectDynamicOverrides,
   type ProjectDynamicSettingField,
-  type ProjectReviewKind,
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
   type ReviewVerdictMode,
 } from "./settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /** Where the value of a field comes from. */
 export type SettingSource = "built_in" | "global" | "project";

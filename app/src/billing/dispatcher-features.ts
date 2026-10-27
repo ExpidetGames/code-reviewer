@@ -12,7 +12,7 @@
 // inside the same transaction that writes `enabled`.
 import "server-only";
 import type { Kysely } from "kysely";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createInstanceSettingsStore } from "../db/repositories/instance-settings-store.ts";
 import type { Database } from "../db/schema.ts";
 import {
   BILLING_RATES_INCOMPLETE,
@@ -26,6 +26,9 @@ export type DispatcherSightings = {
   withVmLifecycleAt?: string;
   withoutVmLifecycleAt?: string;
 };
+
+/** The instance setting that holds them (`instance_settings`, key `dispatcher_sightings`). */
+type SightingValues = { dispatcher_sightings: DispatcherSightings };
 
 /** A Dispatcher without `vm_lifecycle` that has not claimed for this long is a rollout that finished. */
 export const DISPATCHER_STALE_MS = 24 * 60 * 60 * 1000;
@@ -56,7 +59,9 @@ export async function readStoredDispatcherSightings(
   db: Kysely<Database>,
 ): Promise<DispatcherSightings> {
   return readDispatcherSightings(
-    await createInstanceSettingsRepository(db).get("dispatcher_sightings"),
+    await createInstanceSettingsStore<SightingValues>(db).get(
+      "dispatcher_sightings",
+    ),
   );
 }
 
@@ -81,7 +86,7 @@ export async function noteDispatcherClaim(
       now.getTime() - Date.parse(last) < DISPATCHER_NOTE_INTERVAL_MS
     )
       return;
-    await createInstanceSettingsRepository(db).set(
+    await createInstanceSettingsStore<SightingValues>(db).set(
       "dispatcher_sightings",
       { ...sightings, [field]: now.toISOString() },
       null,

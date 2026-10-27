@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What the roles are called and what they mean, in the words of the pages.
-import type { WorkspaceRole } from "../roles.ts";
+import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 
 export const ROLE_LABEL: Record<WorkspaceRole, string> = {
   owner: "Owner",

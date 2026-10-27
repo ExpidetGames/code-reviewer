@@ -3,7 +3,7 @@
 // What the catalog routes of the admin portal send and the page shows (#429). The operator sees the provider and the
 // model id of every entry; nothing here reaches a member (their view is `MemberCatalogEntry`, member.ts). Types only, so
 // the page's client code can import this file.
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { CatalogDefaults, CatalogStatus } from "./entries.ts";
 
 export type AdminCatalogEntry = {

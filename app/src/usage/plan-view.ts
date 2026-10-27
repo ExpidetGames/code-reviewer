@@ -8,7 +8,7 @@
 //   amount of money or a measured cost, in any unit,
 // - the plan label, the start of the period and two flags (managed, paused),
 // and never the reason of a suspension, where the entitlements came from, a model, a key or anything of a job.
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { ResolvedEntitlements } from "../workspaces/entitlements.ts";
 
 /** What has been counted for the period (`src/usage/usage-summary.ts` reads it; this module only shapes it). */

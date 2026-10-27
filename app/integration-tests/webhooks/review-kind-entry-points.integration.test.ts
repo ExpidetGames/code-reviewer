@@ -20,10 +20,8 @@ import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
 import { createJobReviewSettingsHooks } from "../../src/jobs/review-settings-hooks.ts";
 import { createManualReviewService } from "../../src/manual-reviews/service.ts";
 import { createReviewSettingsService } from "../../src/review-settings/service.ts";
-import {
-  builtInReviewSettings,
-  type ProjectReviewKind,
-} from "../../src/review-settings/settings.ts";
+import { builtInReviewSettings } from "../../src/review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../src/job-kind/job-kind.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import { createTestQueue } from "../../src/test-support/jobs.ts";
 import {

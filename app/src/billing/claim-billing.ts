@@ -12,7 +12,7 @@ import "server-only";
 import type { Kysely } from "kysely";
 import { createBillingJournalRepository } from "../db/repositories/billing-journal-repository.ts";
 import type { Database } from "../db/schema.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
 import {
   guardedBalanceNote,

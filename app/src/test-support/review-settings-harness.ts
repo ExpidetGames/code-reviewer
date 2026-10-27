@@ -25,7 +25,7 @@ import {
   catalogSelectionFrom,
   type CatalogSelectionSource,
 } from "../review-settings/catalog-selection.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import { createCatalogService } from "../model-catalog/service.ts";
 import type { ProviderLookup } from "../review-settings/validate.ts";
 import type { NativeSelectionSource } from "../native-providers/catalog.ts";

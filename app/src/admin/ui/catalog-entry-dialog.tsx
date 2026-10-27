@@ -49,7 +49,7 @@ import type {
   AdminCatalogProvider,
 } from "../../model-catalog/admin-view.ts";
 import { CATALOG_KINDS, MAX_NAME_CHARS } from "../../model-catalog/entries.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import type { CatalogApi, EntryInput } from "./catalog-api.ts";
 import {

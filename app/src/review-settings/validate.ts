@@ -17,17 +17,19 @@ import {
   PROJECT_DYNAMIC_SETTING_FIELDS,
   REVIEW_VERDICT_MODES,
   type ReviewVerdictMode,
-  PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   REVIEW_SETTING_LIMITS,
   type ProjectDynamicOverrides,
   type ProjectDynamicPatch,
   type ProjectDynamicSettingField,
-  type ProjectReviewKind,
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
 } from "./settings.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../job-kind/job-kind.ts";
 
 export const REVIEW_SETTING_ISSUE_CODES = [
   /** A field this version does not know. */

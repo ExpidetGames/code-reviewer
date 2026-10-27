@@ -8,7 +8,7 @@ import "server-only";
 import { sql, type Kysely, type Selectable } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
-import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
+import { isWorkspaceRole, type WorkspaceRole } from "../workspace-roles.ts";
 import type { Database, WorkspacesTable } from "../schema.ts";
 
 export type Workspace = {

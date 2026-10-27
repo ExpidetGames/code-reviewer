@@ -20,7 +20,7 @@ import {
   type TopUpDebitBucket,
   type TopUpIntent,
   type TopUpIntentState,
-} from "../../billing/topup-intent.ts";
+} from "../topup-intent.ts";
 import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
 import type { BillingTopupIntentsTable, Database } from "../schema.ts";

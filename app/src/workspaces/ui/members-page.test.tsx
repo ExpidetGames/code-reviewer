@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { Member } from "../../db/repositories/workspace-members-repository.ts";
-import type { WorkspaceRole } from "../roles.ts";
+import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 import type { WorkspaceApi } from "./api.ts";
 import { InviteForm } from "./invite-form.tsx";
 import { MembersPageContent, type MembersPageData } from "./members-page.tsx";

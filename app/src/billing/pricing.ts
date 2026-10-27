@@ -5,7 +5,7 @@
 // amount is a whole number of micro-USD, computed in BigInt and rounded half up once, separately for AI and
 // infrastructure. A result that does not fit the safe integer range is refused, never wrapped. See README.md.
 import "server-only";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
 import type { OutcomeClass } from "./outcome.ts";
 import {

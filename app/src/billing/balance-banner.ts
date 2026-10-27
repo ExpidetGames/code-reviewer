@@ -10,8 +10,8 @@ import type { Database } from "../db/schema.ts";
 import type { BalanceBannerView } from "../workspace-billing/banner.ts";
 import { workspacePath } from "../workspaces/paths.ts";
 import { can } from "../workspaces/permissions.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
-import { balanceLevelOf } from "./balance-state.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
+import { balanceLevelOf } from "../db/balance-state.ts";
 import { readBillingSwitch } from "./enabled.ts";
 
 export async function loadBalanceBanner({

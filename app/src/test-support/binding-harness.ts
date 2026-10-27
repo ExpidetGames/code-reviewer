@@ -56,7 +56,7 @@ import { createIntegrationSync } from "../integrations/sync/service.ts";
 import { createKeyedLock } from "../integrations/sync/keyed-lock.ts";
 import { purposeOfState } from "../signed-state/state.ts";
 import type { WorkspaceAccess } from "../workspaces/access.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import { TEST_APP_ID, TEST_APP_SLUG, testAppKeys } from "./github-app.ts";
 import {
   startTestGithub,

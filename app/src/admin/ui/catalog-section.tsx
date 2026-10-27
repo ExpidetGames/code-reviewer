@@ -55,7 +55,7 @@ import {
   CATALOG_KINDS,
   type CatalogStatus,
 } from "../../model-catalog/entries.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import { browserCatalogApi, type CatalogApi } from "./catalog-api.ts";
 import { EntryDialog, KIND_LABELS } from "./catalog-entry-dialog.tsx";

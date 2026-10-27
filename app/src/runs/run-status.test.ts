@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 import { describe, expect, it } from "vitest";
-import { JOB_STATUSES } from "../jobs/job-status.ts";
+import { JOB_STATUSES } from "../db/job-status.ts";
 import {
   RUN_STATUS_ORDER,
   RUN_STATUS_PRESENTATION,

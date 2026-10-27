@@ -51,7 +51,7 @@ import { can } from "../workspaces/permissions.ts";
 import type { Connections } from "./connections.ts";
 import type { BindingErrorCode, BindingResultCode } from "./errors.ts";
 import { hitBindingLimit } from "./rate-limits.ts";
-import type { LinkEvidence } from "./requests.ts";
+import type { LinkEvidence } from "../db/installation-link-request.ts";
 
 const TYPE = "github_app" as const;
 

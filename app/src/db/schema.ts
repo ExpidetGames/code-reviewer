@@ -123,7 +123,7 @@ export interface WorkspacesTable {
   >;
 }
 
-/** A user's membership of a workspace, with a role (a WorkspaceRole, src/workspaces/roles.ts). */
+/** A user's membership of a workspace, with a role (a WorkspaceRole, src/db/workspace-roles.ts). */
 export interface WorkspaceMembersTable {
   workspace_id: string;
   user_id: string;
@@ -234,7 +234,7 @@ export interface JobsTable {
   actor_login: string;
   /** The webhook delivery that created the job, or null. Unique where not null. */
   delivery_id: string | null;
-  /** A JobStatus (src/jobs/job-status.ts). */
+  /** A JobStatus (src/db/job-status.ts). */
   status: string;
   /** ISO 8601 text in UTC: the job is not handed out before this moment. */
   run_after: string;
@@ -544,7 +544,7 @@ export interface JobVmRunsTable {
   vm_timeout_seconds: number | null;
   /** ISO 8601 UTC: the teardown, or null while none is known. Null together with `end_source`. */
   ended_at: string | null;
-  /** A VmEndSource (src/billing/minutes.ts); null together with `ended_at`. */
+  /** A VmEndSource (src/db/billing-minutes.ts); null together with `ended_at`. */
   end_source: string | null;
   /** 1 for the VM that counts for the job's bill (the final claim's), else 0. */
   billable: ColumnType<number, number | undefined, number>;
@@ -642,7 +642,7 @@ export interface InvitationsTable {
   workspace_id: string;
   /** The address the invitation is bound to, canonical (src/signup/rule.ts `canonicalEmail`). */
   email: string;
-  /** The role the person gets (a WorkspaceRole, src/workspaces/roles.ts). */
+  /** The role the person gets (a WorkspaceRole, src/db/workspace-roles.ts). */
   role: string;
   /** SHA-256 of the token, hex. A resend replaces it, which invalidates the old link. */
   token_hash: string;
@@ -677,7 +677,7 @@ export interface InstallationLinkRequestsTable {
   account_type: string;
   /** The numeric id of the installation's account, as text. */
   account_id: string;
-  /** An InstallationLinkRequestStatus (src/installation-binding/requests.ts). */
+  /** An InstallationLinkRequestStatus (src/db/installation-link-request.ts). */
   status: string;
   /** 1 when the requester's token lists the installation, 0 when it does not, null when it could not be asked. */
   token_can_access: number | null;

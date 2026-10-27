@@ -16,7 +16,7 @@ import {
 import { cn } from "../../lib/utils.ts";
 import { KIND_NAMES } from "../kind-names.ts";
 import type { ProjectDynamicView } from "../service.ts";
-import type { ProjectReviewKind } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type { DynamicFormValues } from "./dynamic-form-state.ts";
 import { SettingsCard } from "./settings-fields.tsx";
 import { SkillEditor } from "./skill-editor.tsx";

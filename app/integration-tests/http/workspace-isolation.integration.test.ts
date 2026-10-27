@@ -40,7 +40,7 @@ import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
 import { discoverRoutes } from "../../src/test-support/routes.ts";
 import { MINIMUM_ROLE } from "../../src/workspaces/permissions.ts";
-import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
+import type { WorkspaceRole } from "../../src/db/workspace-roles.ts";
 
 const session = vi.hoisted(() => ({
   currentLookup: vi.fn<() => Promise<SessionLookup>>(),

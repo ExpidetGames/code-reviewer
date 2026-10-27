@@ -7,9 +7,9 @@
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
-import { SLOT_HOLDING_STATUSES } from "./job-status.ts";
+import { SLOT_HOLDING_STATUSES } from "../db/job-status.ts";
 import { JobQueueError } from "./errors.ts";
-import { DEFAULT_NO_CAPABLE_RUNNER_MS } from "./job-limits.ts";
+import { DEFAULT_NO_CAPABLE_RUNNER_MS } from "../db/job-limits.ts";
 import { createJobReviewSettingsHooks } from "./review-settings-hooks.ts";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";

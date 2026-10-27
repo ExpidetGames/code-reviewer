@@ -24,7 +24,7 @@ import {
 import {
   PROJECT_REVIEW_KINDS,
   type ProjectReviewKind,
-} from "../../review-settings/settings.ts";
+} from "../../job-kind/job-kind.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
   createInstanceDynamicReviewGate,
@@ -39,14 +39,14 @@ import {
   isJobStatus,
   statusesThatCanBecome,
   type JobStatus,
-} from "../../jobs/job-status.ts";
+} from "../job-status.ts";
 import {
   JOB_TRIGGER_KINDS,
   type EnqueueResult,
   type Job,
   type JobErrorCode,
 } from "../../jobs/job-types.ts";
-import { SUPERSEDED_DRAIN_MS } from "../../jobs/supersede-timing.ts";
+import { SUPERSEDED_DRAIN_MS } from "../supersede-timing.ts";
 import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
@@ -87,7 +87,7 @@ export type PreviousReviewedShaInput = {
 
 export type JobsRepositoryOptions = {
   now?: () => Date;
-  /** #397: see `jobs/supersede-timing.ts`. */
+  /** #397: see `db/supersede-timing.ts`. */
   supersededDrainMs?: number;
   newId?: () => string;
   /**

@@ -6,11 +6,16 @@
 // an answer or a log.
 import { z } from "zod";
 import { checkPassword } from "../auth/password-policy.ts";
-import type { InstanceSettingValues } from "../db/repositories/instance-settings-repository.ts";
+import type {
+  SignUpRule,
+  Tenancy,
+} from "../db/repositories/instance-setting-types.ts";
 import type { SetupIssue } from "./errors.ts";
 
-export type Tenancy = InstanceSettingValues["tenancy"];
-export type SignUpRule = InstanceSettingValues["sign_up_rule"];
+export type {
+  SignUpRule,
+  Tenancy,
+} from "../db/repositories/instance-setting-types.ts";
 
 export type SetupInput = {
   tenancy: Tenancy;
