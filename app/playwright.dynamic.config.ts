@@ -115,7 +115,7 @@ export default defineConfig({
         `rm -rf ${hostedEnv.directory} && mkdir -p ${hostedEnv.directory} && ` +
         "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && " +
         "node --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/db/migrate-cli.ts && " +
-        `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
+        `./node_modules/.bin/next start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
       env: {
         APP_SECRET: e2eEnv.appSecret,
         // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.
