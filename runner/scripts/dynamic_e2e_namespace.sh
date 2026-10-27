@@ -30,6 +30,8 @@ fail() {
 # 1. Network: loopback, the guard, and a default route into a veth pair that nothing answers on.
 ip link set lo up || fail "loopback cannot be brought up"
 nft -f "$LANE_APP_DIR/e2e/dynamic/guard.nft" || fail "the network guard cannot be loaded (nft, nf_tables and NET_ADMIN are needed)"
+# Where the rejected packets went (#667): only explains a failure, so the lane starts without it if it cannot be loaded.
+nft -f "$LANE_APP_DIR/e2e/dynamic/guard-trace.nft" || echo "The destinations of the network guard are not recorded (e2e/dynamic/guard-trace.nft did not load); a failure shows the counters only." >&2
 ip link add cr0 type veth peer name cr1 || fail "the veth pair of the network guard cannot be created"
 ip addr add 10.255.255.1/30 dev cr0
 ip link set cr0 up

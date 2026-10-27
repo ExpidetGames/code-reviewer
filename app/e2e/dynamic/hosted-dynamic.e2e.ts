@@ -29,9 +29,8 @@ import {
   syncFromGithubAsAdmin,
 } from "../helpers/admin-api";
 import {
-  assertNoExternalAttempts,
+  assertGuardQuiet,
   engineProcesses,
-  readGuard,
 } from "../helpers/dynamic-lane-guard";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";
 import {
@@ -353,7 +352,7 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       "the engine's processes to be gone",
       async () => engineProcesses().length === 0,
     );
-    assertNoExternalAttempts(readGuard());
+    assertGuardQuiet();
   });
 
   // #201-T01
@@ -572,7 +571,7 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       "the engine's processes to be gone",
       async () => engineProcesses().length === 0,
     );
-    assertNoExternalAttempts(readGuard());
+    assertGuardQuiet();
   });
 
   // #299-T09
@@ -632,6 +631,6 @@ test.describe("a pull request on its way to a Dynamic Review summary through the
       ...allSecrets(),
     ])
       expect(note?.body).not.toContain(text);
-    assertNoExternalAttempts(readGuard());
+    assertGuardQuiet();
   });
 });

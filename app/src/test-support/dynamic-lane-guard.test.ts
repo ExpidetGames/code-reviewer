@@ -15,10 +15,24 @@ import {
   GUARD_TABLE,
   assertNoExternalAttempts,
   describeAttempts,
+  parseDestinations,
   parseGuard,
   type GuardReading,
 } from "../../e2e/helpers/dynamic-lane-guard.ts";
 
+const TRACE = readFileSync(
+  fileURLToPath(new URL("../../e2e/dynamic/guard-trace.nft", import.meta.url)),
+  "utf8",
+);
+const NAMESPACE = readFileSync(
+  fileURLToPath(
+    new URL(
+      "../../../runner/scripts/dynamic_e2e_namespace.sh",
+      import.meta.url,
+    ),
+  ),
+  "utf8",
+);
 const RULES = readFileSync(
   fileURLToPath(new URL("../../e2e/dynamic/guard.nft", import.meta.url)),
   "utf8",
@@ -172,5 +186,71 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
     );
 
     expect(backward).toEqual(forward as GuardReading);
+  });
+
+  // #667-T01
+  it("names the destinations a violation went to, so a failure says what tried to leave the lane", () => {
+    const reading = parseGuard(listing({ ...QUIET, "violation-root": 4 }));
+    const destinations = parseDestinations({
+      nftables: [
+        { metainfo: { version: "1.0.9", json_schema_version: 1 } },
+        {
+          set: {
+            family: "inet",
+            table: GUARD_TABLE,
+            name: "seen4",
+            type: ["ipv4_addr", "inet_proto", "inet_service"],
+            elem: [
+              { elem: { val: { concat: ["168.63.129.16", "udp", 53] } } },
+              { concat: ["10.255.255.2", "tcp", 443] },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(destinations).toEqual([
+      "168.63.129.16:53/udp",
+      "10.255.255.2:443/tcp",
+    ]);
+    expect(() => {
+      assertNoExternalAttempts(reading, destinations);
+    }).toThrow(/168\.63\.129\.16:53\/udp, 10\.255\.255\.2:443\/tcp/);
+    // Without any recorded destination the message is the one it always was.
+    expect(() => {
+      assertNoExternalAttempts(reading);
+    }).toThrow(/not on loopback\.$/);
+  });
+
+  // #667-T01
+  it("reads no destination from a listing that has none, and an address of IPv6 with its port apart", () => {
+    expect(parseDestinations({ nftables: [] })).toEqual([]);
+    expect(parseDestinations("not nft output")).toEqual([]);
+    expect(
+      parseDestinations({
+        nftables: [{ set: { elem: [{ concat: ["fd00:255::2", "udp", 53] }] } }],
+      }),
+    ).toEqual(["[fd00:255::2]:53/udp"]);
+  });
+
+  // #667-T01
+  it("records the destinations in sets that the loopback and the controls never reach, and loads them without being able to break the guard", () => {
+    expect(TRACE).toMatch(
+      /add set inet cr_lane_guard seen4 \{[^}]*flags dynamic/,
+    );
+    expect(TRACE).toMatch(
+      /add set inet cr_lane_guard seen6 \{[^}]*flags dynamic/,
+    );
+    // The rules sit in front of the counters and take no verdict: counting and rejecting stay the guard's.
+    expect(TRACE).toMatch(
+      /insert rule inet cr_lane_guard output oifname != "lo"/,
+    );
+    expect(TRACE).not.toMatch(/\b(accept|reject|drop)\b.*seen/);
+    expect(NAMESPACE).toMatch(
+      /nft -f "\$LANE_APP_DIR\/e2e\/dynamic\/guard-trace\.nft" \|\|/,
+    );
+    expect(NAMESPACE.indexOf("guard.nft")).toBeLessThan(
+      NAMESPACE.indexOf("guard-trace.nft"),
+    );
   });
 });

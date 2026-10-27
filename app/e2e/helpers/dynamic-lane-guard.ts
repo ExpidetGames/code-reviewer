@@ -79,13 +79,80 @@ export function describeAttempts(reading: GuardReading): string[] {
   );
 }
 
-/** Fails (throws) when anything of the lane reached for the network. */
-export function assertNoExternalAttempts(reading: GuardReading): void {
+/**
+ * Fails (throws) when anything of the lane reached for the network. `destinations` (from `readGuardDestinations`) are
+ * named when there are any: where the connections went is what a failure is fixed from.
+ */
+export function assertNoExternalAttempts(
+  reading: GuardReading,
+  destinations: readonly string[] = [],
+): void {
   const attempts = describeAttempts(reading);
-  if (attempts.length > 0)
-    throw new Error(
-      `The network guard saw connections that no fake answers: ${attempts.join("; ")}.`,
+  if (attempts.length === 0) return;
+  const where =
+    destinations.length === 0
+      ? ""
+      : ` Destinations seen: ${destinations.join(", ")}.`;
+  throw new Error(
+    `The network guard saw connections that no fake answers: ${attempts.join("; ")}.${where}`,
+  );
+}
+
+/** The sets of e2e/dynamic/guard-trace.nft. */
+export const TRACE_SETS = ["seen4", "seen6"] as const;
+
+function destinationText(address: string, protocol: string, port: number) {
+  const host = address.includes(":") ? `[${address}]` : address;
+  return `${host}:${String(port)}/${protocol}`;
+}
+
+/** The destinations in the output of `nft -j list set`: every address, protocol and port element of the listing. */
+export function parseDestinations(json: unknown): string[] {
+  const found: string[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (typeof node !== "object" || node === null) return;
+    const concat = (node as { concat?: unknown }).concat;
+    if (
+      Array.isArray(concat) &&
+      concat.length === 3 &&
+      typeof concat[0] === "string" &&
+      typeof concat[1] === "string" &&
+      typeof concat[2] === "number"
+    ) {
+      found.push(destinationText(concat[0], concat[1], concat[2]));
+      return;
+    }
+    Object.values(node).forEach(walk);
+  };
+  walk(json);
+  return found;
+}
+
+/**
+ * Where the rejected packets went (root only). A lane without the trace file, or a listing that cannot be read, has none:
+ * the numbers of the counters are the verdict, the destinations only explain it.
+ */
+export function readGuardDestinations(): string[] {
+  return TRACE_SETS.flatMap((set) => {
+    const done = spawnSync(
+      "nft",
+      ["-j", "list", "set", "inet", GUARD_TABLE, set],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+      },
     );
+    if (done.status !== 0) return [];
+    try {
+      return parseDestinations(JSON.parse(done.stdout));
+    } catch {
+      return [];
+    }
+  });
 }
 
 /** Reads the counters of the kernel now (root only). */
@@ -115,4 +182,13 @@ export function engineProcesses(): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "");
+}
+
+/** Reads the guard now and fails when anything of the lane reached for the network, naming where it went. */
+export function assertGuardQuiet(): void {
+  const reading = readGuard();
+  assertNoExternalAttempts(
+    reading,
+    describeAttempts(reading).length === 0 ? [] : readGuardDestinations(),
+  );
 }

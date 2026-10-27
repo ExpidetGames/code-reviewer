@@ -17,7 +17,7 @@ import { expect, test } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
 import {
   CONTROL_PREFIX,
-  assertNoExternalAttempts,
+  assertGuardQuiet,
   readGuard,
   type ControlWho,
 } from "../helpers/dynamic-lane-guard";
@@ -214,6 +214,6 @@ test.describe("the network guard of the Dynamic lane", () => {
     expect(git.status).not.toBe(0);
     expect(shell.status).toBe(0);
     expect(readGuard()).toEqual(before);
-    assertNoExternalAttempts(readGuard());
+    assertGuardQuiet();
   });
 });
