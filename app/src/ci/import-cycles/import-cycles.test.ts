@@ -8,6 +8,7 @@ import { ALLOWED_IMPORT_CYCLES } from "./allow-list.ts";
 import {
   buildFileGraph,
   checkImportCycles,
+  checkMigrationIsolation,
   cyclicGroups,
   moduleOf,
   readFileGraph,
@@ -184,6 +185,66 @@ describe("the import cycle check", () => {
   it("treats a file directly in src as a module of its own", () => {
     expect(moduleOf("billing/hold.ts")).toBe("billing");
     expect(moduleOf("proxy.ts")).toBe("proxy.ts");
+  });
+});
+
+describe("the isolation of the frozen migrations", () => {
+  // #715-T04
+  it("fails for a migration that imports application code, but not for its own folder and the shared leaf files", () => {
+    const graph = graphOf({
+      "db/migrations/2026_a.ts": imports(
+        "./helper.ts",
+        "./support/rules.ts",
+        "../codecs.ts",
+        "../driver.ts",
+      ),
+      "db/migrations/helper.ts": imports("../../llm/config.ts"),
+      "db/migrations/support/rules.ts": imports("../../../model-catalog/x.ts"),
+      "db/migrations/2026_b.ts": imports("../repositories/jobs-repository.ts"),
+      "db/codecs.ts": "export {};",
+      "db/driver.ts": "export {};",
+      "db/repositories/jobs-repository.ts": "export {};",
+      "llm/config.ts": "export {};",
+      "model-catalog/x.ts": "export {};",
+    });
+
+    expect(checkMigrationIsolation(graph)).toEqual([
+      expect.stringContaining(
+        "db/migrations/2026_b.ts imports db/repositories/jobs-repository.ts: a migration is frozen",
+      ),
+      expect.stringContaining(
+        "db/migrations/helper.ts imports llm/config.ts: a migration is frozen",
+      ),
+      expect.stringContaining(
+        "db/migrations/support/rules.ts imports model-catalog/x.ts: a migration is frozen",
+      ),
+    ]);
+  });
+
+  // #715-T04
+  it("fails for any file outside db/migrations that imports the support folder", () => {
+    const graph = graphOf({
+      "db/migrations/support/rules.ts": "export {};",
+      "db/migrations/2026_a.ts": imports("./support/rules.ts"),
+      "llm/config.ts": imports("../db/migrations/support/rules.ts"),
+      "db/repositories/x.ts": imports("../migrations/support/rules.ts"),
+    });
+
+    expect(checkMigrationIsolation(graph)).toEqual([
+      expect.stringContaining(
+        "db/repositories/x.ts imports db/migrations/support/rules.ts",
+      ),
+      expect.stringContaining(
+        "llm/config.ts imports db/migrations/support/rules.ts",
+      ),
+    ]);
+  });
+
+  // #715-T04
+  it("holds for the migrations of app/src", () => {
+    const src = join(import.meta.dirname, "..", "..");
+
+    expect(checkMigrationIsolation(readFileGraph(src))).toEqual([]);
   });
 });
 

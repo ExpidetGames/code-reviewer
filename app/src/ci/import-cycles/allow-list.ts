@@ -88,7 +88,6 @@ export const ALLOWED_IMPORT_CYCLES: AllowList = {
     "db -> github-config",
     "db -> integrations",
     "db -> jobs",
-    "db -> llm",
     "db -> mail",
     "db -> model-catalog",
     "db -> model-prices",
