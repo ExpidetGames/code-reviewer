@@ -19,7 +19,7 @@ import { createWorkspacesRepository } from "../db/repositories/workspaces-reposi
 import type { Database } from "../db/schema.ts";
 import { validateWorkspaceName } from "./names.ts";
 import { can, canChangeRole, canRemoveMemberWithRole } from "./permissions.ts";
-import { isWorkspaceRole, type WorkspaceRole } from "./roles.ts";
+import { isWorkspaceRole, type WorkspaceRole } from "../db/workspace-roles.ts";
 
 export const MEMBER_ERROR_CODES = [
   /** The person who acts is not a member of the workspace (any more): the workspace is not there for them. */

@@ -13,7 +13,7 @@ import {
 import { dispatchHook, stopEndedClaims } from "../dispatch/shared.ts";
 import { deliverBalanceMails, recordWallClocks } from "../billing/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
-import { configuredNoCapableRunnerMs } from "./job-limits.ts";
+import { configuredNoCapableRunnerMs } from "../db/job-limits.ts";
 import { noticeOfRefusal } from "../refusal-notices/shared.ts";
 import { unknownCostAlertLine } from "../usage/unknown-cost-alert.ts";
 import { createRunnerQueue, type RunnerQueue } from "./runner-queue.ts";

@@ -59,7 +59,7 @@ import {
 import type { MailSender } from "../mail/sender.ts";
 import { canInviteAs, canRevokeInvitationOf } from "./permissions.ts";
 import type { WorkspaceLimits } from "./rate-limits.ts";
-import { isWorkspaceRole, type WorkspaceRole } from "./roles.ts";
+import { isWorkspaceRole, type WorkspaceRole } from "../db/workspace-roles.ts";
 
 /** How long an invitation works. */
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;

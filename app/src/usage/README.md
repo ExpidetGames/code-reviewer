@@ -48,7 +48,7 @@ claim --> reserved --complete with usage (failed or not), or a run that succeede
     (it is raised as an unknown-cost settlement like any other, #361); a report that shows no model call
     voids the record;
   - the claim of a superseded run lasts 240 seconds (a Worker learns of the push at its next heartbeat, at most 60
-    seconds, then drains for at most 120, plus a margin; `src/jobs/supersede-timing.ts`, stated in the contract as
+    seconds, then drains for at most 120, plus a margin; `src/db/supersede-timing.ts`, stated in the contract as
     `SupersedeTiming`), and a report is taken for 60 seconds more. A Worker that uses its whole drain is therefore
     billed its exact cost, whether or not some claim expired leases in between;
   - if no report comes within window and grace, the record settles with an unknown cost and unknown tokens (the

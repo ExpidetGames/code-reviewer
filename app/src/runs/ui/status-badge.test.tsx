@@ -7,7 +7,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { JOB_STATUSES } from "../../jobs/job-status.ts";
+import { JOB_STATUSES } from "../../db/job-status.ts";
 import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
 

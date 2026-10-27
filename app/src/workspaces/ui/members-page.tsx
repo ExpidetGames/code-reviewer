@@ -20,7 +20,7 @@ import type { Member } from "../../db/repositories/workspace-members-repository.
 import type { MailSender } from "../../mail/sender.ts";
 import type { OpenInvitation } from "../invitations.ts";
 import { can } from "../permissions.ts";
-import type { WorkspaceRole } from "../roles.ts";
+import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 import type { WorkspaceApi } from "./api.ts";
 import { InvitationList } from "./invitation-list.tsx";
 import { InviteForm } from "./invite-form.tsx";

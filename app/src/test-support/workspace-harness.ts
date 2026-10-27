@@ -15,7 +15,7 @@ import {
 } from "../db/repositories/workspaces-repository.ts";
 import { assembleWorkspaces } from "../workspaces/assemble.ts";
 import type { Acceptor } from "../workspaces/invitations.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import { createFakeMail } from "./fake-mail.ts";
 import { createTestDatabase } from "./test-database.ts";
 

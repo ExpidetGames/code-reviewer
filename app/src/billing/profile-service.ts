@@ -13,7 +13,7 @@ import {
 } from "../db/repositories/billing-profiles-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { can } from "../workspaces/permissions.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import {
   validateBillingProfileInput,
   type BillingProfileInput,

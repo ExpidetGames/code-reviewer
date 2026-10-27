@@ -17,7 +17,7 @@
 // Two rules sit outside the matrix because they depend on more than the role of the person who acts: the
 // last Owner cannot leave, be removed or be demoted (src/workspaces/members.ts), and a person cannot act on
 // a workspace they are not a member of at all (src/workspaces/access.ts).
-import type { WorkspaceRole } from "./roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 
 /** The actions that need a role and nothing else. */
 export const WORKSPACE_ACTIONS = [

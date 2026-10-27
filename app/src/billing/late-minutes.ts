@@ -13,7 +13,7 @@ import { createBillingJournalRepository } from "../db/repositories/billing-journ
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { readClaimBilling } from "./claim-billing.ts";
-import { backstopEnd, billableMinutes } from "./minutes.ts";
+import { backstopEnd, billableMinutes } from "../db/billing-minutes.ts";
 
 /** How long after the settlement the real end of a VM may still correct it. */
 export const LATE_MINUTES_WINDOW_MS = 24 * 60 * 60 * 1000;

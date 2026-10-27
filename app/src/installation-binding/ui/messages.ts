@@ -11,7 +11,7 @@ import { GITHUB_NOT_CONFIGURED_COPY } from "../../config-status/notices.ts";
 import { ROLE_NOT_ALLOWED } from "../../copy/messages.ts";
 import type { BindingResultCode } from "../errors.ts";
 import type { ConnectAvailability } from "../service.ts";
-import type { RoleResult } from "../requests.ts";
+import type { RoleResult } from "../../db/installation-link-request.ts";
 
 export type ResultTone = "success" | "info" | "error";
 

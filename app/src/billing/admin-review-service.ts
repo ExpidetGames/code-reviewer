@@ -42,7 +42,7 @@ import type { BillingIssue } from "./admin-service.ts";
 import type { BillingIssueCode } from "./admin-errors.ts";
 import { MANUAL_NOTE_MAX_LENGTH } from "./manual-credit.ts";
 import type { TopUpCheckService } from "./topup-check.ts";
-import type { TopUpIntentState } from "./topup-intent.ts";
+import type { TopUpIntentState } from "../db/topup-intent.ts";
 
 /** How many rows a page of the list holds. */
 export const REVIEW_PAGE_SIZE = 25;

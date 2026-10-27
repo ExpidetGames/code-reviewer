@@ -22,8 +22,8 @@ import type {
   Job,
   JobTriggerKind,
 } from "../jobs/job-types.ts";
-import type { JobStatus } from "../jobs/job-status.ts";
-import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { JobStatus } from "../db/job-status.ts";
+import type { JobQueueLimits } from "../db/job-limits.ts";
 import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import { createTestDatabase } from "./test-database.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";

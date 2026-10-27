@@ -194,7 +194,7 @@ export function afterUsageCursor(after: UsageCursor) {
   return sql<boolean>`(settled_at > ${after.settledAt} or (settled_at = ${after.settledAt} and id > ${after.id}))`;
 }
 
-/** The statuses a job never leaves (src/jobs/job-status.ts). */
+/** The statuses a job never leaves (src/db/job-status.ts). */
 const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
 
 export function createUsageRecordsRepository(

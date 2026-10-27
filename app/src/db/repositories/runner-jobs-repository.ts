@@ -22,13 +22,13 @@ import type { ExpressionBuilder, Kysely } from "kysely";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
   type JobQueueLimits,
-} from "../../jobs/job-limits.ts";
+} from "../job-limits.ts";
 import {
   DEFAULT_ENGINES,
   reviewKindsForEngines,
   type RunnerEngine,
 } from "../../jobs/runner-capabilities.ts";
-import type { JobStatus } from "../../jobs/job-status.ts";
+import type { JobStatus } from "../job-status.ts";
 import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import {
   newLeaseToken,
@@ -48,7 +48,7 @@ import type {
 } from "../../jobs/job-types.ts";
 import { encodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
-import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
+import { SUPERSEDED_REPORT_GRACE_MS } from "../supersede-timing.ts";
 import { isJobIndependentRefusal } from "../../usage/enforce-entitlements.ts";
 import { admitClaimedJob, type ClaimRefusal } from "./claim-admission.ts";
 import {
@@ -64,7 +64,7 @@ import {
   checkClaimCaps,
   type CapOutcome,
 } from "../../billing/claim-caps.ts";
-import { headNoticeKey } from "../../refusal-notices/notice-key.ts";
+import { headNoticeKey } from "../refusal-notice-key.ts";
 import { claimOldestDueJob } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";

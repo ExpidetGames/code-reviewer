@@ -5,7 +5,7 @@
 // Worker), the heartbeat of the superseded claim says so, its report is stored once and the job stays superseded,
 // and the job state call says that it drains.
 import { describe, expect, it } from "vitest";
-import { SUPERSEDED_DRAIN_MS } from "../../src/jobs/supersede-timing.ts";
+import { SUPERSEDED_DRAIN_MS } from "../../src/db/supersede-timing.ts";
 import {
   goodResult,
   startRunnerApiHarness,

@@ -20,7 +20,10 @@ import {
   SelectValue,
 } from "../../components/ui/select.tsx";
 import { canInviteAs } from "../permissions.ts";
-import { WORKSPACE_ROLES, type WorkspaceRole } from "../roles.ts";
+import {
+  WORKSPACE_ROLES,
+  type WorkspaceRole,
+} from "../../db/workspace-roles.ts";
 import { browserWorkspaceApi, type WorkspaceApi } from "./api.ts";
 import { InvitationLink, type ShownInvitation } from "./invitation-link.tsx";
 import { describeWorkspaceFailure } from "./messages.ts";

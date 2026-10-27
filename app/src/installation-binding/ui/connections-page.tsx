@@ -15,7 +15,7 @@ import type { RepositoriesRepository } from "../../db/repositories/repositories-
 import type { IntegrationStatus } from "../../integrations/types.ts";
 import { githubAvatarUrl } from "../../shell/user-display.ts";
 import { isBindingResultCode } from "../errors.ts";
-import type { InstallationLinkRequestStatus } from "../requests.ts";
+import type { InstallationLinkRequestStatus } from "../../db/installation-link-request.ts";
 import type {
   ConnectAvailability,
   InstallationBindingService,

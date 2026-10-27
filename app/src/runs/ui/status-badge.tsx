@@ -7,7 +7,7 @@
 // on the run detail page `hint` adds the focusable "?" that holds it.
 import { Badge } from "../../components/ui/badge.tsx";
 import { InfoHint } from "../../components/info-hint.tsx";
-import type { JobStatus } from "../../jobs/job-status.ts";
+import type { JobStatus } from "../../db/job-status.ts";
 import {
   ArrowClockwiseIcon,
   CheckIcon,

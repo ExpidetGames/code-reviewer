@@ -9,7 +9,7 @@ import {
   BINDING_WAITING_CODES,
   isBindingResultCode,
 } from "../errors.ts";
-import { ROLE_RESULTS } from "../requests.ts";
+import { ROLE_RESULTS } from "../../db/installation-link-request.ts";
 import {
   APPROVAL_FAILURE_COPY,
   describeApprovalFailure,

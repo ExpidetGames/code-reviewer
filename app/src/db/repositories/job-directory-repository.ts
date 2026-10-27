@@ -16,7 +16,7 @@ import {
   toJob,
 } from "./jobs-repository.ts";
 import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
-import type { JobStatus } from "../../jobs/job-status.ts";
+import type { JobStatus } from "../job-status.ts";
 import { NOT_DELETED } from "./workspaces-repository.ts";
 
 /** One line of the admin's list: the listed fields only, never the result or the arguments. */

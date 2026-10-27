@@ -18,7 +18,7 @@ import type { Database } from "../db/schema.ts";
 import { can } from "../workspaces/permissions.ts";
 import type { Connections } from "./connections.ts";
 import type { ApprovalErrorCode } from "./errors.ts";
-import type { InstallationLinkRequestView } from "./requests.ts";
+import type { InstallationLinkRequestView } from "../db/installation-link-request.ts";
 
 export type ApprovalResult =
   | { ok: true }

@@ -6,7 +6,7 @@
 // newer commit that replaced the run), always with a reason in words. The text is fixed sentences, counts, a code
 // of the plain shape of one and a validated link; nothing a pull request or a runner wrote is copied into it.
 import type { ReviewCheck } from "../integrations/types.ts";
-import type { JobStatus } from "../jobs/job-status.ts";
+import type { JobStatus } from "../db/job-status.ts";
 import { describeErrorCode } from "../runs/error-copy.ts";
 import type { ReviewFindings } from "../runner-api/contract.ts";
 import { safeLink, type VerdictDecision } from "./verdict.ts";

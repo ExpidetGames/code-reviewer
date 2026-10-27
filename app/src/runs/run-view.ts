@@ -14,7 +14,7 @@ import {
   type RunnerCallTrace,
   type StoppedEarly,
 } from "../runner-api/contract.ts";
-import type { JobStatus } from "../jobs/job-status.ts";
+import type { JobStatus } from "../db/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
 import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {

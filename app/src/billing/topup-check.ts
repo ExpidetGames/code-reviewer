@@ -24,7 +24,7 @@ import { can } from "../workspaces/permissions.ts";
 import { BillingAdapterError, type BillingAdapter } from "./adapter.ts";
 import { applyBillingEvent } from "./apply-event.ts";
 import type { BillingActor } from "./profile-service.ts";
-import type { TopUpIntentState } from "./topup-intent.ts";
+import type { TopUpIntentState } from "../db/topup-intent.ts";
 
 export const TOP_UP_CHECK_ERROR_CODES = [
   "forbidden",

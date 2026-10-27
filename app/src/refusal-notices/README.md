@@ -98,7 +98,7 @@ A job the claim refuses because the balance is zero or below zero (`insufficient
 ran for this change." and "This workspace has no credit left for reviews." (or "The balance of this workspace is below zero."), then "Add credit to
 continue": with a link to the billing page of the workspace (`/w/<slug>/settings/billing`, `settingsUrl`, #505; the workspace settings while billing is off, `billing-link.ts`) it says an Owner or
 Admin can do so there, without one it says to contact an Owner or Admin. It names no amount, rate, formula or model. It is **one per pull request head**,
-not per period: the row is recorded under `head:<commit id>` in the `period_start` column (`notice-key.ts`; a value that is no commit id gets no notice),
+not per period: the row is recorded under `head:<commit id>` in the `period_start` column (`../db/refusal-notice-key.ts`; a value that is no commit id gets no notice),
 so a new push after a top-up that was not enough is told again and the same head is told once. `billing_hold_released`
 has no notice: it is the operator's side (`billing_rates_incomplete` has one since #632, below). The check of `refusal_notices.code` took the two codes with migration `20261021090000_widen_refusal_notice_codes`.
 

@@ -9,7 +9,7 @@ import type { SessionUser } from "../auth/access-policy.ts";
 import type { SessionLookup } from "../auth/session-user.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 
 export function sessionUser(
   id: string,

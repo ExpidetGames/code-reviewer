@@ -6,7 +6,7 @@
 // jobs of one workspace is `voidEndedJobs()` of usage-records-repository.ts.
 import "server-only";
 import { sql, type Kysely } from "kysely";
-import { SUPERSEDED_REPORT_GRACE_MS } from "../../jobs/supersede-timing.ts";
+import { SUPERSEDED_REPORT_GRACE_MS } from "../supersede-timing.ts";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import { settleEndedJobs } from "../../billing/settle-jobs.ts";
@@ -15,7 +15,7 @@ import {
   type UnknownCostSettlement,
 } from "../../usage/usage-records.ts";
 
-/** The statuses a job never leaves (src/jobs/job-status.ts). */
+/** The statuses a job never leaves (src/db/job-status.ts). */
 const ENDED_JOB_STATUSES = ["succeeded", "failed", "cancelled", "superseded"];
 
 /**

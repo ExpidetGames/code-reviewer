@@ -11,7 +11,7 @@ import type {
   BalanceMailDelivery,
   BalanceNotificationKind,
   BalanceNotificationState,
-} from "../../billing/balance-state.ts";
+} from "../balance-state.ts";
 import { formatTimestamp } from "../codecs.ts";
 import type { BillingNotificationsTable, Database } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";

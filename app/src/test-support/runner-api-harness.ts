@@ -13,7 +13,7 @@ import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-reposi
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import { loadGithubAppConfig } from "../integrations/registry.ts";
-import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { JobQueueLimits } from "../db/job-limits.ts";
 import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
 import { configuredLlmModel } from "../llm/config.ts";

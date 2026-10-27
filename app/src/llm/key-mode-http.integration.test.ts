@@ -14,7 +14,7 @@ import { addWorkspace } from "../test-support/workspaces.ts";
 import { resolveWorkspaceAccess } from "../workspaces/access.ts";
 import { accessRefusal } from "../workspaces/access-response.ts";
 import type { WorkspaceAction } from "../workspaces/permissions.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import { createWorkspaceLlm } from "./assemble.ts";
 import { createLlmKeyModeRoute } from "./key-mode-http.ts";
 import { createLlmKeyModeStore } from "./key-mode-store.ts";
