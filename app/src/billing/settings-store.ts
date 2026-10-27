@@ -11,7 +11,7 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { lockBillingSettings } from "../db/billing-settings-lock.ts";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createInstanceSettingsStore } from "../db/repositories/instance-settings-store.ts";
 import type { Database } from "../db/schema.ts";
 import { readBillingSettings, type BillingSettings } from "./settings.ts";
 
@@ -19,6 +19,9 @@ import { readBillingSettings, type BillingSettings } from "./settings.ts";
 export function isUndecodableText(error: unknown): boolean {
   return error instanceof Error && error.cause instanceof SyntaxError;
 }
+
+/** The instance setting this store owns (`instance_settings`, key `billing_settings`). */
+export type BillingSettingValues = { billing_settings: BillingSettings };
 
 export type StoredSettings = {
   settings: BillingSettings;
@@ -31,7 +34,7 @@ export async function readStoredSettings(
 ): Promise<StoredSettings> {
   try {
     const stored =
-      await createInstanceSettingsRepository(db).getWithMeta(
+      await createInstanceSettingsStore<BillingSettingValues>(db).getWithMeta(
         "billing_settings",
       );
     return {
@@ -79,7 +82,7 @@ export function createBillingSettingsStore(
         const { settings } = await readStoredSettings(trx);
         const outcome = await change(settings, trx);
         if ("refuse" in outcome) return outcome.refuse;
-        await createInstanceSettingsRepository(trx).set(
+        await createInstanceSettingsStore<BillingSettingValues>(trx).set(
           "billing_settings",
           outcome.write,
           updatedBy,

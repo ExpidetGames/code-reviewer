@@ -30,7 +30,7 @@ import {
   type JournalVerification,
 } from "../db/repositories/billing-journal-repository.ts";
 import { createBillingJournalDirectory } from "../db/repositories/billing-journal-directory-repository.ts";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createInstanceSettingsStore } from "../db/repositories/instance-settings-store.ts";
 import type { Database } from "../db/schema.ts";
 import { JOURNAL_CHECK_LOCK, tryWithLock } from "../db/try-lock.ts";
 import type { JournalCheckView } from "../admin/ui/billing-view.ts";
@@ -135,10 +135,15 @@ function readState(stored: unknown): StoredJournalCheck {
   return state;
 }
 
+/** The instance setting that holds the state (`instance_settings`, key `billing_journal_check`). */
+type JournalCheckValues = { billing_journal_check: StoredJournalCheck };
+
 async function readStored(db: Kysely<Database>): Promise<StoredJournalCheck> {
   try {
     return readState(
-      await createInstanceSettingsRepository(db).get("billing_journal_check"),
+      await createInstanceSettingsStore<JournalCheckValues>(db).get(
+        "billing_journal_check",
+      ),
     );
   } catch (error) {
     // Text that is no JSON is damaged data like any other: no check made. A lost connection is not, and goes on.
@@ -221,7 +226,7 @@ async function runLocked(
       createBillingJournalRepository(db, workspaceId, now).verify(),
   }: JournalCheckOptions,
 ): Promise<JournalCheckRun> {
-  const settings = createInstanceSettingsRepository(db, now);
+  const settings = createInstanceSettingsStore<JournalCheckValues>(db, now);
   const directory = createBillingJournalDirectory(db);
   const state = await readStored(db);
   const started = now().getTime();

@@ -10,20 +10,6 @@ export const ALLOWED_IMPORT_CYCLES: AllowList = {
   fileGroups: [
     ["auth/auth.ts", "auth/session-user.ts"],
     [
-      "billing/balance-notifications.ts",
-      "billing/claim-billing.ts",
-      "billing/dispatcher-features.ts",
-      "billing/enabled.ts",
-      "billing/journal-check.ts",
-      "billing/settings-store.ts",
-      "billing/settle-jobs.ts",
-      "db/repositories/billing-journal-repository.ts",
-      "db/repositories/instance-settings-repository.ts",
-      "db/repositories/usage-records-sweep.ts",
-      "mail/smtp-settings.ts",
-      "setup/input.ts",
-    ],
-    [
       "github-config/credentials.ts",
       "github-config/service.ts",
       "github-config/shared.ts",
