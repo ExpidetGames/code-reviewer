@@ -3,6 +3,8 @@
 // Addresses and dummy credentials shared by the Playwright configuration (which starts the app and
 // the fake GitHub) and the journeys. Nothing here is a secret: the values only have to match
 // between the two processes under test.
+import { EPHEMERAL_FLOOR, pickFreePort } from "./free-port";
+
 const appPort = Number(process.env.E2E_PORT) || 3417;
 // The second app of the run, for the journey that runs the real runner (see playwright.config.ts):
 // the next port unless E2E_PIPELINE_PORT says otherwise.
@@ -32,48 +34,72 @@ const catalogAdminAppPort =
 // The fake Stripe of the billing journey of a workspace (#505): the catalog admin app sends its Stripe API calls to it, so the port has to be
 // known when the app starts. The port after the catalog admin app unless E2E_STRIPE_PORT says otherwise.
 const stripeFakePort = Number(process.env.E2E_STRIPE_PORT) || appPort + 9;
-// The fake GitHub gets a random port in a high range, so two checkouts never collide however their
-// E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
-// again in every worker process, which inherits the main process's environment.
-process.env.E2E_GITHUB_PORT ||= String(
-  20000 + Math.floor(Math.random() * 20000),
-);
-const githubPort = Number(process.env.E2E_GITHUB_PORT);
-// The fake SMTP server takes three ports in a row (the plain one that offers STARTTLS, the one with TLS and
-// the control API the journeys read the inbox from), also random and kept in the environment. A base of its
-// own so that the three never overlap the fake GitHub's port.
-process.env.E2E_SMTP_PORT ||= String(40500 + Math.floor(Math.random() * 20000));
-const smtpPort = Number(process.env.E2E_SMTP_PORT);
-// The fake LLM of the journey of the LLM key. The fifth app (multi-tenant) checks keys at this address (the
-// "test key" button), so the port has to be known when the app starts: random, in a range of its own, and kept
-// in the environment for the worker processes like the others.
-process.env.E2E_LLM_PORT ||= String(61000 + Math.floor(Math.random() * 4000));
-const llmFakePort = Number(process.env.E2E_LLM_PORT);
-// The fake LLM of the journeys that save a Dynamic model (#269): the app checks the model's tool support at
-// this address, so the port has to be known when the app starts. A range of its own, above the others: 65000-65499 (the fake GitHub takes 20000-39999, the fake SMTP server 40500-60501, the fake LLM of the LLM key journey 61000-64999).
-process.env.E2E_MODEL_LLM_PORT ||= String(
-  65000 + Math.floor(Math.random() * 500),
-);
-const modelLlmFakePort = Number(process.env.E2E_MODEL_LLM_PORT);
-// The fake LLM of the operator limits journey (#285): it answers the reviews of the real runner and, at the same
-// port, the model metadata the operator app reads when it releases a catalog entry and claims with one. The app needs the
-// port when it starts. A range of its own, above the others: 65500-65534.
-process.env.E2E_OPERATOR_LLM_PORT ||= String(
-  65500 + Math.floor(Math.random() * 35),
-);
-const operatorLlmFakePort = Number(process.env.E2E_OPERATOR_LLM_PORT);
+// The fakes get ports of their own, picked once per run by the main Playwright process: random, so that two checkouts never
+// collide however their E2E_PORT values are chosen, below the ephemeral range of the kernel (the ports it gives to
+// outgoing connections: a fake inside it can find its port taken by a connection of the same run, `listen EADDRINUSE`,
+// #585), and probed, so a port that something listens on is never handed out (e2e/helpers/free-port.ts). The choice is
+// stored in the environment: Playwright loads this file again in every worker process, which inherits the main process's
+// environment, and the apps and fakes the configuration starts get the same values.
+const FAKE_PORT_RANGE = { low: 20000, high: EPHEMERAL_FLOOR - 1 } as const;
+// The environment variable of each fake and how many ports in a row it takes.
+const FAKE_PORTS = {
+  E2E_GITHUB_PORT: 1,
+  E2E_SMTP_PORT: 3,
+  E2E_LLM_PORT: 1,
+  E2E_MODEL_LLM_PORT: 1,
+  E2E_OPERATOR_LLM_PORT: 1,
+  E2E_CATALOG_LLM_PORT: 1,
+  E2E_MODELS_DEV_PORT: 1,
+} as const;
+type FakePortVariable = keyof typeof FAKE_PORTS;
+
+function givenPort(variable: FakePortVariable): number | undefined {
+  const given = Number(process.env[variable]);
+  return Number.isInteger(given) && given > 0 ? given : undefined;
+}
+
+// What the environment already names (a worker process: all of it; a developer: the ports they chose) is out of the pick.
+const claimedPorts = new Set<number>();
+for (const variable of Object.keys(FAKE_PORTS) as FakePortVariable[]) {
+  const given = givenPort(variable);
+  if (given === undefined) continue;
+  for (let offset = 0; offset < FAKE_PORTS[variable]; offset += 1)
+    claimedPorts.add(given + offset);
+}
+
+/** The port (or first of the ports in a row) the environment variable names, or a free one picked and stored in it. */
+function claimFakePort(variable: FakePortVariable): number {
+  const given = givenPort(variable);
+  if (given !== undefined) return given;
+  const base = pickFreePort({
+    ...FAKE_PORT_RANGE,
+    count: FAKE_PORTS[variable],
+    avoid: claimedPorts,
+  });
+  process.env[variable] = String(base);
+  for (let offset = 0; offset < FAKE_PORTS[variable]; offset += 1)
+    claimedPorts.add(base + offset);
+  return base;
+}
+
+// The fake GitHub.
+const githubPort = claimFakePort("E2E_GITHUB_PORT");
+// The fake SMTP server takes three ports in a row (the plain one that offers STARTTLS, the one with TLS and the control API
+// the journeys read the inbox from).
+const smtpPort = claimFakePort("E2E_SMTP_PORT");
+// The fake LLM of the journey of the LLM key. The fifth app (multi-tenant) checks keys at this address (the "test key"
+// button), so the port has to be known when the app starts.
+const llmFakePort = claimFakePort("E2E_LLM_PORT");
+// The fake LLM of the journeys that save a Dynamic model (#269): the app checks the model's tool support at this address.
+const modelLlmFakePort = claimFakePort("E2E_MODEL_LLM_PORT");
+// The fake LLM of the operator limits journey (#285): it answers the reviews of the real runner and, at the same port, the
+// model metadata the operator app reads when it releases a catalog entry and claims with one.
+const operatorLlmFakePort = claimFakePort("E2E_OPERATOR_LLM_PORT");
 // The fake LLM of the catalog journey (#435): the same duties as the operator journey's, at a port of its own, so that the
-// two journeys can run side by side. A range of its own, below the fake SMTP server's: 40000-40499.
-process.env.E2E_CATALOG_LLM_PORT ||= String(
-  40000 + Math.floor(Math.random() * 500),
-);
-const catalogLlmFakePort = Number(process.env.E2E_CATALOG_LLM_PORT);
-// The fake models.dev of the catalog admin journey (#554): the app fetches the catalog from it, so the port has to be
-// known when the app starts. A range of its own, between the others: 60600-60999.
-process.env.E2E_MODELS_DEV_PORT ||= String(
-  60600 + Math.floor(Math.random() * 400),
-);
-const modelsDevFakePort = Number(process.env.E2E_MODELS_DEV_PORT);
+// two journeys can run side by side.
+const catalogLlmFakePort = claimFakePort("E2E_CATALOG_LLM_PORT");
+// The fake models.dev of the catalog admin journey (#554): the app fetches the catalog from it.
+const modelsDevFakePort = claimFakePort("E2E_MODELS_DEV_PORT");
 
 /**
  * The Postgres server the apps under test make their databases on: `E2E_DATABASE_URL`, a URL whose user may create and
