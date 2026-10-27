@@ -68,7 +68,9 @@ describe("the production rollback workflow", () => {
   // #403-T09
   it("installs the dependencies before the token is loaded, and the CLI from the lockfile", () => {
     const install = steps.findIndex((s) =>
-      /pnpm --dir dispatcher install --frozen-lockfile/.test(s.run ?? ""),
+      /pnpm install --frozen-lockfile --filter code-reviewer-dispatcher\.\.\./.test(
+        s.run ?? "",
+      ),
     );
     const load = stepIndex(job, isInfisicalLoad);
     const cli = steps.findIndex(
@@ -78,7 +80,7 @@ describe("the production rollback workflow", () => {
     expect(cli).toBeGreaterThanOrEqual(0);
     expect(load).toBeGreaterThan(install);
     expect(load).toBeGreaterThan(cli);
-    expect(source).not.toMatch(/npm install|VERCEL_CLI_VERSION/);
+    expect(source).not.toMatch(/(?<!p)npm install|VERCEL_CLI_VERSION/);
   });
 
   // #403-T09

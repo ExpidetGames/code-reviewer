@@ -6,7 +6,7 @@ description: >-
   the only write path to Infisical of the repository: only the persist job of deploy-production.yml and the rollback
   workflow use it, and the identity's role should allow nothing else (docs/deployment-vercel.md, section 2.1).
 
-# Needs the repository checked out, Node.js and pnpm set up and `pnpm --dir dispatcher install` done. The caller
+# Needs the repository checked out, Node.js and pnpm set up and the dispatcher installed (`pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...`). The caller
 # passes the four Infisical settings in (a composite action cannot read secrets).
 
 inputs:

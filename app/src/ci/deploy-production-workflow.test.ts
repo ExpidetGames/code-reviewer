@@ -291,7 +291,7 @@ describe("the production deployment workflow", () => {
       const steps = stepsOf(found);
       const load = stepIndex(found, isInfisicalLoad);
       const install = steps.findIndex((s) =>
-        /pnpm --dir \w+ install --frozen-lockfile/.test(s.run ?? ""),
+        /pnpm install --frozen-lockfile --filter \S+\.\.\./.test(s.run ?? ""),
       );
       if (load >= 0 && install >= 0)
         expect(load, name).toBeGreaterThan(install);
@@ -306,7 +306,9 @@ describe("the production deployment workflow", () => {
       (step.run ?? "").includes("pnpm --dir app migrate"),
     );
     const install = stepIndex(migrate, (step) =>
-      (step.run ?? "").includes("pnpm --dir app install --frozen-lockfile"),
+      (step.run ?? "").includes(
+        "pnpm install --frozen-lockfile --filter code-reviewer-app...",
+      ),
     );
     expect(install).toBeGreaterThanOrEqual(0);
     expect(load).toBeGreaterThan(install);
@@ -344,7 +346,9 @@ describe("the production deployment workflow", () => {
       "rollback-production.yml",
     ]) {
       const text = readText(`.github/workflows/${file}`);
-      expect(text, file).not.toMatch(/npm install|vercel@|VERCEL_CLI_VERSION/);
+      expect(text, file).not.toMatch(
+        /(?<!p)npm install|vercel@|VERCEL_CLI_VERSION/,
+      );
       const parsed = readWorkflow(file);
       for (const [name, found] of Object.entries(parsed.jobs)) {
         const steps = stepsOf(found);
@@ -369,7 +373,9 @@ describe("the production deployment workflow", () => {
     const at = (command: string) =>
       steps.findIndex((step) => runsVercel(step, command));
     const install = steps.findIndex((s) =>
-      /pnpm --dir "\$DIRECTORY" install --frozen-lockfile/.test(s.run ?? ""),
+      /pnpm install --frozen-lockfile --filter "\.\/\$DIRECTORY\.\.\."/.test(
+        s.run ?? "",
+      ),
     );
     const load = stepIndex(stageJob, isInfisicalLoad);
     expect(install).toBeGreaterThanOrEqual(0);
@@ -396,6 +402,23 @@ describe("the production deployment workflow", () => {
     expect(
       steps.slice(0, load).some((step) => (step.run ?? "").includes("vercel ")),
     ).toBe(false);
+  });
+
+  // #724-T03
+  it("checks after the build and before the upload that every file the built functions list is in the checkout", () => {
+    const steps = stepsOf(stageJob);
+    const build = steps.findIndex((step) => runsVercel(step, "build"));
+    const deploy = steps.findIndex((step) => runsVercel(step, "deploy"));
+    const check = steps.findIndex((step) =>
+      (step.run ?? "").includes("tools/vercel/check-build-output.mjs"),
+    );
+    expect(check).toBeGreaterThan(build);
+    expect(check).toBeLessThan(deploy);
+    expect(steps[check]?.run?.trim()).toBe(
+      'node tools/vercel/check-build-output.mjs "$DIRECTORY"',
+    );
+    expect(steps[check]?.env?.DIRECTORY).toBe("${{ inputs.directory }}");
+    expect(steps[check]?.["continue-on-error"]).toBeUndefined();
   });
 
   // #403-T08
