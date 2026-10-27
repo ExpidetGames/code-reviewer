@@ -22,7 +22,6 @@ import json
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -35,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from engine_ports import EngineExitedEarly, start_on_free_port
 from opencode_support import extra_path, opencode_binary, ripgrep_binary
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -175,12 +175,6 @@ def make_export(root: Path) -> Path:
     return export
 
 
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-
-
 def _call(
     method: str, url: str, body: Any, directory: str | None, timeout: float = 30.0
 ) -> tuple[int, Any]:
@@ -268,6 +262,9 @@ def engine_config(blocks: Mapping[str, dict[str, Any]], default: str) -> dict[st
 class _Engine:
     """The pinned `opencode serve` process. It is stopped when it does not come up healthy."""
 
+    process: subprocess.Popen[bytes]
+    base: str
+
     def __init__(
         self,
         config: dict[str, Any],
@@ -297,10 +294,9 @@ class _Engine:
         self.export = str(export)
         self.log_path = home / "engine.log"
         self._log = self.log_path.open("wb")
-        port = _free_port()
-        self.base = f"http://127.0.0.1:{port}"
-        try:
-            self.process = subprocess.Popen(
+
+        def start(port: int) -> subprocess.Popen[bytes]:
+            return subprocess.Popen(
                 [
                     str(opencode_binary()),
                     "serve",
@@ -317,22 +313,26 @@ class _Engine:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        except BaseException:
-            self._log.close()
-            raise
-        try:
+
+        def wait(process: subprocess.Popen[bytes], port: int) -> None:
+            self.process = process
+            self.base = f"http://127.0.0.1:{port}"
             self._wait_until_healthy()
+
+        try:
+            # An engine that finds its port taken exits; under xdist the taker is another worker.
+            start_on_free_port(start, wait, self._stop_process)
         except BaseException:
-            # A constructor that fails leaves no `with` block to stop the process: do it here, or
-            # an `opencode serve` is orphaned for as long as the machine runs.
-            self.stop()
+            # A constructor that fails leaves no `with` block to stop the process: the failed
+            # attempt was stopped, and the log is ours to close.
+            self._log.close()
             raise
 
     def _wait_until_healthy(self) -> None:
         deadline = time.monotonic() + HEALTH_SECONDS
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
-                raise AssertionError("the engine exited: " + self.log_path.read_text()[-1500:])
+                raise EngineExitedEarly("the engine exited: " + self.log_path.read_text()[-1500:])
             document: Any = None
             status = 0
             with contextlib.suppress(OSError):
@@ -343,15 +343,19 @@ class _Engine:
             time.sleep(0.2)
         raise AssertionError("the engine did not become healthy")
 
-    def stop(self) -> None:
+    @staticmethod
+    def _stop_process(process: subprocess.Popen[bytes]) -> None:
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.process.pid, signal.SIGTERM)
+            os.killpg(process.pid, signal.SIGTERM)
         try:
-            self.process.wait(timeout=10)
+            process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             with contextlib.suppress(ProcessLookupError):
-                os.killpg(self.process.pid, signal.SIGKILL)
-            self.process.wait(timeout=10)
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+
+    def stop(self) -> None:
+        self._stop_process(self.process)
         self._log.close()
 
     def log(self) -> str:

@@ -63,7 +63,7 @@ pull requests that touch the matching parts:
 
 | Command | When | Needs |
 |---|---|---|
-| `make test-engine` | you change the runner, the PR-Agent version or its settings | internet once (a tokenizer file), about 4 minutes |
+| `make test-engine` | you change the runner, the PR-Agent version or its settings | internet once (a tokenizer file), about 15 minutes serially (CI splits it into parallel jobs); `make test-engine-smoke` takes about 2 minutes |
 | `make test-e2e` | you change a user flow in the web UI | a browser (`PLAYWRIGHT_CHANNEL=chrome` uses an installed Chrome) |
 | `make test-images` | you change the Dockerfile, or the runner in a way that affects the image | Docker |
 

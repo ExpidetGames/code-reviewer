@@ -168,13 +168,14 @@ describe("CI workflow triggers and jobs", () => {
     expect(job.steps).toBeUndefined();
   });
 
-  // CR-41-T15
-  it("runs the engine job for pull requests that change the runner and for pull requests into main, never for pushes or app-only changes", () => {
+  // CR-41-T15, #713
+  it("runs the engine job for pull requests that change what the engine suite tests and for pull requests into main, never for pushes or app-only changes", () => {
     const condition = String(jobNamed("engine").if);
 
     expect(condition).toContain("github.event_name == 'pull_request'");
     expect(condition).toContain("github.base_ref == 'main'");
-    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+    expect(condition).toContain("needs.changes.outputs.engine == 'true'");
+    expect(condition).not.toContain("needs.changes.outputs.runner");
     expect(condition).not.toContain("needs.changes.outputs.app");
     expect(condition).not.toContain("github.event_name == 'push'");
   });
@@ -581,8 +582,20 @@ describe("CI workflow path filter", () => {
     return new RegExp(`^${source}$`).test(file) !== negated;
   }
 
+  // {a,b} lists alternatives (micromatch, as in the action): the only way to say "or" under the
+  // quantifier "every".
+  function alternatives(pattern: string): string[] {
+    const braces = /\{([^{}]*)\}/.exec(pattern);
+    if (!braces) return [pattern];
+    return (braces[1] ?? "")
+      .split(",")
+      .flatMap((choice) => alternatives(pattern.replace(braces[0], choice)));
+  }
+
   function touched(filter: string, file: string): boolean {
-    return (filters[filter] ?? []).every((pattern) => matches(pattern, file));
+    return (filters[filter] ?? []).every((pattern) =>
+      alternatives(pattern).some((choice) => matches(choice, file)),
+    );
   }
 
   // CR-16-T09
@@ -637,6 +650,31 @@ describe("CI workflow path filter", () => {
       "README.md",
     ])
       expect(touched("dispatcher", file), file).toBe(false);
+  });
+
+  // #713
+  it("sends only a change to the runner, the fakes, the contracts or the engine workflow to the engine job", () => {
+    for (const file of [
+      "runner/src/code_reviewer_runner/cli.py",
+      "runner/tests/engine/test_engine_cost.py",
+      "runner/uv.lock",
+      "fakes/github/server.ts",
+      "contracts/dispatch-webhook.v1.json",
+      ".github/workflows/engine.yml",
+    ])
+      expect(touched("engine", file), file).toBe(true);
+    // The 24 % of merged commits that ran 21 minutes of engine tests without touching any of these.
+    for (const file of [
+      "app/src/db/index.ts",
+      "dispatcher/src/app.ts",
+      "website/src/pages/index.astro",
+      "README.md",
+      "Makefile",
+      "docs/golden-snapshot.md",
+      ".github/workflows/ci.yml",
+      ".github/workflows/nightly.yml",
+    ])
+      expect(touched("engine", file), file).toBe(false);
   });
 
   // #696

@@ -9,7 +9,7 @@ DISPATCHER := pnpm --dir dispatcher
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-dispatcher lint-runner typecheck typecheck-app typecheck-dispatcher typecheck-runner \
-	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-e2e test-e2e-hosted test-e2e-dynamic test-sandbox-local test-images verify
+	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-engine-smoke test-e2e test-e2e-hosted test-e2e-dynamic test-sandbox-local test-images verify
 
 help:
 	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles"
@@ -21,7 +21,8 @@ help:
 	@echo "make generate-contracts regenerate the TypeScript types of contracts/*.v1.json (app/src/contracts, dispatcher/src/contracts)"
 	@echo "make check-contracts   fail when the generated contract types differ from the schemas (part of verify)"
 	@echo "make fix-spdx-headers  add the SPDX license header to every source file that lacks it (a unit test fails without it)"
-	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
+	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 15 minutes serially, CI runs it in parallel; not part of verify)"
+	@echo "make test-engine-smoke the engine tests marked smoke (about 2 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-e2e-hosted   the hosted deployment on fakes: app, Dispatcher and Worker over loopback (needs E2E_DATABASE_URL, a Postgres server; ARGS=... to filter)"
 	@echo "make test-e2e-dynamic   the privileged Dynamic Review journey with the real OpenCode (root and nft, CI-first, ARGS=... to filter)"
@@ -95,6 +96,12 @@ test-engine:
 	$(RUNNER) run python scripts/prime_tiktoken_cache.py
 	$(RUNNER) run python scripts/fetch_opencode.py
 	$(RUNNER) run pytest -m engine
+
+# The few engine tests that prove the runner end to end (marker smoke, #713), same set-up as above.
+test-engine-smoke:
+	$(RUNNER) run python scripts/prime_tiktoken_cache.py
+	$(RUNNER) run python scripts/fetch_opencode.py
+	$(RUNNER) run pytest -m "engine and smoke"
 
 # Needs a browser. Without a downloaded Chromium, use an installed Chrome:
 #   make test-e2e PLAYWRIGHT_CHANNEL=chrome

@@ -179,6 +179,7 @@ def reads(export: Path, *names: str) -> Any:
 
 
 # #197-T02
+@pytest.mark.smoke
 def test_the_hostile_repository_is_neither_loaded_nor_executed_through_the_real_export(
     tmp_path: Path, sentinels: Path
 ) -> None:
@@ -308,6 +309,7 @@ def test_the_same_tree_unsanitized_runs_the_plugins_which_is_why_the_export_is_s
 
 
 # #197-T03
+@pytest.mark.smoke
 def test_every_write_exec_network_and_unknown_tool_is_denied_and_the_checkout_is_unchanged(
     tmp_path: Path, sentinels: Path
 ) -> None:

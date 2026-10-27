@@ -5,11 +5,13 @@ fake GitHub and the fake LLM: who posts, where, and what the result JSON says. T
 (`/ask`, `/improve`, `/describe`, #203) no longer run. The canned model answers are not judged, only
 the shape and the place of the output."""
 
+import pytest
 from fake_github import BOT_LOGIN, FakeGithub
 from harness import Engine
 
 
 # CR-41-T01
+@pytest.mark.smoke
 def test_a_review_is_posted_as_the_bot_and_reported_with_its_url(
     engine: Engine, github: FakeGithub
 ) -> None:
