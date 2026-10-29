@@ -154,12 +154,17 @@ cd "$LANE_APP_DIR"
 status=0
 # TEMPORARY (#714): find who asks the lane resolver. Reverted in the next commit.
 TRACER=()
-if command -v strace >/dev/null; then TRACER=(strace -f -qq -s 160 -e trace=execve,sendto,sendmsg,sendmmsg,connect -o /run/strace.log); fi
+if command -v strace >/dev/null; then TRACER=(strace -f -qq -s 160 -e trace=execve,execveat,clone,clone3,fork,vfork,setuid,setresuid,sendto,sendmsg,sendmmsg,connect -o /run/strace.log); fi
 "${TRACER[@]}" ./node_modules/.bin/playwright test -c playwright.dynamic.config.ts "$@" || status=$?
 if [ -f /run/strace.log ]; then
   echo "STRACE-DNS-BEGIN"
   grep -E 'sin6?_port=htons\(53\)' /run/strace.log | cut -c1-400 | head -60
-  for p in $(grep -E 'sin6?_port=htons\(53\)' /run/strace.log | awk '{print $1}' | sort -u | head -20); do echo "PID $p:"; grep -E "^$p +execve" /run/strace.log | cut -c1-250 | tail -3; done
+  for p in $(grep -E 'sin6?_port=htons\(53\)' /run/strace.log | awk '{print $1}' | sort -u | head -20); do
+    echo "PID $p: (its lines)"; grep -E "^$p " /run/strace.log | cut -c1-300 | head -12
+    echo "PID $p: (born as)"; grep -E "= $p$" /run/strace.log | cut -c1-250 | head -2
+    parent=$(grep -E "= $p$" /run/strace.log | awk '{print $1}' | head -1)
+    [ -n "$parent" ] && { echo "PARENT $parent:"; grep -E "^$parent +(execve|setuid|setresuid)" /run/strace.log | cut -c1-250 | tail -3; }
+  done
   echo "STRACE-DNS-END"
 fi
 
