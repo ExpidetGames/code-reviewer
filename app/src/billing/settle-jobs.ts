@@ -30,7 +30,7 @@ import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-reposi
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { tryDecodeJson } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { KeyMode } from "../workspaces/entitlements.ts";
 import { readClaimBilling, type ClaimBilling } from "./claim-billing.ts";
 import { classifyOutcome, type RunEnd } from "./outcome.ts";

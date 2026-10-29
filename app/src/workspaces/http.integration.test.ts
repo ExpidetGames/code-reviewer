@@ -15,7 +15,7 @@ import {
 } from "../test-support/workspace-harness.ts";
 import type { WorkspaceAccess } from "./access.ts";
 import { WORKSPACE_REQUEST_MAX_BYTES } from "./http.ts";
-import type { WorkspaceRole } from "./roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 
 function json(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request("https://app.test/api/x", {

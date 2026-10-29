@@ -11,7 +11,7 @@ import {
 } from "../../ui/json-request.ts";
 import type { InvitationDelivery, OpenInvitation } from "../invitations.ts";
 import { workspaceApiPath } from "../paths.ts";
-import type { WorkspaceRole } from "../roles.ts";
+import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 
 export type InviteAnswer = {
   ok: true;

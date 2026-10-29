@@ -86,6 +86,7 @@ def assert_a_native_review(job: FullJob) -> None:
 
 
 # #578-T15, #578-T17: a whole job on the managed key
+@pytest.mark.smoke
 def test_a_whole_native_job_on_the_managed_key_publishes_a_review(tmp_path: Path) -> None:
     with full_job(tmp_path, three_reads_then_the_review, cost=MANAGED) as job:
         assert_a_native_review(job)

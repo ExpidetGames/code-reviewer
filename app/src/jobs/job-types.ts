@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // The vocabulary of the job queue: what a job is and what goes in and out. Everything here is plain
-// data; the rules live in job-status.ts, job-input.ts and job-queue.ts.
+// data; the rules live in db/job-status.ts, job-input.ts and job-queue.ts.
 import type {
   ReviewCommand,
   StoredReviewCommand,
 } from "../integrations/types.ts";
 import type { JsonValue } from "../integrations/types.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
-import type { JobStatus } from "./job-status.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
+import type { JobStatus } from "../db/job-status.ts";
 
 /**
  * What started a job. `webhook` is automatic (a pull request was opened or updated); `comment` is a

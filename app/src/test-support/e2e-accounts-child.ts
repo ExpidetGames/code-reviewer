@@ -12,7 +12,7 @@
 // placeholder address by the verified one (src/github-signin/decide.ts). Prints one JSON line.
 import { openPostgresDatabase } from "../db/postgres.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import { insertUser } from "./users.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 

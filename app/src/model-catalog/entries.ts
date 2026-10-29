@@ -4,7 +4,7 @@
 // operator's list of models that workspaces on the operator's key may use. An entry has a free **name** that members see
 // and a provider and model id that only the operator sees. Pure: no database, no clock, no network.
 import { mentionsModelOrPrice } from "../copy/member-copy-scan.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /** `draft` is being prepared (and may be deleted), `released` may be chosen, `retired` stays for what already uses it. */
 export const CATALOG_STATUSES = ["draft", "released", "retired"] as const;

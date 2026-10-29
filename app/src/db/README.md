@@ -93,7 +93,7 @@ Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_
 
 - `workspaces` (id, name, unique slug, created by, created at) and `workspace_members` (workspace, user,
   role, created at; primary key (workspace, user); the role is restricted to `owner`, `admin`, `member`
-  by a check constraint, the same list as `WORKSPACE_ROLES` in `src/workspaces/roles.ts`).
+  by a check constraint, the same list as `WORKSPACE_ROLES` in `src/db/workspace-roles.ts`).
 - `workspace_id` (required) on `integrations`, `repositories`, `jobs` and `app_settings`; a project
   belongs to a workspace through its repository. `repositories` and `jobs` repeat it so that no query
   needs a join to scope. Two composite foreign keys make the database itself refuse a link across

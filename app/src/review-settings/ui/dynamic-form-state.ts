@@ -6,7 +6,8 @@
 // the save, and the form keeps the typed values of the kind that is not selected, so toggling the kind
 // loses nothing.
 import type { CatalogSelection } from "../catalog-selection.ts";
-import type { ProjectReviewKind, ReviewVerdictMode } from "../settings.ts";
+import type { ReviewVerdictMode } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import type { FormState } from "./form-state.ts";
 

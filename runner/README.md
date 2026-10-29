@@ -641,7 +641,7 @@ push --(next heartbeat, at most 60 s)--> the host knows and tells the process
      --(the requests in flight finish, each within 120 s)--> the result is reported
 ```
 
-The numbers are in one place on each side (`supersede_timing.py` here, `app/src/jobs/supersede-timing.ts` in the app)
+The numbers are in one place on each side (`supersede_timing.py` here, `app/src/db/supersede-timing.ts` in the app)
 and in the contract (`SupersedeTiming` in `contracts/runner-api.v1.json`); a test on each side holds them equal. The
 app keeps the claim for 240 s (a heartbeat, the longest model request, a margin), so a result reported inside the
 drain always arrives while the claim holds. The host waits for the process at most `SUPERSEDED_DRAIN_SECONDS` (120,

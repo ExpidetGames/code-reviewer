@@ -7,7 +7,7 @@ import {
   backstopEnd,
   billableMinutes,
   boundedEnd,
-} from "./minutes.ts";
+} from "./billing-minutes.ts";
 
 const START = new Date("2026-10-19T10:00:00.000Z");
 const after = (seconds: number) => new Date(START.getTime() + seconds * 1000);

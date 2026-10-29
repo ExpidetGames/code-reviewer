@@ -50,7 +50,7 @@ describe("the billing cleanup", () => {
       if (!path.startsWith("app/src/") || !path.endsWith(".ts")) return false;
       if (/\.(test|integration\.test)\.tsx?$/.test(path)) return false;
       if (path.startsWith("app/src/test-support/")) return false;
-      return /\.get\(\s*"billing_settings"\s*\)/.test(
+      return /\.get\(\s*"billing_settings"\s*,?\s*\)/.test(
         readFileSync(`${repoRoot}${path}`, "utf8"),
       );
     });

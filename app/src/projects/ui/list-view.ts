@@ -9,7 +9,7 @@ import type {
   ProjectStatus,
 } from "../../db/repositories/projects-repository.ts";
 import type { ProjectService } from "../service.ts";
-import type { JobStatus } from "../../jobs/job-status.ts";
+import type { JobStatus } from "../../db/job-status.ts";
 import { webAddress } from "../../ui/web-address.ts";
 
 export type LastRun = {

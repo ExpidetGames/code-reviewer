@@ -13,7 +13,7 @@ import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-reposi
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import { loadGithubAppConfig } from "../integrations/registry.ts";
-import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { JobQueueLimits } from "../db/job-limits.ts";
 import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
 import { configuredLlmModel } from "../llm/config.ts";
@@ -21,7 +21,7 @@ import { llmProviderDescriptors } from "../llm/providers/index.ts";
 import type { LlmProviderDescriptor } from "../llm/providers/types.ts";
 import { createCatalogFixture } from "./review-settings-harness.ts";
 import type { CatalogEntry } from "../model-catalog/entries.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { noteDispatcherClaim } from "../billing/dispatcher-features.ts";
 import { createRunnerApi } from "../runner-api/api.ts";

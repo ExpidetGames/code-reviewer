@@ -6,7 +6,7 @@ import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import {
   PROJECT_REVIEW_KINDS,
   type ProjectReviewKind,
-} from "../review-settings/settings.ts";
+} from "../job-kind/job-kind.ts";
 import type { JobFieldError } from "./errors.ts";
 import {
   JOB_TRIGGER_KINDS,

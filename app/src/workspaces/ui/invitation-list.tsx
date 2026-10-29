@@ -13,7 +13,7 @@ import { Badge } from "../../components/ui/badge.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import type { OpenInvitation } from "../invitations.ts";
 import { canInviteAs } from "../permissions.ts";
-import type { WorkspaceRole } from "../roles.ts";
+import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 import { browserWorkspaceApi, type WorkspaceApi } from "./api.ts";
 import { ConfirmAction } from "./confirm-action.tsx";
 import { InvitationLink, type ShownInvitation } from "./invitation-link.tsx";

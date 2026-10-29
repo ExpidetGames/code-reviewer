@@ -9,7 +9,7 @@
 // by every open tab.
 import "server-only";
 import type { Kysely } from "kysely";
-import type { JobStatus } from "../../jobs/job-status.ts";
+import type { JobStatus } from "../job-status.ts";
 import type { Job } from "../../jobs/job-types.ts";
 import type { RunRowSource } from "../../runs/run-view.ts";
 import type { Database } from "../schema.ts";

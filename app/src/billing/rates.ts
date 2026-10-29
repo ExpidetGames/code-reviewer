@@ -6,7 +6,7 @@
 // No number has a default in code: A, both B and the reserve are admin data (D3), and billing cannot be switched on
 // before all four are set.
 import "server-only";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /** A is stored in parts per 10,000: 1.2 is 12,000. */
 export const FACTOR_A_SCALE = 10_000;

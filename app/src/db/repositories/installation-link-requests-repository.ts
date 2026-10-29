@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // Access to the requests of ONE workspace to link an installation that the instance admin decides
-// (src/installation-binding/requests.ts). The factory takes the workspace id; see ../workspace-scope.ts. The
+// (src/db/installation-link-request.ts). The factory takes the workspace id; see ../workspace-scope.ts. The
 // instance admin reads and decides the requests of every workspace through
 // installation-link-request-directory-repository.ts.
 import "server-only";
@@ -11,7 +11,7 @@ import {
   isRoleResult,
   type InstallationLinkRequest,
   type NewInstallationLinkRequest,
-} from "../../installation-binding/requests.ts";
+} from "../installation-link-request.ts";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database, InstallationLinkRequestsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";

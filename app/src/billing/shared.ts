@@ -53,7 +53,7 @@ import {
 } from "./workspace-page.ts";
 import { getWorkspaceLlm } from "../llm/shared.ts";
 import type { BalanceBannerView } from "../workspace-billing/banner.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import { createCheckPaymentLimits, createTopUpLimits } from "./topup-limits.ts";
 import { createTopUpCheckService } from "./topup-check.ts";
 import {

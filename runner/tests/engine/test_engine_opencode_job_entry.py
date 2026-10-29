@@ -14,7 +14,6 @@ flags arrive as written, a model whose status was `deprecated` upstream runs bec
 import copy
 import json
 import os
-import socket
 import subprocess
 import time
 import urllib.error
@@ -25,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from engine_ports import EngineExitedEarly, start_on_free_port
 from opencode_support import opencode_binary, ripgrep_binary
 
 from code_reviewer_runner.dynamic_review.config import engine_environment
@@ -52,12 +52,6 @@ def entry(**model: Any) -> JobModelEntry:
     document["modelId"] = "acme-large"
     document["model"].update(model)
     return parse_job_model_entry(document)
-
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 def get(url: str, headers: dict[str, str]) -> Any:
@@ -94,29 +88,42 @@ def engine_with(provider: dict[str, Any], tmp_path: Path) -> Generator[dict[str,
         tools_dir=str(rg.parent) if rg is not None else None,
     )
     environment["OPENCODE_CONFIG"] = str(config_path)
-    port = free_port()
-    process = subprocess.Popen(
-        [str(opencode_binary()), "serve", "--hostname", "127.0.0.1", "--port", str(port)],
-        env=environment,
-        cwd=directory,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    base = f"http://127.0.0.1:{port}"
-    try:
+
+    def start(port: int) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(
+            [str(opencode_binary()), "serve", "--hostname", "127.0.0.1", "--port", str(port)],
+            env=environment,
+            cwd=directory,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    def wait_healthy(process: subprocess.Popen[bytes], port: int) -> None:
         deadline = time.monotonic() + 60
         while True:
             try:
-                health = as_object(get(f"{base}/global/health", {}))
+                health = as_object(get(f"http://127.0.0.1:{port}/global/health", {}))
                 if health is not None and health.get("healthy") is True:
-                    break
+                    return
             except OSError:
                 pass
-            if process.poll() is not None or time.monotonic() > deadline:
+            if process.poll() is not None:
+                raise EngineExitedEarly("the pinned engine exited before it became healthy")
+            if time.monotonic() > deadline:
                 raise AssertionError("the pinned engine did not become healthy")
             time.sleep(0.2)
+
+    def stop(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is None:
+            os.killpg(process.pid, 15)
+        process.wait(timeout=20)
+
+    # An engine that finds its port taken exits; under xdist the taker is another worker.
+    port, process = start_on_free_port(start, wait_healthy, stop)
+    base = f"http://127.0.0.1:{port}"
+    try:
         answer = as_object(
             get(f"{base}/config/providers", {"x-opencode-directory": str(directory)})
         )

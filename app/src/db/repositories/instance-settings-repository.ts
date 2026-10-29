@@ -3,19 +3,17 @@
 // Access to the instance_settings table: the settings of the whole instance, one row per setting
 // with a JSON value, and who changed it last. Instance level (it belongs to no workspace). The
 // setup markers live here (see src/setup/README.md); the typed service and the admin portal build
-// on this table.
+// on this table. This is the typed map of every setting of the instance and the two settings with rules
+// of their own (the default entitlements, the Dynamic Review gate); the plain reads and writes are the
+// generic store (`instance-settings-store.ts`), which a domain uses for the keys it owns, so that
+// the domain does not import this file and, through it, the value types of all the other domains (#715).
 import "server-only";
 import {
   lockDynamicReviewGate,
   lockJobRowsInOrder,
 } from "../dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
-import {
-  decodeJson,
-  encodeJson,
-  formatTimestamp,
-  tryDecodeJson,
-} from "../codecs.ts";
+import { encodeJson, formatTimestamp, tryDecodeJson } from "../codecs.ts";
 import { lockDefaultEntitlements } from "../entitlements-lock.ts";
 import {
   INVALID_ENTITLEMENTS,
@@ -36,6 +34,11 @@ import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
+import type { SignUpRule, Tenancy } from "./instance-setting-types.ts";
+import {
+  createInstanceSettingsStore,
+  type StoredSetting,
+} from "./instance-settings-store.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 
 /** The value of each setting, by key. A new setting adds its key and type here. */
@@ -43,12 +46,9 @@ export type InstanceSettingValues = {
   /** ISO 8601 UTC time the first-run wizard finished; null (or no row) until then. */
   setup_completed_at: string | null;
   /** `single`: one workspace for the whole instance. `multi`: users create workspaces. */
-  tenancy: "single" | "multi";
+  tenancy: Tenancy;
   /** Who may sign up. The entries are lower case. */
-  sign_up_rule:
-    | { kind: "everyone" }
-    | { kind: "emails"; entries: string[] }
-    | { kind: "domains"; entries: string[] };
+  sign_up_rule: SignUpRule;
   /**
    * Which ways to sign in are switched on (src/admin/sign-in-methods.ts). No row: email with
    * password is on, and GitHub is on while it is configured.
@@ -141,13 +141,8 @@ export type ReadableSettingKey = Exclude<
 >;
 
 /** A setting with who saved it last and when. */
-export type InstanceSettingWithMeta<K extends ReadableSettingKey> = {
-  value: InstanceSettingValues[K];
-  /** The id of the user who saved it, or null (the system, or a user who was deleted since). */
-  updatedBy: string | null;
-  /** ISO 8601 text in UTC. */
-  updatedAt: string;
-};
+export type InstanceSettingWithMeta<K extends ReadableSettingKey> =
+  StoredSetting<InstanceSettingValues[K]>;
 
 export type InstanceSettingsRepository = {
   /** The value, or undefined when the setting has no row. */
@@ -196,6 +191,8 @@ export function createInstanceSettingsRepository(
   db: Kysely<Database>,
   now: () => Date = () => new Date(),
 ): InstanceSettingsRepository {
+  const store = createInstanceSettingsStore<InstanceSettingValues>(db, now);
+
   async function changeGate<T>(
     key: InstanceSettingKey,
     disabling: boolean,
@@ -332,70 +329,28 @@ export function createInstanceSettingsRepository(
     },
 
     async get(key) {
-      const row = await db
-        .selectFrom("instance_settings")
-        .select("value")
-        .where("key", "=", key)
-        .executeTakeFirst();
-      return row === undefined ? undefined : decodeJson(row.value);
+      return store.get(key);
     },
 
     async getWithMeta(key) {
-      const row = await db
-        .selectFrom("instance_settings")
-        .select(["value", "updated_by", "updated_at"])
-        .where("key", "=", key)
-        .executeTakeFirst();
-      return row === undefined
-        ? undefined
-        : {
-            value: decodeJson(row.value),
-            updatedBy: row.updated_by,
-            updatedAt: row.updated_at,
-          };
+      return store.getWithMeta(key);
     },
 
     async claim(key, value, updatedBy, staleBefore) {
-      const row = {
-        key,
-        value: encodeJson(value),
-        updated_by: updatedBy,
-        updated_at: formatTimestamp(now()),
-      };
-      const claimed = await db
-        .insertInto("instance_settings")
-        .values(row)
-        .onConflict((conflict) =>
-          conflict
-            .column("key")
-            .doUpdateSet({
-              value: row.value,
-              updated_by: row.updated_by,
-              updated_at: row.updated_at,
-            })
-            .where("instance_settings.updated_at", "<", staleBefore),
-        )
-        .executeTakeFirst();
-      return Number(claimed.numInsertedOrUpdatedRows ?? 0) > 0;
+      return store.claim(key, value, updatedBy, staleBefore);
     },
 
     async release(key, value) {
-      const result = await db
-        .deleteFrom("instance_settings")
-        .where("key", "=", key)
-        .where("value", "=", encodeJson(value))
-        .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
+      return store.release(key, value);
     },
 
     async remove(key) {
-      return changeGate(key, true, async (executor) => {
-        const result = await executor
-          .deleteFrom("instance_settings")
-          .where("key", "=", key)
-          .executeTakeFirst();
-        return Number(result.numDeletedRows) > 0;
-      });
+      return changeGate(key, true, (executor) =>
+        createInstanceSettingsStore<InstanceSettingValues>(
+          executor,
+          now,
+        ).remove(key),
+      );
     },
 
     async set(key, value, updatedBy) {
@@ -404,29 +359,16 @@ export function createInstanceSettingsRepository(
           value as InstanceSettingValues["default_entitlements"],
           updatedBy,
         );
-      const row = {
-        key,
-        value: encodeJson(value),
-        updated_by: updatedBy,
-        updated_at: formatTimestamp(now()),
-      };
       await changeGate(
         key,
         key === "dynamic_review" &&
           !(value as InstanceSettingValues["dynamic_review"]).enabled,
-        async (executor) => {
-          await executor
-            .insertInto("instance_settings")
-            .values(row)
-            .onConflict((conflict) =>
-              conflict.column("key").doUpdateSet({
-                value: row.value,
-                updated_by: row.updated_by,
-                updated_at: row.updated_at,
-              }),
-            )
-            .execute();
-        },
+        (executor) =>
+          createInstanceSettingsStore<InstanceSettingValues>(executor, now).set(
+            key,
+            value,
+            updatedBy,
+          ),
       );
     },
   };

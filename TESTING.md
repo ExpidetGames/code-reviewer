@@ -85,7 +85,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard, Postgres template database and child process helpers, the sign in harness: database, real Better Auth and the fake GitHub); not product code
-  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens
+  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens, and the import cycle check of `app/src` (`src/ci/import-cycles/`: cycles between files and between top-level modules, with an allow-list of today's cycles that only shrinks, #715)
   integration-tests/               cross-owner integration tests (exists: webhooks/, http/: the route files, and `http/workspace-isolation.integration.test.ts`, every data route of a workspace against a second workspace and against every role)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, dynamic/ (the privileged lane, own config), hosted/ (the hosted lane, own config), operator/, billing/, reviews/, jobs/, runs/, settings/, setup/, workspaces/
@@ -238,7 +238,7 @@ its access attempts. It proves the permission mechanism here in the development 
 on CI's host; the final-image checks are the image smoke test (below, #202). No Docker or OpenCode
 executable is needed for this suite. All fake threads, helpers and owned job directories are joined/removed.
 
-Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, `make test-engine`; the CI job takes about 18 minutes (18.5 on 2026-10-19), of which the native provider file (#546) is about one minute locally, it was 3.7 minutes before it was consolidated):
+Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, `make test-engine`; about 15 to 20 minutes in one serial process, which is how a developer runs it locally; the native provider file (#546) is about one minute of it, it was 3.7 minutes before it was consolidated). CI (`engine.yml`, #713) runs it as three jobs on runners of their own behind the one check `engine`: the **PR-Agent half** and the **OpenCode half** (`--engine-shard=pragent|opencode`, the files named in `runner/tests/engine_shards.py`; the PR-Agent half is every file that is not listed, so a new file cannot fall out of CI), each on four pytest-xdist workers (`-n 4 --dist loadfile` in `scripts/run_engine_offline.sh`, whole files per worker because some files share module-scoped engines), and the privileged suite as the third job. A test that starts its own `opencode serve` takes its port from the band of its xdist worker (`tests/engine/engine_ports.py`) and starts again on another port when the engine exits before it answers. The `smoke` marker (`-m "engine and smoke"`, `make test-engine-smoke`, 18 tests) is the subset that proves the runner end to end in about two minutes; it is for the faster pull request tier, not for the full run:
 
 - The OpenCode half (#197, `test_engine_opencode.py` and `opencode_support.py`) needs the pinned
   executable and a trusted `rg`. `runner/scripts/fetch_opencode.py` downloads the release named by
@@ -375,8 +375,8 @@ phase's):
 `scripts/run_privileged_offline.sh` arranges the namespaces and the capabilities with `sudo`,
 `unshare --net --mount` and `setpriv --bounding-set`, creates the engine user (`10101`), a stranger
 (`10201`) and the Diff job user (`10001`), and runs both phases; `app/src/ci/hosted-lane.test.ts`
-keeps the capability list of the lane equal to the spec. It is a step of the engine CI job
-(`engine.yml`), needs `nft` (apt `nftables`), `rg` and the pinned OpenCode, and is deselected by
+keeps the capability list of the lane equal to the spec. It is a job of its own in
+`engine.yml` (next to the two engine halves), needs `nft` (apt `nftables`), `rg` and the pinned OpenCode, and is deselected by
 default. Locally without root it fails with the way to run it (never a skip); this is **CI-only for
 developers without root**. It proves, against the real kernel and the real `prepared_checkout` (#196)
 over real Git objects, with loopback sentinels standing in for "another job's proxy" and "an
@@ -431,7 +431,7 @@ its own projects: `prepare` (the first-run setup and the GitHub App of the app),
 - **What keeps the lane safe, and must not change.** The job runs the code of the pull request as root (`sudo`, the
   namespace script, the Python runner, Playwright). That is acceptable only because it runs on a GitHub-hosted,
   ephemeral VM, on the `pull_request` trigger (a fork gets a read-only token), with `contents: read`, no `secrets.*`
-  and a checkout with `persist-credentials: false` (the `engine` job, which also runs a privileged suite, too). It
+  and a checkout with `persist-credentials: false` (the jobs of `engine.yml`, one of which runs a privileged suite, too). It
   must never move to a self-hosted runner, to `pull_request_target`, or to a job with a secret or a write
   permission: `src/ci/dynamic-lane.test.ts` (#253-C06, C07) fails if it does. Whether workflows of outside
   contributors need an owner's approval every time is a repository setting, not a file in the repository (see the

@@ -526,7 +526,7 @@ describe("the workspace tables", () => {
   });
 
   it("have the same list of roles as the code", async () => {
-    const { WORKSPACE_ROLES } = await import("../workspaces/roles.ts");
+    const { WORKSPACE_ROLES } = await import("./workspace-roles.ts");
     const { db } = await migrated();
     const { rows } = await sql<{ definition: string }>`
       select pg_get_constraintdef(oid) as definition from pg_constraint

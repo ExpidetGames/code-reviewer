@@ -38,7 +38,7 @@ from code_reviewer_runner.result import ErrorCode
 from passthrough_expect import usage_expected
 from usage_calc import expected_cost
 
-pytestmark = pytest.mark.engine
+pytestmark = [pytest.mark.engine, pytest.mark.smoke]
 
 TOOL_ORDER = ["glob", "read", "grep", "read", "glob", "grep"]
 CREDENTIAL_HEADERS = {

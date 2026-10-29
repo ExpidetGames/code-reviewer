@@ -37,6 +37,7 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       dispatcher: ${{ steps.filter.outputs.dispatcher }}
       runner: ${{ steps.filter.outputs.runner }}
+      engine: ${{ steps.filter.outputs.engine }}
       workflows: ${{ steps.filter.outputs.workflows }}
       licenses: ${{ steps.filter.outputs.licenses }}
       website: ${{ steps.filter.outputs.website }}
@@ -72,6 +73,12 @@ jobs:
               - '!app/**'
               - '!website/**'
               - '!**/*.md'
+            # What the engine suite (runner/tests/engine, 3 jobs of engine.yml) tests: the runner, the
+            # fakes and the contracts it runs against, and its own workflow. One brace pattern, because
+            # the quantifier "every" would read a list of patterns as "and". A change to anything else
+            # (app, dispatcher, docs, the other workflows) does not pay for the engine suite (#713).
+            engine:
+              - '{runner/**,fakes/**,contracts/**,.github/workflows/engine.yml}'
             workflows:
               - '.github/**'
             # The Markdown exclusions above skip this file, but the license check compares it with
@@ -322,13 +329,15 @@ jobs:
 
   # The engine suite: the real, pinned PR-Agent against a fake GitHub and a fake LLM
   # (runner/tests/engine), defined once in engine.yml. No Docker stack: the fakes are loopback
-  # servers the tests start themselves. Runs for pull requests that change the runner and for pull
-  # requests into main; nightly.yml runs the same suite on development. A skipped job never blocks
-  # a merge, a failed one does (ci-passed).
+  # servers the tests start themselves. Runs for pull requests that change the runner, the fakes or the
+  # contracts and for pull requests into main; nightly.yml runs the same suite on development. This job is the rollup of the
+  # jobs engine.yml runs (the two engine shards and the privileged suite): ci-passed needs this one
+  # name, and it fails when any of them fails. A skipped job never blocks a merge, a failed one does
+  # (ci-passed).
   engine:
     name: "Runner: engine tests"
     needs: changes
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.engine == 'true') }}
     permissions:
       contents: read
     uses: ./.github/workflows/engine.yml

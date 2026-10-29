@@ -12,7 +12,7 @@ import type {
   AdminCatalogView,
 } from "../../model-catalog/admin-view.ts";
 import type { CatalogDefaults } from "../../model-catalog/entries.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 
 /** What the form sends for an entry. */
 export type EntryInput = {

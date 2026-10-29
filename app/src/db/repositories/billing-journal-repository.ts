@@ -35,7 +35,7 @@ import {
   type ReserveRefusal,
 } from "../../billing/journal.ts";
 import { noteBalanceMovedSafely } from "../../billing/balance-notifications.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import { formatTimestamp } from "../codecs.ts";
 import { databaseDriver } from "../driver.ts";
 import type { BillingJournalEntriesTable, Database } from "../schema.ts";

@@ -124,7 +124,11 @@ const SCOPED = [
  * - billing-webhook-events: the record of provider events by `(provider, event id)` (#497): an id, an outcome and the
  *   order of the states of a refund or dispute, and for an event under review the ids of our own top-up and workspace it belongs to and
  *   what an operator recorded when closing it (#603: their id, time and note, and the journal entry). No payload, no amount and no
- *   buyer, so it is not customer data.
+ *   buyer, so it is not customer data;
+ * - instance-settings-store: the generic key/value access to `instance_settings` (#715, cut 2), which the repository of the
+ *   whole instance and the domains that own a key (billing, the setup wizard) build on. Instance level like the repository,
+ *   and it knows no setting;
+ * - instance-setting-types: the shapes of two instance settings (tenancy, the sign-up rule), no function, no query.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
@@ -138,7 +142,9 @@ const INSTANCE_LEVEL = [
   "catalog-repository.ts",
   "claim-admission.ts",
   "installation-link-request-directory-repository.ts",
+  "instance-setting-types.ts",
   "instance-settings-repository.ts",
+  "instance-settings-store.ts",
   "integration-directory-repository.ts",
   "invitation-directory-repository.ts",
   "job-check-runs-sweep.ts",

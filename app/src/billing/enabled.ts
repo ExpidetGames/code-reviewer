@@ -9,7 +9,7 @@
 // Stripe, and calls nobody. This is the one reader of the switch.
 import "server-only";
 import type { Kysely } from "kysely";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createInstanceSettingsStore } from "../db/repositories/instance-settings-store.ts";
 import { createSecretsRepository } from "../db/repositories/secrets-repository.ts";
 import type { Database } from "../db/schema.ts";
 import {
@@ -25,7 +25,10 @@ import {
   type BillingRates,
 } from "./rates.ts";
 import { DEFAULT_ADAPTER_ID, readBillingSettings } from "./settings.ts";
-import { isUndecodableText } from "./settings-store.ts";
+import {
+  isUndecodableText,
+  type BillingSettingValues,
+} from "./settings-store.ts";
 
 /**
  * The stored value of `billing_settings`, as it is. The one place that reads it: the switch and the active adapter both ask
@@ -36,7 +39,9 @@ export async function readStoredBillingSettings(
   db: Kysely<Database>,
 ): Promise<unknown> {
   try {
-    return await createInstanceSettingsRepository(db).get("billing_settings");
+    return await createInstanceSettingsStore<BillingSettingValues>(db).get(
+      "billing_settings",
+    );
   } catch (error) {
     if (!isUndecodableText(error)) throw error;
     return undefined;

@@ -25,7 +25,7 @@ import "server-only";
 import { sql, type Kysely } from "kysely";
 import type { Database } from "../schema.ts";
 
-/** The statuses a job never leaves (src/jobs/job-status.ts). */
+/** The statuses a job never leaves (src/db/job-status.ts). */
 export const ENDED_JOB_STATUSES = [
   "succeeded",
   "failed",

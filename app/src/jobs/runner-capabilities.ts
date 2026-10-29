@@ -5,7 +5,7 @@
 // request means `pr-agent` only. The claim statement filters on the review kind, so a runner that
 // cannot run a kind is never handed such a job — not even briefly, and without counting an attempt or
 // creating credentials.
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /**
  * The engines a runner may claim for. `pr-agent` runs Diff Review, `opencode` runs Dynamic Review.

@@ -42,7 +42,7 @@ import {
 } from "./adapter.ts";
 import { BILLING_TERMS_VERSION } from "./profile.ts";
 import type { BillingActor } from "./profile-service.ts";
-import type { TopUpIntent } from "./topup-intent.ts";
+import type { TopUpIntent } from "../db/topup-intent.ts";
 
 export const TOP_UP_ERROR_CODES = [
   "forbidden",

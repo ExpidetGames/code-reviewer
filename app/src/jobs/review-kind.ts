@@ -10,10 +10,8 @@ import type { Kysely } from "kysely";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import type { Database } from "../db/schema.ts";
-import {
-  REVIEW_DEFAULTS_KEY,
-  type ProjectReviewKind,
-} from "../review-settings/settings.ts";
+import { REVIEW_DEFAULTS_KEY } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {
   parseStoredProjectDynamicOverrides,
   parseStoredWorkspaceDynamic,

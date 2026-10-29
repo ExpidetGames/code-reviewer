@@ -6,7 +6,7 @@
 // `dispatcher/src/billing-hold-pin.test.ts` reads this file). An operator who raises a setting above its default makes the
 // hold smaller than the real maximum, never larger; the settlement charges the real price in any case.
 import "server-only";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /** `DISPATCHER_JOB_TIMEOUT_SECONDS` of the Dispatcher (`dispatcher/src/config.ts`): how long a Worker of a Diff job may live. */
 export const DIFF_JOB_TIMEOUT_SECONDS = 1200;
