@@ -48,6 +48,9 @@ export default defineConfig({
   testMatch: /.*\.e2e\.ts$/,
   // Before anything else: the lane says what is missing and stops (e2e/helpers/dynamic-preflight.ts).
   globalSetup: "./e2e/dynamic/preflight.global-setup.ts",
+  // Playwright reads the commit of the checkout for its report and, on CI, runs `git fetch origin <sha>` for it: a name lookup of
+  // github.com by root, inside the lane's network namespace, found with strace (#714, #736). The lane's report does not need it.
+  captureGitInfo: { commit: false, diff: false },
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   // No retry: the journey and its fixtures are written once per run, and a retry would hide what failed.

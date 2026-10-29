@@ -19,6 +19,7 @@ import {
   describeDnsProblems,
   parseAskedNames,
   parseDestinations,
+  parseDnsDestinations,
   parseDnsAllowlist,
   parseDns,
   parseGuard,
@@ -357,7 +358,11 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
 });
 
 describe("the name lookups on the lane's own resolver", () => {
-  const ALLOWED = parseDnsAllowlist(ALLOWLIST);
+  /** The file's own allowlist, and one with a name and no engine lookups, the rule the file works toward (#739). */
+  const FILE = parseDnsAllowlist(ALLOWLIST);
+  const ALLOWED = parseDnsAllowlist(
+    "example.org # a name for the tests\nengine-query-packets 0\n",
+  );
 
   // #714-T02
   it("reads the DNS counters of each user and the engine control, apart from the violations", () => {
@@ -385,12 +390,36 @@ describe("the name lookups on the lane's own resolver", () => {
   });
 
   // #714-T02
-  it("fails the lane when the engine user sent any query, even for a name that is allowed", () => {
+  it("fails the lane when the engine user sent a query, even for a name that is allowed for the others", () => {
     const dns = parseDns(listing({ ...QUIET, ...DNS_QUIET, "dns-engine": 1 }));
 
     expect(() => {
-      assertDnsQuiet(dns, ["github.com"], ALLOWED);
-    }).toThrow(/engine user .* 1 DNS query packet/);
+      assertDnsQuiet(dns, ["example.org"], ALLOWED);
+    }).toThrow(/engine user .* 1 DNS query packet.* more than the 0/);
+    // The destinations of the set are named when there are any.
+    expect(() => {
+      assertDnsQuiet(dns, [], ALLOWED, ["uid 10101 → 127.0.0.1:53/udp"]);
+    }).toThrow(/uid 10101 → 127\.0\.0\.1:53\/udp/);
+  });
+
+  // #714-T02
+  it("fails the lane only above the documented baseline of the engine user's lookups", () => {
+    const baseline = FILE.engineQueryPackets;
+    const at = parseDns(
+      listing({ ...QUIET, ...DNS_QUIET, "dns-engine": baseline }),
+    );
+    const above = parseDns(
+      listing({ ...QUIET, ...DNS_QUIET, "dns-engine": baseline + 1 }),
+    );
+
+    expect(() => {
+      assertDnsQuiet(at, [], FILE);
+    }).not.toThrow();
+    expect(() => {
+      assertDnsQuiet(above, [], FILE);
+    }).toThrow(
+      /more than the \d+ that e2e\/dynamic\/dns-allowlist\.txt expects/,
+    );
   });
 
   // #714-T02
@@ -398,14 +427,10 @@ describe("the name lookups on the lane's own resolver", () => {
     const dns = parseDns(listing({ ...QUIET, ...DNS_QUIET, "dns-root": 2 }));
 
     expect(() => {
-      assertDnsQuiet(
-        dns,
-        ["github.com", "registry.npmjs.org", "evil.test"],
-        ALLOWED,
-      );
-    }).toThrow(/registry\.npmjs\.org, evil\.test/);
+      assertDnsQuiet(dns, ["example.org", "github.com", "evil.test"], ALLOWED);
+    }).toThrow(/github\.com, evil\.test/);
     expect(
-      describeDnsProblems(dns, ["github.com", "registry.npmjs.org"], ALLOWED),
+      describeDnsProblems(dns, ["example.org", "github.com"], ALLOWED),
     ).toHaveLength(1);
   });
 
@@ -421,7 +446,7 @@ describe("the name lookups on the lane's own resolver", () => {
     );
 
     expect(() => {
-      assertDnsQuiet(dns, ["github.com", "github.com"], ALLOWED);
+      assertDnsQuiet(dns, ["example.org", "example.org"], ALLOWED);
     }).not.toThrow();
     expect(() => {
       assertDnsQuiet(dns, [], ALLOWED);
@@ -432,28 +457,69 @@ describe("the name lookups on the lane's own resolver", () => {
   it("reads the names of the resolver's log and the allowlist the same way, whatever the type, case or root dot", () => {
     expect(
       parseAskedNames(
-        "A github.com\nAAAA GitHub.com.\n\nMALFORMED (not a query)\n",
+        "A example.org\nAAAA Example.ORG.\n\nMALFORMED (not a query)\n",
       ),
-    ).toEqual(["github.com", "github.com", "(not a query)"]);
+    ).toEqual(["example.org", "example.org", "(not a query)"]);
     expect(
-      parseDnsAllowlist("# comment\n\nGitHub.com # why\n  example.org  \n"),
-    ).toEqual(new Set(["github.com", "example.org"]));
-    // A malformed query is not a name that can be on a list.
-    expect(
-      describeDnsProblems(
-        parseDns(listing({ ...QUIET, ...DNS_QUIET })),
-        parseAskedNames(
-          "MALFORMED not a query with one question, 15 bytes 1234",
+      parseDnsAllowlist(
+        "# comment\n\nExample.org # why\n  other.test  \nengine-query-packets 3 # why\n",
+      ),
+    ).toEqual({
+      names: new Set(["example.org", "other.test"]),
+      engineQueryPackets: 3,
+    });
+    // A malformed query, or a packet that is no query, is not a name that can be on a list.
+    for (const log of [
+      "MALFORMED not a query with one question, 15 bytes 1234",
+      "IGNORED an answer, 20 bytes 0000",
+    ])
+      expect(
+        describeDnsProblems(
+          parseDns(listing({ ...QUIET, ...DNS_QUIET })),
+          parseAskedNames(log),
+          ALLOWED,
         ),
-        ALLOWED,
-      ),
-    ).toHaveLength(1);
+      ).toHaveLength(1);
   });
 
   // #714-T02
-  it("has an allowlist that names github.com and the issue to find its asker, and nothing else", () => {
-    expect([...ALLOWED]).toEqual(["github.com"]);
-    expect(ALLOWLIST).toMatch(/github\.com .*#736/);
+  it("names who sent the lookups and where, from the dns sets (the user as a number or as a name)", () => {
+    expect(
+      parseDnsDestinations({
+        nftables: [
+          {
+            set: {
+              elem: [
+                { concat: [10101, "127.0.0.1", "udp", 53] },
+                { concat: ["root", "127.0.0.1", "tcp", 53] },
+                { elem: { val: { concat: [10101, "::1", 17, 53] } } },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      "uid 10101 → 127.0.0.1:53/udp",
+      "root → 127.0.0.1:53/tcp",
+      "uid 10101 → [::1]:53/udp",
+    ]);
+    expect(parseDnsDestinations({ nftables: [] })).toEqual([]);
+  });
+
+  // #714-T02
+  it("has an allowlist where every entry points to an issue, with no name now and the engine baseline explained", () => {
+    const entries = ALLOWLIST.split("\n").filter(
+      (line) => line.trim() !== "" && !line.startsWith("#"),
+    );
+
+    expect([...FILE.names]).toEqual([]);
+    expect(FILE.engineQueryPackets).toBeGreaterThanOrEqual(0);
+    expect(entries).toEqual([
+      `engine-query-packets ${String(FILE.engineQueryPackets)}`,
+    ]);
+    // The reason of the baseline is in the file and names the issue that removes it.
+    expect(ALLOWLIST).toMatch(/#739/);
+    expect(ALLOWLIST).toMatch(/#736/);
   });
 
   // #714-T02

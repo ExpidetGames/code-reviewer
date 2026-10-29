@@ -135,14 +135,26 @@ export function parseDns(json: unknown): DnsReading {
   };
 }
 
-/** The names of an allowlist file: one per line, `#` starts a comment. */
-export function parseDnsAllowlist(text: string): Set<string> {
-  return new Set(
-    text
-      .split("\n")
-      .map((line) => line.replace(/#.*$/, "").trim().toLowerCase())
-      .filter((line) => line !== ""),
-  );
+/** What e2e/dynamic/dns-allowlist.txt allows: names anyone may ask for, and how many query packets the engine user may send. */
+export type DnsAllowlist = {
+  names: ReadonlySet<string>;
+  engineQueryPackets: number;
+};
+
+const ENGINE_LINE = /^engine-query-packets\s+(\d+)$/;
+
+/** The allowlist file: `engine-query-packets <n>` and one name per line, `#` starts a comment. */
+export function parseDnsAllowlist(text: string): DnsAllowlist {
+  const names = new Set<string>();
+  let engineQueryPackets = 0;
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/#.*$/, "").trim().toLowerCase();
+    if (line === "") continue;
+    const engine = ENGINE_LINE.exec(line);
+    if (engine !== null) engineQueryPackets = Number(engine[1]);
+    else names.add(line);
+  }
+  return { names, engineQueryPackets };
 }
 
 /** The names in the resolver's log (`A github.com` → `github.com`), lower case, without the root dot. */
@@ -160,23 +172,23 @@ export function parseAskedNames(log: string): string[] {
 }
 
 /**
- * What is wrong with the name lookups of the lane: the engine user asked for any name at all, or a name is not on the
- * allowlist. The engine user needs no name (its model and the fakes are addresses), so one query of it is a violation even
- * when the name is allowed for the other programs.
+ * What is wrong with the name lookups of the lane: the engine user sent more query packets than the allowlist expects (none is
+ * the rule, see the file), or a name is not on the allowlist. The names of the engine user are never read (its packets are
+ * rejected before the lane's resolver), so no name on the list excuses a packet of it.
  */
 export function describeDnsProblems(
   reading: DnsReading,
   askedNames: readonly string[],
-  allowed: ReadonlySet<string>,
+  allowed: DnsAllowlist,
   destinations: readonly string[] = [],
 ): string[] {
   const problems: string[] = [];
-  if (reading.queries.engine > 0)
+  if (reading.queries.engine > allowed.engineQueryPackets)
     problems.push(
-      `the engine user (the pinned OpenCode, or anything it started) sent ${String(reading.queries.engine)} DNS query packet(s) to the lane's resolver; the engine user may not look up any name${destinations.length === 0 ? "" : ` (lookups on loopback, by user: ${destinations.join(", ")})`}`,
+      `the engine user (the pinned OpenCode, or anything it started) sent ${String(reading.queries.engine)} DNS query packet(s) to the lane's resolver, more than the ${String(allowed.engineQueryPackets)} that e2e/dynamic/dns-allowlist.txt expects; the engine user may not look up any name${destinations.length === 0 ? "" : ` (lookups on loopback, by user: ${destinations.join(", ")})`}`,
     );
   const unlisted = [
-    ...new Set(askedNames.filter((name) => !allowed.has(name))),
+    ...new Set(askedNames.filter((name) => !allowed.names.has(name))),
   ];
   if (unlisted.length > 0)
     problems.push(
@@ -189,7 +201,7 @@ export function describeDnsProblems(
 export function assertDnsQuiet(
   reading: DnsReading,
   askedNames: readonly string[],
-  allowed: ReadonlySet<string>,
+  allowed: DnsAllowlist,
   destinations: readonly string[] = [],
 ): void {
   const problems = describeDnsProblems(
@@ -209,7 +221,7 @@ export function readAskedNames(logFile = LANE_DNS_LOG): string[] {
   return parseAskedNames(readFileSync(logFile, "utf8"));
 }
 
-export function readDnsAllowlist(file = DNS_ALLOWLIST_FILE): Set<string> {
+export function readDnsAllowlist(file = DNS_ALLOWLIST_FILE): DnsAllowlist {
   return parseDnsAllowlist(readFileSync(file, "utf8"));
 }
 

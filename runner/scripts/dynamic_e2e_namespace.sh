@@ -152,21 +152,7 @@ echo "probe entry mode: opencode with a read-only root, not with a writable one"
 cd "$LANE_APP_DIR"
 "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-lane-guard-report.ts"
 status=0
-# TEMPORARY (#714): find who asks the lane resolver. Reverted in the next commit.
-TRACER=()
-if command -v strace >/dev/null; then TRACER=(strace -f -qq -s 160 -e trace=execve,execveat,clone,clone3,fork,vfork,setuid,setresuid,sendto,sendmsg,sendmmsg,connect -o /run/strace.log); fi
-"${TRACER[@]}" ./node_modules/.bin/playwright test -c playwright.dynamic.config.ts "$@" || status=$?
-if [ -f /run/strace.log ]; then
-  echo "STRACE-DNS-BEGIN"
-  grep -E 'sin6?_port=htons\(53\)' /run/strace.log | cut -c1-300 | sed -n '1,60p' || true
-  for p in $(grep -E 'sin_port=htons\(53\), sin_addr=inet_addr\("127.0.0.1"\)' /run/strace.log | awk '{print $1}' | sort -u | sed -n '1,20p'); do
-    echo "PID $p (its lines):"; { grep -E "^$p " /run/strace.log | cut -c1-260 | sed -n '1,14p'; } || true
-    echo "PID $p (born as):"; { grep -E "= $p$" /run/strace.log | cut -c1-200 | sed -n '1,2p'; } || true
-    echo "MENTIONS of $p:"; { grep -E "[ =(,]$p[ ,)]|= $p$" /run/strace.log | grep -v "^$p " | cut -c1-300 | sed -n '1,12p'; } || true
-    echo "EXECS (opencode, bun, python, runner):"; { grep -E "execve\(.*(opencode|bun|python|code_reviewer)" /run/strace.log | grep -v ENOENT | cut -c1-300 | sed -n '1,12p'; } || true
-  done
-  echo "STRACE-DNS-END"
-fi
+./node_modules/.bin/playwright test -c playwright.dynamic.config.ts "$@" || status=$?
 
 # 5. The guard has the last word, and nothing may be left running.
 kill "$DNS_PID" 2>/dev/null && wait "$DNS_PID" 2>/dev/null && :
