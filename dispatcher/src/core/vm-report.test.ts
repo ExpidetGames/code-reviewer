@@ -101,7 +101,9 @@ describe("the report of the VM", () => {
     const jobId = app.enqueue();
     const { core, launcher, logger, recorded } = build();
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     const [call] = vmCalls(recorded.calls);
@@ -127,7 +129,9 @@ describe("the report of the VM", () => {
     app.script("vm", [{ status: 503 }, { status: 500 }, { status: 502 }]);
     const { core, logger } = build();
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     expect(vmRequests()).toHaveLength(3);
@@ -144,7 +148,9 @@ describe("the report of the VM", () => {
     const jobId = app.enqueue();
     app.script("vm", [{ status: 503 }]);
     const first = build();
-    await handled(first.core.handle({ jobId, reviewKind: "diff" }));
+    await handled(
+      first.core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
     expect(vmRequests().map((request) => request.status)).toStrictEqual([
       503, 200,
     ]);
@@ -154,7 +160,13 @@ describe("the report of the VM", () => {
     const next = app.enqueue();
     app.script("vm", [{ status: 409 }]);
     const second = build();
-    await handled(second.core.handle({ jobId: next, reviewKind: "diff" }));
+    await handled(
+      second.core.handle({
+        appId: "reviewer",
+        jobId: next,
+        reviewKind: "diff",
+      }),
+    );
     expect(vmRequests().map((request) => request.status)).toStrictEqual([409]);
     expect(second.logger.text()).toContain("vm_report_failed");
   });
@@ -169,7 +181,9 @@ describe("the report of the VM", () => {
     ]);
     const { core, logger, launcher } = build();
 
-    await handled(core.handle({ jobId, reviewKind: "diff" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(logger.text()).not.toContain(
       launcher.launches[0]?.credential ?? "x",
@@ -192,7 +206,9 @@ describe("the report of the VM", () => {
     ]);
     const { core, logger } = build();
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     expect(vmRequests()).toHaveLength(0);
@@ -204,7 +220,9 @@ describe("the report of the VM", () => {
     const jobId = app.enqueue();
     const { core } = build({ onLaunch: () => Promise.resolve() });
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     expect(vmRequests()).toHaveLength(0);
@@ -220,7 +238,9 @@ describe("the report of the VM", () => {
       },
     });
 
-    await handled(core.handle({ jobId, reviewKind: "diff" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(vmRequests()).toHaveLength(1);
     expect(app.requests().filter((r) => r.route === "release")).toHaveLength(1);

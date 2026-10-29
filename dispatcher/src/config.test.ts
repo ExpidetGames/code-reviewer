@@ -29,17 +29,26 @@ describe("the settings of the Dispatcher", () => {
   it("reads the settings with their defaults", () => {
     const { core, signingKeys } = loadSettings(base);
 
-    expect(core).toMatchObject({
-      appUrl: "https://app.example.test",
-      token: TOKEN,
-      poolId: "dispatcher",
-      maxRunning: 4,
+    // The legacy variables define the app `reviewer`; nothing else exists without DISPATCHER_APPS (#730-T01).
+    expect(core).toStrictEqual({
+      apps: [
+        {
+          id: "reviewer",
+          url: "https://app.example.test",
+          token: TOKEN,
+          poolId: "dispatcher",
+          maxRunning: 4,
+          kinds: ["diff", "dynamic"],
+        },
+      ],
       engines: ["pr-agent", "opencode"],
       jobTimeoutSeconds: 1200,
       launchDeadlineSeconds: 300,
       workerConfig: { diff: {}, dynamic: {} },
     });
-    expect(signingKeys).toStrictEqual([{ kid: "k1", secret: SECRET }]);
+    expect(signingKeys).toStrictEqual([
+      { kid: "k1", secret: SECRET, appId: "reviewer" },
+    ]);
   });
 
   // #327-T10
@@ -70,7 +79,7 @@ describe("the settings of the Dispatcher", () => {
     });
 
     expect(core.engines).toStrictEqual(["pr-agent"]);
-    expect(core.poolId).toBe("staging-1");
+    expect(core.apps[0]?.poolId).toBe("staging-1");
     expect(core.jobTimeoutSeconds).toBe(600);
     expect(core.workerConfig.dynamic).toStrictEqual({
       container: { memory: { limit: "1500m" } },

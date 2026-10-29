@@ -10,6 +10,9 @@ export type SignatureVerdict =
 
 export type SigningKey = { kid: string; secret: string };
 
+/** A key of the multi-app Dispatcher (#730): the sender of a call signed with it is the app `appId`, and nobody else. */
+export type AppSigningKey = SigningKey & { appId: string };
+
 const SIGNATURE = /^v1=[0-9a-f]{64}$/;
 const TIMESTAMP = /^\d{1,12}$/;
 
@@ -24,14 +27,28 @@ export function sign(input: {
   return `v1=${createHmac("sha256", input.secret).update(message, "utf8").digest("hex")}`;
 }
 
-/** The verdict for a request as the receiver sees it; `headers` are keyed by lower case name. */
-export function verifyDispatchSignature(input: {
-  keys: readonly SigningKey[];
+export type SignatureInput<K extends SigningKey> = {
+  keys: readonly K[];
   headers: Readonly<Record<string, string | undefined>>;
   rawBody: string;
   nowSeconds: number;
   toleranceSeconds: number;
-}): SignatureVerdict {
+};
+
+/** The verdict for a request as the receiver sees it; `headers` are keyed by lower case name. */
+export function verifyDispatchSignature(
+  input: SignatureInput<SigningKey>,
+): SignatureVerdict {
+  return identifyDispatchSignature(input).verdict;
+}
+
+/**
+ * The same verdict, and with `ok` the key that matched (#730): the key is the identity of the sender, so a caller that
+ * serves several apps learns which app signed from the key and from nothing else the request says.
+ */
+export function identifyDispatchSignature<K extends SigningKey>(
+  input: SignatureInput<K>,
+): { verdict: "ok"; key: K } | { verdict: Exclude<SignatureVerdict, "ok"> } {
   const timestamp = input.headers["x-dispatch-timestamp"];
   const dispatchId = input.headers["x-dispatch-id"];
   const signature = input.headers["x-dispatch-signature"];
@@ -45,17 +62,17 @@ export function verifyDispatchSignature(input: {
     !TIMESTAMP.test(timestamp) ||
     !SIGNATURE.test(signature)
   )
-    return "malformed";
+    return { verdict: "malformed" };
   if (Math.abs(Number(timestamp) - input.nowSeconds) > input.toleranceSeconds)
-    return "expired";
+    return { verdict: "expired" };
   const key = input.keys.find((candidate) => candidate.kid === keyId);
-  if (key === undefined) return "unknown_key";
+  if (key === undefined) return { verdict: "unknown_key" };
   const expected = Buffer.from(
     sign({ secret: key.secret, timestamp, dispatchId, rawBody: input.rawBody }),
   );
   const received = Buffer.from(signature);
   return expected.length === received.length &&
     timingSafeEqual(expected, received)
-    ? "ok"
-    : "bad_signature";
+    ? { verdict: "ok", key }
+    : { verdict: "bad_signature" };
 }

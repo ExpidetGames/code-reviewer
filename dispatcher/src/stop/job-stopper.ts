@@ -5,7 +5,8 @@
 // only inside a name prefix of our own naming scheme (`cr-<kind>-<job id>-`, launchers/sandbox.ts) together with the tag
 // the Launcher puts on every VM. The platform's listing only narrows: every VM it returns is checked again with the
 // reaper's rule (`shapeOf`), so a VM that is not exactly one of our job VMs of this job, a canary, a persistent VM,
-// a lookalike or one the platform is already ending is never returned.
+// a lookalike or one the platform is already ending is never returned. With several apps (#730) a VM is returned only to
+// the app its `tenant` tag names (no tag: `reviewer`): a stop signed by one app can never end a VM of another.
 import type { SandboxFleet } from "../launchers/sandbox-service.ts";
 import { APP_TAG, isLive, shapeOf } from "../reaper/vm-shape.ts";
 
@@ -20,10 +21,11 @@ export class StopLookupError extends Error {
   }
 }
 
-/** The names of the live VMs of `jobId` that this Dispatcher's Launcher could have created. */
+/** The names of the live VMs of `jobId` that this Dispatcher's Launcher created for the app `appId`. */
 export async function findJobVms(
   fleet: Pick<SandboxFleet, "list">,
   jobId: string,
+  appId: string,
 ): Promise<string[]> {
   const id = jobId.toLowerCase();
   const names = new Set<string>();
@@ -38,6 +40,7 @@ export async function findJobVms(
         if (
           shape?.kind === "job" &&
           shape.jobId === id &&
+          shape.appId === appId &&
           vm.tags.kind === kind &&
           isLive(vm)
         )

@@ -75,17 +75,21 @@ export function mountStopRoute(app: Hono, options: StopRouteOptions): void {
       return refuse(c, "invalid");
     }
     const { jobId, stopId } = stop.data;
+    // The app is the one whose key verified the call. Its stop ids are its own: another app cannot use one up.
+    const appId = verified.appId;
+    const replayKey = `${appId}:${stopId}`;
 
-    if (!replay.begin(stopId)) {
-      logger.info("stop_replayed", { jobId });
+    if (!replay.begin(replayKey)) {
+      logger.info("stop_replayed", { app: appId, jobId });
       return c.json({ version: 1, status: "ignored", reason: "replayed" });
     }
     let names: string[];
     try {
-      names = await findJobVms(fleet, jobId);
+      names = await findJobVms(fleet, jobId, appId);
     } catch (error) {
-      replay.forget(stopId);
+      replay.forget(replayKey);
       logger.error("stop_list_failed", {
+        app: appId,
         jobId,
         code: error instanceof StopLookupError ? error.code : "STOP_FAILED",
       });
@@ -93,7 +97,7 @@ export function mountStopRoute(app: Hono, options: StopRouteOptions): void {
         "retry-after": String(RETRY_AFTER_SECONDS),
       });
     }
-    logger.info("stop_received", { jobId, vms: names.length });
+    logger.info("stop_received", { app: appId, jobId, vms: names.length });
     if (names.length === 0)
       return c.json({ version: 1, status: "ignored", reason: "no_vm" });
     options.background(stopAll(jobId, names));

@@ -31,8 +31,12 @@ function build() {
   const app = new Hono();
   mountStopRoute(app, {
     keys: [
-      { kid: KEY_ID, secret: SIGNING_SECRET },
-      { kid: PREVIOUS_KEY_ID, secret: PREVIOUS_SIGNING_SECRET },
+      { kid: KEY_ID, secret: SIGNING_SECRET, appId: "reviewer" },
+      {
+        kid: PREVIOUS_KEY_ID,
+        secret: PREVIOUS_SIGNING_SECRET,
+        appId: "reviewer",
+      },
     ],
     fleet: sandbox,
     logger,
@@ -404,8 +408,12 @@ describe("POST /stop", () => {
     const probe = new Hono();
     webhookTrigger({
       keys: [
-        { kid: KEY_ID, secret: SIGNING_SECRET },
-        { kid: PREVIOUS_KEY_ID, secret: PREVIOUS_SIGNING_SECRET },
+        { kid: KEY_ID, secret: SIGNING_SECRET, appId: "reviewer" },
+        {
+          kid: PREVIOUS_KEY_ID,
+          secret: PREVIOUS_SIGNING_SECRET,
+          appId: "reviewer",
+        },
       ],
       nowSeconds: () => NOW,
     }).mount(probe, {

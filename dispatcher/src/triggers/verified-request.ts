@@ -6,15 +6,18 @@
 // same answer, so a caller cannot tell which check failed, and nothing here logs a key, a signature or a body.
 import type { Context } from "hono";
 import type { Logger } from "../core/types.ts";
-import { verifyDispatchSignature, type SigningKey } from "./signature.ts";
+import { identifyDispatchSignature, type AppSigningKey } from "./signature.ts";
 
 /** The body of a signed call is at most 1 KiB (the contract). */
 export const MAX_BODY_BYTES = 1024;
 export const TOLERANCE_SECONDS = 300;
 
 export type VerifiedRequestOptions = {
-  /** The key the App signs with now, and the previous one while a rotation is in progress. */
-  keys: readonly SigningKey[];
+  /**
+   * The key each app signs with now, and its previous one while a rotation is in progress (#730). The key that matches
+   * names the app: that is the whole identity of the sender.
+   */
+  keys: readonly AppSigningKey[];
   nowSeconds?: () => number;
   toleranceSeconds?: number;
 };
@@ -85,7 +88,8 @@ async function readBody(
 }
 
 export type Verified =
-  { ok: true; text: string; id: string } | { ok: false; response: Response };
+  | { ok: true; text: string; id: string; appId: string }
+  | { ok: false; response: Response };
 
 /**
  * Checks, in the contract's order, everything but the body's own form. `id` is the `x-dispatch-id` header, which the
@@ -113,7 +117,7 @@ export async function verifyRequest(
     return { ok: false, response: refuse(c, "too_large") };
   if (body === "invalid") return { ok: false, response: refuse(c, "invalid") };
 
-  const verdict = verifyDispatchSignature({
+  const identified = identifyDispatchSignature({
     keys: options.keys,
     headers: {
       "x-dispatch-timestamp":
@@ -128,16 +132,20 @@ export async function verifyRequest(
     nowSeconds: nowSeconds(),
     toleranceSeconds: options.toleranceSeconds ?? TOLERANCE_SECONDS,
   });
-  if (verdict !== "ok") {
-    options.logger.warn(options.refusedEvent, { verdict });
+  if (identified.verdict !== "ok") {
+    options.logger.warn(options.refusedEvent, { verdict: identified.verdict });
     return {
       ok: false,
-      response: refuse(c, verdict === "malformed" ? "invalid" : "unauthorized"),
+      response: refuse(
+        c,
+        identified.verdict === "malformed" ? "invalid" : "unauthorized",
+      ),
     };
   }
   return {
     ok: true,
     text: body.text,
+    appId: identified.key.appId,
     // `verifyDispatchSignature` proved the header is there.
     id: request.headers.get("x-dispatch-id") ?? "",
   };

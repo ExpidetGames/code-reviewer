@@ -4,13 +4,18 @@
 // Launcher (which starts its Worker). It claims, holds the per-job credential only while it hands the job
 // over, keeps the lease alive during the launch and gives the job back when the launch fails.
 //
-//   handle(hint) -> capability check -> capacity -> App version -> claim -> { started, background }
+//   handle(hint) -> capability check -> app's kinds -> capacity -> App version -> claim -> kind check -> { started, background }
 //   background:  launch(spec) while heartbeating with the job credential
 //                deadline, lost lease or abort -> stop the launch; launch failed -> release(launch_failed)
 //   after that:  nothing. The Worker owns the lease and the core never looks at the job again (#487); the App tells the
 //                Dispatcher when the claim ends (`POST /stop`)
 //
 // It never sees the job input, the git token or the model key: the App hands those to the Worker.
+//
+// Several apps (#730): every call names the app (`hint.appId`, the app whose signing key verified the wake-up call). The
+// core keeps one client, one slot counter and one version memory per app, claims at that app only (a 204 is `ignored`:
+// there is no looking at another app), refuses a kind the app is not allowed before and after the claim, and hands the
+// Launcher the registry's URL of the app that claimed, never anything a request said.
 import {
   createAppClient,
   type AppClient,
@@ -22,6 +27,7 @@ import {
 import { systemClock } from "./clock.ts";
 import {
   ENGINE_BY_KIND,
+  type AppSettings,
   type Clock,
   type CoreSettings,
   type CreatedVm,
@@ -70,25 +76,49 @@ function clampRetry(seconds: number | undefined, fallback: number): number {
   return Math.min(seconds, RETRY_CEILING_SECONDS);
 }
 
+/** Everything the core keeps for one app (#730): nothing of it is shared with another app. */
+type AppState = {
+  settings: AppSettings;
+  client: AppClient;
+  /** Launches in progress (claimed or being claimed): the local share of this app's cap. */
+  launching: number;
+  versionOkUntil: number;
+  /** #493: whether the App, as of the last version answer, takes the report of a VM. */
+  takesVmReports: boolean;
+};
+
 export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   const { settings, launcher, logger } = deps;
   const clock = deps.clock ?? systemClock;
   const now = deps.now ?? (() => Date.now());
-  const app: AppClient = createAppClient({
-    appUrl: settings.appUrl,
-    token: settings.token,
-    poolId: settings.poolId,
-    fetch: deps.fetch ?? fetch,
-    requestTimeoutMs: deps.requestTimeoutMs,
-  });
+  const apps = new Map<string, AppState>();
+  for (const configured of settings.apps)
+    apps.set(configured.id, {
+      settings: configured,
+      client: createAppClient({
+        appUrl: configured.url,
+        token: configured.token,
+        poolId: configured.poolId,
+        fetch: deps.fetch ?? fetch,
+        requestTimeoutMs: deps.requestTimeoutMs,
+      }),
+      launching: 0,
+      versionOkUntil: 0,
+      takesVmReports: false,
+    });
   const shutdown = new AbortController();
-  /** Launches in progress (claimed or being claimed): the local share of the cap. */
-  let launching = 0;
-  let versionOkUntil = 0;
-  /** #493: whether the App, as of the last version answer, takes the report of a VM. */
-  let appTakesVmReports = false;
 
-  async function engines(hint: JobHint): Promise<EnginesAnswer> {
+  /** The engines of the kinds an app may be given: what its claim asks for. */
+  function allowedEngines(state: AppState): Engine[] {
+    return [
+      ...new Set(state.settings.kinds.map((kind) => ENGINE_BY_KIND[kind])),
+    ];
+  }
+
+  async function engines(
+    hint: JobHint,
+    state: AppState,
+  ): Promise<EnginesAnswer> {
     let offered: readonly Engine[];
     try {
       offered = await launcher.capabilities(shutdown.signal);
@@ -99,8 +129,9 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
       };
     }
-    const usable = settings.engines.filter((engine) =>
-      offered.includes(engine),
+    const allowed = allowedEngines(state);
+    const usable = settings.engines.filter(
+      (engine) => offered.includes(engine) && allowed.includes(engine),
     );
     if (usable.length === 0) return { kind: "not_capable" };
     if (
@@ -111,40 +142,62 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     return { kind: "usable", engines: usable };
   }
 
-  async function appSupportsTheSplit(): Promise<
+  async function appSupportsTheSplit(
+    state: AppState,
+  ): Promise<
     { ok: true } | { ok: false; code: AppFailure; retryAfterSeconds?: number }
   > {
-    if (now() < versionOkUntil) return { ok: true };
-    const checked = await app.checkVersion();
+    if (now() < state.versionOkUntil) return { ok: true };
+    const checked = await state.client.checkVersion();
     if (!checked.ok) return checked;
-    versionOkUntil = now() + VERSION_TTL_MS;
-    appTakesVmReports = checked.features.includes(VM_LIFECYCLE_FEATURE);
+    state.versionOkUntil = now() + VERSION_TTL_MS;
+    state.takesVmReports = checked.features.includes(VM_LIFECYCLE_FEATURE);
     return { ok: true };
   }
 
   async function handle(hint: JobHint): Promise<HandleResult> {
-    const answer = await engines(hint);
+    const state = apps.get(hint.appId);
+    if (state === undefined) {
+      // Cannot happen for a call a verified key led to; fail closed all the same.
+      logger.error("app_unknown");
+      return { outcome: "not_capable" };
+    }
+    const app = state.client;
+    const appId = state.settings.id;
+    const answer = await engines(hint, state);
     if (answer.kind === "retry")
       return {
         outcome: "unavailable",
         retryAfterSeconds: answer.retryAfterSeconds,
       };
     if (answer.kind === "not_capable") {
-      logger.info("not_capable", { reviewKind: hint.reviewKind });
+      logger.info("not_capable", { app: appId, reviewKind: hint.reviewKind });
       return { outcome: "not_capable" };
     }
-    if (launching >= settings.maxRunning) {
-      logger.info("busy", { launching });
+    // The first wall of the job kinds (#730): a kind the app may not submit is never claimed.
+    if (
+      hint.reviewKind !== undefined &&
+      !state.settings.kinds.includes(hint.reviewKind)
+    ) {
+      logger.warn("kind_not_allowed", {
+        app: appId,
+        reviewKind: hint.reviewKind,
+        stage: "dispatch",
+      });
+      return { outcome: "not_capable" };
+    }
+    if (state.launching >= state.settings.maxRunning) {
+      logger.info("busy", { app: appId, launching: state.launching });
       return { outcome: "busy", retryAfterSeconds: DEFAULT_RETRY_BUSY_SECONDS };
     }
 
     // The slot is taken before the first await, so two wake-up calls cannot both pass the check.
-    launching += 1;
+    state.launching += 1;
     let handedOver = false;
     try {
-      const supported = await appSupportsTheSplit();
+      const supported = await appSupportsTheSplit(state);
       if (!supported.ok) {
-        logger.error("app_unsupported", { code: supported.code });
+        logger.error("app_unsupported", { app: appId, code: supported.code });
         return {
           outcome: "unavailable",
           retryAfterSeconds: clampRetry(
@@ -156,14 +209,14 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       const claimed = await app.claim({
         engines: answer.engines,
         ...(hint.jobId === undefined ? {} : { jobId: hint.jobId }),
-        maxRunning: settings.maxRunning,
+        maxRunning: state.settings.maxRunning,
       });
       if (claimed.kind === "none") {
-        logger.info("claim_none", { jobId: hint.jobId });
+        logger.info("claim_none", { app: appId, jobId: hint.jobId });
         return { outcome: "ignored" };
       }
       if (claimed.kind === "busy") {
-        logger.warn("claim_busy", { jobId: hint.jobId });
+        logger.warn("claim_busy", { app: appId, jobId: hint.jobId });
         return {
           outcome: "busy",
           retryAfterSeconds: clampRetry(
@@ -173,7 +226,11 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         };
       }
       if (claimed.kind === "unavailable") {
-        logger.error("claim_failed", { jobId: hint.jobId, code: claimed.code });
+        logger.error("claim_failed", {
+          app: appId,
+          jobId: hint.jobId,
+          code: claimed.code,
+        });
         const fallback =
           claimed.code === "app_rejected"
             ? DEFAULT_RETRY_REJECTED_SECONDS
@@ -183,16 +240,30 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
           retryAfterSeconds: clampRetry(claimed.retryAfterSeconds, fallback),
         };
       }
+      // The second wall (#730): a job of a kind the app may not have (a misconfigured or compromised app) is given back
+      // unlaunched, so no VM is created for it.
+      if (!state.settings.kinds.includes(claimed.job.reviewKind)) {
+        logger.error("kind_not_allowed", {
+          app: appId,
+          jobId: claimed.job.id,
+          reviewKind: claimed.job.reviewKind,
+          stage: "claim",
+        });
+        await release(state, claimed.job, "launch_failed");
+        return { outcome: "not_capable" };
+      }
       // The slot is given back when the launch phase ends, by the background work.
       handedOver = true;
-      return { outcome: "started", background: runLaunch(claimed.job) };
+      return { outcome: "started", background: runLaunch(state, claimed.job) };
     } finally {
-      if (!handedOver) launching -= 1;
+      if (!handedOver) state.launching -= 1;
     }
   }
 
   /** The launch phase of one claimed job. Never rejects. The credential lives in this scope only. */
-  async function runLaunch(job: ClaimedJob): Promise<void> {
+  async function runLaunch(state: AppState, job: ClaimedJob): Promise<void> {
+    const app = state.client;
+    const appId = state.settings.id;
     const startedAt = now();
     // Aborts the Launcher: the deadline, a lost lease or a shutdown. Never aborted after a successful launch,
     // because a Launcher may tie the Worker's life to its signal.
@@ -219,12 +290,12 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         if (timers.aborted) return;
         const beat = await app.heartbeat(job.id, job.credential);
         if (beat === "lease_lost") {
-          logger.warn("lease_lost", { jobId: job.id });
+          logger.warn("lease_lost", { app: appId, jobId: job.id });
           stopFor("lease_lost");
           return;
         }
         if (beat === "failed")
-          logger.warn("heartbeat_failed", { jobId: job.id });
+          logger.warn("heartbeat_failed", { app: appId, jobId: job.id });
       }
     })();
     void clock
@@ -236,13 +307,14 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     // #493: the reports of the VM the Launcher created, in the background; awaited at the very end only.
     const reports: Promise<void>[] = [];
     const onVmCreated = (vm: CreatedVm) => {
-      if (!appTakesVmReports) return;
-      reports.push(reportVm(job, vm));
+      if (!state.takesVmReports) return;
+      reports.push(reportVm(state, job, vm));
     };
 
     try {
-      await launchWith(job, guard, onVmCreated);
+      await launchWith(state, job, guard, onVmCreated);
       logger.info("launched", {
+        app: appId,
         jobId: job.id,
         kind: job.reviewKind,
         ms: now() - startedAt,
@@ -250,6 +322,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     } catch (error) {
       const code = errorCode(error);
       logger.error("launch_failed", {
+        app: appId,
         jobId: job.id,
         kind: job.reviewKind,
         code,
@@ -257,11 +330,11 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         stopped: reason,
       });
       // A lost lease means the App already gave the job away: there is nothing of ours to release.
-      if (reason !== "lease_lost") await release(job, "launch_failed");
+      if (reason !== "lease_lost") await release(state, job, "launch_failed");
     } finally {
       phaseDone.abort();
       shutdown.signal.removeEventListener("abort", onShutdown);
-      launching -= 1;
+      state.launching -= 1;
       // The platform keeps the function alive for the work of the launch: do not end it before the reports are made.
       await Promise.allSettled(reports);
     }
@@ -272,10 +345,14 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
    * App), none for a refusal, one log line with a stable code when it did not work, and nothing here ever throws or
    * touches the job.
    */
-  async function reportVm(job: ClaimedJob, vm: CreatedVm): Promise<void> {
+  async function reportVm(
+    state: AppState,
+    job: ClaimedJob,
+    vm: CreatedVm,
+  ): Promise<void> {
     try {
       for (let attempt = 0; ; attempt += 1) {
-        const result = await app.reportVm(job.id, job.credential, vm);
+        const result = await state.client.reportVm(job.id, job.credential, vm);
         if (result === "recorded") return;
         const pause = VM_REPORT_RETRY_MS[attempt];
         if (result === "refused" || pause === undefined) break;
@@ -284,10 +361,11 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     } catch {
       // Only that it failed.
     }
-    logger.warn("vm_report_failed", { jobId: job.id });
+    logger.warn("vm_report_failed", { app: state.settings.id, jobId: job.id });
   }
 
   async function launchWith(
+    state: AppState,
     job: ClaimedJob,
     guard: Abort,
     onVmCreated: (vm: CreatedVm) => void,
@@ -300,7 +378,9 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     // A Launcher that ignores the signal cannot hold the deadline hostage.
     const launched = launcher.launch(
       {
-        appUrl: settings.appUrl,
+        appId: state.settings.id,
+        // The registry's URL of the app that claimed the job: never anything a request said.
+        appUrl: state.settings.url,
         jobId: job.id,
         credential: job.credential,
         kind: job.reviewKind,
@@ -315,33 +395,43 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   }
 
   async function release(
+    state: AppState,
     job: ClaimedJob,
     reason: ReleaseReason,
   ): Promise<void> {
+    const appId = state.settings.id;
     for (let attempt = 1; attempt <= RELEASE_ATTEMPTS; attempt += 1) {
-      const result = await app.release(
+      const result = await state.client.release(
         job.id,
         job.credential,
         reason,
         RELEASE_RETRY_AFTER_SECONDS,
       );
       if (result === "released") {
-        logger.info("released", { jobId: job.id, reason });
+        logger.info("released", { app: appId, jobId: job.id, reason });
         return;
       }
       if (result === "ended") {
         // Not a problem: the Worker delivered its result (and may have exited 1 after a failed one). Nothing to give back.
-        logger.info("release_job_ended", { jobId: job.id, reason });
+        logger.info("release_job_ended", {
+          app: appId,
+          jobId: job.id,
+          reason,
+        });
         return;
       }
       if (result === "not_holder") {
-        logger.warn("release_not_holder", { jobId: job.id, reason });
+        logger.warn("release_not_holder", {
+          app: appId,
+          jobId: job.id,
+          reason,
+        });
         return;
       }
       if (attempt < RELEASE_ATTEMPTS) await clock.sleep(attempt * 1000);
     }
     // The lease runs out and the App gives the job back by itself; the cost is the wait.
-    logger.error("release_failed", { jobId: job.id, reason });
+    logger.error("release_failed", { app: appId, jobId: job.id, reason });
   }
 
   return {

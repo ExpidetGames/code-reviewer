@@ -103,7 +103,9 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue();
     const { core, launcher, recorded } = build();
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     const claim = recorded.calls.find((call) => call.url.endsWith("/claim"));
@@ -133,9 +135,13 @@ describe("the Dispatcher core", () => {
   it("ignores a job the claim does not hand out (a replay, a running or a finished job) and launches nothing", async () => {
     const jobId = app.enqueue();
     const { core, launcher } = build();
-    await handled(core.handle({ jobId, reviewKind: "diff" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
-    const replay = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const replay = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(replay).toStrictEqual({ outcome: "ignored" });
     expect(launcher.launches).toHaveLength(1);
@@ -152,7 +158,9 @@ describe("the Dispatcher core", () => {
       },
     );
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     const release = recorded.calls.find((call) =>
@@ -169,7 +177,9 @@ describe("the Dispatcher core", () => {
     expect(
       app.requests().filter((request) => request.route === "release"),
     ).toStrictEqual([{ method: "POST", route: "release", jobId, status: 200 }]);
-    const again = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const again = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
     expect(again.outcome).toBe("started");
   });
 
@@ -178,7 +188,11 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue({ reviewKind: "dynamic" });
     const { core, launcher, recorded } = build({ engines: ["pr-agent"] });
 
-    const result = await core.handle({ jobId, reviewKind: "dynamic" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "dynamic",
+    });
 
     expect(result).toStrictEqual({ outcome: "not_capable" });
     expect(recorded.calls).toStrictEqual([]);
@@ -190,7 +204,9 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue();
     const { core, recorded } = build({}, { engines: ["pr-agent"] });
 
-    await handled(core.handle({ jobId, reviewKind: "diff" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     const claim = recorded.calls.find((call) => call.url.endsWith("/claim"));
     expect((claim?.body as { engines: string[] }).engines).toStrictEqual([
@@ -203,7 +219,11 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue();
     const { core, recorded } = build({}, { capabilitiesFail: true });
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
 
     expect(result.outcome).toBe("unavailable");
     expect(recorded.calls).toStrictEqual([]);
@@ -214,7 +234,9 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue({ reviewKind: "dynamic" });
     const { core, launcher, recorded } = build();
 
-    const result = await handled(core.handle({ jobId, reviewKind: "dynamic" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "dynamic" }),
+    );
 
     expect(result.outcome).toBe("started");
     expect(
@@ -233,12 +255,14 @@ describe("the Dispatcher core", () => {
     const { core, launcher, recorded } = build({ maxRunning: 2 });
     const ids = [app.enqueue(), app.enqueue(), app.enqueue()];
     for (const id of ids.slice(0, 2)) {
-      await handled(core.handle({ jobId: id, reviewKind: "diff" }));
+      await handled(
+        core.handle({ appId: "reviewer", jobId: id, reviewKind: "diff" }),
+      );
       await settle();
     }
 
     const third = await handled(
-      core.handle({ jobId: ids[2], reviewKind: "diff" }),
+      core.handle({ appId: "reviewer", jobId: ids[2], reviewKind: "diff" }),
     );
 
     expect(third).toStrictEqual({ outcome: "ignored" });
@@ -262,8 +286,16 @@ describe("the Dispatcher core", () => {
       },
     );
 
-    const first = await core.handle({ jobId: jobs[0], reviewKind: "diff" });
-    const second = await core.handle({ jobId: jobs[1], reviewKind: "diff" });
+    const first = await core.handle({
+      appId: "reviewer",
+      jobId: jobs[0],
+      reviewKind: "diff",
+    });
+    const second = await core.handle({
+      appId: "reviewer",
+      jobId: jobs[1],
+      reviewKind: "diff",
+    });
 
     expect(first.outcome).toBe("started");
     expect(second).toMatchObject({ outcome: "busy" });
@@ -289,7 +321,7 @@ describe("the Dispatcher core", () => {
     );
 
     const result = await handled(
-      failing.core.handle({ jobId, reviewKind: "diff" }),
+      failing.core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
     );
 
     const credential = failing.launcher.launches[0]?.credential ?? "";
@@ -310,7 +342,11 @@ describe("the Dispatcher core", () => {
       { onLaunch: () => Promise.reject(new LaunchError("boom")) },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     if (result.outcome === "started") await drive(result.background);
 
     const credential = launcher.launches[0]?.credential ?? "";
@@ -332,7 +368,11 @@ describe("the Dispatcher core", () => {
       },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     await settle();
     await beat(5);
     finishLaunch();
@@ -354,7 +394,9 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue();
     const { core } = build();
 
-    await handled(core.handle({ jobId, reviewKind: "diff" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
     const before = heartbeats();
     await clock.advance(120_000);
     await settle();
@@ -377,7 +419,11 @@ describe("the Dispatcher core", () => {
       },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     await settle();
     await beat(9);
     await clock.advance(29_000);
@@ -400,7 +446,11 @@ describe("the Dispatcher core", () => {
       { onLaunch: () => new Promise<void>(() => undefined) },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     await settle();
     await beat(9);
     await clock.advance(30_000);
@@ -422,7 +472,11 @@ describe("the Dispatcher core", () => {
       },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     await settle();
     app.loseLease(jobId);
     await clock.advance(30_000);
@@ -444,7 +498,11 @@ describe("the Dispatcher core", () => {
     ]);
     const { core, launcher } = build();
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
 
     expect(result).toMatchObject({ outcome: "unavailable" });
     expect(app.requests().filter((r) => r.route === "claim")).toStrictEqual([]);
@@ -457,7 +515,11 @@ describe("the Dispatcher core", () => {
     app.script("version", [{ status: 404 }]);
     const { core } = build();
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
 
     expect(result).toMatchObject({ outcome: "unavailable" });
     expect(app.requests().filter((r) => r.route === "claim")).toStrictEqual([]);
@@ -472,7 +534,11 @@ describe("the Dispatcher core", () => {
     app.script("claim", [{ status: 200, body: legacy }]);
     const { core, launcher, logger } = build();
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
 
     expect(result).toMatchObject({ outcome: "unavailable" });
     expect(launcher.launches).toStrictEqual([]);
@@ -485,8 +551,12 @@ describe("the Dispatcher core", () => {
     const second = app.enqueue();
     const { core } = build();
 
-    await handled(core.handle({ jobId: first, reviewKind: "diff" }));
-    await handled(core.handle({ jobId: second, reviewKind: "diff" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId: first, reviewKind: "diff" }),
+    );
+    await handled(
+      core.handle({ appId: "reviewer", jobId: second, reviewKind: "diff" }),
+    );
 
     expect(app.requests().filter((r) => r.route === "version")).toHaveLength(1);
   });
@@ -504,7 +574,11 @@ describe("the Dispatcher core", () => {
       app.script("claim", [{ status, retryAfterSeconds }]);
       const { core, launcher } = build();
 
-      const result = await core.handle({ jobId, reviewKind: "diff" });
+      const result = await core.handle({
+        appId: "reviewer",
+        jobId,
+        reviewKind: "diff",
+      });
 
       expect(result).toStrictEqual({ outcome, retryAfterSeconds: expected });
       expect(launcher.launches).toStrictEqual([]);
@@ -516,7 +590,11 @@ describe("the Dispatcher core", () => {
     const jobId = app.enqueue();
     const { core } = build({ appUrl: "http://127.0.0.1:1" });
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
 
     expect(result).toMatchObject({ outcome: "unavailable" });
   });
@@ -531,7 +609,9 @@ describe("the Dispatcher core", () => {
       },
     });
 
-    await handled(core.handle({ jobId, reviewKind: "dynamic" }));
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "dynamic" }),
+    );
 
     expect(launcher.launches[0]).toMatchObject({
       kind: "dynamic",
@@ -551,7 +631,11 @@ describe("the Dispatcher core", () => {
           ),
       },
     );
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     await settle();
 
     core.abort();
@@ -600,7 +684,11 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
       },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     if (result.outcome === "started") await drive(result.background);
 
     expect(releases()).toStrictEqual([
@@ -615,9 +703,10 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
     expect(logger.text()).not.toContain('"released"');
     expect(app.results(jobId)).toHaveLength(1);
     // The job is finished, not queued: nothing is claimed for it.
-    expect((await core.handle({ jobId, reviewKind: "diff" })).outcome).toBe(
-      "ignored",
-    );
+    expect(
+      (await core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }))
+        .outcome,
+    ).toBe("ignored");
   });
 
   // #375-T06 (the Dispatcher's side: a stale credential after a requeue and a new claim)
@@ -633,7 +722,11 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
           }),
       },
     );
-    const started = await first.core.handle({ jobId, reviewKind: "diff" });
+    const started = await first.core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     expect(started.outcome).toBe("started");
     const staleCredential = first.launcher.launches[0]?.credential ?? "";
     // The first claim ends (the job is given back by someone else), a second claim starts.
@@ -655,8 +748,11 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
     expect(given.status).toBe(200);
     const second = build();
     expect(
-      (await handled(second.core.handle({ jobId, reviewKind: "diff" })))
-        .outcome,
+      (
+        await handled(
+          second.core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+        )
+      ).outcome,
     ).toBe("started");
     expect(second.launcher.launches[0]?.credential).not.toBe(staleCredential);
     const before = releases().length;
@@ -675,7 +771,13 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
     ).toBe(true);
     // The new claim is untouched: the job is still running for it, and nothing is claimed twice.
     expect(
-      (await second.core.handle({ jobId, reviewKind: "diff" })).outcome,
+      (
+        await second.core.handle({
+          appId: "reviewer",
+          jobId,
+          reviewKind: "diff",
+        })
+      ).outcome,
     ).toBe("ignored");
   });
 
@@ -690,7 +792,11 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
     ]);
     const { core, logger } = build({}, { onLaunch: launchFails });
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     if (result.outcome === "started") await drive(result.background);
     await clock.advance(10 * 60 * 1000);
     await settle();
@@ -715,7 +821,11 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
       },
     );
 
-    const result = await core.handle({ jobId, reviewKind: "diff" });
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
     expect(result.outcome).toBe("started");
     if (result.outcome === "started")
       await expect(drive(result.background)).resolves.toBeUndefined();
@@ -753,11 +863,16 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
 
     // Every outcome of the release: released, job ended, refused (the claim is gone), a failing App.
     for (const jobId of [released, ended]) {
-      const result = await core.handle({ jobId, reviewKind: "diff" });
+      const result = await core.handle({
+        appId: "reviewer",
+        jobId,
+        reviewKind: "diff",
+      });
       if (result.outcome === "started") await drive(result.background);
     }
     app.script("release", [{ status: 401 }]);
     const refusedResult = await core.handle({
+      appId: "reviewer",
       jobId: refused,
       reviewKind: "diff",
     });
@@ -765,6 +880,7 @@ describe("the Dispatcher core when it gives a failed launch back", () => {
       await drive(refusedResult.background);
     app.script("release", [{ status: 503 }, { status: 503 }, { status: 503 }]);
     const failingResult = await core.handle({
+      appId: "reviewer",
       jobId: failing,
       reviewKind: "diff",
     });
@@ -794,7 +910,9 @@ describe("the Dispatcher core after the hand-over", () => {
     const jobId = app.enqueue();
     const { core, launcher } = build();
 
-    const result = await handled(core.handle({ jobId, reviewKind: "diff" }));
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
 
     expect(result.outcome).toBe("started");
     const spec = launcher.launches[0];

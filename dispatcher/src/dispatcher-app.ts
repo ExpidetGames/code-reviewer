@@ -6,6 +6,7 @@
 import { Hono } from "hono";
 import { createLogger } from "./core/logger.ts";
 import { createDispatcherCore } from "./core/dispatcher.ts";
+import { LEGACY_APP_ID } from "./core/types.ts";
 import type {
   Clock,
   CoreSettings,
@@ -13,6 +14,7 @@ import type {
   Launcher,
   Logger,
 } from "./core/types.ts";
+import { mountAppsCheckRoute } from "./probe/apps-check.ts";
 import { mountProbeRoute } from "./probe/route.ts";
 import type { Trigger } from "./triggers/types.ts";
 
@@ -25,6 +27,11 @@ export type AppOptions = {
   logger?: Logger;
   fetch?: typeof fetch;
   clock?: Clock;
+  /**
+   * `DISPATCHER_OPERATOR_TOKEN` (#730): the credential of `POST /probe` and `POST /apps/check`. Unset, `/probe` is still
+   * opened by the token of the app `reviewer` (the rollout fallback; a warning is logged) and `/apps/check` refuses everyone.
+   */
+  operatorToken?: string;
   /** The Worker image id of the golden snapshot (`SANDBOX_IMAGE_DIGEST`): named in the answer of `POST /probe`. */
   imageDigest?: string;
   /** The golden snapshot (`SANDBOX_SNAPSHOT_ID`): named in the answer of `POST /probe` too. */
@@ -36,7 +43,10 @@ export type Dispatcher = { app: Hono; core: DispatcherCore };
 export function createDispatcher(options: AppOptions): Dispatcher {
   const logger =
     options.logger ??
-    createLogger((line) => console.log(line), [options.settings.token]);
+    createLogger(
+      (line) => console.log(line),
+      options.settings.apps.map((configured) => configured.token),
+    );
   const core = createDispatcherCore({
     settings: options.settings,
     launcher: options.launcher,
@@ -47,8 +57,24 @@ export function createDispatcher(options: AppOptions): Dispatcher {
   const app = new Hono();
   app.get("/health", (c) => c.json({ status: "ok" }));
   options.trigger.mount(app, { core, background: options.background, logger });
+  // The probe starts canary VMs, which cost money: an app's own credential must not open it. While no operator token is
+  // configured the token of `reviewer` still does, as it did before there were several apps.
+  const fallback = options.settings.apps.find(
+    (configured) => configured.id === LEGACY_APP_ID,
+  )?.token;
+  const probeToken = options.operatorToken ?? fallback;
+  if (options.operatorToken === undefined)
+    logger.warn("operator_token_missing", {
+      note: "POST /probe is opened by the token of the app reviewer until DISPATCHER_OPERATOR_TOKEN is set",
+    });
+  mountAppsCheckRoute(app, {
+    token: options.operatorToken,
+    apps: options.settings.apps,
+    logger,
+    fetch: options.fetch,
+  });
   mountProbeRoute(app, {
-    token: options.settings.token,
+    token: probeToken,
     engines: options.settings.engines,
     launcher: options.launcher,
     logger,
