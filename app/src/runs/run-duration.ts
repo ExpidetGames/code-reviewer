@@ -3,7 +3,7 @@
 // How long a run took, from its times. Pure: the current time is passed in, so a running run's
 // duration is a function of the clock the caller hands over (the server's time of answering, which is
 // what the page shows until the next answer).
-import type { JobStatus } from "../jobs/job-status.ts";
+import type { JobStatus } from "../db/job-status.ts";
 
 /**
  * Milliseconds the run has been going or took:

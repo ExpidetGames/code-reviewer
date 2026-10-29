@@ -15,7 +15,7 @@ import {
   WORKSPACE_ACTIONS,
   type WorkspaceAction,
 } from "./permissions.ts";
-import { WORKSPACE_ROLES, type WorkspaceRole } from "./roles.ts";
+import { WORKSPACE_ROLES, type WorkspaceRole } from "../db/workspace-roles.ts";
 
 // "yes" for the roles that may do the action, in the order member, admin, owner.
 const MATRIX: Record<WorkspaceAction, [boolean, boolean, boolean]> = {

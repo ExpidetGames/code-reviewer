@@ -197,11 +197,11 @@ describe("golden snapshot workflow", () => {
     );
     expect(checkout?.with?.["persist-credentials"]).toBe(false);
     expect(stepNamed("Install dependencies").run).toBe(
-      "pnpm install --frozen-lockfile",
+      "pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...",
     );
-    expect(stepNamed("Install dependencies")["working-directory"]).toBe(
-      "dispatcher",
-    );
+    expect(
+      stepNamed("Install dependencies")["working-directory"],
+    ).toBeUndefined();
     expect(stepNamed("Archive the commit").run).toContain("git archive");
   });
 

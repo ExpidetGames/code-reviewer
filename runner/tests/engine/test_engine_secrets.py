@@ -73,7 +73,13 @@ def assert_no_secret(engine: Engine, outcome: Outcome, secrets: list[str]) -> No
 
 
 # CR-41-T12
-@pytest.mark.parametrize("scenario", list(SCENARIOS))
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(name, marks=pytest.mark.smoke) if name == "success" else name
+        for name in SCENARIOS
+    ],
+)
 @pytest.mark.parametrize("command", ["review"])
 def test_no_credential_of_the_job_is_in_any_output_of_a_run(
     engine: Engine, github: FakeGithub, llm: FakeLlm, command: str, scenario: str

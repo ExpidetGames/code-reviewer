@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ownerIdFor } from "../../../fakes/github/registry";
-import type { WorkspaceRole } from "../../src/workspaces/roles";
+import type { WorkspaceRole } from "../../src/db/workspace-roles";
 import { e2eEnv } from "./e2e-env";
 
 const run = promisify(execFile);

@@ -22,7 +22,10 @@ import type { Member } from "../../db/repositories/workspace-members-repository.
 import { UserAvatar } from "../../shell/user-avatar.tsx";
 import { githubAvatarUrl } from "../../shell/user-display.ts";
 import { canRemoveMemberWithRole } from "../permissions.ts";
-import { WORKSPACE_ROLES, type WorkspaceRole } from "../roles.ts";
+import {
+  WORKSPACE_ROLES,
+  type WorkspaceRole,
+} from "../../db/workspace-roles.ts";
 import { browserWorkspaceApi, type WorkspaceApi } from "./api.ts";
 import { ConfirmAction } from "./confirm-action.tsx";
 import { describeWorkspaceFailure } from "./messages.ts";

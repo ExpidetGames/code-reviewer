@@ -14,11 +14,8 @@ import {
   RadioGroupItem,
 } from "../../components/ui/radio-group.tsx";
 import { cn } from "../../lib/utils.ts";
-import {
-  REVIEW_VERDICT_MODES,
-  type ProjectReviewKind,
-  type ReviewVerdictMode,
-} from "../settings.ts";
+import { REVIEW_VERDICT_MODES, type ReviewVerdictMode } from "../settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import { FOLLOWS_DEFAULT_BADGE } from "./review-kind-fieldset.tsx";
 import { SettingsCard } from "./settings-fields.tsx";
 

@@ -61,7 +61,10 @@ import {
 } from "./adapter.ts";
 import { BillingJournalError } from "./journal.ts";
 import { netShareMicroUsd } from "./net-share.ts";
-import { PENDING_TOP_UP_WINDOW_MS, type TopUpIntent } from "./topup-intent.ts";
+import {
+  PENDING_TOP_UP_WINDOW_MS,
+  type TopUpIntent,
+} from "../db/topup-intent.ts";
 
 export type ApplyResult = {
   outcome: BillingEventOutcome;

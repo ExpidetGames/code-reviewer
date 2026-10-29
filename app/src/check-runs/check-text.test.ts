@@ -4,7 +4,7 @@
 // that is never red, a title, and a summary made of fixed sentences, counts and the link to the review. Nothing a
 // pull request or a runner wrote reaches the text except a validated link and a code of the plain shape of one.
 import { describe, expect, it } from "vitest";
-import { JOB_STATUSES } from "../jobs/job-status.ts";
+import { JOB_STATUSES } from "../db/job-status.ts";
 import { describeCheck, type CheckSubject } from "./check-text.ts";
 import type { VerdictSkipReason } from "./verdict.ts";
 

@@ -21,7 +21,7 @@ import { KEY_TEST_WORKSPACE_MAX } from "../../src/llm/key-test.ts";
 import { createSecretStore } from "../../src/secrets/store.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
-import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
+import type { WorkspaceRole } from "../../src/db/workspace-roles.ts";
 
 const session = vi.hoisted(() => ({
   currentLookup: vi.fn<() => Promise<SessionLookup>>(),

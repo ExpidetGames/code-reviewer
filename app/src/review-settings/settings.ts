@@ -11,6 +11,7 @@
 // `job.env` win over the repository file (README.md, "Things to know"), so the file only reaches keys
 // that are left out (empty project rules, switches that are off, everything else PR-Agent has).
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import { DEFAULT_LLM_MODEL, type LlmProvider } from "../llm/config.ts";
 import {
   DEFAULT_LLM_PROVIDER,
@@ -83,13 +84,6 @@ export type ReadableReviewSettings = Omit<
   (typeof MODEL_SETTING_FIELDS)[number]
 > &
   Partial<Pick<ReviewSettings, (typeof MODEL_SETTING_FIELDS)[number]>>;
-
-/**
- * The one review kind a project selects (#193, #194). Diff Review is the existing PR-Agent review;
- * Dynamic Review is the read-only agent of the epic. A project has exactly one.
- */
-export const PROJECT_REVIEW_KINDS = ["diff", "dynamic"] as const;
-export type ProjectReviewKind = (typeof PROJECT_REVIEW_KINDS)[number];
 
 /**
  * What a finished review does on its pull request besides the check run (#405): `off` submits no review, `blocking`

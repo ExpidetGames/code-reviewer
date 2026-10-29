@@ -29,7 +29,7 @@ import {
   isCatalogModelId,
   nativeProviderIdOf,
 } from "../native-cost/catalog-ref.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {
   ENTITLEMENTS_INVALID_CODE,
   entryAllowed,

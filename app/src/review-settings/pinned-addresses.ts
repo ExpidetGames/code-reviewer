@@ -5,10 +5,8 @@
 // workspace does not hold is written by an Owner or Admin only). Both read every project: a pin is dormant, not gone (#614).
 // Pure over a workspace-scoped projects repository.
 import type { ProjectsRepository } from "../db/repositories/projects-repository.ts";
-import {
-  builtInProjectDynamicSettings,
-  type ProjectReviewKind,
-} from "./settings.ts";
+import { builtInProjectDynamicSettings } from "./settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import { parseStoredProjectDynamicOverrides } from "./validate.ts";
 
 /** Which projects count. */

@@ -12,7 +12,7 @@ import {
   SUPERSEDED_DRAIN_MS,
   SUPERSEDED_REPORT_GRACE_MS,
   WORKER_DRAIN_SECONDS,
-} from "./supersede-timing.ts";
+} from "../db/supersede-timing.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";

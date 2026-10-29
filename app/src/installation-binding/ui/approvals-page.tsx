@@ -33,7 +33,7 @@ import {
   ROLE_RESULT_COPY,
   TOKEN_CAN_ACCESS_COPY,
 } from "./messages.ts";
-import type { InstallationLinkRequestView } from "../requests.ts";
+import type { InstallationLinkRequestView } from "../../db/installation-link-request.ts";
 
 const LIST_CLASS =
   "flex flex-col divide-y divide-border rounded-lg border border-border bg-card";

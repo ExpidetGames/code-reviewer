@@ -31,7 +31,7 @@ import {
   balanceLevelOf,
   kindsInStateOf,
   type BalanceNotificationKind,
-} from "./balance-state.ts";
+} from "../db/balance-state.ts";
 import { readBillingSwitch } from "./enabled.ts";
 
 /** The stable codes of the log line of a delivery that did not reach anybody. */

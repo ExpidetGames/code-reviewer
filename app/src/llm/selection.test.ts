@@ -5,7 +5,7 @@ import {
   ENTITLEMENTS_INVALID_CODE,
   type ResolvedEntitlements,
 } from "../workspaces/entitlements.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {
   createFakeAdapter,
   FAKE_PROVIDER_ID,

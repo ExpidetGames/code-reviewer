@@ -3,7 +3,7 @@
 // The measure of the infrastructure of a job (#493): the VM the Dispatcher reported, the end the App learned (or the
 // bounded backstop), the VM of the final claim that counts, and the wall clock of a job without a VM.
 import { describe, expect, it } from "vitest";
-import { STOP_RETRY_WINDOW_SECONDS } from "../../billing/minutes.ts";
+import { STOP_RETRY_WINDOW_SECONDS } from "../billing-minutes.ts";
 import { createJobQueueFixture } from "../../test-support/jobs.ts";
 import { createJobVmRunsRepository } from "./job-vm-runs-repository.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";

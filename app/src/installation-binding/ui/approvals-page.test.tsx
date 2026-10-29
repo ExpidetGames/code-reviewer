@@ -29,7 +29,7 @@ vi.mock("next/navigation", () => ({
 import type { ApprovalsApi } from "./api.ts";
 import { ApprovalsPageContent } from "./approvals-page.tsx";
 import type { UnclaimedInstallation } from "../../db/repositories/unclaimed-installations-repository.ts";
-import type { InstallationLinkRequestView } from "../requests.ts";
+import type { InstallationLinkRequestView } from "../../db/installation-link-request.ts";
 
 afterEach(() => {
   cleanup();

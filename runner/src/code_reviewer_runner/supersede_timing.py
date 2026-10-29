@@ -2,7 +2,7 @@
 
 """The timing of a run that a newer push superseded (#396, #397), in one place.
 
-The app (`app/src/jobs/supersede-timing.ts`) and this runner state the same numbers, and the
+The app (`app/src/db/supersede-timing.ts`) and this runner state the same numbers, and the
 contract file states them once more (`SupersedeTiming` in `contracts/runner-api.v1.json`); a test
 on each side compares its constants with the contract.
 

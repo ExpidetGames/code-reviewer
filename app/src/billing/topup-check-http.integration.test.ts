@@ -16,7 +16,7 @@ import { createTestDatabase } from "../test-support/test-database.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { resolveWorkspaceAccess } from "../workspaces/access.ts";
 import { accessRefusal } from "../workspaces/access-response.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import type { BillingAdapter } from "./adapter.ts";
 import { applyBillingEvent } from "./apply-event.ts";
 import { isBillingOn } from "./enabled.ts";

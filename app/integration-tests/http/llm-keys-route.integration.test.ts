@@ -18,7 +18,7 @@ import { seedRepositories } from "../../src/test-support/review-settings-harness
 import { LlmAccessSection } from "../../src/llm/ui/llm-access-section.tsx";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { openRouteTestDatabase } from "../../src/test-support/test-database.ts";
-import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
+import type { WorkspaceRole } from "../../src/db/workspace-roles.ts";
 
 const session = vi.hoisted(() => ({
   currentLookup: vi.fn<() => Promise<SessionLookup>>(),

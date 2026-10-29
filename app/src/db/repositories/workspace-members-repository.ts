@@ -9,7 +9,7 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
-import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
+import { isWorkspaceRole, type WorkspaceRole } from "../workspace-roles.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 import type { Database } from "../schema.ts";
 

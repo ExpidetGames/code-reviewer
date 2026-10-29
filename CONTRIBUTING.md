@@ -63,7 +63,7 @@ pull requests that touch the matching parts:
 
 | Command | When | Needs |
 |---|---|---|
-| `make test-engine` | you change the runner, the PR-Agent version or its settings | internet once (a tokenizer file), about 4 minutes |
+| `make test-engine` | you change the runner, the PR-Agent version or its settings | internet once (a tokenizer file), about 15 minutes serially (CI splits it into parallel jobs); `make test-engine-smoke` takes about 2 minutes |
 | `make test-e2e` | you change a user flow in the web UI | a browser (`PLAYWRIGHT_CHANNEL=chrome` uses an installed Chrome) |
 | `make test-images` | you change the Dockerfile, or the runner in a way that affects the image | Docker |
 
@@ -124,7 +124,7 @@ is adapted from Apache-2.0 sources and says so): never relabel it, and record it
 `NOTICE` and `THIRD_PARTY_LICENSES.md`.
 
 If you add a dependency, check its license. `make check-licenses` (part of `make verify`, and the CI
-job "Licenses: dependency check") fails when a package of `app/pnpm-lock.yaml` or `runner/uv.lock`
+job "Licenses: dependency check") fails when a package of `pnpm-lock.yaml` or `runner/uv.lock`
 has a license outside the allow list of `license-policy.json`. Permissive licenses pass without any
 entry. For any other license, choose another dependency, or, when that is not reasonable, add an
 exception with a reason to `license-policy.json` and to the matching table in

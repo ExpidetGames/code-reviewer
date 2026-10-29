@@ -27,7 +27,10 @@ import {
   isDeleted,
 } from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
-import { BALANCE_NOTIFICATION_KINDS, kindsInStateOf } from "./balance-state.ts";
+import {
+  BALANCE_NOTIFICATION_KINDS,
+  kindsInStateOf,
+} from "../db/balance-state.ts";
 import { readBillingSwitch } from "./enabled.ts";
 
 export type BalanceMove = "down" | "up";

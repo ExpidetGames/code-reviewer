@@ -12,9 +12,9 @@ import {
   billableMinutes,
   boundedEnd,
   type VmEndSource,
-} from "../../billing/minutes.ts";
+} from "../billing-minutes.ts";
 import { maxVmMinutes } from "../../billing/hold.ts";
-import type { ProjectReviewKind } from "../../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
 import { decodeBoolean, encodeBoolean, formatTimestamp } from "../codecs.ts";
 import type { Database, JobVmRunsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";

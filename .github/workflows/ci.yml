@@ -37,6 +37,7 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       dispatcher: ${{ steps.filter.outputs.dispatcher }}
       runner: ${{ steps.filter.outputs.runner }}
+      engine: ${{ steps.filter.outputs.engine }}
       workflows: ${{ steps.filter.outputs.workflows }}
       licenses: ${{ steps.filter.outputs.licenses }}
       website: ${{ steps.filter.outputs.website }}
@@ -72,6 +73,12 @@ jobs:
               - '!app/**'
               - '!website/**'
               - '!**/*.md'
+            # What the engine suite (runner/tests/engine, 3 jobs of engine.yml) tests: the runner, the
+            # fakes and the contracts it runs against, and its own workflow. One brace pattern, because
+            # the quantifier "every" would read a list of patterns as "and". A change to anything else
+            # (app, dispatcher, docs, the other workflows) does not pay for the engine suite (#713).
+            engine:
+              - '{runner/**,fakes/**,contracts/**,.github/workflows/engine.yml}'
             workflows:
               - '.github/**'
             # The Markdown exclusions above skip this file, but the license check compares it with
@@ -127,15 +134,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app...
       - name: Check formatting
         run: pnpm format:check
       - name: Lint
@@ -148,13 +153,29 @@ jobs:
         run: pnpm contracts:check
       - name: Unit tests
         run: pnpm test
-      - name: Build
+      # The production build is `vercel build --prod` run from the repository root with the project's root directory
+      # (.github/workflows/vercel-stage.yml), which runs `next build`: the same pinned CLI builds the App here with a stub
+      # project file (the settings of the Vercel project, root directory `app`, Node.js 24) and no token (#724). The app and
+      # the Dispatcher are one pnpm workspace, so the function's packages come from node_modules/.pnpm at the root;
+      # check-build-output.mjs proves that every file the function lists is in the checkout, which is what the upload
+      # sends. Nothing is deployed or pulled, and nothing is read from the network or from a secret.
+      - name: Install the Vercel CLI
+        uses: ./.github/actions/vercel-cli
+      - name: Build the App with the Vercel CLI, as the deployment does
+        working-directory: ${{ github.workspace }}
         # Placeholder environment for the production build. Required settings get a dummy value
         # here when they are introduced (for example the database path); real values never belong
         # in CI.
         env:
           NEXT_TELEMETRY_DISABLED: "1"
-        run: pnpm build
+          VERCEL_TELEMETRY_DISABLED: "1"
+        run: |
+          mkdir -p .vercel
+          echo '{"projectId":"prj_ci","orgId":"team_ci","settings":{"framework":"nextjs","nodeVersion":"24.x","rootDirectory":"app"}}' > .vercel/project.json
+          vercel build --prod --yes
+      - name: Check that everything the built functions list is in the checkout
+        working-directory: ${{ github.workspace }}
+        run: node tools/vercel/check-build-output.mjs app
 
   # The integration tests in a job of their own, split into two shards: in app-fast they took 6 to
   # 10 minutes and pushed it over its limit (#641). They run against this Postgres service container: every test
@@ -190,15 +211,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app...
       - name: Integration tests on the host
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
@@ -219,15 +238,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: dispatcher/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: dispatcher/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...
       - name: Check formatting
         run: pnpm format:check
       - name: Lint
@@ -258,6 +275,19 @@ jobs:
       # placeholder settings, and asks it for GET /health. Offline, no token, no secret.
       - name: Start the built function and ask it for GET /health
         run: node scripts/check-built-function.mjs
+      # The deployment builds from the repository root with the project's root directory, in a workspace whose packages are
+      # in node_modules/.pnpm at the root (#724): the same CLI builds the Dispatcher that way, and every file its function
+      # lists must be in the checkout. (The function of that layout is not started here: it is not self-contained
+      # until the upload resolves its file map; the step above starts the one of this directory.)
+      - name: Build the Dispatcher from the repository root, as the deployment does, and check the upload
+        working-directory: ${{ github.workspace }}
+        env:
+          VERCEL_TELEMETRY_DISABLED: "1"
+        run: |
+          mkdir -p .vercel
+          echo '{"projectId":"prj_ci","orgId":"team_ci","settings":{"framework":"hono","nodeVersion":"24.x","rootDirectory":"dispatcher"}}' > .vercel/project.json
+          vercel build --prod --yes
+          node tools/vercel/check-build-output.mjs dispatcher
 
   # The privileged lane of the Sandbox-Launcher (#329-T09, T10): `make test-sandbox-local` builds the `sandbox`
   # target on the runner's Docker daemon and runs the Launcher's local mode against it and the fake App, so
@@ -273,15 +303,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: dispatcher/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: dispatcher/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install the dispatcher dependencies
-        run: pnpm --dir dispatcher install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...
       - name: Run the Sandbox-Launcher against a real Docker daemon
         run: make test-sandbox-local
 
@@ -322,13 +350,15 @@ jobs:
 
   # The engine suite: the real, pinned PR-Agent against a fake GitHub and a fake LLM
   # (runner/tests/engine), defined once in engine.yml. No Docker stack: the fakes are loopback
-  # servers the tests start themselves. Runs for pull requests that change the runner and for pull
-  # requests into main; nightly.yml runs the same suite on development. A skipped job never blocks
-  # a merge, a failed one does (ci-passed).
+  # servers the tests start themselves. Runs for pull requests that change the runner, the fakes or the
+  # contracts and for pull requests into main; nightly.yml runs the same suite on development. This job is the rollup of the
+  # jobs engine.yml runs (the two engine shards and the privileged suite): ci-passed needs this one
+  # name, and it fails when any of them fails. A skipped job never blocks a merge, a failed one does
+  # (ci-passed).
   engine:
     name: "Runner: engine tests"
     needs: changes
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.engine == 'true') }}
     permissions:
       contents: read
     uses: ./.github/workflows/engine.yml
@@ -363,15 +393,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app...
       # The headless Chromium needs no apt packages: the runner image has its libraries. --with-deps
       # only added fonts and xvfb from the Ubuntu mirror, which took up to 9 minutes (#641).
       - name: Read the Playwright version
@@ -466,20 +494,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - name: Install the app's dependencies
-        working-directory: app
-        run: pnpm install --frozen-lockfile
-      # The Dispatcher is a project of its own: the journeys start its test host (dispatcher/src/test-support).
-      - name: Install the Dispatcher's dependencies
-        working-directory: dispatcher
-        run: pnpm install --frozen-lockfile
+          cache-dependency-path: pnpm-lock.yaml
+      # The journeys start the Dispatcher's test host (dispatcher/src/test-support), so both projects are installed.
+      - name: Install the dependencies of the app and the Dispatcher
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app... --filter code-reviewer-dispatcher...
       # The headless Chromium needs no apt packages: the runner image has its libraries. --with-deps
       # only added fonts and xvfb from the Ubuntu mirror, which took up to 9 minutes (#641).
       - name: Read the Playwright version
@@ -568,20 +590,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - name: Install dependencies
-        working-directory: app
-        run: pnpm install --frozen-lockfile
-      # The hosted journey of the lane (#332) starts the Dispatcher's test host.
-      - name: Install the Dispatcher's dependencies
-        working-directory: dispatcher
-        run: pnpm install --frozen-lockfile
+          cache-dependency-path: pnpm-lock.yaml
+      # The hosted journey of the lane (#332) starts the Dispatcher's test host, so both projects are installed.
+      - name: Install the dependencies of the app and the Dispatcher
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app... --filter code-reviewer-dispatcher...
       # The headless Chromium needs no apt packages: the runner image has its libraries. --with-deps
       # only added fonts and xvfb from the Ubuntu mirror, which took up to 9 minutes (#641).
       - name: Read the Playwright version
@@ -654,18 +670,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - name: Install the app dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Install the dispatcher dependencies
-        working-directory: dispatcher
-        run: pnpm install --frozen-lockfile
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install the app and dispatcher dependencies
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app... --filter code-reviewer-dispatcher...
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.13.0"

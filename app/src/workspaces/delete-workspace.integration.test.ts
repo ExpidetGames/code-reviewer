@@ -21,7 +21,7 @@ import {
   DELETED_WORKSPACE_NAME,
   type DeleteWorkspaceResult,
 } from "./delete-workspace.ts";
-import { PENDING_TOP_UP_WINDOW_MS } from "../billing/topup-intent.ts";
+import { PENDING_TOP_UP_WINDOW_MS } from "../db/topup-intent.ts";
 import {
   addUser,
   seedWorkspaceForDeletion,

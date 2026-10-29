@@ -6,6 +6,7 @@ the same pull request edits the first comment of the bot instead of posting a du
 patch does not take effect, because the result would then be wrong in a way that looks fine."""
 
 import canned
+import pytest
 from fake_github import BOT_LOGIN, FakeGithub
 from fake_llm import FakeLlm
 from harness import Engine, visible_text
@@ -14,6 +15,7 @@ REVIEW_MARKER = "<!-- pr-agent:review:full -->"
 
 
 # CR-41-T05, CR-30-T08
+@pytest.mark.smoke
 def test_a_second_review_edits_the_first_comment_instead_of_posting_another(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:

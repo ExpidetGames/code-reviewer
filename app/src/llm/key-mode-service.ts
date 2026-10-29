@@ -11,7 +11,7 @@ import "server-only";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import { can } from "../workspaces/permissions.ts";
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 import { DEFAULT_LLM_KEY_MODE } from "../workspaces/effective-key-mode.ts";
 import { KEY_MODES, type KeyMode } from "../workspaces/entitlements.ts";
 import { createLlmKeyModeStore } from "./key-mode-store.ts";

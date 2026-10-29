@@ -24,10 +24,12 @@ type Step = {
   name?: string;
   uses?: string;
   run?: string;
+  env?: Record<string, string>;
   with?: Record<string, unknown>;
 };
 type Job = {
   "timeout-minutes"?: number;
+  strategy?: { "fail-fast"?: boolean; matrix?: Record<string, string[]> };
   permissions?: Record<string, string>;
   defaults?: { run?: { "working-directory"?: string } };
   steps?: Step[];
@@ -40,10 +42,11 @@ type Workflow = {
 
 const workflow = parse(source) as Workflow;
 const engine = workflow.jobs.engine as Job;
+const privileged = workflow.jobs.privileged as Job;
 const steps = engine.steps ?? [];
 
-function commandLines(): string[] {
-  return steps
+function commandLines(job: Job = engine): string[] {
+  return (job.steps ?? [])
     .flatMap((step) => (step.run ? step.run.split("\n") : []))
     .map((line) => line.trim())
     .filter((line) => line !== "");
@@ -55,16 +58,36 @@ describe("engine workflow", () => {
     expect(Object.keys(workflow.on)).toEqual(["workflow_call"]);
   });
 
-  // CR-41-T15
-  it("installs from the lockfile and runs the suite with the marker through the offline script", () => {
+  // #713-T01
+  it("has three jobs: the PR-Agent and the OpenCode half of the engine suite as a matrix, and the privileged suite on a runner of its own", () => {
+    expect(Object.keys(workflow.jobs)).toEqual(["engine", "privileged"]);
+    expect(engine.strategy?.matrix).toEqual({ shard: ["pragent", "opencode"] });
+    // A failed half must not hide the other: both halves report.
+    expect(engine.strategy?.["fail-fast"]).toBe(false);
+  });
+
+  // CR-41-T15, #713-T01
+  it("installs from the lockfile and runs its half of the suite with the marker through the offline script", () => {
     const lines = commandLines();
+    // The shard reaches the shell through the environment, never through the text of the command.
+    const run = 'scripts/run_engine_offline.sh --engine-shard="$ENGINE_SHARD"';
+    const step = steps.find((candidate) => candidate.run === run);
 
     expect(lines).toContain("uv sync --locked");
-    expect(lines).toContain("scripts/run_engine_offline.sh");
-    expect(lines.indexOf("uv sync --locked")).toBeLessThan(
-      lines.indexOf("scripts/run_engine_offline.sh"),
-    );
+    expect(lines).toContain(run);
+    expect(step?.env).toEqual({ ENGINE_SHARD: "${{ matrix.shard }}" });
+    expect(lines.indexOf("uv sync --locked")).toBeLessThan(lines.indexOf(run));
     expect(engine.defaults?.run?.["working-directory"]).toBe("runner");
+    expect(lines.join("\n")).not.toContain("run_privileged_offline.sh");
+  });
+
+  // #713-T01
+  it("runs the engine tests on four workers that each take whole files, from the explicit directory", () => {
+    expect(script).toMatch(
+      /pytest -m engine\b[^\n]*-n "\$\{TEST_MAX_WORKERS:-4\}"/,
+    );
+    expect(script).toContain("--dist loadfile");
+    expect(script).toMatch(/--dist loadfile[^\n]* tests\/engine\b/);
   });
 
   // CR-41-T15
@@ -95,6 +118,9 @@ describe("engine workflow", () => {
     expect(script).toContain("command -v rg");
     expect(commandLines().join("\n")).toContain("apt-get install");
     expect(commandLines().join("\n")).toContain("ripgrep");
+    // The runner image carries nftables and libcap2-bin; the index refresh cost 10 to 53 s per job (#713).
+    for (const job of [engine, privileged])
+      expect(commandLines(job).join("\n")).not.toContain("apt-get update");
 
     const cache = steps.find(
       (step) =>
@@ -105,16 +131,24 @@ describe("engine workflow", () => {
     expect(String(cache?.with?.key)).toContain("opencode-pin.json");
   });
 
-  // #197-T09
-  it("runs the privileged suite after the engine suite, as root with the production capabilities and no network", () => {
-    const lines = commandLines();
+  // #197-T09, #713-T01
+  it("runs the privileged suite in a job of its own, as root with the production capabilities and no network", () => {
+    const lines = commandLines(privileged);
 
+    expect(lines).toContain("uv sync --locked");
     expect(lines).toContain("scripts/run_privileged_offline.sh");
-    expect(lines.indexOf("scripts/run_privileged_offline.sh")).toBeGreaterThan(
-      lines.indexOf("scripts/run_engine_offline.sh"),
+    expect(lines.indexOf("uv sync --locked")).toBeLessThan(
+      lines.indexOf("scripts/run_privileged_offline.sh"),
     );
-    // nftables is what the engine user's network rules are proven with.
+    expect(privileged.defaults?.run?.["working-directory"]).toBe("runner");
+    // nftables is what the engine user's network rules are proven with, setcap what the execve phase needs.
     expect(lines.join("\n")).toContain("nftables");
+    expect(lines.join("\n")).toContain("libcap2-bin");
+    expect(lines.join("\n")).toContain("ripgrep");
+    const cache = (privileged.steps ?? []).find((step) =>
+      String(step.with?.key).includes("opencode"),
+    );
+    expect(cache?.with?.path).toBe("~/.cache/code-reviewer/opencode");
     // Root, but only with the capabilities of the hardened container spec (the container spec contract pins
     // the list), without new privileges, in a namespace that has loopback and no route out.
     expect(privilegedScript).toContain("sudo");
@@ -146,24 +180,31 @@ describe("engine workflow", () => {
   it("grants the token read access to the contents only and uses no secrets", () => {
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(engine.permissions).toBeUndefined();
+    expect(privileged.permissions).toBeUndefined();
     expect(source).not.toMatch(/secrets\./);
     expect(source).not.toMatch(/continue-on-error/);
   });
 
   // CR-41-T15
   it("limits the run time and pins the uv version and every third party action", () => {
-    expect(engine["timeout-minutes"]).toBeGreaterThan(0);
-    expect(engine["timeout-minutes"]).toBeLessThanOrEqual(30);
-    const uses = steps.filter((step) => step.uses);
+    for (const job of [engine, privileged]) {
+      expect(job["timeout-minutes"]).toBeGreaterThan(0);
+      expect(job["timeout-minutes"]).toBeLessThanOrEqual(30);
+    }
+    const uses = [engine, privileged]
+      .flatMap((job) => job.steps ?? [])
+      .filter((step) => step.uses);
     for (const step of uses) {
       const action = String(step.uses);
       expect(action).toMatch(/@(v\d+(\.\d+){0,2}|[0-9a-f]{40})(\s|$)/);
       if (!action.startsWith("actions/"))
         expect(action).toMatch(/@[0-9a-f]{40}$/);
     }
-    const setupUv = uses.find((step) =>
-      step.uses?.startsWith("astral-sh/setup-uv@"),
-    );
-    expect(setupUv?.with?.version).toMatch(/^\d+\.\d+\.\d+$/);
+    for (const job of [engine, privileged]) {
+      const setupUv = (job.steps ?? []).find((step) =>
+        step.uses?.startsWith("astral-sh/setup-uv@"),
+      );
+      expect(setupUv?.with?.version).toMatch(/^\d+\.\d+\.\d+$/);
+    }
   });
 });

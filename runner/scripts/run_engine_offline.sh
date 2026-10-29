@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-# Runs the engine suite (pytest -m engine) in a Linux network namespace that has nothing but a
+# Runs the engine suite (pytest -m engine tests/engine) in a Linux network namespace that has nothing but a
 # loopback interface: the operating system itself, not only the Python level guard of the suite,
 # guarantees that the real PR-Agent can reach nobody but the fakes. For CI (GitHub's Ubuntu runners
 # have passwordless sudo); on a developer machine use `uv run pytest -m engine`.
 #
-#   scripts/run_engine_offline.sh [pytest arguments]
+#   scripts/run_engine_offline.sh [--engine-shard=pragent|opencode] [pytest options]
+#
+# The tests run on TEST_MAX_WORKERS pytest-xdist workers (default 4, the cores of a CI runner), one
+# file per worker at a time (--dist loadfile: the module-scoped engines of a file are shared by its
+# tests). --engine-shard runs one half of the suite (tests/engine_shards.py; CI runs both halves as
+# jobs of their own). Options only: the directory tests/engine is always the one that is collected.
 #
 # The tiktoken cache is filled and the pinned OpenCode is fetched and verified first, outside the
 # namespace (the steps that need the internet). The engine also needs a trusted ripgrep on its PATH,
@@ -29,5 +34,5 @@ sudo --preserve-env env "PATH=$PATH" "HOME=$HOME" ENGINE_USER="$(id -u):$(id -g)
       exit 1
     fi
     exec setpriv --reuid="${ENGINE_USER%%:*}" --regid="${ENGINE_USER##*:}" --clear-groups --no-new-privs \
-      uv run --no-sync --offline pytest -m engine "$@"
+      uv run --no-sync --offline pytest -m engine -n "${TEST_MAX_WORKERS:-4}" --dist loadfile tests/engine "$@"
   ' engine-offline "$@"

@@ -12,7 +12,7 @@ import { CatalogNameTakenError } from "../db/repositories/catalog-repository.ts"
 import type { InstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { isModelId, LLM_PROVIDERS, type LlmProvider } from "../llm/config.ts";
 import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 import {
   CATALOG_KINDS,
   canTransition,

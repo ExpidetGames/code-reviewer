@@ -7,7 +7,7 @@
 // payment reference of one provider never matches an intent of another.
 import "server-only";
 import type { Kysely } from "kysely";
-import type { TopUpIntent } from "../../billing/topup-intent.ts";
+import type { TopUpIntent } from "../topup-intent.ts";
 import { databaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
 import { toTopUpIntent } from "./billing-topup-intents-repository.ts";

@@ -9,7 +9,7 @@ import { Button } from "@/components/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ProductName } from "@/components/brand";
 import { canonicalEmail } from "../../signup/rule.ts";
-import type { WorkspaceRole } from "../roles.ts";
+import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
 import type { AccountApi } from "./api.ts";
 import { ROLE_LABEL } from "./role-copy.ts";

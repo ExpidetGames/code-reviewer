@@ -47,7 +47,7 @@ import {
 } from "../db/repositories/workspaces-repository.ts";
 import { lockDynamicReviewGate } from "../db/dynamic-review-lock.ts";
 import type { Database } from "../db/schema.ts";
-import { PENDING_TOP_UP_WINDOW_MS } from "../billing/topup-intent.ts";
+import { PENDING_TOP_UP_WINDOW_MS } from "../db/topup-intent.ts";
 import { can } from "./permissions.ts";
 import type { CheckFinisher, ChecksToFinish } from "./finish-checks.ts";
 

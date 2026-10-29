@@ -4,7 +4,7 @@
 // stopping, the App's clock at that moment is their end (`app_stop_confirmed`). Any other answer, or none, leaves the end
 // to the bounded backstop that `measure` applies (`timeout_backstop`); the stop never fails or delays anything.
 import { describe, expect, it } from "vitest";
-import { STOP_RETRY_WINDOW_SECONDS } from "../billing/minutes.ts";
+import { STOP_RETRY_WINDOW_SECONDS } from "../db/billing-minutes.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createFakeDispatchReceiver } from "../test-support/fake-dispatch-receiver.ts";

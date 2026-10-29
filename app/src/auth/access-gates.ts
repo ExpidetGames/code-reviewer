@@ -17,7 +17,7 @@
 // An account that signs in with GitHub only is asked the second question only: the address GitHub reports as
 // the verified primary one was verified at the sign in (an imported user's placeholder waits for it). Who may
 // have an account at all was decided when it was made, by the sign-up rule (src/github-signin/decide.ts).
-import type { WorkspaceRole } from "../workspaces/roles.ts";
+import type { WorkspaceRole } from "../db/workspace-roles.ts";
 
 export type AccessGates = {
   /** Whether email and password accounts must have a verified address: the instance can send mail. */

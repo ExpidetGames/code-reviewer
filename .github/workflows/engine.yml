@@ -2,10 +2,17 @@ name: Engine tests
 
 # The engine suite: the real, pinned PR-Agent through the job entry point against a fake GitHub and
 # a fake LLM, and the real, pinned stock OpenCode behind the runner's model proxy against a scripted
-# loopback model (runner/tests/engine). One definition for the two workflows that run it: ci.yml (pull
-# requests that change the runner and pull requests into main) and nightly.yml. It is not started
-# by anything else. No repository secrets: the fakes need none, and the suite must never talk to a
-# real model or a real GitHub. The caller's token (contents: read) is all this workflow can use.
+# loopback model (runner/tests/engine), and the privileged suite (root, the dedicated engine user,
+# nft). One definition for the two workflows that run it: ci.yml (pull requests that change the
+# runner, the fakes or the contracts, and pull requests into main) and nightly.yml. It is not
+# started by anything else. No repository secrets: the fakes need none, and the suite must never
+# talk to a real model or a real GitHub. The caller's token (contents: read) is all this workflow
+# can use.
+#
+# Three jobs run side by side on runners of their own (#713; one serial job took 20 minutes): the two
+# halves of the engine suite (runner/tests/engine_shards.py) on four pytest-xdist workers each, and
+# the privileged suite. The caller (the `engine` job of ci.yml and nightly.yml) is the one check
+# that reports all three: it fails when any of them fails.
 on:
   workflow_call:
 
@@ -14,9 +21,16 @@ permissions:
 
 jobs:
   engine:
-    name: "Runner: engine tests (real PR-Agent, fake GitHub and LLM)"
+    name: "Runner: engine tests (${{ matrix.shard }})"
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      # Both halves report, so one run shows every failing test.
+      fail-fast: false
+      matrix:
+        # pragent is every engine test file that is not listed for opencode in runner/tests/engine_shards.py,
+        # so a new test file cannot fall out of CI.
+        shard: [pragent, opencode]
     defaults:
       run:
         working-directory: runner
@@ -33,12 +47,12 @@ jobs:
         run: uv sync --locked
       # The engine's grep and glob run ripgrep; the pinned OpenCode downloads one when none is on
       # its PATH, which the runner never allows. The runner image will carry the same tool (#202).
-      # Both come from the runner's apt and are not version-pinned: the supply-chain audit of what
-      # the image installs (with the OpenCode binary and its Bun lock) is part of #202. nftables is
-      # what the privileged step needs to prove the engine user's network rules, and libcap2-bin
-      # (setcap) what it needs to make the file-capability probe of the execve phase (#249).
-      - name: Install ripgrep, nftables and setcap
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ripgrep nftables libcap2-bin
+      # It comes from the runner's apt and is not version-pinned: the supply-chain audit of what
+      # the image installs (with the OpenCode binary and its Bun lock) is part of #202. No
+      # `apt-get update`: it cost 10 to 53 seconds a job (#713), and the runner image's package index
+      # holds ripgrep.
+      - name: Install ripgrep
+        run: sudo apt-get install --yes --no-install-recommends ripgrep
       # PR-Agent counts tokens with a tiktoken encoding that it downloads on first use. The
       # download is the only network use of this job besides the installation, so it is cached.
       - name: Restore the tiktoken encoding
@@ -53,12 +67,46 @@ jobs:
         with:
           path: ~/.cache/code-reviewer/opencode
           key: opencode-${{ hashFiles('runner/opencode-pin.json') }}
-      # Fills the caches if needed (with retries), then runs `pytest -m engine` in a network
-      # namespace that has a loopback interface and nothing else.
+      # Fills the caches if needed (with retries), then runs `pytest -m engine` for this half of the
+      # suite on four workers in a network namespace that has a loopback interface and nothing else.
       - name: Engine tests without network
-        run: scripts/run_engine_offline.sh
-      # The privileged suite (#197): root with exactly the capabilities of the hardened container spec, the
-      # dedicated engine user, the per-user nft rules and the kill of that user's processes, in a
-      # namespace with nothing but loopback. Uses the pinned OpenCode fetched above.
+        env:
+          ENGINE_SHARD: ${{ matrix.shard }}
+        run: scripts/run_engine_offline.sh --engine-shard="$ENGINE_SHARD"
+
+  # The privileged suite (#197): root with exactly the capabilities of the hardened container spec, the
+  # dedicated engine user, the per-user nft rules and the kill of that user's processes, in a
+  # namespace with nothing but loopback. Its rules are keyed to one user and it kills that user's
+  # processes, so it does not run in parallel inside a job; it runs next to the engine suite on a
+  # runner of its own. Uses the pinned OpenCode fetched below.
+  privileged:
+    name: "Runner: privileged tests (dedicated engine user, network rules)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      # ripgrep as for the engine suite (#202). nftables is what the suite proves the engine user's
+      # network rules with, and libcap2-bin (setcap) what it needs to make the file-capability probe
+      # of the execve phase (#249); the runner image has both, so apt only has to confirm it. No
+      # `apt-get update` (#713).
+      - name: Install ripgrep, nftables and setcap
+        run: sudo apt-get install --yes --no-install-recommends ripgrep nftables libcap2-bin
+      - name: Restore the pinned OpenCode
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/code-reviewer/opencode
+          key: opencode-${{ hashFiles('runner/opencode-pin.json') }}
       - name: Privileged tests (dedicated engine user, network rules)
         run: scripts/run_privileged_offline.sh

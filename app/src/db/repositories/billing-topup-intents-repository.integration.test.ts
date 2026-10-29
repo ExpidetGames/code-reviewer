@@ -7,7 +7,7 @@ import {
   BILLING_ENGINES,
   type BillingEngine,
 } from "../../test-support/billing-engines.ts";
-import { TopUpIntentError } from "../../billing/topup-intent.ts";
+import { TopUpIntentError } from "../topup-intent.ts";
 import { createBillingTopUpIntentDirectory } from "./billing-topup-intent-directory-repository.ts";
 import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-repository.ts";
 import { createBillingWebhookEventsRepository } from "./billing-webhook-events-repository.ts";

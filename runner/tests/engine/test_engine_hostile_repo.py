@@ -71,7 +71,7 @@ def everything_sent(engine: Engine, outcome: Outcome) -> str:
 
 
 # CR-41-T13, #203
-@pytest.mark.parametrize("command", ["review"])
+@pytest.mark.parametrize("command", [pytest.param("review", marks=pytest.mark.smoke)])
 def test_a_repository_file_cannot_move_a_request_a_credential_the_model_or_the_budget(
     engine: Engine, github: FakeGithub, llm: FakeLlm, canary: Canary, command: str
 ) -> None:

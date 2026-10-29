@@ -36,7 +36,7 @@ import {
   readContract,
   readExamples,
 } from "../../src/test-support/runner-contract.ts";
-import { PROJECT_REVIEW_KINDS } from "../../src/review-settings/settings.ts";
+import { PROJECT_REVIEW_KINDS } from "../../src/job-kind/job-kind.ts";
 import { KEY_MODES, LIMIT_NAMES } from "../../src/workspaces/entitlements.ts";
 import {
   CATALOG_ENTRY_ID_PATTERN,

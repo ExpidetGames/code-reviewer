@@ -10,7 +10,7 @@ import type { Kysely } from "kysely";
 import type {
   InstallationLinkRequest,
   InstallationLinkRequestView,
-} from "../../installation-binding/requests.ts";
+} from "../installation-link-request.ts";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 import { toLinkRequest } from "./installation-link-requests-repository.ts";

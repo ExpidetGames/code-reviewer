@@ -5,11 +5,11 @@
 // model (a catalog entry per kind on the operator's key) and the verdict. So the one request carries every field that differs
 // from the shipped value, nothing when nothing changed, and an empty one removes them all. A project differs: its project-only
 // fields travel apart from its Diff group (`project-save.ts`).
+import { CATALOG_FIELD_OF_KIND } from "../settings.ts";
 import {
-  CATALOG_FIELD_OF_KIND,
   PROJECT_REVIEW_KINDS,
   type ProjectReviewKind,
-} from "../settings.ts";
+} from "../../job-kind/job-kind.ts";
 import { validateWorkspaceSettingsPatch } from "../validate.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { diffPatch, type FormState } from "./form-state.ts";

@@ -21,7 +21,7 @@ def hosts_of(connections: list[dict[str, object]]) -> set[str]:
 
 
 # CR-41-T14, #203
-@pytest.mark.parametrize("command", ["review"])
+@pytest.mark.parametrize("command", [pytest.param("review", marks=pytest.mark.smoke)])
 def test_every_connection_of_a_run_goes_to_loopback_and_only_to_the_two_fakes(
     engine: Engine, github: FakeGithub, llm: FakeLlm, command: str
 ) -> None:

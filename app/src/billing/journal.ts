@@ -6,7 +6,7 @@
 // in SQL (a check cannot take bound values, and a migration does not import app code that may change later);
 // `journal.test.ts` fails when the two drift apart.
 import "server-only";
-import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /** What can happen to a balance. The one set the table check, the repository and the types share. */
 export const BILLING_ENTRY_TYPES = [
