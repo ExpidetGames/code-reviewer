@@ -66,9 +66,14 @@ describe("the production deployment workflow", () => {
       "snapshot-build",
       "stage-app",
       "stage-dispatcher",
+      // The dormant factory lane (#732, factory-lane-workflow.test.ts) sits among them, never in front of them.
+      "stage-factory",
       "health-app",
+      "health-factory",
       "canary",
+      "apps-check",
       "promote-app",
+      "promote-factory",
       "promote-dispatcher",
       "persist",
       "cleanup",
@@ -257,7 +262,12 @@ describe("the production deployment workflow", () => {
     const writers = Object.entries(workflow.jobs)
       .filter(([, found]) => found.permissions?.deployments === "write")
       .map(([name]) => name);
-    expect(writers.sort()).toEqual(["record", "stage-app", "stage-dispatcher"]);
+    expect(writers.sort()).toEqual([
+      "record",
+      "stage-app",
+      "stage-dispatcher",
+      "stage-factory",
+    ]);
     for (const found of [...Object.values(workflow.jobs), stageJob])
       expect(found.permissions?.contents, found.name).toBe("read");
   });
@@ -268,7 +278,10 @@ describe("the production deployment workflow", () => {
       "migrate",
       "snapshot-decide",
       "health-app",
+      "health-factory",
+      "apps-check",
       "promote-app",
+      "promote-factory",
       "promote-dispatcher",
       "persist",
       "cleanup",
@@ -301,9 +314,18 @@ describe("the production deployment workflow", () => {
   // #403-T07
   it("migrates the database first with the migrate role's URL from Infisical, before anything is deployed", () => {
     const migrate = job("migrate");
-    const load = stepIndex(migrate, isInfisicalLoad);
-    const run = stepIndex(migrate, (step) =>
-      (step.run ?? "").includes("pnpm --dir app migrate"),
+    // The reviewer's own steps; the two factory steps in front of them are pinned in factory-lane-workflow.test.ts.
+    const load = stepIndex(
+      migrate,
+      (step) =>
+        isInfisicalLoad(step) &&
+        step.with?.["secret-names"] === "DATABASE_URL_MIGRATE",
+    );
+    const run = stepIndex(
+      migrate,
+      (step) =>
+        step.name === "Apply the migrations" &&
+        (step.run ?? "").includes("pnpm --dir app migrate"),
     );
     const install = stepIndex(migrate, (step) =>
       (step.run ?? "").includes(
@@ -436,8 +458,10 @@ describe("the production deployment workflow", () => {
     expect(needsOf(record).sort()).toEqual([
       "promote-app",
       "promote-dispatcher",
+      "promote-factory",
       "stage-app",
       "stage-dispatcher",
+      "stage-factory",
     ]);
     expect(String(record.if)).toContain("always()");
     const script = stepsOf(record).find((step) =>

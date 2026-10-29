@@ -150,7 +150,9 @@ describe("dispatcher canary workflow", () => {
     const withSecrets = job.steps.filter((step) =>
       JSON.stringify(step).includes("secrets."),
     );
+    // The second load is the operator credential of the factory lane (#732), skipped unless the caller asks for it.
     expect(withSecrets.map((step) => step.uses)).toEqual([
+      "./.github/actions/infisical-ci-secrets",
       "./.github/actions/infisical-ci-secrets",
     ]);
     expect(canary.run).not.toContain("secrets.");

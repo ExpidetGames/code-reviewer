@@ -957,7 +957,8 @@ describe("the deployment pipeline in the guide", () => {
     ])
       loaded.add(name);
     expect(documented.sort()).toEqual([...loaded].sort());
-    expect(documented).toHaveLength(8);
+    // Eight for the hosted pair, four more for the dormant second App (#732, section 5.8).
+    expect(documented).toHaveLength(12);
   });
 
   // #403-T11
@@ -1210,5 +1211,134 @@ describe("the snapshot keys, the rollback and the build in the guide", () => {
   it("says that this guide is for a new installation and what a hand-made pair does", () => {
     expect(flat(guide)).toContain("This guide is for a **new installation**");
     expect(flat(guide)).toContain("keeps the old one as the previous snapshot");
+  });
+});
+
+describe("the second App in the guide (#732)", () => {
+  const second = section("### 5.8 A second App (the factory lane)");
+  const bringUp = read("docs/factory-bring-up.md");
+  const deploy = read(".github/workflows/deploy-production.yml");
+  const bootstrap = read("tools/factory-bootstrap/factory-bootstrap.sh");
+
+  // #732-T09
+  it("exists, says it is dormant and what switches it on and off", () => {
+    expect(flat(second)).toContain("merged dormant");
+    expect(second).toContain("`FACTORY_ENABLED`");
+    expect(flat(second)).toContain("Switching it off");
+    expect(flat(second)).toContain("never blocks the release of the first");
+    expect(
+      section("### 2.1 Setup of the deployment pipeline (once)"),
+    ).toContain("`FACTORY_ENABLED`");
+  });
+
+  // #732-T09
+  it("names every job of the lane, in the order the workflow has them", () => {
+    const jobs = [
+      ...deploy.matchAll(/^ {2}([a-z-]*(?:factory|apps-check))\s*:/gm),
+    ].map((match) => match[1] as string);
+    expect(jobs.sort()).toEqual(
+      [
+        "apps-check",
+        "health-factory",
+        "promote-factory",
+        "stage-factory",
+      ].sort(),
+    );
+    for (const name of jobs) expect(second, name).toContain(`\`${name}\``);
+    expect(second).toContain("`migrate` (two more steps)");
+  });
+
+  // #732-T09
+  it("names every variable, key and folder the lane adds, as the workflows and the bootstrap tool have them", () => {
+    const workflows = [
+      deploy,
+      read(".github/workflows/rollback-production.yml"),
+      read(".github/workflows/dispatcher-canary.yml"),
+    ].join("\n");
+    const keys = new Set<string>(["FACTORY_ENABLED", "DISPATCHER_APPS"]);
+    for (const match of workflows.matchAll(
+      /\b([A-Z][A-Z0-9_]*FACTORY[A-Z0-9_]*)\b/g,
+    ))
+      keys.add(match[1] as string);
+    for (const match of bootstrap.matchAll(
+      /^\s+"\/[a-z-]+\|([A-Z][A-Z0-9_]+)\|/gm,
+    ))
+      keys.add(match[1] as string);
+    // Names that are results or inputs of a step, not settings of the lane.
+    keys.delete("FACTORY_RESULT");
+    keys.delete("FACTORY_DEPLOYMENT");
+    keys.delete("FACTORY_DEPLOYMENT_ID");
+    keys.delete("FACTORY_URL");
+    const documented = `${second}\n${section("### 2.1 Setup of the deployment pipeline (once)")}`;
+    for (const key of keys) {
+      // Keys the hosted pair already documents elsewhere in the guide (section 3) need no second description.
+      if (
+        [
+          "APP_SECRET",
+          "CRON_SECRET",
+          "DATABASE_URL",
+          "BETTER_AUTH_URL",
+          "RUNNER_TOKEN",
+          "RUNNER_WEBHOOK_SECRET",
+        ].includes(key)
+      )
+        continue;
+      expect(documented, key).toContain(`\`${key}\``);
+    }
+    expect(second).toContain("`/app-factory`");
+    expect(second).toContain("factory_deployment");
+    expect(section("## 7. Rolling back")).toContain("`factory_deployment`");
+  });
+
+  // #732-T09
+  it("states that the migration is the one gate that reaches the first App, and the order of the promotions", () => {
+    const text = flat(second);
+    expect(text).toContain("the only gate that reaches the first App");
+    expect(text).toContain("the App, the second App, the Dispatcher");
+  });
+
+  // #732-T09
+  it("keeps the owner's checklist to four mandatory steps and lists the rest as optional or deferred", () => {
+    const mandatory = bringUp
+      .split("## Mandatory")[1]
+      ?.split("## Optional or deferred")[0] as string;
+    const steps = [...mandatory.matchAll(/^(\d+)\. \*\*([^*]+)\*\*/gm)].map(
+      (match) => match[2] as string,
+    );
+    expect(steps).toEqual([
+      "Create the database.",
+      "Create the Vercel project.",
+      "Run the bootstrap, then fill Infisical.",
+      "Set the repository variable `FACTORY_ENABLED` to `true`",
+    ]);
+    const optional = bringUp.split("## Optional or deferred")[1] as string;
+    for (const item of [
+      "GitHub App",
+      "model key",
+      "Own domain",
+      "Mail",
+      "Stripe",
+      "Final product name",
+      "PostHog",
+    ])
+      expect(optional, item).toContain(item);
+    expect(bringUp).toContain("factory-bootstrap.sh");
+    expect(bringUp).not.toContain("—");
+    expect(bringUp).not.toMatch(/\bcustomers?\b|GmbH/i);
+  });
+
+  // #732-T09
+  it("is the same list of entries as the bootstrap tool prints, for the keys of /dispatcher", () => {
+    for (const key of [
+      "DISPATCHER_APP_FACTORY_TOKEN",
+      "DISPATCHER_APP_FACTORY_SIGNING_SECRET",
+      "DISPATCHER_OPERATOR_TOKEN",
+      "DISPATCHER_APPS",
+    ]) {
+      expect(bootstrap, key).toContain(key);
+      expect(second, key).toContain(`\`${key}\``);
+    }
+    expect(bootstrap).toContain("${prod.app-factory.RUNNER_TOKEN}");
+    expect(second).toContain("`${prod.app-factory.RUNNER_TOKEN}`");
   });
 });

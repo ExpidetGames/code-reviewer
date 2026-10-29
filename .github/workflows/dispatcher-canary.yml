@@ -35,6 +35,11 @@ on:
         description: "Golden snapshot id the deployment must report; empty does not check the snapshot"
         default: ""
         required: false
+      operator_token:
+        description: "Open /probe with the Dispatcher's operator credential (DISPATCHER_OPERATOR_TOKEN) and not with RUNNER_TOKEN: on once the factory lane is on"
+        type: boolean
+        default: false
+        required: false
   workflow_call:
     inputs:
       url:
@@ -56,6 +61,11 @@ on:
         default: ""
         required: false
         type: string
+      operator_token:
+        description: "Open /probe with the Dispatcher's operator credential (DISPATCHER_OPERATOR_TOKEN) and not with RUNNER_TOKEN: on once the factory lane is on"
+        default: false
+        required: false
+        type: boolean
     secrets:
       INFISICAL_CLIENT_ID:
         description: Client id of the Infisical machine identity (a secret of the environment production, passed by the caller)
@@ -111,6 +121,22 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: The canary did not run, so nothing is promoted.
+      # Only with the factory lane on (#732): the Dispatcher then serves more than one App, so `/probe` opens with a
+      # credential of its own and no App's token. The canary command reads the credential from RUNNER_TOKEN; the loaded
+      # value is already masked and goes to the later steps through the job's environment file, never a command line.
+      - name: Load the operator credential from Infisical
+        if: ${{ inputs.operator_token }}
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: DISPATCHER_OPERATOR_TOKEN
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: The canary did not run, so nothing is promoted.
+      - name: Probe with the operator credential
+        if: ${{ inputs.operator_token }}
+        run: printf 'RUNNER_TOKEN=%s\n' "${DISPATCHER_OPERATOR_TOKEN}" >> "${GITHUB_ENV}"
       # A snapshot that was removed since (a re-run of failed jobs after the run's snapshot was discarded) is said so
       # here, in a code, and not as a canary VM that cannot start.
       - name: Check that the golden snapshot still exists

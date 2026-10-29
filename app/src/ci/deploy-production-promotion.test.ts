@@ -138,9 +138,14 @@ describe("the production deployment when the golden snapshot is reused", () => {
       "snapshot-build": "skipped",
       "stage-app": "success",
       "stage-dispatcher": "success",
+      // The factory lane is dormant: FACTORY_ENABLED is not set (factory-lane-workflow.test.ts has it on).
+      "stage-factory": "skipped",
       "health-app": "success",
+      "health-factory": "skipped",
       canary: "success",
+      "apps-check": "skipped",
       "promote-app": "success",
+      "promote-factory": "skipped",
       "promote-dispatcher": "success",
       persist: "skipped",
       cleanup: "success",
@@ -311,12 +316,14 @@ describe("the conditions of the jobs that follow the snapshot build", () => {
     const dependents = dependentsOf(workflow, "snapshot-build");
     expect(dependents.sort()).toEqual(
       [
+        "apps-check",
         "canary",
         "cleanup",
         "discard",
         "persist",
         "promote-app",
         "promote-dispatcher",
+        "promote-factory",
         "record",
         "stage-dispatcher",
       ].sort(),
@@ -329,7 +336,10 @@ describe("the conditions of the jobs that follow the snapshot build", () => {
   it("check every job a promotion needs for success, and accept skipped for snapshot-build alone", () => {
     for (const name of PROMOTIONS) {
       const condition = String(job(name).if);
-      for (const need of needsOf(job(name)))
+      // `promote-factory` is a need of the Dispatcher's promotion for the order only: its result is deliberately not read.
+      for (const need of needsOf(job(name)).filter(
+        (found) => found !== "promote-factory",
+      ))
         expect(condition, `${name} checks ${need}`).toContain(
           `needs.${need}.result == 'success'`,
         );
