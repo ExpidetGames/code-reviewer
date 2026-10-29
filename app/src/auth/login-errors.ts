@@ -2,10 +2,12 @@
 
 // Translates the `error` code in the login page URL to copy. The code comes from Better Auth (or
 // from GitHub, for access_denied) and is untrusted: it only selects a message, it is never shown.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 
-const MESSAGES: Readonly<Record<string, string>> = {
-  access_denied:
-    "You cancelled the sign in at GitHub. Sign in again if you want to use code-review.com.",
+const messages = (
+  product: ProductIdentity,
+): Readonly<Record<string, string>> => ({
+  access_denied: `You cancelled the sign in at GitHub. Sign in again if you want to use ${product.name}.`,
   state_mismatch:
     "The sign in could not be matched to its start. Please start again.",
   state_not_found:
@@ -22,8 +24,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   // is allowed.
   github_email_unverified:
     "GitHub reports no verified primary email address for your account. Verify one in your GitHub settings and sign in again.",
-  email_not_allowed:
-    "The email address of your GitHub account is not allowed to sign up on code-review.com.",
+  email_not_allowed: `The email address of your GitHub account is not allowed to sign up on ${product.name}.`,
   signup_closed:
     "Signing up is closed until an admin has set it up. Ask an admin for help.",
   email_exists_unverified:
@@ -48,11 +49,15 @@ const MESSAGES: Readonly<Record<string, string>> = {
     "This way of signing in is switched off here. Use another one.",
   account_not_linked:
     "This GitHub account could not be matched to an existing user. Ask an administrator for help.",
-};
+});
 
 const GENERIC_MESSAGE = "Sign in failed. Please try again.";
 
-export function loginErrorMessage(code: string | undefined): string | null {
+export function loginErrorMessage(
+  product: ProductIdentity,
+  code: string | undefined,
+): string | null {
   if (!code) return null;
-  return Object.hasOwn(MESSAGES, code) ? MESSAGES[code]! : GENERIC_MESSAGE;
+  const copy = messages(product);
+  return Object.hasOwn(copy, code) ? copy[code]! : GENERIC_MESSAGE;
 }

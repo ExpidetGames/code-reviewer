@@ -2,13 +2,17 @@
 
 import { describe, expect, it } from "vitest";
 import { enablingNotice } from "./enabling-copy.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the copy of the enabling step", () => {
   // #504-T13
   it("says that every workspace is charged from a prepaid balance, that workspaces choose their key mode, and what a workspace with no balance can do", () => {
-    const notice = enablingNotice({ workspaces: 5, ownKeyWorkspaces: 2 }).join(
-      " ",
-    );
+    const notice = enablingNotice(PRODUCT, {
+      workspaces: 5,
+      ownKeyWorkspaces: 2,
+    }).join(" ");
 
     expect(notice).toMatch(/reviews of every workspace[^.]*charged/i);
     expect(notice).toMatch(/prepaid balance/i);
@@ -22,9 +26,10 @@ describe("the copy of the enabling step", () => {
 
   // #504-T13
   it("states the number of workspaces and how many of them hold a stored own key", () => {
-    const notice = enablingNotice({ workspaces: 5, ownKeyWorkspaces: 2 }).join(
-      " ",
-    );
+    const notice = enablingNotice(PRODUCT, {
+      workspaces: 5,
+      ownKeyWorkspaces: 2,
+    }).join(" ");
 
     expect(notice).toMatch(/\b5 workspaces\b/);
     expect(notice).toMatch(/\b2 of them\b[^.]*stored own key/i);
@@ -38,7 +43,10 @@ describe("the copy of the enabling step", () => {
   ])(
     "says %i workspaces with %i own keys in good English",
     (workspaces, ownKeyWorkspaces, countText, keyText) => {
-      const notice = enablingNotice({ workspaces, ownKeyWorkspaces }).join(" ");
+      const notice = enablingNotice(PRODUCT, {
+        workspaces,
+        ownKeyWorkspaces,
+      }).join(" ");
 
       expect(notice).toMatch(countText);
       expect(notice).toMatch(keyText);
@@ -51,7 +59,7 @@ describe("the copy of the enabling step", () => {
       { workspaces: 0, ownKeyWorkspaces: 0 },
       { workspaces: 3, ownKeyWorkspaces: 3 },
     ]) {
-      const notice = enablingNotice(facts).join(" ");
+      const notice = enablingNotice(PRODUCT, facts).join(" ");
 
       expect(notice.toLowerCase()).not.toContain(["pad", "dle"].join(""));
       expect(notice).not.toMatch(/\bplans?\b|subscription|free plan/i);

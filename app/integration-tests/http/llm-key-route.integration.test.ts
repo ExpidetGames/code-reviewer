@@ -8,6 +8,7 @@
 // one exists and is refused everything else; the key is encrypted at rest and in no answer, log line or error;
 // the request is read the one way every JSON route is (same site, JSON only, small, once); the test button is
 // limited; and the workspace of the address is the only one that is ever touched.
+import { getProductIdentity } from "../../src/product-identity/current.ts";
 import { OPERATOR_LLM_KEY_NAMES } from "../../src/llm/secret-names.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -618,6 +619,7 @@ async function managed() {
   const page = async (canManage: boolean) =>
     renderToStaticMarkup(
       createElement(LlmAccessSection, {
+        product: getProductIdentity(),
         workspaceSlug: "alpha",
         canManage,
         keyStatuses: await llm.keyServiceFor(t.alpha.id).statusAll(),

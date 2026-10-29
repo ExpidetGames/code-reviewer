@@ -25,6 +25,9 @@ import {
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
 import { createJobQueueFixture, sha, type JobQueueFixture } from "./jobs.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 export const HEAD = sha("a");
 export const COMMENT_URL =
@@ -128,6 +131,7 @@ export async function createCheckRunsHarness(
     fixture.clock.now,
   );
   const service = createCheckRunService({
+    product: PRODUCT,
     jobs: { get: (id) => fixture.queue.get(id) },
     repositories: (id) =>
       createRepositoriesRepository(db, id, fixture.clock.now),

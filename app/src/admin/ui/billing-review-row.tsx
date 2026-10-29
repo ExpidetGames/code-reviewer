@@ -5,6 +5,7 @@
 // and the ways to deal with it: close it with a note (no money moves), credit or correct the workspace of the row by hand and
 // close it in one step (the manual credit, once per row), or ask Stripe about the payment again ("Check payment"). The server
 // judges every value and picks the workspace; the row shows the reason it gets back.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -48,6 +49,7 @@ export function BillingReviewRow({
   review: BillingReviewView;
   api: BillingReviewApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const run = useBillingRun();
   const outcome = describeOutcome(review.outcome);
@@ -76,7 +78,7 @@ export function BillingReviewRow({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: result.issues,
           missing: [],
         };
@@ -115,7 +117,7 @@ export function BillingReviewRow({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: result.issues,
           missing: [],
         };
@@ -135,7 +137,7 @@ export function BillingReviewRow({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: result.issues,
           missing: [],
         };

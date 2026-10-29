@@ -19,6 +19,9 @@ import type { ProviderKeyStatus } from "../workspace-key.ts";
 import type { LlmKeyModeApi } from "./key-mode-api.ts";
 import { KeyModeCard } from "./key-mode-card.tsx";
 import { LlmAccessSection } from "./llm-access-section.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(() => {
   cleanup();
@@ -196,6 +199,7 @@ describe("the LLM access section with the choice", () => {
     const user = userEvent.setup();
     render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={keyStatuses}
@@ -225,6 +229,7 @@ describe("the LLM access section with the choice", () => {
   it("shows the key form while the own key is chosen", () => {
     render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={keyStatuses}
@@ -241,6 +246,7 @@ describe("the LLM access section with the choice", () => {
   it("is the same section as before when billing is off: no choice, the instance's access card", () => {
     render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={keyStatuses}

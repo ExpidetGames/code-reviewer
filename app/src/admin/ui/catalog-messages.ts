@@ -3,6 +3,7 @@
 // The copy for what the catalog data routes answer: one sentence per stable code (src/model-catalog/admin-errors.ts) and
 // for the problems of the fields of the form. The codes are the contract, these sentences are only what the page shows.
 // The page is for the operator, who sees the real model ids; the sentences still never repeat one.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   CROSS_SITE_REQUEST,
   INVALID_VALUES,
@@ -63,17 +64,23 @@ const FAILURE_COPY: Record<string, string> = {
 };
 
 /** The sentence for a failed change or call. */
-export function describeCatalogFailure(code: string): string {
+export function describeCatalogFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );
 }
 
 /** The sentence for a problem with one field: the same sentences, by the code the server gave the field. */
-export function describeCatalogIssue(issue: RequestIssue): string {
-  return describeCatalogFailure(issue.code);
+export function describeCatalogIssue(
+  product: ProductIdentity,
+  issue: RequestIssue,
+): string {
+  return describeCatalogFailure(product, issue.code);
 }
 
 /** What "Check model" found, when the provider vouches for the model. */

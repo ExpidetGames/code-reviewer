@@ -5,6 +5,7 @@
 // the operator API limits stay; and how many workspaces the instance has and how many hold a stored own key. A self-hoster who
 // never switches billing on never sees it anywhere but on this page. One owner for the wording (#169); the page shows it.
 import "server-only";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 
 export type EnablingFacts = {
   /** All workspaces of the instance. */
@@ -27,15 +28,15 @@ function ownKeyText(workspaces: number, ownKeyWorkspaces: number): string {
 }
 
 /** The paragraphs of the notice, in the order the page shows them. */
-export function enablingNotice({
-  workspaces,
-  ownKeyWorkspaces,
-}: EnablingFacts): string[] {
+export function enablingNotice(
+  product: ProductIdentity,
+  { workspaces, ownKeyWorkspaces }: EnablingFacts,
+): string[] {
   return [
     "Once billing is on, the reviews of every workspace are charged from a prepaid balance in US dollars. A review costs its infrastructure minutes, plus the AI cost when it runs on your models.",
     "Each workspace chooses its key mode: your models (the default) or its own key. A review on its own key is charged for its minutes only.",
     "A workspace with no balance cannot start a review until it has the start credit or credit from a top-up or from you.",
     "The run quotas of the workspaces are not applied while billing is on. The operator API limits stay.",
-    `code-review.com has ${workspacesText(workspaces)}. ${ownKeyText(workspaces, ownKeyWorkspaces)}`,
+    `${product.name} has ${workspacesText(workspaces)}. ${ownKeyText(workspaces, ownKeyWorkspaces)}`,
   ];
 }

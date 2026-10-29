@@ -5,7 +5,7 @@
 // reach it. The words are in src/copy/refusal-notice.ts.
 import {
   NOTICE_ADD_CREDIT_WHO,
-  NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE,
+  noticeAskWhoeverRuns,
   NOTICE_BILLING_SETUP_INCOMPLETE,
   NOTICE_BALANCE_NEGATIVE,
   NOTICE_INSUFFICIENT_BALANCE,
@@ -23,6 +23,7 @@ import {
   NOTICE_WORKSPACE_SUSPENDED,
   noticeWhoCanActAt,
 } from "../copy/refusal-notice.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 
 /**
  * The refusals that get a notice. The others (`entitlements_invalid`, `llm_not_configured`: the operator's side, and
@@ -97,10 +98,13 @@ const REASON_OF: Record<NoticeCode, string> = {
   billing_rates_incomplete: NOTICE_BILLING_SETUP_INCOMPLETE,
 };
 
-function whoCanAct(code: NoticeCode, link: string | null): string {
+function whoCanAct(
+  product: ProductIdentity,
+  code: NoticeCode,
+  link: string | null,
+): string {
   if (code === "reviews_paused") return NOTICE_TRY_AGAIN_LATER;
-  if (code === "billing_rates_incomplete")
-    return NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE;
+  if (code === "billing_rates_incomplete") return noticeAskWhoeverRuns(product);
   if (code === "monthly_limit_reached")
     return link === null
       ? NOTICE_MONTHLY_LIMIT_WHO
@@ -120,6 +124,7 @@ function whoCanAct(code: NoticeCode, link: string | null): string {
  * recorded under: a period, or `head:` and a commit id for the balance (`notice-key.ts`).
  */
 export function noticeBody(
+  product: ProductIdentity,
   code: NoticeCode,
   periodStart: string,
   link: string | null,
@@ -127,7 +132,7 @@ export function noticeBody(
   return [
     `**${NOTICE_LEAD}**`,
     "",
-    `${REASON_OF[code]} ${whoCanAct(code, link)}`,
+    `${REASON_OF[code]} ${whoCanAct(product, code, link)}`,
     "",
     noticeMarker(periodStart),
   ].join("\n");

@@ -4,6 +4,8 @@
 // Asks for a password reset link by mail. The answer is the same for every address, and so is the copy: it
 // never says whether the address has an account. A successful request leaves one success card instead of
 // the form (#170).
+import { useProductIdentity } from "@/product-identity/context";
+import type { ProductIdentity } from "@/product-identity/identity";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
@@ -30,9 +32,12 @@ const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,
 };
 
-export function describeForgotPasswordFailure(code: string): string {
+export function describeForgotPasswordFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );
@@ -44,6 +49,7 @@ export function ForgotPasswordForm({
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState(false);
@@ -66,7 +72,7 @@ export function ForgotPasswordForm({
       setSent(true);
       return;
     }
-    setProblem(describeForgotPasswordFailure(result.code));
+    setProblem(describeForgotPasswordFailure(product, result.code));
   }
 
   if (sent)

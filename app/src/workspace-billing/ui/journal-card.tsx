@@ -4,6 +4,7 @@
 // The journal of the workspace's money (ADR 0006, 2.5, 2.7; #505): credit added, the start credit, what each review was charged
 // (its AI price and its infrastructure price and a link to the run), refunds, chargebacks and corrections, newest first, page by
 // page. A hold and its release are not rows. No rate, no minute count and no formula is ever in it.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { Button } from "../../components/button.tsx";
@@ -91,6 +92,7 @@ export function JournalCard({
   initial: JournalPageView;
   api: WorkspaceBillingApi;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const { pending, outcome, run } = useAction();
   // Older pages are fetched here; when the server renders the page again (a refresh) its first page wins and they are dropped.
@@ -115,7 +117,7 @@ export function JournalCard({
         if (!result.ok)
           return {
             kind: "failed",
-            text: describeBillingFailure(result.code),
+            text: describeBillingFailure(product, result.code),
             issues: [],
           };
         setOlder({

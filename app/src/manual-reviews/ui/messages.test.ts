@@ -6,12 +6,15 @@ import { describe, expect, it } from "vitest";
 import { MANUAL_REVIEW_ERROR_CODES } from "../errors.ts";
 import { GENERIC_FAILURE } from "../../ui/transport-messages.ts";
 import { describeManualReviewFailure, staleListFailure } from "./messages.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the copy for failures of the manual start", () => {
   it.each(MANUAL_REVIEW_ERROR_CODES)(
     "has a sentence of its own for %s that does not show the code",
     (code) => {
-      const text = describeManualReviewFailure(code);
+      const text = describeManualReviewFailure(PRODUCT, code);
 
       expect(text).not.toBe(GENERIC_FAILURE);
       expect(text).not.toContain("MANUAL_REVIEW");
@@ -20,14 +23,18 @@ describe("the copy for failures of the manual start", () => {
   );
 
   it("tells the transport failures in plain words", () => {
-    expect(describeManualReviewFailure("NETWORK_ERROR")).toContain(
+    expect(describeManualReviewFailure(PRODUCT, "NETWORK_ERROR")).toContain(
       "could not be reached",
     );
   });
 
   it("answers a code it does not know with the generic sentence", () => {
-    expect(describeManualReviewFailure("SOMETHING_NEW")).toBe(GENERIC_FAILURE);
-    expect(describeManualReviewFailure("toString")).toBe(GENERIC_FAILURE);
+    expect(describeManualReviewFailure(PRODUCT, "SOMETHING_NEW")).toBe(
+      GENERIC_FAILURE,
+    );
+    expect(describeManualReviewFailure(PRODUCT, "toString")).toBe(
+      GENERIC_FAILURE,
+    );
   });
 
   it("reloads the list after a pull request that is gone or closed, and only then", () => {

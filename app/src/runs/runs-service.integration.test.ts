@@ -17,6 +17,9 @@ import {
   createRunsService,
   parseRunsFilter,
 } from "./runs-service.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the runs list", () => {
   // CR-35-T01
@@ -211,6 +214,7 @@ describe("one run", () => {
     );
     const { createRunsService } = await import("./runs-service.ts");
     const redacting = createRunsService({
+      product: PRODUCT,
       runs: f.runsRepository,
       now: f.clock.now,
       redact: (text) => text.replace(/sk-or-[\w-]+/, "[redacted]"),
@@ -314,6 +318,7 @@ describe("the usage of a run", () => {
 
     // A member of another workspace reads neither the run nor its usage.
     const otherRuns = createRunsService({
+      product: PRODUCT,
       runs: createRunsRepository(f.db, await addWorkspace(f.db, "bravo")),
       now: f.clock.now,
     });

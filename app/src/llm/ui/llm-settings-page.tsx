@@ -3,6 +3,7 @@
 // The "LLM access" sub-page content (#178): the settings frame and the key card. The page file only
 // wires the real key service; the form itself is `LlmAccessSection` (one form, "Save key" and
 // "Test key") for each provider. The removal of a key is a destructive action at the end of the page (#658).
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { SettingsScreen } from "../../workspaces/ui/settings-shell.tsx";
 import type { WorkspaceLlmSummary } from "../assemble.ts";
 import type { ProviderKeyStatus } from "../workspace-key.ts";
@@ -19,6 +20,7 @@ import {
 } from "./llm-access-section.tsx";
 
 export function LlmSettingsPageContent({
+  product,
   workspaceSlug,
   canManage,
   keyStatuses,
@@ -31,6 +33,7 @@ export function LlmSettingsPageContent({
   showBilling = false,
   api,
 }: {
+  product: ProductIdentity;
   workspaceSlug: string;
   /** An Admin or an Owner of the workspace (`manage_llm_key`). */
   canManage: boolean;
@@ -61,6 +64,7 @@ export function LlmSettingsPageContent({
     >
       <div>
         <LlmAccessSection
+          product={product}
           workspaceSlug={workspaceSlug}
           canManage={canManage}
           keyStatuses={keyStatuses}

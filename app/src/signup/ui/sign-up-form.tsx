@@ -6,6 +6,7 @@
 // not the address may sign up, so the page says what happens next in words that are true either way: with a
 // mail server a link is sent to the address if it may sign up, without one the person signs in. Both answers
 // are one success card with a single link back to the sign-in (#170).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
 import {
@@ -31,6 +32,7 @@ export function SignUpForm({
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -77,7 +79,7 @@ export function SignUpForm({
       setNext(result.data.next === "verify_email" ? "verify_email" : "sign_in");
       return;
     }
-    setProblem(describeSignUpFailure(result.code, result.issues));
+    setProblem(describeSignUpFailure(product, result.code, result.issues));
   }
 
   return (

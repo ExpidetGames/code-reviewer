@@ -12,6 +12,9 @@ import {
   missingPermissions,
   suggestedAppName,
 } from "./manifest.ts";
+import { getProductIdentity } from "../../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const PUBLIC_URL = "https://reviews.example.com";
 
@@ -19,6 +22,7 @@ describe("the GitHub App manifest", () => {
   // #102-GH-01
   it("derives the webhook, redirect, callback and setup addresses from the public URL of a multi-tenant instance", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "multi",
       name: "Code Reviewer",
@@ -42,6 +46,7 @@ describe("the GitHub App manifest", () => {
   // #102-GH-01
   it("makes the App private on a single-tenant instance", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "single",
       name: "Code Reviewer",
@@ -54,6 +59,7 @@ describe("the GitHub App manifest", () => {
   // #405-T13
   it("asks for the repository permissions of a review job plus Checks, Email addresses and Members", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "single",
       name: "Code Reviewer",
@@ -76,6 +82,7 @@ describe("the GitHub App manifest", () => {
 
   it("does not ask GitHub to authorize a person during the installation", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "single",
       name: "x",
@@ -86,6 +93,7 @@ describe("the GitHub App manifest", () => {
 
   it("ignores a trailing slash of the public URL", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: `${PUBLIC_URL}/`,
       tenancy: "single",
       name: "x",
@@ -99,10 +107,11 @@ describe("the GitHub App manifest", () => {
 
 describe("the suggested App name", () => {
   it("names the host of the instance and stays within what GitHub accepts", () => {
-    expect(suggestedAppName(PUBLIC_URL)).toBe(
+    expect(suggestedAppName(PRODUCT, PUBLIC_URL)).toBe(
       "Code Reviewer reviews.example.com",
     );
     const long = suggestedAppName(
+      PRODUCT,
       "https://a-very-long-subdomain.example-company.com",
     );
     expect(long.length).toBeLessThanOrEqual(APP_NAME_MAX_LENGTH);

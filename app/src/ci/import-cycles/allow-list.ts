@@ -301,7 +301,6 @@ export const ALLOWED_IMPORT_CYCLES: AllowList = {
     "workspace-billing -> workspaces",
     "workspaces -> auth",
     "workspaces -> billing",
-    "workspaces -> check-runs",
     "workspaces -> config-status",
     "workspaces -> db",
     "workspaces -> github-config",

@@ -3,6 +3,7 @@
 "use client";
 // Renames the workspace (an Owner; the address, the slug, stays). One form with one explicit save and
 // the saved state inline next to it; a refused name is named under the field.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
@@ -22,6 +23,7 @@ export function RenameForm({
   /** Only tests pass this. */
   api?: WorkspaceApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const id = useId();
   const [name, setName] = useState(initialName);
@@ -37,7 +39,7 @@ export function RenameForm({
     const result = await api.rename(name);
     setPending(false);
     if (!result.ok) {
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       return;
     }
     setName(result.data.name);

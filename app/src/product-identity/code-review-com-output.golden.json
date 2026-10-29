@@ -182,10 +182,7 @@
       "description": "Automatic pull request reviews by code-review.com.",
       "public": true,
       "request_oauth_on_install": false,
-      "default_events": [
-        "pull_request",
-        "issue_comment"
-      ],
+      "default_events": ["pull_request", "issue_comment"],
       "default_permissions": {
         "pull_requests": "write",
         "issues": "write",
@@ -236,12 +233,8 @@
   },
   "errorCopy": {
     "constants": {
-      "HISTORIC_ERROR_CODES": [
-        "managed_tier_unavailable"
-      ],
-      "UNSHOWN_ERROR_CODES": [
-        "reviews_paused"
-      ],
+      "HISTORIC_ERROR_CODES": ["managed_tier_unavailable"],
+      "UNSHOWN_ERROR_CODES": ["reviews_paused"],
       "ERROR_COPY": {
         "lease_expired": "The runner stopped reporting while it worked on this run, and the run ran out of retries.",
         "timeout": "The run took longer than the time limit, so it was stopped.",

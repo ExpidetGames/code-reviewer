@@ -76,6 +76,7 @@ export async function loadLoginPage(
     signUpOpen: signUp.open,
     canReset: passwordResetAvailable(facts),
     error: loginErrorMessage(
+      getProductIdentity(),
       typeof rawError === "string" ? rawError : undefined,
     ),
   };

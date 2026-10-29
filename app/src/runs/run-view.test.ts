@@ -14,7 +14,11 @@ import {
   toRunDetailView,
   toRunRowView,
 } from "./run-view.ts";
-import { CHECKOUT_REASON_COPY, UNKNOWN_ERROR_COPY } from "./error-copy.ts";
+import { CHECKOUT_REASON_COPY, unknownErrorCopy } from "./error-copy.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
+const UNKNOWN_ERROR_COPY = unknownErrorCopy(PRODUCT);
 
 const NOW = new Date("2026-10-10T12:10:00.000Z");
 
@@ -133,6 +137,7 @@ describe("the provider in the log of a run", () => {
     });
 
     const detail = toRunDetailView(
+      PRODUCT,
       stored,
       "acme/widgets",
       NOW,
@@ -153,7 +158,7 @@ describe("the provider in the log of a run", () => {
       result: { ok: false, commentUrl: null, logTail: OLD_LOG },
     });
 
-    const detail = toRunDetailView(stored, "acme/widgets", NOW);
+    const detail = toRunDetailView(PRODUCT, stored, "acme/widgets", NOW);
 
     expect(detail.log.text).toBe(OLD_LOG);
   });
@@ -184,21 +189,31 @@ describe("the problem of a Diff Review that stopped at its cost limit", () => {
   // #689-T26
   it("names whose limit it was on the detail page, from the limit the runner reported", () => {
     expect(
-      toRunDetailView(failed("cost_limit"), "acme/widgets", NOW).problem,
+      toRunDetailView(PRODUCT, failed("cost_limit"), "acme/widgets", NOW)
+        .problem,
     ).toContain("maximum cost per review set by code-review.com");
     expect(
-      toRunDetailView(failed("project_cost_limit"), "acme/widgets", NOW)
-        .problem,
+      toRunDetailView(
+       PRODUCT,
+        failed("project_cost_limit"),
+        "acme/widgets",
+        NOW,
+      ).problem,
     ).toContain("Limits in the project settings");
   });
 
   // #689-T26
   it("is true for both limits where the runner did not say which, and in a list row", () => {
-    const neutral = toRunDetailView(failed(), "acme/widgets", NOW).problem;
+    const neutral = toRunDetailView(
+     PRODUCT,
+      failed(),
+      "acme/widgets",
+      NOW,
+    ).problem;
     expect(neutral).toContain("code-review.com");
     expect(neutral).toContain("project");
     expect(
-      toRunRowView(failed("cost_limit"), "acme/widgets", NOW).problem,
+      toRunRowView(PRODUCT, failed("cost_limit"), "acme/widgets", NOW).problem,
     ).toBe(neutral);
   });
 });
@@ -309,8 +324,12 @@ describe("the usage of a run", () => {
       },
     });
 
-    const { model } = toRunDetailView(stored, "acme/widgets", NOW, (text) =>
-      text.replace("SECRET", "\u{1F600}".repeat(30)),
+    const { model } = toRunDetailView(
+     PRODUCT,
+      stored,
+      "acme/widgets",
+      NOW,
+      (text) => text.replace("SECRET", "\u{1F600}".repeat(30)),
     ).usage ?? { model: null };
 
     expect(Array.from(model ?? "").length).toBeLessThanOrEqual(200);
@@ -324,8 +343,12 @@ describe("the usage of a run", () => {
       result: { ok: true, commentUrl: null, logTail: "", usage },
     });
 
-    const detail = toRunDetailView(stored, "acme/widgets", NOW, (text) =>
-      text.replace("dynamic-model", "[redacted]"),
+    const detail = toRunDetailView(
+     PRODUCT,
+      stored,
+      "acme/widgets",
+      NOW,
+      (text) => text.replace("dynamic-model", "[redacted]"),
     );
 
     expect(detail.usage).toEqual({
@@ -335,15 +358,15 @@ describe("the usage of a run", () => {
       costUsd: 0.04,
       stoppedEarly: null,
     });
-    expect(toRunRowView(stored, "acme/widgets", NOW)).not.toHaveProperty(
-      "usage",
-    );
+    expect(
+      toRunRowView(PRODUCT, stored, "acme/widgets", NOW),
+    ).not.toHaveProperty("usage");
   });
 });
 
 describe("the row of a run", () => {
   it("carries what the list shows and nothing of the lease", () => {
-    const view = toRunRowView(job(), "acme/widgets", NOW);
+    const view = toRunRowView(PRODUCT, job(), "acme/widgets", NOW);
 
     expect(view).toEqual({
       id: "6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11",
@@ -371,32 +394,44 @@ describe("the row of a run", () => {
   it("carries the review kind the run was queued for, in the list and in the detail", () => {
     const dynamic = job({ reviewKind: "dynamic" });
 
-    expect(toRunRowView(dynamic, "p", NOW).reviewKind).toBe("dynamic");
-    expect(toRunDetailView(dynamic, "p", NOW).reviewKind).toBe("dynamic");
+    expect(toRunRowView(PRODUCT, dynamic, "p", NOW).reviewKind).toBe("dynamic");
+    expect(toRunDetailView(PRODUCT, dynamic, "p", NOW).reviewKind).toBe(
+      "dynamic",
+    );
   });
 
   // CR-35-T04
   it("names who started a run started by comment or by hand", () => {
     expect(
       toRunRowView(
+       PRODUCT,
         job({ triggerKind: "comment", actorLogin: "alice" }),
         "p",
         NOW,
       ).trigger,
     ).toBe("Comment by alice");
     expect(
-      toRunRowView(job({ triggerKind: "manual", actorLogin: "bob" }), "p", NOW)
-        .trigger,
+      toRunRowView(
+       PRODUCT,
+        job({ triggerKind: "manual", actorLogin: "bob" }),
+        "p",
+        NOW,
+      ).trigger,
     ).toBe("Started by bob");
   });
 
   it("counts a running run up to the time of the answer and shows none for a waiting one", () => {
     expect(
-      toRunRowView(job({ status: "running", finishedAt: null }), "p", NOW)
-        .durationMs,
+      toRunRowView(
+       PRODUCT,
+        job({ status: "running", finishedAt: null }),
+        "p",
+        NOW,
+      ).durationMs,
     ).toBe(590_000);
     expect(
       toRunRowView(
+       PRODUCT,
         job({ status: "queued", claimedAt: null, finishedAt: null }),
         "p",
         NOW,
@@ -406,22 +441,31 @@ describe("the row of a run", () => {
 
   it("explains why a failed or cancelled run did not succeed", () => {
     expect(
-      toRunRowView(job({ status: "failed", errorCode: "timeout" }), "p", NOW)
-        .problem,
+      toRunRowView(
+       PRODUCT,
+        job({ status: "failed", errorCode: "timeout" }),
+        "p",
+        NOW,
+      ).problem,
     ).toBe("The run took longer than the time limit, so it was stopped.");
     expect(
       toRunRowView(
+       PRODUCT,
         job({ status: "cancelled", errorCode: "project_deactivated" }),
         "p",
         NOW,
       ).problem,
     ).toContain("switched off");
     expect(
-      toRunRowView(job({ status: "failed", errorCode: null }), "p", NOW)
-        .problem,
+      toRunRowView(
+       PRODUCT,
+        job({ status: "failed", errorCode: null }),
+        "p",
+        NOW,
+      ).problem,
     ).toBe("The run failed without saying why.");
     expect(
-      toRunRowView(job({ status: "succeeded" }), "p", NOW).problem,
+      toRunRowView(PRODUCT, job({ status: "succeeded" }), "p", NOW).problem,
     ).toBeNull();
   });
 
@@ -432,9 +476,12 @@ describe("the row of a run", () => {
       "https://evilgithub.com/acme/widgets/pull/7",
       "http://github.com/acme/widgets/pull/7",
     ])
-      expect(toRunRowView(job({ prUrl: bad }), "p", NOW).prUrl).toBeNull();
+      expect(
+        toRunRowView(PRODUCT, job({ prUrl: bad }), "p", NOW).prUrl,
+      ).toBeNull();
     expect(
       toRunRowView(
+       PRODUCT,
         job({ prUrl: "https://github.com/acme/widgets/pull/7" }),
         "p",
         NOW,
@@ -465,7 +512,7 @@ describe("the detail of a run", () => {
 
   // CR-35-T04
   it("holds pull request, command, trigger, times, comment link and log", () => {
-    const view = toRunDetailView(succeeded, "acme/widgets", NOW);
+    const view = toRunDetailView(PRODUCT, succeeded, "acme/widgets", NOW);
 
     expect(view).toMatchObject({
       prNumber: 7,
@@ -484,7 +531,7 @@ describe("the detail of a run", () => {
   // CR-35-T15
   it("does not carry the runner, the lease, the delivery or the rest of the stored result", () => {
     const text = JSON.stringify(
-      toRunDetailView(succeeded, "acme/widgets", NOW),
+      toRunDetailView(PRODUCT, succeeded, "acme/widgets", NOW),
     );
 
     for (const secret of [
@@ -510,6 +557,7 @@ describe("the detail of a run", () => {
       null,
     ]) {
       const view = toRunDetailView(
+       PRODUCT,
         job({ result: { ok: true, commentUrl, logTail: "" } }),
         "p",
         NOW,
@@ -520,11 +568,16 @@ describe("the detail of a run", () => {
 
   it("says a succeeded run has no comment link, but not a failed one", () => {
     expect(
-      toRunDetailView(job({ result: { ok: true, commentUrl: null } }), "p", NOW)
-        .commentMissing,
+      toRunDetailView(
+       PRODUCT,
+        job({ result: { ok: true, commentUrl: null } }),
+        "p",
+        NOW,
+      ).commentMissing,
     ).toBe(true);
     expect(
       toRunDetailView(
+       PRODUCT,
         job({ status: "failed", errorCode: "timeout", result: null }),
         "p",
         NOW,
@@ -536,12 +589,15 @@ describe("the detail of a run", () => {
   it("marks a shortened log and an empty one", () => {
     expect(
       toRunDetailView(
+       PRODUCT,
         job({ result: { ok: true, logTail: "tail", logTruncated: true } }),
         "p",
         NOW,
       ).log,
     ).toEqual({ text: "tail", truncated: true });
-    expect(toRunDetailView(job({ result: null }), "p", NOW).log).toEqual({
+    expect(
+      toRunDetailView(PRODUCT, job({ result: null }), "p", NOW).log,
+    ).toEqual({
       text: "",
       truncated: false,
     });
@@ -551,6 +607,7 @@ describe("the detail of a run", () => {
     const long = `${"a".repeat(MAX_LOG_CHARS)}END`;
 
     const { log } = toRunDetailView(
+     PRODUCT,
       job({ result: { ok: true, logTail: long } }),
       "p",
       NOW,
@@ -563,6 +620,7 @@ describe("the detail of a run", () => {
 
   it("hands the log to the redaction before it leaves", () => {
     const { log } = toRunDetailView(
+      PRODUCT,
       job({ result: { ok: true, logTail: "key sk-live-123 used" } }),
       "p",
       NOW,
@@ -575,6 +633,7 @@ describe("the detail of a run", () => {
   // #296-T11
   it("reads the checkout reason of a failed run from its stored result and explains it", () => {
     const view = toRunDetailView(
+     PRODUCT,
       job({
         status: "failed",
         errorCode: "checkout_incomplete",
@@ -601,14 +660,18 @@ describe("the detail of a run", () => {
   it("shows no reason for a run that has none, for a good run, or for a stored value that is no stable name", () => {
     expect(
       toRunDetailView(
+       PRODUCT,
         job({ status: "failed", errorCode: "timeout", result: null }),
         "p",
         NOW,
       ).errorReason,
     ).toBeNull();
-    expect(toRunDetailView(succeeded, "p", NOW).errorReason).toBeNull();
+    expect(
+      toRunDetailView(PRODUCT, succeeded, "p", NOW).errorReason,
+    ).toBeNull();
     expect(
       toRunDetailView(
+       PRODUCT,
         job({
           status: "failed",
           errorCode: "checkout_incomplete",
@@ -623,6 +686,7 @@ describe("the detail of a run", () => {
   // CR-35-T09
   it("shows an unknown error code with the general sentence", () => {
     const view = toRunDetailView(
+     PRODUCT,
       job({ status: "failed", errorCode: "brand_new_problem" }),
       "p",
       NOW,
@@ -636,8 +700,8 @@ describe("the detail of a run", () => {
   // #499-T13
   it("carries no error code and no window for a run the hidden brake refused", () => {
     const refused = job({ status: "failed", errorCode: "reviews_paused" });
-    const detail = toRunDetailView(refused, "p", NOW);
-    const row = toRunRowView(refused, "p", NOW);
+    const detail = toRunDetailView(PRODUCT, refused, "p", NOW);
+    const row = toRunRowView(PRODUCT, refused, "p", NOW);
 
     expect(detail.errorCode).toBeNull();
     expect(detail.errorCodeKnown).toBe(true);
@@ -661,6 +725,7 @@ describe("the detail of a run", () => {
       const commentUrl =
         "https://github.com/acme/widgets/pull/7#issuecomment-9";
       const view = toRunDetailView(
+       PRODUCT,
         job({
           status: "failed",
           errorCode,
@@ -682,6 +747,7 @@ describe("the detail of a run", () => {
   // CR-53-T03
   it("shows no comment link for other failed runs, even if the stored result has one", () => {
     const view = toRunDetailView(
+     PRODUCT,
       job({
         status: "failed",
         errorCode: "llm_auth",
@@ -702,6 +768,7 @@ describe("the detail of a run", () => {
   // CR-53-T03
   it("gives a truncated review whose link is not usable no link and no claim that it is missing", () => {
     const view = toRunDetailView(
+     PRODUCT,
       job({
         status: "failed",
         errorCode: "review_state_truncated",
@@ -717,6 +784,7 @@ describe("the detail of a run", () => {
 
   it("keeps a question and a replaced run's successor", () => {
     const view = toRunDetailView(
+     PRODUCT,
       job({
         command: "ask",
         args: "What does it do?\u001b[0m",
@@ -798,20 +866,31 @@ describe("the call trace of a run", () => {
   it("is in the detail of a run and not in the row of the list", () => {
     const run = job({ reviewKind: "dynamic", result: stored(trace) });
 
-    expect(toRunDetailView(run, "p", NOW).callTrace).toStrictEqual(trace);
-    expect(toRunRowView(run, "p", NOW)).not.toHaveProperty("callTrace");
+    expect(toRunDetailView(PRODUCT, run, "p", NOW).callTrace).toStrictEqual(
+      trace,
+    );
+    expect(toRunRowView(PRODUCT, run, "p", NOW)).not.toHaveProperty(
+      "callTrace",
+    );
   });
 
   it("is null in the detail of a run without one", () => {
     const run = job({ reviewKind: "dynamic", result: { ok: true } });
 
-    expect(toRunDetailView(run, "p", NOW).callTrace).toBeNull();
+    expect(toRunDetailView(PRODUCT, run, "p", NOW).callTrace).toBeNull();
   });
 
   it("shows no cost per call for a run on the operator's key", () => {
     const run = job({ reviewKind: "dynamic", result: stored(trace) });
 
-    const detail = toRunDetailView(run, "p", NOW, (text) => text, true);
+    const detail = toRunDetailView(
+     PRODUCT,
+      run,
+      "p",
+      NOW,
+      (text) => text,
+      true,
+    );
 
     expect(detail.callTrace?.modelCalls.map((call) => call.costUsd)).toEqual([
       null,
@@ -831,8 +910,15 @@ describe("the call trace of a run", () => {
       }),
     });
 
-    const own = toRunDetailView(run, "p", NOW);
-    const managed = toRunDetailView(run, "p", NOW, (text) => text, true);
+    const own = toRunDetailView(PRODUCT, run, "p", NOW);
+    const managed = toRunDetailView(
+     PRODUCT,
+      run,
+      "p",
+      NOW,
+      (text) => text,
+      true,
+    );
 
     expect(own.callTrace?.modelCalls[0]).toMatchObject({
       cacheRead: 123_457,
@@ -858,7 +944,14 @@ describe("the call trace of a run", () => {
       }),
     });
 
-    const managed = toRunDetailView(run, "p", NOW, (text) => text, true);
+    const managed = toRunDetailView(
+     PRODUCT,
+      run,
+      "p",
+      NOW,
+      (text) => text,
+      true,
+    );
 
     expect(managed.callTrace).toBeNull();
     expect(JSON.stringify(managed)).not.toContain("end_turn");
@@ -874,7 +967,12 @@ describe("the detail of a run for a member (#657)", () => {
   it("is the detail of the admin without the log and the call trace", () => {
     const stored = job({ result: { ok: true, logTail: "log text" } });
 
-    const member = toCustomerRunDetailView(stored, "acme/widgets", NOW);
+    const member = toCustomerRunDetailView(
+     PRODUCT,
+      stored,
+      "acme/widgets",
+      NOW,
+    );
 
     expect(member).not.toHaveProperty("log");
     expect(member).not.toHaveProperty("callTrace");
@@ -887,12 +985,19 @@ describe("the detail of a run for a member (#657)", () => {
     const stored = job();
 
     expect(
-      toCustomerRunDetailView(stored, "p", NOW, redact, false, OLD_COMMENT)
-        .reviewText,
+      toCustomerRunDetailView(
+       PRODUCT,
+        stored,
+        "p",
+        NOW,
+        redact,
+        false,
+        OLD_COMMENT,
+      ).reviewText,
     ).toBe("## Review\n\ncalling openrouter/some-model with [redacted]");
     for (const none of [null, "", "  \n "])
       expect(
-        toCustomerRunDetailView(stored, "p", NOW, redact, false, none)
+        toCustomerRunDetailView(PRODUCT, stored, "p", NOW, redact, false, none)
           .reviewText,
       ).toBeNull();
   });
@@ -900,6 +1005,7 @@ describe("the detail of a run for a member (#657)", () => {
   // #657-T04
   it("never names the provider in the review text of a run on the operator's key", () => {
     const view = toCustomerRunDetailView(
+      PRODUCT,
       job(),
       "p",
       NOW,

@@ -5,6 +5,8 @@
 // password rule of every account, stated once as an InfoHint) and the token; this form collects them and
 // shows the reasons. The token comes from the link and is sent as it is; it is never shown or kept. A link
 // that does not work says what happened and the next step, the detail behind a disclosure (#170).
+import { useProductIdentity } from "@/product-identity/context";
+import type { ProductIdentity } from "@/product-identity/identity";
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
@@ -40,12 +42,16 @@ const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,
 };
 
-function describe(code: string, issues: RequestIssue[]): string {
+function describe(
+  product: ProductIdentity,
+  code: string,
+  issues: RequestIssue[],
+): string {
   const password = issues.find((issue) => issue.field === "password");
   if (password && Object.hasOwn(PASSWORD_ERROR_COPY, password.code))
     return PASSWORD_ERROR_COPY[password.code as PasswordErrorCode];
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );
@@ -60,6 +66,7 @@ export function ResetPasswordForm({
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const [password, setPassword] = useState("");
   const [repeat, setRepeat] = useState("");
@@ -129,7 +136,7 @@ export function ResetPasswordForm({
       setInvalidLink(true);
       return;
     }
-    setProblem(describe(result.code, result.issues));
+    setProblem(describe(product, result.code, result.issues));
   }
 
   return (

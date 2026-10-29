@@ -5,6 +5,7 @@
 // result was, in words. A failure shows its class (the sentence of messages.ts) and the detail the server
 // sends back as plain text; the password is in neither, and the page never has it. The result is announced
 // through the polite StatusRegion (#184-T03), so a screen reader hears it without losing focus.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
@@ -35,6 +36,7 @@ export function TestMailPanel({
   /** Only tests pass this. */
   api?: AdminApi;
 }) {
+  const product = useProductIdentity();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
 
@@ -46,7 +48,7 @@ export function TestMailPanel({
     if (!result.ok) {
       setOutcome({
         kind: "failed",
-        text: describeAdminFailure(result.code),
+        text: describeAdminFailure(product, result.code),
         detail: null,
       });
       return;

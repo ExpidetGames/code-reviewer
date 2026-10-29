@@ -14,6 +14,9 @@ import {
   createAdminRunsService,
   ADMIN_RUNS_LIST_LIMIT,
 } from "./runs-service.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const NOW = new Date("2026-10-10T12:10:00.000Z");
 const ID = "6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11";
@@ -105,6 +108,7 @@ describe("the admin's list of runs", () => {
   // #541-T09
   it("names the workspace, the project and the status of every run, without usage or log", async () => {
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: directory(undefined),
       now: () => NOW,
     });
@@ -141,6 +145,7 @@ describe("one run for the admin", () => {
   // #541-T09
   it("has the usage, the cost, the stop reason and the call trace", async () => {
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: directory(stored),
       now: () => NOW,
     });
@@ -163,6 +168,7 @@ describe("one run for the admin", () => {
   // #541-T09
   it("never carries the log, the question or the lease", async () => {
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: directory(stored),
       now: () => NOW,
     });
@@ -192,6 +198,7 @@ describe("one run for the admin", () => {
       }),
     };
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: directory(failed),
       now: () => NOW,
     });
@@ -231,6 +238,7 @@ describe("one run for the admin", () => {
   // #541-T09
   it("shows the cost of a run on the operator's key in full", async () => {
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: directory(stored),
       now: () => NOW,
     });
@@ -247,6 +255,7 @@ describe("one run for the admin", () => {
       job: job({ result: { ok: true, logTail: "" } as never }),
     };
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: directory(without),
       now: () => NOW,
     });
@@ -258,6 +267,7 @@ describe("one run for the admin", () => {
   it("asks the database only for an id that has the shape of one, and has nothing for an unknown run", async () => {
     let asked = 0;
     const service = createAdminRunsService({
+      product: PRODUCT,
       directory: {
         list: async () => ({ runs: [], hasMore: false }),
         get: async () => {

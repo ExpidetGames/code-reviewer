@@ -2,6 +2,7 @@
 
 // The copy for what the setup answers: one sentence per stable code (src/setup/errors.ts), and for
 // the fields of the wizard. The codes are the contract, these sentences are only what the page shows.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   PASSWORD_ERROR_COPY,
   type PasswordErrorCode,
@@ -40,9 +41,12 @@ const FAILURE_COPY: Record<string, string> = {
 };
 
 /** The sentence for a failed call of the code form or the wizard. */
-export function describeSetupFailure(code: string): string {
+export function describeSetupFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );

@@ -4,6 +4,7 @@
 // them into the sentences a person reads (the UI translates codes, never the other way round). Never
 // a value: a hint names what to fix, not what is there.
 import type { LlmConfigIssue, LlmConfigIssueCode } from "../llm/config.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
 export type ConfigNotice = {
@@ -72,6 +73,7 @@ function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
  * default audience is the member: the names of the variables are for the operator, who has to ask for them.
  */
 export function describeConfigNotices(
+  product: ProductIdentity,
   status: ConfigStatus,
   audience: ConfigAudience = "member",
 ): ConfigNotice[] {
@@ -88,8 +90,8 @@ export function describeConfigNotices(
           : "GitHub App settings not valid",
       detail:
         variables.length === 0
-          ? "GitHub is not connected yet. A code-review.com admin connects it under Integrations in the admin portal. Until then repositories cannot be read from GitHub and projects cannot be activated."
-          : `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (a code-review.com admin does that under Integrations in the admin portal).`,
+          ? `GitHub is not connected yet. A ${product.name} admin connects it under Integrations in the admin portal. Until then repositories cannot be read from GitHub and projects cannot be activated.`
+          : `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (a ${product.name} admin does that under Integrations in the admin portal).`,
     });
   }
   // The LLM access is a matter of the workspace now (its own key, `src/llm/`), and its hint is shown by the

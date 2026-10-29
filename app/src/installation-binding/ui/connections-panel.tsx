@@ -5,6 +5,7 @@
 // the one failed call of the page and the busy flag, and lays out the three cards — Installations,
 // Connect and Requests. The buttons only show what the role allows; the routes and the services
 // decide for themselves. Account names come from GitHub: text, never markup.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { goTo } from "../../github-config/ui/api.ts";
@@ -38,6 +39,7 @@ export function ConnectionsPanel({
   api?: BindingApi;
   go?: (url: string) => void;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const defaultApi = useMemo(
     () => browserBindingApi(workspaceSlug),
@@ -57,7 +59,7 @@ export function ConnectionsPanel({
     const result = await call();
     if (!result.ok) {
       setBusy(false);
-      setProblem(describeBindingFailure(result.code));
+      setProblem(describeBindingFailure(product, result.code));
       return;
     }
     go(result.data.url);
@@ -69,7 +71,7 @@ export function ConnectionsPanel({
     setProblem(null);
     const result = await api.disconnect(integrationId);
     setBusy(false);
-    if (!result.ok) setProblem(describeBindingFailure(result.code));
+    if (!result.ok) setProblem(describeBindingFailure(product, result.code));
     router.refresh();
   }
 

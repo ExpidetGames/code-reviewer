@@ -3,6 +3,7 @@
 // Billing: the switch, the payment adapter and the Stripe credentials, the rates and numbers, and the manual credit (#504,
 // ADR 0006). Instance admin only. Opening this page changes nothing and calls nobody; billing stays off until the admin
 // switches it on.
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
 import { BillingPage } from "@/admin/ui/billing-page";
@@ -30,7 +31,7 @@ export default async function AdminBillingPage() {
         {/* Not keyed on the data: the forms keep their sentences while the page's data is refreshed. */}
         <BillingPage
           billing={billing}
-          notice={enablingNotice({
+          notice={enablingNotice(getProductIdentity(), {
             workspaces: billing.workspaces,
             ownKeyWorkspaces: billing.ownKeyWorkspaces,
           })}

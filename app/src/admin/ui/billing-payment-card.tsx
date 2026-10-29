@@ -8,6 +8,7 @@
 // connection check makes one harmless read at Stripe; "Create webhook endpoint" tells Stripe to post its events to this app and
 // saves the signing secret Stripe returns (one that exists already for this app's address is taken over). The server judges
 // every step; the card shows the reason it gets back.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { InfoHint } from "../../components/info-hint.tsx";
@@ -89,6 +90,7 @@ export function BillingPaymentCard({
   billing: BillingView;
   api: BillingApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const { pending, outcome, run } = useBillingRun();
   const [apiKey, setApiKey] = useState("");
@@ -112,7 +114,7 @@ export function BillingPaymentCard({
         ? { kind: "ok", text: "The payment adapter is saved." }
         : {
             kind: "failed",
-            text: describeBillingFailure(result.code, result.status),
+            text: describeBillingFailure(product, result.code, result.status),
             issues: result.issues,
             missing: [],
           };
@@ -133,7 +135,7 @@ export function BillingPaymentCard({
         : {
             kind: "failed",
             text:
-              describeBillingFailure(answer.code, answer.status) +
+              describeBillingFailure(product, answer.code, answer.status) +
               describeStripeDetail(answer.details?.stripe),
             issues: answer.issues,
             missing: [],
@@ -151,7 +153,7 @@ export function BillingPaymentCard({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: [],
           missing: [],
         };
@@ -163,7 +165,7 @@ export function BillingPaymentCard({
         : {
             kind: "failed",
             text:
-              describeBillingFailure(result.data.error) +
+              describeBillingFailure(product, result.data.error) +
               describeStripeDetail(result.data.stripe),
             issues: [],
             missing: [],
@@ -180,7 +182,7 @@ export function BillingPaymentCard({
         return {
           kind: "failed",
           text:
-            describeBillingFailure(result.code, result.status) +
+            describeBillingFailure(product, result.code, result.status) +
             describeStripeDetail(result.details?.stripe),
           issues: [],
           missing: [],

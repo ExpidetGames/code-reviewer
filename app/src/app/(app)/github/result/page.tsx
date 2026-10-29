@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
@@ -24,7 +25,7 @@ export default async function GithubResultPage({
   const { github } = await searchParams;
   const result =
     typeof github === "string" && isBindingResultCode(github)
-      ? describeResultCode(github)
+      ? describeResultCode(getProductIdentity(), github)
       : null;
   const connectionsHref = await connectionsPath();
   return (

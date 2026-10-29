@@ -8,6 +8,8 @@ import { MEMBER_COPY_FORBIDDEN } from "./member-copy-scan.ts";
 import { getProductIdentity } from "../product-identity/current.ts";
 import * as choice from "./model-choice.ts";
 
+const PRODUCT = getProductIdentity();
+
 /** Every string the module exports. */
 function allStrings(): string[] {
   const found: string[] = [];
@@ -56,14 +58,22 @@ describe("the copy of the generic chooser", () => {
   // #433-T08
   it("also holds for the other sentences a member reads about this: the refused writes", () => {
     const sentences = [
-      describeIssue("model", "MODEL_MANAGED_BY_INSTANCE"),
-      describeIssue("dynamicModel", "MODEL_MANAGED_BY_INSTANCE"),
-      describeIssue("provider", "MODEL_MANAGED_BY_INSTANCE"),
-      describeIssue("catalogEntryDiff", "CATALOG_ENTRY_UNKNOWN"),
-      describeIssue("catalogEntryDiff", "CATALOG_ENTRY_NOT_RELEASED"),
-      describeIssue("catalogEntryDynamic", "CATALOG_ENTRY_KIND_MISMATCH"),
-      describeIssue("catalogEntryDynamic", "CATALOG_ENTRY_NOT_ALLOWED"),
-      describeErrorCode("managed_tier_unavailable").text,
+      describeIssue(PRODUCT, "model", "MODEL_MANAGED_BY_INSTANCE"),
+      describeIssue(PRODUCT, "dynamicModel", "MODEL_MANAGED_BY_INSTANCE"),
+      describeIssue(PRODUCT, "provider", "MODEL_MANAGED_BY_INSTANCE"),
+      describeIssue(PRODUCT, "catalogEntryDiff", "CATALOG_ENTRY_UNKNOWN"),
+      describeIssue(PRODUCT, "catalogEntryDiff", "CATALOG_ENTRY_NOT_RELEASED"),
+      describeIssue(
+        PRODUCT,
+        "catalogEntryDynamic",
+        "CATALOG_ENTRY_KIND_MISMATCH",
+      ),
+      describeIssue(
+        PRODUCT,
+        "catalogEntryDynamic",
+        "CATALOG_ENTRY_NOT_ALLOWED",
+      ),
+      describeErrorCode(PRODUCT, "managed_tier_unavailable").text,
     ];
     // "the AI models" and "no AI model was used" say that a model exists, not which one.
     const forbidden = [

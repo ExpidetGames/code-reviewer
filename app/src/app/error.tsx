@@ -9,7 +9,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { Button } from "@/components/button";
 import { ERROR_COPY, SystemPage } from "@/components/system-page";
-import { getProductIdentity } from "@/product-identity/current";
+import { useProductIdentity } from "@/product-identity/context";
 
 export default function ErrorPage({
   error,
@@ -18,6 +18,7 @@ export default function ErrorPage({
   error: Error & { digest?: string };
   retry: () => void;
 }) {
+  const product = useProductIdentity();
   useEffect(() => {
     // The browser console of the person is where a developer looks; the server has logged it already.
     console.error(error);
@@ -25,7 +26,7 @@ export default function ErrorPage({
 
   return (
     <SystemPage
-      product={getProductIdentity()}
+      product={product}
       mark={
         <WarningIcon
           aria-hidden="true"

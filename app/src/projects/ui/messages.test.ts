@@ -11,6 +11,9 @@ import {
   describeSyncProblem,
   SYNC_PROBLEM_CODES,
 } from "./messages.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the copy for a failed project action", () => {
   // CR-34-T04
@@ -19,20 +22,20 @@ describe("the copy for a failed project action", () => {
     ...SYNC_ERROR_CODES,
     ...TRANSPORT_ERROR_CODES,
   ])("has a sentence for %s that is not the code itself", (code) => {
-    const text = describeFailure(code);
+    const text = describeFailure(PRODUCT, code);
 
     expect(text).not.toBe("");
     expect(text).not.toContain(code);
   });
 
   it("explains a repository that is no longer available", () => {
-    expect(describeFailure("PROJECT_REPOSITORY_UNAVAILABLE")).toMatch(
+    expect(describeFailure(PRODUCT, "PROJECT_REPOSITORY_UNAVAILABLE")).toMatch(
       /no longer available/i,
     );
   });
 
   it("falls back to a generic sentence for a code it does not know", () => {
-    expect(describeFailure("SOMETHING_NEW")).toBe(
+    expect(describeFailure(PRODUCT, "SOMETHING_NEW")).toBe(
       "Something went wrong. Reload the page and try again.",
     );
   });

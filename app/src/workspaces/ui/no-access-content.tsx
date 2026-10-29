@@ -10,6 +10,7 @@
 //
 // Both instance modes render the action in the same card, so the slot is the same whether it holds the
 // form or the sentence (#171).
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import type { PendingInvitation } from "../invitations.ts";
@@ -18,12 +19,14 @@ import { CreateWorkspaceForm } from "./create-workspace-form.tsx";
 import { PendingInvitations } from "./pending-invitations.tsx";
 
 export function NoAccessContent({
+  product,
   multiTenant,
   pending,
   isInstanceAdmin,
   api,
   open,
 }: {
+  product: ProductIdentity;
   multiTenant: boolean;
   pending: PendingInvitation[];
   isInstanceAdmin: boolean;
@@ -51,7 +54,7 @@ export function NoAccessContent({
       </Card>
       {isInstanceAdmin ? (
         <p className="text-sm text-muted-foreground">
-          You run code-review.com:{" "}
+          You run {product.name}:{" "}
           <Link href="/admin" className="underline underline-offset-4">
             open the admin portal
           </Link>

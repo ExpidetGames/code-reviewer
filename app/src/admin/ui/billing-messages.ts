@@ -3,6 +3,7 @@
 // The copy for what the billing data routes answer: one sentence per stable code (src/billing/admin-errors.ts), per refused
 // field and per item that keeps billing from being switched on (src/billing/readiness.ts). The codes are the contract, these
 // sentences are only what the page shows.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   CROSS_SITE_REQUEST,
   INVALID_VALUES,
@@ -77,11 +78,12 @@ const FAILURE_COPY: Record<string, string> = {
  * (#690).
  */
 export function describeBillingFailure(
+  product: ProductIdentity,
   code: string,
   status?: number | null,
 ): string {
   return (
-    describeTransportFailure(code, status) ??
+    describeTransportFailure(product, code, status) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );

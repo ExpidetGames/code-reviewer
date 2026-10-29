@@ -7,6 +7,7 @@
 // Every address in it is made from the configured public URL of the instance, never from a request
 // header: the manifest decides where GitHub delivers webhooks and sends the person back, so a forged
 // `Host` header must not be able to change it.
+import type { ProductIdentity } from "../../../product-identity/identity.ts";
 import { JOB_TOKEN_PERMISSIONS } from "./job-access.ts";
 
 /** The paths of the app that GitHub is told about. */
@@ -76,6 +77,8 @@ export type GithubAppManifest = {
 export const APP_NAME_MAX_LENGTH = 34;
 
 export type ManifestInput = {
+  /** Who the App is for: what it says about itself on GitHub (`githubAppDescription`). */
+  product: ProductIdentity;
   /** The configured public address of the instance (`BETTER_AUTH_URL`), an origin without a path. */
   publicUrl: string;
   /** Multi-tenant instances create a public App (anybody may install it), single-tenant a private one. */
@@ -84,6 +87,7 @@ export type ManifestInput = {
 };
 
 export function buildAppManifest({
+  product,
   publicUrl,
   tenancy,
   name,
@@ -100,7 +104,7 @@ export function buildAppManifest({
     callback_urls: [`${origin}${GITHUB_APP_PATHS.signInCallback}`],
     setup_url: `${origin}${GITHUB_APP_PATHS.installationSetup}`,
     setup_on_update: true,
-    description: "Automatic pull request reviews by code-review.com.",
+    description: product.githubAppDescription,
     public: tenancy === "multi",
     request_oauth_on_install: false,
     default_events: [...SUBSCRIBED_EVENTS],
@@ -109,17 +113,21 @@ export function buildAppManifest({
 }
 
 /**
- * The name the form starts with: "Code Reviewer" and the host of the instance, cut to what GitHub
- * accepts. The admin can change it before creating the App.
+ * The name the form starts with: the App name of the product (`githubAppName`) and the host of the deployment, cut to what
+ * GitHub accepts. The admin can change it before creating the App.
  */
-export function suggestedAppName(publicUrl: string): string {
+export function suggestedAppName(
+  product: ProductIdentity,
+  publicUrl: string,
+): string {
   let host = "";
   try {
     host = new URL(publicUrl).hostname;
   } catch {
     // No usable address: the plain name.
   }
-  const name = host === "" ? "Code Reviewer" : `Code Reviewer ${host}`;
+  const base = product.githubAppName;
+  const name = host === "" ? base : `${base} ${host}`;
   return name.slice(0, APP_NAME_MAX_LENGTH).trim();
 }
 

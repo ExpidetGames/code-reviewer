@@ -9,6 +9,7 @@
 // resolve; the README and the other deployment guides link to the guide; and none of the public files holds an account
 // id, a snapshot id, a digest, a secret shape, a price, a company name or a real host name. What only a real deployment
 // can show is listed in the guide's section 8 and stays manual.
+import { getProductIdentity } from "../product-identity/current.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +37,7 @@ import {
 } from "../dispatch/sweep-settings.ts";
 import { LLM_DEFAULT_VARIABLES } from "../llm/config.ts";
 import { operatorTokenProblem } from "../operator-api/token.ts";
-import { ERROR_COPY } from "../runs/error-copy.ts";
+import { errorCopy } from "../runs/error-copy.ts";
 import { SETUP_CODE_TTL_MS } from "../setup/code-store.ts";
 import { DEBOUNCE_VARIABLE } from "../webhooks/debounce-config.ts";
 
@@ -721,8 +722,9 @@ describe("the hosted deployment guide as a procedure", () => {
 
   // #333-T04
   it("explains codes that exist: the two on the Runs pages have a text, and no code of the retired per-instance probe is left", () => {
-    expect(ERROR_COPY).toHaveProperty("dispatch_unavailable");
-    expect(ERROR_COPY).toHaveProperty("launch_failed");
+    const copy = errorCopy(getProductIdentity());
+    expect(copy).toHaveProperty("dispatch_unavailable");
+    expect(copy).toHaveProperty("launch_failed");
     // #479: the Dispatcher runs no probe on a dispatch, so `capability_not_proven` is not raised any more.
     expect(guide).not.toContain("capability_not_proven");
     expect(guide).not.toContain("withCapabilityProbe");

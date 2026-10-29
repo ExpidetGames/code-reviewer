@@ -6,6 +6,7 @@
 // prove who owns an account, the reason is one Alert — never a stack of sentences. The list of
 // installations the person may choose from and the "how it works" explanation live here too. Account
 // names come from GitHub: text, truncated, never markup.
+import { useProductIdentity } from "@/product-identity/context";
 import { useId } from "react";
 import { Button } from "../../components/button.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
@@ -18,7 +19,7 @@ import {
 } from "../../components/ui/card.tsx";
 import type { ConnectAvailability } from "../service.ts";
 import type { ConnectionsPageData } from "./connections-page.tsx";
-import { AVAILABILITY_COPY, CONNECT_HELP_COPY } from "./messages.ts";
+import { availabilityCopy, CONNECT_HELP_COPY } from "./messages.ts";
 
 /** The quiet tone of the one reason Alert: a hard block is a warning, an approval note is info. */
 function reasonVariant(
@@ -46,6 +47,7 @@ export function ConnectCard({
   onStartPicker: () => void;
   onChoose: (picker: string, installationId: string) => void;
 }) {
+  const product = useProductIdentity();
   const titleId = useId();
   const reasonId = `${useId()}-reason`;
   const blocked = connect !== "available" && connect !== "needs_approval";
@@ -64,7 +66,9 @@ export function ConnectCard({
       <CardContent className="flex flex-col gap-4">
         {connect === "available" ? null : (
           <Alert id={reasonId} variant={reasonVariant(connect)} role="note">
-            <AlertDescription>{AVAILABILITY_COPY[connect]}</AlertDescription>
+            <AlertDescription>
+              {availabilityCopy(product)[connect]}
+            </AlertDescription>
           </Alert>
         )}
         <div className="flex flex-wrap gap-2">

@@ -27,6 +27,9 @@ import {
   noWorkspaceGates,
   openGates,
 } from "../../src/test-support/open-gates.ts";
+import { getProductIdentity } from "../../src/product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -86,6 +89,7 @@ async function startApp() {
   });
 
   const service = createRunsService({
+    product: PRODUCT,
     runs: createRunsRepository(
       harness.db,
       await defaultWorkspaceId(harness.db),

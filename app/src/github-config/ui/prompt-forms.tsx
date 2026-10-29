@@ -5,6 +5,7 @@
 // shows the callback address to register in the App's settings and takes the client id and secret (checked
 // with GitHub, stored encrypted); and a question GitHub's API cannot answer: can the App only be installed
 // on its own account? (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.4 and 2.11.)
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
@@ -33,6 +34,7 @@ export function UserAuthorizationForm({
   /** Only tests pass this. */
   api?: GithubApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const router = useRouter();
   const [clientId, setClientId] = useState(
@@ -51,7 +53,7 @@ export function UserAuthorizationForm({
     if (!result.ok) {
       setStatus({
         kind: "failed",
-        text: describeGithubFailure(result.code),
+        text: describeGithubFailure(product, result.code),
         issues: result.issues,
       });
       return;
@@ -154,6 +156,7 @@ export function PrivateAppForm({
   /** Only tests pass this. */
   api?: GithubApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<Status>(null);
@@ -166,7 +169,7 @@ export function PrivateAppForm({
     if (!result.ok) {
       setStatus({
         kind: "failed",
-        text: describeGithubFailure(result.code),
+        text: describeGithubFailure(product, result.code),
         issues: result.issues,
       });
       return;

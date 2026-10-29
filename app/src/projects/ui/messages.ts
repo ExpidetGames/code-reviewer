@@ -4,6 +4,7 @@
 // The routes answer with stable codes; this is where a code becomes a sentence (the UI translates
 // codes, never the other way round). A code written out in a sentence is a bug, so an unknown code
 // gets a generic one.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import type { SyncErrorCode } from "../../integrations/sync/errors.ts";
 import {
   CROSS_SITE_REQUEST_RELOAD_PAGE,
@@ -78,9 +79,12 @@ function hasCopy(code: string): code is keyof typeof FAILURE_COPY {
 }
 
 /** The sentence for the code a route answered with (or a transport code). */
-export function describeFailure(code: string): string {
+export function describeFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   if (hasCopy(code)) return FAILURE_COPY[code];
-  return describeTransportFailure(code) ?? GENERIC_FAILURE;
+  return describeTransportFailure(product, code) ?? GENERIC_FAILURE;
 }
 
 const GENERIC_SYNC_PROBLEM = "GitHub could not be read.";

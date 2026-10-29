@@ -10,6 +10,7 @@
 // Untrusted data: the title, branches and description of the pull request are never read into the text (the text
 // takes the code, the period and the instance's link), and a pull request is looked at only for being open and,
 // for an automatic review, not a draft.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type {
   RefusalNoticesRepository,
   StoredNotice,
@@ -82,6 +83,8 @@ export type RefusalNoticeService = {
 };
 
 export type RefusalNoticeDeps = {
+  /** Who the notice speaks for: it names the product when nobody in the workspace can act. */
+  product: ProductIdentity;
   repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
   integrations: (workspaceId: string) => Pick<IntegrationsRepository, "get">;
   workspaces: Pick<WorkspacesRepository, "get">;
@@ -232,7 +235,7 @@ export function createRefusalNoticeService(
       workspace === undefined ? null : await noticeLink(code, workspace.slug);
     try {
       await provider.postPullRequestNotice(integration, repo, prNumber, {
-        body: noticeBody(code, periodStart, link),
+        body: noticeBody(deps.product, code, periodStart, link),
         marker: noticeMarker(periodStart),
         // A later attempt may follow one that posted and then stopped before it was noted: look first.
         ...(notice.attempts > 1

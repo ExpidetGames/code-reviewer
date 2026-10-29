@@ -310,29 +310,56 @@ export function checkMigrationIsolation(graph: FileGraph): string[] {
   return problems.sort();
 }
 
-/** The value that says who the product is (#715, cut 7); the type next to it (`identity.ts`) is what the code that writes the words takes. */
-const PRODUCT_IDENTITY_VALUE = "product-identity/code-review-com.ts";
-/** The one file that picks the identity of the deployment: every composition root gets the value from its `getProductIdentity()`. */
+/** The values that say who each product is (#715, cut 7; #740); the type next to them (`identity.ts`) is what the code that writes the words takes. */
+const PRODUCT_IDENTITY_VALUES: readonly string[] = [
+  "product-identity/code-review-com.ts",
+  "product-identity/factory.ts",
+];
+/** The table of the products: the only file that imports the values, keyed by the product id (`identityFor`). */
+const PRODUCT_IDENTITY_TABLE = "product-identity/identities.ts";
+/** The files that may import the table: the selector of the server, the provider of the client, the identity of the build. */
+const PRODUCT_IDENTITY_TABLE_USERS: readonly string[] = [
+  "product-identity/current.ts",
+  "product-identity/context.tsx",
+  "product-identity/public.ts",
+];
+/** The one file that reads the environment and picks the identity of the deployment: every composition root gets the value from its `getProductIdentity()`. */
 export const PRODUCT_IDENTITY_SELECTOR = "product-identity/current.ts";
+const PRODUCT_IDENTITY_TYPE = "product-identity/identity.ts";
+/** The one file that takes a `ProductIdentity` and also calls the selector: `createAuth` is the parameterised factory, `getAuth` its composition root, in one module. */
+const SELECTOR_AND_TYPE_EXCEPTIONS: readonly string[] = ["auth/auth.ts"];
 
 /**
- * The rule for the brand (#715, cut 7). A module that writes a word of the product takes a `ProductIdentity` as a parameter
- * and never imports the product's value, so it can move to a package that other products use. The composition roots (a route,
- * a page, a `shared.ts`, the singletons of `auth/`) get the identity from `getProductIdentity()` in
- * `product-identity/current.ts`, and that selector is the only file that imports `product-identity/code-review-com.ts`:
- * choosing the identity per deployment later changes that one file. `identity.ts` imports nothing.
+ * The rule for the brand (#715, cut 7; #740). A module that writes a word of the product takes a `ProductIdentity` as a parameter
+ * and never imports a product's value or the selector, so it can move to a package that other products use. The composition
+ * roots (a route, a page, a `shared.ts`, the singletons of `auth/`) get the identity from `getProductIdentity()` in
+ * `product-identity/current.ts`, which reads `PRODUCT_ID`; the table of the products (`identities.ts`) is the only file that imports the
+ * values, and only the selector, the provider and the identity of the build import the table. `identity.ts` imports nothing.
  */
 export function checkProductIdentityImports(graph: FileGraph): string[] {
   const problems: string[] = [];
   for (const [file, imports] of graph) {
+    for (const value of PRODUCT_IDENTITY_VALUES)
+      if (imports.has(value) && file !== PRODUCT_IDENTITY_TABLE)
+        problems.push(
+          `${file} imports ${value}: get the identity from getProductIdentity() in ${PRODUCT_IDENTITY_SELECTOR} (a composition root) or take a ProductIdentity as a parameter (any other module); only the table of the products (${PRODUCT_IDENTITY_TABLE}) imports the values`,
+        );
     if (
-      imports.has(PRODUCT_IDENTITY_VALUE) &&
-      file !== PRODUCT_IDENTITY_SELECTOR
+      imports.has(PRODUCT_IDENTITY_TABLE) &&
+      !PRODUCT_IDENTITY_TABLE_USERS.includes(file)
     )
       problems.push(
-        `${file} imports ${PRODUCT_IDENTITY_VALUE}: get the identity from getProductIdentity() in ${PRODUCT_IDENTITY_SELECTOR} (a composition root) or take a ProductIdentity as a parameter (any other module); only the selector imports the value`,
+        `${file} imports ${PRODUCT_IDENTITY_TABLE}: get the identity from getProductIdentity() in ${PRODUCT_IDENTITY_SELECTOR} (a composition root) or take a ProductIdentity as a parameter (any other module); only ${PRODUCT_IDENTITY_TABLE_USERS.join(", ")} look the table up`,
       );
-    if (file === "product-identity/identity.ts" && imports.size > 0)
+    if (
+      imports.has(PRODUCT_IDENTITY_SELECTOR) &&
+      imports.has(PRODUCT_IDENTITY_TYPE) &&
+      !SELECTOR_AND_TYPE_EXCEPTIONS.includes(file)
+    )
+      problems.push(
+        `${file} imports ${PRODUCT_IDENTITY_SELECTOR} and takes a ProductIdentity: a module that takes the identity gets it from its caller and does not pick one itself`,
+      );
+    if (file === PRODUCT_IDENTITY_TYPE && imports.size > 0)
       problems.push(
         `${file} imports ${[...imports].sort().join(", ")}: the type of the identity imports nothing, so it can move to a package as it is`,
       );

@@ -5,6 +5,7 @@
 // the real cost of our key, a model or a provider, and the hidden hourly brake is never mentioned. The maintainer's decisions
 // show in the copy: prepaid US dollars, for businesses; a top-up of 10 to 500 US dollars; no auto-recharge; credit never expires
 // and is not refunded by us; a balance can go below zero after a review and then blocks new reviews until it is topped up.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import {
   CROSS_SITE_REQUEST,
   INVALID_VALUES,
@@ -189,9 +190,12 @@ const FAILURE_COPY: Record<string, string> = {
 };
 
 /** The sentence for a stable code of a billing route of a workspace, or a transport failure. */
-export function describeBillingFailure(code: string): string {
+export function describeBillingFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );

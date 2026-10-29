@@ -25,7 +25,7 @@ import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
 import {
-  VERDICT_COMMON_NOTE,
+  verdictCommonNote,
   VERDICT_KIND_NOTES,
 } from "./review-verdict-fieldset.tsx";
 import { getProductIdentity } from "../../product-identity/current.ts";
@@ -136,7 +136,7 @@ describe("the Review verdict card", () => {
       screen.getByRole("heading", { level: 2, name: "Review verdict" }),
     ).toBeTruthy();
     expect(
-      screen.getByText(new RegExp(VERDICT_COMMON_NOTE.slice(0, 30))),
+      screen.getByText(new RegExp(verdictCommonNote(getProductIdentity()).slice(0, 30))),
     ).toBeTruthy();
   });
 

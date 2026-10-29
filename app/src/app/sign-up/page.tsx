@@ -43,7 +43,7 @@ async function SignUpOrNotice({
       <AuthCard product={getProductIdentity()} title={TITLE}>
         <Alert variant="warning">
           <AlertDescription>
-            {describeSignUpFailure(availability.error)}
+            {describeSignUpFailure(getProductIdentity(), availability.error)}
           </AlertDescription>
         </Alert>
         <Link className="text-sm underline underline-offset-4" href={signIn}>

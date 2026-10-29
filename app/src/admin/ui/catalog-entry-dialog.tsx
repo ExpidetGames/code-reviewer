@@ -6,6 +6,7 @@
 // catalog-messages.ts turns into a sentence next to its field, and the focus moves to the first field that was refused
 // (rulebook R20). Changing the model behind a released entry asks first, with the number of projects that use it, as the
 // server counted it when it refused the first attempt (decision C6); the dialog never decides that on its own.
+import { useProductIdentity } from "@/product-identity/context";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -88,6 +89,7 @@ export function EntryDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const focusRef = useFocusFirstError();
   const [name, setName] = useState(entry?.name ?? "");
@@ -124,7 +126,9 @@ export function EntryDialog({
       FIELDS.some((field) => field === issue.field),
     );
     setIssues(own);
-    setFormError(own.length === 0 ? describeCatalogFailure(code) : null);
+    setFormError(
+      own.length === 0 ? describeCatalogFailure(product, code) : null,
+    );
     const first = FIELDS.find((field) =>
       own.some((issue) => issue.field === field),
     );
@@ -193,15 +197,18 @@ export function EntryDialog({
         kind: "failed",
         text:
           issue === undefined
-            ? describeCatalogFailure(result.code)
-            : describeCatalogIssue(issue),
+            ? describeCatalogFailure(product, result.code)
+            : describeCatalogIssue(product, issue),
       });
       return;
     }
     setChecked(
       result.data.ok
         ? { kind: "ok", verified: result.data.verified }
-        : { kind: "failed", text: describeCatalogFailure(result.data.error) },
+        : {
+            kind: "failed",
+            text: describeCatalogFailure(product, result.data.error),
+          },
     );
   }
 
@@ -217,7 +224,7 @@ export function EntryDialog({
     if (issue === undefined) return null;
     return (
       <FieldError id={`${ids}-${field}-error`}>
-        {describeCatalogIssue(issue)}
+        {describeCatalogIssue(product, issue)}
       </FieldError>
     );
   }
@@ -232,7 +239,7 @@ export function EntryDialog({
             {entry === null ? "Add a model" : `Edit ${entry.name}`}
           </DialogTitle>
           <DialogDescription>
-            An entry is what members of a workspace billed via code-review.com
+            An entry is what members of a workspace billed via {product.name}
             choose from. They see its name, description and the name of its
             provider; the model stays with you.
           </DialogDescription>

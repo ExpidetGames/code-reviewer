@@ -3,6 +3,7 @@
 // The words of the notice a pull request gets when a review is refused (#281). Fixed sentences, one set per
 // code: nothing in them comes from the pull request, and none says an amount, a figure, a reason or a name of
 // a model. The notice module (src/refusal-notices/) puts them together; nothing else writes them.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 
 /** The first line of every notice. */
 export const NOTICE_LEAD = "No review ran for this change.";
@@ -82,5 +83,5 @@ export const NOTICE_TRY_AGAIN_LATER = "Please try again later.";
  */
 export const NOTICE_BILLING_SETUP_INCOMPLETE =
   "Reviews cannot start because the billing setup is not complete.";
-export const NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE =
-  "Please contact whoever runs code-review.com.";
+export const noticeAskWhoeverRuns = (product: ProductIdentity): string =>
+  `Please contact whoever runs ${product.name}.`;

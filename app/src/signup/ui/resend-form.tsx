@@ -2,6 +2,7 @@
 
 "use client";
 // Asks for a new verification link. The answer is the same for every address, and so is the copy.
+import { useProductIdentity } from "@/product-identity/context";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
 import { StatusRegion } from "@/components/status-region";
@@ -20,6 +21,7 @@ export function ResendForm({
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const [email, setEmail] = useState(initialEmail);
   const [pending, setPending] = useState(false);
@@ -42,7 +44,7 @@ export function ResendForm({
       setSent(true);
       return;
     }
-    setProblem(describeSignUpFailure(result.code, result.issues));
+    setProblem(describeSignUpFailure(product, result.code, result.issues));
   }
 
   return (

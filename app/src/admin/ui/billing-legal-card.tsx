@@ -5,6 +5,7 @@
 // of a workspace points to the terms, and billing cannot run on Stripe without that link. The privacy link is optional and is
 // shown next to it. An https address of a public host; the server judges it, the page shows the sentence it gets back. A link
 // can be changed while billing is on; the terms link of a Stripe setup that is on cannot be removed.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -37,6 +38,7 @@ export function BillingLegalCard({
   billing: BillingView;
   api: BillingApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const { pending, outcome, run } = useBillingRun();
   const [draft, setDraft] = useState<Draft>({
@@ -61,7 +63,7 @@ export function BillingLegalCard({
         ? { kind: "ok", text: "Saved." }
         : {
             kind: "failed",
-            text: describeBillingFailure(result.code, result.status),
+            text: describeBillingFailure(product, result.code, result.status),
             issues: result.issues,
             missing: [],
           };

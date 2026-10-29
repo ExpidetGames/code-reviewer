@@ -22,6 +22,7 @@ import {
   describeErrorCode,
   type ReasonDescription,
 } from "./error-copy.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { runDurationMs } from "./run-duration.ts";
 import type { RunPriceView } from "../workspace-billing/view.ts";
 
@@ -302,18 +303,19 @@ export type RunRowSource = Pick<
   | "errorCode"
 >;
 
-function problemOf(job: RunRowSource): string | null {
+function problemOf(product: ProductIdentity, job: RunRowSource): string | null {
   if (job.status === "failed" || job.status === "cancelled") {
     return job.errorCode === null
       ? job.status === "failed"
         ? "The run failed without saying why."
         : null
-      : describeErrorCode(job.errorCode).text;
+      : describeErrorCode(product, job.errorCode).text;
   }
   return null;
 }
 
 export function toRunRowView(
+  product: ProductIdentity,
   job: RunRowSource,
   project: string,
   now: Date,
@@ -337,11 +339,12 @@ export function toRunRowView(
       { status: job.status, startedAt, finishedAt: job.finishedAt },
       now,
     ),
-    problem: problemOf(job),
+    problem: problemOf(product, job),
   };
 }
 
 export function toRunDetailView(
+  product: ProductIdentity,
   job: Job,
   project: string,
   now: Date,
@@ -366,8 +369,8 @@ export function toRunDetailView(
   const error =
     job.errorCode === null
       ? null
-      : describeErrorCode(job.errorCode, stoppedEarly);
-  const row = toRunRowView(job, project, now);
+      : describeErrorCode(product, job.errorCode, stoppedEarly);
+  const row = toRunRowView(product, job, project, now);
   return {
     ...row,
     problem:
@@ -381,7 +384,7 @@ export function toRunDetailView(
     errorCodeKnown: error?.known ?? false,
     errorReason:
       job.status === "failed" && stored.errorReason !== null
-        ? describeCheckoutReason(stored.errorReason)
+        ? describeCheckoutReason(product, stored.errorReason)
         : null,
     commentUrl,
     commentMissing: job.status === "succeeded" && commentUrl === null,
@@ -401,6 +404,7 @@ export function toRunDetailView(
  * posted. The text is cleaned and redacted like the log, and on the operator's key it never names its provider.
  */
 export function toCustomerRunDetailView(
+  product: ProductIdentity,
   job: Job,
   project: string,
   now: Date,
@@ -409,7 +413,14 @@ export function toCustomerRunDetailView(
   reviewComment: string | null = null,
 ): CustomerRunDetailView {
   // Left out here, so neither is ever part of what a member's browser receives.
-  const full = toRunDetailView(job, project, now, redact, onManagedKey);
+  const full = toRunDetailView(
+    product,
+    job,
+    project,
+    now,
+    redact,
+    onManagedKey,
+  );
   const detail = Object.fromEntries(
     Object.entries(full).filter(
       ([key]) => key !== "log" && key !== "callTrace",

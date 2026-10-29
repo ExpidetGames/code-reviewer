@@ -6,6 +6,7 @@
 //
 // `llmAccessAttention` builds the notice as data, so a page can merge it into its one "Needs attention"
 // strip (#173) instead of rendering a second notice region; `LlmAccessNotice` renders it on its own.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import Link from "next/link";
 import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { NeedsAttention } from "../../components/needs-attention.tsx";
@@ -14,10 +15,12 @@ import type { WorkspaceLlmSummary } from "../assemble.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 
 export function llmAccessAttention({
+  product,
   workspaceSlug,
   summary,
   canManage,
 }: {
+  product: ProductIdentity;
   workspaceSlug: string;
   summary: WorkspaceLlmSummary;
   canManage: boolean;
@@ -32,7 +35,7 @@ export function llmAccessAttention({
       title: "LLM is not available",
       detail: (
         <>
-          Reviews of this workspace cannot run right now: code-review.com cannot
+          Reviews of this workspace cannot run right now: {product.name} cannot
           set up the LLM at the moment. Contact the administrator.
         </>
       ),
@@ -62,6 +65,7 @@ export function llmAccessAttention({
 }
 
 export function LlmAccessNotice(props: {
+  product: ProductIdentity;
   workspaceSlug: string;
   summary: WorkspaceLlmSummary;
   canManage: boolean;

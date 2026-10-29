@@ -6,6 +6,7 @@
 // sits outside that form, and a visible stepper says which step of three this is (#172). The server
 // judges every answer (and says so with a code per field); this form only collects them, keeps them
 // while the person goes back and forth, and shows the reasons.
+import { useProductIdentity } from "@/product-identity/context";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/button.tsx";
 import { HelpDisclosure } from "@/components/help-disclosure.tsx";
@@ -215,6 +216,7 @@ export function Wizard({
   api?: SetupApi;
   onDone?: (redirectTo: string) => void;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const headingId = `${ids}-heading`;
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -297,7 +299,7 @@ export function Wizard({
       }
       return;
     }
-    setProblem(describeSetupFailure(result.code));
+    setProblem(describeSetupFailure(product, result.code));
   }
 
   if (step === 1)

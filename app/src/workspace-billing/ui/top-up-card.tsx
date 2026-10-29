@@ -7,6 +7,7 @@
 //
 // The amount is typed in dollars and sent as whole cents; the server judges it again (10 to 500 dollars). One attempt is one
 // intent id, made here and kept until an attempt fails, so a repeated click is the same payment and never two.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { Checkbox } from "../../components/ui/checkbox.tsx";
@@ -61,6 +62,7 @@ export function TopUpCard({
   /** The operator's privacy statement, when the instance has set a link to it. */
   privacyHref: string | null;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const { pending, outcome, run } = useAction();
   const [preset, setPreset] = useState<number>(DEFAULT_PRESET);
@@ -101,15 +103,17 @@ export function TopUpCard({
         ? { ok: true as const, cents: preset * 100 }
         : parseTopUpCents(custom);
     if (!amount.ok) {
-      setLocal(describeBillingFailure(amount.error));
+      setLocal(describeBillingFailure(product, amount.error));
       return;
     }
     if (needsProfile) {
-      setLocal(describeBillingFailure("profile_required"));
+      setLocal(describeBillingFailure(product, "profile_required"));
       return;
     }
     if (needsConfirmation && !confirmed) {
-      setLocal(describeBillingFailure("business_confirmation_required"));
+      setLocal(
+        describeBillingFailure(product, "business_confirmation_required"),
+      );
       return;
     }
     void run(
@@ -126,7 +130,7 @@ export function TopUpCard({
             intentId.current = crypto.randomUUID();
           return {
             kind: "failed",
-            text: describeBillingFailure(result.code),
+            text: describeBillingFailure(product, result.code),
             issues: result.issues,
           };
         }
@@ -237,7 +241,7 @@ export function TopUpCard({
           ) : null}
           {needsProfile ? (
             <p className="text-sm text-muted-foreground">
-              {describeBillingFailure("profile_required")}
+              {describeBillingFailure(product, "profile_required")}
             </p>
           ) : null}
           {problem === null ? null : <FieldError>{problem}</FieldError>}

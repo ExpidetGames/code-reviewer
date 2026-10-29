@@ -15,6 +15,7 @@
 //
 // Every call that makes the server talk to GitHub is limited per admin and for the instance, in the shared
 // `rate_limits` table. Nothing here logs a secret, a code or a response body, and no answer contains one.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { secondsLeft } from "../auth/sign-in-limit.ts";
 import type { RateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import {
@@ -158,6 +159,8 @@ export type GithubConfigService = {
 };
 
 export type GithubConfigServiceOptions = {
+  /** Who the App is for: its suggested name and its description on GitHub. */
+  product: ProductIdentity;
   credentials: GithubCredentialStore;
   signedStates: SignedStates;
   rateLimits: RateLimitsRepository;
@@ -192,6 +195,7 @@ function secretView(state: { state: string }): SecretView {
 }
 
 export function createGithubConfigService({
+  product,
   credentials,
   signedStates,
   rateLimits,
@@ -475,7 +479,7 @@ export function createGithubConfigService({
         return invalid([{ field: "", code: "github_invalid" }]);
       const issues: SetupIssue[] = [];
 
-      let name = suggestedAppName(publicUrl);
+      let name = suggestedAppName(product, publicUrl);
       if (body.name !== undefined && body.name !== null && body.name !== "") {
         if (
           typeof body.name !== "string" ||
@@ -525,6 +529,7 @@ export function createGithubConfigService({
 
       const currentTenancy = await tenancy();
       const manifest = buildAppManifest({
+        product,
         publicUrl,
         tenancy: currentTenancy,
         name,

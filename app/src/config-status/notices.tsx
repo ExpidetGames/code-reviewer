@@ -4,19 +4,22 @@
 // configuration is complete. The text comes from `describeConfigNotices`, so it names variables (for the
 // instance admin only) and never values. On the component kit (#185): the tone maps to the shadcn
 // `Alert` variants, an error is the assertive role and a warning the polite one.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { describeConfigNotices } from "./notices.ts";
 import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
 export function ConfigNotices({
+  product,
   status,
   audience = "member",
 }: {
+  product: ProductIdentity;
   status: ConfigStatus;
   /** The instance admin reads which variables are wrong; everybody else only that a part is not set up. */
   audience?: ConfigAudience;
 }) {
-  const notices = describeConfigNotices(status, audience);
+  const notices = describeConfigNotices(product, status, audience);
   if (notices.length === 0) return null;
   return (
     <section

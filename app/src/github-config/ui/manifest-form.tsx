@@ -7,6 +7,7 @@
 // flow is one call to the data route; the answer is the manifest and the address of GitHub's creation page,
 // which carries a signed, single-use state bound to this session. The manifest is then posted to GitHub by
 // the browser, as GitHub documents it.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { FieldError } from "../../components/ui/field.tsx";
@@ -35,6 +36,7 @@ export function ManifestForm({
   api?: GithubApi;
   post?: (postUrl: string, manifest: string) => void;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const [name, setName] = useState(suggestedName);
   const [organization, setOrganization] = useState("");
@@ -53,7 +55,7 @@ export function ManifestForm({
     if (!result.ok) {
       setPending(false);
       setFailure({
-        text: describeGithubFailure(result.code),
+        text: describeGithubFailure(product, result.code),
         issues: result.issues,
       });
       return;

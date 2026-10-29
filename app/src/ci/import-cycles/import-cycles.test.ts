@@ -261,18 +261,21 @@ describe("the import cycles of app/src", () => {
 });
 
 describe("the brand", () => {
-  // #715-T08
-  it("is imported only by the selector, and the type of the identity imports nothing", () => {
+  // #715-T08, #740-T07
+  it("is imported only by the table of the products, and the type of the identity imports nothing", () => {
     const graph = graphOf({
       "product-identity/identity.ts": imports("../copy/messages.ts"),
       "product-identity/code-review-com.ts": imports("./identity.ts"),
-      "product-identity/current.ts": imports(
+      "product-identity/factory.ts": imports("./identity.ts"),
+      "product-identity/identities.ts": imports(
         "./code-review-com.ts",
+        "./factory.ts",
         "./identity.ts",
       ),
+      "product-identity/current.ts": imports("./identities.ts"),
       "copy/messages.ts": "export {};",
       "mail/invite.ts": imports("../product-identity/code-review-com.ts"),
-      "mail/shared.ts": imports("../product-identity/code-review-com.ts"),
+      "mail/shared.ts": imports("../product-identity/factory.ts"),
       "app/login/page.tsx": imports(
         "../../product-identity/code-review-com.ts",
       ),
@@ -288,10 +291,50 @@ describe("the brand", () => {
         "mail/invite.ts imports product-identity/code-review-com.ts: get the identity from getProductIdentity()",
       ),
       expect.stringContaining(
-        "mail/shared.ts imports product-identity/code-review-com.ts: get the identity from getProductIdentity()",
+        "mail/shared.ts imports product-identity/factory.ts: get the identity from getProductIdentity()",
       ),
       expect.stringContaining(
         "product-identity/identity.ts imports copy/messages.ts: the type of the identity imports nothing",
+      ),
+    ]);
+  });
+
+  // #740-T07
+  it("is looked up by the table only in the files that compose the application", () => {
+    const graph = graphOf({
+      "product-identity/identities.ts": "export {};",
+      "product-identity/current.ts": imports("./identities.ts"),
+      "product-identity/context.tsx": imports("./identities.ts"),
+      "product-identity/public.ts": imports("./identities.ts"),
+      "mail/shared.ts": imports("../product-identity/identities.ts"),
+    });
+
+    expect(checkProductIdentityImports(graph)).toEqual([
+      expect.stringContaining(
+        "mail/shared.ts imports product-identity/identities.ts: ",
+      ),
+    ]);
+  });
+
+  // #740-T07
+  it("keeps a module that takes the identity from importing the selector", () => {
+    const graph = graphOf({
+      "product-identity/identity.ts": "export {};",
+      "product-identity/current.ts": "export {};",
+      "mail/invitation-message.ts": imports(
+        "../product-identity/identity.ts",
+        "../product-identity/current.ts",
+      ),
+      "auth/auth.ts": imports(
+        "../product-identity/identity.ts",
+        "../product-identity/current.ts",
+      ),
+      "app/login/page.tsx": imports("../../product-identity/current.ts"),
+    });
+
+    expect(checkProductIdentityImports(graph)).toEqual([
+      expect.stringContaining(
+        "mail/invitation-message.ts imports product-identity/current.ts and takes a ProductIdentity",
       ),
     ]);
   });

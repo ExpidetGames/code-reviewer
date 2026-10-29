@@ -14,10 +14,13 @@ import {
   PASSWORD_REASON,
   stepOfField,
 } from "./messages.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the sentence for a failed call", () => {
   it("has its own sentence for every code the setup routes answer with a person-facing cause", () => {
-    const generic = describeSetupFailure("something_else");
+    const generic = describeSetupFailure(PRODUCT, "something_else");
     const specific = SETUP_ERROR_CODES.filter(
       (code) =>
         ![
@@ -30,7 +33,7 @@ describe("the sentence for a failed call", () => {
     );
 
     for (const code of specific)
-      expect(describeSetupFailure(code), code).not.toBe(generic);
+      expect(describeSetupFailure(PRODUCT, code), code).not.toBe(generic);
   });
 
   // #97-SU-08
@@ -42,18 +45,24 @@ describe("the sentence for a failed call", () => {
       "setup_session_expired",
       "setup_unavailable",
     ])
-      expect(describeSetupFailure(code), code).toMatch(/pnpm setup-code/);
+      expect(describeSetupFailure(PRODUCT, code), code).toMatch(
+        /pnpm setup-code/,
+      );
   });
 
   it("explains the lock on a wrong code", () => {
-    expect(describeSetupFailure("invalid_code")).toMatch(/10 wrong codes/);
+    expect(describeSetupFailure(PRODUCT, "invalid_code")).toMatch(
+      /10 wrong codes/,
+    );
   });
 
   it("translates the transport codes and falls back to a generic sentence", () => {
-    expect(describeSetupFailure("NETWORK_ERROR")).toMatch(
+    expect(describeSetupFailure(PRODUCT, "NETWORK_ERROR")).toMatch(
       /could not be reached/,
     );
-    expect(describeSetupFailure("anything")).toMatch(/Something went wrong/);
+    expect(describeSetupFailure(PRODUCT, "anything")).toMatch(
+      /Something went wrong/,
+    );
   });
 });
 
@@ -68,7 +77,7 @@ describe("the sentence for a failed call", () => {
       "setup_session_expired",
       "setup_unavailable",
     ]) {
-      const sentence = describeSetupFailure(code);
+      const sentence = describeSetupFailure(PRODUCT, code);
       expect(sentence, code).toMatch(/pnpm setup-code/);
       expect(sentence, code).not.toMatch(/Restart|log of the app/);
     }

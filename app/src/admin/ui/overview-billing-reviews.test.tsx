@@ -7,6 +7,9 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AdminSettingsView } from "../service.ts";
 import { Overview } from "./overview.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -44,7 +47,13 @@ function settings(): AdminSettingsView {
 describe("the billing reviews on the overview", () => {
   // #603-T17
   it("name how many rows are open and link the list", () => {
-    render(<Overview settings={settings()} billingReviewCount={2} />);
+    render(
+      <Overview
+        product={PRODUCT}
+        settings={settings()}
+        billingReviewCount={2}
+      />,
+    );
 
     const region = screen.getByRole("region", { name: "Needs attention" });
     expect(within(region).getByText("2 payments need a review.")).toBeTruthy();
@@ -57,14 +66,26 @@ describe("the billing reviews on the overview", () => {
 
   // #603-T17
   it("say it in the singular for one row", () => {
-    render(<Overview settings={settings()} billingReviewCount={1} />);
+    render(
+      <Overview
+        product={PRODUCT}
+        settings={settings()}
+        billingReviewCount={1}
+      />,
+    );
 
     expect(screen.getByText("1 payment needs a review.")).toBeTruthy();
   });
 
   // #603-T17
   it("add nothing while no row is open", () => {
-    render(<Overview settings={settings()} billingReviewCount={0} />);
+    render(
+      <Overview
+        product={PRODUCT}
+        settings={settings()}
+        billingReviewCount={0}
+      />,
+    );
 
     expect(
       screen.queryByRole("region", { name: "Needs attention" }),

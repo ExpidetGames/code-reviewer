@@ -6,6 +6,7 @@
 // ones (every few seconds), and it keeps asking slowly once everything is settled so a run that starts
 // later shows up too. Everything in a run that came from outside (the project name, the login) is
 // rendered as text and truncated instead of widening the page.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import Link from "next/link";
 import { useMemo } from "react";
 import { Button } from "../../components/button.tsx";
@@ -209,6 +210,7 @@ export function RunsList({
   filter: RunsFilter;
   api?: RunsApi;
 }) {
+  const product = useProductIdentity();
   // One client for the life of the component: a new one every render would restart what depends on it.
   const defaultApi = useMemo(
     () => browserRunsApi(workspaceSlug),
@@ -232,7 +234,7 @@ export function RunsList({
       {/* The one polite region of the list; it stays in the DOM so an update result is announced. */}
       <StatusRegion label="Updating the list" className="text-warning">
         {failed
-          ? describePollFailure(failureCode, stopped, POLL_FAILED_TEXT)
+          ? describePollFailure(product, failureCode, stopped, POLL_FAILED_TEXT)
           : ""}
       </StatusRegion>
       {data.runs.length === 0 ? (

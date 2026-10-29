@@ -6,6 +6,7 @@
 import "server-only";
 import { createJobDirectoryRepository } from "../db/repositories/job-directory-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { knownSecretsFromEnv, redactText } from "../runner-api/redact.ts";
 import {
   createAdminRunsService,
@@ -14,6 +15,7 @@ import {
 
 export function adminRunsService(): AdminRunsService {
   return createAdminRunsService({
+    product: getProductIdentity(),
     directory: createJobDirectoryRepository(getDatabase()),
     // Read on every call: the keys can change while the server runs.
     redact: (text) => redactText(text, knownSecretsFromEnv(process.env)),

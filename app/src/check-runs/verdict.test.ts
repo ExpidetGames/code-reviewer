@@ -12,6 +12,9 @@ import {
   type FindingCounts,
   type ReviewVerdictMode,
 } from "./verdict.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const NONE = { P0: 0, P1: 0, P2: 0, P3: 0 };
 const dynamic = (by: Partial<typeof NONE>, open?: number): FindingCounts => {
@@ -226,7 +229,7 @@ describe("the body of the review", () => {
 
   // #405-T20
   it("is a verdict line, the link to the review and the marker, and nothing of the findings", () => {
-    const body = verdictBody({
+    const body = verdictBody(PRODUCT, {
       jobId: "job-1",
       event: "request_changes",
       mode: "blocking",
@@ -243,14 +246,14 @@ describe("the body of the review", () => {
 
   // #405-T21
   it("says what was not found when it approves", () => {
-    const blocking = verdictBody({
+    const blocking = verdictBody(PRODUCT, {
       jobId: "job-1",
       event: "approve",
       mode: "blocking",
       blocking: 0,
       commentUrl: link,
     });
-    const any = verdictBody({
+    const any = verdictBody(PRODUCT, {
       jobId: "job-1",
       event: "approve",
       mode: "any",

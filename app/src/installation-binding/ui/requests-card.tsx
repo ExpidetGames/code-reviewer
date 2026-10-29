@@ -6,6 +6,7 @@
 // nothing to decide. An Owner or Admin sees it; a Member never renders it. The account name comes
 // from GitHub: text, truncated, never markup. Status is not told by colour alone; the badge label
 // carries the meaning.
+import { useProductIdentity } from "@/product-identity/context";
 import { useId } from "react";
 import { Badge } from "../../components/ui/badge.tsx";
 import {
@@ -16,7 +17,7 @@ import {
 } from "../../components/ui/card.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import type { RequestView } from "./connections-page.tsx";
-import { REQUEST_STATUS_COPY } from "./messages.ts";
+import { requestStatusCopy } from "./messages.ts";
 
 const REQUEST_VARIANT: Record<
   RequestView["status"],
@@ -29,6 +30,7 @@ const REQUEST_VARIANT: Record<
 };
 
 export function RequestsCard({ requests }: { requests: RequestView[] }) {
+  const product = useProductIdentity();
   const titleId = useId();
   return (
     <Card role="region" aria-labelledby={titleId}>
@@ -47,7 +49,7 @@ export function RequestsCard({ requests }: { requests: RequestView[] }) {
           <p className="text-sm text-muted-foreground">No requests waiting.</p>
         ) : (
           <ul
-            aria-label="Requests for the code-review.com admin"
+            aria-label={`Requests for the ${product.name} admin`}
             className="flex flex-col divide-y divide-border"
           >
             {requests.map((request) => (
@@ -68,7 +70,7 @@ export function RequestsCard({ requests }: { requests: RequestView[] }) {
                   </span>
                 </div>
                 <Badge variant={REQUEST_VARIANT[request.status]}>
-                  {REQUEST_STATUS_COPY[request.status]}
+                  {requestStatusCopy(product)[request.status]}
                 </Badge>
               </li>
             ))}

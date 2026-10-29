@@ -8,6 +8,7 @@
 // app does not approve what it cannot judge), and `any` counts its active findings. What is not known (the runner
 // did not report the findings) and a review that was wrapped up at its cost or time limit never approve; a blocker
 // such a review did find still requests changes.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { ReviewFindings } from "../runner-api/contract.ts";
 import type { ReviewVerdictMode } from "../review-settings/settings.ts";
 
@@ -77,19 +78,22 @@ function plural(count: number, noun: string): string {
  * The body of the review: a verdict line, a link to the review comment and the marker. Short, and nothing of the
  * findings or of the pull request: the findings are in the comment it links to.
  */
-export function verdictBody(input: {
-  jobId: string;
-  event: "approve" | "request_changes";
-  mode: ReviewVerdictMode;
-  blocking: number;
-  commentUrl: string | null;
-}): string {
+export function verdictBody(
+  product: ProductIdentity,
+  input: {
+    jobId: string;
+    event: "approve" | "request_changes";
+    mode: ReviewVerdictMode;
+    blocking: number;
+    commentUrl: string | null;
+  },
+): string {
   const { event, mode, blocking } = input;
   const kind = mode === "blocking" ? "P0 finding" : "finding";
   const line =
     event === "request_changes"
-      ? `**code-review.com: changes requested.** ${plural(blocking, kind)} open.`
-      : `**code-review.com: approved.** No ${mode === "blocking" ? "P0 finding is" : "open finding is"} left.`;
+      ? `**${product.name}: changes requested.** ${plural(blocking, kind)} open.`
+      : `**${product.name}: approved.** No ${mode === "blocking" ? "P0 finding is" : "open finding is"} left.`;
   const link = safeLink(input.commentUrl);
   return [
     link === null ? line : `${line} [Review summary](${link})`,

@@ -21,6 +21,9 @@ import {
 } from "../../src/test-support/runner-api-harness.ts";
 import { readPlanView } from "../../src/usage/usage-summary.ts";
 import type { EntitlementsData } from "../../src/workspaces/entitlements.ts";
+import { getProductIdentity } from "../../src/product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const OPERATOR_KEY = "plain-operator-key-0001-aaaaaaaa";
 // The ids below are made up for the test. Nothing in the repository names a real model for an entry.
@@ -129,6 +132,7 @@ async function run(h: RunnerApiHarness, kind: "diff" | "dynamic") {
 /** Every answer and page source a workspace member can read, as one text. */
 async function whatAMemberCanRead(h: RunnerApiHarness): Promise<string> {
   const runs = createRunsService({
+    product: PRODUCT,
     runs: createRunsRepository(h.db, h.workspaceId),
     now: h.clock.now,
   });
@@ -174,6 +178,7 @@ describe("what a workspace member can read after managed runs", () => {
     const { h } = await start();
     const job = await run(h, "diff");
     const runs = createRunsService({
+      product: PRODUCT,
       runs: createRunsRepository(h.db, h.workspaceId),
       now: h.clock.now,
     });

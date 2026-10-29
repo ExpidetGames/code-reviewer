@@ -7,6 +7,7 @@
 // no new obligation. The table lists every entry, a retired one too; a row has its actions (edit, release, retire,
 // delete, order) and the default of each kind it serves. Every refusal is a stable code that catalog-messages.ts turns
 // into a sentence; nothing here throws.
+import { useProductIdentity } from "@/product-identity/context";
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -89,6 +90,7 @@ export function ModelCatalogSection({
   /** Only tests pass this. */
   api?: CatalogApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const headingId = useId();
   const [open, setOpen] = useState(catalog.entries.length > 0);
@@ -115,7 +117,10 @@ export function ModelCatalogSection({
     const result = await call();
     setBusy(false);
     if (!result.ok) {
-      setOutcome({ kind: "failed", text: describeCatalogFailure(result.code) });
+      setOutcome({
+        kind: "failed",
+        text: describeCatalogFailure(product, result.code),
+      });
       return;
     }
     setOutcome({ kind: "saved" });
@@ -185,10 +190,10 @@ export function ModelCatalogSection({
           <CollapsibleContent>
             <CardContent className="flex flex-col gap-4">
               <p className="text-sm text-muted-foreground">
-                The models that workspaces billed via code-review.com may
-                choose. Members see the name, the description and the provider
-                of a released entry, never the model id. A retired entry stays
-                listed here.
+                The models that workspaces billed via {product.name} may choose.
+                Members see the name, the description and the provider of a
+                released entry, never the model id. A retired entry stays listed
+                here.
               </p>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-col gap-1 text-sm">
