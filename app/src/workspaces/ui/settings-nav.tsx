@@ -9,6 +9,7 @@
 // `SettingsAccessProvider`, so no page has to pass it on; the nav takes it from there unless a caller says it itself. It is a
 // promise, read with `use` behind the nav's own <Suspense> boundary: the nav shows without the link until the role is known, and
 // the page below stays outside any boundary of the layout, so a page that answers "not found" still answers with status 404.
+import { useCapabilities } from "@/capabilities/context";
 import { PILL_LINK_CLASS } from "@/components/pill-link";
 import Link from "next/link";
 import {
@@ -74,10 +75,16 @@ function SettingsLinks({
   showBilling = false,
   advanced,
 }: SettingsNavProps & { advanced: boolean }) {
+  const capabilities = useCapabilities();
   return (
     <nav aria-label="Settings sections">
       <ul className="flex flex-wrap items-center gap-1">
         {SETTINGS_SECTIONS.filter((section) => {
+          if (
+            section.capability !== undefined &&
+            !capabilities.has(section.capability)
+          )
+            return false;
           if (section.segment === "plan") return showPlan && !showBilling;
           if (section.segment === "billing") return showBilling;
           if (section.segment === "advanced") return advanced;

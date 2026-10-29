@@ -44,11 +44,18 @@ export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api" | "$context">;
   /** The verified-address and workspace gates (access-gates.ts); asked per request. */
   getGates: () => AccessGates;
+  /**
+   * Whether the path belongs to a capability this deployment does not have (src/capabilities/). Such a path is answered as a
+   * path that does not exist, after the same checks any path gets (a visitor without a session is sent to sign in, as for a
+   * path that is not there). Left out, no path is absent.
+   */
+  isAbsent?: (pathname: string) => boolean;
 };
 
 export function createAccessProxy({
   getAuth,
   getGates,
+  isAbsent = () => false,
 }: AccessProxyDependencies) {
   // Per proxy, not per request; a request that comes from outside cannot know it.
   const rewriteMark = randomBytes(24).toString("base64url");
@@ -107,8 +114,25 @@ export function createAccessProxy({
   ): Promise<NextResponse> {
     const { pathname } = request.nextUrl;
 
+    // A path of a capability this deployment does not have (src/capabilities/) does not exist here. It is answered the way a
+    // path that is not a route is: a public prefix (the webhook, the runner API) goes on to the 404 of Next.js, the rest
+    // goes through the checks below and ends in the same 404 where it would have been served.
+    let absent: boolean;
+    try {
+      absent = isAbsent(pathname);
+    } catch (error) {
+      console.error(
+        `[auth] could not read the capabilities: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return new NextResponse("Service unavailable", {
+        status: 503,
+        headers: { "cache-control": "no-store" },
+      });
+    }
+
     // A public path needs no lookup.
-    if (isPublicPath(pathname)) return forward(request);
+    if (isPublicPath(pathname))
+      return absent ? treatAsMissing(request) : forward(request);
 
     let lookup: SessionLookup;
     try {
@@ -172,6 +196,7 @@ export function createAccessProxy({
     // says `Sec-Fetch-Dest: empty`) keeps the redirect of the page itself, which the router follows in place; a
     // 307 there makes the router fetch the target twice and the address stays where it was.
     if (
+      !absent &&
       lookup.kind === "user" &&
       (request.method === "GET" || request.method === "HEAD") &&
       asksForADocument(request) &&
@@ -204,6 +229,7 @@ export function createAccessProxy({
     });
     switch (decision.kind) {
       case "allow": {
+        if (absent) return treatAsMissing(request);
         // The admin portal (docs/decisions/0001-editions-setup-and-accounts.md, section 2.3). Its files
         // live below `/instance-portal` and `/api/instance-portal`, so `/admin` and `/api/admin` are
         // not routes of the app: the instance admin's request is rewritten to the files, and for

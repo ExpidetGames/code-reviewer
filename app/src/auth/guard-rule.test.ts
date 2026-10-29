@@ -12,6 +12,7 @@ import {
   concretePath,
   discoverRoutes,
 } from "../test-support/routes.ts";
+import { isServerFunctionFile } from "../test-support/server-functions.ts";
 import { isPublicPath } from "./access.ts";
 
 const SRC = join(APP_DIRECTORY, "..");
@@ -28,12 +29,6 @@ const PUBLIC_SERVER_FUNCTION_FILES = ["auth/actions.ts"];
 function callsRequireUser(source: string): boolean {
   return /\brequireUser\(\)|\brequireAdmin\(\)|\baccess:\s*lookupAdmin\b|\bwithWorkspace\(|\bwithSignedIn\(|\badminAccessOf\(/.test(
     source,
-  );
-}
-
-function isServerFunctionFile(source: string): boolean {
-  return /^\s*(["'])use server\1/m.test(
-    source.split("\n").slice(0, 5).join("\n"),
   );
 }
 

@@ -6,13 +6,22 @@
 // shows them while the page is in a workspace. The groups are daily work (Projects, Runs), then a
 // separator, then the workspace administration (Connections, Members, Settings); #168 says Members
 // stays a top-level item.
+import {
+  createCapabilitySet,
+  type Capability,
+  type CapabilitySet,
+} from "../capabilities/capability.ts";
+import { PRODUCTS } from "../capabilities/products.ts";
 import { workspacePath, workspaceSlugOfPath } from "../workspaces/paths.ts";
 
-const NAV_GROUPS = [
+// An item with a `capability` is shown only in a deployment that has it (src/capabilities/): no capability, no entry.
+const NAV_GROUPS: readonly {
+  items: readonly { path: string; label: string; capability?: Capability }[];
+}[] = [
   {
     items: [
-      { path: "/projects", label: "Projects" },
-      { path: "/runs", label: "Runs" },
+      { path: "/projects", label: "Projects", capability: "review" },
+      { path: "/runs", label: "Runs", capability: "review" },
     ],
   },
   {
@@ -22,7 +31,10 @@ const NAV_GROUPS = [
       { path: "/settings", label: "Settings" },
     ],
   },
-] as const;
+];
+
+/** The set a caller that names none gets: the whole product of code-review.com (the tests of the navigation itself). */
+const WHOLE_PRODUCT = createCapabilitySet(PRODUCTS["code-review-com"].default);
 
 export type NavItem = { href: string; label: string };
 /** A group of places; the sidebar draws a separator between two groups, not inside one. */
@@ -37,21 +49,35 @@ export type NavGroup = { items: NavItem[] };
 export const SIDEBAR_LINK_CLASS =
   "text-sidebar-foreground no-underline aria-[current=page]:text-foreground pointer-coarse:h-11";
 
-/** The groups of the workspace the page is in, or none for a page outside any workspace. */
-export function navGroupsFor(pathname: string | null): NavGroup[] {
+/**
+ * The groups of the workspace the page is in, or none for a page outside any workspace. A place whose capability the
+ * deployment does not have is left out, and a group without places with it.
+ */
+export function navGroupsFor(
+  pathname: string | null,
+  capabilities: CapabilitySet = WHOLE_PRODUCT,
+): NavGroup[] {
   const slug = pathname === null ? undefined : workspaceSlugOfPath(pathname);
   if (typeof slug !== "string") return [];
   return NAV_GROUPS.map((group) => ({
-    items: group.items.map((place) => ({
-      href: workspacePath(slug, place.path),
-      label: place.label,
-    })),
-  }));
+    items: group.items
+      .filter(
+        (place) =>
+          place.capability === undefined || capabilities.has(place.capability),
+      )
+      .map((place) => ({
+        href: workspacePath(slug, place.path),
+        label: place.label,
+      })),
+  })).filter((group) => group.items.length > 0);
 }
 
 /** Every place in one list, in the order the sidebar shows them. */
-export function navItemsFor(pathname: string | null): NavItem[] {
-  return navGroupsFor(pathname).flatMap((group) => group.items);
+export function navItemsFor(
+  pathname: string | null,
+  capabilities: CapabilitySet = WHOLE_PRODUCT,
+): NavItem[] {
+  return navGroupsFor(pathname, capabilities).flatMap((group) => group.items);
 }
 
 /**

@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
+import { useCapabilities } from "../../capabilities/context.tsx";
 import { workspaceHome } from "../paths.ts";
 import { browserAccountApi, type AccountApi } from "./api.ts";
 import { describeWorkspaceFailure } from "./messages.ts";
@@ -25,6 +26,7 @@ export function AcceptInvitation({
   api?: AccountApi;
   open?: (path: string) => void;
 }) {
+  const capabilities = useCapabilities();
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -38,7 +40,7 @@ export function AcceptInvitation({
       return;
     }
     // A full navigation: the frame (the switcher) is made again with the new workspace in it.
-    open(workspaceHome(result.data.workspace.slug));
+    open(workspaceHome(result.data.workspace.slug, capabilities));
   }
 
   return (

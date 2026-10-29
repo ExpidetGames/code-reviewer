@@ -4,13 +4,14 @@
 // src/auth/startup.ts, which requires the master key and the public address): the shared token of the
 // runner, that the operator API token (when set) is not a copy of another credential, and, in webhook
 // dispatch mode, the URL and the signing secret of the dispatch webhook (src/dispatch/config.ts). A missing value would otherwise show up later as a failing runner with a less helpful
-// message. Called from `src/instrumentation.ts`.
+// message. The capability set of the deployment (`PRODUCT_CAPABILITIES`, src/capabilities/) is checked here too. Called from `src/instrumentation.ts`.
 //
 // The GitHub App is not an environment setting any more: it is entered in the admin portal, and the variables of
 // an installation from before accounts are imported once (src/legacy-import/), which also says which of them
 // could not be used. An instance starts without any `GITHUB_*` variable; GitHub is then "not configured" (the
 // pages say so) until the integration is set up.
 
+import { capabilityConfigProblems } from "../capabilities/products.ts";
 import { dispatchConfigProblems } from "../dispatch/config.ts";
 import { operatorTokenReuseProblem } from "../operator-api/token.ts";
 import { runnerTokenProblem } from "../runner-api/token-auth.ts";
@@ -43,6 +44,9 @@ export function findDeploymentConfigProblems(env: Env): string[] {
   // The dispatch webhook (#326) is off by default. Only a webhook mode with an incomplete setup stops the
   // start: the app would queue jobs and never wake anyone. The problems name variables, never values.
   problems.push(...dispatchConfigProblems(env));
+
+  // The product and its capability set (#731); unset means today's code-review.com, so this adds no required variable.
+  problems.push(...capabilityConfigProblems(env));
 
   return problems;
 }

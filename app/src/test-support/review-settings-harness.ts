@@ -85,6 +85,10 @@ export async function setupReviewSettings(
     >[0]["dynamicReady"];
     /** The clock of the workspace defaults, so two saves can be told apart; default the real one. */
     settingsClock?: () => Date;
+    /** #731: which review kinds the deployment has a capability for; default all. */
+    kindAllowed?: Parameters<
+      typeof createReviewSettingsService
+    >[0]["kindAllowed"];
   } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
@@ -121,6 +125,9 @@ export async function setupReviewSettings(
             Promise.resolve({}),
         }),
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
+    ...(options.kindAllowed === undefined
+      ? {}
+      : { kindAllowed: options.kindAllowed }),
     ...(options.dynamicReady === undefined
       ? {}
       : { dynamicReady: options.dynamicReady }),

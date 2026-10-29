@@ -8,12 +8,15 @@
 // 2. A visitor from the landing page (`/sign-up` or `/login` with `ph_did`/`ph_sid`): the identifiers go into a short-lived
 //    cookie and out of the address (src/landing-identity/). Nothing else about the request changes.
 // 3. The access check: nothing is reachable without a session except the paths in src/auth/access.ts.
-//    The logic is in src/auth/access-proxy.ts so it can be tested without a server.
+//    The logic is in src/auth/access-proxy.ts so it can be tested without a server. It also answers a path of a
+//    capability that this deployment does not have (src/capabilities/) as a path that does not exist.
 import type { NextRequest } from "next/server";
 import { getAccessGates } from "./auth/access-gates-runtime.ts";
 import { createAccessProxy } from "./auth/access-proxy.ts";
 import { getAuth } from "./auth/auth.ts";
 import { loadAuthConfig } from "./auth/config.ts";
+import { isAbsentPath } from "./capabilities/routes.ts";
+import { getCapabilities } from "./capabilities/shared.ts";
 import { captureLandingIdentity } from "./landing-identity/capture.ts";
 import { createSetupGate } from "./setup/gate-proxy.ts";
 import { getSetupStateReader } from "./setup/shared.ts";
@@ -26,6 +29,8 @@ const setupGate = createSetupGate({
 const accessProxy = createAccessProxy({
   getAuth,
   getGates: getAccessGates,
+  // A path of a capability this deployment does not have is a path that does not exist (src/capabilities/).
+  isAbsent: (pathname) => isAbsentPath(pathname, getCapabilities()),
 });
 
 /** Whether cookies get `Secure`, as everywhere else: the configured address is https. */

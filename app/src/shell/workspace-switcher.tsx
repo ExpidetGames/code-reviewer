@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useCapabilities } from "../capabilities/context.tsx";
 import { workspaceHome, workspaceSlugOfPath } from "../workspaces/paths.ts";
 
 export type SwitcherWorkspace = { slug: string; name: string };
@@ -33,6 +34,7 @@ export function WorkspaceSwitcher({
   pendingInvitations: number;
 }) {
   const pathname = usePathname();
+  const capabilities = useCapabilities();
   const slug = workspaceSlugOfPath(pathname);
   const current = workspaces.find((entry) => entry.slug === slug);
 
@@ -62,7 +64,7 @@ export function WorkspaceSwitcher({
           {workspaces.map((entry) => (
             <DropdownMenuItem key={entry.slug} asChild>
               <Link
-                href={workspaceHome(entry.slug)}
+                href={workspaceHome(entry.slug, capabilities)}
                 aria-current={entry.slug === slug ? "true" : undefined}
                 className="text-foreground no-underline"
               >

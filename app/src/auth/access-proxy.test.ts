@@ -8,6 +8,11 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { PORTAL_DENIED_HEADER } from "../admin/paths.ts";
+import {
+  createCapabilitySet,
+  type CapabilitySet,
+} from "../capabilities/capability.ts";
+import { isAbsentPath } from "../capabilities/routes.ts";
 import { SETUP_REWRITE_HEADER } from "../setup/paths.ts";
 import type { AccessGates } from "./access-gates.ts";
 import { PORTAL_REWRITE_HEADER, createAccessProxy } from "./access-proxy.ts";
@@ -651,6 +656,135 @@ describe("an address from before the workspace was in the address", () => {
     const response = await newProxy({
       firstWorkspaceSlug: () => Promise.reject(new Error("database is down")),
     })(request("/projects", DOCUMENT));
+
+    expect(response.status).toBe(503);
+  });
+});
+
+describe("a path of a capability this deployment does not have", () => {
+  const FACTORY = createCapabilitySet(["review", "dynamic-review"]);
+  const NO_REVIEW = createCapabilitySet([]);
+
+  function proxyWith(
+    capabilities: CapabilitySet,
+    gates: Partial<AccessGates> = {},
+  ) {
+    return createAccessProxy({
+      getAuth: () => undefined as never,
+      getGates: () => gates as AccessGates,
+      isAbsent: (pathname) => isAbsentPath(pathname, capabilities),
+    });
+  }
+
+  const member = { workspaceRole: () => Promise.resolve("owner" as const) };
+
+  // #731-T03
+  it.each([
+    "/w/acme/settings/billing",
+    "/api/w/acme/billing/top-ups",
+    "/api/w/acme/billing/journal",
+    "/admin/billing",
+    "/api/admin/billing/reviews",
+  ])(
+    "is marked as one for a missing path for the admin and the member, as a path that is not a route is (%s)",
+    async (path) => {
+      for (const isAdmin of [true, false]) {
+        lookupSession.mockResolvedValue(aUser(isAdmin));
+        const response = await proxyWith(FACTORY, member)(request(path));
+        expect(isMarkedAsMissing(response), `${path} admin=${isAdmin}`).toBe(
+          true,
+        );
+        // Not the admin's rewrite to the files of the portal.
+        expect(
+          response.headers.get(REQUEST_HEADER(PORTAL_REWRITE_HEADER)),
+        ).toBeNull();
+      }
+    },
+  );
+
+  // #731-T03
+  it("is marked as missing for a public path as well (the payment provider's webhook), without a session lookup", async () => {
+    lookupSession.mockClear();
+    const response = await proxyWith(FACTORY)(
+      request("/api/billing/webhook", { "content-type": "application/json" }),
+    );
+
+    expect(isMarkedAsMissing(response)).toBe(true);
+    expect(lookupSession).not.toHaveBeenCalled();
+  });
+
+  // #731-T04
+  it.each([
+    "/api/webhooks/github-app",
+    "/api/runners/v1/claim",
+    "/api/workers/v1/jobs/1/result",
+  ])(
+    "is marked as missing for the review APIs without review (%s)",
+    async (path) => {
+      const response = await proxyWith(NO_REVIEW)(request(path));
+
+      expect(isMarkedAsMissing(response)).toBe(true);
+    },
+  );
+
+  // #731-T04
+  it("keeps what the deployment has: the same paths go on where the capability exists", async () => {
+    lookupSession.mockResolvedValue(aUser(false));
+    for (const path of [
+      "/api/webhooks/github-app",
+      "/api/runners/v1/claim",
+      "/w/acme/projects",
+      "/w/acme/settings",
+    ]) {
+      const response = await proxyWith(FACTORY, member)(request(path));
+      expect(wentOnUntouched(response), path).toBe(true);
+    }
+    const health = await proxyWith(NO_REVIEW)(request("/api/health"));
+    expect(wentOnUntouched(health)).toBe(true);
+  });
+
+  // #731-T03
+  it("is answered like a path that is not there to a visitor without a session: sign in, 401 for a data route", async () => {
+    lookupSession.mockResolvedValue({ kind: "none" } satisfies SessionLookup);
+
+    const page = await proxyWith(FACTORY)(request("/w/acme/settings/billing"));
+    const missingPage = await proxyWith(FACTORY)(
+      request("/w/acme/settings/nothing"),
+    );
+    expect(page.status).toBe(missingPage.status);
+    expect(page.headers.get("location")).toBe(
+      missingPage.headers.get("location"),
+    );
+
+    const api = await proxyWith(FACTORY)(
+      request("/api/w/acme/billing/profile"),
+    );
+    const missingApi = await proxyWith(FACTORY)(request("/api/w/acme/nothing"));
+    expect(api.status).toBe(401);
+    expect(await api.text()).toBe(await missingApi.text());
+  });
+
+  // #731-T03
+  it("does not send an absent legacy address on to the workspace page, which would be absent too", async () => {
+    lookupSession.mockResolvedValue(aUser(false));
+    const firstWorkspaceSlug = vi.fn(() => Promise.resolve("acme"));
+
+    const response = await proxyWith(NO_REVIEW, { firstWorkspaceSlug })(
+      request("/projects", DOCUMENT),
+    );
+
+    expect(isMarkedAsMissing(response)).toBe(true);
+    expect(firstWorkspaceSlug).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 503 when the capabilities cannot be read, instead of letting the request through", async () => {
+    const response = await createAccessProxy({
+      getAuth: () => undefined as never,
+      getGates: () => ({}) as AccessGates,
+      isAbsent: () => {
+        throw new Error("bad setting");
+      },
+    })(request("/api/webhooks/github-app"));
 
     expect(response.status).toBe(503);
   });

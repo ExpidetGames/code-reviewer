@@ -529,6 +529,7 @@ function refuseDynamicModelProviderMismatch(
 function checkedWorkspace(
   input: unknown,
   providers: ProviderLookup,
+  kindAllowed: KindAllowed,
 ): WorkspaceSettingsPatch {
   const result = validateWorkspaceSettingsPatch(input, providers);
   if (!result.ok)
@@ -537,13 +538,31 @@ function checkedWorkspace(
       "Some settings are not valid.",
       result.issues,
     );
+  refuseAbsentKind(result.value.dynamic.reviewKind, kindAllowed);
   return result.value;
+}
+
+/** Whether this deployment has the capability of a review kind (#731); a save of a kind it does not have is refused. */
+type KindAllowed = (kind: ProjectReviewKind) => boolean;
+
+/** The option does not exist in a deployment without the capability: the same refusal as for a value that is no kind. */
+function refuseAbsentKind(
+  kind: ProjectReviewKind | undefined,
+  kindAllowed: KindAllowed,
+): void {
+  if (kind === undefined || kindAllowed(kind)) return;
+  throw new ReviewSettingsError(
+    "REVIEW_SETTINGS_INVALID",
+    "Some settings are not valid.",
+    [{ field: "reviewKind", code: "INVALID_FORMAT" }],
+  );
 }
 
 /** Validates the Diff and project-only fields of a project save (#194). */
 function checkedProject(
   input: unknown,
   providers: ProviderLookup,
+  kindAllowed: KindAllowed,
 ): ProjectSettingsPatch {
   const result = validateProjectSettingsPatch(input, providers);
   if (!result.ok)
@@ -552,6 +571,7 @@ function checkedProject(
       "Some settings are not valid.",
       result.issues,
     );
+  refuseAbsentKind(result.value.dynamic.reviewKind, kindAllowed);
   return result.value;
 }
 
@@ -686,8 +706,14 @@ export function createReviewSettingsService(deps: {
   dynamicReady?: (
     defaults: Omit<ProjectDynamicOverrides, "reviewSkill">,
   ) => Promise<boolean>;
+  /**
+   * #731: whether this deployment has the capability of a review kind (src/capabilities/). A save that names a kind it does not
+   * have is refused as a value that is no kind. Default: every kind is allowed.
+   */
+  kindAllowed?: (kind: ProjectReviewKind) => boolean;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
+  const kindAllowed = deps.kindAllowed ?? (() => true);
   const dynamicDefaults =
     deps.dynamicDefaults ?? (() => builtInProjectDynamicSettings());
   const defaultSkill = deps.defaultSkill ?? readDefaultReviewSkill;
@@ -1285,7 +1311,7 @@ export function createReviewSettingsService(deps: {
           "dynamicProvider",
         ]);
       else refuseCatalogEntries(input);
-      const requested = checkedWorkspace(input, providers);
+      const requested = checkedWorkspace(input, providers, kindAllowed);
       if (managed) await refuseUnfitEntries(requested.dynamic);
       const stored = await readGlobal();
       // The person saw other defaults than the ones stored now: what they decided on may not hold (#676). Checked again in the
@@ -1392,7 +1418,7 @@ export function createReviewSettingsService(deps: {
           "dynamicProvider",
         ]);
       else refuseCatalogEntries(input);
-      const patch = checkedProject(input, providers);
+      const patch = checkedProject(input, providers, kindAllowed);
       if (managed) await refuseUnfitEntries(patch.dynamic);
       const storedDynamic = parseDynamic(
         (await projects.get(repositoryId))?.settings,

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { webhookFixture } from "../../../fakes/github/webhooks.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
+import type { ProjectReviewKind } from "../../src/job-kind/job-kind.ts";
 import { createJobQueue } from "../../src/jobs/job-queue.ts";
 import { startWebhookHarness } from "../../src/test-support/webhook-harness.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
@@ -33,21 +34,32 @@ function withHeadSha(fixture: string, sha: string): PullRequestPayload {
 
 /** The webhook harness with the job queue intake instead of the recording one. */
 async function startHarness(
-  options: { projects?: WorkspaceCollaborators["projects"] } = {},
+  options: {
+    projects?: WorkspaceCollaborators["projects"];
+    kindAllowed?: (kind: ProjectReviewKind) => boolean;
+  } = {},
 ) {
   const h = await startWebhookHarness();
-  const queue = createJobQueue(h.db, await defaultWorkspaceId(h.db));
+  const queue = createJobQueue(
+    h.db,
+    await defaultWorkspaceId(h.db),
+    options.kindAllowed === undefined
+      ? {}
+      : { kindAllowed: options.kindAllowed },
+  );
   const repositories = createRepositoriesRepository(
     h.db,
     await defaultWorkspaceId(h.db),
   );
   const logLines: string[] = [];
+  const warnLines: string[] = [];
   const routeLog: string[] = [];
   const intake = createJobQueueReviewTriggerIntake({
     queue,
     repositories,
     logger: {
       info: (line) => logLines.push(line),
+      warn: (line) => warnLines.push(line),
       error: (line) => logLines.push(line),
     },
   });
@@ -64,6 +76,7 @@ async function startHarness(
     automatic: h.automatic,
     logger: {
       info: (line) => routeLog.push(line),
+      warn: (line) => routeLog.push(line),
       error: (line) => routeLog.push(line),
     },
   });
@@ -81,7 +94,7 @@ async function startHarness(
           : { deliveryId: options.deliveryId }),
       }),
     );
-  return { h, queue, intake, send, logLines, routeLog };
+  return { h, queue, intake, send, logLines, warnLines, routeLog };
 }
 
 function addOpenPullRequest(h: Awaited<ReturnType<typeof startHarness>>["h"]) {
@@ -235,6 +248,40 @@ describe("a comment delivery with the job queue behind the route", () => {
         status: "queued",
       },
     ]);
+  });
+
+  // #731-T05
+  it("drops a trigger whose review kind this deployment has no capability for, with a warning and not an error", async () => {
+    const { h, queue, intake, logLines, warnLines } = await startHarness({
+      kindAllowed: () => false,
+    });
+    const integration = await h.seedInstallation();
+
+    await intake.enqueueReviewTrigger(
+      {
+        kind: "command",
+        command: "review",
+        args: "",
+        repo: {
+          integrationId: integration.id,
+          externalId: "7001",
+          fullName: "acme/widgets",
+          url: "https://github.test/acme/widgets",
+        },
+        prNumber: 7,
+        prUrl: "https://github.test/acme/widgets/pull/7",
+        headSha: OPENED_HEAD,
+        commentId: "99001",
+        actor: { login: "bob", externalId: "1002" },
+      },
+      integration,
+      { deliveryId: "d-1", event: "issue_comment" },
+    );
+
+    expect(await queue.list()).toEqual([]);
+    expect(warnLines).toHaveLength(1);
+    expect(warnLines[0]).toContain("trigger dropped, JOB_KIND_UNAVAILABLE");
+    expect(logLines).toEqual([]);
   });
 
   it("drops a trigger that carries review arguments instead of failing the delivery again and again", async () => {
