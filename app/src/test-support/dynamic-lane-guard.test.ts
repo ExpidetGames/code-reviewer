@@ -116,7 +116,7 @@ function captured(name: "chain" | "seen4" | "seen6"): unknown {
 
 const DNS_QUIET = {
   "dns-control-engine": 0,
-  "dns-control-engine-delivered": 0,
+  "dns-control-delivered": 0,
   "dns-engine-delivered": 0,
   "dns-engine": 0,
   "dns-job": 0,
@@ -362,20 +362,20 @@ describe("the name lookups on the lane's own resolver", () => {
     parseDns(listing({ ...QUIET, ...DNS_QUIET, ...counts }));
 
   // #714-T02
-  it("reads the DNS counters of each user, the engine's delivered packets and both controls, apart from the violations", () => {
+  it("reads the DNS counters of each user, the engine's delivered packets and the controls, apart from the violations", () => {
     expect(
       reading({
         "dns-engine": 3,
         "dns-root": 2,
         "dns-engine-delivered": 1,
         "dns-control-engine": 4,
-        "dns-control-engine-delivered": 5,
+        "dns-control-delivered": 5,
       }),
     ).toEqual({
       queries: { engine: 3, job: 0, root: 2, other: 0 },
       engineDelivered: 1,
       controlEngine: 4,
-      controlEngineDelivered: 5,
+      controlDelivered: 5,
     });
     // The loopback queries do not touch the counters that fail a test for leaving the machine.
     expect(() => {
@@ -422,7 +422,7 @@ describe("the name lookups on the lane's own resolver", () => {
     const dns = reading({
       "dns-engine": 3,
       "dns-control-engine": 1,
-      "dns-control-engine-delivered": 1,
+      "dns-control-delivered": 1,
     });
 
     expect(describeDnsProblems(dns, [], ALLOWED)).toEqual([]);
@@ -540,7 +540,7 @@ describe("the name lookups on the lane's own resolver", () => {
     );
     expect(delivered).toHaveLength(2);
     expect(RULES).toMatch(
-      /output_after oifname "lo" ip daddr 127\.0\.0\.2 .*skuid 10101 counter accept comment "dns-control-engine-delivered"/,
+      /output_after oifname "lo" ip daddr 127\.0\.0\.2 .*skuid 10001 counter accept comment "dns-control-delivered"/,
     );
     expect(RULES).toMatch(
       /output_after oifname "lo" meta l4proto \{ tcp, udp \} th dport 53 meta skuid 10101 counter comment "dns-engine-delivered"/,

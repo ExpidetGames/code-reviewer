@@ -8,7 +8,7 @@
 // test (anything that is not loopback) are read by the journey, and a connection to a fake on loopback
 // moves none of them. Which counter fails a test is proven without root in
 // src/test-support/dynamic-lane-guard.test.ts.
-import { execFile, spawn, spawnSync } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -180,23 +180,22 @@ test.describe("the network guard of the Dynamic lane", () => {
   });
 
   // #714-T02
-  test("counts a query packet of the engine user to port 53, before and after the runner's rules, in a control that no check fails", async () => {
+  test("counts a query packet to port 53 on loopback, of the engine user before the runner's rules and of the job user after them, in controls that no check fails", async () => {
     const before = readGuard();
     const dnsBefore = readDns();
 
-    // Nothing answers on 127.0.0.2, and the Worker has not installed its rules yet: the packet is the control, not a lookup
-    // of the lane's resolver. A real lookup of the engine user that got past the runner's rules would fail the lane at its
-    // end, by design; the gate logic is proven in src/test-support.
-    await asUser(ENGINE, home, "bash", [
-      "-c",
-      "exec 3<>/dev/udp/127.0.0.2/53; echo control >&3",
-    ]);
+    // Nothing answers on 127.0.0.2: these packets are the controls, not lookups of the lane's resolver. The runner's rules
+    // for the engine user are in place since the probe of the lane's setup, so its packet is rejected after being counted;
+    // the job user is not under them, so its packet reaches the chain behind them. A real lookup of the engine user that
+    // got past the runner's rules would fail the lane at its end, by design (src/test-support proves the gate).
+    const script = "exec 3<>/dev/udp/127.0.0.2/53; echo control >&3";
+    await asUser(ENGINE, home, "bash", ["-c", script]);
+    await asUser(JOB, home, "bash", ["-c", script]);
 
     const dnsAfter = readDns();
     expect(dnsAfter.controlEngine - dnsBefore.controlEngine).toBeGreaterThan(0);
     expect(
-      dnsAfter.controlEngineDelivered - dnsBefore.controlEngineDelivered,
-      `the rules now: ${spawnSync("nft", ["list", "table", "inet", "cr_lane_guard"], { encoding: "utf8" }).stdout}`,
+      dnsAfter.controlDelivered - dnsBefore.controlDelivered,
     ).toBeGreaterThan(0);
     expect(dnsAfter.queries.engine).toBe(dnsBefore.queries.engine);
     expect(dnsAfter.engineDelivered).toBe(dnsBefore.engineDelivered);

@@ -114,9 +114,10 @@ export type DnsReading = {
   queries: Record<GuardWho, number>;
   /** The engine user's packets to port 53 that got past the runner's own table: the boundary of production. */
   engineDelivered: number;
-  /** The engine user's query to 127.0.0.2:53, before and after that table (they prove the two counters move). */
+  /** The engine user's query to 127.0.0.2:53, counted before that table (it proves the attempts are counted for the engine). */
   controlEngine: number;
-  controlEngineDelivered: number;
+  /** The Diff job user's query to 127.0.0.2:53, counted after it (it proves that chain counts such a query). */
+  controlDelivered: number;
 };
 
 /** Reads the dns-* counters from the output of `nft -j list table inet cr_lane_guard` (or of the chains). */
@@ -137,7 +138,7 @@ export function parseDns(json: unknown): DnsReading {
     ) as DnsReading["queries"],
     engineDelivered: counterOf(rules, "dns-engine-delivered"),
     controlEngine: counterOf(rules, "dns-control-engine"),
-    controlEngineDelivered: counterOf(rules, "dns-control-engine-delivered"),
+    controlDelivered: counterOf(rules, "dns-control-delivered"),
   };
 }
 
