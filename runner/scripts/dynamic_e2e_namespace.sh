@@ -158,12 +158,12 @@ if command -v strace >/dev/null; then TRACER=(strace -f -qq -s 160 -e trace=exec
 "${TRACER[@]}" ./node_modules/.bin/playwright test -c playwright.dynamic.config.ts "$@" || status=$?
 if [ -f /run/strace.log ]; then
   echo "STRACE-DNS-BEGIN"
-  grep -E 'sin6?_port=htons\(53\)' /run/strace.log | cut -c1-400 | head -60
-  for p in $(grep -E 'sin6?_port=htons\(53\)' /run/strace.log | awk '{print $1}' | sort -u | head -20); do
-    echo "PID $p: (its lines)"; grep -E "^$p " /run/strace.log | cut -c1-300 | head -12
-    echo "PID $p: (born as)"; grep -E "= $p$" /run/strace.log | cut -c1-250 | head -2
-    parent=$(grep -E "= $p$" /run/strace.log | awk '{print $1}' | head -1)
-    [ -n "$parent" ] && { echo "PARENT $parent:"; grep -E "^$parent +(execve|setuid|setresuid)" /run/strace.log | cut -c1-250 | tail -3; }
+  grep -E 'sin6?_port=htons\(53\)' /run/strace.log | cut -c1-300 | sed -n '1,60p' || true
+  for p in $(grep -E 'sin_port=htons\(53\), sin_addr=inet_addr\("127.0.0.1"\)' /run/strace.log | awk '{print $1}' | sort -u | sed -n '1,20p'); do
+    echo "PID $p (its lines):"; { grep -E "^$p " /run/strace.log | cut -c1-260 | sed -n '1,14p'; } || true
+    echo "PID $p (born as):"; { grep -E "= $p$" /run/strace.log | cut -c1-200 | sed -n '1,2p'; } || true
+    parent=$(grep -E "= $p$" /run/strace.log | awk '{print $1}' | sed -n '1p')
+    if [ -n "$parent" ]; then echo "PARENT $parent:"; { grep -E "^$parent +(execve|setuid|setresuid)" /run/strace.log | cut -c1-260 | tail -n 2; } || true; fi
   done
   echo "STRACE-DNS-END"
 fi
