@@ -44,6 +44,13 @@ else
   echo "IPv6 is not available in this namespace: no IPv6 connection can leave it either." >&2
 fi
 
+# TEMPORARY (#714): capture real nft listings for the fixtures of dynamic-lane-guard.test.ts; reverted in the next commit.
+( exec 3<>/dev/tcp/10.255.255.2/443 ) 2>/dev/null || true
+( exec 3<>/dev/udp/10.255.255.2/53; echo x >&3 ) 2>/dev/null || true
+( exec 3<>/dev/tcp/fd00:255::2/443 ) 2>/dev/null || true
+sleep 1
+echo "NFT-CAPTURE-BEGIN seen4"; nft -j list set inet cr_lane_guard seen4; echo; echo "NFT-CAPTURE seen6"; nft -j list set inet cr_lane_guard seen6; echo; echo "NFT-CAPTURE chain"; nft -j list chain inet cr_lane_guard output; echo; echo "NFT-CAPTURE-END"
+
 # 2. The Dynamic image's users, run directory and tools, inside this namespace only.
 mount -t tmpfs tmpfs /run
 STAGE="$LANE_STAGE"
