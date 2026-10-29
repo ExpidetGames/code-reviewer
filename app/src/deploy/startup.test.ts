@@ -239,4 +239,40 @@ describe("checking the dispatch webhook settings when the server starts", () => 
       "RUNNER_WEBHOOK_SECRET must differ from RUNNER_TOKEN",
     );
   });
+
+  // #731-T02
+  it("stops the start when the capability set names something the product does not allow, without repeating a value", async () => {
+    const { exit, log } = await run({
+      ...validEnv,
+      PRODUCT_CAPABILITIES: "review,hunter2-secret",
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    const line = String(log.mock.calls[0]?.[0]);
+    expect(line).toContain("DEPLOY_CONFIG_INVALID");
+    expect(line).toContain("PRODUCT_CAPABILITIES");
+    expect(line).not.toContain("hunter2");
+  });
+
+  // #731-T08
+  it("stops the start for implementer on code-review.com", async () => {
+    const { exit, log } = await run({
+      ...validEnv,
+      PRODUCT_CAPABILITIES: "review,implementer",
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(String(log.mock.calls[0]?.[0])).toContain("PRODUCT_CAPABILITIES");
+  });
+
+  // #731-T01
+  it("lets the factory set start", async () => {
+    const { exit } = await run({
+      ...validEnv,
+      PRODUCT_ID: "factory",
+      PRODUCT_CAPABILITIES: "review,dynamic-review",
+    });
+
+    expect(exit).not.toHaveBeenCalled();
+  });
 });

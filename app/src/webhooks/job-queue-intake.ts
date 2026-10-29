@@ -118,6 +118,16 @@ export function createJobQueueReviewTriggerIntake(
           );
           return;
         }
+        // #731: a kind this deployment has no capability for is refused every time as well; the trigger is dropped.
+        if (
+          error instanceof JobQueueError &&
+          error.code === "JOB_KIND_UNAVAILABLE"
+        ) {
+          deps.logger.error(
+            `[webhook] trigger dropped, ${error.code} repo=${trigger.repo.fullName} pr=${trigger.prNumber} delivery=${source.deliveryId}`,
+          );
+          return;
+        }
         throw error;
       }
       const why =

@@ -120,6 +120,9 @@ describe("the health response of a cold serverless instance", () => {
     expect(await behind.json()).toEqual({
       status: "error",
       code: "SCHEMA_BEHIND",
+      // #731: the answer also says which product and capabilities this deployment runs.
+      product: "code-review-com",
+      capabilities: ["review", "dynamic-review", "billing"],
     });
     expect((await healthResponse()).status).toBe(503);
     // The probe created no table: it is the migration command's job.
@@ -130,7 +133,11 @@ describe("the health response of a cold serverless instance", () => {
 
     const current = await healthResponse();
     expect(current.status).toBe(200);
-    expect(await current.json()).toEqual({ status: "ok" });
+    expect(await current.json()).toEqual({
+      status: "ok",
+      product: "code-review-com",
+      capabilities: ["review", "dynamic-review", "billing"],
+    });
   });
 
   // #319-T05
