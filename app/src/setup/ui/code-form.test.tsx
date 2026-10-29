@@ -8,6 +8,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SetupApi } from "./api.ts";
 import { CodeForm } from "./code-form.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -16,6 +17,7 @@ function renderForm(result: Awaited<ReturnType<SetupApi["submitCode"]>>) {
   const onAccepted = vi.fn();
   render(
     <CodeForm
+      product={getProductIdentity()}
       api={{ submitCode, complete: vi.fn() }}
       onAccepted={onAccepted}
     />,
@@ -34,7 +36,12 @@ function codeInput(): HTMLElement {
 describe("the setup code form", () => {
   // #321-T01
   it("points at pnpm setup-code instead of the log of the app", () => {
-    render(<CodeForm api={{ submitCode: vi.fn(), complete: vi.fn() }} />);
+    render(
+      <CodeForm
+        product={getProductIdentity()}
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+      />,
+    );
 
     expect(screen.getByText(/pnpm setup-code/)).toBeTruthy();
     expect(screen.queryByText(/docker compose logs app/)).toBeNull();
@@ -45,6 +52,7 @@ describe("the setup code form", () => {
     const user = userEvent.setup();
     render(
       <CodeForm
+        product={getProductIdentity()}
         api={{
           submitCode: vi.fn(async () => ({
             ok: false as const,
@@ -129,7 +137,7 @@ describe("the setup code form", () => {
   });
 
   it("says where the code comes from, and mentions kept data on an existing installation", () => {
-    render(<CodeForm existingInstallation />);
+    render(<CodeForm product={getProductIdentity()} existingInstallation />);
 
     expect(screen.getByText(/pnpm setup-code/)).toBeTruthy();
     expect(screen.getByText(/data from before the setup existed/)).toBeTruthy();
@@ -137,7 +145,12 @@ describe("the setup code form", () => {
 
   // #172-T01
   it("keeps the heading outside the form and gives the form a name", () => {
-    render(<CodeForm api={{ submitCode: vi.fn(), complete: vi.fn() }} />);
+    render(
+      <CodeForm
+        product={getProductIdentity()}
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+      />,
+    );
 
     const form = screen.getByRole("form", { name: "Setup code" });
     const heading = screen.getByRole("heading", {

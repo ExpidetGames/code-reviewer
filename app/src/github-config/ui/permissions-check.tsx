@@ -11,6 +11,7 @@ import { ProductName } from "../../components/brand.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { browserGithubApi, type GithubApi } from "./api.ts";
 import { describeGithubFailure, PERMISSION_LABELS } from "./messages.ts";
+import type { ProductIdentity } from "@/product-identity/identity.ts";
 
 type Outcome =
   | { kind: "missing"; missing: string[] }
@@ -18,8 +19,11 @@ type Outcome =
   | null;
 
 export function PermissionsCheck({
+  product,
   api = browserGithubApi,
 }: {
+  /** The product the App is for: the sentence names it. */
+  product: ProductIdentity;
   /** Only tests pass this. */
   api?: GithubApi;
 }) {
@@ -65,7 +69,8 @@ export function PermissionsCheck({
         {outcome?.kind === "missing" && outcome.missing.length === 0 ? (
           <Alert variant="success" role="status">
             <AlertDescription>
-              The App has every permission <ProductName /> asks for.
+              The App has every permission <ProductName product={product} />{" "}
+              asks for.
             </AlertDescription>
           </Alert>
         ) : null}

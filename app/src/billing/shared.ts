@@ -66,6 +66,7 @@ import {
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { loadBalanceBanner } from "./balance-banner.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
@@ -242,6 +243,7 @@ export function getBillingAdminService(): BillingAdminService {
     secretsOn: (executor) => getSecretStoreOn(executor, STRIPE_SECRET_NAMES),
     ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
     publicUrl: publicAddress(),
+    product: getProductIdentity(),
     clientFor: (apiKey, environment, options) =>
       createStripeClient({
         apiKey,
@@ -351,5 +353,6 @@ export function deliverDueBalanceMailsNow(): Promise<{
     db: getDatabase(),
     mail: getMailSender(),
     baseUrl: publicAddress(),
+    product: getProductIdentity(),
   });
 }

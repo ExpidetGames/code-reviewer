@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getSignUpAvailability } from "@/signup/shared";
 import { describeSignUpFailure } from "@/signup/ui/messages";
 import { SignUpForm } from "@/signup/ui/sign-up-form";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = { title: "Create your account" };
 
@@ -21,7 +22,9 @@ const TITLE = "Create your account";
 
 export default function SignUpPage({ searchParams }: PageProps<"/sign-up">) {
   return (
-    <Suspense fallback={<AuthCard title={TITLE} />}>
+    <Suspense
+      fallback={<AuthCard product={getProductIdentity()} title={TITLE} />}
+    >
       <SignUpOrNotice searchParams={searchParams} />
     </Suspense>
   );
@@ -37,7 +40,7 @@ async function SignUpOrNotice({
   const availability = await getSignUpAvailability();
   if (!availability.open)
     return (
-      <AuthCard title={TITLE}>
+      <AuthCard product={getProductIdentity()} title={TITLE}>
         <Alert variant="warning">
           <AlertDescription>
             {describeSignUpFailure(availability.error)}
@@ -49,7 +52,7 @@ async function SignUpOrNotice({
       </AuthCard>
     );
   return (
-    <AuthCard title={TITLE}>
+    <AuthCard product={getProductIdentity()} title={TITLE}>
       <SignUpForm signInPath={signIn} />
     </AuthCard>
   );

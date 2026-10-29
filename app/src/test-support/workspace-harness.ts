@@ -13,6 +13,7 @@ import {
   createWorkspacesRepository,
   type Workspace,
 } from "../db/repositories/workspaces-repository.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { assembleWorkspaces } from "../workspaces/assemble.ts";
 import type { Acceptor } from "../workspaces/invitations.ts";
 import type { WorkspaceRole } from "../db/workspace-roles.ts";
@@ -58,6 +59,7 @@ export async function createWorkspaceHarness(
     db,
     mail,
     baseUrl: WORKSPACE_TEST_BASE_URL,
+    product: getProductIdentity(),
     githubConfigured: () => options.github ?? false,
     now,
     // Real tokens (256 random bits); the harness only remembers what was made.

@@ -17,6 +17,7 @@ import { afterQueryPlugin } from "../test-support/query-hook.ts";
 import { insertUser } from "../test-support/users.ts";
 import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const USD = 1_000_000;
 const BASE_URL = "https://reviews.example.com";
@@ -39,6 +40,7 @@ for (const engine of BILLING_ENGINES) {
       const logged: string[] = [];
       const deliver = () =>
         deliverDueBalanceMails({
+          product: getProductIdentity(),
           db,
           mail,
           baseUrl: BASE_URL,
@@ -135,6 +137,7 @@ for (const engine of BILLING_ENGINES) {
       });
       const run = () =>
         deliverDueBalanceMails({
+          product: getProductIdentity(),
           db: t.db.withPlugin(rendezvous),
           mail: t.mail,
           baseUrl: BASE_URL,

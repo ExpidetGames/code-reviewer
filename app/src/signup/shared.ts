@@ -11,6 +11,7 @@ import { isGithubSignInConfigured } from "../github-config/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import { signUpAvailability, type SignUpAvailability } from "./availability.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { assembleSignUp } from "./assemble.ts";
 import { readSignUpFacts } from "./state.ts";
 import type { SignUpRouteHandlers } from "./http.ts";
@@ -26,6 +27,7 @@ export function getSignUpRouteHandlers(): SignUpRouteHandlers {
     githubConfigured: isGithubSignInConfigured,
     // The address the links point to is the configured one, never a request header.
     baseUrl: loadAuthConfig(process.env).baseUrl,
+    product: getProductIdentity(),
     async currentUserId(request) {
       try {
         const session = await getAuth().api.getSession({

@@ -22,6 +22,7 @@ import {
   TEST_CLIENT_SECRET,
 } from "./github-fake.ts";
 import { createTestDatabase } from "./test-database.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 export { TEST_CLIENT_ID, TEST_CLIENT_SECRET };
 export const TEST_BASE_URL = "http://localhost:3000";
@@ -95,6 +96,7 @@ function assembleHarness(
   const auth = createAuth({
     db,
     config,
+    product: getProductIdentity(),
     githubSignIn: {
       clientId: TEST_CLIENT_ID,
       clientSecret: TEST_CLIENT_SECRET,

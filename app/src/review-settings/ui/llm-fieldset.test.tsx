@@ -14,11 +14,9 @@ import {
   MODEL_CHOICE_DEFAULT_OPTION,
   MODEL_CHOICE_LOCKED_BADGE,
   MODEL_CHOICE_MANAGE_PLAN,
-  MODEL_CHOICE_NONE_CHOSEN,
-  MODEL_CHOICE_NONE_OFFERED,
   MODEL_CHOICE_UNAVAILABLE_OPTION,
-  MODEL_CHOICE_BILLED_NOTE,
   MODEL_CHOICE_RETIRED_BADGE,
+  modelChoiceWords,
 } from "../../copy/model-choice.ts";
 import {
   CHOICES,
@@ -35,9 +33,11 @@ import {
 import type { CatalogChoices } from "../catalog-selection.ts";
 import { DEFAULT_DYNAMIC_MODEL } from "../settings.ts";
 import { SettingsForm } from "./settings-form.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
+const WORDS = modelChoiceWords(getProductIdentity());
 const SAVE = { name: "Save review settings" };
 const SAVE_DEFAULTS = { name: "Save review defaults" };
 const FALLBACK_REMOVED =
@@ -84,6 +84,7 @@ async function renderManaged(
   const { api, save } = fakeApi();
   render(
     <SettingsForm
+      product={getProductIdentity()}
       workspaceSlug="acme"
       initial={initial}
       dynamicReviewEnabled
@@ -144,8 +145,8 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
     const user = userEvent.setup();
     await renderManaged(user);
 
-    expect(MODEL_CHOICE_BILLED_NOTE).toBe("Billed via code-review.com");
-    expect(screen.getByText(MODEL_CHOICE_BILLED_NOTE)).toBeTruthy();
+    expect(WORDS.billedNote).toBe("Billed via code-review.com");
+    expect(screen.getByText(WORDS.billedNote)).toBeTruthy();
     expect(providerDropdown().textContent).toBe(MODEL_CHOICE_DEFAULT_OPTION);
   });
 
@@ -163,7 +164,7 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
       "Anthropic",
       "OpenAI",
     ]);
-    expect(screen.getByText(MODEL_CHOICE_BILLED_NOTE)).toBeTruthy();
+    expect(screen.getByText(WORDS.billedNote)).toBeTruthy();
     await chooseOption(user, providerDropdown(), "OpenAI");
     expect(await offered(user)).toEqual([
       "Thorough",
@@ -202,7 +203,7 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
       "Anthropic",
       "OpenAI",
     ]);
-    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+    expect(screen.queryByText(WORDS.noneChosen)).toBeNull();
   });
 
   // #433-T02
@@ -213,7 +214,7 @@ describe("the catalog dropdown of a workspace on the operator's key", () => {
       managedModel({ choices: { diff: [], dynamic: [] } }),
     );
 
-    expect(screen.getByText(MODEL_CHOICE_NONE_OFFERED)).toBeTruthy();
+    expect(screen.getByText(WORDS.noneOffered)).toBeTruthy();
     expect(screen.queryByLabelText("Provider")).toBeNull();
     expect(screen.queryByLabelText("Model")).toBeNull();
   });
@@ -480,7 +481,7 @@ describe("a provider whose entries the plan does not include, and a chosen entry
       MODEL_CHOICE_UNAVAILABLE_OPTION,
     );
     expect(screen.getByText(MODEL_CHOICE_CHOSEN_UNAVAILABLE)).toBeTruthy();
-    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+    expect(screen.queryByText(WORDS.noneChosen)).toBeNull();
     await user.click(screen.getByRole("button", SAVE));
     expect(save).not.toHaveBeenCalled();
   });
@@ -492,9 +493,9 @@ describe("what the default option stands for, and the billing note while billing
     const user = userEvent.setup();
     await renderManaged(user);
 
-    expect(screen.getByText(MODEL_CHOICE_NONE_CHOSEN)).toBeTruthy();
+    expect(screen.getByText(WORDS.noneChosen)).toBeTruthy();
     await chooseOption(user, providerDropdown(), "OpenAI");
-    expect(screen.queryByText(MODEL_CHOICE_NONE_CHOSEN)).toBeNull();
+    expect(screen.queryByText(WORDS.noneChosen)).toBeNull();
   });
 
   // #675-F5
@@ -503,7 +504,7 @@ describe("what the default option stands for, and the billing note while billing
     await renderManaged(user, managedModel(), "LLM", false);
 
     expect(providerDropdown()).toBeTruthy();
-    expect(screen.queryByText(MODEL_CHOICE_BILLED_NOTE)).toBeNull();
+    expect(screen.queryByText(WORDS.billedNote)).toBeNull();
   });
 });
 
@@ -604,6 +605,7 @@ describe("a stored fallback model", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({
           overrides: { fallbackModel: "vendor/fallback-model" },
@@ -638,6 +640,7 @@ describe("a stored fallback model", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({
           overrides: { fallbackModel: "vendor/fallback-model" },
@@ -665,6 +668,7 @@ describe("a stored fallback model", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel()}
         keyedProviders={["openrouter", "anthropic"]}
@@ -684,6 +688,7 @@ describe("a stored fallback model", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({
           overrides: { fallbackModel: "vendor/fallback-model" },

@@ -13,10 +13,12 @@ import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
 import { loadAccountView } from "@/workspaces/account-view";
 import { WorkspaceSwitcher } from "@/shell/workspace-switcher";
+import { getProductIdentity } from "@/product-identity/current";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <AppShell
+      product={getProductIdentity()}
       userMenu={
         <Suspense
           fallback={

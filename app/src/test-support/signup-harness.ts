@@ -9,6 +9,7 @@ import {
   createInstanceSettingsRepository,
   type InstanceSettingValues,
 } from "../db/repositories/instance-settings-repository.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { assembleSignUp } from "../signup/assemble.ts";
 import { createFakeMail } from "./fake-mail.ts";
 import {
@@ -71,6 +72,7 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
     },
     githubConfigured: () => flags.github,
     baseUrl: SIGNUP_TEST_BASE_URL,
+    product: getProductIdentity(),
     currentUserId: () => Promise.resolve(session.userId),
     defer: (work) => {
       pending.push(work);

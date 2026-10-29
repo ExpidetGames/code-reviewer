@@ -24,6 +24,7 @@ import {
   type BalanceMailLevel,
 } from "../mail/balance-message.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { formatMoney } from "../workspace-billing/money.ts";
 import { workspacePath } from "../workspaces/paths.ts";
 import { can } from "../workspaces/permissions.ts";
@@ -54,6 +55,8 @@ export type BalanceMailDelivery = {
   mail: MailSender;
   /** The configured public address of the app, never a request header. */
   baseUrl: string;
+  /** Whose name the mail carries. */
+  product: ProductIdentity;
   now?: () => Date;
   log?: (line: string) => void;
 };
@@ -156,6 +159,7 @@ async function deliverOne(
         workspaceName: workspace.name,
         balanceText: formatMoney(balanceMicroUsd),
         link,
+        product: options.product,
       }),
     );
     if (sent.ok) reached += 1;

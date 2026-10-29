@@ -15,6 +15,15 @@ const OLD_NAME = /code\s+reviewer/i;
 
 /** Every string literal, template literal part and JSX text of the file that says the old name. */
 export function findOldName(path: string, content: string): OldNameFinding[] {
+  return findText(path, content, OLD_NAME);
+}
+
+/** Every string literal, template literal part and JSX text of the file that matches the pattern (comments and identifiers do not count). */
+export function findText(
+  path: string,
+  content: string,
+  pattern: RegExp,
+): OldNameFinding[] {
   const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(
     path,
@@ -26,7 +35,7 @@ export function findOldName(path: string, content: string): OldNameFinding[] {
   const found: OldNameFinding[] = [];
   const visit = (node: ts.Node) => {
     const text = textOf(node);
-    if (text !== null && OLD_NAME.test(text)) {
+    if (text !== null && pattern.test(text)) {
       const { line } = source.getLineAndCharacterOfPosition(node.getStart());
       found.push({ path, line: line + 1, text: text.trim() });
     }

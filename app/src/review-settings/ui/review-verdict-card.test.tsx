@@ -28,6 +28,7 @@ import {
   VERDICT_COMMON_NOTE,
   VERDICT_KIND_NOTES,
 } from "./review-verdict-fieldset.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -105,6 +106,7 @@ function renderForm(
 ) {
   return render(
     <SettingsForm
+      product={getProductIdentity()}
       workspaceSlug="acme"
       initial={initial}
       api={api}
@@ -241,6 +243,7 @@ describe("the Review verdict card", () => {
   it("is not part of the form of the global defaults", () => {
     render(
       <SettingsForm
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={{
           ...projectModel(),

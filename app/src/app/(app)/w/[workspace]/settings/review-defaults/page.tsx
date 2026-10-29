@@ -15,6 +15,7 @@ import {
 } from "@/review-settings/ui/global-settings-page";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = { title: "Settings · Review defaults" };
 
@@ -42,6 +43,7 @@ export default async function ReviewDefaultsSettingsPage({
   );
   return (
     <GlobalSettingsPageContent
+      product={getProductIdentity()}
       workspaceSlug={workspace.slug}
       canEdit={can(role, "manage_review_defaults")}
       showPlan={showPlan}

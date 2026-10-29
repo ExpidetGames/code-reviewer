@@ -20,15 +20,14 @@ import {
 } from "../../components/ui/select.tsx";
 import Link from "next/link";
 import {
-  MODEL_CHOICE_BILLED_NOTE,
   MODEL_CHOICE_CHOSEN_UNAVAILABLE,
   MODEL_CHOICE_DEFAULT_OPTION,
   MODEL_CHOICE_LOCKED_BADGE,
-  MODEL_CHOICE_NONE_CHOSEN,
-  MODEL_CHOICE_NONE_OFFERED,
   MODEL_CHOICE_RETIRED_BADGE,
   MODEL_CHOICE_UNAVAILABLE_OPTION,
+  modelChoiceWords,
 } from "../../copy/model-choice.ts";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import type { NativeModelView } from "../../native-providers/catalog.ts";
 import {
   browserCatalogModelsApi,
@@ -240,18 +239,21 @@ function providersOf(
 }
 
 function ManagedChoice({
+  product,
   workspaceSlug,
   choice,
   disabled,
   fieldName,
   billingOn,
 }: {
+  product: ProductIdentity;
   workspaceSlug: string;
   choice: ManagedLlmChoice;
   disabled: boolean;
   fieldName: string;
   billingOn: boolean;
 }) {
+  const words = modelChoiceWords(product);
   const chosen = choice.choices.find((entry) => entry.id === choice.value);
   const chosenUnavailable = choice.value !== null && chosen?.available !== true;
   const providers = providersOf(choice.choices, chosen);
@@ -281,9 +283,7 @@ function ManagedChoice({
   return (
     <>
       {choice.choices.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {MODEL_CHOICE_NONE_OFFERED}
-        </p>
+        <p className="text-sm text-muted-foreground">{words.noneOffered}</p>
       ) : (
         <>
           <div data-field="provider" className="flex flex-col gap-2">
@@ -317,7 +317,7 @@ function ManagedChoice({
             // With a default entry of the workspace the option names what it resolves to; the sentence would contradict it.
             choice.defaultLabel === undefined ? (
               <p className="text-sm text-muted-foreground">
-                {MODEL_CHOICE_NONE_CHOSEN}
+                {words.noneChosen}
               </p>
             ) : null
           ) : gone ? null : (
@@ -332,9 +332,7 @@ function ManagedChoice({
             />
           )}
           {billingOn ? (
-            <p className="text-sm text-muted-foreground">
-              {MODEL_CHOICE_BILLED_NOTE}
-            </p>
+            <p className="text-sm text-muted-foreground">{words.billedNote}</p>
           ) : null}
         </>
       )}
@@ -367,6 +365,7 @@ function ManagedChoice({
 }
 
 export function LlmFieldset({
+  product,
   workspaceSlug,
   disabled,
   own,
@@ -375,6 +374,8 @@ export function LlmFieldset({
   billingOn = true,
   catalogApi,
 }: {
+  /** The product whose name the sentences of a managed choice use. */
+  product: ProductIdentity;
   workspaceSlug: string;
   disabled: boolean;
   /** Exactly one of `own` and `managed` is given. */
@@ -399,6 +400,7 @@ export function LlmFieldset({
       ) : null}
       {managed !== undefined ? (
         <ManagedChoice
+          product={product}
           workspaceSlug={workspaceSlug}
           choice={managed}
           disabled={disabled}
