@@ -28,7 +28,7 @@ describe("GET /api/health", () => {
     expect(await response.json()).toEqual({
       status: "ok",
       product: "code-review-com",
-      capabilities: ["review", "dynamic-review", "billing"],
+      capabilities: ["billing", "dynamic-review", "review"],
     });
   });
 
@@ -43,7 +43,7 @@ describe("GET /api/health", () => {
     expect(body).toEqual({
       status: "ok",
       product: "factory",
-      capabilities: ["review", "dynamic-review"],
+      capabilities: ["dynamic-review", "review"],
     });
   });
 

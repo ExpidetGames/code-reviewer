@@ -34,6 +34,9 @@ export const PRODUCTS: Readonly<Record<ProductId, ProductDefinition>> = {
   },
 };
 
+/** The capability every capability set contains. */
+const ALWAYS_NEEDED: Capability = "review";
+
 export const PRODUCT_ENV = "PRODUCT_ID";
 export const CAPABILITIES_ENV = "PRODUCT_CAPABILITIES";
 
@@ -77,8 +80,17 @@ export function resolveCapabilityConfig(env: Env): CapabilityConfig {
   }
 
   const chosen = new Set<Capability>();
+  let emptyEntry = false;
   for (const raw of listValue.split(",")) {
     const name = raw.trim();
+    if (name === "") {
+      if (!emptyEntry)
+        problems.push(
+          `${CAPABILITIES_ENV} has an empty entry (a stray comma?); name the capabilities as a comma-separated list`,
+        );
+      emptyEntry = true;
+      continue;
+    }
     if (!isCapability(name)) {
       problems.push(
         `${CAPABILITIES_ENV} names a capability that does not exist (known: ${CAPABILITIES.join(", ")})`,
@@ -93,15 +105,21 @@ export function resolveCapabilityConfig(env: Env): CapabilityConfig {
     }
     chosen.add(name);
   }
+  let reviewReported = false;
   for (const capability of chosen) {
     const needed = requiredCapability(capability);
-    if (needed !== undefined && !chosen.has(needed))
+    if (needed !== undefined && !chosen.has(needed)) {
       problems.push(
         `${CAPABILITIES_ENV} has "${capability}" but not "${needed}", which it needs`,
       );
+      if (needed === ALWAYS_NEEDED) reviewReported = true;
+    }
   }
-  if (chosen.size === 0 && problems.length === 0)
-    problems.push(`${CAPABILITIES_ENV} names no capability`);
+  // Every deployment reviews; the other capabilities are additions to it.
+  if (chosen.size > 0 && !chosen.has(ALWAYS_NEEDED) && !reviewReported)
+    problems.push(
+      `${CAPABILITIES_ENV} does not name "${ALWAYS_NEEDED}", which every deployment needs`,
+    );
   if (problems.length > 0) return { ok: false, problems };
   return { ok: true, product, capabilities: createCapabilitySet(chosen) };
 }

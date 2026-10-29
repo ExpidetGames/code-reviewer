@@ -16,6 +16,7 @@ import { AdminNav } from "../admin/ui/admin-nav.tsx";
 import { adminNavGroupsFor } from "../admin/ui/nav-items.ts";
 import { AppShell } from "../shell/app-shell.tsx";
 import { navGroupsFor, navItemsFor } from "../shell/nav-items.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { workspaceHome } from "../workspaces/paths.ts";
 import { SettingsNav } from "../workspaces/ui/settings-nav.tsx";
 import { CapabilitiesProvider } from "./context.tsx";
@@ -35,7 +36,7 @@ describe("the workspace sidebar", () => {
   it("lists Projects and Runs where the deployment has review, and the rest of the workspace always", () => {
     render(
       <CapabilitiesProvider capabilities={FACTORY}>
-        <AppShell userMenu={<span>menu</span>}>
+        <AppShell product={getProductIdentity()} userMenu={<span>menu</span>}>
           <h1>Page</h1>
         </AppShell>
       </CapabilitiesProvider>,
@@ -56,7 +57,7 @@ describe("the workspace sidebar", () => {
   it("leaves Projects and Runs out without review, for every person: the sidebar knows no roles", () => {
     render(
       <CapabilitiesProvider capabilities={[]}>
-        <AppShell userMenu={<span>menu</span>}>
+        <AppShell product={getProductIdentity()} userMenu={<span>menu</span>}>
           <h1>Page</h1>
         </AppShell>
       </CapabilitiesProvider>,
@@ -71,7 +72,7 @@ describe("the workspace sidebar", () => {
 
   it("shows the whole product where no capability set was provided", () => {
     render(
-      <AppShell userMenu={<span>menu</span>}>
+      <AppShell product={getProductIdentity()} userMenu={<span>menu</span>}>
         <h1>Page</h1>
       </AppShell>,
     );

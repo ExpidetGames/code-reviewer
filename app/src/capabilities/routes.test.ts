@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-import { readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { portalRewriteTarget } from "../admin/paths.ts";
+import { discoverRoutes } from "../test-support/routes.ts";
+import { isServerFunctionFile } from "../test-support/server-functions.ts";
 import { createCapabilitySet } from "./capability.ts";
 import {
   capabilityOfPath,
@@ -12,64 +14,84 @@ import {
   ROUTE_CLASSES,
 } from "./routes.ts";
 
-const APP_DIR = join(import.meta.dirname, "..", "app");
+const SRC = join(import.meta.dirname, "..");
 
-function filesBelow(directory: string): string[] {
-  return readdirSync(directory).flatMap((name) => {
-    const path = join(directory, name);
-    return statSync(path).isDirectory() ? filesBelow(path) : [path];
+// Every file of Server Functions, relative to src. A Server Function is a POST that any page of the build can reach by
+// its action id, so the path gate of the proxy (routes.ts) does not cover it: a file of them may not belong to a
+// capability. A new one has to be added here on purpose, and its author has to say how it is gated.
+const SERVER_FUNCTION_FILES = ["auth/actions.ts"];
+
+function sourceFilesBelow(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFilesBelow(path);
+    return /\.(ts|tsx|js|jsx|mjs)$/.test(entry.name) &&
+      !/\.test\./.test(entry.name)
+      ? [path]
+      : [];
   });
 }
 
-/** The route of a `page.tsx` or `route.ts` below src/app: `(group)` folders do not count, `/` for the root. */
-function routeOf(file: string): string | undefined {
-  const parts = relative(APP_DIR, file).split(sep);
-  const leaf = parts.pop();
-  if (leaf !== "page.tsx" && leaf !== "route.ts") return undefined;
-  const segments = parts.filter((part) => !/^\(.*\)$/.test(part));
-  return `/${segments.join("/")}`;
-}
-
-function routesOfApp(): string[] {
-  return filesBelow(APP_DIR)
-    .map(routeOf)
-    .filter((route): route is string => route !== undefined);
+/** Whether the table lists this route file itself: a blanket prefix above it does not count. */
+function hasOwnEntry(route: string): boolean {
+  return ROUTE_CLASSES.some((entry) => entry.route === route);
 }
 
 describe("the route classification", () => {
   // #731-T07
-  it("covers every page and route of the app", () => {
-    const routes = routesOfApp();
+  it("has an entry of its own for every page, route handler and metadata file of the app", () => {
+    const routes = discoverRoutes().map(({ route }) => route);
     expect(routes.length).toBeGreaterThan(100);
-    const unclassified = routes.filter(
-      (route) => classOfRoute(route) === undefined,
-    );
     expect(
-      unclassified,
-      "add the route to ROUTE_CLASSES in src/capabilities/routes.ts",
+      routes.filter((route) => !hasOwnEntry(route)),
+      "add the route to ROUTE_CLASSES in src/capabilities/routes.ts, with the class it belongs to",
     ).toEqual([]);
   });
 
   // #731-T07
-  it("fails for a route nobody classified (fixture)", () => {
+  it("fails for a route nobody classified, also below a route that is core (fixture)", () => {
+    expect(hasOwnEntry("/a-new-feature")).toBe(false);
+    expect(hasOwnEntry("/new-top-level/[id]")).toBe(false);
+    expect(hasOwnEntry("/api/w/[workspace]/a-new-feature")).toBe(false);
+    expect(hasOwnEntry("/w/[workspace]/settings/a-new-section")).toBe(false);
+    expect(hasOwnEntry("/instance-portal/a-new-page")).toBe(false);
+    expect(hasOwnEntry("/api/operator/v1/a-new-endpoint")).toBe(false);
+    expect(hasOwnEntry("/github/a-new-page")).toBe(false);
     expect(classOfRoute("/a-new-feature")).toBeUndefined();
-    expect(classOfRoute("/api/w/[workspace]/a-new-feature")).toBe("core");
-    expect(classOfRoute("/new-top-level/[id]")).toBeUndefined();
+    expect(hasOwnEntry("/w/[workspace]/settings/billing")).toBe(true);
   });
 
-  it("has no pattern that covers no route of the app (no stale entry)", () => {
-    const routes = routesOfApp();
-    const stale = ROUTE_CLASSES.filter(
-      (entry) =>
-        !routes.some((route) => {
-          const own = classOfRoute(route);
-          return (
-            own !== undefined &&
-            (route === entry.route || route.startsWith(`${entry.route}/`))
-          );
-        }),
-    ).map((entry) => entry.route);
-    expect(stale).toEqual([]);
+  // #731-T07
+  it("sees every kind of file that makes a route (page, handler, metadata)", () => {
+    const files = discoverRoutes().map(({ file }) => basename(file));
+    expect(files).toContain("page.tsx");
+    expect(files).toContain("route.ts");
+    expect(
+      files.some((file) => /^(icon|apple-icon|favicon)\./.test(file)),
+    ).toBe(true);
+  });
+
+  it("has no entry that matches no file of the app (no stale entry) and none twice", () => {
+    const routes = new Set(discoverRoutes().map(({ route }) => route));
+    expect(
+      ROUTE_CLASSES.filter((entry) => !routes.has(entry.route)).map(
+        (entry) => entry.route,
+      ),
+    ).toEqual([]);
+    const seen = ROUTE_CLASSES.map((entry) => entry.route);
+    expect(seen.filter((route, i) => seen.indexOf(route) !== i)).toEqual([]);
+  });
+
+  // #731-T07
+  it("allows a file of Server Functions only where it is listed, and the list is not stale", () => {
+    const found = sourceFilesBelow(SRC)
+      .filter((file) => isServerFunctionFile(readFileSync(file, "utf8")))
+      .map((file) => relative(SRC, file).split(sep).join("/"))
+      .sort();
+    expect(
+      found,
+      "a new file of Server Functions must be added to SERVER_FUNCTION_FILES (routes.test.ts) on purpose",
+    ).toEqual([...SERVER_FUNCTION_FILES].sort());
   });
 
   it("puts each billing and review route in its capability, the specific pattern winning inside a core one", () => {
@@ -86,7 +108,9 @@ describe("the route classification", () => {
       "/api/billing/webhook": "billing",
       "/api/webhooks/github-app": "review",
       "/api/runners/v1/claim": "review",
-      "/api/workers/v1/jobs/[id]/result": "review",
+      "/api/workers/v1/jobs/[id]": "dynamic-review",
+      "/api/workers/v1/jobs/[id]/heartbeat": "dynamic-review",
+      "/api/workers/v1/jobs/[id]/result": "dynamic-review",
       "/api/internal/repository-sync": "review",
       "/api/internal/dispatch-sweep": "core",
       "/instance-portal/billing/reviews": "billing",
@@ -95,6 +119,7 @@ describe("the route classification", () => {
       "/instance-portal/llm": "core",
       "/projects/[[...rest]]": "review",
       "/api/health": "core",
+      "/favicon.ico": "core",
     };
     for (const [route, expectedClass] of Object.entries(expected))
       expect(classOfRoute(route), route).toBe(expectedClass);
@@ -165,6 +190,21 @@ describe("capabilityOfPath and isAbsentPath", () => {
       "/api/health",
     ])
       expect(isAbsentPath(path, factory), path).toBe(false);
+  });
+
+  // #731-T05
+  it("find the Worker API absent in a set with review but without dynamic-review, and present with it", () => {
+    const diffOnly = createCapabilitySet(["review"]);
+    for (const path of [
+      "/api/workers/v1/jobs/1",
+      "/api/workers/v1/jobs/1/heartbeat",
+      "/api/workers/v1/jobs/1/result",
+    ]) {
+      expect(capabilityOfPath(path), path).toBe("dynamic-review");
+      expect(isAbsentPath(path, diffOnly), path).toBe(true);
+      expect(isAbsentPath(path, factory), path).toBe(false);
+    }
+    expect(isAbsentPath("/api/runners/v1/claim", diffOnly)).toBe(false);
   });
 
   // #731-T04

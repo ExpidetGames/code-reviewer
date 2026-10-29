@@ -123,7 +123,7 @@ export function createJobQueueReviewTriggerIntake(
           error instanceof JobQueueError &&
           error.code === "JOB_KIND_UNAVAILABLE"
         ) {
-          deps.logger.error(
+          deps.logger.warn(
             `[webhook] trigger dropped, ${error.code} repo=${trigger.repo.fullName} pr=${trigger.prNumber} delivery=${source.deliveryId}`,
           );
           return;

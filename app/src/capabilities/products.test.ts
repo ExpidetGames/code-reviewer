@@ -18,26 +18,29 @@ describe("the capability set of a deployment", () => {
   it("is the default of code-review.com when nothing is set, so today's deployment needs no setting", () => {
     expect(resolved({})).toEqual({
       product: "code-review-com",
-      list: ["review", "dynamic-review", "billing"],
+      list: ["billing", "dynamic-review", "review"],
     });
     expect(resolved({ PRODUCT_CAPABILITIES: "  ", PRODUCT_ID: "" })).toEqual({
       product: "code-review-com",
-      list: ["review", "dynamic-review", "billing"],
+      list: ["billing", "dynamic-review", "review"],
     });
   });
 
   it("is the default of the factory product when it is named and no list is given", () => {
     expect(resolved({ PRODUCT_ID: "factory" })).toEqual({
       product: "factory",
-      list: ["review", "dynamic-review"],
+      list: ["dynamic-review", "review"],
     });
   });
 
   // #731-T02
-  it("reads a list that narrows the product, in a stable order", () => {
+  it("reads a list that narrows the product, listed alphabetically whatever the order of the setting", () => {
     expect(
-      resolved({ PRODUCT_CAPABILITIES: "dynamic-review, review" }).list,
-    ).toEqual(["review", "dynamic-review"]);
+      resolved({ PRODUCT_CAPABILITIES: "review, dynamic-review" }).list,
+    ).toEqual(["dynamic-review", "review"]);
+    expect(
+      resolved({ PRODUCT_CAPABILITIES: "review,dynamic-review,billing" }).list,
+    ).toEqual(["billing", "dynamic-review", "review"]);
     expect(resolved({ PRODUCT_CAPABILITIES: "review" }).list).toEqual([
       "review",
     ]);
@@ -49,7 +52,7 @@ describe("the capability set of a deployment", () => {
         PRODUCT_ID: "factory",
         PRODUCT_CAPABILITIES: "review,billing",
       }).list,
-    ).toEqual(["review", "billing"]);
+    ).toEqual(["billing", "review"]);
   });
 
   // #731-T02
@@ -63,13 +66,46 @@ describe("the capability set of a deployment", () => {
   });
 
   // #731-T02
-  it("refuses dynamic-review without review, and an empty list of names", () => {
+  it("refuses dynamic-review without review", () => {
     expect(
       capabilityConfigProblems({ PRODUCT_CAPABILITIES: "dynamic-review" }),
     ).toEqual([expect.stringContaining('"dynamic-review" but not "review"')]);
-    expect(capabilityConfigProblems({ PRODUCT_CAPABILITIES: "," })).not.toEqual(
-      [],
-    );
+  });
+
+  // #731-T02
+  it("names an empty entry as such, once, and does not call it an unknown capability", () => {
+    for (const value of [",", "review,", "review,,billing", ", review"]) {
+      const problems = capabilityConfigProblems({
+        PRODUCT_CAPABILITIES: value,
+      });
+      expect(
+        problems.filter((problem) => problem.includes("empty entry")),
+        value,
+      ).toHaveLength(1);
+      expect(
+        problems.filter((problem) => problem.includes("does not exist")),
+        value,
+      ).toEqual([]);
+    }
+  });
+
+  // #731-T02
+  it("requires review in every set", () => {
+    expect(
+      capabilityConfigProblems({ PRODUCT_CAPABILITIES: "billing" }),
+    ).toEqual([expect.stringContaining('does not name "review"')]);
+    expect(
+      capabilityConfigProblems({
+        PRODUCT_ID: "factory",
+        PRODUCT_CAPABILITIES: "billing",
+      }),
+    ).toEqual([expect.stringContaining('does not name "review"')]);
+    // dynamic-review without review is one problem, not two
+    expect(
+      capabilityConfigProblems({ PRODUCT_CAPABILITIES: "dynamic-review" }),
+    ).toHaveLength(1);
+    for (const product of Object.values(PRODUCTS))
+      expect(product.default).toContain("review");
   });
 
   // #731-T02

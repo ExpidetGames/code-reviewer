@@ -88,6 +88,7 @@ export async function startWebhookHarness(
   const errorLines: string[] = [];
   const logger: WebhookLogger = {
     info: (line) => infoLines.push(line),
+    warn: (line) => infoLines.push(line),
     error: (line) => errorLines.push(line),
   };
   const settings: ReviewSettings = {

@@ -45,7 +45,7 @@ test.describe("a deployment with the capabilities review and dynamic-review", ()
     expect(JSON.parse(answer.body)).toEqual({
       status: "ok",
       product: "factory",
-      capabilities: ["review", "dynamic-review"],
+      capabilities: ["dynamic-review", "review"],
     });
   });
 

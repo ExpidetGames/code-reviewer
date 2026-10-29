@@ -66,7 +66,11 @@ async function twoWorkspaces() {
     intake: createJobQueueReviewTriggerIntake({
       queue: createJobQueue(h.db, workspaceId),
       repositories: createRepositoriesRepository(h.db, workspaceId),
-      logger: { info: () => undefined, error: () => undefined },
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
     }),
   }));
   return { h, a, b, route };

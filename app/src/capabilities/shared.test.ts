@@ -10,9 +10,9 @@ import {
 describe("the capability set of the running server", () => {
   it("is read from the environment it is given, and again when that changes", () => {
     expect(getCapabilities({}).list()).toEqual([
-      "review",
-      "dynamic-review",
       "billing",
+      "dynamic-review",
+      "review",
     ]);
     expect(getCapabilities({ PRODUCT_CAPABILITIES: "review" }).list()).toEqual([
       "review",

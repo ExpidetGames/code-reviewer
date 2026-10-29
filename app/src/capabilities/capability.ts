@@ -40,7 +40,7 @@ export const CAPABILITY_OF_REVIEW_KIND = {
 
 export type CapabilitySet = {
   has(capability: Capability): boolean;
-  /** In the order of `CAPABILITIES`, so the answer of the health check is stable. */
+  /** Sorted alphabetically: the stable contract of the health check, which the deploy pipeline compares. */
   list(): Capability[];
   /** Whether a job of this review kind may exist in this deployment. */
   allowsReviewKind(kind: keyof typeof CAPABILITY_OF_REVIEW_KIND): boolean;
@@ -52,7 +52,7 @@ export function createCapabilitySet(
   const members = new Set(capabilities);
   return {
     has: (capability) => members.has(capability),
-    list: () => CAPABILITIES.filter((capability) => members.has(capability)),
+    list: () => [...members].sort(),
     allowsReviewKind: (kind) => members.has(CAPABILITY_OF_REVIEW_KIND[kind]),
   };
 }

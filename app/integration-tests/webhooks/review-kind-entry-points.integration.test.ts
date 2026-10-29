@@ -62,6 +62,7 @@ async function start(
   const logLines: string[] = [];
   const logger = {
     info: (line: string) => logLines.push(line),
+    warn: (line: string) => logLines.push(line),
     error: (line: string) => logLines.push(line),
   };
   const handler = createGithubAppWebhookHandler({
