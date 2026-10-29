@@ -7,6 +7,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GithubConfigView } from "../service.ts";
 import { GithubSection, GithubStatusCard } from "./github-section.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -107,6 +108,7 @@ describe("the GitHub App page", () => {
   it("no longer renders the admin's own GitHub account block", () => {
     render(
       <GithubSection
+        product={getProductIdentity()}
         view={view()}
         tenancy="single"
         suggestedName="code-reviewer"
@@ -125,6 +127,7 @@ describe("the GitHub App page", () => {
   it("renders one h1 and the card titles as h2", () => {
     render(
       <GithubSection
+        product={getProductIdentity()}
         view={view()}
         tenancy="single"
         suggestedName="code-reviewer"

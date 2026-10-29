@@ -17,6 +17,7 @@ import {
   openSection,
 } from "../../test-support/settings-sections.ts";
 import { SettingsForm } from "./settings-form.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -28,6 +29,7 @@ function renderForm(
 ) {
   return render(
     <SettingsForm
+      product={getProductIdentity()}
       workspaceSlug="acme"
       initial={initial}
       keyedProviders={keyedProviders}

@@ -57,6 +57,7 @@ import {
   invitationMessage,
 } from "../mail/invitation-message.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { canInviteAs, canRevokeInvitationOf } from "./permissions.ts";
 import type { WorkspaceLimits } from "./rate-limits.ts";
 import { isWorkspaceRole, type WorkspaceRole } from "../db/workspace-roles.ts";
@@ -210,6 +211,8 @@ export type InvitationServiceDependencies = {
   limits: WorkspaceLimits;
   /** The configured public address of the app: a link never comes from a request header. */
   baseUrl: string;
+  /** Whose name the invitation mail carries. */
+  product: ProductIdentity;
   /** Whether sign-in with GitHub exists (the facts of the sign-up rule). */
   githubConfigured: () => boolean | Promise<boolean>;
   now?: () => Date;
@@ -235,7 +238,7 @@ function toOpen(invitation: Invitation, now: Date): OpenInvitation {
 export function createInvitationService(
   dependencies: InvitationServiceDependencies,
 ): InvitationService {
-  const { db, mail, limits, baseUrl, githubConfigured } = dependencies;
+  const { db, mail, limits, baseUrl, product, githubConfigured } = dependencies;
   const now = dependencies.now ?? (() => new Date());
   const newId = dependencies.newId ?? (() => crypto.randomUUID());
   const newToken = dependencies.newToken ?? newLinkToken;
@@ -275,6 +278,7 @@ export function createInvitationService(
           inviterName: input.inviterName,
           role: input.role,
           validForDays: INVITATION_TTL_MS / (24 * 60 * 60 * 1000),
+          product,
         }),
       );
       if (result.ok) return { kind: "mailed" };

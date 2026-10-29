@@ -22,6 +22,7 @@ import {
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = { title: "Project settings" };
 
@@ -103,6 +104,7 @@ async function ProjectSettingsContent({
   });
   return (
     <ProjectSettingsPageContent
+      product={getProductIdentity()}
       workspaceSlug={workspaceSlug}
       audience={configAudienceOf(user)}
       llmNotice={llmNotice}

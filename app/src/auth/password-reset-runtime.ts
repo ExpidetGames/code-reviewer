@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { createSignUpLimits } from "../signup/limits.ts";
 import { getSignUpFacts } from "../signup/shared.ts";
 import { getAuth } from "./auth.ts";
@@ -52,6 +53,7 @@ export function getPasswordResetRequestHandler() {
           emailPasswordOn: async () => (await getSignInMethods()).emailPassword,
           // The address in the link is the configured one, never a request header.
           baseUrl: loadAuthConfig(process.env).baseUrl,
+          product: getProductIdentity(),
           // Nothing of the account is looked at before the answer is sent (Next.js runs it after the
           // response), so neither its content nor its time tells whether there was one. The work does not
           // throw; the catch is only a net.

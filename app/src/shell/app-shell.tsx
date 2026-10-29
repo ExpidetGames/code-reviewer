@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { Suspense, useId, type CSSProperties, type ReactNode } from "react";
 import { Brand } from "@/components/brand";
+import type { ProductIdentity } from "@/product-identity/identity";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import {
   CurrentWorkspaceSidebar,
@@ -18,10 +19,13 @@ import {
 } from "./nav-links.tsx";
 
 export function AppShell({
+  product,
   userMenu,
   workspaceSwitcher,
   children,
 }: {
+  /** The product whose brand the header shows. */
+  product: ProductIdentity;
   userMenu: ReactNode;
   /** The workspaces of the signed in person; it needs the session, so it arrives as a slot too. */
   workspaceSwitcher?: ReactNode;
@@ -56,7 +60,7 @@ export function AppShell({
             href="/"
             className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full px-2 no-underline sm:pr-3"
           >
-            <Brand compact />
+            <Brand product={product} compact />
           </Link>
           {workspaceSwitcher || userMenu ? (
             <span aria-hidden="true" className="h-6 w-px shrink-0 bg-border" />

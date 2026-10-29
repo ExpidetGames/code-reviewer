@@ -21,6 +21,7 @@ import { createSetupStateReader, readSetupState } from "../setup/state.ts";
 import { SETUP_SESSION_COOKIE } from "../setup/setup-session.ts";
 import { cookieHeader, remember, type CookieJar } from "./auth-harness.ts";
 import { createTestDatabase } from "./test-database.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 export const SETUP_TEST_BASE_URL = "http://localhost:3000";
 export const SETUP_TEST_SECRET = "setup-test-secret-0123456789-0123456789";
@@ -78,6 +79,7 @@ function assemble(
   const auth = createAuth({
     db,
     config,
+    product: getProductIdentity(),
     verificationRequired: () => Promise.resolve(gateState.mail),
   });
   const logs: string[] = [];

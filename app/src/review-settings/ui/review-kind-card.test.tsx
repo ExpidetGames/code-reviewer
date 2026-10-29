@@ -30,6 +30,7 @@ import {
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -145,6 +146,7 @@ function renderForm(
 ) {
   return render(
     <SettingsForm
+      product={getProductIdentity()}
       workspaceSlug="acme"
       initial={initial}
       api={api}

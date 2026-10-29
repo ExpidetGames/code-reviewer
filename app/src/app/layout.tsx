@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
-import { PRODUCT_NAME } from "@/copy/product-name";
+import { getProductIdentity } from "@/product-identity/current";
 import { initialThemeScript } from "@/theme/theme";
 import { ThemeSync } from "@/theme/theme-sync";
 import { fontVariables } from "./fonts.ts";
@@ -9,7 +9,10 @@ import { fontVariables } from "./fonts.ts";
 import "./theme.css";
 
 export const metadata: Metadata = {
-  title: { default: PRODUCT_NAME, template: `%s · ${PRODUCT_NAME}` },
+  title: {
+    default: getProductIdentity().name,
+    template: `%s · ${getProductIdentity().name}`,
+  },
   description: "Automatic code reviews for GitHub pull requests.",
 };
 

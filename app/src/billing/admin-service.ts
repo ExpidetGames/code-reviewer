@@ -25,7 +25,7 @@
 //   the admin enters the secret or recreates the endpoint (billing off). The environment of the endpoint (its `livemode`) must be the one of the API key.
 import "server-only";
 import type { Kysely } from "kysely";
-import { PRODUCT_NAME } from "../copy/product-name.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { isBillingOn } from "./enabled.ts";
@@ -100,6 +100,8 @@ export type BillingAdminServiceOptions = {
   ) => StripeClient;
   /** The public address of this app (`BETTER_AUTH_URL`): where Stripe is told to post its events. Never from a request. */
   publicUrl: string;
+  /** Whose name the webhook endpoint carries as its description at Stripe. */
+  product: ProductIdentity;
   now?: () => Date;
   /** One line per change of the switch or the endpoint; never a value of a credential. Default: the console. */
   log?: (line: string) => void;
@@ -264,6 +266,7 @@ export function createBillingAdminService({
   ownKeySecretNames,
   clientFor,
   publicUrl,
+  product,
   now = () => new Date(),
   log = (line) => console.info(line),
 }: BillingAdminServiceOptions): BillingAdminService {
@@ -835,7 +838,7 @@ export function createBillingAdminService({
       const created = await client.createWebhookEndpoint({
         url: webhookUrl,
         enabled_events: [...STRIPE_WEBHOOK_EVENTS],
-        description: PRODUCT_NAME,
+        description: product.name,
         // The events are rendered in the version the client's calls use, not the account's default, which can change.
         api_version: STRIPE_MANAGED_PAYMENTS_API_VERSION,
       });

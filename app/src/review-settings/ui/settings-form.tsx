@@ -84,6 +84,7 @@ import {
 import { planGlobalSave } from "./global-save.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ProviderAddressNote } from "./provider-address-note.tsx";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { LlmFieldset, type OwnLlmChoice } from "./llm-fieldset.tsx";
 import { LimitsFieldset } from "./limits-fieldset.tsx";
 import type { NativeFormData } from "../../native-providers/form-data.ts";
@@ -282,6 +283,7 @@ function planOf(model: SettingsFormModel, state: FormState) {
 }
 
 export function SettingsForm({
+  product,
   workspaceSlug,
   initial,
   repositoryId,
@@ -295,6 +297,8 @@ export function SettingsForm({
   api: apiOverride,
   catalogApi,
 }: {
+  /** The product whose name the sentences of the form use. */
+  product: ProductIdentity;
   /** The workspace of the page: the call is made in it. */
   workspaceSlug: string;
   initial: SettingsFormModel;
@@ -780,6 +784,7 @@ export function SettingsForm({
     if (!model.managed)
       return (
         <LlmFieldset
+          product={product}
           workspaceSlug={workspaceSlug}
           disabled={disabled}
           own={ownChoice()}
@@ -798,6 +803,7 @@ export function SettingsForm({
         : choices.find((entry) => entry.id === followed);
     return (
       <LlmFieldset
+        product={product}
         workspaceSlug={workspaceSlug}
         disabled={disabled}
         managedFieldName={field}

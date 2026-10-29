@@ -9,15 +9,18 @@ import { Button } from "@/components/button.tsx";
 import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
-import { PRODUCT_NAME } from "@/copy/product-name.ts";
+import type { ProductIdentity } from "@/product-identity/identity.ts";
 import { browserSetupApi, type SetupApi } from "./api.ts";
 import { describeSetupFailure } from "./messages.ts";
 
 export function CodeForm({
+  product,
   existingInstallation = false,
   api = browserSetupApi,
   onAccepted = () => window.location.reload(),
 }: {
+  /** The product that is being set up. */
+  product: ProductIdentity;
   /** The instance has data from before the setup existed. */
   existingInstallation?: boolean;
   /** Where the code comes from: the log of a server, or `pnpm setup-code` of a serverless deployment. */
@@ -47,7 +50,7 @@ export function CodeForm({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">
-          {`Set up ${PRODUCT_NAME}`}
+          {`Set up ${product.name}`}
         </h1>
         <p className="text-sm text-muted-foreground">
           Enter the setup code that this command printed in your terminal:{" "}

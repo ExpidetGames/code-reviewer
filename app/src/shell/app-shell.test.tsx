@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { AppShell } from "./app-shell.tsx";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 // jsdom cannot navigate; a click on a link would only print a "not implemented" notice.
 const keepPageInPlace = (event: Event) => event.preventDefault();
@@ -33,7 +34,7 @@ afterEach(() => {
 
 function renderShell() {
   return render(
-    <AppShell userMenu={<span>user menu</span>}>
+    <AppShell product={getProductIdentity()} userMenu={<span>user menu</span>}>
       <h1>Page content</h1>
     </AppShell>,
   );
@@ -163,6 +164,7 @@ describe("the frame", () => {
   it("shows the workspace switcher and the user menu it is given in the header, and a way to open the sidebar", () => {
     render(
       <AppShell
+        product={getProductIdentity()}
         userMenu={<span>user menu</span>}
         workspaceSwitcher={<span>workspace switcher</span>}
       >
@@ -242,7 +244,10 @@ describe("the drawer on a narrow screen", () => {
 
     navigation.pathname = "/w/acme/projects";
     rerender(
-      <AppShell userMenu={<span>user menu</span>}>
+      <AppShell
+        product={getProductIdentity()}
+        userMenu={<span>user menu</span>}
+      >
         <h1>Page content</h1>
       </AppShell>,
     );

@@ -28,6 +28,7 @@ import type { ProjectRowView } from "./list-view.ts";
 import { loadProjectRow } from "./list-view.ts";
 import { PROJECT_STATE_NOTICE } from "./messages.ts";
 import { ProjectPageHeader } from "./project-page-header.tsx";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 
 export type ProjectSettingsPageData =
   | { kind: "not_found" }
@@ -88,6 +89,7 @@ export function projectStateNotices(row: ProjectRowView): AttentionNotice[] {
 }
 
 export function ProjectSettingsPageContent({
+  product,
   workspaceSlug,
   audience = "member",
   llmNotice = null,
@@ -98,6 +100,8 @@ export function ProjectSettingsPageContent({
   data,
   api,
 }: {
+  /** The product whose name the sentences of the page use. */
+  product: ProductIdentity;
   /** The workspace of the page: every link and call stays in it. */
   workspaceSlug: string;
   /** Whether the person runs the instance (reads which variables are wrong) or is a member. */
@@ -132,6 +136,7 @@ export function ProjectSettingsPageContent({
             when it is shown again with fresh data the form must start from that data. */}
         <SettingsForm
           key={JSON.stringify([data.model, data.dynamicReviewEnabled])}
+          product={product}
           workspaceSlug={workspaceSlug}
           initial={data.model}
           dynamicReviewEnabled={data.dynamicReviewEnabled}

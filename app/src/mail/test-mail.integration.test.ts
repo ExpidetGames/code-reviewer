@@ -21,6 +21,7 @@ import {
   testMailAdminKey,
   TEST_MAIL_WINDOW_MS,
 } from "./test-mail.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const APP_SECRET = "test-mail-test-secret-0123456789-0123456789";
 const QUICK = {
@@ -59,6 +60,7 @@ async function start(options: { auth?: boolean; configure?: boolean } = {}) {
   const rateLimits = createRateLimitsRepository(db, now);
   const logs: string[] = [];
   const service = createTestMailService({
+    product: getProductIdentity(),
     config,
     rateLimits,
     baseUrl: "https://code-reviewer.example.com",
@@ -149,6 +151,7 @@ describe("the test mail", () => {
   it("answers password_unreadable for a password that cannot be decrypted", async () => {
     const { db, smtp, logs } = await start();
     const service = createTestMailService({
+      product: getProductIdentity(),
       config: createSmtpConfigStore({
         db,
         appSecret: "another-app-secret-0123456789-0123456789-xyz",

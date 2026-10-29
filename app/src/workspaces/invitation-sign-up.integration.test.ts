@@ -6,6 +6,7 @@
 // the invited address (no mail server, rule "everyone") accepts with the link and becomes a member.
 import { describe, expect, it } from "vitest";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { assembleWorkspaces } from "./assemble.ts";
 import {
   createSignUpHarness,
@@ -28,6 +29,7 @@ async function invited() {
     db: h.db,
     mail: h.mail,
     baseUrl: "https://reviews.example.test",
+    product: getProductIdentity(),
     githubConfigured: () => false,
     now: h.now,
     newToken: () => {
