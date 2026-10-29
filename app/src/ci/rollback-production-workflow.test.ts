@@ -37,6 +37,7 @@ describe("the production rollback workflow", () => {
     expect(Object.keys(inputs).sort()).toEqual([
       "app_deployment",
       "dispatcher_deployment",
+      "factory_deployment",
     ]);
   });
 
@@ -114,13 +115,16 @@ describe("the production rollback workflow", () => {
     const rollbacks = steps.filter((step) =>
       /vercel rollback/.test(step.run ?? ""),
     );
-    expect(rollbacks).toHaveLength(2);
+    expect(rollbacks).toHaveLength(3);
     expect(rollbacks[0]?.run).toContain('vercel rollback "$DEPLOYMENT"');
     expect(rollbacks[0]?.env?.VERCEL_PROJECT_ID).toBe(
       "${{ env.VERCEL_APP_PROJECT_ID }}",
     );
     expect(rollbacks[1]?.env?.VERCEL_PROJECT_ID).toBe(
       "${{ env.VERCEL_DISPATCHER_PROJECT_ID }}",
+    );
+    expect(rollbacks[2]?.env?.VERCEL_PROJECT_ID).toBe(
+      "${{ env.VERCEL_FACTORY_PROJECT_ID }}",
     );
     for (const step of rollbacks) {
       expect(step.if).toBeTruthy();
@@ -189,7 +193,10 @@ describe("the input check of the rollback", () => {
       },
     ],
   ])("accepts %s", (_name, env) => {
-    expect(runStep(selector, { env }).status).toBe(0);
+    // GitHub hands the step every input, empty when it was not given.
+    expect(
+      runStep(selector, { env: { FACTORY_DEPLOYMENT: "", ...env } }).status,
+    ).toBe(0);
   });
 
   // #403-T09
@@ -213,7 +220,7 @@ describe("the input check of the rollback", () => {
       { APP_DEPLOYMENT: "dpl_example0001", DISPATCHER_DEPLOYMENT: "latest" },
     ],
   ])("refuses %s", (_name, env) => {
-    const run = runStep(selector, { env });
+    const run = runStep(selector, { env: { FACTORY_DEPLOYMENT: "", ...env } });
 
     expect(run.status).toBe(1);
     expect(run.stdout).toContain("::error::");

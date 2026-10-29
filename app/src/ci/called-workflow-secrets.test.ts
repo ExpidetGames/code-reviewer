@@ -51,6 +51,7 @@ describe("secrets of the called workflows", () => {
       "deploy-production.yml:snapshot-build",
       "deploy-production.yml:stage-app",
       "deploy-production.yml:stage-dispatcher",
+      "deploy-production.yml:stage-factory",
     ]);
   });
 
