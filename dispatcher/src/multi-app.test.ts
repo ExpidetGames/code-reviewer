@@ -941,6 +941,33 @@ describe("the cap of each app against the platform's fleet", () => {
   });
 
   // #730-T22
+  it("does not list the platform for the cap in the single-app environment, the production of today", async () => {
+    const legacy = environment();
+    delete legacy.DISPATCHER_APPS;
+    delete legacy.DISPATCHER_APP_FACTORY_TOKEN;
+    delete legacy.DISPATCHER_APP_FACTORY_SIGNING_SECRET;
+    delete legacy.DISPATCHER_OPERATOR_TOKEN;
+    const { core, sandbox, launcher, logger } = build({
+      env: legacy,
+      withFleet: true,
+    });
+    // A platform that cannot be listed must not change what the single app gets.
+    sandbox.failNextList(new Error("platform down"));
+
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId: reviewer.enqueue(),
+      reviewKind: "diff",
+    });
+    if (result.outcome === "started") await result.background;
+
+    expect(result.outcome).toBe("started");
+    expect(sandbox.lists).toHaveLength(0);
+    expect(launcher.launches).toHaveLength(1);
+    expect(logger.text()).not.toContain("fleet_list_failed");
+  });
+
+  // #730-T22
   it("holds the reviewer to DISPATCHER_MAX_RUNNING plus the tolerance with the same count", async () => {
     const { core, sandbox } = build({
       env: environment({ DISPATCHER_MAX_RUNNING: "2" }),

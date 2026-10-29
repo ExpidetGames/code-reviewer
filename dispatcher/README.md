@@ -136,7 +136,7 @@ the whole identity of the sender**.
   Canary VMs have no tenant. The platform's listing narrows by one tag only, so the tenant is checked in code.
 - **The cap is counted here too.** The App enforces an app's cap at the claim, but an app that is buggy or compromised can
   ignore its cap, and one app must not take the Sandbox concurrency of another. Where the platform can be listed (the
-  Sandbox-Launcher, i.e. wherever the reaper exists), the Dispatcher counts for each claim what the app occupies by its own
+  Sandbox-Launcher, i.e. wherever the reaper exists) **and more than one app is configured**, the Dispatcher counts for each claim what the app occupies by its own
   numbers: the live job VMs of its `tenant` tag (a VM without the tag counts for `reviewer`; canaries and VMs the platform is
   ending do not count), the VMs created since the listing, and its launches in progress that have no VM yet. Above the app's
   `maxRunning` **plus a tolerance of the cap and two more** (so twice the cap plus two VMs in all, the VM this call would start
@@ -144,12 +144,17 @@ the whole identity of the sender**.
   backstop against a runaway app, not a fair share: it counts VMs, and a VM outlives its job for a while (the listing is up to
   five seconds old, the stop call of a finished job comes after its result, and the VM of a Worker that died stays until the
   reaper stops it, one per attempt of a crash loop). An exact comparison would refuse the job the App rightly sends, and
-  nothing wakes it again before the sweep (the hosted E2E of a crash loop at cap 1 showed it). The cap is that of the app: for
+  nothing wakes it again before the sweep (the hosted E2E of a crash loop at cap 1 showed it). Even with the tolerance, an app
+  in a crash loop whose dead Workers leave more than twice the cap plus two VMs can have a job **delayed, not lost**: the
+  wake-up call is answered `busy` and the App offers the job again, until the reaper has stopped the leftovers. The cap is that of the app: for
   `reviewer` `DISPATCHER_MAX_RUNNING`, unchanged. _Cost:_ one listing of the project's `cr-` VMs (all pages) per five seconds at most, shared by every claim in that time;
   claims that arrive together share one call. A claim therefore sees a VM that ended up to five seconds late (the safe side)
-  and one that started in that time through the count of the Dispatcher's own launches. If the listing fails, the last good one
-  is used for up to a minute; after that the claim answers `unavailable` (retry in 60 s, `fleet_list_failed` in the log) and
-  nothing is claimed. Without a fleet (a local Launcher) the cap is the launches in progress, as before. The sum of the caps
+  and one that started in that time through the count of the Dispatcher's own launches. A listing that gives no answer in four
+  seconds counts as a failed one (claims never wait longer, and a waiting claim holds no launch slot). If the listing fails,
+  the last good one is used for up to a minute; after that the claim answers `unavailable` (retry in 60 s, `fleet_list_failed` in the log) and
+  nothing is claimed. Without a fleet (a local Launcher), **and with one app only (today's production, a Dispatcher with no
+  `DISPATCHER_APPS`)**, the platform is not listed for the cap at all: the cap is the launches in progress and the App's own,
+  exactly as before #730, so the cap adds no platform call and no new way to refuse. The count starts with the second app. The sum of the caps
   plus their tolerances should stay within the team's Sandbox concurrency (a platform limit not verified here); then no app
   can starve another.
 - **Operator credential.** `POST /probe` (it starts canary VMs, which cost money) and `POST /apps/check` are opened by

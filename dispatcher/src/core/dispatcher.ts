@@ -4,7 +4,7 @@
 // Launcher (which starts its Worker). It claims, holds the per-job credential only while it hands the job
 // over, keeps the lease alive during the launch and gives the job back when the launch fails.
 //
-//   handle(hint) -> capability check -> app's kinds -> capacity -> fleet cap -> App version -> claim -> kind and engine check -> { started, background }
+//   handle(hint) -> capability check -> app's kinds -> capacity -> fleet cap (several apps) -> App version -> claim -> kind and engine check -> { started, background }
 //   background:  launch(spec) while heartbeating with the job credential
 //                deadline, lost lease or abort -> stop the launch; launch failed -> release(launch_failed)
 //   after that:  nothing. The Worker owns the lease and the core never looks at the job again (#487); the App tells the
@@ -15,9 +15,9 @@
 // Several apps (#730): every call names the app (`hint.appId`, the app whose signing key verified the wake-up call). The
 // core keeps one client, one slot counter and one version memory per app, claims at that app only (a 204 is `ignored`:
 // there is no looking at another app), refuses a kind the app is not allowed before and after the claim, and hands the
-// Launcher the registry's URL of the app that claimed, never anything a request said. Where the platform can be listed
-// (`liveVms`), the cap of an app is also the Dispatcher's own count of that app's live VMs plus its launches in flight, so
-// an app that ignores its cap (a bug, a compromise) cannot take the concurrency of another.
+// Launcher the registry's URL of the app that claimed, never anything a request said. Where the platform can be listed and
+// there is more than one app (`liveVms`), the cap of an app is also the Dispatcher's own count of that app's live VMs plus
+// its launches in flight, so an app that ignores its cap (a bug, a compromise) cannot take the concurrency of another.
 import {
   createAppClient,
   type AppClient,
@@ -55,6 +55,8 @@ const VERSION_TTL_MS = 10 * 60 * 1000;
 const MIN_HEARTBEAT_SECONDS = 5;
 /** The listing of the live VMs is reused this long: a claim must not cost a platform call each. */
 const LIVE_VMS_TTL_MS = 5 * 1000;
+/** A listing that has not answered by then is a failed one: a hang must not hold up the claims that wait for it. */
+const LIVE_VMS_TIMEOUT_MS = 4 * 1000;
 /** A listing that failed is replaced by the last good one only while it is this young; then the claim waits. */
 const LIVE_VMS_STALE_MS = 60 * 1000;
 /**
@@ -178,7 +180,10 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   let live: LiveSnapshot | undefined;
   let listing: Promise<LiveSnapshot | undefined> | undefined;
 
-  /** One listing at a time, reused for a few seconds. A failed one is replaced by the last good one while that is young. */
+  /**
+   * One listing at a time, reused for a few seconds. A failed one (a rejection or no answer in `LIVE_VMS_TIMEOUT_MS`, even
+   * from a platform that ignores the signal) is replaced by the last good one while that is young.
+   */
   async function refreshLive(
     counter: LiveVmCounter,
   ): Promise<LiveSnapshot | undefined> {
@@ -186,11 +191,29 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       [...apps].map(([id, state]) => [id, state.vmsCreated]),
     );
     const at = now();
+    const timedOut = new AbortController();
+    const answered = new AbortController();
+    void clock.sleep(LIVE_VMS_TIMEOUT_MS, answered.signal).then(() => {
+      if (!answered.signal.aborted) timedOut.abort();
+    });
+    const signal = AbortSignal.any([shutdown.signal, timedOut.signal]);
+    const gaveUp = new Promise<never>((_resolve, reject) => {
+      const fail = () => reject(new Error("fleet_list_timeout"));
+      if (signal.aborted) fail();
+      else signal.addEventListener("abort", fail, { once: true });
+    });
+    gaveUp.catch(() => undefined);
     try {
-      live = { at, counts: await counter(shutdown.signal), created };
+      live = {
+        at,
+        counts: await Promise.race([counter(signal), gaveUp]),
+        created,
+      };
     } catch {
       // The platform's own text is not ours to log.
       logger.error("fleet_list_failed");
+    } finally {
+      answered.abort();
     }
     return live !== undefined && now() - live.at < LIVE_VMS_STALE_MS
       ? live
@@ -209,8 +232,8 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
 
   /**
    * What the app occupies, by the Dispatcher's own count: the live VMs of the last listing, the VMs created since, and the
-   * launches in progress that have no VM yet (the others are in the listing or in the VMs created since). The caller holds
-   * a slot already, so a count above the cap means this launch would be one too many.
+   * launches in progress that have no VM yet (the others are in the listing or in the VMs created since). The launch asked
+   * about is not among them yet: the caller adds it.
    */
   function occupied(state: AppState, snapshot: LiveSnapshot): number {
     const id = state.settings.id;
@@ -232,6 +255,14 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     state.versionOkUntil = now() + VERSION_TTL_MS;
     state.takesVmReports = checked.features.includes(VM_LIFECYCLE_FEATURE);
     return { ok: true };
+  }
+
+  function busy(state: AppState): HandleResult {
+    logger.info("busy", {
+      app: state.settings.id,
+      launching: state.launching,
+    });
+    return { outcome: "busy", retryAfterSeconds: DEFAULT_RETRY_BUSY_SECONDS };
   }
 
   async function handle(hint: JobHint): Promise<HandleResult> {
@@ -274,37 +305,40 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       logger.info("not_capable", { app: appId, reviewKind: hint.reviewKind });
       return { outcome: "not_capable" };
     }
-    if (state.launching >= state.settings.maxRunning) {
-      logger.info("busy", { app: appId, launching: state.launching });
-      return { outcome: "busy", retryAfterSeconds: DEFAULT_RETRY_BUSY_SECONDS };
+    if (state.launching >= state.settings.maxRunning) return busy(state);
+
+    // The listing is waited for before a slot is taken: a call that waits holds none, so a platform that answers slowly
+    // cannot fill the cap with calls that launch nothing.
+    if (deps.liveVms !== undefined) {
+      const snapshot = await liveSnapshot(deps.liveVms);
+      if (snapshot === undefined)
+        return {
+          outcome: "unavailable",
+          retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
+        };
+      // Calls that waited for the same listing, and launches that began meanwhile, are counted now.
+      if (state.launching >= state.settings.maxRunning) return busy(state);
+      // This launch is one more than the Dispatcher's count.
+      const used = occupied(state, snapshot) + 1;
+      const tolerance = capTolerance(state.settings.maxRunning);
+      if (used > state.settings.maxRunning + tolerance) {
+        logger.warn("app_cap_reached", {
+          app: appId,
+          occupied: used - 1,
+          maxRunning: state.settings.maxRunning,
+          tolerance,
+        });
+        return {
+          outcome: "busy",
+          retryAfterSeconds: DEFAULT_RETRY_BUSY_SECONDS,
+        };
+      }
     }
 
-    // The slot is taken before the first await, so two wake-up calls cannot both pass the check.
+    // The slot is taken with no await between the last check and here, so two wake-up calls cannot both pass the check.
     state.launching += 1;
     let handedOver = false;
     try {
-      if (deps.liveVms !== undefined) {
-        const snapshot = await liveSnapshot(deps.liveVms);
-        if (snapshot === undefined)
-          return {
-            outcome: "unavailable",
-            retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
-          };
-        const used = occupied(state, snapshot);
-        const tolerance = capTolerance(state.settings.maxRunning);
-        if (used > state.settings.maxRunning + tolerance) {
-          logger.warn("app_cap_reached", {
-            app: appId,
-            occupied: used - 1,
-            maxRunning: state.settings.maxRunning,
-            tolerance,
-          });
-          return {
-            outcome: "busy",
-            retryAfterSeconds: DEFAULT_RETRY_BUSY_SECONDS,
-          };
-        }
-      }
       const supported = await appSupportsTheSplit(state);
       if (!supported.ok) {
         logger.error("app_unsupported", { app: appId, code: supported.code });
@@ -423,11 +457,17 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     // #493: the reports of the VM the Launcher created, in the background; awaited at the very end only.
     const reports: Promise<void>[] = [];
     let vmCounted = false;
+    let inFlight = false;
+    let phaseEnded = false;
     const onVmCreated = (vm: CreatedVm) => {
       if (!vmCounted) {
         vmCounted = true;
         state.vmsCreated += 1;
-        state.vmsInFlight += 1;
+        // A VM reported after the launch phase ended is created, but no launch is left to hold it in flight.
+        if (!phaseEnded) {
+          inFlight = true;
+          state.vmsInFlight += 1;
+        }
       }
       if (!state.takesVmReports) return;
       reports.push(reportVm(state, job, vm));
@@ -458,8 +498,9 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     } finally {
       phaseDone.abort();
       shutdown.signal.removeEventListener("abort", onShutdown);
+      phaseEnded = true;
       state.launching -= 1;
-      if (vmCounted) state.vmsInFlight -= 1;
+      if (inFlight) state.vmsInFlight -= 1;
       // The platform keeps the function alive for the work of the launch: do not end it before the reports are made.
       await Promise.allSettled(reports);
     }

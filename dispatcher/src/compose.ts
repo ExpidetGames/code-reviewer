@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What both entry points share: the settings from the environment, the Webhook-Trigger over the
-// configured keys (one set per app, #730), the stop route and the reaper where there is a platform fleet, and a logger
-// that masks every secret of this deployment, every app's included.
+// configured keys (one set per app, #730), the stop route and the reaper where there is a platform fleet (with several apps
+// also the fleet cap), and a logger that masks every secret of this deployment, every app's included.
 import { createDispatcher, type Dispatcher } from "./dispatcher-app.ts";
 import { loadSettings, type Settings } from "./config.ts";
 import { createLogger } from "./core/logger.ts";
@@ -64,8 +64,14 @@ export function composeDispatcher(
       reason: settings.cronSecretProblem.reason,
     });
   }
-  // The platform's side of the fleet (#364) is also what counts the live VMs of every app for its cap (#730).
   const setup = options.reaper?.(settings);
+  // The platform's side of the fleet (#364) is also what counts the live VMs of every app for its cap (#730), but only where
+  // there is another app to protect: with one app the listing would cost a platform call and two new ways to refuse, for
+  // nothing the App's own cap does not already do.
+  const liveVms =
+    setup !== undefined && settings.core.apps.length > 1
+      ? liveJobVmsByApp(setup.fleet)
+      : undefined;
   const dispatcher = createDispatcher({
     settings: settings.core,
     launcher,
@@ -73,7 +79,7 @@ export function composeDispatcher(
     trigger: webhookTrigger({ keys: settings.signingKeys }),
     logger,
     fetch: options.fetch,
-    ...(setup === undefined ? {} : { liveVms: liveJobVmsByApp(setup.fleet) }),
+    ...(liveVms === undefined ? {} : { liveVms }),
     ...(settings.operatorToken === undefined
       ? {}
       : { operatorToken: settings.operatorToken }),

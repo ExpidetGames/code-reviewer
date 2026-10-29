@@ -17,6 +17,7 @@ import { createDispatcherCore } from "./dispatcher.ts";
 import {
   LaunchError,
   type AppSettings,
+  type CreatedVm,
   type HandleResult,
   type LiveVmCounter,
 } from "./types.ts";
@@ -884,6 +885,164 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     expect(counter).toHaveBeenCalledTimes(1);
     for (const result of results)
       if (result.outcome === "started") await result.background;
+  });
+
+  // #730-T22
+  it("turns a listing that hangs into a failure after four seconds and holds no slot while it waits", async () => {
+    // A platform that never answers and ignores the signal: the wait itself must end.
+    const hanging: LiveVmCounter = () => new Promise(() => undefined);
+    const { core, logger } = build({
+      factory: { maxRunning: 1 },
+      liveVms: hanging,
+    });
+
+    const calls = [0, 1, 2].map(() =>
+      core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+    let answered = 0;
+    for (const call of calls) void call.then(() => (answered += 1));
+    await settle();
+    await clock.advance(3999);
+    // Three waiting calls at a cap of one: none of them took the slot, so none was answered `busy` and none is answered yet.
+    expect(answered).toBe(0);
+
+    await clock.advance(1);
+    const results = await Promise.all(calls);
+
+    expect(results).toStrictEqual([
+      { outcome: "unavailable", retryAfterSeconds: 60 },
+      { outcome: "unavailable", retryAfterSeconds: 60 },
+      { outcome: "unavailable", retryAfterSeconds: 60 },
+    ]);
+    expect(logger.text()).toContain("fleet_list_failed");
+    expect(factory.requests()).toHaveLength(0);
+  });
+
+  // #730-T22
+  it("serves the next call normally after a listing that hung, with the slot free", async () => {
+    let hang = true;
+    const { core } = build({
+      factory: { maxRunning: 1 },
+      liveVms: () =>
+        hang
+          ? new Promise<never>(() => undefined)
+          : Promise.resolve(new Map<string, number>()),
+    });
+    const first = core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+    await settle();
+    await clock.advance(4000);
+    expect((await first).outcome).toBe("unavailable");
+
+    hang = false;
+    const second = await handled(
+      core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+
+    expect(second.outcome).toBe("started");
+  });
+
+  // #730-T22
+  it("hands the listing a signal that aborts after four seconds", async () => {
+    let received: AbortSignal | undefined;
+    const { core } = build({
+      liveVms: (signal) => {
+        received = signal;
+        return new Promise<never>(() => undefined);
+      },
+    });
+    const call = core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+    await settle();
+    await clock.advance(3999);
+    expect(received?.aborted).toBe(false);
+
+    await clock.advance(1);
+
+    expect(received?.aborted).toBe(true);
+    await call;
+  });
+
+  // #730-T22
+  it("does not let two calls that waited for the same listing both take the last slot", async () => {
+    const release = deferred();
+    const { core } = build({
+      factory: { maxRunning: 1 },
+      liveVms: async () => {
+        await release.promise;
+        return new Map<string, number>();
+      },
+      launcher: { onLaunch: () => release.promise },
+    });
+    const calls = [0, 1].map(() =>
+      core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+    release.resolve();
+    const results = await Promise.all(calls);
+
+    expect(results.map((result) => result.outcome).sort()).toStrictEqual([
+      "busy",
+      "started",
+    ]);
+    for (const result of results)
+      if (result.outcome === "started") await result.background;
+  });
+
+  // #730-T22
+  it("does not count a VM reported after its launch ended as one in flight", async () => {
+    // The launch ends, then the Launcher reports its VM (a callback that arrives late). The VM is real, so it counts as
+    // created; it must not make the next call think a launch without a VM has one more VM than it has.
+    let late: ((vm: CreatedVm) => void) | undefined;
+    const { core } = build({
+      factory: { maxRunning: 1 },
+      liveVms: counts({ factory: 3 }),
+      launcher: {
+        onLaunch: (spec) => {
+          late = spec.onVmCreated;
+          return Promise.resolve();
+        },
+      },
+    });
+    const first = await handled(
+      core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+    expect(first.outcome).toBe("started");
+    late?.({
+      name: "cr-diff-late",
+      startedAt: new Date(0),
+      timeoutSeconds: 1500,
+    });
+
+    // The cached listing shows 3; the late VM makes 4; with this call 5 is above the cap of 1 plus its tolerance of 3.
+    const second = await core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+
+    expect(second).toStrictEqual({ outcome: "busy", retryAfterSeconds: 30 });
   });
 
   // #730-T22
