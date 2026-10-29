@@ -3,6 +3,7 @@
 // The wiring of the running server: the real database and the model of the instance. The webhook
 // intake and the claim of the runner API get the settings of a project from here.
 import "server-only";
+import { getCapabilities } from "../capabilities/shared.ts";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createCatalogRepository } from "../db/repositories/catalog-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -59,6 +60,8 @@ export function reviewSettingsServiceFor(
     ),
     // #195: a kind change cancels the project's waiting review jobs in this transaction.
     hooks: createJobReviewSettingsHooks(workspaceId),
+    // #731: a deployment without `dynamic-review` takes no Dynamic kind.
+    kindAllowed: (kind) => getCapabilities().allowsReviewKind(kind),
     newProjectSettings: () => newProjectSettings(db, workspaceId),
     modelCapabilities,
     // #283: the models of a workspace on the operator's key are the operator's, and the workspace's budget is not

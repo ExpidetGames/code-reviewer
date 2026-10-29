@@ -6,6 +6,7 @@
 // (#656). The card never implies that Dynamic Review works while the instance has not enabled it (#195 gate): the
 // option says so and choosing it shows what happens to the runs. Switching is confirmed by the form when it is saved.
 import { useId } from "react";
+import { useCapabilities } from "../../capabilities/context.tsx";
 import { Alert, alertVariants } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
 import { FieldDescription, FieldLabel } from "../../components/ui/field.tsx";
@@ -79,6 +80,8 @@ export function ReviewKindFieldset({
   followsDefault?: boolean;
 }) {
   const ids = useId();
+  // #731: without the capability there is no choice to make: the card is not there.
+  if (!useCapabilities().has("dynamic-review")) return null;
   const dynamic = values.reviewKind === "dynamic";
   const kindErrorId = `${ids}-kind-error`;
   return (
