@@ -1,0 +1,6 @@
+# The landing page is a pnpm project of its own, not a member of the workspace at the repository root (#724): its lockfile
+# is website/pnpm-lock.yaml, its pnpm and Node pins are its own, and Cloudflare builds it from this directory. Without
+# this file pnpm walks up to the root pnpm-workspace.yaml, finds that this directory is not one of its packages and
+# installs the root workspace instead of the site. With it, this directory is the workspace root again, as before.
+packages:
+  - "."

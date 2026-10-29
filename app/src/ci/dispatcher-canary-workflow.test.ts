@@ -192,7 +192,7 @@ describe("dispatcher canary workflow", () => {
     );
     expect(checkout?.with?.["persist-credentials"]).toBe(false);
     expect(stepNamed("Install dependencies").run).toBe(
-      "pnpm install --frozen-lockfile",
+      "pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...",
     );
     const canary = stepNamed("Run the canary");
     expect(canary["working-directory"]).toBe("dispatcher");

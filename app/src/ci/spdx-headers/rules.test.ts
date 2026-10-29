@@ -38,7 +38,8 @@ describe("isSourceFile", () => {
     // Data and configuration, where a comment would change or break the format.
     "app/package.json",
     "app/tsconfig.json",
-    "app/pnpm-lock.yaml",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "runner/uv.lock",
     "runner/pyproject.toml",
     "compose.yml",
