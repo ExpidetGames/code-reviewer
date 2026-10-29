@@ -7,6 +7,7 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { loadAuthConfig } from "../auth/config.ts";
+import { getCapabilities } from "../capabilities/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
@@ -68,6 +69,11 @@ import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
+/** Whether this deployment has billing at all (#731). Without it none of the billing readers below is constructed or asked. */
+function hasBilling(): boolean {
+  return getCapabilities().has("billing");
+}
+
 /** The configured public address of the app (`BETTER_AUTH_URL`): the one place billing reads the environment. */
 function publicAddress(): string {
   return loadAuthConfig(process.env).baseUrl;
@@ -126,6 +132,7 @@ export function getMonthlyLimitRoute(): MonthlyLimitRoute {
  * setting; with billing off nothing else is read.
  */
 export function billingPageLinkedFor(): Promise<boolean> {
+  if (!hasBilling()) return Promise.resolve(false);
   return isBillingOn(getDatabase());
 }
 
@@ -137,6 +144,7 @@ export async function balanceBannerFor(
   workspace: { id: string; slug: string },
   role: WorkspaceRole,
 ): Promise<BalanceBannerView | null> {
+  if (!hasBilling()) return null;
   try {
     return await loadBalanceBanner({ db: getDatabase(), workspace, role });
   } catch {
@@ -273,6 +281,7 @@ export function getBillingReviewService(): BillingReviewService {
  * cannot answer must not break every page of the portal, so it counts as none (the list itself says what is wrong).
  */
 export async function countOpenBillingReviews(): Promise<number> {
+  if (!hasBilling()) return 0;
   try {
     return await getBillingReviewService().openCount();
   } catch {
@@ -286,6 +295,7 @@ export async function countOpenBillingReviews(): Promise<number> {
  * answer must not break every page of the portal, so it names nothing (the Billing page itself says what is wrong).
  */
 export async function readIncompleteBilling(): Promise<BillingMissingItem[]> {
+  if (!hasBilling()) return [];
   try {
     return await incompleteBillingItems(getDatabase());
   } catch {
@@ -296,7 +306,7 @@ export async function readIncompleteBilling(): Promise<BillingMissingItem[]> {
 
 /** The claims of these jobs ended: records the wall clock of those that ran on a runner, where billing is on. Never throws, never delays the call. */
 export function recordWallClocks(jobIds: readonly string[]): void {
-  if (jobIds.length === 0) return;
+  if (jobIds.length === 0 || !hasBilling()) return;
   try {
     const recorder = createWallClockRecorder({ db: getDatabase() });
     runAfterResponse(() => recorder.recordFor(jobIds));
@@ -312,6 +322,7 @@ export function recordWallClocks(jobIds: readonly string[]): void {
  * logs only a stable code.
  */
 export function deliverBalanceMails(): void {
+  if (!hasBilling()) return;
   runAfterResponse(async () => {
     try {
       await deliverDueBalanceMailsNow();
@@ -329,6 +340,7 @@ export function deliverDueBalanceMailsNow(): Promise<{
   delivered: number;
   failed: number;
 }> {
+  if (!hasBilling()) return Promise.resolve({ delivered: 0, failed: 0 });
   return deliverDueBalanceMails({
     db: getDatabase(),
     mail: getMailSender(),

@@ -31,9 +31,14 @@
 //     that a slow answer from the internet never delays the steps that move jobs. A fetch that fails records its own
 //     failure (`models_dev_fetch_state`) and is not a failed step; a step fails only when the fetch itself threw.
 //
+// The capability set of the deployment (src/capabilities/) decides which steps exist: without `review` there are no jobs and the
+// steps 1 to 6 do not run; without `billing` the steps 8 to 10 do not run (nothing of billing is read or asked). Steps 7 and 11
+// belong to every deployment. Left out, the set is the whole product, as before.
+//
 // A step that fails is logged by its name and does not stop the others; the next run tries again. Nothing a
 // database or an answer said is ever logged: a connection string can be in it.
 import "server-only";
+import type { CapabilitySet } from "../capabilities/capability.ts";
 import type { AppMetaRepository } from "../db/repositories/app-meta-repository.ts";
 import type { JobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import type { ExpiryReport } from "../db/repositories/runner-jobs-repository.ts";
@@ -133,6 +138,8 @@ export type SweepDependencies = {
     refreshIfDue(options?: { deadlineMs?: number }): Promise<RefreshOutcome>;
   };
   settings: SweepSettings;
+  /** #731: which steps this deployment has. Left out, all of them. */
+  capabilities?: CapabilitySet;
   log?: SweepLog;
 };
 
@@ -141,6 +148,8 @@ export type DispatchSweep = { run(): Promise<SweepReport> };
 export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? console;
+  const has = (capability: Parameters<CapabilitySet["has"]>[0]) =>
+    deps.capabilities?.has(capability) ?? true;
 
   async function run(): Promise<SweepReport> {
     const report: SweepReport = {
@@ -166,15 +175,17 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       }
     };
 
-    await step("expire", async () => {
-      report.expired = await deps.queue.expireStaleJobs();
-    });
+    const review = has("review");
+    if (review)
+      await step("expire", async () => {
+        report.expired = await deps.queue.expireStaleJobs();
+      });
     const { giveUpMs, maxRunning } = deps.settings;
-    if (giveUpMs !== null)
+    if (review && giveUpMs !== null)
       await step("give_up", async () => {
         report.givenUp = await deps.queue.failUndispatched(giveUpMs);
       });
-    const dispatch = deps.dispatch;
+    const dispatch = review ? deps.dispatch : undefined;
     if (dispatch !== undefined) {
       await step("revive", async () => {
         const at = now();
@@ -194,12 +205,12 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
         if (free > 0) report.sent = (await dispatch.sendDue(free)).sent;
       });
     }
-    const notices = deps.notices;
+    const notices = review ? deps.notices : undefined;
     if (notices !== undefined)
       await step("notices", async () => {
         report.noticesTried = (await notices.retryDue()).tried;
       });
-    const checks = deps.checks;
+    const checks = review ? deps.checks : undefined;
     if (checks !== undefined)
       await step("checks", async () => {
         report.checksSynced = (
@@ -214,17 +225,18 @@ export function createDispatchSweep(deps: SweepDependencies): DispatchSweep {
       await deps.meta.set(CLEANUP_HOUR_KEY, String(hour));
       report.cleanedUp = true;
     });
-    const billingHolds = deps.billingHolds;
+    const billing = has("billing");
+    const billingHolds = billing ? deps.billingHolds : undefined;
     if (billingHolds !== undefined)
       await step("billing_holds", async () => {
         report.holdsReleased = (await billingHolds.releaseStranded()).released;
       });
-    const balanceMails = deps.balanceMails;
+    const balanceMails = billing ? deps.balanceMails : undefined;
     if (balanceMails !== undefined)
       await step("balance_mails", async () => {
         report.balanceMailsSent = (await balanceMails.deliverDue()).delivered;
       });
-    const journalCheck = deps.journalCheck;
+    const journalCheck = billing ? deps.journalCheck : undefined;
     if (journalCheck !== undefined)
       await step("journal_check", async () => {
         report.journalChecked = (await journalCheck.run()).checked;
