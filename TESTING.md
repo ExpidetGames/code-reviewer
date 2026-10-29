@@ -192,10 +192,13 @@ Network guard (exists, applies to every automated test):
   the end). Positive controls (`e2e/dynamic/network-guard.e2e.ts`) make each kind of process connect to a
   reserved address and show that its counter moves, so the guard cannot pass vacuously.
   Name lookups never leave the namespace: the lane has a resolver of its own on loopback
-  (`app/e2e/helpers/lane-dns-stub.ts`) that answers every name "no such name" and logs it. Because that traffic is
-  loopback, `guard.nft` counts it apart (`dns-*` counters, UDP and TCP port 53, per user, #714) and the lane
-  fails when the engine user sent any query, or when a name is asked that is not on the checked-in allowlist
-  (`app/e2e/dynamic/dns-allowlist.txt`, each entry with the issue that explains it).
+  (`app/e2e/helpers/lane-dns-stub.ts`) that answers every name "no such name" and logs everything it receives. Because that
+  traffic is loopback, `guard.nft` counts it apart (`dns-*` counters, UDP and TCP port 53, per user, #714). The lane fails
+  when a query of the engine user got past the runner's own nft table (counter `dns-engine-delivered`, behind that table; the
+  production boundary), and when a name is asked that is not on the checked-in allowlist (`app/e2e/dynamic/dns-allowlist.txt`,
+  each entry with the issue that explains it; none now). The engine user's attempts that the runner's table rejects are
+  counted and printed, not failed (OpenCode still asks once per start for registry.npmjs.org, #739). Two controls prove that
+  the counters move without a lookup that would fail the lane.
 
 ## 6. Tooling
 
