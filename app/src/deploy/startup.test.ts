@@ -286,7 +286,7 @@ describe("checking the dispatch webhook settings when the server starts", () => 
     expect(exit).not.toHaveBeenCalled();
   });
 
-  // #740-T07
+  // #740-T08
   it("warns when the product of the build and PRODUCT_ID of the running server disagree", async () => {
     const { exit, log, warn } = await run(
       { ...validEnv, PRODUCT_ID: "factory" },
@@ -302,7 +302,7 @@ describe("checking the dispatch webhook settings when the server starts", () => 
     expect(line).not.toContain("\n");
   });
 
-  // #740-T07
+  // #740-T08
   it("stays quiet when both name the same product, or both are unset, white space aside", async () => {
     for (const [productId, built] of [
       ["factory", "factory"],

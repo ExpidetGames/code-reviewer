@@ -32,7 +32,7 @@ describe("the build setting the identity of the build is made from", () => {
     vi.resetModules();
   });
 
-  // #740-T07
+  // #740-T08
   it("derives NEXT_PUBLIC_PRODUCT_ID from PRODUCT_ID, so only PRODUCT_ID has to be set per project", async () => {
     vi.stubEnv("PRODUCT_ID", "factory");
     vi.resetModules();
