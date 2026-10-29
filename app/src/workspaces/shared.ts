@@ -10,6 +10,7 @@ import { isGithubSignInConfigured } from "../github-config/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { assembleWorkspaces, type AssembledWorkspaces } from "./assemble.ts";
 import { createCheckFinisher } from "./finish-checks.ts";
 import type { WorkspaceRouteHandlers } from "./http.ts";
@@ -22,6 +23,7 @@ function assembled(): AssembledWorkspaces {
     mail: getMailSender(),
     // The address in a link is the configured one, never a request header.
     baseUrl: loadAuthConfig(process.env).baseUrl,
+    product: getProductIdentity(),
     githubConfigured: () => isGithubSignInConfigured(),
     // The check runs of the reviews a deleted workspace had waiting are completed on the platform (#658).
     finishChecks: createCheckFinisher({ registry: integrationRegistry }),

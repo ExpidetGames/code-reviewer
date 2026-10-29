@@ -4,6 +4,7 @@
 // link is the only secret in it; the message never contains a password. The address of the link is built
 // from the configured public address of the app, never from a request header (a forged `Host` header
 // must not make the app mail a link to another site).
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 
@@ -20,15 +21,17 @@ export function verificationMessage({
   to,
   link,
   validForHours,
+  product,
 }: {
   to: string;
   link: string;
   validForHours: number;
+  product: ProductIdentity;
 }): MailMessage {
   const text = [
     "Confirm your email address",
     "",
-    "Someone created an account at code-review.com with this email address. Open this link and enter the",
+    `Someone created an account at ${product.name} with this email address. Open this link and enter the`,
     `password chosen at that sign-up to confirm it (the link works once and for ${String(validForHours)} hours):`,
     "",
     link,
@@ -37,7 +40,7 @@ export function verificationMessage({
   ].join("\n");
   const html = [
     "<p>Confirm your email address</p>",
-    "<p>Someone created an account at code-review.com with this email address. Open this link and enter the",
+    `<p>Someone created an account at ${escapeHtml(product.name)} with this email address. Open this link and enter the`,
     `password chosen at that sign-up to confirm it (the link works once and for ${String(validForHours)} hours):</p>`,
     `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
     "<p>If this was not you, ignore this message: without that password the link does nothing.</p>",

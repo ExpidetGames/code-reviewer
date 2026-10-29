@@ -309,3 +309,33 @@ export function checkMigrationIsolation(graph: FileGraph): string[] {
   }
   return problems.sort();
 }
+
+/** The value that says who the product is (#715, cut 7); the type next to it (`identity.ts`) is what the code that writes the words takes. */
+const PRODUCT_IDENTITY_VALUE = "product-identity/code-review-com.ts";
+/** The one file that picks the identity of the deployment: every composition root gets the value from its `getProductIdentity()`. */
+export const PRODUCT_IDENTITY_SELECTOR = "product-identity/current.ts";
+
+/**
+ * The rule for the brand (#715, cut 7). A module that writes a word of the product takes a `ProductIdentity` as a parameter
+ * and never imports the product's value, so it can move to a package that other products use. The composition roots (a route,
+ * a page, a `shared.ts`, the singletons of `auth/`) get the identity from `getProductIdentity()` in
+ * `product-identity/current.ts`, and that selector is the only file that imports `product-identity/code-review-com.ts`:
+ * choosing the identity per deployment later changes that one file. `identity.ts` imports nothing.
+ */
+export function checkProductIdentityImports(graph: FileGraph): string[] {
+  const problems: string[] = [];
+  for (const [file, imports] of graph) {
+    if (
+      imports.has(PRODUCT_IDENTITY_VALUE) &&
+      file !== PRODUCT_IDENTITY_SELECTOR
+    )
+      problems.push(
+        `${file} imports ${PRODUCT_IDENTITY_VALUE}: get the identity from getProductIdentity() in ${PRODUCT_IDENTITY_SELECTOR} (a composition root) or take a ProductIdentity as a parameter (any other module); only the selector imports the value`,
+      );
+    if (file === "product-identity/identity.ts" && imports.size > 0)
+      problems.push(
+        `${file} imports ${[...imports].sort().join(", ")}: the type of the identity imports nothing, so it can move to a package as it is`,
+      );
+  }
+  return problems.sort();
+}

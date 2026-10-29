@@ -13,6 +13,7 @@
 // nothing else; no secret is in it, and none is in an answer.
 import { secondsLeft } from "../auth/sign-in-limit.ts";
 import type { RateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 import type { SmtpConfigStore } from "./smtp-config.ts";
@@ -43,18 +44,22 @@ export type TestMailService = {
   send(admin: { id: string; email: string }): Promise<TestMailResult>;
 };
 
-export function testMessage(to: string, baseUrl: string): MailMessage {
+export function testMessage(
+  to: string,
+  baseUrl: string,
+  product: ProductIdentity,
+): MailMessage {
   const text = [
-    "This is a test message from code-review.com.",
+    `This is a test message from ${product.name}.`,
     "",
-    `It was sent by code-review.com at ${baseUrl} to check the mail server settings.`,
+    `It was sent by ${product.name} at ${baseUrl} to check the mail server settings.`,
     "If you can read it, the settings work. Nobody needs to answer.",
   ].join("\n");
   const html = [
-    "<p>This is a test message from code-review.com.</p>",
-    `<p>It was sent by code-review.com at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
+    `<p>This is a test message from ${escapeHtml(product.name)}.</p>`,
+    `<p>It was sent by ${escapeHtml(product.name)} at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
   ].join("\n");
-  return { to, subject: "Test mail from code-review.com", text, html };
+  return { to, subject: `Test mail from ${product.name}`, text, html };
 }
 
 export type TestMailServiceOptions = {
@@ -62,6 +67,8 @@ export type TestMailServiceOptions = {
   rateLimits: RateLimitsRepository;
   /** The configured public address of the app. */
   baseUrl: string;
+  /** Whose name the test message carries. */
+  product: ProductIdentity;
   timeouts?: SmtpTimeouts;
   now?: () => Date;
   log?: (line: string) => void;
@@ -71,6 +78,7 @@ export function createTestMailService({
   config,
   rateLimits,
   baseUrl,
+  product,
   timeouts,
   now = () => new Date(),
   log = console.error,
@@ -111,7 +119,7 @@ export function createTestMailService({
 
       const result = await deliverWithStoredSettings(
         config,
-        testMessage(admin.email, baseUrl),
+        testMessage(admin.email, baseUrl, product),
         timeouts,
       );
       if (result.ok) return { ok: true };

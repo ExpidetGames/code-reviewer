@@ -6,6 +6,7 @@
 // from the configured public address of the app by the caller, never from a request header. The workspace name is text somebody
 // else typed: it is made one line before it goes into the subject or the text, and escaped in the HTML.
 import { oneLine } from "../workspaces/names.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 
@@ -15,11 +16,12 @@ function copyOf(
   level: BalanceMailLevel,
   workspace: string,
   balanceText: string,
+  product: ProductIdentity,
 ): { subject: string; headline: string; detail: string } {
   if (level === "low")
     return {
       subject: `Low balance in "${workspace}"`,
-      headline: `The prepaid balance of the workspace "${workspace}" at code-review.com is low: ${balanceText} is left.`,
+      headline: `The prepaid balance of the workspace "${workspace}" at ${product.name} is low: ${balanceText} is left.`,
       detail:
         "Reviews keep starting while there is credit. Add credit so they do not stop.",
     };
@@ -27,8 +29,8 @@ function copyOf(
     subject: `No credit left in "${workspace}"`,
     headline:
       level === "negative"
-        ? `The prepaid balance of the workspace "${workspace}" at code-review.com is below zero: ${balanceText}.`
-        : `The prepaid balance of the workspace "${workspace}" at code-review.com has run out: ${balanceText}.`,
+        ? `The prepaid balance of the workspace "${workspace}" at ${product.name} is below zero: ${balanceText}.`
+        : `The prepaid balance of the workspace "${workspace}" at ${product.name} has run out: ${balanceText}.`,
     detail:
       "New reviews are not started until credit is added; the pull requests get a notice instead. Reviews that are already running finish.",
   };
@@ -40,6 +42,7 @@ export function balanceMessage({
   workspaceName,
   balanceText,
   link,
+  product,
 }: {
   to: string;
   level: BalanceMailLevel;
@@ -48,9 +51,15 @@ export function balanceMessage({
   balanceText: string;
   /** The billing page of the workspace. */
   link: string;
+  product: ProductIdentity;
 }): MailMessage {
   const workspace = oneLine(workspaceName);
-  const { subject, headline, detail } = copyOf(level, workspace, balanceText);
+  const { subject, headline, detail } = copyOf(
+    level,
+    workspace,
+    balanceText,
+    product,
+  );
   const action = "Open the billing page to add credit:";
   const reason =
     "You get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.";

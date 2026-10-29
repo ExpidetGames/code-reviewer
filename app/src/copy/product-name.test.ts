@@ -12,10 +12,11 @@ import { describe, expect, it } from "vitest";
 import { listSourceFiles } from "../ci/spdx-headers/source-files.ts";
 import {
   findOldName,
+  findText,
   type OldNameException,
   withoutExceptions,
 } from "./old-name-scan.ts";
-import { PRODUCT_NAME } from "./product-name.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { DEFAULT_REVIEW_SKILL } from "../review-settings/default-skill.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -44,6 +45,18 @@ const EXCEPTIONS: readonly OldNameException[] = [
   },
 ];
 
+// The modules that took the name from the identity (#715, cut 7): none writes the literal any more. The remaining
+// literals of the app are swept with the per-deployment selection of the identity.
+const WITHOUT_LITERAL_NAME: readonly string[] = [
+  "app/src/components/brand.tsx",
+  "app/src/copy/model-choice.ts",
+  "app/src/mail/balance-message.ts",
+  "app/src/mail/invitation-message.ts",
+  "app/src/mail/password-reset-message.ts",
+  "app/src/mail/test-mail.ts",
+  "app/src/mail/verification-message.ts",
+];
+
 function isScanned(path: string): boolean {
   return (
     path.startsWith("app/src/") &&
@@ -65,9 +78,38 @@ describe("the product name", () => {
     expect(withoutExceptions(findings, EXCEPTIONS)).toEqual([]);
   });
 
+  // #715-T07
+  it("is not a literal in the modules that take it from the identity", () => {
+    const findings = WITHOUT_LITERAL_NAME.flatMap((path) =>
+      findText(
+        path,
+        readFileSync(`${repoRoot}${path}`, "utf8"),
+        /code-review\.com/i,
+      ),
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  // #715-T07
+  it("finds the literal name in a string, a template and a JSX text, but not in a comment", () => {
+    const content = [
+      "// Welcome to code-review.com.",
+      'export const a = "Join code-review.com";',
+      "export const b = `Hello ${name}, welcome to code-review.com`;",
+      "export const C = () => <p>Set up code-review.com</p>;",
+    ].join("\n");
+
+    expect(
+      findText("app/src/x.tsx", content, /code-review\.com/i).map(
+        (f) => f.line,
+      ),
+    ).toEqual([2, 3, 4]);
+  });
+
   // #635-T01
   it("is written in lowercase as code-review.com", () => {
-    expect(PRODUCT_NAME).toBe("code-review.com");
+    expect(getProductIdentity().name).toBe("code-review.com");
   });
 
   // #635-T01

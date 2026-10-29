@@ -9,6 +9,7 @@ import {
   buildFileGraph,
   checkImportCycles,
   checkMigrationIsolation,
+  checkProductIdentityImports,
   cyclicGroups,
   moduleOf,
   readFileGraph,
@@ -256,5 +257,49 @@ describe("the import cycles of app/src", () => {
     expect(
       checkImportCycles(readFileGraph(src), ALLOWED_IMPORT_CYCLES),
     ).toEqual([]);
+  });
+});
+
+describe("the brand", () => {
+  // #715-T08
+  it("is imported only by the selector, and the type of the identity imports nothing", () => {
+    const graph = graphOf({
+      "product-identity/identity.ts": imports("../copy/messages.ts"),
+      "product-identity/code-review-com.ts": imports("./identity.ts"),
+      "product-identity/current.ts": imports(
+        "./code-review-com.ts",
+        "./identity.ts",
+      ),
+      "copy/messages.ts": "export {};",
+      "mail/invite.ts": imports("../product-identity/code-review-com.ts"),
+      "mail/shared.ts": imports("../product-identity/code-review-com.ts"),
+      "app/login/page.tsx": imports(
+        "../../product-identity/code-review-com.ts",
+      ),
+      "auth/auth.ts": imports("../product-identity/current.ts"),
+      "billing/send.ts": imports("../product-identity/identity.ts"),
+    });
+
+    expect(checkProductIdentityImports(graph)).toEqual([
+      expect.stringContaining(
+        "app/login/page.tsx imports product-identity/code-review-com.ts: get the identity from getProductIdentity()",
+      ),
+      expect.stringContaining(
+        "mail/invite.ts imports product-identity/code-review-com.ts: get the identity from getProductIdentity()",
+      ),
+      expect.stringContaining(
+        "mail/shared.ts imports product-identity/code-review-com.ts: get the identity from getProductIdentity()",
+      ),
+      expect.stringContaining(
+        "product-identity/identity.ts imports copy/messages.ts: the type of the identity imports nothing",
+      ),
+    ]);
+  });
+
+  // #715-T08
+  it("holds for app/src", () => {
+    const src = join(import.meta.dirname, "..", "..");
+
+    expect(checkProductIdentityImports(readFileGraph(src))).toEqual([]);
   });
 });

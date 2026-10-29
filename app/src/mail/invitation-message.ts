@@ -8,6 +8,7 @@
 // line (`oneLine`) before they go into the subject or the text, so a name with a line break cannot start a
 // new mail header (an extra `Bcc:`) or a new paragraph, and both are escaped in the HTML.
 import { oneLine } from "../workspaces/names.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 
@@ -27,6 +28,7 @@ export function invitationMessage({
   inviterName,
   role,
   validForDays,
+  product,
 }: {
   to: string;
   link: string;
@@ -34,13 +36,14 @@ export function invitationMessage({
   inviterName: string;
   role: string;
   validForDays: number;
+  product: ProductIdentity;
 }): MailMessage {
   const workspace = oneLine(workspaceName);
   const inviter = oneLine(inviterName, 60);
-  const intro = `${inviter} invited you to the workspace "${workspace}" at code-review.com as ${role === "admin" ? "an" : "a"} ${role}.`;
+  const intro = `${inviter} invited you to the workspace "${workspace}" at ${product.name} as ${role === "admin" ? "an" : "a"} ${role}.`;
   const how = `Open this link, sign in or create an account with this email address, and accept the invitation (the link works once and for ${String(validForDays)} days):`;
   const text = [
-    `Join "${workspace}" at code-review.com`,
+    `Join "${workspace}" at ${product.name}`,
     "",
     intro,
     how,
@@ -50,7 +53,7 @@ export function invitationMessage({
     "If you did not expect this, ignore this message: nothing happens until the invitation is accepted.",
   ].join("\n");
   const html = [
-    `<p>Join &quot;${escapeHtml(workspace)}&quot; at code-review.com</p>`,
+    `<p>Join &quot;${escapeHtml(workspace)}&quot; at ${escapeHtml(product.name)}</p>`,
     `<p>${escapeHtml(intro)}</p>`,
     `<p>${escapeHtml(how)}</p>`,
     `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
@@ -58,7 +61,7 @@ export function invitationMessage({
   ].join("\n");
   return {
     to,
-    subject: `Join "${workspace}" at code-review.com`,
+    subject: `Join "${workspace}" at ${product.name}`,
     text,
     html,
   };

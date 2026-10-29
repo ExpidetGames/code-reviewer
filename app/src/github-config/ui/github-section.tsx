@@ -31,8 +31,11 @@ import {
 } from "./messages.ts";
 import { PermissionsCheck } from "./permissions-check.tsx";
 import { PrivateAppForm, UserAuthorizationForm } from "./prompt-forms.tsx";
+import type { ProductIdentity } from "@/product-identity/identity.ts";
 
 export type GithubSectionProps = {
+  /** The product the App is for. */
+  product: ProductIdentity;
   view: GithubConfigView;
   tenancy: "single" | "multi";
   /** The name the one-click form starts with. */
@@ -227,6 +230,7 @@ function SignInCard({ view }: { view: GithubConfigView }) {
 }
 
 export function GithubSection({
+  product,
   view,
   tenancy,
   suggestedName,
@@ -320,7 +324,7 @@ export function GithubSection({
 
         {view.status !== "not_configured" && view.mayLackPermissions ? (
           <HelpDisclosure label="Permissions GitHub granted">
-            <PermissionsCheck />
+            <PermissionsCheck product={product} />
           </HelpDisclosure>
         ) : null}
 

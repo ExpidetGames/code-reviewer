@@ -1,0 +1,68 @@
+{
+  "productName": "code-review.com",
+  "passwordReset": {
+    "to": "ada@example.test",
+    "subject": "Reset your password",
+    "text": "Reset your password\n\nSomeone asked to reset the password of your code-review.com account. Open this link to choose a new password (the link works once and for 30 minutes):\n\nhttps://reviews.example.test/x?token=abc123\n\nIf this was not you, ignore this message: nothing changes until the link is used.",
+    "html": "<p>Reset your password</p>\n<p>Someone asked to reset the password of your code-review.com account. Open this link to choose a new password (the link works once and for 30 minutes):</p>\n<p><a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>If this was not you, ignore this message: nothing changes until the link is used.</p>"
+  },
+  "invitationAdmin": {
+    "to": "ada@example.test",
+    "subject": "Join \"Acme <Team>\" at code-review.com",
+    "text": "Join \"Acme <Team>\" at code-review.com\n\nGrace invited you to the workspace \"Acme <Team>\" at code-review.com as an admin.\nOpen this link, sign in or create an account with this email address, and accept the invitation (the link works once and for 7 days):\n\nhttps://reviews.example.test/x?token=abc123\n\nIf you did not expect this, ignore this message: nothing happens until the invitation is accepted.",
+    "html": "<p>Join &quot;Acme &lt;Team&gt;&quot; at code-review.com</p>\n<p>Grace invited you to the workspace &quot;Acme &lt;Team&gt;&quot; at code-review.com as an admin.</p>\n<p>Open this link, sign in or create an account with this email address, and accept the invitation (the link works once and for 7 days):</p>\n<p><a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>If you did not expect this, ignore this message: nothing happens until the invitation is accepted.</p>"
+  },
+  "invitationMember": {
+    "to": "ada@example.test",
+    "subject": "Join \"Acme\" at code-review.com",
+    "text": "Join \"Acme\" at code-review.com\n\nGrace invited you to the workspace \"Acme\" at code-review.com as a member.\nOpen this link, sign in or create an account with this email address, and accept the invitation (the link works once and for 7 days):\n\nhttps://reviews.example.test/x?token=abc123\n\nIf you did not expect this, ignore this message: nothing happens until the invitation is accepted.",
+    "html": "<p>Join &quot;Acme&quot; at code-review.com</p>\n<p>Grace invited you to the workspace &quot;Acme&quot; at code-review.com as a member.</p>\n<p>Open this link, sign in or create an account with this email address, and accept the invitation (the link works once and for 7 days):</p>\n<p><a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>If you did not expect this, ignore this message: nothing happens until the invitation is accepted.</p>"
+  },
+  "verification": {
+    "to": "ada@example.test",
+    "subject": "Confirm your email address",
+    "text": "Confirm your email address\n\nSomeone created an account at code-review.com with this email address. Open this link and enter the\npassword chosen at that sign-up to confirm it (the link works once and for 24 hours):\n\nhttps://reviews.example.test/x?token=abc123\n\nIf this was not you, ignore this message: without that password the link does nothing.",
+    "html": "<p>Confirm your email address</p>\n<p>Someone created an account at code-review.com with this email address. Open this link and enter the\npassword chosen at that sign-up to confirm it (the link works once and for 24 hours):</p>\n<p><a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>If this was not you, ignore this message: without that password the link does nothing.</p>"
+  },
+  "balanceLow": {
+    "to": "ada@example.test",
+    "subject": "Low balance in \"Acme\"",
+    "text": "Low balance in \"Acme\"\n\nThe prepaid balance of the workspace \"Acme\" at code-review.com is low: $1.20 is left.\nReviews keep starting while there is credit. Add credit so they do not stop.\n\nOpen the billing page to add credit:\nhttps://reviews.example.test/x?token=abc123\n\nYou get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.",
+    "html": "<p>Low balance in &quot;Acme&quot;</p>\n<p>The prepaid balance of the workspace &quot;Acme&quot; at code-review.com is low: $1.20 is left.</p>\n<p>Reviews keep starting while there is credit. Add credit so they do not stop.</p>\n<p>Open the billing page to add credit: <a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>You get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.</p>"
+  },
+  "balanceEmpty": {
+    "to": "ada@example.test",
+    "subject": "No credit left in \"Acme\"",
+    "text": "No credit left in \"Acme\"\n\nThe prepaid balance of the workspace \"Acme\" at code-review.com has run out: $0.00.\nNew reviews are not started until credit is added; the pull requests get a notice instead. Reviews that are already running finish.\n\nOpen the billing page to add credit:\nhttps://reviews.example.test/x?token=abc123\n\nYou get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.",
+    "html": "<p>No credit left in &quot;Acme&quot;</p>\n<p>The prepaid balance of the workspace &quot;Acme&quot; at code-review.com has run out: $0.00.</p>\n<p>New reviews are not started until credit is added; the pull requests get a notice instead. Reviews that are already running finish.</p>\n<p>Open the billing page to add credit: <a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>You get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.</p>"
+  },
+  "balanceNegative": {
+    "to": "ada@example.test",
+    "subject": "No credit left in \"Acme\"",
+    "text": "No credit left in \"Acme\"\n\nThe prepaid balance of the workspace \"Acme\" at code-review.com is below zero: -$0.40.\nNew reviews are not started until credit is added; the pull requests get a notice instead. Reviews that are already running finish.\n\nOpen the billing page to add credit:\nhttps://reviews.example.test/x?token=abc123\n\nYou get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.",
+    "html": "<p>No credit left in &quot;Acme&quot;</p>\n<p>The prepaid balance of the workspace &quot;Acme&quot; at code-review.com is below zero: -$0.40.</p>\n<p>New reviews are not started until credit is added; the pull requests get a notice instead. Reviews that are already running finish.</p>\n<p>Open the billing page to add credit: <a href=\"https://reviews.example.test/x?token=abc123\">https://reviews.example.test/x?token=abc123</a></p>\n<p>You get this message because you are an Owner or an Admin of the workspace. It is sent once when the balance drops into this state, and again only after the balance was topped up and has dropped again.</p>"
+  },
+  "testMail": {
+    "to": "ada@example.test",
+    "subject": "Test mail from code-review.com",
+    "text": "This is a test message from code-review.com.\n\nIt was sent by code-review.com at https://reviews.example.test to check the mail server settings.\nIf you can read it, the settings work. Nobody needs to answer.",
+    "html": "<p>This is a test message from code-review.com.</p>\n<p>It was sent by code-review.com at https://reviews.example.test to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>"
+  },
+  "modelChoice": {
+    "MODEL_CHOICE_HEADING": "Quality",
+    "MODEL_CHOICE_BILLED_NOTE": "Billed via code-review.com",
+    "MODEL_CHOICE_DEFAULT_OPTION": "Default",
+    "MODEL_CHOICE_UNAVAILABLE_OPTION": "Unavailable option",
+    "MODEL_CHOICE_HINT": "How reviews of this kind are done. code-review.com takes care of the rest.",
+    "MODEL_CHOICE_DEFAULT_SOURCE": "code-review.com default",
+    "MODEL_CHOICE_NONE_CHOSEN": "Nothing is chosen yet, so the code-review.com default applies.",
+    "MODEL_CHOICE_NONE_OFFERED": "code-review.com offers no choice for this kind of review yet. Reviews use its default.",
+    "MODEL_CHOICE_LOCKED_BADGE": "Not included in your plan",
+    "MODEL_CHOICE_MANAGE_PLAN": "Manage plan",
+    "MODEL_CHOICE_RETIRED_BADGE": "No longer available",
+    "MODEL_CHOICE_CHOSEN_UNAVAILABLE": "The chosen option is not available right now, so reviews do not start until another one is chosen."
+  },
+  "brand": "<span class=\"inline-flex items-center gap-2 text-base leading-6 font-semibold whitespace-nowrap text-foreground\"><svg viewBox=\"0 0 32 32\" aria-hidden=\"true\" focusable=\"false\" class=\"size-6 shrink-0\"><rect width=\"32\" height=\"32\" rx=\"8\" class=\"fill-foreground\"></rect><g fill=\"none\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"stroke-background\"><path d=\"M10.5 10 6 16l4.5 6\"></path><path d=\"M21.5 10 26 16l-4.5 6\"></path><path d=\"m12.5 16.5 2.5 2.5 4.5-5.5\"></path></g></svg><span>code-review.com</span></span>",
+  "brandCompact": "<span class=\"inline-flex items-center gap-2 text-base leading-6 font-semibold whitespace-nowrap text-foreground\"><svg viewBox=\"0 0 32 32\" aria-hidden=\"true\" focusable=\"false\" class=\"size-6 shrink-0\"><rect width=\"32\" height=\"32\" rx=\"8\" class=\"fill-foreground\"></rect><g fill=\"none\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"stroke-background\"><path d=\"M10.5 10 6 16l4.5 6\"></path><path d=\"M21.5 10 26 16l-4.5 6\"></path><path d=\"m12.5 16.5 2.5 2.5 4.5-5.5\"></path></g></svg><span class=\"sr-only sm:not-sr-only\">code-review.com</span></span>",
+  "productNameInText": "<span class=\"whitespace-nowrap\">code-review.com</span>"
+}

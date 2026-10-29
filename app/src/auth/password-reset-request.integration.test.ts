@@ -25,6 +25,7 @@ import { completePasswordReset, isKnownResetToken } from "./password-reset.ts";
 import { createPasswordResetHandler } from "./password-reset-http.ts";
 import { requestPasswordReset } from "./password-reset-request.ts";
 import { createPasswordResetRequestHandler } from "./password-reset-request-http.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const QUICK = {
   connectionMs: 1_500,
@@ -76,6 +77,7 @@ async function start(
           emailPasswordOn: () =>
             Promise.resolve(options.emailPassword !== false),
           baseUrl: ADMIN_TEST_BASE_URL,
+          product: getProductIdentity(),
           defer: (work) => {
             pending.push(work);
           },

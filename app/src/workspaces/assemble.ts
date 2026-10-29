@@ -6,6 +6,7 @@
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { loadAcceptorFrom } from "./acceptor.ts";
 import { createWorkspaceUnderTenancy } from "./create-workspace.ts";
@@ -27,6 +28,8 @@ export type AssembleWorkspacesOptions = {
   mail: MailSender;
   /** The configured public address of the app: a link never comes from a request header. */
   baseUrl: string;
+  /** Whose name the invitation mail carries. */
+  product: ProductIdentity;
   /** Whether sign-in with GitHub exists (a fact of the sign-up rule). */
   githubConfigured: () => boolean | Promise<boolean>;
   now?: () => Date;
@@ -58,6 +61,7 @@ export function assembleWorkspaces(
     mail: options.mail,
     limits,
     baseUrl: options.baseUrl,
+    product: options.product,
     githubConfigured: options.githubConfigured,
     now,
     newId: options.newId,

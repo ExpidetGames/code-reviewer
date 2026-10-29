@@ -33,6 +33,7 @@ import {
 import { LlmSettingsPageContent } from "../../llm/ui/llm-settings-page.tsx";
 import { AdvancedSettingsPageContent } from "./advanced-settings-page.tsx";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -68,7 +69,11 @@ const renders = [
     key: "review-defaults",
     label: "Review defaults",
     element: (
-      <GlobalSettingsPageContent workspaceSlug="acme" data={GLOBAL_DATA} />
+      <GlobalSettingsPageContent
+        product={getProductIdentity()}
+        workspaceSlug="acme"
+        data={GLOBAL_DATA}
+      />
     ),
     forms: 1,
   },
@@ -124,7 +129,11 @@ describe("the review defaults page (#656)", () => {
   // #656-T06
   it("has the same sections as a project: Review, LLM, Trigger and Limits, with the kind and verdict as defaults and no skill", () => {
     render(
-      <GlobalSettingsPageContent workspaceSlug="acme" data={GLOBAL_DATA} />,
+      <GlobalSettingsPageContent
+        product={getProductIdentity()}
+        workspaceSlug="acme"
+        data={GLOBAL_DATA}
+      />,
     );
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
@@ -150,6 +159,7 @@ describe("the review defaults of a workspace that uses the instance's key (#283)
     const user = userEvent.setup();
     render(
       <GlobalSettingsPageContent
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={{
           model: managedModel({ mode: "global" }),

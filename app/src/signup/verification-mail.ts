@@ -7,6 +7,7 @@
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import {
   verificationLink,
   verificationMessage,
@@ -21,6 +22,8 @@ export type SendVerificationMailDependencies = {
   mail: MailSender;
   /** The configured public address of the app: the link never comes from a request header. */
   baseUrl: string;
+  /** Whose name the mail carries. */
+  product: ProductIdentity;
   now?: () => Date;
   log?: (message: string) => void;
 };
@@ -30,6 +33,7 @@ export async function sendVerificationMail(
     db,
     mail,
     baseUrl,
+    product,
     now,
     log = console.error,
   }: SendVerificationMailDependencies,
@@ -49,6 +53,7 @@ export async function sendVerificationMail(
         to: user.email,
         link: verificationLink(baseUrl, token),
         validForHours: VERIFICATION_TOKEN_TTL_MS / (60 * 60 * 1000),
+        product,
       }),
     );
     if (!result.ok)
