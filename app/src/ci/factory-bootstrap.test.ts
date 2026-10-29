@@ -94,10 +94,29 @@ describe("the bootstrap tool without --out", () => {
       "DISPATCHER_APP_FACTORY_TOKEN",
       "DISPATCHER_APP_FACTORY_SIGNING_SECRET",
       "DISPATCHER_APPS",
+      "PRODUCT_ID",
+      "PRODUCT_CAPABILITIES",
+      "RUNNER_DISPATCH",
+      "RUNNER_WEBHOOK_URL",
+      "RUNNER_WEBHOOK_KEY_ID",
+      "RUNNER_DISPATCH_MAX_RUNNING",
+      "RUNNER_WEBHOOK_BYPASS_TOKEN",
     ])
       expect(result.stdout, key).toContain(key);
     expect(result.stdout).toContain("${prod.app-factory.RUNNER_TOKEN}");
     expect(result.stdout).toContain("FACTORY_ENABLED");
+    // The fixed values of the clone are in the table: the product, the capability set without billing, the webhook mode,
+    // the key id and the cap that DISPATCHER_APPS must repeat.
+    for (const line of [
+      /PRODUCT_ID\s+fixed: factory\b/,
+      /PRODUCT_CAPABILITIES\s+fixed: review,dynamic-review\s/,
+      /RUNNER_DISPATCH\s+fixed: webhook\b/,
+      /RUNNER_WEBHOOK_KEY_ID\s+fixed: factory-k1\b/,
+      /RUNNER_DISPATCH_MAX_RUNNING\s+fixed: 2\b/,
+      /RUNNER_WEBHOOK_BYPASS_TOKEN\s+reference\s.*\$\{prod\.ci\.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET\}/,
+      /DISPATCHER_APPS\s.*"id":"factory".*"keyId":"factory-k1".*"maxRunning":2/,
+    ])
+      expect(result.stdout).toMatch(line);
     expect(result.stdout).toContain("Root directory: app");
     expect(readdirSync(cwd)).toEqual([]);
     // No value that could be a secret.
@@ -118,7 +137,12 @@ describe("the bootstrap tool without --out", () => {
   // #732-T08
   it("refuses arguments it does not know", () => {
     const cwd = scratch();
-    for (const args of [["--write"], ["--out"], ["--out", "a", "b"]]) {
+    for (const args of [
+      ["--write"],
+      ["--out"],
+      ["--out", "a", "b"],
+      ["--out", ""],
+    ]) {
       const result = run(args, { cwd });
       expect(result.status, args.join(" ")).toBe(2);
       expect(result.stderr).toContain("usage:");
@@ -202,6 +226,14 @@ describe("the bootstrap tool with --out", () => {
     expect(result.status).toBe(1);
     expect(readFileSync(out, "utf8")).toBe("mine\n");
     expect(result.stderr).toContain("Refusing to overwrite");
+  });
+
+  // #732-T08
+  it("leaves a file that appears between the check and the write alone (noclobber)", () => {
+    const whole = readText("tools/factory-bootstrap/factory-bootstrap.sh");
+    // The empty file is created with noclobber, so that a racing file or symlink is refused and never truncated.
+    expect(whole).toMatch(/set -C\nif ! : > "\$\{out\}"; then/);
+    expect(whole.indexOf("set -C")).toBeLessThan(whole.indexOf("set +C"));
   });
 
   // #732-T08

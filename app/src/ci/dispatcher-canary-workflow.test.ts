@@ -150,10 +150,10 @@ describe("dispatcher canary workflow", () => {
     const withSecrets = job.steps.filter((step) =>
       JSON.stringify(step).includes("secrets."),
     );
-    // The second load is the operator credential of the factory lane (#732), skipped unless the caller asks for it.
+    // The second is the Dispatcher's operator credential (#730, #732), loaded from /dispatcher when it exists.
     expect(withSecrets.map((step) => step.uses)).toEqual([
       "./.github/actions/infisical-ci-secrets",
-      "./.github/actions/infisical-ci-secrets",
+      "Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d",
     ]);
     expect(canary.run).not.toContain("secrets.");
     expect(canary.run).not.toMatch(
@@ -204,8 +204,13 @@ describe("dispatcher canary workflow", () => {
   });
 
   // #331-extra-workflow
-  it("does not ignore a failure of any step", () => {
+  it("does not ignore a failure of any step, except the one that looks for the Dispatcher's optional operator credential (#732)", () => {
+    const OPTIONAL =
+      "Load the operator credential from Infisical (when the Dispatcher has one)";
     for (const step of job.steps)
-      expect(step["continue-on-error"], step.name).toBeUndefined();
+      if (step.name === OPTIONAL) expect(step["continue-on-error"]).toBe(true);
+      else expect(step["continue-on-error"], step.name).toBeUndefined();
+    // That step is the only one, it reads one key and runs before the canary.
+    expect(job.steps.filter((step) => step.name === OPTIONAL)).toHaveLength(1);
   });
 });

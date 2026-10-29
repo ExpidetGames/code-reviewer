@@ -27,34 +27,46 @@ case "$#" in
   2)
     [ "$1" = "--out" ] || usage
     out="$2"
+    if [ -z "${out}" ]; then
+      echo "--out needs a file name, not an empty one." >&2
+      usage
+    fi
     ;;
   *) usage ;;
 esac
 
 # The entries. `generated` ones get a random value with --out; `reference` ones are Infisical secret references
-# (docs/deployment-vercel.md, section 5.8); `yours` ones need a value only the owner has.
+# (docs/deployment-vercel.md, section 5.8); `fixed` ones have the one value shown in the table; `yours` ones need a value
+# only the owner has. The table is the single list: docs/factory-bring-up.md, step 3, points here.
 entries=(
+  "/app-factory|PRODUCT_ID|fixed: factory|Mandatory: which product this deployment is. Without it the clone starts as code-review-com"
+  "/app-factory|PRODUCT_CAPABILITIES|fixed: review,dynamic-review|Billing off. The staged App must report exactly this set (health-factory checks it)"
   "/app-factory|APP_SECRET|generated (base64)|The master key. Keep a copy of this one in a password manager: it cannot be rotated"
   "/app-factory|RUNNER_TOKEN|generated (hex)|The factory App's dispatcher credential"
   "/app-factory|CRON_SECRET|generated (hex)|Opens the factory App's cron routes. Its own value"
   "/app-factory|RUNNER_WEBHOOK_SECRET|generated (hex)|The key the factory App signs wake-ups with"
-  "/ci|DISPATCHER_OPERATOR_TOKEN|generated (hex)|Opens /probe and /apps/check of the Dispatcher; the pipeline reads it"
+  "/app-factory|RUNNER_DISPATCH|fixed: webhook|Without it the App stays in poll mode and nothing wakes the Dispatcher"
+  "/app-factory|RUNNER_WEBHOOK_URL|yours|https://<dispatcher production domain>/dispatch (the same Dispatcher as code-review.com)"
+  "/app-factory|RUNNER_WEBHOOK_KEY_ID|fixed: factory-k1|Must equal keyId of the factory entry in DISPATCHER_APPS"
+  "/app-factory|RUNNER_DISPATCH_MAX_RUNNING|fixed: 2|Must equal maxRunning of the factory entry in DISPATCHER_APPS"
+  "/app-factory|RUNNER_WEBHOOK_BYPASS_TOKEN|reference|Only if the Dispatcher is protected: \${prod.ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}"
   "/app-factory|DATABASE_URL|yours|The factory database's app role URL (a direct connection)"
-  "/ci|DATABASE_URL_MIGRATE_FACTORY|yours|The factory database's migrate role URL (a direct connection)"
   "/app-factory|BETTER_AUTH_URL|yours|https://<factory project>.vercel.app"
+  "/ci|DISPATCHER_OPERATOR_TOKEN|generated (hex)|Opens /probe and /apps/check of the Dispatcher; the pipeline reads it"
+  "/ci|DATABASE_URL_MIGRATE_FACTORY|yours|The factory database's migrate role URL (a direct connection)"
   "/ci|VERCEL_FACTORY_PROJECT_ID|yours|The id of the factory's Vercel project"
   "/ci|VERCEL_FACTORY_AUTOMATION_BYPASS_SECRET|yours|The factory project's Protection Bypass for Automation secret"
   "/dispatcher|DISPATCHER_APP_FACTORY_TOKEN|reference|\${prod.app-factory.RUNNER_TOKEN}"
   "/dispatcher|DISPATCHER_APP_FACTORY_SIGNING_SECRET|reference|\${prod.app-factory.RUNNER_WEBHOOK_SECRET}"
   "/dispatcher|DISPATCHER_OPERATOR_TOKEN|reference|\${prod.ci.DISPATCHER_OPERATOR_TOKEN}"
-  "/dispatcher|DISPATCHER_APPS|yours|One JSON line naming the factory App (docs/deployment-vercel.md, section 5.8)"
+  "/dispatcher|DISPATCHER_APPS|yours|One line, the factory entry: {\"id\":\"factory\",\"url\":\"<BETTER_AUTH_URL>\",\"kinds\":[\"diff\",\"dynamic\"],\"keyId\":\"factory-k1\",\"maxRunning\":2} in a JSON array"
 )
 
 echo "Infisical entries of the factory lane (environment prod):"
-printf '  %-14s %-42s %-18s %s\n' "Folder" "Key" "Value" "Note"
+printf '  %-14s %-42s %-36s %s\n' "Folder" "Key" "Value" "Note"
 for entry in "${entries[@]}"; do
   IFS='|' read -r folder key kind note <<< "${entry}"
-  printf '  %-14s %-42s %-18s %s\n' "${folder}" "${key}" "${kind}" "${note}"
+  printf '  %-14s %-42s %-36s %s\n' "${folder}" "${key}" "${kind}" "${note}"
 done
 echo
 echo 'Vercel project of the factory (dashboard, once):'
@@ -100,7 +112,13 @@ base64_32() {
 }
 
 # Created empty and 0600 before any value is written (the umask already makes it so; this makes it explicit).
-: > "${out}"
+# noclobber: the redirection fails if the file appeared since the check above, instead of following or truncating it.
+set -C
+if ! : > "${out}"; then
+  echo "Refusing to overwrite ${out}." >&2
+  exit 1
+fi
+set +C
 chmod 600 "${out}"
 
 # Five different values. A collision of 256-bit random values is not a case; the check is cheap and keeps the rule of

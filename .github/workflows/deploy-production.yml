@@ -35,21 +35,23 @@ name: Deploy production
 #     removes the snapshot of a run that built one and whose Dispatcher promotion never started; after a failed or
 #     cancelled promotion the outcome is unknown (it can still land) and the snapshot is left to the next cleanup.
 #
-# The second App ("factory", #732) is a lane of this pipeline that exists but is dormant: every job below that has
-# `factory` in its name, and the two factory steps of `migrate`, run only when the repository variable FACTORY_ENABLED is
-# `true` (a boolean, harmless in a public repository). Unset or false, the pipeline does exactly what it did before.
-# Switched on, the same `app/` is deployed to a second Vercel project with its own database:
+# The second App ("factory", #732) is a lane of this pipeline that exists but is dormant. The repository variable
+# FACTORY_ENABLED (a repository variable, not an environment variable of `production`; a boolean, harmless in a public
+# repository) is read once, by `factory-flag`, and every factory job reads its output. Unset or not `true`, the
+# pipeline does exactly what it did before. Switched on, the same `app/` is deployed to a second Vercel project with its
+# own database:
 #
-#   migrate (factory database first, then the reviewer's) -> stage-factory -> health-factory ---+
-#   canary -> apps-check -----------------------------------------------------------------------+-> promote-factory
-#   promote-app -> promote-factory -> promote-dispatcher                              (promote-factory: only after the App)
+#   factory-flag -> migrate-factory -> stage-factory -> health-factory ---+
+#   canary -> apps-check -------------------------------------------------+-> promote-factory
+#   promote-app -> promote-factory -> promote-dispatcher                 (promote-factory: only after the App)
 #
-# The factory never blocks the release of code-review.com: nothing in the reviewer path needs a factory job, and
-# `promote-dispatcher` waits for `promote-factory` to finish but does not look at its result. A failed factory lane
-# fails the run, loudly, after the reviewer's production is already promoted. The one gate that does reach the reviewer is
-# the migration: the factory database is migrated first, as the canary database (a migration that breaks does so there,
-# before the production database is touched), so a factory migration that fails stops the release before anything is
-# deployed. docs/deployment-vercel.md, section 5.8, has the rollout order and how to switch it off.
+# The factory never blocks the release of code-review.com. The reviewer's jobs (everything above this lane) need no
+# factory job, so a factory migration, staging, health check, Apps check or promotion that fails or is skipped changes
+# nothing of the reviewer's release. `promote-dispatcher` waits for `promote-factory` to finish (apps first, the
+# Dispatcher last) but does not look at its result, so a factory job that hangs delays the Dispatcher's promotion up to
+# the time limits below, which is why they are short. A failed factory lane fails the run, loudly, after the
+# reviewer's production is promoted. docs/deployment-vercel.md, section 5.8, lists exactly what a factory failure can
+# still touch, the rollout order and how to switch it off.
 #
 # Production only: no staging, no preview. It never runs for a pull request and never on `pull_request_target`. Every
 # job runs only for this repository on main (the job's own condition guards against accidents; the boundary is the
@@ -126,23 +128,6 @@ jobs:
           node-version-file: .nvmrc
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter code-reviewer-app...
-      # The factory database first (#732), when the lane is on: it is the canary database, so a migration that breaks
-      # does so here and the production database is not touched. Same command, the other database.
-      - name: Load the factory migrate role's database URL from Infisical
-        if: ${{ vars.FACTORY_ENABLED == 'true' }}
-        uses: ./.github/actions/infisical-ci-secrets
-        with:
-          secret-names: DATABASE_URL_MIGRATE_FACTORY
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          domain: ${{ secrets.INFISICAL_DOMAIN }}
-          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
-          consequence: Nothing was migrated, so nothing is deployed.
-      - name: Apply the migrations to the factory database
-        if: ${{ vars.FACTORY_ENABLED == 'true' }}
-        env:
-          DATABASE_URL_MIGRATE: ${{ env.DATABASE_URL_MIGRATE_FACTORY }}
-        run: pnpm --dir app migrate
       # After the install and just before the command that uses it.
       - name: Load the migrate role's database URL from Infisical
         uses: ./.github/actions/infisical-ci-secrets
@@ -156,6 +141,69 @@ jobs:
       # Takes the advisory lock, applies every pending migration in one transaction and prints the number applied,
       # never the URL (docs/deployment-vercel.md, step 1). Idempotent: a run with nothing to apply exits 0.
       - name: Apply the migrations
+        run: pnpm --dir app migrate
+
+  # The one place that reads the repository variable FACTORY_ENABLED (#732). It has no secret and nothing of the
+  # reviewer's path needs it; every factory job reads its output, so that the switch is read once per run.
+  factory-flag:
+    name: Read the factory switch
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      enabled: ${{ steps.flag.outputs.enabled }}
+    steps:
+      - name: Read FACTORY_ENABLED
+        id: flag
+        env:
+          FACTORY_ENABLED: ${{ vars.FACTORY_ENABLED }}
+        run: |
+          set -euo pipefail
+
+          if [ "${FACTORY_ENABLED}" = "true" ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "The factory lane is on."
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "The factory lane is off."
+          fi
+
+  # The factory's own migration (#732), in a job of its own: the reviewer's `migrate` does not depend on it and nothing
+  # of the reviewer's path needs it. Same command, the factory's database.
+  migrate-factory:
+    name: Migrate the factory database
+    needs: [fresh, factory-flag]
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.factory-flag.outputs.enabled == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app...
+      - name: Load the factory migrate role's database URL from Infisical
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: DATABASE_URL_MIGRATE_FACTORY
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: Nothing was migrated, so the factory is not deployed.
+      - name: Apply the migrations to the factory database
+        env:
+          DATABASE_URL_MIGRATE: ${{ env.DATABASE_URL_MIGRATE_FACTORY }}
         run: pnpm --dir app migrate
 
   snapshot-decide:
@@ -279,8 +327,8 @@ jobs:
   # In parallel with the App. Nothing downstream of the reviewer's path needs it.
   stage-factory:
     name: Stage the factory App
-    needs: migrate
-    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && vars.FACTORY_ENABLED == 'true' }}
+    needs: [factory-flag, migrate-factory]
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.factory-flag.outputs.enabled == 'true' }}
     permissions:
       contents: read
       deployments: write
@@ -367,10 +415,10 @@ jobs:
   # project, or the other way round) are never promoted. `PRODUCT_MISMATCH` is final, it is not retried.
   health-factory:
     name: Check the staged factory App's health
-    needs: stage-factory
-    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && vars.FACTORY_ENABLED == 'true' }}
+    needs: [factory-flag, stage-factory]
+    if: ${{ github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.factory-flag.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     environment: production
     permissions:
       contents: read
@@ -450,8 +498,6 @@ jobs:
       engines: ${{ inputs.canary_engines || 'pr-agent,opencode' }}
       image_digest: ${{ needs.snapshot-build.outputs.image-digest || needs.snapshot-decide.outputs.image-digest }}
       snapshot_id: ${{ needs.snapshot-build.outputs.snapshot-id || needs.snapshot-decide.outputs.snapshot-id }}
-      # With the factory lane on, the Dispatcher has an operator credential of its own for /probe (#730).
-      operator_token: ${{ vars.FACTORY_ENABLED == 'true' }}
 
   # What the staged Dispatcher says about every App it serves (#730): each must be reachable with its credential. Runs
   # on the staged Dispatcher the canary just proved to belong to the Dispatcher project, so the operator credential goes
@@ -459,10 +505,11 @@ jobs:
   # previous release at this point). The reviewer's promotion does not need it.
   apps-check:
     name: Check the Apps of the staged Dispatcher
-    needs: [stage-dispatcher, canary]
-    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && vars.FACTORY_ENABLED == 'true' && needs.stage-dispatcher.result == 'success' && needs.canary.result == 'success' }}
+    needs: [factory-flag, stage-dispatcher, canary]
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.factory-flag.outputs.enabled == 'true' && needs.stage-dispatcher.result == 'success' && needs.canary.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # One request of at most a minute after the checkout and the sign-in. It sits in front of promote-dispatcher, so a hang is a delay of the reviewer's release.
+    timeout-minutes: 5
     environment: production
     permissions:
       contents: read
@@ -580,10 +627,11 @@ jobs:
   # must have succeeded. Its result is never looked at by a job of the reviewer's path.
   promote-factory:
     name: Promote the factory App
-    needs: [stage-factory, health-factory, canary, apps-check, promote-app]
-    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && vars.FACTORY_ENABLED == 'true' && needs.stage-factory.result == 'success' && needs.health-factory.result == 'success' && needs.canary.result == 'success' && needs.apps-check.result == 'success' && needs.promote-app.result == 'success' }}
+    needs: [factory-flag, stage-factory, health-factory, canary, apps-check, promote-app]
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.factory-flag.outputs.enabled == 'true' && needs.stage-factory.result == 'success' && needs.health-factory.result == 'success' && needs.canary.result == 'success' && needs.apps-check.result == 'success' && needs.promote-app.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # `vercel promote --timeout 5m` after the setup. It sits in front of promote-dispatcher, so a hang is a delay of the reviewer's release.
+    timeout-minutes: 10
     environment: production
     permissions:
       contents: read

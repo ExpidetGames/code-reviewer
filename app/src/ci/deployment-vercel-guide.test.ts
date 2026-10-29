@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { loadAuthConfig } from "../auth/config.ts";
 import { refuseUnlessCron } from "../cron/auth.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
@@ -1226,6 +1227,11 @@ describe("the second App in the guide (#732)", () => {
     expect(second).toContain("`FACTORY_ENABLED`");
     expect(flat(second)).toContain("Switching it off");
     expect(flat(second)).toContain("never blocks the release of the first");
+    // Where the switch lives: a repository variable, which the job `factory-flag` reads once.
+    expect(flat(second)).toContain(
+      "**repository variable** (Settings, Secrets and variables, Actions, *Variables*, repository), not a variable of the environment `production`",
+    );
+    expect(flat(second)).toContain("`factory-flag` reads it once per run");
     expect(
       section("### 2.1 Setup of the deployment pipeline (once)"),
     ).toContain("`FACTORY_ENABLED`");
@@ -1234,18 +1240,43 @@ describe("the second App in the guide (#732)", () => {
   // #732-T09
   it("names every job of the lane, in the order the workflow has them", () => {
     const jobs = [
-      ...deploy.matchAll(/^ {2}([a-z-]*(?:factory|apps-check))\s*:/gm),
+      ...deploy.matchAll(
+        /^ {2}((?:[a-z-]*factory(?:-flag)?|apps-check))\s*:/gm,
+      ),
     ].map((match) => match[1] as string);
     expect(jobs.sort()).toEqual(
       [
         "apps-check",
+        "factory-flag",
         "health-factory",
+        "migrate-factory",
         "promote-factory",
         "stage-factory",
       ].sort(),
     );
-    for (const name of jobs) expect(second, name).toContain(`\`${name}\``);
-    expect(second).toContain("`migrate` (two more steps)");
+    const lane = parse(deploy) as {
+      jobs: Record<string, { "timeout-minutes"?: number }>;
+    };
+    const stage = parse(read(".github/workflows/vercel-stage.yml")) as {
+      jobs: Record<string, { "timeout-minutes"?: number }>;
+    };
+    const limits = Object.values(stage.jobs).map(
+      (found) => found["timeout-minutes"],
+    );
+    for (const name of jobs) {
+      expect(second, name).toContain(`\`${name}\``);
+      // The row of the job names its time limit: the one of the job, or of the workflow it calls.
+      const row = second
+        .split("\n")
+        .find((line) => line.startsWith(`| \`${name}\` |`));
+      expect(row, name).toBeDefined();
+      const limit =
+        lane.jobs[name]?.["timeout-minutes"] ??
+        Math.max(...(limits as number[]));
+      expect(row, name).toContain(`| ${limit} min |`);
+    }
+    // The factory migration is a job of its own and `migrate` is not mentioned as carrying steps of it.
+    expect(second).not.toContain("`migrate` (two more steps)");
   });
 
   // #732-T09
@@ -1291,10 +1322,41 @@ describe("the second App in the guide (#732)", () => {
   });
 
   // #732-T09
-  it("states that the migration is the one gate that reaches the first App, and the order of the promotions", () => {
+  it("lists exactly what a failure of the lane can still affect, says the migration is no gate, and gives the order of the promotions", () => {
     const text = flat(second);
-    expect(text).toContain("the only gate that reaches the first App");
+    expect(text).toContain(
+      "No job of the first App's path needs a job of the lane, the second App's migration included",
+    );
+    expect(text).not.toContain("the only gate that reaches the first App");
+    expect(text).toContain(
+      "What a failure of the lane can still affect, all of it:",
+    );
+    for (const item of [
+      "1. **The run is red**",
+      "2. **Delay.**",
+      "3. **Shared configuration, not jobs.**",
+    ])
+      expect(text, item).toContain(item);
     expect(text).toContain("the App, the second App, the Dispatcher");
+    // The hung-job delay is documented where the limits are, and the first promotion's manual step is too.
+    expect(text).toContain("`promote-dispatcher` waits for `promote-factory`");
+    expect(text).toContain("**The first promotion needs one manual step.**");
+    expect(text).toContain("vercel promote");
+    expect(text).toContain("`app_unreachable: factory`");
+  });
+
+  // #732-T09
+  it("documents the canary's credential as independent of the switch, in the guide and in the workflow", () => {
+    const text = flat(second);
+    expect(text).toContain("does not depend on the switch");
+    expect(text).toContain(
+      "`DISPATCHER_OPERATOR_TOKEN` when Infisical `/dispatcher` has that key",
+    );
+    expect(text).toContain("`RUNNER_TOKEN` when it has not");
+    const off = text.split("**Switching it off.**")[1] as string;
+    expect(off).toContain("The canary does not change");
+    expect(off).not.toContain("operator_token");
+    expect(deploy).not.toContain("operator_token");
   });
 
   // #732-T09
@@ -1323,6 +1385,22 @@ describe("the second App in the guide (#732)", () => {
     ])
       expect(optional, item).toContain(item);
     expect(bringUp).toContain("factory-bootstrap.sh");
+    // The entries of the clone that are not secrets are in the checklist too.
+    for (const key of [
+      "PRODUCT_ID",
+      "PRODUCT_CAPABILITIES",
+      "RUNNER_DISPATCH",
+      "RUNNER_WEBHOOK_URL",
+      "RUNNER_WEBHOOK_KEY_ID",
+      "RUNNER_DISPATCH_MAX_RUNNING",
+      "RUNNER_WEBHOOK_BYPASS_TOKEN",
+      "DISPATCHER_APPS",
+    ])
+      expect(bringUp, key).toContain(`\`${key}\``);
+    expect(flat(bringUp)).toContain(
+      "repository variable, not a variable of the environment `production`",
+    );
+    expect(bringUp).toContain("The first run stops at `apps-check`");
     expect(bringUp).not.toContain("—");
     expect(bringUp).not.toMatch(/\bcustomers?\b|GmbH/i);
   });

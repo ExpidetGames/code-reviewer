@@ -35,11 +35,6 @@ on:
         description: "Golden snapshot id the deployment must report; empty does not check the snapshot"
         default: ""
         required: false
-      operator_token:
-        description: "Open /probe with the Dispatcher's operator credential (DISPATCHER_OPERATOR_TOKEN) and not with RUNNER_TOKEN: on once the factory lane is on"
-        type: boolean
-        default: false
-        required: false
   workflow_call:
     inputs:
       url:
@@ -61,11 +56,6 @@ on:
         default: ""
         required: false
         type: string
-      operator_token:
-        description: "Open /probe with the Dispatcher's operator credential (DISPATCHER_OPERATOR_TOKEN) and not with RUNNER_TOKEN: on once the factory lane is on"
-        default: false
-        required: false
-        type: boolean
     secrets:
       INFISICAL_CLIENT_ID:
         description: Client id of the Infisical machine identity (a secret of the environment production, passed by the caller)
@@ -121,22 +111,24 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: The canary did not run, so nothing is promoted.
-      # Only with the factory lane on (#732): the Dispatcher then serves more than one App, so `/probe` opens with a
-      # credential of its own and no App's token. The canary command reads the credential from RUNNER_TOKEN; the loaded
-      # value is already masked and goes to the later steps through the job's environment file, never a command line.
-      - name: Load the operator credential from Infisical
-        if: ${{ inputs.operator_token }}
-        uses: ./.github/actions/infisical-ci-secrets
+      # The Dispatcher's operator credential (#730, #732), when the Dispatcher has one: `/probe` is then opened by it
+      # and by no App's token. The rule does not depend on the factory switch: present in Infisical /dispatcher, it is
+      # exported as DISPATCHER_OPERATOR_TOKEN (masked) and `pnpm probe:canary` uses it; absent, the step fails
+      # harmlessly and the canary keeps using RUNNER_TOKEN, as before. /dispatcher, not /ci, because the question is
+      # whether the Dispatcher has the credential, and /dispatcher is where it gets it.
+      - name: Load the operator credential from Infisical (when the Dispatcher has one)
+        continue-on-error: true
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
-          secret-names: DISPATCHER_OPERATOR_TOKEN
+          method: universal
           client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
-          consequence: The canary did not run, so nothing is promoted.
-      - name: Probe with the operator credential
-        if: ${{ inputs.operator_token }}
-        run: printf 'RUNNER_TOKEN=%s\n' "${DISPATCHER_OPERATOR_TOKEN}" >> "${GITHUB_ENV}"
+          env-slug: prod
+          secret-path: /dispatcher
+          secret-name: DISPATCHER_OPERATOR_TOKEN
+          export-type: env
       # A snapshot that was removed since (a re-run of failed jobs after the run's snapshot was discarded) is said so
       # here, in a code, and not as a canary VM that cannot start.
       - name: Check that the golden snapshot still exists

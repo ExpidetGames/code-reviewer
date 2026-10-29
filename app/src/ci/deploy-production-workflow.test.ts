@@ -62,6 +62,9 @@ describe("the production deployment workflow", () => {
     expect(Object.keys(workflow.jobs)).toEqual([
       "fresh",
       "migrate",
+      // The dormant factory lane's switch and migration (#732): jobs of their own, the first App's `migrate` stays as it was.
+      "factory-flag",
+      "migrate-factory",
       "snapshot-decide",
       "snapshot-build",
       "stage-app",
@@ -276,6 +279,7 @@ describe("the production deployment workflow", () => {
   it("runs every job that signs in to Infisical in the environment production", () => {
     for (const name of [
       "migrate",
+      "migrate-factory",
       "snapshot-decide",
       "health-app",
       "health-factory",
@@ -314,18 +318,9 @@ describe("the production deployment workflow", () => {
   // #403-T07
   it("migrates the database first with the migrate role's URL from Infisical, before anything is deployed", () => {
     const migrate = job("migrate");
-    // The reviewer's own steps; the two factory steps in front of them are pinned in factory-lane-workflow.test.ts.
-    const load = stepIndex(
-      migrate,
-      (step) =>
-        isInfisicalLoad(step) &&
-        step.with?.["secret-names"] === "DATABASE_URL_MIGRATE",
-    );
-    const run = stepIndex(
-      migrate,
-      (step) =>
-        step.name === "Apply the migrations" &&
-        (step.run ?? "").includes("pnpm --dir app migrate"),
+    const load = stepIndex(migrate, isInfisicalLoad);
+    const run = stepIndex(migrate, (step) =>
+      (step.run ?? "").includes("pnpm --dir app migrate"),
     );
     const install = stepIndex(migrate, (step) =>
       (step.run ?? "").includes(

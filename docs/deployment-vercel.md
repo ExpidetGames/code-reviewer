@@ -261,7 +261,7 @@ yours.
 
   Set them without typing a value into a command line, for example
   `read -rs -p 'value: ' V; printf '%s' "$V" | gh secret set INFISICAL_CLIENT_SECRET --env production; unset V`.
-- No repository variable is needed, except `FACTORY_ENABLED` when you run a second App (section 5.8). Unset, the pipeline is exactly the one described here.
+- No repository variable is needed, except `FACTORY_ENABLED` when you run a second App (section 5.8; a *repository* variable, not a variable of the environment `production`). Unset, the pipeline is exactly the one described here.
 - Retired: the environments `hosted-snapshot` and `hosted-canary`, the repository variables `DISPATCHER_CANARY_HOSTS`
   and `GOLDEN_SNAPSHOT_ENABLED`.
 
@@ -287,10 +287,10 @@ yours.
   | `VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET` | The same for the Dispatcher project: opens the staged Dispatcher's address for the canary | the canary |
   | `DATABASE_URL_MIGRATE` | The direct URL of the migrate role (section 2) | the migration |
   | `RUNNER_TOKEN` | The dispatcher credential, the canary's. **The value of the App's and the Dispatcher's `RUNNER_TOKEN`** | the canary |
-| `VERCEL_FACTORY_PROJECT_ID` | The id of the second App's Vercel project (section 5.8; only with `FACTORY_ENABLED`) | the second App's deployment, the rollback |
-| `VERCEL_FACTORY_AUTOMATION_BYPASS_SECRET` | The second App project's *Protection Bypass for Automation* secret (section 5.8) | the second App's health check |
-| `DATABASE_URL_MIGRATE_FACTORY` | The direct URL of the migrate role of the second App's database (section 5.8) | the migration |
-| `DISPATCHER_OPERATOR_TOKEN` | The Dispatcher's operator credential, which opens `/probe` and `/apps/check` and no App's token (section 5.8) | the canary, the check of the Apps |
+  | `VERCEL_FACTORY_PROJECT_ID` | The id of the second App's Vercel project (section 5.8; only with `FACTORY_ENABLED`) | the second App's deployment, the rollback |
+  | `VERCEL_FACTORY_AUTOMATION_BYPASS_SECRET` | The second App project's *Protection Bypass for Automation* secret (section 5.8) | the second App's health check |
+  | `DATABASE_URL_MIGRATE_FACTORY` | The direct URL of the migrate role of the second App's database (section 5.8) | the second App's migration |
+  | `DISPATCHER_OPERATOR_TOKEN` | The Dispatcher's operator credential, which opens `/probe` and `/apps/check` and no App's token (section 5.8). The canary does not read this copy: it reads `/dispatcher` (below) | the check of the Apps |
 
 **Infisical Secret Sync** (the App's and the Dispatcher's variables reach Vercel from Infisical, never from a workflow):
 
@@ -1127,10 +1127,13 @@ start within a minute is not a sweep problem: look at section 5.3 and at the Dis
 ### 5.8 A second App (the factory lane)
 
 The same `app/` can be deployed a second time, as a separate Vercel project with its own database, and served by the same
-Dispatcher. The lane is **merged dormant**: it runs only when the repository variable `FACTORY_ENABLED` is `true`. The
-variable is a plain boolean (harmless in a public repository, unlike the Infisical sign-in of section 2.1), and it exists
-because the lane is merged before its Vercel project and its database do. Unset or `false`, *Deploy production* is the
-pipeline of section 5.6, job for job.
+Dispatcher. The lane is **merged dormant**: it runs only when the repository variable `FACTORY_ENABLED` is `true`. It is a
+**repository variable** (Settings, Secrets and variables, Actions, *Variables*, repository), not a variable of the
+environment `production`: the job that reads it does not run in that environment. It is a plain boolean (harmless in a
+public repository, unlike the Infisical sign-in of section 2.1), and it exists because the lane is merged before its
+Vercel project and its database do. The job `factory-flag` reads it once per run and every job of the lane reads that
+job's output. Unset or `false`, *Deploy production* is the pipeline of section 5.6, job for job (plus the one job that
+reads the switch, which nothing waits for).
 
 **What is shared and what is separate.** The code, the pipeline, the Dispatcher, the golden snapshot (one snapshot serves
 every App) and the machine identity are shared. The Vercel project, the database, the `CRON_SECRET`, the `APP_SECRET`, the
@@ -1139,58 +1142,114 @@ features it has and which GitHub App it uses are settings of that project and of
 
 **Infisical.** A fourth folder `/app-factory` in `prod`, synced to the second project (a third Secret Sync, source
 `prod` `/app-factory`, destination the second project, environment **Production**, auto-sync on). Its variables are those of
-section 3.1, with its own values; `BETTER_AUTH_URL` is its `vercel.app` address and `RUNNER_WEBHOOK_KEY_ID` a key id of
-its own (`factory-k1`). The keys of `/ci` for the lane are in the table of section 2.1. The Dispatcher learns about the App
-from `/dispatcher`, with references so that a value lives once:
+section 3.1, with its own values, and these are the ones that differ or are mandatory for the clone:
+
+| Key in `/app-factory` | Value |
+|---|---|
+| `PRODUCT_ID` | `factory`. **Mandatory:** unset, the project starts as `code-review-com` (section 3.1) |
+| `PRODUCT_CAPABILITIES` | `review,dynamic-review` (billing off). This is the product's default; it is set explicitly so that the value `health-factory` checks is written down |
+| `RUNNER_DISPATCH` | `webhook` |
+| `RUNNER_WEBHOOK_URL` | `https://<dispatcher production domain>/dispatch`, the same Dispatcher as the first App's |
+| `RUNNER_WEBHOOK_KEY_ID` | `factory-k1`: the `keyId` of the App's entry in `DISPATCHER_APPS` |
+| `RUNNER_DISPATCH_MAX_RUNNING` | `2`: the `maxRunning` of the App's entry in `DISPATCHER_APPS` |
+| `RUNNER_WEBHOOK_BYPASS_TOKEN` | Only if the Dispatcher is protected: `${prod.ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
+| `BETTER_AUTH_URL` | Its `vercel.app` address |
+
+The keys of `/ci` for the lane are in the table of section 2.1. The Dispatcher learns about the App from `/dispatcher`,
+with references so that a value lives once:
 
 | Key in `/dispatcher` | Value |
 |---|---|
-| `DISPATCHER_APPS` | One JSON line with the non-secret facts of the App: its id, its address, the job kinds it may submit, its key id, its cap and its pool id (the format is that of `docs/dispatcher.md`) |
+| `DISPATCHER_APPS` | One JSON array on one line with the non-secret facts of the App: `[{"id":"factory","url":"https://<project>.vercel.app","kinds":["diff","dynamic"],"keyId":"factory-k1","maxRunning":2}]` (the format and every refusal are in section 3.2) |
 | `DISPATCHER_APP_FACTORY_TOKEN` | `${prod.app-factory.RUNNER_TOKEN}` |
 | `DISPATCHER_APP_FACTORY_SIGNING_SECRET` | `${prod.app-factory.RUNNER_WEBHOOK_SECRET}` |
 | `DISPATCHER_OPERATOR_TOKEN` | `${prod.ci.DISPATCHER_OPERATOR_TOKEN}` |
 
 Check once that the references show as resolved in Infisical and in Vercel (section 2.1). If a hyphen in the folder name
 does not resolve on your instance, name the folder `/appfactory` in the references and the sync; nothing else changes.
-`tools/factory-bootstrap/factory-bootstrap.sh` lists every entry, the Vercel project settings and, only when you run it
-with `--out`, writes the five random secrets of the second App into a new file that only you can read (mode 0600),
-without ever printing or tracing one.
+`tools/factory-bootstrap/factory-bootstrap.sh` prints every one of these entries with its folder, the Vercel project
+settings and, only when you run it with `--out`, writes the five random secrets of the second App into a new file that
+only you can read (mode 0600), without ever printing or tracing one.
+
+**The operator credential of the canary does not depend on the switch.** The canary opens `/probe` with
+`DISPATCHER_OPERATOR_TOKEN` when Infisical `/dispatcher` has that key, and with `RUNNER_TOKEN` when it has not. It is the
+Dispatcher's own configuration that decides, so the canary follows the key and not `FACTORY_ENABLED`: a Dispatcher that has
+the operator token accepts nothing else on `/probe`, whether the lane runs or not. Add the key to `/dispatcher` only when
+the Dispatcher that reads it is released and the Secret Sync is done (the rollout order below).
 
 **The database.** A second Postgres database receives the same migrations, with the same roles and grants (section 2), a
 direct connection and a region near the projects. `pnpm --dir app setup-code` and the setup wizard create its first
 administrator and workspace, as in step 4 of section 4; nothing is copied from the first database.
 
-**The jobs.** All of them run in the environment `production` and use the Infisical sign-in as the others do.
+**The jobs.** All of them run in the environment `production` and use the Infisical sign-in as the others do, except
+`factory-flag`, which holds no secret. Each has a short time limit, because `promote-dispatcher` waits for `promote-factory`
+to finish (below).
 
-| Job | What it does | If it fails |
-|---|---|---|
-| `migrate` (two more steps) | Migrates the **second** database first, with `DATABASE_URL_MIGRATE_FACTORY`, then the first one. The second database is the canary database: a migration that breaks does so there, before the first database is touched | Nothing is deployed (this is the one place where the second App can stop the release; additions first, removals one release later, makes a database that is ahead of its App safe) |
-| `stage-factory` | `vercel-stage.yml` for the second project, from the `app/` directory, in parallel with `stage-app` | The second App is not promoted |
-| `health-factory` | `GET /api/health` of the staged second App must answer `200` with `{"status":"ok"}`, **and** report `product` `factory` and the capabilities `dynamic-review,review`, so that crossed project variables are never promoted (`PRODUCT_MISMATCH` stops at once) | The second App is not promoted |
-| `apps-check` | `POST /apps/check` of the staged Dispatcher (operator credential): every App it serves must be reachable and accept its credential (`app_unreachable`, `app_rejected`); a missing feature is a warning, because the live Apps are still the previous release | The second App is not promoted |
-| `promote-factory` | `vercel promote` of the second App, after `promote-app`, `health-factory`, `apps-check` and the canary | The second App keeps its previous deployment |
+| Job | What it does | Limit | If it fails |
+|---|---|---|---|
+| `factory-flag` | Reads `FACTORY_ENABLED` and outputs `enabled` (`true` only for the text `true`) | 2 min | The lane is skipped |
+| `migrate-factory` | `pnpm --dir app migrate` against `DATABASE_URL_MIGRATE_FACTORY` (the second App's migrate role). A job of its own: the first App's `migrate` does not run it and does not wait for it | 15 min | The second App is not staged. Nothing of the first App's path changes |
+| `stage-factory` | `vercel-stage.yml` for the second project, from the `app/` directory, after `migrate-factory`, in parallel with `stage-app` | 30 min | The second App is not promoted |
+| `health-factory` | `GET /api/health` of the staged second App must answer `200` with `{"status":"ok"}`, **and** report `product` `factory` and the capabilities `dynamic-review,review` (`PRODUCT_MISMATCH` stops at once). This is one-sided: the first App's `health-app` does not yet assert its own product (#738) | 10 min | The second App is not promoted |
+| `apps-check` | `POST /apps/check` of the staged Dispatcher (operator credential): every App it serves must be reachable and accept its credential (`app_unreachable`, `app_rejected`); a missing feature is a warning, because the live Apps are still the previous release | 5 min | The second App is not promoted |
+| `promote-factory` | `vercel promote` of the second App, after `promote-app`, `health-factory`, `apps-check` and the canary | 10 min | The second App keeps its previous deployment |
 
-`canary` runs once, for the Dispatcher; with the lane on it opens `/probe` with `DISPATCHER_OPERATOR_TOKEN`. The promotion
-order is the App, the second App, the Dispatcher (apps first, section 5.6). `record` also closes a `factory-production`
-deployment record.
+`canary` runs once, for the Dispatcher, as without the lane. The promotion order is the App, the second App, the
+Dispatcher (apps first, section 5.6). `record` also closes a `factory-production` deployment record.
 
-**The second App never blocks the release of the first.** No job of the first App's path needs a second-App job.
-`promote-dispatcher` waits for `promote-factory` so that the order holds, but its condition does not read the result
-(`deploy-production-promotion.test.ts` evaluates it). A failed second-App lane fails the run, loudly, after the first
-App's production is already promoted; the next run, or a manual one, tries again. Making the second App a gate later is a
-change of the conditions of `promote-dispatcher`, and it should come with the first users of the second App. The
-migration step above is the only gate that reaches the first App, on purpose.
+**The first promotion needs one manual step.** `apps-check` asks the staged Dispatcher about the Apps as they are *live*:
+the address in `DISPATCHER_APPS` is the second App's production address. On the first run the second project has nothing
+live, so that address answers nothing the Dispatcher accepts and `apps-check` fails with `app_unreachable: factory` (or
+`app_rejected: factory`), and `promote-factory` is skipped. This is expected once, and the first App's release is not
+affected. The deployment is staged and `health-factory` has checked it: promote it by hand with
+`VERCEL_ORG_ID=<team id> VERCEL_PROJECT_ID=<factory project id> vercel promote <the staged address from the run's summary> --yes`
+(or in the dashboard: the second project, Deployments, the staged one, *Promote*). From the next run on the address
+answers and `apps-check` passes. A run in which `apps-check` fails with `app_unreachable: reviewer` is something else:
+look at the Dispatcher.
+
+**The second App never blocks the release of the first.** No job of the first App's path needs a job of the lane, the
+second App's migration included: `migrate`, `snapshot-decide`, `stage-app`, `health-app`, `canary` and `promote-app` run
+as without the lane, and a failed or skipped job of the lane changes none of their results
+(`factory-lane-workflow.test.ts` evaluates the conditions with every lane job failing, and with the switch itself
+failing). The conditions of `promote-dispatcher`, `persist`, `cleanup` and `discard` do not read a result of the lane.
+Making the second App a gate later is a change of those conditions, and it should come with the first users of the second
+App. What a failure of the lane can still affect, all of it:
+
+1. **The run is red**, after the first App is promoted when the failure came late. The next run, or a manual one, tries
+   again. The deployment records say what moved.
+2. **Delay.** `promote-dispatcher` waits for `promote-factory` to finish (the order), and `persist`, `cleanup` and
+   `discard` wait for `promote-dispatcher`; the next deployment waits for this run (deployments queue and are never
+   cancelled). A factory job that hangs delays all of that until its time limit (the column above; staging is limited by
+   `vercel-stage.yml` to 30 minutes), then the Dispatcher is promoted as usual. The limits are short on purpose; the
+   reviewer's own jobs run in the meantime, so only the part the lane needs beyond them is lost. While the App is promoted
+   and the Dispatcher is not, the App runs against the previous Dispatcher, which is the state any failed run leaves
+   between the two promotions.
+3. **Shared configuration, not jobs.** The Dispatcher is one deployment for both Apps. A malformed `DISPATCHER_APPS` or a
+   missing or short `DISPATCHER_APP_FACTORY_*` secret makes the Dispatcher refuse to start (section 3.2), and the next
+   canary of the first App fails with it, because the staged Dispatcher is the same one. So, before you set the switch,
+   run *Deploy production* once with the switch still off after step 3 of the rollout: a green canary proves the Dispatcher
+   starts with the registry. The same holds for `DISPATCHER_OPERATOR_TOKEN` in `/dispatcher`: it changes what `/probe`
+   accepts for both Apps. The Dispatcher's Sandbox concurrency is shared too: the caps of the Apps (`maxRunning`) add up,
+   and their sum must fit what the team's Sandbox allows.
+
+Nothing else: the migration of the second database, its staging, its health, the Apps check and its promotion cannot stop
+the migration, the staging, the health check, the canary or the promotion of the first App.
 
 **Rollout order.** (1) Release the Dispatcher with the App registry (`docs/dispatcher.md`) and the App with the capability
 set; the lane's health check needs the product and the capabilities in `/api/health`. (2) Create the database and the
 project, run the bootstrap tool, fill Infisical, add the Secret Sync (`docs/factory-bring-up.md` has the short list).
-(3) Add `DISPATCHER_APPS` and the references to `/dispatcher` and wait until the Dispatcher shows them synced. (4) Set
-`FACTORY_ENABLED` to `true` and run *Deploy production*. (5) Run `pnpm --dir app setup-code` against the second database and
-finish the wizard in the browser.
+(3) Add `DISPATCHER_APPS`, the references and `DISPATCHER_OPERATOR_TOKEN` to `/dispatcher`, wait until the Secret Sync shows
+them synced, and run *Deploy production* with the switch still off: the canary must pass. (4) Set `FACTORY_ENABLED` to
+`true` and run *Deploy production*; promote the second App by hand once (above). (5) Run `pnpm --dir app setup-code` against
+the second database and finish the wizard in the browser.
 
-**Switching it off.** Set `FACTORY_ENABLED` back to anything but `true`: the next run is the first App's pipeline again.
-The second project and its database are not touched. To restore an earlier deployment of the second App, run *Rollback
-production* with `factory_deployment` (section 7).
+**Switching it off.** Set `FACTORY_ENABLED` back to anything but `true`: the next run is the first App's pipeline again,
+and `factory-flag` is the only job left over. The canary does not change: its credential follows `DISPATCHER_OPERATOR_TOKEN`
+in `/dispatcher`, not the switch, so leave that key where it is while the Dispatcher has it (removing it from
+`/dispatcher` is a change of the Dispatcher, and the canary then goes back to `RUNNER_TOKEN` with the next Secret Sync).
+The second project, its database, the Dispatcher's registry and the App's wake-ups are not touched: remove
+`DISPATCHER_APPS` and the `DISPATCHER_APP_FACTORY_*` keys too if the Dispatcher should stop serving the App. To restore an
+earlier deployment of the second App, run *Rollback production* with `factory_deployment` (section 7).
 
 ## 6. Sizing the Worker VMs
 

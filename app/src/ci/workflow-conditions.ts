@@ -7,8 +7,8 @@
 // It models the rule that bit the production pipeline (#480): a job whose `if` has no status function gets an implicit
 // `success()`, and that check looks at every job it depends on, directly or through other jobs, so a job skipped
 // anywhere up the chain skips it too. Only the syntax the pipeline uses is supported (`&&`, `||`, `!`, `==`, `!=`,
-// parentheses, string literals, `needs.<job>.result`, `needs.<job>.outputs.<name>`, `github.<name>`, `vars.<name>`,
-// `cancelled()` and `always()`); anything else throws, so a new construct cannot slip by unmodelled.
+// parentheses, string literals, `needs.<job>.result`, `needs.<job>.outputs.<name>`, `github.<name>`, `cancelled()` and
+// `always()`); anything else throws, so a new construct cannot slip by unmodelled.
 import type { Job, Workflow } from "./workflow-support.ts";
 import { needsOf, REPOSITORY } from "./workflow-support.ts";
 
@@ -25,8 +25,6 @@ export type Scenario = {
   cancelling?: string[];
   /** The run was cancelled before it started. */
   cancelled?: boolean;
-  /** Repository variables (`vars.<name>`); one that is not set reads as an empty string, as on GitHub. */
-  vars?: Record<string, string>;
 };
 
 const GITHUB: Record<string, string> = {
@@ -74,7 +72,6 @@ type Context = {
   results: Record<string, JobResult>;
   outputs: Record<string, Record<string, string>>;
   cancelled: boolean;
-  vars: Record<string, string>;
 };
 
 function evaluate(tokens: string[], context: Context): Value {
@@ -114,8 +111,6 @@ function evaluate(tokens: string[], context: Context): Value {
       }
       return context.outputs[name]?.[output as string] ?? "";
     }
-    const variable = /^vars\.(\w+)$/.exec(token);
-    if (variable) return context.vars[variable[1] as string] ?? "";
     const github = /^github\.(\w+)$/.exec(token);
     if (github && GITHUB[github[1] as string] !== undefined)
       return GITHUB[github[1] as string] as string;
@@ -204,7 +199,6 @@ export function simulate(
       ),
       outputs: scenario.outputs ?? {},
       cancelled: runCancelled,
-      vars: scenario.vars ?? {},
     };
     const implicitSuccess = !hasStatusFunction(job);
     const upstreamSucceeded = ancestorsOf(workflow, name).every(

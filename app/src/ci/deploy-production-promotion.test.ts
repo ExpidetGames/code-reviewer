@@ -134,11 +134,13 @@ describe("the production deployment when the golden snapshot is reused", () => {
     expect(simulate(workflow, reuse)).toEqual({
       fresh: "success",
       migrate: "success",
+      // The factory lane is dormant: its switch reads `false` here (factory-lane-workflow.test.ts has it on).
+      "factory-flag": "success",
+      "migrate-factory": "skipped",
       "snapshot-decide": "success",
       "snapshot-build": "skipped",
       "stage-app": "success",
       "stage-dispatcher": "success",
-      // The factory lane is dormant: FACTORY_ENABLED is not set (factory-lane-workflow.test.ts has it on).
       "stage-factory": "skipped",
       "health-app": "success",
       "health-factory": "skipped",

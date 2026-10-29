@@ -2,10 +2,11 @@
 
 // Pins down the lane for the second App ("factory", #732) in .github/workflows/deploy-production.yml,
 // rollback-production.yml and dispatcher-canary.yml. The lane is merged dormant: it runs only when the repository
-// variable FACTORY_ENABLED is `true`. Switched off, the pipeline of code-reviewer.com must do exactly what it did
-// before (proved by evaluating the conditions of the jobs with and without the lane, not by matching text); switched
-// on, the lane migrates its database first, stages, checks and promotes the second project, and no result of the lane
-// can stop the promotion of the first App or of the Dispatcher. The shell of the new steps runs against stand-ins.
+// variable FACTORY_ENABLED is `true`, read once by the job `factory-flag`. Switched off, the pipeline of
+// code-reviewer.com must do exactly what it did before (proved by evaluating the conditions of the jobs with and
+// without the lane, not by matching text); switched on, the lane migrates its own database in a job of its own, stages,
+// checks and promotes the second project, and no result of the lane (nor of its migration) can stop the release of the
+// first App or of the Dispatcher. The shell of the new steps runs against stand-ins.
 import { describe, expect, it } from "vitest";
 import { runStep } from "./shell-support.ts";
 import { simulate, type Scenario } from "./workflow-conditions.ts";
@@ -31,14 +32,16 @@ const job = (name: string): Job => {
   return found;
 };
 
+const FLAG_JOB = "factory-flag";
 const FACTORY_JOBS = [
+  "migrate-factory",
   "stage-factory",
   "health-factory",
   "apps-check",
   "promote-factory",
 ];
 const REVIEWER_JOBS = Object.keys(workflow.jobs).filter(
-  (name) => !FACTORY_JOBS.includes(name),
+  (name) => name !== FLAG_JOB && !FACTORY_JOBS.includes(name),
 );
 const WRITE_ACTION = "./.github/actions/infisical-write-snapshot-pair";
 
@@ -48,17 +51,21 @@ const reuse: Scenario = {
 const rebuild: Scenario = {
   outputs: { "snapshot-decide": { rebuild: "true", repair: "false" } },
 };
-const on = (scenario: Scenario): Scenario => ({
+/** What `factory-flag` outputs for a value of the variable (its shell is proved below). */
+const flagged = (scenario: Scenario, enabled: string): Scenario => ({
   ...scenario,
-  vars: { FACTORY_ENABLED: "true" },
+  outputs: { ...scenario.outputs, [FLAG_JOB]: { enabled } },
 });
+const on = (scenario: Scenario): Scenario => flagged(scenario, "true");
 
-/** The pipeline as it was before the lane: the factory jobs are gone, and so is every need on one of them. */
+/** The pipeline as it was before the lane: the flag and the factory jobs are gone, and so is every need on one of them. */
 function withoutTheLane(): Workflow {
   const jobs: Workflow["jobs"] = {};
   for (const [name, found] of Object.entries(workflow.jobs)) {
-    if (FACTORY_JOBS.includes(name)) continue;
-    const needs = needsOf(found).filter((need) => !FACTORY_JOBS.includes(need));
+    if (name === FLAG_JOB || FACTORY_JOBS.includes(name)) continue;
+    const needs = needsOf(found).filter(
+      (need) => need !== FLAG_JOB && !FACTORY_JOBS.includes(need),
+    );
     jobs[name] = { ...found, needs };
   }
   return { ...workflow, jobs };
@@ -92,21 +99,19 @@ describe("the lane while FACTORY_ENABLED is not true", () => {
     "leaves every job of the first App's pipeline exactly as it was, with %s, and skips the whole lane",
     (_name, scenario) => {
       const before = simulate(withoutTheLane(), scenario);
-      const after = simulate(workflow, scenario);
+      const after = simulate(workflow, flagged(scenario, "false"));
       for (const name of REVIEWER_JOBS)
         expect(after[name], name).toBe(before[name]);
       for (const name of FACTORY_JOBS)
         expect(after[name], name).toBe("skipped");
+      expect(after[FLAG_JOB]).toBe("success");
     },
   );
 
   // #732-T01
-  it("treats a variable that is false, empty or anything but `true` as off", () => {
+  it("skips the lane for an output that is anything but `true`, and runs it for `true`", () => {
     for (const value of ["false", "", "1", "yes", "true "]) {
-      const result = simulate(workflow, {
-        ...reuse,
-        vars: { FACTORY_ENABLED: value },
-      });
+      const result = simulate(workflow, flagged(reuse, value));
       for (const name of FACTORY_JOBS)
         expect(result[name], `${value}: ${name}`).toBe("skipped");
     }
@@ -141,36 +146,26 @@ describe("the lane while FACTORY_ENABLED is not true", () => {
       "stage-app",
       "stage-dispatcher",
     ]);
-    // Nothing else of the first App's path knows the lane.
+    // Nothing else of the first App's path knows the lane, the flag included.
     for (const name of REVIEWER_JOBS) {
       if (name === "promote-dispatcher" || name === "record") continue;
       expect(
-        needsOf(job(name)).filter((need) => FACTORY_JOBS.includes(need)),
+        needsOf(job(name)).filter(
+          (need) => need === FLAG_JOB || FACTORY_JOBS.includes(need),
+        ),
         name,
       ).toEqual([]);
     }
   });
 
   // #732-T01
-  it("changes the first App's job conditions in nothing but the migration's two extra steps and the canary input", () => {
+  it("leaves the first App's migration, canary and conditions exactly as they were", () => {
     for (const name of REVIEWER_JOBS)
       expect(String(job(name).if), name).not.toContain("FACTORY");
+    // `migrate` is the migration of the first database and nothing else: no factory step, no condition on a step.
     const migrate = stepsOf(job("migrate"));
-    const factorySteps = migrate.filter((step) =>
-      JSON.stringify(step).includes("FACTORY"),
-    );
-    expect(factorySteps.map((step) => step.name)).toEqual([
-      "Load the factory migrate role's database URL from Infisical",
-      "Apply the migrations to the factory database",
-    ]);
-    for (const step of factorySteps)
-      expect(step.if).toBe("${{ vars.FACTORY_ENABLED == 'true' }}");
-    // The steps of the first App's migration have no condition of their own and are the same as before.
-    expect(
-      migrate
-        .filter((step) => !factorySteps.includes(step))
-        .map((step) => step.name ?? step.uses),
-    ).toEqual([
+    expect(JSON.stringify(migrate)).not.toMatch(/FACTORY|factory/);
+    expect(migrate.map((step) => step.name ?? step.uses)).toEqual([
       "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413",
       "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
@@ -178,28 +173,60 @@ describe("the lane while FACTORY_ENABLED is not true", () => {
       "Load the migrate role's database URL from Infisical",
       "Apply the migrations",
     ]);
-    expect(
-      migrate.filter(
-        (step) => step.if !== undefined && !factorySteps.includes(step),
-      ),
-    ).toEqual([]);
-    expect(job("canary").with?.operator_token).toBe(
-      "${{ vars.FACTORY_ENABLED == 'true' }}",
-    );
+    expect(migrate.filter((step) => step.if !== undefined)).toEqual([]);
+    // The canary is called with the inputs it had: the credential is not chosen by the factory switch.
+    expect(Object.keys(job("canary").with ?? {}).sort()).toEqual([
+      "engines",
+      "image_digest",
+      "snapshot_id",
+      "url",
+    ]);
+    expect(JSON.stringify(job("canary"))).not.toMatch(/FACTORY|factory|vars\./);
   });
 
   // #732-T01
-  it("is the only place that reads the variable, and reads it as the text `true`", () => {
-    const uses = [...source.matchAll(/vars\.(\w+)/g)].map((m) => m[1]);
-    expect(new Set(uses)).toEqual(new Set(["FACTORY_ENABLED"]));
-    for (const match of source.matchAll(
-      /vars\.FACTORY_ENABLED([^'\n]*)'?([^'\n]*)'/g,
-    ))
-      expect(match[0]).toMatch(/vars\.FACTORY_ENABLED == 'true'$/);
-    for (const name of FACTORY_JOBS)
+  it("reads the variable once, in `factory-flag`, as the text `true`, and every factory job reads that job's output", () => {
+    const uses = [...source.matchAll(/vars\.(\w+)/g)].map((m) => m[0]);
+    expect(uses).toEqual(["vars.FACTORY_ENABLED"]);
+    const flag = job(FLAG_JOB);
+    expect(stepsOf(flag)).toHaveLength(1);
+    expect(stepsOf(flag)[0]?.env).toEqual({
+      FACTORY_ENABLED: "${{ vars.FACTORY_ENABLED }}",
+    });
+    expect(flag.outputs).toEqual({
+      enabled: "${{ steps.flag.outputs.enabled }}",
+    });
+    // No secret and no environment: it reads a repository variable and nothing else, and no reviewer job needs it.
+    expect(JSON.stringify(flag)).not.toContain("secrets.");
+    expect(flag.environment).toBeUndefined();
+    expect(needsOf(flag)).toEqual([]);
+    for (const name of FACTORY_JOBS) {
+      expect(needsOf(job(name)), name).toContain(FLAG_JOB);
       expect(String(job(name).if), name).toContain(
-        "vars.FACTORY_ENABLED == 'true'",
+        "needs.factory-flag.outputs.enabled == 'true'",
       );
+    }
+  });
+
+  // #732-T01
+  it("makes the output `true` for the text true and `false` for anything else, as a repository variable arrives", () => {
+    const selector = {
+      workflow: "deploy-production.yml",
+      job: FLAG_JOB,
+      step: "Read FACTORY_ENABLED",
+    } as const;
+    for (const [value, expected] of [
+      ["true", "true"],
+      ["false", "false"],
+      ["", "false"],
+      ["TRUE", "false"],
+      ["1", "false"],
+      ["true ", "false"],
+    ] as const) {
+      const run = runStep(selector, { env: { FACTORY_ENABLED: value } });
+      expect(run.status, value).toBe(0);
+      expect(run.output.trim(), value).toBe(`enabled=${expected}`);
+    }
   });
 });
 
@@ -211,46 +238,65 @@ describe("the lane while FACTORY_ENABLED is true", () => {
       if (name === "snapshot-build" || name === "persist" || name === "discard")
         expect(result[name], name).toBe("skipped");
       else expect(result[name], name).toBe("success");
-    expect(needsOf(job("stage-factory"))).toEqual(["migrate"]);
-    expect(needsOf(job("health-factory"))).toEqual(["stage-factory"]);
+    expect(needsOf(job("migrate-factory")).sort()).toEqual([
+      "factory-flag",
+      "fresh",
+    ]);
+    expect(needsOf(job("stage-factory")).sort()).toEqual([
+      "factory-flag",
+      "migrate-factory",
+    ]);
+    expect(needsOf(job("health-factory")).sort()).toEqual([
+      "factory-flag",
+      "stage-factory",
+    ]);
   });
 
   // #732-T02
-  it("migrates the factory database first, in the same job, and the first App's database only if that worked", () => {
-    const migrate = stepsOf(job("migrate"));
-    const names = migrate.map((step) => step.name);
-    const loadFactory = names.indexOf(
+  it("migrates the factory database in a job of its own, and the first App's `migrate` knows nothing of it", () => {
+    const migrate = job("migrate-factory");
+    const steps = stepsOf(migrate);
+    const names = steps.map((step) => step.name);
+    const load = names.indexOf(
       "Load the factory migrate role's database URL from Infisical",
     );
-    const applyFactory = names.indexOf(
-      "Apply the migrations to the factory database",
-    );
-    const loadReviewer = names.indexOf(
-      "Load the migrate role's database URL from Infisical",
-    );
-    const applyReviewer = names.indexOf("Apply the migrations");
-    expect(loadFactory).toBeGreaterThan(names.indexOf("Install dependencies"));
-    expect(applyFactory).toBeGreaterThan(loadFactory);
-    expect(loadReviewer).toBeGreaterThan(applyFactory);
-    expect(applyReviewer).toBeGreaterThan(loadReviewer);
-    // Steps run in order and stop at the first failure unless one says otherwise.
-    for (const step of migrate) {
-      expect(step["continue-on-error"], step.name).toBeUndefined();
-      expect(String(step.if ?? ""), step.name).not.toMatch(
-        /always\(\)|failure\(\)|cancelled\(\)/,
-      );
-    }
-    const factoryLoad = migrate[loadFactory];
+    const apply = names.indexOf("Apply the migrations to the factory database");
+    expect(load).toBeGreaterThan(names.indexOf("Install dependencies"));
+    expect(apply).toBeGreaterThan(load);
+    expect(migrate.environment).toBe("production");
+    const factoryLoad = steps[load];
     expect(isInfisicalLoad(factoryLoad ?? {})).toBe(true);
     expect(factoryLoad?.with?.["secret-names"]).toBe(
       "DATABASE_URL_MIGRATE_FACTORY",
     );
     // The same command against the other database: the factory's URL is mapped to the name the command reads.
-    expect(migrate[applyFactory]?.run).toBe("pnpm --dir app migrate");
-    expect(migrate[applyFactory]?.env).toEqual({
+    expect(steps[apply]?.run).toBe("pnpm --dir app migrate");
+    expect(steps[apply]?.env).toEqual({
       DATABASE_URL_MIGRATE: "${{ env.DATABASE_URL_MIGRATE_FACTORY }}",
     });
-    expect(JSON.stringify(migrate[applyFactory])).not.toContain("secrets.");
+    expect(JSON.stringify(steps[apply])).not.toContain("secrets.");
+    // It never holds the first App's database URL (`migrate` never holds the factory's: no `factory` in its steps, above).
+    for (const step of steps.filter(isInfisicalLoad))
+      expect(step.with?.["secret-names"]).not.toBe("DATABASE_URL_MIGRATE");
+    // Nothing of the first App's path needs it, whatever it does (and the next test runs it failing).
+    for (const name of REVIEWER_JOBS)
+      expect(needsOf(job(name)), name).not.toContain("migrate-factory");
+    // Only the factory's own chain follows it.
+    expect(
+      Object.keys(workflow.jobs).filter((name) =>
+        needsOf(job(name)).includes("migrate-factory"),
+      ),
+    ).toEqual(["stage-factory"]);
+  });
+
+  // #732-T02
+  it("keeps the time limit of every job of the lane short, because promote-dispatcher waits for the lane to finish", () => {
+    const limit = (name: string) => Number(job(name)["timeout-minutes"]);
+    expect(limit(FLAG_JOB)).toBeLessThanOrEqual(2);
+    expect(limit("migrate-factory")).toBeLessThanOrEqual(15);
+    expect(limit("health-factory")).toBeLessThanOrEqual(10);
+    expect(limit("apps-check")).toBeLessThanOrEqual(5);
+    expect(limit("promote-factory")).toBeLessThanOrEqual(10);
   });
 
   // #732-T02
@@ -314,24 +360,33 @@ describe("the lane while FACTORY_ENABLED is true", () => {
     expect(needsOf(job("promote-factory")).sort()).toEqual([
       "apps-check",
       "canary",
+      "factory-flag",
       "health-factory",
       "promote-app",
       "stage-factory",
     ]);
     const condition = String(job("promote-factory").if);
-    for (const need of needsOf(job("promote-factory")))
+    for (const need of needsOf(job("promote-factory")).filter(
+      (found) => found !== FLAG_JOB,
+    ))
       expect(condition, need).toContain(`needs.${need}.result == 'success'`);
     expect(condition).toContain("!cancelled()");
     expect(condition).not.toMatch(/\.result != |skipped/);
     // The Apps check runs on the staged Dispatcher that the canary proved.
     expect(needsOf(job("apps-check")).sort()).toEqual([
       "canary",
+      "factory-flag",
       "stage-dispatcher",
     ]);
   });
 
   // #732-T02
   it.each([
+    [
+      "its migration fails",
+      "migrate-factory",
+      ["stage-factory", "health-factory", "promote-factory"],
+    ],
     [
       "staging the second App fails",
       "stage-factory",
@@ -361,7 +416,10 @@ describe("the lane while FACTORY_ENABLED is true", () => {
 });
 
 describe("the lane never stops the first App's release", () => {
-  const LANE_FAILURES = [...FACTORY_JOBS].map((name) => [name] as const);
+  // The flag itself is the first of them: a runner that cannot read a variable must not stop a release either.
+  const LANE_FAILURES = [FLAG_JOB, ...FACTORY_JOBS].map(
+    (name) => [name] as const,
+  );
 
   // #732-T03
   it.each(LANE_FAILURES)(
@@ -395,7 +453,7 @@ describe("the lane never stops the first App's release", () => {
   // #732-T03
   it("has a Dispatcher promotion whose condition does not depend on any job of the lane", () => {
     const condition = String(job("promote-dispatcher").if);
-    for (const name of FACTORY_JOBS)
+    for (const name of [FLAG_JOB, ...FACTORY_JOBS])
       expect(condition, name).not.toContain(name);
     expect(condition).not.toMatch(/FACTORY|factory/);
     for (const name of ["promote-app", "persist", "cleanup", "discard"])
@@ -867,68 +925,61 @@ describe("the check of the Apps of the staged Dispatcher", () => {
   });
 });
 
-describe("the canary with the lane on", () => {
+describe("the canary and the Dispatcher's operator credential", () => {
   const canary = canaryWorkflow.jobs.canary as Job;
   const steps = stepsOf(canary);
+  const load = steps.find(
+    (step) =>
+      step.name ===
+      "Load the operator credential from Infisical (when the Dispatcher has one)",
+  );
 
   // #732-T01
-  it("takes the operator credential as an input that is off unless the caller turns it on", () => {
+  it("takes the credential whenever the Dispatcher has one, whatever the factory switch says: no input, no condition on a variable", () => {
     for (const trigger of ["workflow_dispatch", "workflow_call"] as const) {
       const inputs = (
-        canaryWorkflow.on[trigger] as {
-          inputs: Record<string, { type?: string; default?: unknown }>;
-        }
+        canaryWorkflow.on[trigger] as { inputs: Record<string, unknown> }
       ).inputs;
-      expect(inputs.operator_token?.type, trigger).toBe("boolean");
-      expect(inputs.operator_token?.default, trigger).toBe(false);
+      expect(Object.keys(inputs), trigger).not.toContain("operator_token");
     }
+    expect(JSON.stringify(canaryWorkflow)).not.toMatch(
+      /FACTORY|factory|vars\./,
+    );
+    expect(load?.if).toBeUndefined();
   });
 
   // #732-T01
-  it("loads and uses the credential only under that input, leaving the first App's steps alone", () => {
-    const load = steps.find(
-      (step) => step.name === "Load the operator credential from Infisical",
+  it("reads DISPATCHER_OPERATOR_TOKEN from /dispatcher, where the Dispatcher gets it, and goes on without it", () => {
+    expect(load?.uses).toBe(
+      "Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d",
     );
-    const use = steps.find(
-      (step) => step.name === "Probe with the operator credential",
-    );
-    expect(load?.if).toBe("${{ inputs.operator_token }}");
-    expect(load?.with?.["secret-names"]).toBe("DISPATCHER_OPERATOR_TOKEN");
-    expect(use?.if).toBe("${{ inputs.operator_token }}");
-    expect(use?.run).toBe(
-      `printf 'RUNNER_TOKEN=%s\\n' "\${DISPATCHER_OPERATOR_TOKEN}" >> "\${GITHUB_ENV}"`,
-    );
-    expect(steps.indexOf(use as never)).toBeGreaterThan(
-      steps.indexOf(load as never),
-    );
-    expect(steps.indexOf(use as never)).toBeLessThan(
-      steps.findIndex((step) => step.name === "Run the canary"),
-    );
+    expect(load?.["continue-on-error"]).toBe(true);
+    expect(load?.with).toEqual({
+      method: "universal",
+      "client-id": "${{ secrets.INFISICAL_CLIENT_ID }}",
+      "client-secret": "${{ secrets.INFISICAL_CLIENT_SECRET }}",
+      domain: "${{ secrets.INFISICAL_DOMAIN }}",
+      "project-slug": "${{ secrets.INFISICAL_PROJECT_SLUG }}",
+      "env-slug": "prod",
+      "secret-path": "/dispatcher",
+      "secret-name": "DISPATCHER_OPERATOR_TOKEN",
+      "export-type": "env",
+    });
+    // No other step is allowed to fail and go on, and the credential is not copied to RUNNER_TOKEN: the canary command
+    // takes DISPATCHER_OPERATOR_TOKEN when it is set and RUNNER_TOKEN when it is not (#730).
+    for (const step of steps.filter((found) => found !== load))
+      expect(step["continue-on-error"], step.name).toBeUndefined();
+    expect(JSON.stringify(steps)).not.toContain("GITHUB_ENV");
     const first = steps.find(isInfisicalLoad);
     expect(first?.with?.["secret-names"]).toBe(
       "RUNNER_TOKEN VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET",
     );
     expect(first?.if).toBeUndefined();
-  });
-
-  // #732-T01
-  it("writes the credential only to the job's environment file, where it stays masked", () => {
-    const shell = runStep(
-      {
-        workflow: "dispatcher-canary.yml",
-        job: "canary",
-        step: "Probe with the operator credential",
-      },
-      {
-        env: {
-          DISPATCHER_OPERATOR_TOKEN: "operator-token-not-real-0123456789",
-          GITHUB_ENV: "/dev/null",
-        },
-      },
+    expect(steps.indexOf(load as never)).toBeGreaterThan(
+      steps.indexOf(first as never),
     );
-    expect(shell.status).toBe(0);
-    expect(shell.stdout + shell.stderr).not.toContain(
-      "operator-token-not-real",
+    expect(steps.indexOf(load as never)).toBeLessThan(
+      steps.findIndex((step) => step.name === "Run the canary"),
     );
   });
 });
