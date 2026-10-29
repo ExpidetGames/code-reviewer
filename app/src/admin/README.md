@@ -112,7 +112,7 @@ identity linked to the acting admin (`github-identity.ts`: a row in `accounts`),
 - Encryption as in the decision record: a key per purpose from `APP_SECRET` (HKDF-SHA256), AES-256-GCM, a
   random 96-bit nonce per save, the table, the name (the row id) and the field as additional authenticated
   data, so a ciphertext copied to another name does not decrypt. The names are a closed list
-  (`secrets/names.ts`); a feature that stores a credential adds its name.
+  (`src/secret-names/names.ts`, joined with the LLM key names in `admin/secret-names.ts`); a feature that stores a credential adds its name.
 - `save`, `status` / `statuses` ("is configured") and `use` (inside the server). **Nothing returns a value
   through an API or a page.** `use` hands out a `SecretValue` that prints as `[secret]` in a string, JSON or
   `console.log`; `reveal()` is the one way to the value. A status can carry the last four characters, only

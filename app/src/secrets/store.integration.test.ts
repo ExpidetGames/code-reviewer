@@ -10,6 +10,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { createSecretStore } from "./store.ts";
 
+// The store knows no name of its own: the test hands it a list, in the order `statuses` must answer.
+const NAMES = [
+  "github_app_client_secret",
+  "github_app_private_key",
+  "github_app_webhook_secret",
+  "operator_llm_key",
+  "operator_llm_key.anthropic",
+  "smtp_password",
+  "stripe_api_key",
+  "stripe_webhook_secret",
+] as const;
 const APP_SECRET = "store-test-app-secret-0123456789-0123456789";
 const OTHER_APP_SECRET = "other-test-app-secret-0123456789-0123456789";
 const PRIVATE_KEY =
@@ -23,7 +34,12 @@ async function startStore(appSecret: string = APP_SECRET) {
   );
   let now = new Date("2026-10-11T08:00:00.000Z");
   const store = (secret: string = appSecret) =>
-    createSecretStore({ db, appSecret: secret, now: () => now });
+    createSecretStore({
+      db,
+      names: NAMES,
+      appSecret: secret,
+      now: () => now,
+    });
   return {
     db,
     store: store(),

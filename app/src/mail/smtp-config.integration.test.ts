@@ -4,6 +4,7 @@
 // password is encrypted at rest and never part of what is read back for a page, an empty password keeps the
 // stored one and the explicit clear removes it, a password that cannot be decrypted is a state and not a
 // crash, and removing the mail server removes the password with it.
+import { SMTP_SECRET_NAMES } from "../secret-names/names.ts";
 import { sql } from "kysely";
 import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -30,7 +31,11 @@ async function start(appSecret: string = APP_SECRET) {
     values ('admin-1', 'Admin', 'admin@example.test', 0, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z')`.execute(
     db,
   );
-  const secrets = createSecretStore({ db, appSecret });
+  const secrets = createSecretStore({
+    db,
+    names: SMTP_SECRET_NAMES,
+    appSecret,
+  });
   const store = createSmtpConfigStore({ db, appSecret });
   const reopened = (secret: string) =>
     createSmtpConfigStore({ db, appSecret: secret });

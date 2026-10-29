@@ -34,8 +34,10 @@ import {
   type EntryIds,
   type Tier,
 } from "./model-tiers-to-catalog.ts";
-import { DEFAULT_LLM_PROVIDER } from "../../llm/providers/index.ts";
-import { nameKeyOf } from "../../model-catalog/entries.ts";
+import {
+  nameKeyOf,
+  TIER_MIGRATION_PROVIDER,
+} from "./support/model-tier-rules.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a migration must not depend on the current schema types.
 type AnyDb = Kysely<any>;
@@ -93,7 +95,7 @@ async function addEntries(
         name,
         name_key: nameKeyOf(name),
         description: entry.description,
-        provider: DEFAULT_LLM_PROVIDER,
+        provider: TIER_MIGRATION_PROVIDER,
         model_id: entry.modelId,
         serves_diff: entry.kinds.includes("diff") ? 1 : 0,
         serves_dynamic: entry.kinds.includes("dynamic") ? 1 : 0,

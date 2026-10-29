@@ -39,6 +39,7 @@ import type {
   BillingSecretView,
   BillingView,
 } from "../admin/ui/billing-view.ts";
+import type { StripeSecretName } from "../secret-names/names.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type {
   BillingCheckErrorCode,
@@ -84,7 +85,9 @@ export type BillingAdminServiceOptions = {
    * The secret store on an executor: the database for a plain look, the transaction of a change of the settings for a
    * credential that must be read or written together with them.
    */
-  secretsOn: (executor: Kysely<Database>) => SecretStore;
+  secretsOn: (executor: Kysely<Database>) => SecretStore<StripeSecretName>;
+  /** The names a workspace's own LLM keys are stored under: the view counts the workspaces that hold one. */
+  ownKeySecretNames: readonly string[];
   /**
    * A client of Stripe for this key and environment. May throw a `StripeClientError` (a key of the wrong environment).
    * `managedPayments: false` leaves out the preview flag of Managed Payments (the check uses it to tell a key Stripe refuses
@@ -258,6 +261,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function createBillingAdminService({
   db,
   secretsOn,
+  ownKeySecretNames,
   clientFor,
   publicUrl,
   now = () => new Date(),
@@ -389,7 +393,9 @@ export function createBillingAdminService({
 
   const CHECK_FIELDS = ["checkedAt", "checkedEnvironment"] as const;
 
-  async function storedSecrets(on: SecretStore = secrets): Promise<{
+  async function storedSecrets(
+    on: SecretStore<StripeSecretName> = secrets,
+  ): Promise<{
     apiKey: SecretStatus;
     webhookSecret: SecretStatus;
   }> {
@@ -410,7 +416,10 @@ export function createBillingAdminService({
       ]);
       const [workspaces, ownKeyWorkspaces] = await Promise.all([
         createWorkspacesRepository(db).count(),
-        createOwnKeyCountRepository(db).countWorkspacesWithStoredOwnKey(),
+        createOwnKeyCountRepository(
+          db,
+          ownKeySecretNames,
+        ).countWorkspacesWithStoredOwnKey(),
       ]);
       const adapter: BillingAdapterChoice =
         settings.adapter === STRIPE_ADAPTER_ID ? "stripe" : "manual";
