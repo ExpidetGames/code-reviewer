@@ -4,9 +4,11 @@
 // APPROVE otherwise, decided from the project's setting and the findings the runner reported. A Dynamic review has
 // severities (`blocking` is P0); a Diff review has none, so `blocking` submits nothing for it and `any` counts its
 // active findings. What is not known, or a review that stopped early without a blocker, never approves.
+import { identityFor } from "../product-identity/identities.ts";
 import { describe, expect, it } from "vitest";
 import {
   decideVerdict,
+  VERDICT_MARKER_PREFIX,
   verdictBody,
   verdictMarker,
   type FindingCounts,
@@ -221,6 +223,25 @@ describe("a review that shows no sign of work", () => {
       kind: "submit",
       event: "request_changes",
     });
+  });
+});
+
+describe("the review of another product", () => {
+  // #740-T05
+  it("is signed with the name of the product and still carries the marker by which the app finds its reviews", () => {
+    const body = verdictBody(identityFor("factory"), {
+      jobId: "job-1",
+      event: "request_changes",
+      mode: "blocking",
+      blocking: 1,
+      commentUrl: null,
+    });
+
+    expect(body).toContain("**Factory: changes requested.**");
+    expect(body).not.toMatch(/code-review\.com/i);
+    // The withdrawal finds the app's reviews by this prefix and the login of the App, whichever product wrote them.
+    expect(body).toContain(verdictMarker("job-1"));
+    expect(VERDICT_MARKER_PREFIX).toBe("<!-- code-reviewer:verdict");
   });
 });
 

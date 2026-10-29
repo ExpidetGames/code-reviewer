@@ -43,7 +43,7 @@ set; a link the navigation still shows then leads to a path that does not exist.
 
 ## Product identity
 
-The product (`PRODUCT_ID`) and the identity the application is composed with (`product-identity/current.ts`, `getProductIdentity()`:
-name, wording, mail) are two separate choices. Today `getProductIdentity()` always returns code-review.com; a later change lets
-it follow `PRODUCT_ID` (the product ids live in `capabilities/products.ts`). This module does not import the identity, and the
-identity does not read the capability set.
+The identity the application is composed with (`product-identity/`: name, wording, mail, the name of the check run and of the
+GitHub App) follows the product: `identities.ts` holds one identity per id of `capabilities/products.ts`, and `current.ts` picks
+the one of `PRODUCT_ID` (there is no second selector). This module does not import the identity; the identity imports only the
+product ids from `products.ts`.

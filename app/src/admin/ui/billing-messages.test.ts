@@ -48,7 +48,7 @@ describe("the copy for the billing codes", () => {
   // #595
   it("tells to switch billing off before the unusable webhook endpoint is replaced, as replacing is refused while billing is on", () => {
     const sentence = describeBillingFailure(
-     PRODUCT,
+      PRODUCT,
       "webhook_endpoint_unusable",
     );
 
@@ -100,7 +100,9 @@ describe("the copy for the billing codes", () => {
   // #504-T12
   it("names no vendor of the removed design and no plan", () => {
     const all = [
-      ...BILLING_ERROR_CODES.map((code) => describeBillingFailure(PRODUCT, code)),
+      ...BILLING_ERROR_CODES.map((code) =>
+        describeBillingFailure(PRODUCT, code),
+      ),
       ...BILLING_ISSUE_CODES.map((code) =>
         describeBillingIssue({ field: "x", code }),
       ),
@@ -115,7 +117,7 @@ describe("the copy for a failed Stripe check (#690)", () => {
   // #690-T04
   it("says in so many words that the account is not enabled for Managed Payments", () => {
     const sentence = describeBillingFailure(
-     PRODUCT,
+      PRODUCT,
       "stripe_managed_payments_unavailable",
     );
 

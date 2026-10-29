@@ -142,7 +142,9 @@ describe("the plan page of a workspace with limits", () => {
     page(limited({ managed: true, billed: false }));
 
     expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
-    expect(screen.getByText(planManagedUnbilled(getProductIdentity()))).toBeTruthy();
+    expect(
+      screen.getByText(planManagedUnbilled(getProductIdentity())),
+    ).toBeTruthy();
   });
 
   it("does not say that for a workspace on its own key", () => {

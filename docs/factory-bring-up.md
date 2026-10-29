@@ -37,6 +37,7 @@ credential, which is why step 3 ends with a run that has the switch still off.
 
 | Item | When you need it | Without it |
 |---|---|---|
+| The brand name of the second App | Before any user sees it. Everything it says (pages, mails, the check run and the GitHub App on GitHub) comes from one value, `app/src/product-identity/factory.ts`: the name is a one-line change there. Until then it is the codename "Factory", with no domain of its own (the address is `BETTER_AUTH_URL`). The browser icons are the shared mark | The App runs as "Factory" |
 | GitHub App for the second App | The first real review. One click in its admin portal (Integrations) creates it from the manifest | Login, workspaces and settings work; GitHub is shown as not connected |
 | A model key | The first review | Enter a workspace key in Settings, LLM access |
 | Own domain and DNS | A brand launch | It runs on the `vercel.app` address; moving later means editing the GitHub App's three URLs and `BETTER_AUTH_URL` |

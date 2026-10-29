@@ -3,6 +3,7 @@
 // What the check run of a review says for each state of its job (#405): the status GitHub shows, a conclusion
 // that is never red, a title, and a summary made of fixed sentences, counts and the link to the review. Nothing a
 // pull request or a runner wrote reaches the text except a validated link and a code of the plain shape of one.
+import { identityFor } from "../product-identity/identities.ts";
 import { describe, expect, it } from "vitest";
 import { JOB_STATUSES } from "../db/job-status.ts";
 import { describeCheck, type CheckSubject } from "./check-text.ts";
@@ -448,5 +449,35 @@ describe("every check run", () => {
           describeCheck(PRODUCT, subject({ status })).status === "completed",
       ),
     ).toEqual(["succeeded", "failed", "superseded", "cancelled"]);
+  });
+});
+
+describe("the check of another product", () => {
+  const factory = identityFor("factory");
+
+  // #740-T05
+  it("names the product where the text says who requested changes", () => {
+    const check = describeCheck(
+      factory,
+      subject({
+        status: "succeeded",
+        verdict: { kind: "skip", reason: "review_incomplete" },
+      }),
+    );
+
+    expect(check.summary).toContain(
+      "An earlier request for changes by Factory",
+    );
+    expect(JSON.stringify(check)).not.toMatch(/code-review\.com/i);
+  });
+
+  // #740-T05
+  it("words a failed run for the product", () => {
+    const check = describeCheck(
+      factory,
+      subject({ status: "failed", errorCode: "billing_rates_incomplete" }),
+    );
+
+    expect(check.summary).toContain("Ask whoever runs Factory.");
   });
 });

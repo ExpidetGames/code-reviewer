@@ -65,7 +65,7 @@ describe("the sentences for error codes", () => {
       "project_cost_limit",
     );
     const operator = describeErrorCode(
-     PRODUCT,
+      PRODUCT,
       "cost_limit_reached",
       "cost_limit",
     );
@@ -126,7 +126,7 @@ describe("the sentences for error codes", () => {
   it("tells a person about an unavailable model choice without naming a model, and where to change it", () => {
     expect(CLAIM_FAILURE_CODES).toContain("managed_model_unavailable");
     const { text, known } = describeErrorCode(
-     PRODUCT,
+      PRODUCT,
       "managed_model_unavailable",
     );
 
@@ -142,7 +142,7 @@ describe("the sentences for error codes", () => {
   it("tells a person that the runner cannot use the provider chosen for the project, naming no provider", () => {
     expect(CLAIM_FAILURE_CODES).toContain("llm_provider_unsupported");
     const { text, known } = describeErrorCode(
-     PRODUCT,
+      PRODUCT,
       "llm_provider_unsupported",
     );
 
@@ -156,7 +156,7 @@ describe("the sentences for error codes", () => {
   it("tells a person that the address of the provider changed, that the key was not sent and who can confirm it", () => {
     expect(CLAIM_FAILURE_CODES).toContain("provider_address_changed");
     const { text, known } = describeErrorCode(
-     PRODUCT,
+      PRODUCT,
       "provider_address_changed",
     );
 
@@ -217,7 +217,7 @@ describe("the sentences for error codes", () => {
   // #290-T06
   it("tells a person that the request was larger than the model's context window", () => {
     const { text, known } = describeErrorCode(
-     PRODUCT,
+      PRODUCT,
       "llm_context_length_exceeded",
     );
 
@@ -230,7 +230,7 @@ describe("the sentences for error codes", () => {
   // #477-T04
   it("tells a person that no provider can serve this model with the request's parameters, and what to do", () => {
     const { text, known } = describeErrorCode(
-     PRODUCT,
+      PRODUCT,
       "llm_parameters_unsupported",
     );
 

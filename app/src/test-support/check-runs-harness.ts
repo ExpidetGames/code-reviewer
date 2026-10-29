@@ -4,6 +4,7 @@
 // GitHub App provider and client over HTTP against the fake GitHub (which serves the Checks and review API), and a
 // clock the test moves. A test enqueues, claims and completes jobs through `queue`, calls the service like the
 // running server does (`syncJob`, `reconcileDue`) and reads what the fake GitHub shows.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { createCheckRunService } from "../check-runs/service.ts";
 import type { CheckRunService } from "../check-runs/service.ts";
 import { createJobCheckRunsRepository } from "../db/repositories/job-check-runs-repository.ts";
@@ -81,7 +82,11 @@ export type CheckRunsHarness = {
 };
 
 export async function createCheckRunsHarness(
-  options: { permissions?: Record<string, "read" | "write"> } = {},
+  options: {
+    permissions?: Record<string, "read" | "write">;
+    /** Who the check run speaks for (default: the product of the deployment). */
+    product?: ProductIdentity;
+  } = {},
 ): Promise<CheckRunsHarness> {
   const fixture = await createJobQueueFixture();
   // The repository the jobs of the fixture belong to, as GitHub knows it.
@@ -131,7 +136,7 @@ export async function createCheckRunsHarness(
     fixture.clock.now,
   );
   const service = createCheckRunService({
-    product: PRODUCT,
+    product: options.product ?? PRODUCT,
     jobs: { get: (id) => fixture.queue.get(id) },
     repositories: (id) =>
       createRepositoriesRepository(db, id, fixture.clock.now),

@@ -136,7 +136,9 @@ describe("the Review verdict card", () => {
       screen.getByRole("heading", { level: 2, name: "Review verdict" }),
     ).toBeTruthy();
     expect(
-      screen.getByText(new RegExp(verdictCommonNote(getProductIdentity()).slice(0, 30))),
+      screen.getByText(
+        new RegExp(verdictCommonNote(getProductIdentity()).slice(0, 30)),
+      ),
     ).toBeTruthy();
   });
 

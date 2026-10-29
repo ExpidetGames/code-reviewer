@@ -4,6 +4,7 @@
 // the job queue, the real GitHub App provider and client over HTTP against the fake GitHub, and the service the
 // running server uses. The fake GitHub shows what a pull request would show: the check runs of the commit with every
 // state they were in, and the reviews with the decision GitHub would count.
+import { identityFor } from "../product-identity/identities.ts";
 import { describe, expect, it } from "vitest";
 import {
   COMMENT_URL,
@@ -52,6 +53,18 @@ describe("the check run of a job through its states", () => {
       syncedStatus: "queued",
       state: "active",
     });
+  });
+
+  // #740-T05
+  it("is named after the product the app is made for", async () => {
+    const t = await createCheckRunsHarness({ product: identityFor("factory") });
+    const job = await t.fixture.enqueueNew();
+
+    await t.service.syncJob(job.id);
+
+    expect(t.checkRuns()).toMatchObject([
+      { name: "Factory", status: "queued", output: { title: "Waiting" } },
+    ]);
   });
 
   // #405-T02
