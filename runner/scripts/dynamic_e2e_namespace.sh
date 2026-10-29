@@ -162,12 +162,8 @@ if [ -f /run/strace.log ]; then
   for p in $(grep -E 'sin_port=htons\(53\), sin_addr=inet_addr\("127.0.0.1"\)' /run/strace.log | awk '{print $1}' | sort -u | sed -n '1,20p'); do
     echo "PID $p (its lines):"; { grep -E "^$p " /run/strace.log | cut -c1-260 | sed -n '1,14p'; } || true
     echo "PID $p (born as):"; { grep -E "= $p$" /run/strace.log | cut -c1-200 | sed -n '1,2p'; } || true
-    cur=$p
-    for _ in 1 2 3 4 5 6 7 8; do
-      cur=$(grep -E "= $cur$" /run/strace.log | awk '{print $1}' | sed -n '1p')
-      [ -n "$cur" ] || break
-      echo "ANCESTOR $cur:"; { grep -E "^$cur +(execve|setuid|setresuid|setgid)" /run/strace.log | cut -c1-330 | tail -n 2; } || true
-    done
+    echo "MENTIONS of $p:"; { grep -E "[ =(,]$p[ ,)]|= $p$" /run/strace.log | grep -v "^$p " | cut -c1-300 | sed -n '1,12p'; } || true
+    echo "EXECS (opencode, bun, python, runner):"; { grep -E "execve\(.*(opencode|bun|python|code_reviewer)" /run/strace.log | grep -v ENOENT | cut -c1-300 | sed -n '1,12p'; } || true
   done
   echo "STRACE-DNS-END"
 fi
