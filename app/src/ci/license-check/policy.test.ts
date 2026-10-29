@@ -35,8 +35,7 @@ const policy = parsePolicy(JSON.parse(read("license-policy.json")));
 // way `make check-licenses` reads them.
 const binaries = auditBinaries({ policy, readText: readIfThere });
 const locked: LockedPackage[] = [
-  ...parsePnpmLock(read("app/pnpm-lock.yaml")),
-  ...parsePnpmLock(read("dispatcher/pnpm-lock.yaml")),
+  ...parsePnpmLock(read("pnpm-lock.yaml")),
   ...parseUvLock(read("runner/uv.lock")),
   ...binaries.locked,
 ];

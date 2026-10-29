@@ -45,7 +45,7 @@ The rest of this file is for the team that develops the service.
 make install
 ```
 
-This runs `pnpm --dir app install --frozen-lockfile` and `uv --directory runner sync --locked`.
+This runs `pnpm install --frozen-lockfile` (one pnpm workspace with one `pnpm-lock.yaml` for the app and the Dispatcher; `website/` is its own pnpm project) and `uv --directory runner sync --locked`.
 
 ## Run the app locally
 

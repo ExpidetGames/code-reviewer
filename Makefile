@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
 # Entry points for developers and agents. Every target is a thin wrapper around the commands
-# of app/package.json, dispatcher/package.json and runner/pyproject.toml; see TESTING.md for what each
+# of app/package.json, dispatcher/package.json and runner/pyproject.toml (the app and the Dispatcher are one pnpm
+# workspace, see pnpm-workspace.yaml); see TESTING.md for what each
 # level means.
 
 APP := pnpm --dir app
@@ -12,7 +13,7 @@ RUNNER := uv --directory runner
 	test-unit test-unit-app test-unit-dispatcher test-unit-runner test-integration check-licenses fix-spdx-headers generate-contracts check-contracts test-engine test-engine-smoke test-e2e test-e2e-hosted test-e2e-dynamic test-sandbox-local test-images verify
 
 help:
-	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles"
+	@echo "make install           install app, dispatcher and runner dependencies from the lockfiles (one pnpm-lock.yaml at the root, runner/uv.lock)"
 	@echo "make lint              lint and format check, all three parts"
 	@echo "make typecheck         typecheck all three parts"
 	@echo "make test-unit         unit tests of all three parts"
@@ -31,8 +32,7 @@ help:
 	@echo "make verify            lint, typecheck, unit and host integration tests and the license check; run before every PR"
 
 install:
-	$(APP) install --frozen-lockfile
-	$(DISPATCHER) install --frozen-lockfile
+	pnpm install --frozen-lockfile
 	$(RUNNER) sync --locked
 
 lint: lint-app lint-dispatcher lint-runner
@@ -70,7 +70,7 @@ test-integration:
 	$(RUNNER) run pytest -m "integration or contract"
 
 # The license of every installed dependency of the app, the Dispatcher and the runner against license-policy.json
-# (app/src/ci/license-check). Reads installed metadata and the lockfiles of app, dispatcher and runner, no network.
+# (app/src/ci/license-check). Reads installed metadata and the lockfiles (pnpm-lock.yaml at the root, runner/uv.lock), no network.
 check-licenses:
 	$(APP) licenses:check
 

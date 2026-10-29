@@ -117,11 +117,19 @@ and uses Postgres only.
 
   | Project | Root directory | Framework | Config |
   |---|---|---|---|
-  | App | `app/` | Next.js | `app/vercel.json`: region `fra1`, `pnpm install --frozen-lockfile`, function durations, the two crons |
-  | Dispatcher | `dispatcher/` | Hono (the entry is `src/index.ts`, the only file named `app`, `index` or `server` that imports `hono`) | `dispatcher/vercel.json`: region `fra1`, `maxDuration` 1800 for `src/index.ts`, one cron (the reaper, every 5 minutes) |
+  | App | `app/` | Next.js | `app/vercel.json`: region `fra1`, install command `pnpm install --frozen-lockfile --filter code-reviewer-app...`, function durations, the two crons |
+  | Dispatcher | `dispatcher/` | Hono (the entry is `src/index.ts`, the only file named `app`, `index` or `server` that imports `hono`) | `dispatcher/vercel.json`: region `fra1`, install command `pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...`, `maxDuration` 1800 for `src/index.ts`, one cron (the reaper, every 5 minutes) |
 
   Both need Node.js 24 (`engines` in both `package.json` files, `.nvmrc`). Set the Node.js version of each project to
   24.x if the project's default differs.
+
+  The two projects are members of one pnpm workspace (`pnpm-workspace.yaml`, one `pnpm-lock.yaml` at the repository
+  root, #724): the packages of both projects are installed into `node_modules/.pnpm` at the root, outside each project's
+  root directory. Each Vercel project must therefore have **Include source files outside of the Root Directory in the Build
+  Step** switched on (Settings, Build and Deployment, Root Directory); the install command of each project is the one in its
+  `vercel.json`, filtered to that project, so a deployment installs only what it needs. The deployment workflow builds in
+  GitHub Actions from the repository root and uploads the result (`vercel deploy --prebuilt`), and
+  `tools/vercel/check-build-output.mjs` fails the stage when a file a built function lists is not in the checkout.
 - Crons run **only for the production deployment** of a project. A preview or staged deployment never sweeps (App) and never reaps (Dispatcher).
 - A production domain for each project. The **App's URL must be reachable without a login** by GitHub (webhooks), by
   the Worker inside the VM (it calls the App's Worker API and has no way to send a bypass header) and by Vercel's cron.
@@ -214,8 +222,8 @@ secrets they held are in Infisical `/ci`. The repository variable `GOLDEN_SNAPSH
 deployment builds a snapshot when it has to.
 
 **On your machine**, a checkout of `main` (or the release tag), Node.js 24, pnpm 10 and `openssl`:
-`pnpm --dir app install --frozen-lockfile` and `pnpm --dir dispatcher install --frozen-lockfile`. The commands in
-steps 1 and 4 run from there.
+`pnpm install --frozen-lockfile` (the app and the Dispatcher are one pnpm workspace with one `pnpm-lock.yaml` at the root).
+The commands in steps 1 and 4 run from there.
 
 ### 2.1 Setup of the deployment pipeline (once)
 
@@ -356,7 +364,9 @@ Its role is exactly this, and nothing more (create a custom role and add the ide
 **Vercel dashboard**, for each of the two projects:
 
 1. Settings, Build and Deployment, **Root Directory**: `app` for the App project, `dispatcher` for the Dispatcher
-   project. **Framework Preset**: Next.js for the App, Hono for the Dispatcher. Node.js Version 24.x. Name the projects
+   project, with **Include source files outside of the Root Directory in the Build Step** switched on for both (the
+   workspace keeps the packages at the repository root, section 2). **Install Command**: leave the override off, the
+   `installCommand` of the project's `vercel.json` applies. **Framework Preset**: Next.js for the App, Hono for the Dispatcher. Node.js Version 24.x. Name the projects
    as you like; no name appears in the repository.
 2. **Git auto-deploy off.** `app/vercel.json` and `dispatcher/vercel.json` carry `"git": { "deploymentEnabled": false }`,
    which stops Vercel from building a push by itself. Also check Settings, Git: either disconnect the repository, or

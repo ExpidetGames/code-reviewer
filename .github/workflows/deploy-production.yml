@@ -105,13 +105,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: app/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
       - name: Install dependencies
-        run: pnpm --dir app install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-app...
       # After the install and just before the command that uses it.
       - name: Load the migrate role's database URL from Infisical
         uses: ./.github/actions/infisical-ci-secrets
@@ -152,13 +150,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: dispatcher/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
       - name: Install dependencies
-        run: pnpm --dir dispatcher install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...
       - name: Install the Vercel CLI
         uses: ./.github/actions/vercel-cli
       - name: Load the Vercel credentials from Infisical
@@ -431,13 +427,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: dispatcher/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
       - name: Install dependencies
-        run: pnpm --dir dispatcher install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...
       # A pair of an older run must not overwrite a newer one: if main moved on, the next run finds the live pair and
       # writes it itself (the repair).
       - uses: ./.github/actions/check-current-commit
@@ -473,13 +467,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: dispatcher/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
       - name: Install dependencies
-        run: pnpm --dir dispatcher install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...
       - name: Load the Vercel credentials from Infisical
         uses: ./.github/actions/infisical-ci-secrets
         with:
@@ -518,13 +510,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: dispatcher/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .nvmrc
       - name: Install dependencies
-        run: pnpm --dir dispatcher install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...
       - name: Load the Vercel credentials from Infisical
         uses: ./.github/actions/infisical-ci-secrets
         with:

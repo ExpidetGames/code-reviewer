@@ -9,6 +9,8 @@
 // #605: no claim takes a hold any more, so this machinery is dormant: it acts on the reservations an earlier release wrote and
 // on nothing a new job leaves. The tests keep pinning it for those rows; `claim` writes such a reservation by hand after the
 // claim (what the claim of an earlier release did), and one test shows that a job claimed since #605 leaves nothing to release.
+import { STRIPE_SECRET_NAMES } from "../secret-names/names.ts";
+import { WORKSPACE_LLM_KEY_NAMES } from "../llm/secret-names.ts";
 import { sql, type KyselyPlugin } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
@@ -327,7 +329,12 @@ describe("the holds of ended jobs", () => {
     const service = createBillingAdminService({
       db: fixture.db,
       secretsOn: (executor) =>
-        createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+        createSecretStore({
+          db: executor,
+          names: STRIPE_SECRET_NAMES,
+          appSecret: SETUP_TEST_SECRET,
+        }),
+      ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
       publicUrl: "https://reviews.example.test",
       clientFor: () => {
         throw new Error("no outbound call");
@@ -362,7 +369,12 @@ describe("the holds of ended jobs", () => {
     const service = createBillingAdminService({
       db: fixture.db,
       secretsOn: (executor) =>
-        createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+        createSecretStore({
+          db: executor,
+          names: STRIPE_SECRET_NAMES,
+          appSecret: SETUP_TEST_SECRET,
+        }),
+      ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
       publicUrl: "https://reviews.example.test",
       clientFor: () => {
         throw new Error("no outbound call");

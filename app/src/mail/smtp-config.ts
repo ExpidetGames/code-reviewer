@@ -30,6 +30,7 @@ import {
 } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { SecretValue } from "../secrets/secret-value.ts";
+import { SMTP_SECRET_NAMES } from "../secret-names/names.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import {
@@ -94,7 +95,12 @@ export function createSmtpConfigStore({
   // The same stores on another connection: a transaction.
   const on = (connection: Kysely<Database>) => ({
     settings: createInstanceSettingsRepository(connection, now),
-    secrets: createSecretStore({ db: connection, appSecret, now }),
+    secrets: createSecretStore({
+      db: connection,
+      names: SMTP_SECRET_NAMES,
+      appSecret,
+      now,
+    }),
   });
 
   async function stored(settings: InstanceSettingsRepository) {

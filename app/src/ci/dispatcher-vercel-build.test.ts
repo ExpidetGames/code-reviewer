@@ -15,7 +15,7 @@ describe("the Dispatcher build with the Vercel CLI", () => {
     const manifest = JSON.parse(readText("dispatcher/package.json")) as {
       devDependencies?: Record<string, string>;
     };
-    const lock = parse(readText("dispatcher/pnpm-lock.yaml")) as {
+    const lock = parse(readText("pnpm-lock.yaml")) as {
       snapshots: Record<string, { dependencies?: Record<string, string> }>;
     };
     const typesNode = Object.entries(lock.snapshots).filter(([key]) =>
@@ -40,7 +40,11 @@ describe("the Dispatcher build with the Vercel CLI", () => {
     expect(build).toBeGreaterThan(install);
     // The dependencies are installed before the CLI builds from them.
     expect(
-      steps.findIndex((step) => step.run === "pnpm install --frozen-lockfile"),
+      steps.findIndex(
+        (step) =>
+          step.run ===
+          "pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...",
+      ),
     ).toBeLessThan(install);
     const run = steps[build]?.run ?? "";
     expect(run).toContain("vercel build --prod --yes");

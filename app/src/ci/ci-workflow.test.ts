@@ -41,6 +41,10 @@ type Workflow = {
   jobs: Record<string, Job>;
 };
 
+// The names of the two pnpm workspace projects (app/package.json, dispatcher/package.json): installs filter by them.
+const APP_PACKAGE = "code-reviewer-app";
+const DISPATCHER_PACKAGE = "code-reviewer-dispatcher";
+
 const workflow = parse(workflowSource) as Workflow;
 const jobs = Object.entries(workflow.jobs);
 
@@ -107,10 +111,42 @@ describe("CI workflow triggers and jobs", () => {
       "pnpm lint",
       "pnpm typecheck",
       "pnpm test",
-      "pnpm build",
     ]) {
       expect(lines, command).toContain(command);
     }
+  });
+
+  // #724-T03
+  it("builds the App with the pinned Vercel CLI from the repository root, as the deployment does, and checks the upload", () => {
+    const job = jobNamed("app-fast");
+    const all = steps(job);
+    const install = all.findIndex(
+      (step) => step.uses === "./.github/actions/vercel-cli",
+    );
+    const build = all.findIndex((step) => step.run?.includes("vercel build"));
+    const check = all.findIndex((step) =>
+      step.run?.includes("tools/vercel/check-build-output.mjs"),
+    );
+
+    expect(install).toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(install);
+    expect(check).toBeGreaterThan(build);
+    // Not `pnpm build`: the CLI runs `next build` itself, once.
+    expect(commandLines(job)).not.toContain("pnpm build");
+    expect(all[build]?.["working-directory"]).toBe("${{ github.workspace }}");
+    const run = all[build]?.run ?? "";
+    expect(run).toContain("vercel build --prod --yes");
+    expect(run).toContain('"framework":"nextjs"');
+    expect(run).toContain('"rootDirectory":"app"');
+    expect(run).not.toMatch(/--token|VERCEL_TOKEN|secrets\./);
+    expect(JSON.stringify(all[build]?.env ?? {})).not.toMatch(
+      /secrets\.|TOKEN/,
+    );
+    expect(all[build]?.["continue-on-error"]).toBeUndefined();
+    expect(all[check]?.run?.trim()).toBe(
+      "node tools/vercel/check-build-output.mjs app",
+    );
+    expect(all[check]?.["continue-on-error"]).toBeUndefined();
   });
 
   // #105-PG-04, moved to app-int by #641
@@ -329,8 +365,10 @@ describe("CI license job", () => {
   it("installs both parts from their lockfiles and runs the dependency license check", () => {
     const job = jobNamed("licenses");
     const lines = commandLines(job);
+    const install = `pnpm install --frozen-lockfile --filter ${APP_PACKAGE}... --filter ${DISPATCHER_PACKAGE}...`;
 
-    expect(lines).toContain("pnpm install --frozen-lockfile");
+    // One workspace, one lockfile (#724): a single install covers the app and the Dispatcher.
+    expect(lines).toContain(install);
     expect(lines).toContain("uv sync --locked");
     expect(lines).toContain("pnpm licenses:check");
     // Installing comes first: the check reads the metadata of what is installed.
@@ -338,7 +376,7 @@ describe("CI license job", () => {
       lines.indexOf("uv sync --locked"),
     );
     expect(lines.indexOf("pnpm licenses:check")).toBeGreaterThan(
-      lines.indexOf("pnpm install --frozen-lockfile"),
+      lines.indexOf(install),
     );
     expect(
       steps(job).find((step) => step.run === "uv sync --locked")?.[
@@ -427,13 +465,14 @@ describe("CI license job", () => {
 
 describe("CI Dispatcher job", () => {
   // #327 (CI wiring)
-  it("checks formatting, lint, types and the unit and integration tests of the Dispatcher from its own lockfile", () => {
+  it("checks formatting, lint, types and the unit and integration tests of the Dispatcher from the workspace lockfile", () => {
     const job = jobNamed("dispatcher-fast");
     const lines = commandLines(job);
+    const install = `pnpm install --frozen-lockfile --filter ${DISPATCHER_PACKAGE}...`;
 
     expect(job.defaults?.run?.["working-directory"]).toBe("dispatcher");
     for (const command of [
-      "pnpm install --frozen-lockfile",
+      install,
       "pnpm format:check",
       "pnpm lint",
       "pnpm typecheck",
@@ -442,17 +481,42 @@ describe("CI Dispatcher job", () => {
     ]) {
       expect(lines, command).toContain(command);
     }
-    expect(lines.indexOf("pnpm install --frozen-lockfile")).toBeLessThan(
-      lines.indexOf("pnpm test"),
-    );
+    expect(lines.indexOf(install)).toBeLessThan(lines.indexOf("pnpm test"));
+    // The pnpm version is the root package.json's (the action's default), the cache key the one lockfile.
     expect(
       steps(job).find((step) => step.uses?.startsWith("pnpm/action-setup@"))
-        ?.with?.package_json_file,
-    ).toBe("dispatcher/package.json");
+        ?.with,
+    ).toBeUndefined();
     expect(
       steps(job).find((step) => step.uses?.startsWith("actions/setup-node@"))
         ?.with?.["cache-dependency-path"],
-    ).toBe("dispatcher/pnpm-lock.yaml");
+    ).toBe("pnpm-lock.yaml");
+  });
+
+  // #724-T03
+  it("also builds the Dispatcher from the repository root with its root directory, as the deployment does, and checks the upload", () => {
+    const all = steps(jobNamed("dispatcher-fast"));
+    const own = all.findIndex(
+      (step) =>
+        step.run?.includes("vercel build") && !step["working-directory"],
+    );
+    const build = all.findIndex(
+      (step) =>
+        step.run?.includes("vercel build") &&
+        step["working-directory"] === "${{ github.workspace }}",
+    );
+    const run = all[build]?.run ?? "";
+
+    expect(own).toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(own);
+    expect(run).toContain("vercel build --prod --yes");
+    expect(run).toContain('"framework":"hono"');
+    expect(run).toContain('"rootDirectory":"dispatcher"');
+    expect(run).toContain(
+      "node tools/vercel/check-build-output.mjs dispatcher",
+    );
+    expect(run).not.toMatch(/--token|VERCEL_TOKEN|secrets\./);
+    expect(all[build]?.["continue-on-error"]).toBeUndefined();
   });
 
   // #327 (CI wiring)
@@ -471,11 +535,13 @@ describe("CI Dispatcher job", () => {
   it("installs the Dispatcher's dependencies in the license job and runs it for Dispatcher changes", () => {
     const job = jobNamed("licenses");
     const install = steps(job).find(
-      (step) => step.name === "Install the dispatcher dependencies",
+      (step) => step.name === "Install the app and dispatcher dependencies",
     );
 
-    expect(install?.["working-directory"]).toBe("dispatcher");
-    expect(install?.run).toBe("pnpm install --frozen-lockfile");
+    expect(install?.["working-directory"]).toBeUndefined();
+    expect(install?.run).toBe(
+      `pnpm install --frozen-lockfile --filter ${APP_PACKAGE}... --filter ${DISPATCHER_PACKAGE}...`,
+    );
     expect(steps(job).indexOf(install as Step)).toBeLessThan(
       steps(job).findIndex((step) => step.run === "pnpm licenses:check"),
     );
@@ -493,7 +559,8 @@ describe("CI Dispatcher job", () => {
     expect(makefile).toMatch(/^test-unit: .*\btest-unit-dispatcher\b/m);
     expect(makefile).toMatch(/^verify: lint typecheck /m);
     expect(makefile).toContain("$(DISPATCHER) test:int\n");
-    expect(makefile).toContain("$(DISPATCHER) install --frozen-lockfile\n");
+    // One workspace, one lockfile (#724): `make install` is a single root install, not one per project.
+    expect(makefile).toMatch(/^install:\n\tpnpm install --frozen-lockfile\n/m);
   });
 });
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // #501: the Stripe client of the instance, made from the key the admin stored (#504) when a top-up needs it.
+import { STRIPE_SECRET_NAMES } from "../secret-names/names.ts";
 import { describe, expect, it } from "vitest";
 import { createSecretStore } from "../secrets/store.ts";
 import { startTestStripe } from "../test-support/stripe-fake.ts";
@@ -16,7 +17,11 @@ const APP_SECRET = "stripe-credentials-test-app-secret-0123456789-0123";
 
 async function start() {
   const { db } = await createTestDatabase();
-  const secrets = createSecretStore({ db, appSecret: APP_SECRET });
+  const secrets = createSecretStore({
+    db,
+    names: STRIPE_SECRET_NAMES,
+    appSecret: APP_SECRET,
+  });
   const fake = await startTestStripe();
   return { db, secrets, fake };
 }

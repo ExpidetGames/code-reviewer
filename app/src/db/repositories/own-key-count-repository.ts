@@ -5,15 +5,16 @@
 // own may use it. Instance level: it counts across workspaces, takes no argument and returns one number, no row and no name.
 import "server-only";
 import type { Kysely } from "kysely";
-import { WORKSPACE_SECRET_NAMES } from "../../secrets/names.ts";
 import type { Database } from "../schema.ts";
 
 export type OwnKeyCountRepository = {
   countWorkspacesWithStoredOwnKey(): Promise<number>;
 };
 
+/** `ownKeyNames`: the names a workspace's own LLM keys are stored under (the application knows them, the database does not). */
 export function createOwnKeyCountRepository(
   db: Kysely<Database>,
+  ownKeyNames: readonly string[],
 ): OwnKeyCountRepository {
   return {
     async countWorkspacesWithStoredOwnKey() {
@@ -25,7 +26,7 @@ export function createOwnKeyCountRepository(
             .distinct()
             .as("count"),
         )
-        .where("name", "in", [...WORKSPACE_SECRET_NAMES])
+        .where("name", "in", [...ownKeyNames])
         .executeTakeFirst();
       return Number(row?.count ?? 0);
     },

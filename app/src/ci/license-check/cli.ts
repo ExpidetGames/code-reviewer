@@ -4,8 +4,8 @@
 //
 //   node src/ci/license-check/cli.ts          (or: pnpm licenses:check, make check-licenses)
 //
-// It lists the installed packages of the app and the Dispatcher (pnpm) and the runner (uv) with their licenses, reads
-// pnpm-lock.yaml and uv.lock, audits the prebuilt binaries of the runner image (OpenCode, ripgrep:
+// It lists the installed packages of the pnpm workspace (the app and the Dispatcher) and the runner (uv) with their
+// licenses, reads the root pnpm-lock.yaml and runner/uv.lock, audits the prebuilt binaries of the runner image (OpenCode, ripgrep:
 // their pins, the documents and the snapshot of the packages bundled in OpenCode, see binaries.ts),
 // and judges everything against license-policy.json at the repository root. Exit code 0 when every license is allowed, 1 for a violation or when the data could not be
 // collected. Everything it reads is local metadata: no network.

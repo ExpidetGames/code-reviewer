@@ -135,7 +135,7 @@ export type Collected = {
 // Our own packages. They are proprietary (LICENSE), which is no entry on the allow list and never
 // will be: the check is about the licenses of what we depend on, not about our own code. The runner
 // is the only one that the tools see as a package (uv installs it into its own environment and
-// lists it in uv.lock); the app and the dispatcher are the roots of their pnpm projects.
+// lists it in uv.lock); the app and the dispatcher are the workspace projects of the pnpm workspace.
 export const FIRST_PARTY_PACKAGES: ReadonlyArray<{
   ecosystem: Ecosystem;
   name: string;
@@ -176,22 +176,22 @@ export const UV_LICENSES_ARGS = [
   "scripts/list_licenses.py",
 ];
 
-/** Starts pnpm and uv; both need their dependencies installed (`make install`). */
+/**
+ * Starts pnpm and uv; both need their dependencies installed (`make install`). The app and the Dispatcher are one pnpm
+ * workspace with one lockfile (#724): `pnpm licenses list` from the root lists the packages of both, and
+ * `pnpm-lock.yaml` at the root locks them.
+ */
 export function collectAll(repoRoot: string): Collected {
-  const appDir = `${repoRoot}/app`;
-  const dispatcherDir = `${repoRoot}/dispatcher`;
   const runnerDir = `${repoRoot}/runner`;
   return {
     installed: withoutFirstParty([
-      ...parsePnpmLicenses(run("pnpm", ["licenses", "list", "--json"], appDir)),
       ...parsePnpmLicenses(
-        run("pnpm", ["licenses", "list", "--json"], dispatcherDir),
+        run("pnpm", ["licenses", "list", "--json"], repoRoot),
       ),
       ...parsePythonInstalled(run("uv", UV_LICENSES_ARGS, runnerDir)),
     ]),
     locked: withoutFirstParty([
-      ...parsePnpmLock(readFileSync(`${appDir}/pnpm-lock.yaml`, "utf8")),
-      ...parsePnpmLock(readFileSync(`${dispatcherDir}/pnpm-lock.yaml`, "utf8")),
+      ...parsePnpmLock(readFileSync(`${repoRoot}/pnpm-lock.yaml`, "utf8")),
       ...parseUvLock(readFileSync(`${runnerDir}/uv.lock`, "utf8")),
     ]),
   };

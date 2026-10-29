@@ -3,6 +3,11 @@
 // Switching billing on is judged under the lock of the billing settings, and the credentials it judges are read there too (#504):
 // a request that removes the webhook secret at the moment another switches billing on must not leave billing on without the
 // secret. The interleaving is made by holding the switch-on at its read of the webhook secret.
+import {
+  STRIPE_SECRET_NAMES,
+  type StripeSecretName,
+} from "../secret-names/names.ts";
+import { WORKSPACE_LLM_KEY_NAMES } from "../llm/secret-names.ts";
 import { describe, expect, it } from "vitest";
 import { startStripeFake } from "../../../fakes/stripe/server.ts";
 import { insertUser } from "../test-support/users.ts";
@@ -31,7 +36,11 @@ describe.each(BILLING_ENGINES)(
       const adminId = await insertUser(db, { id: "admin-lock" });
       const stripe = await startStripeFake();
       cleanUpAfterTest(() => stripe.close());
-      const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
+      const secrets = createSecretStore({
+        db,
+        names: STRIPE_SECRET_NAMES,
+        appSecret: SETUP_TEST_SECRET,
+      });
 
       // The first look at the webhook secret after `arm()` answers, then waits for `release()`.
       let armed = false;
@@ -39,7 +48,9 @@ describe.each(BILLING_ENGINES)(
       let release: () => void = () => undefined;
       const atTheGate = new Promise<void>((resolve) => (reached = resolve));
       const opened = new Promise<void>((resolve) => (release = resolve));
-      const holding = (store: SecretStore): SecretStore => ({
+      const holding = (
+        store: SecretStore<StripeSecretName>,
+      ): SecretStore<StripeSecretName> => ({
         ...store,
         async status(name) {
           const status = await store.status(name);
@@ -55,8 +66,13 @@ describe.each(BILLING_ENGINES)(
         db,
         secretsOn: (executor) =>
           holding(
-            createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+            createSecretStore({
+              db: executor,
+              names: STRIPE_SECRET_NAMES,
+              appSecret: SETUP_TEST_SECRET,
+            }),
           ),
+        ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
         publicUrl: "https://reviews.example.test",
         clientFor: (apiKey, environment) =>
           createStripeClient({

@@ -3,7 +3,7 @@
 // How many workspaces hold a stored own LLM key of any provider: the number the instance admin reads before switching
 // billing on (#504). It counts workspaces, not keys, and returns a number only.
 import { describe, expect, it } from "vitest";
-import { WORKSPACE_SECRET_NAMES } from "../../secrets/names.ts";
+import { WORKSPACE_LLM_KEY_NAMES } from "../../llm/secret-names.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
 import type { Database } from "../schema.ts";
 import type { Kysely } from "kysely";
@@ -37,7 +37,10 @@ describe("the count of workspaces with a stored own key", () => {
     const { db } = await createTestDatabase();
 
     expect(
-      await createOwnKeyCountRepository(db).countWorkspacesWithStoredOwnKey(),
+      await createOwnKeyCountRepository(
+        db,
+        WORKSPACE_LLM_KEY_NAMES,
+      ).countWorkspacesWithStoredOwnKey(),
     ).toBe(0);
   });
 
@@ -45,7 +48,7 @@ describe("the count of workspaces with a stored own key", () => {
   it("counts a workspace once, however many providers it holds a key for, and no workspace without one", async () => {
     const { db } = await createTestDatabase();
     const workspaces = createWorkspacesRepository(db);
-    const names = [...WORKSPACE_SECRET_NAMES];
+    const names = [...WORKSPACE_LLM_KEY_NAMES];
     expect(names.length).toBeGreaterThan(1);
     const a = await workspaces.create({
       name: "A",
@@ -62,7 +65,10 @@ describe("the count of workspaces with a stored own key", () => {
     await addKey(db, b.id, names[0] ?? "");
 
     expect(
-      await createOwnKeyCountRepository(db).countWorkspacesWithStoredOwnKey(),
+      await createOwnKeyCountRepository(
+        db,
+        WORKSPACE_LLM_KEY_NAMES,
+      ).countWorkspacesWithStoredOwnKey(),
     ).toBe(2);
   });
 });

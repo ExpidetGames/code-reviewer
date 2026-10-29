@@ -3,6 +3,7 @@
 // Whose LLM key a job gets, assembled over a real database (src/llm/assemble.ts): the entitlements of the
 // workspace (or the instance default) decide, the operator's key serves `managed` workspaces only, and every
 // failure is closed (docs/decisions/0001-editions-setup-and-accounts.md, section 2.8, addendum).
+import { OPERATOR_LLM_KEY_NAMES } from "./secret-names.ts";
 import type { KyselyPlugin } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -315,11 +316,11 @@ describe("a workspace with the key mode managed", () => {
     const t = await start({
       appSecret: () => "a-different-app-secret-0123456789-0123456",
     });
-    await createSecretStore({ db: t.db, appSecret: APP_SECRET }).save(
-      "operator_llm_key",
-      OPERATOR_KEY,
-      { updatedBy: null },
-    );
+    await createSecretStore({
+      db: t.db,
+      names: OPERATOR_LLM_KEY_NAMES,
+      appSecret: APP_SECRET,
+    }).save("operator_llm_key", OPERATOR_KEY, { updatedBy: null });
     await t.setEntitlements(entitlements("managed"));
     await t.setWorkspaceKey();
 
