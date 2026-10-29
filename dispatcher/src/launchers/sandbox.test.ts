@@ -295,6 +295,28 @@ describe("the Sandbox-Launcher", () => {
     });
   });
 
+  // #730-T12
+  it("tags the VM of a factory job with the factory as its tenant and keeps the name format", async () => {
+    const launcher = build();
+
+    await launch(launcher, spec({ appId: "factory" }));
+    await launch(launcher, spec({ appId: "reviewer" }));
+
+    const [factoryVm, reviewerVm] = service.creates;
+    expect(factoryVm?.tags).toStrictEqual({
+      app: "code-reviewer",
+      kind: "diff",
+      job: JOB_ID,
+      tenant: "factory",
+    });
+    expect(reviewerVm?.tags.tenant).toBe("reviewer");
+    // The name does not carry the app: `cr-<kind>-<job id>-<8 hex>`, which the reaper and the stop route match.
+    expect(factoryVm?.name).toMatch(
+      new RegExp(`^cr-diff-${JOB_ID}-[0-9a-f]{8}$`),
+    );
+    expect(factoryVm?.name).not.toContain("factory");
+  });
+
   // #329-T04
   it.each<[SandboxFailureKind, string, boolean]>([
     ["rate_limited", "sandbox_rate_limited", true],

@@ -8,7 +8,11 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { DispatchStopSchema } from "./triggers/stop-schema.ts";
 import { DispatchWebhookSchema } from "./triggers/webhook-schema.ts";
-import { createAppClient, parseSplitClaim } from "./core/app-client.ts";
+import {
+  APP_FAILURES,
+  createAppClient,
+  parseSplitClaim,
+} from "./core/app-client.ts";
 import { readContract } from "./test-support/harness.ts";
 
 const CONTRACTS = join(import.meta.dirname, "..", "..", "contracts");
@@ -17,7 +21,7 @@ const CONTRACTS = join(import.meta.dirname, "..", "..", "contracts");
 const ids = new Map<string, string>();
 function ajvWithContracts(): Ajv2020 {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
-  for (const file of ["runner-api", "dispatch-webhook"]) {
+  for (const file of ["runner-api", "dispatch-webhook", "dispatcher-ops"]) {
     const schema = readContract<{ $id: string }>(`${file}.v1.json`);
     ids.set(file, schema.$id);
     ajv.addSchema(schema);
@@ -212,5 +216,26 @@ describe("the contracts the Dispatcher speaks", () => {
         ),
       ),
     ).toBeTruthy();
+  });
+});
+
+describe("the operator routes of the Dispatcher (#730)", () => {
+  // #730-T16
+  it("has a valid example of the apps check answer, and the codes of the file are the codes of the code", () => {
+    const check = validator("dispatcher-ops", "AppsCheckResponse");
+    expect(
+      check(readContract("examples/dispatcher-ops/AppsCheckResponse.json")),
+      JSON.stringify(check.errors),
+    ).toBe(true);
+    expect(
+      readdirSync(join(CONTRACTS, "examples", "dispatcher-ops")),
+    ).toStrictEqual(["AppsCheckResponse.json"]);
+    const codes = readContract<{
+      $defs: { AppCheckCode: { enum: Array<string | null> } };
+    }>("dispatcher-ops.v1.json").$defs.AppCheckCode.enum;
+    expect(codes.filter((code) => code !== null).sort()).toStrictEqual(
+      [...APP_FAILURES].sort(),
+    );
+    expect(codes).toContain(null);
   });
 });

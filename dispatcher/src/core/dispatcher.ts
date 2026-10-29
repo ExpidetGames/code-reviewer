@@ -115,10 +115,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     ];
   }
 
-  async function engines(
-    hint: JobHint,
-    state: AppState,
-  ): Promise<EnginesAnswer> {
+  async function engines(hint: JobHint): Promise<EnginesAnswer> {
     let offered: readonly Engine[];
     try {
       offered = await launcher.capabilities(shutdown.signal);
@@ -129,9 +126,8 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
       };
     }
-    const allowed = allowedEngines(state);
-    const usable = settings.engines.filter(
-      (engine) => offered.includes(engine) && allowed.includes(engine),
+    const usable = settings.engines.filter((engine) =>
+      offered.includes(engine),
     );
     if (usable.length === 0) return { kind: "not_capable" };
     if (
@@ -164,7 +160,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     }
     const app = state.client;
     const appId = state.settings.id;
-    const answer = await engines(hint, state);
+    const answer = await engines(hint);
     if (answer.kind === "retry")
       return {
         outcome: "unavailable",
@@ -184,6 +180,15 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         reviewKind: hint.reviewKind,
         stage: "dispatch",
       });
+      return { outcome: "not_capable" };
+    }
+    // The claim asks for the engines of the app's kinds only, so an app is never handed a job it may not have.
+    const allowed = allowedEngines(state);
+    const claimEngines = answer.engines.filter((engine) =>
+      allowed.includes(engine),
+    );
+    if (claimEngines.length === 0) {
+      logger.info("not_capable", { app: appId, reviewKind: hint.reviewKind });
       return { outcome: "not_capable" };
     }
     if (state.launching >= state.settings.maxRunning) {
@@ -207,7 +212,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         };
       }
       const claimed = await app.claim({
-        engines: answer.engines,
+        engines: claimEngines,
         ...(hint.jobId === undefined ? {} : { jobId: hint.jobId }),
         maxRunning: state.settings.maxRunning,
       });

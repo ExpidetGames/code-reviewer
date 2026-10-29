@@ -518,6 +518,10 @@ Vercel) reads `DISPATCHER_SHUTDOWN_GRACE_SECONDS` and `PORT`.
 | `RUNNER_WEBHOOK_BYPASS_TOKEN` | the Dispatcher project's bypass secret | Only with Deployment Protection; the App's is `${prod.ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
 | `CRON_SECRET` | `CRON_SECRET` | **Not** the same value: each project has its own, because each cron route must open with its own secret only |
 
+A Dispatcher that serves a further App (`DISPATCHER_APPS`, section 3.2) holds that App's `RUNNER_TOKEN` as `DISPATCHER_APP_<ID>_TOKEN`,
+its `RUNNER_WEBHOOK_SECRET` as `DISPATCHER_APP_<ID>_SIGNING_SECRET`, its `RUNNER_WEBHOOK_KEY_ID` as `keyId`, its
+`RUNNER_DISPATCH_MAX_RUNNING` as `maxRunning` and its `BETTER_AUTH_URL` as `url`; the table above is the `reviewer` app.
+
 ### 3.4 The GitHub side
 
 | Where | Name | Meaning |

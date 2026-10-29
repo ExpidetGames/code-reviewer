@@ -73,8 +73,9 @@ and holds only the App's address and the job credential, and nothing in it can c
 - **Log events.** `stop_received` (`jobId`, `vms`), `vm_stopped`, `vm_stop_failed`, `stop_replayed`, `stop_list_failed`
   (`code`), `stop_refused` (`verdict` only). No key, signature or platform text.
 
-A VM is scoped by the tag `app = code-reviewer` and the job's UUID, with no tag of the deployment: two deployments in one Vercel
-team must use different dispatch signing keys (and databases), or one's valid stop could name the other's job
+A VM is scoped by the tags `app = code-reviewer`, the job's UUID and, since #730, `tenant`, the app that claimed the job (see "More
+than one App"): a stop signed by one app of a Dispatcher never reaches a VM of another. Two separate Dispatcher deployments in
+one Vercel team must still use different dispatch signing keys (and databases), or one's valid stop could name the other's job
 (`docs/deployment-vercel.md`, section 5.5).
 
 A job that goes back to the queue is **not** stopped by the App (the next attempt's VM could already exist when the call
@@ -98,6 +99,46 @@ timeoutSeconds })` (the platform's name, the Dispatcher's clock and the VM's own
   delays a launch, a heartbeat or a job transition**: the App then measures the VM by the backstop of its own, or counts
   0 minutes when it got no report at all.
 - A Launcher that creates no VM (the fake) never calls the callback.
+
+## More than one App (#730)
+
+One Dispatcher can serve several Apps (the same code deployed twice, each with its own database). The protocol did not change:
+the key that signs a wake-up or stop call already identified the sender, so **a key belongs to exactly one app and the key is
+the whole identity of the sender**.
+
+- **Registry.** The legacy variables (`RUNNER_API_URL`, `RUNNER_TOKEN`, `DISPATCHER_SIGNING_*`, `DISPATCHER_MAX_RUNNING`,
+  `DISPATCHER_POOL_ID`) define the app `reviewer`, unchanged; with nothing else set the Dispatcher behaves exactly as before.
+  `DISPATCHER_APPS` adds apps (`id`, `url`, `kinds`, `keyId`, `maxRunning`, `poolId`), and the secrets come from variables
+  named after the id: `DISPATCHER_APP_<ID>_TOKEN`, `DISPATCHER_APP_<ID>_SIGNING_SECRET` and, while rotating,
+  `..._SIGNING_SECRET_PREVIOUS` with `..._SIGNING_SECRET_PREVIOUS_KEY_ID`. At start a refusal names the variable (and the app),
+  never a value: a repeated id, the reserved id `reviewer`, a repeated key id or address, a kind that is not on the list in code
+  (`diff`, `dynamic`; a later `implementer` is added there and in the contracts, never by configuration), a missing or short
+  secret, and a secret equal to any other secret of any app, to the operator token or to `CRON_SECRET`.
+- **Per-app core.** `core.handle({appId, jobId, reviewKind})`: the app comes from the verified key. Each app has its own client
+  (address, credential, `X-Runner-Id`), its own cap (`maxRunning`, also sent with its claim; one app at its cap answers `busy`
+  and takes no slot of another, so the ceiling is the sum of the caps), its own memory of the version answer, and its own
+  heartbeats, releases and VM reports. `LaunchSpec.appUrl` is the registry's address of the app that claimed the job, never a
+  value of a request. A claim answered `204` is `ignored`: there is no fallback to another app.
+- **Job kinds per app.** A wake-up call for a kind outside the app's `kinds` is answered `200 ignored` with `not_capable` (an
+  answer the App already understands and does not resend on), logged as `kind_not_allowed`, and **no claim is made**. The claim
+  asks for the engines of the app's kinds only. A claimed job of another kind is released (`launch_failed`), logged as the
+  error `kind_not_allowed`, and no VM is created. The `reviewer`'s kinds are the ones whose engine is in `DISPATCHER_ENGINES`.
+- **VM isolation.** Every job VM carries the tag `tenant=<app id>` next to `{app, kind, job}`; the name format is unchanged.
+  The stop route lists with the app of the verified key and returns only VMs whose tenant is that app (a VM without the tag was
+  created before this release and belongs to `reviewer`): **a stop signed by one app can never end a VM of another**. Stop ids
+  are remembered per app. The reaper asks the state of a VM's job at the app its tag names, through that app's client, and
+  never at another; an unreadable answer or a tenant this Dispatcher does not serve keeps the VM until its lifetime ends.
+  Canary VMs have no tenant. The platform's listing narrows by one tag only, so the tenant is checked in code.
+- **Operator credential.** `POST /probe` (it starts canary VMs, which cost money) and `POST /apps/check` are opened by
+  `DISPATCHER_OPERATOR_TOKEN`, not by an app's token. While it is unset (rollout), `/probe` is still opened by the token of
+  `reviewer` and the log warns `operator_token_missing`; `/apps/check` refuses everyone. `pnpm probe:canary` reads
+  `DISPATCHER_OPERATOR_TOKEN`, else `RUNNER_TOKEN`.
+- **`POST /apps/check`** asks each app's `GET /api/runners/v1/version` with that app's credential and answers
+  `AppsCheckResponse` (`contracts/dispatcher-ops.v1.json`): ids, booleans and stable codes, no address, secret or text.
+- **Rollout.** (1) Release this version with no change of environment: only `reviewer` exists. (2) Add `DISPATCHER_APPS` and the
+  app's secrets, deploy. Rolling back to an older Dispatcher is safe: it ignores the unknown variables.
+- **Not built.** Fair sharing between apps (the cap per app is the isolation; their sum must fit the team's Sandbox
+  concurrency, a platform limit not verified here) and a per-app snapshot or Worker configuration. The tag count of a VM went from three to four; the Sandbox API's limit on tags is not verified.
 
 ## What the core does
 
