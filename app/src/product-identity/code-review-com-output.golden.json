@@ -50,19 +50,555 @@
   },
   "modelChoice": {
     "MODEL_CHOICE_HEADING": "Quality",
-    "MODEL_CHOICE_BILLED_NOTE": "Billed via code-review.com",
     "MODEL_CHOICE_DEFAULT_OPTION": "Default",
     "MODEL_CHOICE_UNAVAILABLE_OPTION": "Unavailable option",
-    "MODEL_CHOICE_HINT": "How reviews of this kind are done. code-review.com takes care of the rest.",
-    "MODEL_CHOICE_DEFAULT_SOURCE": "code-review.com default",
-    "MODEL_CHOICE_NONE_CHOSEN": "Nothing is chosen yet, so the code-review.com default applies.",
-    "MODEL_CHOICE_NONE_OFFERED": "code-review.com offers no choice for this kind of review yet. Reviews use its default.",
     "MODEL_CHOICE_LOCKED_BADGE": "Not included in your plan",
     "MODEL_CHOICE_MANAGE_PLAN": "Manage plan",
     "MODEL_CHOICE_RETIRED_BADGE": "No longer available",
-    "MODEL_CHOICE_CHOSEN_UNAVAILABLE": "The chosen option is not available right now, so reviews do not start until another one is chosen."
+    "MODEL_CHOICE_CHOSEN_UNAVAILABLE": "The chosen option is not available right now, so reviews do not start until another one is chosen.",
+    "MODEL_CHOICE_BILLED_NOTE": "Billed via code-review.com",
+    "MODEL_CHOICE_HINT": "How reviews of this kind are done. code-review.com takes care of the rest.",
+    "MODEL_CHOICE_DEFAULT_SOURCE": "code-review.com default",
+    "MODEL_CHOICE_NONE_CHOSEN": "Nothing is chosen yet, so the code-review.com default applies.",
+    "MODEL_CHOICE_NONE_OFFERED": "code-review.com offers no choice for this kind of review yet. Reviews use its default."
   },
   "brand": "<span class=\"inline-flex items-center gap-2 text-base leading-6 font-semibold whitespace-nowrap text-foreground\"><svg viewBox=\"0 0 32 32\" aria-hidden=\"true\" focusable=\"false\" class=\"size-6 shrink-0\"><rect width=\"32\" height=\"32\" rx=\"8\" class=\"fill-foreground\"></rect><g fill=\"none\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"stroke-background\"><path d=\"M10.5 10 6 16l4.5 6\"></path><path d=\"M21.5 10 26 16l-4.5 6\"></path><path d=\"m12.5 16.5 2.5 2.5 4.5-5.5\"></path></g></svg><span>code-review.com</span></span>",
   "brandCompact": "<span class=\"inline-flex items-center gap-2 text-base leading-6 font-semibold whitespace-nowrap text-foreground\"><svg viewBox=\"0 0 32 32\" aria-hidden=\"true\" focusable=\"false\" class=\"size-6 shrink-0\"><rect width=\"32\" height=\"32\" rx=\"8\" class=\"fill-foreground\"></rect><g fill=\"none\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"stroke-background\"><path d=\"M10.5 10 6 16l4.5 6\"></path><path d=\"M21.5 10 26 16l-4.5 6\"></path><path d=\"m12.5 16.5 2.5 2.5 4.5-5.5\"></path></g></svg><span class=\"sr-only sm:not-sr-only\">code-review.com</span></span>",
-  "productNameInText": "<span class=\"whitespace-nowrap\">code-review.com</span>"
+  "productNameInText": "<span class=\"whitespace-nowrap\">code-review.com</span>",
+  "checkRuns": {
+    "checkName": "Code Reviewer",
+    "withdrawMessage": "The review verdict of code-review.com is switched off for this project, so its earlier request for changes no longer applies.",
+    "verdictChanges": "**code-review.com: changes requested.** 2 P0 findings open. [Review summary](https://reviews.example.test/c)\n\n<!-- code-reviewer:verdict job=job-1 -->",
+    "verdictApproved": "**code-review.com: approved.** No open finding is left.\n\n<!-- code-reviewer:verdict job=job-1 -->",
+    "checks": [
+      {
+        "status": "queued",
+        "title": "Waiting",
+        "summary": "A review of this commit is waiting for a worker. It starts as soon as one is free."
+      },
+      {
+        "status": "in_progress",
+        "title": "Reviewing",
+        "summary": "A review of this commit is running."
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Superseded by a newer commit",
+        "summary": "A newer commit replaced this review, so it was stopped or never started. The review of the newer commit has its own check."
+      },
+      {
+        "status": "completed",
+        "conclusion": "success",
+        "title": "Review finished",
+        "summary": "The review verdict is switched off for this project.\n\n[Read the review](https://reviews.example.test/c)",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "success",
+        "title": "Review finished",
+        "summary": "No review verdict was submitted: the review did not cover everything (a finding was dropped, files were left out, or it stopped at a limit). An earlier request for changes by code-review.com on this pull request stays until a complete review replaces it.\n\n[Read the review](https://reviews.example.test/c)",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "success",
+        "title": "Review finished",
+        "summary": "No review verdict was submitted: a Diff Review has no severities, so the setting for blocking findings cannot judge it. An earlier request for changes by code-review.com on this pull request stays: a Diff Review submits no verdict under the setting for blocking findings. Choose Any finding in the project settings to get one, or Off to have it dismissed, or dismiss it by hand.\n\n[Read the review](https://reviews.example.test/c)",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "success",
+        "title": "Review finished",
+        "summary": "No review verdict was submitted: the runner did not report which findings are open. An earlier request for changes by code-review.com on this pull request stays until a review reports its findings or it is dismissed by hand.\n\n[Read the review](https://reviews.example.test/c)",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "success",
+        "title": "Review finished",
+        "summary": "No review verdict was submitted: the review made no model call. An earlier request for changes by code-review.com on this pull request stays until a complete review replaces it.\n\n[Read the review](https://reviews.example.test/c)",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Review cancelled",
+        "summary": "The review stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. The limit is the one set for this project under Limits in the project settings, or the maximum cost per review set by code-review.com, whichever is lower. (`cost_limit_reached`)\n\nThis check is informational and never blocks a merge."
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Review did not finish",
+        "summary": "The review stopped at the maximum cost per review set by code-review.com: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. This maximum is not a setting of the project. (`cost_limit_reached`)\n\n[Read the review](https://reviews.example.test/c)\n\nThis check is informational and never blocks a merge. A new push or a review request runs the review again.",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Review did not finish",
+        "summary": "The review stopped at the cost limit set for this project: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. You can change the limit under Limits in the project settings. (`cost_limit_reached`)\n\n[Read the review](https://reviews.example.test/c)\n\nThis check is informational and never blocks a merge. A new push or a review request runs the review again.",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Review did not finish",
+        "summary": "The run ended with an error this version of code-review.com does not know. The error code below helps whoever runs the server to look it up. (`billing_not_configured`)\n\n[Read the review](https://reviews.example.test/c)\n\nThis check is informational and never blocks a merge. A new push or a review request runs the review again.",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Review did not finish",
+        "summary": "The run ended with an error this version of code-review.com does not know. The error code below helps whoever runs the server to look it up. (`a_code_nobody_knows`)\n\n[Read the review](https://reviews.example.test/c)\n\nThis check is informational and never blocks a merge. A new push or a review request runs the review again.",
+        "detailsUrl": "https://reviews.example.test/c"
+      },
+      {
+        "status": "completed",
+        "conclusion": "neutral",
+        "title": "Review did not finish",
+        "summary": "The review did not finish.\n\n[Read the review](https://reviews.example.test/c)\n\nThis check is informational and never blocks a merge. A new push or a review request runs the review again.",
+        "detailsUrl": "https://reviews.example.test/c"
+      }
+    ]
+  },
+  "manifest": {
+    "built": {
+      "name": "Code Reviewer reviews.example.test",
+      "url": "https://reviews.example.test",
+      "hook_attributes": {
+        "url": "https://reviews.example.test/api/webhooks/github-app",
+        "active": true
+      },
+      "redirect_url": "https://reviews.example.test/api/admin/github/manifest/callback",
+      "callback_urls": [
+        "https://reviews.example.test/api/auth/callback/github"
+      ],
+      "setup_url": "https://reviews.example.test/github/connected",
+      "setup_on_update": true,
+      "description": "Automatic pull request reviews by code-review.com.",
+      "public": true,
+      "request_oauth_on_install": false,
+      "default_events": [
+        "pull_request",
+        "issue_comment"
+      ],
+      "default_permissions": {
+        "pull_requests": "write",
+        "issues": "write",
+        "contents": "read",
+        "metadata": "read",
+        "checks": "write",
+        "emails": "read",
+        "members": "read"
+      }
+    },
+    "suggestedName": "Code Reviewer reviews.example.test",
+    "suggestedNameWithoutHost": "Code Reviewer"
+  },
+  "refusalNotices": {
+    "copy": {
+      "NOTICE_LEAD": "No review ran for this change.",
+      "NOTICE_QUOTA_EXHAUSTED": "This workspace has used the reviews included for the current period.",
+      "NOTICE_WORKSPACE_SUSPENDED": "Reviews are paused for this workspace.",
+      "NOTICE_WHO_CAN_ACT": "Please contact an Owner or Admin of this workspace.",
+      "NOTICE_PLAN_PAGE_LINK_TEXT": "the plan page",
+      "NOTICE_INSUFFICIENT_BALANCE": "This workspace has no credit left for reviews.",
+      "NOTICE_BALANCE_NEGATIVE": "The balance of this workspace is below zero.",
+      "NOTICE_ADD_CREDIT_WHO": "Add credit to continue: please contact an Owner or Admin of this workspace.",
+      "NOTICE_SETTINGS_LINK_TEXT": "the workspace settings",
+      "NOTICE_MONTHLY_LIMIT_REACHED": "The monthly spending limit of this workspace was reached.",
+      "NOTICE_MONTHLY_LIMIT_WHO": "An Owner or Admin of this workspace can change it.",
+      "NOTICE_REVIEWS_PAUSED_FOR_A_WHILE": "Reviews are paused for this workspace for a while.",
+      "NOTICE_TRY_AGAIN_LATER": "Please try again later.",
+      "NOTICE_BILLING_SETUP_INCOMPLETE": "Reviews cannot start because the billing setup is not complete.",
+      "NOTICE_ASK_WHOEVER_RUNS_THE_INSTANCE": "Please contact whoever runs code-review.com."
+    },
+    "bodies": [
+      "**No review ran for this change.**\n\nThis workspace has used the reviews included for the current period. Please contact an Owner or Admin of this workspace.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThis workspace has used the reviews included for the current period. Please contact an Owner or Admin of this workspace, who can find out more on [the plan page](https://reviews.example.test/w/acme/plan).\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nReviews are paused for this workspace. Please contact an Owner or Admin of this workspace.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nReviews are paused for this workspace. Please contact an Owner or Admin of this workspace, who can find out more on [the plan page](https://reviews.example.test/w/acme/plan).\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThis workspace has no credit left for reviews. Add credit to continue: please contact an Owner or Admin of this workspace.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThis workspace has no credit left for reviews. Add credit to continue: an Owner or Admin of this workspace can do so on [the workspace settings](https://reviews.example.test/w/acme/plan).\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThe balance of this workspace is below zero. Add credit to continue: please contact an Owner or Admin of this workspace.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThe balance of this workspace is below zero. Add credit to continue: an Owner or Admin of this workspace can do so on [the workspace settings](https://reviews.example.test/w/acme/plan).\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThe monthly spending limit of this workspace was reached. An Owner or Admin of this workspace can change it.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nThe monthly spending limit of this workspace was reached. An Owner or Admin of this workspace can change it on [the workspace settings](https://reviews.example.test/w/acme/plan).\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nReviews are paused for this workspace for a while. Please try again later.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nReviews are paused for this workspace for a while. Please try again later.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nReviews cannot start because the billing setup is not complete. Please contact whoever runs code-review.com.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->",
+      "**No review ran for this change.**\n\nReviews cannot start because the billing setup is not complete. Please contact whoever runs code-review.com.\n\n<!-- code-reviewer:refusal-notice period=2026-10-01T00:00:00.000Z -->"
+    ]
+  },
+  "errorCopy": {
+    "constants": {
+      "HISTORIC_ERROR_CODES": [
+        "managed_tier_unavailable"
+      ],
+      "UNSHOWN_ERROR_CODES": [
+        "reviews_paused"
+      ],
+      "ERROR_COPY": {
+        "lease_expired": "The runner stopped reporting while it worked on this run, and the run ran out of retries.",
+        "timeout": "The run took longer than the time limit, so it was stopped.",
+        "project_deactivated": "The project was switched off before this run could start.",
+        "pull_request_closed": "The pull request was closed before this run could start.",
+        "pull_request_draft": "The pull request was turned into a draft before this run could start.",
+        "command_removed": "This command was removed from the product, so the waiting run was cancelled.",
+        "review_kind_changed": "The project's review kind was changed before this run could start, so the waiting run was cancelled.",
+        "no_capable_runner": "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
+        "dispatch_unavailable": "No worker picked up this run within the time limit, so it was stopped. The service that starts workers may be down or fully busy. It will run again on the next push or review request.",
+        "dynamic_review_disabled": "Dynamic Review is not switched on yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
+        "workspace_suspended": "Reviews are paused for this workspace, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan.",
+        "quota_exhausted": "This workspace has used up what its plan allows for the current period, so this run did not start and no AI model was used. Reviews start again when the period renews or the limit is raised.",
+        "entitlements_invalid": "The plan settings of this workspace could not be read, so this run did not start and no AI model was used. Ask whoever manages this workspace's plan to check them.",
+        "balance_negative": "The balance of this workspace is below zero, so this run did not start and no AI model was used. Add credit to continue.",
+        "insufficient_balance": "The balance of this workspace is used up, so this run did not start and no AI model was used. Add credit to continue.",
+        "billing_rates_incomplete": "This run did not start because the billing setup is not complete, and no AI model was used. Ask whoever runs code-review.com.",
+        "billing_hold_released": "The credit held for this run was released before it could start, so it did not start and no AI model was used. It will run again on the next push or review request.",
+        "monthly_limit_reached": "The monthly spending limit of this workspace was reached, so this run did not start and no AI model was used. An Owner or Admin of the workspace can change the limit in the workspace settings.",
+        "reviews_paused": "Reviews are paused for this workspace for a while, so this run did not start and no AI model was used. It will run again on the next push or review request.",
+        "billing_limits_unreadable": "The spending limits of this workspace could not be checked, so this run did not start and no AI model was used. It will run again on the next push or review request. If this keeps happening, ask whoever runs code-review.com.",
+        "managed_tier_unavailable": "The quality level chosen for this project was not available when this run was made, so it did not start and no AI model was used. Quality levels have since been replaced by review options, which a workspace Owner or Admin can choose in the review settings of the project.",
+        "managed_model_unavailable": "The review option chosen for this project is not available right now, so this run did not start and no AI model was used. A workspace Owner or Admin can choose another option in the review settings of the project. If none is available, contact whoever runs code-review.com.",
+        "llm_provider_unsupported": "The AI provider chosen in the model settings of this project cannot be used for this run, so it did not start and no AI model was used. Check the model settings of the project, or ask whoever runs code-review.com.",
+        "llm_model_unavailable": "The AI model chosen in the model settings of this project is not available any more, so this run did not start and no AI model was used. Choose another model in the review settings of the project.",
+        "provider_address_changed": "The address of the AI provider chosen in the model settings of this project has changed since it was chosen, so this run did not start, your AI key was not sent anywhere and no AI model was used. An Owner or Admin of the workspace can check the provider and confirm the new address in the review settings of the project.",
+        "llm_not_configured": "No access to an AI model is set up on this server. Ask whoever runs it to set the LLM provider and key.",
+        "git_connection_disabled": "The GitHub connection of this repository is switched off.",
+        "git_connection_gone": "The GitHub connection of this repository no longer exists.",
+        "git_connection_suspended": "The GitHub App is suspended for this account.",
+        "git_scope_refused": "GitHub did not give the app the access this review needs.",
+        "git_app_auth_failed": "The server could not sign in to GitHub as the app. Check the GitHub App credentials.",
+        "git_access_failed": "The server could not get access to the repository on GitHub.",
+        "pr_not_found": "The pull request could not be found on GitHub.",
+        "job_args_invalid": "The command or arguments of this run could not be used.",
+        "job_env_invalid": "The review settings of this project could not be used for this run. Check them on the project page.",
+        "job_llm_options_invalid": "The model settings of this project, for a Dynamic Review its Dynamic model too, could not be used for this run. Check them on the project page.",
+        "git_access_unavailable": "GitHub could not be reached to prepare this run, even after several tries.",
+        "pull_request_unavailable": "The pull request could not be read from GitHub, even after several tries.",
+        "claim_failed": "The server could not prepare this run, even after several tries.",
+        "price_check_failed": "The server could not check the model for this run, even after several tries.",
+        "provider_pin_check_failed": "The server could not check the address of the model provider for this run, even after several tries.",
+        "launch_failed": "The worker for this run could not be started, even after several tries.",
+        "worker_exited": "The worker for this run stopped with an error before it reported a result, even after several tries.",
+        "invalid_job": "The runner refused the job because it was incomplete.",
+        "invalid_command": "The command of this run is not one the runner supports.",
+        "pr_agent_version_mismatch": "The review engine in the runner is not the version this server expects.",
+        "identity_patch_failed": "The review engine could not act as the GitHub App. This is a problem of the runner.",
+        "runner_error": "The runner hit an unexpected error.",
+        "command_failed": "The review engine reported an error.",
+        "review_not_published": "No review was posted on the pull request. Either the engine did not post one, or the earlier review on the pull request belongs to a commit this run cannot account for.",
+        "review_state_truncated": "The review was posted, but it grew past GitHub's comment size limit, so earlier findings are no longer tracked.",
+        "review_text_truncated": "The review was posted, but part of it was cut off because the comment reached GitHub's size limit.",
+        "git_auth": "GitHub refused the access token of this run.",
+        "git_forbidden": "GitHub does not allow the app to do this on the repository.",
+        "git_rate_limit": "GitHub is limiting requests right now. Try again later.",
+        "git_unavailable": "GitHub could not be reached.",
+        "git_unprocessable": "GitHub could not process the request for this pull request.",
+        "git_provider_init": "The review engine could not connect to the pull request.",
+        "llm_auth": "The AI provider refused the API key.",
+        "llm_quota": "The AI provider says the credit or quota is used up.",
+        "llm_rate_limit": "The AI provider is limiting requests right now.",
+        "llm_timeout": "The AI provider took too long to answer.",
+        "llm_unavailable": "The AI provider could not be reached or is having trouble.",
+        "llm_bad_request": "The AI provider rejected the request, for example because the pull request is too large for the model.",
+        "llm_context_length_exceeded": "The request was larger than the model's context window, so the AI provider refused it. Choose a model with a larger window, or review a smaller pull request.",
+        "llm_output_invalid": "The AI model answered in a form the review engine could not use.",
+        "model_unknown": "The configured model is not known to the AI provider.",
+        "llm_parameters_unsupported": "No provider can serve this model with everything the review asks for, so the AI service refused the request. Choose another model for this project.",
+        "runner_shutdown": "The runner was shut down while it worked on this run.",
+        "dynamic_engine_unavailable": "This run needs something no runner that answered has available yet: the Dynamic Review engine, or, for a project with a cost limit, a runner that can enforce that limit.",
+        "dynamic_isolation_self_check_failed": "The Dynamic Review engine could not prove its isolation is safe, so no runner advertises it.",
+        "dynamic_config_invalid": "The Dynamic Review settings of this project could not be used for this run. Check them on the project page.",
+        "checkout_incomplete": "The Dynamic Review could not prepare the repository checkout, so it was not started.",
+        "dynamic_policy_violation": "The Dynamic Review stopped because it would have broken a safety rule.",
+        "dynamic_budget_exceeded": "The Dynamic Review used more than its allowed budget and was stopped.",
+        "dynamic_accounting_failed": "The Dynamic Review's model usage could not be accounted for, so it was stopped.",
+        "cost_limit_reached": "The review stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. The limit is the one set for this project under Limits in the project settings, or the maximum cost per review set by code-review.com, whichever is lower.",
+        "dynamic_model_features_unsupported": "The configured model does not support the features Dynamic Review requires. Choose another model.",
+        "lease_lost": "When the review was ready, the job was no longer held by its runner or this could not be confirmed, so nothing was written. The next push reviews again.",
+        "superseded": "A newer push replaced this run while it was running, so it was stopped and published nothing.",
+        "unknown": "The run failed for a reason this version does not know."
+      },
+      "CHECKOUT_REASON_COPY": {
+        "invalid_request": "The job or its limits could not be used to prepare the repository checkout.",
+        "ref_moved": "The pull request changed while the checkout was prepared, so nothing was reviewed. The next push reviews again.",
+        "ref_missing": "The pull request or its base branch could not be found on GitHub.",
+        "protocol": "GitHub answered in a form the checkout could not read.",
+        "pack_invalid": "The repository data GitHub sent could not be verified.",
+        "object_missing": "A file the checkout needed was missing from what GitHub sent.",
+        "tree_invalid": "The file tree of the repository could not be read.",
+        "entries": "The repository has more files than a Dynamic Review can prepare.",
+        "path_invalid": "A file path in the repository cannot be exported safely.",
+        "budget_transfer": "The repository is larger to download than a Dynamic Review allows.",
+        "budget_preparation": "The repository is larger to prepare than a Dynamic Review allows.",
+        "budget_exposed": "The text files of the repository are more than a Dynamic Review may read.",
+        "diff_too_large": "The change of this pull request is larger than a Dynamic Review can read.",
+        "input_too_large": "The description or the earlier review state of the pull request is larger than a Dynamic Review can use.",
+        "cancelled": "The run was stopped while the checkout was prepared.",
+        "timeout": "Preparing the repository checkout took longer than the time limit.",
+        "transport": "GitHub refused the request or could not be reached while the checkout was prepared.",
+        "isolation": "The checkout could not be sealed safely for the review engine.",
+        "context": "The title, the description or the earlier review state of the pull request could not be read."
+      },
+      "UNKNOWN_REASON_COPY": "The checkout failed for a reason this version of code-review.com does not know. The reason below helps whoever runs the server to look it up.",
+      "UNKNOWN_ERROR_COPY": "The run ended with an error this version of code-review.com does not know. The error code below helps whoever runs the server to look it up."
+    },
+    "costLimit": [
+      {
+        "code": "cost_limit_reached",
+        "text": "The review stopped at the maximum cost per review set by code-review.com: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. This maximum is not a setting of the project.",
+        "known": true
+      },
+      {
+        "code": "cost_limit_reached",
+        "text": "The review stopped at the cost limit set for this project: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. You can change the limit under Limits in the project settings.",
+        "known": true
+      },
+      {
+        "code": "cost_limit_reached",
+        "text": "The review stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. The limit is the one set for this project under Limits in the project settings, or the maximum cost per review set by code-review.com, whichever is lower.",
+        "known": true
+      },
+      {
+        "code": "cost_limit_reached",
+        "text": "The review stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much, and posted no review. The limit is the one set for this project under Limits in the project settings, or the maximum cost per review set by code-review.com, whichever is lower.",
+        "known": true
+      }
+    ],
+    "unknown": {
+      "code": "a_code_nobody_knows",
+      "text": "The run ended with an error this version of code-review.com does not know. The error code below helps whoever runs the server to look it up.",
+      "known": false
+    },
+    "unknownReason": {
+      "code": "a_reason_nobody_knows",
+      "text": "The checkout failed for a reason this version of code-review.com does not know. The reason below helps whoever runs the server to look it up.",
+      "known": false
+    }
+  },
+  "messages": {
+    "installation": {
+      "RESULT_COPY": {
+        "linked": {
+          "tone": "success",
+          "text": "GitHub is connected. The repositories of the installation are listed under Projects."
+        },
+        "picker_ready": {
+          "tone": "info",
+          "text": "Choose the installation to connect."
+        },
+        "waiting_for_github_approval": {
+          "tone": "info",
+          "text": "GitHub asked the owners of the account to approve the installation. Nothing is connected yet. Once they have approved, use Link an existing installation."
+        },
+        "waiting_for_instance_admin": {
+          "tone": "info",
+          "text": "Nothing is connected yet. GitHub did not let the app check your role in the organization, so a code-review.com admin has to approve the connection. You will see the decision below."
+        },
+        "state_invalid": {
+          "tone": "error",
+          "text": "That link is no longer valid (it may have expired or been used already). Start again with Connect GitHub."
+        },
+        "workspace_role_required": {
+          "tone": "error",
+          "text": "Only an Owner or Admin of the workspace can connect GitHub."
+        },
+        "github_app_not_configured": {
+          "tone": "error",
+          "text": "The GitHub App is not set up yet. Ask your admin to set it up."
+        },
+        "user_authorization_not_configured": {
+          "tone": "error",
+          "text": "Connecting GitHub is not available yet: a code-review.com admin has to finish setting up the GitHub App (its sign in with GitHub)."
+        },
+        "access_denied": {
+          "tone": "error",
+          "text": "You did not authorize the app at GitHub, so nothing was connected."
+        },
+        "github_authorization_required": {
+          "tone": "error",
+          "text": "GitHub did not accept your authorization. Authorize again with Connect GitHub."
+        },
+        "github_unreachable": {
+          "tone": "error",
+          "text": "GitHub could not be reached or answered something unexpected. Nothing was connected. Try again in a moment."
+        },
+        "installation_id_invalid": {
+          "tone": "error",
+          "text": "GitHub did not say which installation to connect. Start again with Connect GitHub."
+        },
+        "installation_not_accessible": {
+          "tone": "error",
+          "text": "That installation is not one code-review.com can connect for you: your GitHub account cannot use it, or code-review.com has not heard of it yet. If it was installed just now, wait a moment and try again."
+        },
+        "not_installation_admin": {
+          "tone": "error",
+          "text": "Only the owner of a personal account, or an owner of the organization, can connect its installation. Ask an owner of the organization to connect it."
+        },
+        "installation_already_linked": {
+          "tone": "error",
+          "text": "That installation is connected already and cannot be connected here."
+        },
+        "identity_belongs_to_other_user": {
+          "tone": "error",
+          "text": "That GitHub account belongs to another user."
+        },
+        "github_identity_mismatch": {
+          "tone": "error",
+          "text": "You have linked another GitHub account to your account than the one that authorized. Authorize with the account you linked."
+        },
+        "picker_invalid": {
+          "tone": "error",
+          "text": "That choice is no longer in the list. Open the list again."
+        },
+        "integration_not_found": {
+          "tone": "error",
+          "text": "That connection does not exist in this workspace."
+        },
+        "rate_limited": {
+          "tone": "error",
+          "text": "Too many attempts. Wait a few minutes and try again."
+        },
+        "unavailable": {
+          "tone": "error",
+          "text": "Something went wrong and nothing was connected. Try again."
+        }
+      },
+      "AVAILABILITY_COPY": {
+        "app_not_configured": "The GitHub App is not set up yet. Ask your admin to set it up.",
+        "user_authorization_not_configured": "Connecting GitHub is not available yet. A code-review.com admin sets up the sign in with GitHub of the GitHub App in the admin portal.",
+        "needs_approval": "code-review.com cannot check your rights on GitHub, so a code-review.com admin approves every connection. Connect GitHub sends the request."
+      },
+      "CONNECT_HELP_COPY": "You connect an installation of the GitHub App if you own the account it is on: a personal account, or an organization you are an owner of. GitHub asks you to authorize the app, which proves that.",
+      "ROLE_RESULT_COPY": {
+        "admin": "Owner of the account",
+        "member": "Member of the organization, not an owner",
+        "not_a_member": "Not a member of the organization",
+        "unreadable": "Could not be read",
+        "unavailable": "Was not asked (the app cannot check anyone's rights)"
+      },
+      "REQUEST_STATUS_COPY": {
+        "pending": "Waiting for a code-review.com admin",
+        "approved": "Approved",
+        "denied": "Denied by a code-review.com admin",
+        "withdrawn": "Connected in the meantime"
+      },
+      "APPROVAL_FAILURE_COPY": {
+        "request_not_found": "That request does not exist any more.",
+        "request_not_pending": "That request was decided already. Reload the page.",
+        "requester_not_admin": "The person who asked is not an Owner or Admin of the workspace any more. Deny the request.",
+        "installation_already_linked": "That installation is connected to a workspace already. The request was closed.",
+        "installation_not_accessible": "GitHub does not know that installation any more. Deny the request.",
+        "github_unreachable": "GitHub could not be reached. Try again in a moment.",
+        "unavailable": "Something went wrong. Try again."
+      },
+      "TOKEN_CAN_ACCESS_COPY": "Yes (outside collaborators can use an installation too, so this alone does not show that they administer the account)"
+    },
+    "workspaces": {
+      "INVITATION_LINK_LIFETIME": "An invitation works once, for 7 days, for the address it was made for.",
+      "DELETE_WORKSPACE_COPY": {
+        "title": "Delete workspace",
+        "description": "Removes this workspace with its projects, runs, settings and keys, and disconnects its GitHub installations. This cannot be undone.",
+        "action": "Delete workspace…",
+        "confirmDescription": "Everyone loses access, pending reviews are cancelled and the GitHub installations are released. Billing records are kept for the books.",
+        "confirm": "Delete this workspace",
+        "deleting": "Deleting"
+      }
+    },
+    "workspaceFailures": [
+      "The sign-up rule does not let that address in, so it can neither be invited nor accept an invitation. A code-review.com admin can change the rule.",
+      "Invitations are closed right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs code-review.com.",
+      "code-review.com cannot send mail, so a link cannot be sent again. Revoke the invitation and invite the address once more to get a new link."
+    ],
+    "reviewSettings": {
+      "FALLBACK_REMOVED_NOTICE": "The fallback model of the previous provider was removed.",
+      "TAB_PROBLEM_NOTE": "(has a problem)"
+    },
+    "reviewSettingsIssues": [
+      "code-review.com provides the AI models for this workspace. Choose from the listed options instead.",
+      "This workspace reviews with its own AI key, so the code-review.com choices cannot be used. They can be chosen once the workspace is billed via code-review.com."
+    ],
+    "transport": {
+      "TRANSPORT_FAILURE_COPY": {
+        "UNAUTHENTICATED": "Your session has ended. Sign in again.",
+        "ACCESS_DENIED": "Your GitHub account is not allowed to use code-review.com.",
+        "NETWORK_ERROR": "The server could not be reached. Check your connection and try again.",
+        "UNEXPECTED_RESPONSE": "The server answered with something unexpected. Reload the page and try again."
+      },
+      "GENERIC_FAILURE": "Something went wrong. Reload the page and try again."
+    },
+    "loginErrors": [
+      "You cancelled the sign in at GitHub. Sign in again if you want to use code-review.com.",
+      "The email address of your GitHub account is not allowed to sign up on code-review.com.",
+      "The sign in could not be matched to its start. Please start again.",
+      "Sign in failed. Please try again."
+    ],
+    "planUsage": {
+      "PLAN_PAGE_TITLE": "Plan and usage",
+      "PLAN_NAV_LABEL": "Plan",
+      "PLAN_NO_LIMITS": "No limits apply to this workspace.",
+      "PLAN_UNREADABLE": "The limits of this workspace cannot be read right now, so reviews are not started. Contact the operator.",
+      "PLAN_MANAGED": "The models for your reviews are provided and billed via code-review.com.",
+      "PLAN_MANAGED_UNBILLED": "The models for your reviews are provided by code-review.com.",
+      "PLAN_PAUSED_TITLE": "Reviews are paused",
+      "PLAN_PAUSED": "Reviews are paused for this workspace.",
+      "PLAN_PAUSED_DETAIL": "New reviews are not started.",
+      "PLAN_CURRENT_HEADING": "Current plan",
+      "PLAN_RUNS_HEADING": "Reviews in this period",
+      "PLAN_COST_HEADING": "Usage limit",
+      "PLAN_LABEL_TERM": "Plan",
+      "PLAN_PERIOD_TERM": "Counting since",
+      "PLAN_NO_LIMIT": "no limit",
+      "PLAN_LIMIT_REACHED": "limit reached",
+      "PLAN_COST_REACHED": "The limit is reached. New reviews are not started.",
+      "PLAN_COST_SOFT_CAP": "The figure is not exact: usage is added when a review finishes, so it can trail behind, and a review that is already running can take the total slightly past the limit.",
+      "PLAN_POLL_FAILED": "Updating failed. This page shows the last data it got; it keeps trying.",
+      "PLAN_POLL_STOPPED_SUFFIX": " This page no longer updates; reload it to try again."
+    },
+    "configNotices": {
+      "constants": {
+        "GITHUB_NOT_CONFIGURED_TITLE": "GitHub is not set up yet",
+        "GITHUB_NOT_CONFIGURED_COPY": "The GitHub App is not set up yet. Ask your admin to set it up.",
+        "LLM_ISSUE_COPY": {
+          "LLM_MODEL_INVALID": {
+            "severity": "warning",
+            "title": "LLM model setting ignored"
+          },
+          "LLM_MAX_TOKENS_INVALID": {
+            "severity": "warning",
+            "title": "LLM context window setting ignored"
+          }
+        }
+      },
+      "admin": [
+        {
+          "id": "github_app",
+          "severity": "error",
+          "title": "GitHub App not configured",
+          "detail": "GitHub is not connected yet. A code-review.com admin connects it under Integrations in the admin portal. Until then repositories cannot be read from GitHub and projects cannot be activated."
+        }
+      ],
+      "adminWithVariables": [
+        {
+          "id": "github_app",
+          "severity": "error",
+          "title": "GitHub App settings not valid",
+          "detail": "Not valid: GITHUB_APP_ID. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (a code-review.com admin does that under Integrations in the admin portal)."
+        }
+      ]
+    },
+    "enabling": [
+      "Once billing is on, the reviews of every workspace are charged from a prepaid balance in US dollars. A review costs its infrastructure minutes, plus the AI cost when it runs on your models.",
+      "Each workspace chooses its key mode: your models (the default) or its own key. A review on its own key is charged for its minutes only.",
+      "A workspace with no balance cannot start a review until it has the start credit or credit from a top-up or from you.",
+      "The run quotas of the workspaces are not applied while billing is on. The operator API limits stay.",
+      "code-review.com has 3 workspaces. 1 of them holds a stored own key."
+    ]
+  }
 }

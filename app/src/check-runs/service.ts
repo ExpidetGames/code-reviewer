@@ -263,7 +263,7 @@ function postedCommentId(
     : null;
 }
 
-const WITHDRAW_MESSAGE =
+export const WITHDRAW_MESSAGE =
   "The review verdict of code-review.com is switched off for this project, so its earlier request for changes no longer applies.";
 
 export function createCheckRunService(
