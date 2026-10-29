@@ -142,7 +142,7 @@ the whole identity of the sender**.
   `maxRunning` **plus a tolerance of half the cap, at least one** (counting the VM this call would start) the wake-up call is
   answered `busy` (`app_cap_reached` in the log) and **the app is not called at all**. The tolerance is there because the
   listing is up to five seconds old and the VM of a finished job lives until the App's stop call: an exact comparison refused the
-  job the App sends the moment another one ends, and nothing wakes it again before the sweep (the hosted E2E found this). So an
+  job the App sends the moment another one ends, and nothing wakes it again before the sweep (found by reasoning, not by a test). So an
   app that ignores its cap can occupy 1.5 times its cap, not more. The cap is that of the app: for `reviewer`
   `DISPATCHER_MAX_RUNNING`, unchanged. _Cost:_ one listing of the project's `cr-` VMs (all pages) per five seconds at most, shared by every claim in that time;
   claims that arrive together share one call. A claim therefore sees a VM that ended up to five seconds late (the safe side)

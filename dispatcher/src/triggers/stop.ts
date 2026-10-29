@@ -97,7 +97,8 @@ export function mountStopRoute(app: Hono, options: StopRouteOptions): void {
         "retry-after": String(RETRY_AFTER_SECONDS),
       });
     }
-    logger.info("stop_received", { app: appId, jobId, vms: names.length });
+    // The app comes last: the log lines that existed before several apps keep their leading fields, which the hosted E2E reads.
+    logger.info("stop_received", { jobId, vms: names.length, app: appId });
     if (names.length === 0)
       return c.json({ version: 1, status: "ignored", reason: "no_vm" });
     options.background(stopAll(jobId, names));

@@ -433,11 +433,13 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
 
     try {
       await launchWith(state, job, guard, onVmCreated);
+      // The app comes last: the log lines that existed before several apps keep their leading fields, which the hosted E2E
+      // reads (`"event":"launched","jobId":...`).
       logger.info("launched", {
-        app: appId,
         jobId: job.id,
         kind: job.reviewKind,
         ms: now() - startedAt,
+        app: appId,
       });
     } catch (error) {
       const code = errorCode(error);

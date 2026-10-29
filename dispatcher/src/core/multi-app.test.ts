@@ -134,6 +134,25 @@ describe("the core with several apps", () => {
     expect(launcher.launches).toHaveLength(1);
   });
 
+  // #730-T26
+  it("keeps the leading fields of the `launched` line, which the hosted E2E reads, and adds the app after them", async () => {
+    const jobId = reviewer.enqueue();
+    const { core, logger } = build();
+
+    await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
+
+    expect(
+      logger.lines.some((line) =>
+        line.startsWith(
+          `info launched {"jobId":"${jobId}","kind":"diff","ms":`,
+        ),
+      ),
+    ).toBe(true);
+    expect(logger.text()).toContain('"app":"reviewer"}');
+  });
+
   // #730-T03
   it("claims a job of the reviewer at the reviewer's address with the reviewer's credential, and does not call the factory", async () => {
     const jobId = reviewer.enqueue();

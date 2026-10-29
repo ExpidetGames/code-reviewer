@@ -405,6 +405,23 @@ describe("POST /stop with two apps", () => {
     expect(sandbox.stops).not.toContain(reviewerVm);
   });
 
+  // #730-T26
+  it("keeps the leading fields of the `stop_received` line, which the hosted E2E reads, and adds the app after them", async () => {
+    const { app, sandbox, background, logger } = build({ withFleet: true });
+    vm(sandbox, JOB, "factory", "33333333");
+
+    await app.fetch(stop("factory", JOB));
+    await background.drain(1000);
+
+    expect(
+      logger.lines.some((line) =>
+        line.startsWith(
+          `info stop_received {"jobId":"${JOB}","vms":1,"app":"factory"}`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
   // #730-T13
   it("does not let one app use up the stop id of another", async () => {
     const { app, sandbox, background } = build({ withFleet: true });
