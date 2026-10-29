@@ -10,7 +10,7 @@ import { DEFAULT_LLM_PROVIDER } from "../../src/llm/providers/index.ts";
 import { createFakeAdapter } from "../../src/llm/providers/fake-adapter.ts";
 import { openrouterDescriptor } from "../../src/llm/providers/openrouter/descriptor.ts";
 import { createProviderRegistry } from "../../src/llm/providers/registry.ts";
-import type { SecretName } from "../../src/secrets/names.ts";
+import { SECRET_NAMES, type SecretName } from "../../src/admin/secret-names.ts";
 import {
   NotFoundMarker,
   startOperatorApiHarness,
@@ -888,6 +888,7 @@ describe("the operator's own LLM key", () => {
     const h = await startOperatorApiHarness();
     await createSecretStore({
       db: h.db,
+      names: SECRET_NAMES,
       appSecret: "operator-api-test-app-secret-0123456789-01",
     }).save("operator_llm_key", KEY, { updatedBy: null, showLastFour: true });
     const answers: string[] = [];
@@ -929,6 +930,7 @@ describe("the operator's own LLM key", () => {
     const h = await startOperatorApiHarness();
     const secrets = createSecretStore({
       db: h.db,
+      names: SECRET_NAMES,
       appSecret: "operator-api-test-app-secret-0123456789-01",
     });
     // Two providers, each with a key of its own under the name its adapter gives it. The second one exists only in

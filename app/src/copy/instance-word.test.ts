@@ -66,11 +66,6 @@ const EXCEPTIONS: readonly InstanceWordException[] = [
     text: "a serverless instance does not have",
     reason: "the start-up error about the database configuration",
   },
-  {
-    path: "app/src/secrets/names.ts",
-    text: "is already a secret name of the instance",
-    reason: "a programming error thrown while the secret registry is built",
-  },
 ];
 
 function isScanned(path: string): boolean {

@@ -126,7 +126,7 @@ The first real adapter (#501, #502) talks to Stripe through `stripe-client.ts` a
   the HTTP status, and Stripe's own `type` and `code` when they are plain identifiers (`stripeCode: "resource_missing"` tells a
   buyer's deleted object from other 404s; the journal tolerates it). Fixed texts; **no response body, no header, no key and no
   cause** in an error, and the client logs nothing. A customer Stripe reports as `deleted: true` is `not_found`.
-- **Secrets.** `stripe_api_key` and `stripe_webhook_secret` are names in `SECRET_NAMES` (encrypted, write-only like the others);
+- **Secrets.** `stripe_api_key` and `stripe_webhook_secret` are names in `STRIPE_SECRET_NAMES` (`src/secret-names/names.ts`) (encrypted, write-only like the others);
   the billing page sets them (#504).
 - **The verifier.** `verifyStripeSignature({ header, rawBody, secret, now, toleranceSeconds })` returns `{ ok: true, timestamp }`
   or `{ ok: false, code }` with a code of `STRIPE_SIGNATURE_ERROR_CODES` (`secret_missing`, `signature_missing`,

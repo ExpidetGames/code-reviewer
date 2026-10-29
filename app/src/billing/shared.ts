@@ -11,6 +11,8 @@ import { getCapabilities } from "../capabilities/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { WORKSPACE_LLM_KEY_NAMES } from "../llm/secret-names.ts";
+import { STRIPE_SECRET_NAMES } from "../secret-names/names.ts";
 import { getSecretStore, getSecretStoreOn } from "../secrets/shared.ts";
 import { createAdapterRegistry } from "./adapter.ts";
 import {
@@ -79,6 +81,9 @@ function publicAddress(): string {
   return loadAuthConfig(process.env).baseUrl;
 }
 
+/** The secret store on the Stripe credentials, the only secrets billing reads. */
+const stripeSecrets = () => getSecretStore(STRIPE_SECRET_NAMES);
+
 /**
  * The adapters of this instance: the `manual` one, and Stripe, which reads its key and its webhook secret from the secret store
  * when a top-up, a webhook or a check needs them (never at startup).
@@ -89,15 +94,15 @@ export function getBillingAdapterRegistry() {
     manualAdapter,
     createStripeAdapter({
       client: stripeClientFromSecrets({
-        secrets: getSecretStore,
+        secrets: stripeSecrets,
         baseUrl: stripeApiBaseUrl(),
       }),
       // Only a test stack that points the app at a loopback fake gets that fake's links; in production this is undefined.
       ...(linkOrigin === undefined ? {} : { allowedLinkOrigin: linkOrigin }),
       webhookSecret: stripeWebhookSecretFromSecrets({
-        secrets: getSecretStore,
+        secrets: stripeSecrets,
       }),
-      environment: stripeEnvironmentFromSecrets({ secrets: getSecretStore }),
+      environment: stripeEnvironmentFromSecrets({ secrets: stripeSecrets }),
     }),
   ]);
 }
@@ -234,7 +239,8 @@ export function getBillingWebhookHandler(): (
 export function getBillingAdminService(): BillingAdminService {
   return createBillingAdminService({
     db: getDatabase(),
-    secretsOn: getSecretStoreOn,
+    secretsOn: (executor) => getSecretStoreOn(executor, STRIPE_SECRET_NAMES),
+    ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
     publicUrl: publicAddress(),
     clientFor: (apiKey, environment, options) =>
       createStripeClient({

@@ -5,6 +5,7 @@
 // client refuses a key of any other shape (`environment_mismatch`), so a typo or a publishable key never reaches Stripe. The
 // key is read, used to make the client and forgotten; it is in no error and no log.
 import "server-only";
+import type { StripeSecretName } from "../secret-names/names.ts";
 import type { SecretStore } from "../secrets/store.ts";
 import {
   StripeClientError,
@@ -14,15 +15,16 @@ import {
   type StripeEnvironment,
 } from "./stripe-client.ts";
 
-const STRIPE_API_KEY = "stripe_api_key";
-const STRIPE_WEBHOOK_SECRET = "stripe_webhook_secret";
+const STRIPE_API_KEY = "stripe_api_key" satisfies StripeSecretName;
+const STRIPE_WEBHOOK_SECRET =
+  "stripe_webhook_secret" satisfies StripeSecretName;
 
 export function stripeClientFromSecrets({
   secrets,
   baseUrl,
 }: {
   /** Made when it is needed: the master key is read from the environment then. */
-  secrets: () => SecretStore;
+  secrets: () => SecretStore<StripeSecretName>;
   /** `STRIPE_API_BASE_URL` on the running server, the fake's address in a test. */
   baseUrl: string;
 }): () => Promise<StripeClient> {
@@ -41,7 +43,7 @@ export function stripeClientFromSecrets({
 export function stripeWebhookSecretFromSecrets({
   secrets,
 }: {
-  secrets: () => SecretStore;
+  secrets: () => SecretStore<StripeSecretName>;
 }): () => Promise<string | null> {
   return async () => {
     const secret = await secrets().use(STRIPE_WEBHOOK_SECRET);
@@ -56,7 +58,7 @@ export function stripeWebhookSecretFromSecrets({
 export function stripeEnvironmentFromSecrets({
   secrets,
 }: {
-  secrets: () => SecretStore;
+  secrets: () => SecretStore<StripeSecretName>;
 }): () => Promise<StripeEnvironment | null> {
   return async () => {
     const key = await secrets().use(STRIPE_API_KEY);
