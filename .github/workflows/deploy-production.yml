@@ -621,7 +621,7 @@ jobs:
     name: Promote the Dispatcher
     # promote-factory is here for the order only (apps first, the Dispatcher last): the condition below never reads its result.
     needs: [stage-app, stage-dispatcher, health-app, canary, promote-app, promote-factory]
-    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' && needs.promote-app.result == 'success' && needs.promote-factory.result == 'success' }}
+    if: ${{ !cancelled() && github.repository == 'Itegro-GmbH/code-reviewer' && github.ref == 'refs/heads/main' && needs.stage-app.result == 'success' && needs.stage-dispatcher.result == 'success' && needs.health-app.result == 'success' && needs.canary.result == 'success' && needs.promote-app.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
