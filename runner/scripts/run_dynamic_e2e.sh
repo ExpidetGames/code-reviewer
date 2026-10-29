@@ -78,6 +78,9 @@ case "$E2E_PORT:${E2E_HOSTED_PORT:-}" in
     exit 1 ;;
 esac
 
+# TEMPORARY (#714): strace to find out who asks the lane resolver; reverted in the next commit.
+sudo -n apt-get install -y -qq strace >/dev/null 2>&1 || true
+
 # Step 2: root, in the lane's namespaces. `env PATH=...` because sudo replaces PATH.
 set +e
 sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" \
