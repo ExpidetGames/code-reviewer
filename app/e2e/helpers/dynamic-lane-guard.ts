@@ -168,11 +168,12 @@ export function describeDnsProblems(
   reading: DnsReading,
   askedNames: readonly string[],
   allowed: ReadonlySet<string>,
+  destinations: readonly string[] = [],
 ): string[] {
   const problems: string[] = [];
   if (reading.queries.engine > 0)
     problems.push(
-      `the engine user (the pinned OpenCode, or anything it started) sent ${String(reading.queries.engine)} DNS query packet(s) to the lane's resolver; the engine user may not look up any name`,
+      `the engine user (the pinned OpenCode, or anything it started) sent ${String(reading.queries.engine)} DNS query packet(s) to the lane's resolver; the engine user may not look up any name${destinations.length === 0 ? "" : ` (lookups on loopback, by user: ${destinations.join(", ")})`}`,
     );
   const unlisted = [
     ...new Set(askedNames.filter((name) => !allowed.has(name))),
@@ -189,8 +190,14 @@ export function assertDnsQuiet(
   reading: DnsReading,
   askedNames: readonly string[],
   allowed: ReadonlySet<string>,
+  destinations: readonly string[] = [],
 ): void {
-  const problems = describeDnsProblems(reading, askedNames, allowed);
+  const problems = describeDnsProblems(
+    reading,
+    askedNames,
+    allowed,
+    destinations,
+  );
   if (problems.length > 0)
     throw new Error(
       `The network guard saw name lookups: ${problems.join("; ")}.`,
@@ -208,6 +215,7 @@ export function readDnsAllowlist(file = DNS_ALLOWLIST_FILE): Set<string> {
 
 /** The sets of e2e/dynamic/guard-trace.nft. */
 export const TRACE_SETS = ["seen4", "seen6"] as const;
+export const DNS_TRACE_SETS = ["dns4", "dns6"] as const;
 
 const PROTOCOL_NAMES: Record<number, string> = { 6: "tcp", 17: "udp" };
 
@@ -253,12 +261,56 @@ export function parseDestinations(json: unknown): string[] {
   return found;
 }
 
+/** The elements `user address protocol port` of the DNS sets: `uid 10101 → 127.0.0.1:53/udp`. */
+export function parseDnsDestinations(json: unknown): string[] {
+  const found: string[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (typeof node !== "object" || node === null) return;
+    const concat = (node as { concat?: unknown }).concat;
+    if (Array.isArray(concat) && concat.length === 4) {
+      const protocol = protocolText(concat[2]);
+      const port = portNumber(concat[3]);
+      const user = concat[0];
+      if (
+        (typeof user === "string" || typeof user === "number") &&
+        typeof concat[1] === "string" &&
+        protocol !== null &&
+        port !== null
+      ) {
+        found.push(
+          `${typeof user === "number" ? "uid " : ""}${String(user)} → ${destinationText(concat[1], protocol, port)}`,
+        );
+        return;
+      }
+    }
+    Object.values(node).forEach(walk);
+  };
+  walk(json);
+  return found;
+}
+
 /**
  * Where the rejected packets went (root only). A lane without the trace file, or a listing that cannot be read, has none:
  * the numbers of the counters are the verdict, the destinations only explain it; that they are missing is said on stderr.
  */
 export function readGuardDestinations(): string[] {
-  return TRACE_SETS.flatMap((set) => {
+  return readSets(TRACE_SETS, parseDestinations);
+}
+
+/** Who sent name lookups on loopback, and to which address and port (the dns4 and dns6 sets of guard-trace.nft). */
+export function readDnsDestinations(): string[] {
+  return readSets(DNS_TRACE_SETS, parseDnsDestinations);
+}
+
+function readSets(
+  sets: readonly string[],
+  parse: (json: unknown) => string[],
+): string[] {
+  return sets.flatMap((set) => {
     const done = spawnSync(
       "nft",
       ["-j", "list", "set", "inet", GUARD_TABLE, set],
@@ -274,7 +326,7 @@ export function readGuardDestinations(): string[] {
       return [];
     }
     try {
-      const destinations = parseDestinations(JSON.parse(done.stdout));
+      const destinations = parse(JSON.parse(done.stdout));
       if (destinations.length === 0 && /"elem"\s*:\s*\[/.test(done.stdout))
         process.stderr.write(
           `destinations unreadable: the listing of ${set} has elements, none of them an address, protocol and port\n`,
@@ -339,5 +391,11 @@ export function assertGuardQuiet(): void {
     reading,
     describeAttempts(reading).length === 0 ? [] : readGuardDestinations(),
   );
-  assertDnsQuiet(readDns(), readAskedNames(), readDnsAllowlist());
+  const dns = readDns();
+  assertDnsQuiet(
+    dns,
+    readAskedNames(),
+    readDnsAllowlist(),
+    dns.queries.engine > 0 ? readDnsDestinations() : [],
+  );
 }

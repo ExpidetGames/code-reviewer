@@ -12,6 +12,7 @@ import {
   describeAttempts,
   readAskedNames,
   readDns,
+  readDnsDestinations,
   readDnsAllowlist,
   readGuard,
   readGuardDestinations,
@@ -41,6 +42,7 @@ try {
       dns,
       readAskedNames(process.argv[2] ?? LANE_DNS_LOG),
       readDnsAllowlist(),
+      dns.queries.engine > 0 ? readDnsDestinations() : [],
     );
   });
 } catch (error) {

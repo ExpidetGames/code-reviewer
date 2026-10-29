@@ -15,3 +15,12 @@ add set inet cr_lane_guard seen6 { type ipv6_addr . inet_proto . inet_service ; 
 
 insert rule inet cr_lane_guard output oifname != "lo" meta nfproto ipv6 add @seen6 { ip6 daddr . meta l4proto . th dport }
 insert rule inet cr_lane_guard output oifname != "lo" meta nfproto ipv4 ip daddr != 192.0.2.0/24 add @seen4 { ip daddr . meta l4proto . th dport }
+
+# Where the name lookups on loopback went, and for whom (#714). guard.nft counts them per user (dns-*); these sets say which
+# address and port of loopback they were sent to, so a failure of the engine user names what it asked (a resolver address that is
+# not the lane's, TCP instead of UDP) instead of a count. The user is the number of skuid; the reader accepts a name too.
+add set inet cr_lane_guard dns4 { type uid . ipv4_addr . inet_proto . inet_service ; flags dynamic ; size 256 ; }
+add set inet cr_lane_guard dns6 { type uid . ipv6_addr . inet_proto . inet_service ; flags dynamic ; size 256 ; }
+
+insert rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta nfproto ipv4 add @dns4 { meta skuid . ip daddr . meta l4proto . th dport }
+insert rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta nfproto ipv6 add @dns6 { meta skuid . ip6 daddr . meta l4proto . th dport }
