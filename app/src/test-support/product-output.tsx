@@ -19,7 +19,7 @@ import * as installationMessages from "../installation-binding/ui/messages.ts";
 import {
   buildAppManifest,
   suggestedAppName,
-} from "../integrations/providers/github-app/manifest.ts";
+} from "../integrations/registry.ts";
 import { NOTICE_CODES, noticeBody } from "../refusal-notices/notice-text.ts";
 import * as reviewSettingsMessages from "../review-settings/ui/messages.ts";
 import * as errorCopy from "../runs/error-copy.ts";
