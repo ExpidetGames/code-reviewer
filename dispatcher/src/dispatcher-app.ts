@@ -12,6 +12,7 @@ import type {
   CoreSettings,
   DispatcherCore,
   Launcher,
+  LiveVmCounter,
   Logger,
 } from "./core/types.ts";
 import { mountAppsCheckRoute } from "./probe/apps-check.ts";
@@ -29,9 +30,12 @@ export type AppOptions = {
   clock?: Clock;
   /**
    * `DISPATCHER_OPERATOR_TOKEN` (#730): the credential of `POST /probe` and `POST /apps/check`. Unset, `/probe` is still
-   * opened by the token of the app `reviewer` (the rollout fallback; a warning is logged) and `/apps/check` refuses everyone.
+   * opened by the token of the app `reviewer` while that is the only app (the rollout fallback); with several apps, and
+   * for `/apps/check` always, nobody (a warning is logged).
    */
   operatorToken?: string;
+  /** The platform's live job VMs per app: the Dispatcher's own check of every app's cap (`core/dispatcher.ts`). */
+  liveVms?: LiveVmCounter;
   /** The Worker image id of the golden snapshot (`SANDBOX_IMAGE_DIGEST`): named in the answer of `POST /probe`. */
   imageDigest?: string;
   /** The golden snapshot (`SANDBOX_SNAPSHOT_ID`): named in the answer of `POST /probe` too. */
@@ -53,19 +57,24 @@ export function createDispatcher(options: AppOptions): Dispatcher {
     logger,
     fetch: options.fetch,
     clock: options.clock,
+    ...(options.liveVms === undefined ? {} : { liveVms: options.liveVms }),
   });
   const app = new Hono();
   app.get("/health", (c) => c.json({ status: "ok" }));
   options.trigger.mount(app, { core, background: options.background, logger });
-  // The probe starts canary VMs, which cost money: an app's own credential must not open it. While no operator token is
-  // configured the token of `reviewer` still does, as it did before there were several apps.
-  const fallback = options.settings.apps.find(
-    (configured) => configured.id === LEGACY_APP_ID,
-  )?.token;
+  // The probe starts canary VMs, which cost money: an app's own credential must not open it. With one app and no operator
+  // token (the Dispatcher as it was before #730) the token of `reviewer` still does; with several apps only the operator
+  // token does, so no app's credential, the reviewer's included, can start a canary VM.
+  const severalApps = options.settings.apps.length > 1;
+  const fallback = severalApps
+    ? undefined
+    : options.settings.apps.find(
+        (configured) => configured.id === LEGACY_APP_ID,
+      )?.token;
   const probeToken = options.operatorToken ?? fallback;
-  if (options.operatorToken === undefined)
+  if (options.operatorToken === undefined && severalApps)
     logger.warn("operator_token_missing", {
-      note: "POST /probe is opened by the token of the app reviewer until DISPATCHER_OPERATOR_TOKEN is set",
+      note: "POST /probe and POST /apps/check refuse everyone until DISPATCHER_OPERATOR_TOKEN is set",
     });
   mountAppsCheckRoute(app, {
     token: options.operatorToken,

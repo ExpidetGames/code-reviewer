@@ -49,7 +49,13 @@ function env(
   apps: unknown,
   extra: Record<string, string> = factorySecrets,
 ): Record<string, string> {
-  return { ...legacy, DISPATCHER_APPS: JSON.stringify(apps), ...extra };
+  // With several apps the operator token is required (the canary's route is never opened by an app's credential).
+  return {
+    ...legacy,
+    DISPATCHER_APPS: JSON.stringify(apps),
+    DISPATCHER_OPERATOR_TOKEN: OPERATOR,
+    ...extra,
+  };
 }
 
 function failure(variables: Record<string, string>): ConfigError {
@@ -191,6 +197,13 @@ describe("the registry of apps", () => {
     [
       "uses the address of the legacy app",
       [{ ...factory, url: "https://app.example.test/" }],
+      factorySecrets,
+      "DISPATCHER_APPS",
+      "duplicate",
+    ],
+    [
+      "uses the address of the legacy app in another spelling (upper case host, default port)",
+      [{ ...factory, url: "https://APP.example.test:443" }],
       factorySecrets,
       "DISPATCHER_APPS",
       "duplicate",
@@ -345,6 +358,46 @@ describe("the registry of apps", () => {
         expect(error.message).not.toContain(secret);
     },
   );
+
+  // #730-T23
+  it("compares the addresses of two apps as the platform reads them, not as they are spelled", () => {
+    for (const spelling of [
+      "https://FACTORY.example.test",
+      "https://factory.example.test:443/",
+      "https://factory.example.test//",
+    ])
+      expect(
+        failure(
+          env([factory, { ...other, url: spelling, keyId: "second-k2" }], {
+            ...factorySecrets,
+            ...otherSecrets,
+          }),
+        ),
+        spelling,
+      ).toMatchObject({ variable: "DISPATCHER_APPS", reason: "duplicate" });
+    // Another path or port is another address.
+    expect(() =>
+      loadSettings(
+        env([factory, { ...other, url: "https://factory.example.test:8443" }], {
+          ...factorySecrets,
+          ...otherSecrets,
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  // #730-T25
+  it("requires the operator token as soon as DISPATCHER_APPS names an app, and not before", () => {
+    const withoutOperator = env([factory]);
+    delete withoutOperator.DISPATCHER_OPERATOR_TOKEN;
+
+    expect(failure(withoutOperator)).toMatchObject({
+      variable: "DISPATCHER_OPERATOR_TOKEN",
+      reason: "required",
+    });
+    // Without DISPATCHER_APPS the legacy environment is untouched.
+    expect(() => loadSettings(legacy)).not.toThrow();
+  });
 
   // #730-T02
   it("tells which app and which field a refusal of DISPATCHER_APPS is about", () => {

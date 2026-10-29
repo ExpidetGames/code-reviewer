@@ -2,7 +2,7 @@
 
 // The core with several apps (#730): every call is claimed at the app it names and nowhere else, each app has its own
 // credential, pool, cap and version memory, and a kind the app may not have is refused before and after the claim.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DispatcherAppFake } from "../../../fakes/dispatcher-app/server.ts";
 import { createFakeLauncher } from "../launchers/fake.ts";
 import { ManualClock, settle } from "../test-support/manual-clock.ts";
@@ -14,7 +14,12 @@ import {
   waitFor,
 } from "../test-support/harness.ts";
 import { createDispatcherCore } from "./dispatcher.ts";
-import { LaunchError, type AppSettings, type HandleResult } from "./types.ts";
+import {
+  LaunchError,
+  type AppSettings,
+  type HandleResult,
+  type LiveVmCounter,
+} from "./types.ts";
 
 const FACTORY_TOKEN = "dummy-factory-dispatcher-token-for-tests";
 
@@ -68,6 +73,7 @@ function build(
     factory?: Partial<AppSettings>;
     reviewer?: { maxRunning?: number };
     launcher?: Parameters<typeof createFakeLauncher>[0];
+    liveVms?: LiveVmCounter;
   } = {},
 ) {
   const logger = recordingLogger();
@@ -82,6 +88,8 @@ function build(
     clock,
     logger,
     fetch: recorded.fetch,
+    now: () => clock.now(),
+    ...(options.liveVms === undefined ? {} : { liveVms: options.liveVms }),
   });
   return { core, launcher, logger, recorded };
 }
@@ -520,5 +528,345 @@ describe("the core with several apps", () => {
     expect(result).toStrictEqual({ outcome: "not_capable" });
     expect(reviewer.requests()).toHaveLength(0);
     expect(factory.requests()).toHaveLength(0);
+  });
+});
+
+const JOB_CREDENTIAL = `crj_${"C".repeat(43)}`;
+
+/** A claim answer that hands out `reviewKind` whatever the claim asked for. */
+function claimAnswering(jobId: string, reviewKind: "diff" | "dynamic") {
+  return [
+    {
+      status: 200,
+      body: {
+        version: 1,
+        job: {
+          id: jobId,
+          credential: JOB_CREDENTIAL,
+          reviewKind,
+          leaseExpiresAt: "2026-10-10T12:02:00.000Z",
+          heartbeatIntervalSeconds: 30,
+        },
+      },
+    },
+  ];
+}
+
+/** Lets the core's waits (the retries of a release) pass until `done` settles. */
+async function through<T>(done: Promise<T>): Promise<T> {
+  let finished = false;
+  void done.then(
+    () => {
+      finished = true;
+    },
+    () => {
+      finished = true;
+    },
+  );
+  for (let step = 0; step < 100 && !finished; step += 1) {
+    await clock.advance(1000);
+    await settle();
+  }
+  return done;
+}
+
+describe("the second wall checks the engine too", () => {
+  // #730-T21
+  it("releases a claimed Dynamic job when this Dispatcher does not serve `opencode`, although the app may have Dynamic jobs, and creates no VM", async () => {
+    const jobId = "00000000-0000-4000-8000-0000000000e1";
+    factory.enqueue({ id: jobId, reviewKind: "diff" });
+    // The app is asked for Diff engines only (opencode is not served here) and answers with a Dynamic job all the same.
+    factory.script("claim", claimAnswering(jobId, "dynamic"));
+    const { core, launcher, logger, recorded } = build({
+      factory: { kinds: ["diff", "dynamic"] },
+      launcher: { engines: ["pr-agent"] },
+    });
+
+    const result = await through(
+      core.handle({ appId: "factory", jobId, reviewKind: "diff" }),
+    );
+
+    const claim = recorded.calls.find((call) => call.url.endsWith("/claim"));
+    expect((claim?.body as { engines: string[] }).engines).toStrictEqual([
+      "pr-agent",
+    ]);
+    expect(result).toStrictEqual({ outcome: "not_capable" });
+    expect(launcher.launches).toHaveLength(0);
+    expect(seen(factory, "release").length).toBeGreaterThan(0);
+    expect(
+      logger.lines.some((line) =>
+        line.startsWith('error kind_not_allowed {"app":"factory"'),
+      ),
+    ).toBe(true);
+    expect(logger.text()).toContain('"reason":"engine"');
+    expect(logger.text()).not.toContain("crj_");
+  });
+
+  // #730-T21
+  it("still launches a Diff job that comes back for the Diff engine of the same deployment", async () => {
+    const jobId = "00000000-0000-4000-8000-0000000000e2";
+    factory.enqueue({ id: jobId, reviewKind: "diff" });
+    const { core, launcher } = build({ launcher: { engines: ["pr-agent"] } });
+
+    const result = await handled(
+      core.handle({ appId: "factory", jobId, reviewKind: "diff" }),
+    );
+
+    expect(result.outcome).toBe("started");
+    expect(launcher.launches).toHaveLength(1);
+  });
+});
+
+describe("the cap of an app is counted by the Dispatcher too", () => {
+  const counts = (live: Record<string, number>): LiveVmCounter => {
+    const counter = vi.fn(() => Promise.resolve(new Map(Object.entries(live))));
+    return counter;
+  };
+
+  // #730-T22
+  it("refuses a claim, without a call to the app, when the platform already shows the app's cap of live VMs", async () => {
+    const jobId = factory.enqueue();
+    const { core, launcher, logger } = build({
+      factory: { maxRunning: 2 },
+      liveVms: counts({ factory: 2 }),
+    });
+
+    const result = await core.handle({
+      appId: "factory",
+      jobId,
+      reviewKind: "diff",
+    });
+
+    expect(result).toStrictEqual({ outcome: "busy", retryAfterSeconds: 30 });
+    expect(factory.requests()).toHaveLength(0);
+    expect(launcher.launches).toHaveLength(0);
+    expect(logger.text()).toContain(
+      'app_cap_reached {"app":"factory","occupied":2,"maxRunning":2}',
+    );
+  });
+
+  // #730-T22
+  it("does not count the VMs of another app: a factory that fills its own cap leaves the reviewer all of its own", async () => {
+    const reviewerJob = reviewer.enqueue();
+    const { core } = build({
+      reviewer: { maxRunning: 2 },
+      liveVms: counts({ factory: 40, reviewer: 1 }),
+    });
+
+    const result = await handled(
+      core.handle({
+        appId: "reviewer",
+        jobId: reviewerJob,
+        reviewKind: "diff",
+      }),
+    );
+
+    expect(result.outcome).toBe("started");
+  });
+
+  // #730-T22
+  it("counts the untagged VMs of before the tenant tag as the reviewer's, and holds the reviewer to its cap", async () => {
+    const jobId = reviewer.enqueue();
+    const { core } = build({
+      reviewer: { maxRunning: 3 },
+      // `liveJobVmsByApp` puts an untagged VM under `reviewer`.
+      liveVms: counts({ reviewer: 3 }),
+    });
+
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "diff",
+    });
+
+    expect(result).toStrictEqual({ outcome: "busy", retryAfterSeconds: 30 });
+    expect(reviewer.requests()).toHaveLength(0);
+  });
+
+  // #730-T22
+  it("starts a job at one below the cap and refuses the next one", async () => {
+    const hold = deferred();
+    const { core } = build({
+      factory: { maxRunning: 2 },
+      liveVms: counts({ factory: 1 }),
+      launcher: { onLaunch: () => hold.promise },
+    });
+
+    const first = await core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+    // One live VM plus the launch in progress: the cap.
+    const second = await core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+
+    expect(first.outcome).toBe("started");
+    expect(second).toStrictEqual({ outcome: "busy", retryAfterSeconds: 30 });
+    hold.resolve();
+    if (first.outcome === "started") await first.background;
+  });
+
+  // #730-T22
+  it("counts a launch whose VM is already in the listing once, not twice", async () => {
+    const hold = deferred();
+    // The first launch has its VM; a listing taken after that shows it. The second call must see 1 VM, not 1 VM and 1 launch.
+    const { core, launcher } = build({
+      factory: { maxRunning: 2 },
+      liveVms: counts({ factory: 1 }),
+      launcher: {
+        onLaunch: (spec) => {
+          spec.onVmCreated?.({
+            name: "cr-diff-x",
+            startedAt: new Date(0),
+            timeoutSeconds: 1500,
+          });
+          return hold.promise;
+        },
+      },
+    });
+
+    const first = await core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+    await clock.advance(6000);
+    const second = await core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+    // The second one's VM, created after the listing, is not in it: the third call counts it.
+    const third = await core.handle({
+      appId: "factory",
+      jobId: factory.enqueue(),
+      reviewKind: "diff",
+    });
+
+    expect(first.outcome).toBe("started");
+    expect(second.outcome).toBe("started");
+    expect(third).toStrictEqual({ outcome: "busy", retryAfterSeconds: 30 });
+    expect(launcher.launches).toHaveLength(2);
+    hold.resolve();
+    for (const result of [first, second])
+      if (result.outcome === "started") await result.background;
+  });
+
+  // #730-T22
+  it("lists the platform once for the claims of a few seconds, and again after that", async () => {
+    const counter = counts({});
+    const { core } = build({ liveVms: counter });
+
+    for (let call = 0; call < 3; call += 1)
+      await handled(
+        core.handle({
+          appId: "factory",
+          jobId: factory.enqueue(),
+          reviewKind: "diff",
+        }),
+      );
+    expect(counter).toHaveBeenCalledTimes(1);
+
+    await clock.advance(6000);
+    await handled(
+      core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+    expect(counter).toHaveBeenCalledTimes(2);
+  });
+
+  // #730-T22
+  it("asks the platform once for claims that arrive together", async () => {
+    const release = deferred();
+    const counter = vi.fn(async () => {
+      await release.promise;
+      return new Map<string, number>();
+    });
+    const { core } = build({ liveVms: counter });
+
+    const calls = [0, 1].map(() =>
+      core.handle({
+        appId: "reviewer",
+        jobId: reviewer.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+    release.resolve();
+    const results = await Promise.all(calls);
+
+    expect(counter).toHaveBeenCalledTimes(1);
+    for (const result of results)
+      if (result.outcome === "started") await result.background;
+  });
+
+  // #730-T22
+  it("answers `unavailable` and makes no claim when the platform cannot be listed and no listing is young enough", async () => {
+    const jobId = factory.enqueue();
+    const { core, logger } = build({
+      liveVms: () => Promise.reject(new Error("the platform said something")),
+    });
+
+    const result = await core.handle({
+      appId: "factory",
+      jobId,
+      reviewKind: "diff",
+    });
+
+    expect(result).toStrictEqual({
+      outcome: "unavailable",
+      retryAfterSeconds: 60,
+    });
+    expect(factory.requests()).toHaveLength(0);
+    expect(logger.text()).toContain("fleet_list_failed");
+    // The platform's own text is not ours to log.
+    expect(logger.text()).not.toContain("the platform said something");
+  });
+
+  // #730-T22
+  it("keeps working on the last listing for a minute when the platform cannot be listed, and not longer", async () => {
+    let failing = false;
+    const { core } = build({
+      liveVms: () =>
+        failing
+          ? Promise.reject(new Error("down"))
+          : Promise.resolve(new Map<string, number>()),
+    });
+    const handleOne = () =>
+      handled(
+        core.handle({
+          appId: "factory",
+          jobId: factory.enqueue(),
+          reviewKind: "diff",
+        }),
+      );
+
+    expect((await handleOne()).outcome).toBe("started");
+    failing = true;
+    await clock.advance(10_000);
+    expect((await handleOne()).outcome).toBe("started");
+    await clock.advance(61_000);
+    expect(await handleOne()).toStrictEqual({
+      outcome: "unavailable",
+      retryAfterSeconds: 60,
+    });
+  });
+
+  // #730-T22
+  it("keeps today's behaviour without a fleet: the cap is the launches in progress", async () => {
+    const jobId = reviewer.enqueue();
+    const { core } = build({ reviewer: { maxRunning: 1 } });
+
+    const result = await handled(
+      core.handle({ appId: "reviewer", jobId, reviewKind: "diff" }),
+    );
+
+    expect(result.outcome).toBe("started");
   });
 });

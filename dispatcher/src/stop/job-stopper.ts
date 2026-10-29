@@ -7,10 +7,9 @@
 // reaper's rule (`shapeOf`), so a VM that is not exactly one of our job VMs of this job, a canary, a persistent VM,
 // a lookalike or one the platform is already ending is never returned. With several apps (#730) a VM is returned only to
 // the app its `tenant` tag names (no tag: `reviewer`): a stop signed by one app can never end a VM of another.
+import { KNOWN_KINDS } from "../core/types.ts";
 import type { SandboxFleet } from "../launchers/sandbox-service.ts";
 import { APP_TAG, isLive, shapeOf } from "../reaper/vm-shape.ts";
-
-const KINDS = ["diff", "dynamic"] as const;
 
 export class StopLookupError extends Error {
   readonly code = "STOP_LIST_FAILED";
@@ -30,7 +29,7 @@ export async function findJobVms(
   const id = jobId.toLowerCase();
   const names = new Set<string>();
   try {
-    for (const kind of KINDS) {
+    for (const kind of KNOWN_KINDS) {
       const listed = await fleet.list({
         namePrefix: `cr-${kind}-${id}-`,
         tags: { app: APP_TAG },

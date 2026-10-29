@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeSandboxService } from "../../fakes/sandbox/service.ts";
 import type { DispatcherAppFake } from "../../fakes/dispatcher-app/server.ts";
 import { composeDispatcher } from "./compose.ts";
+import { createDispatcher } from "./dispatcher-app.ts";
+import { webhookTrigger } from "./triggers/webhook.ts";
 import { createFakeLauncher } from "./launchers/fake.ts";
 import { createBackgroundTracker } from "./test-support/background.ts";
 import {
@@ -15,6 +17,7 @@ import {
   SIGNING_SECRET,
   readContract,
   recordingLogger,
+  settingsFor,
   signedRequest,
   signedStopRequest,
   startApp,
@@ -63,6 +66,8 @@ function environment(
     ]),
     DISPATCHER_APP_FACTORY_TOKEN: FACTORY_TOKEN,
     DISPATCHER_APP_FACTORY_SIGNING_SECRET: FACTORY_SECRET,
+    // Required with DISPATCHER_APPS: no app's credential opens `/probe` or `/apps/check`.
+    DISPATCHER_OPERATOR_TOKEN: OPERATOR,
     ...extra,
   };
 }
@@ -460,22 +465,46 @@ describe("the operator credential", () => {
   });
 
   // #730-T15
-  it("falls back to the reviewer's token on /probe while the operator token is unset, logs a warning, and still refuses the factory's token", async () => {
+  it("refuses to start with DISPATCHER_APPS and no operator token, naming the variable: the reviewer's token never opens /probe next to another app", () => {
+    const withoutOperator = environment();
+    delete withoutOperator.DISPATCHER_OPERATOR_TOKEN;
+
+    expect(() =>
+      composeDispatcher({
+        env: withoutOperator,
+        launcher: probing(),
+        background: () => undefined,
+        logger: recordingLogger(),
+      }),
+    ).toThrow(/DISPATCHER_OPERATOR_TOKEN is required/);
+  });
+
+  // #730-T15
+  it("opens /probe to nobody, and says so, when several apps are served without an operator token (an assembly that skipped the configuration)", async () => {
     const launcher = probing();
     const logger = recordingLogger();
-    const { app } = composeDispatcher({
-      env: environment(),
+    const { app } = createDispatcher({
+      settings: settingsFor(reviewer.url, {
+        more: [
+          {
+            id: "factory",
+            url: factory.url,
+            token: FACTORY_TOKEN,
+            poolId: "factory",
+            maxRunning: 2,
+            kinds: ["diff", "dynamic"],
+          },
+        ],
+      }),
       launcher,
       background: () => undefined,
       logger,
+      trigger: webhookTrigger({ keys: [] }),
     });
 
-    const factoryAttempt = await app.fetch(probe(FACTORY_TOKEN));
-    const reviewerAttempt = await app.fetch(probe(DISPATCHER_TOKEN));
-
-    expect(factoryAttempt.status).toBe(401);
-    expect(reviewerAttempt.status).toBe(200);
-    expect(launcher.probes).toBe(1);
+    for (const token of [FACTORY_TOKEN, DISPATCHER_TOKEN, OPERATOR, undefined])
+      expect((await app.fetch(probe(token))).status, String(token)).toBe(401);
+    expect(launcher.probes).toBe(0);
     expect(
       logger.lines.some((line) =>
         line.startsWith("warn operator_token_missing"),
@@ -486,6 +515,7 @@ describe("the operator credential", () => {
   // #730-T15
   it("keeps the legacy behaviour with one app and no operator token: the reviewer's token opens /probe", async () => {
     const launcher = probing();
+    const logger = recordingLogger();
     const { app } = composeDispatcher({
       env: {
         RUNNER_API_URL: reviewer.url,
@@ -496,11 +526,13 @@ describe("the operator credential", () => {
       },
       launcher,
       background: () => undefined,
-      logger: recordingLogger(),
+      logger,
     });
 
     expect((await app.fetch(probe(DISPATCHER_TOKEN))).status).toBe(200);
     expect((await app.fetch(probe("wrong"))).status).toBe(401);
+    // Nothing to warn about: with one app that is how it always was.
+    expect(logger.text()).not.toContain("operator_token_missing");
   });
 });
 
@@ -512,8 +544,16 @@ describe("POST /apps/check", () => {
     });
 
   // #730-T16
-  it("lists each app, and refuses every app credential and every caller when no operator token is set", async () => {
-    const { app } = build();
+  it("refuses every app credential and every caller when no operator token is set", async () => {
+    const { app } = build({
+      env: {
+        RUNNER_API_URL: reviewer.url,
+        RUNNER_TOKEN: DISPATCHER_TOKEN,
+        DISPATCHER_MAX_RUNNING: "2",
+        DISPATCHER_SIGNING_KEY_ID: KEY_ID,
+        DISPATCHER_SIGNING_SECRET: SIGNING_SECRET,
+      },
+    });
 
     for (const token of [FACTORY_TOKEN, DISPATCHER_TOKEN, OPERATOR, undefined])
       expect((await app.fetch(check(token))).status, String(token)).toBe(401);
@@ -822,5 +862,82 @@ describe("the reaper with two apps", () => {
 
     expect(sandbox.stops).toStrictEqual([old]);
     expect(sandbox.stops).not.toContain(young);
+  });
+});
+
+describe("the cap of each app against the platform's fleet", () => {
+  const seedLive = (
+    sandbox: FakeSandboxService,
+    tenant: string | undefined,
+    count: number,
+    first: number,
+  ) => {
+    for (let index = 0; index < count; index += 1) {
+      const jobId = `00000000-0000-4000-8000-${String(first + index).padStart(12, "0")}`;
+      sandbox.seedVm({
+        name: `cr-diff-${jobId}-0000000${index}`,
+        tags: {
+          app: "code-reviewer",
+          kind: "diff",
+          job: jobId,
+          ...(tenant === undefined ? {} : { tenant }),
+        },
+      });
+    }
+  };
+
+  // #730-T22
+  it("refuses the factory at its own cap with the VMs the platform lists, whatever the factory says, and still serves the reviewer", async () => {
+    const { core, sandbox, launcher } = build({
+      env: environment({ DISPATCHER_MAX_RUNNING: "3" }),
+      withFleet: true,
+    });
+    // The factory's cap is 2 (the environment): it is at it. The reviewer has 2 of its 3 (one of them untagged).
+    seedLive(sandbox, "factory", 2, 100);
+    seedLive(sandbox, "reviewer", 1, 200);
+    seedLive(sandbox, undefined, 1, 300);
+
+    const factoryJob = factory.enqueue();
+    const forFactory = await core.handle({
+      appId: "factory",
+      jobId: factoryJob,
+      reviewKind: "diff",
+    });
+    const reviewerJob = reviewer.enqueue();
+    const forReviewer = await core.handle({
+      appId: "reviewer",
+      jobId: reviewerJob,
+      reviewKind: "diff",
+    });
+    if (forReviewer.outcome === "started") await forReviewer.background;
+
+    expect(forFactory).toStrictEqual({
+      outcome: "busy",
+      retryAfterSeconds: 30,
+    });
+    expect(factory.requests()).toHaveLength(0);
+    expect(forReviewer.outcome).toBe("started");
+    expect(launcher.launches.map((spec) => spec.appId)).toStrictEqual([
+      "reviewer",
+    ]);
+  });
+
+  // #730-T22
+  it("holds the reviewer to DISPATCHER_MAX_RUNNING with the same count", async () => {
+    const { core, sandbox } = build({
+      env: environment({ DISPATCHER_MAX_RUNNING: "2" }),
+      withFleet: true,
+    });
+    seedLive(sandbox, undefined, 1, 300);
+    seedLive(sandbox, "reviewer", 1, 200);
+
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId: reviewer.enqueue(),
+      reviewKind: "diff",
+    });
+
+    expect(result).toStrictEqual({ outcome: "busy", retryAfterSeconds: 30 });
+    expect(reviewer.requests()).toHaveLength(0);
   });
 });

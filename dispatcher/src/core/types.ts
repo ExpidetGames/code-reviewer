@@ -132,6 +132,14 @@ export interface Logger {
   error(event: string, fields?: Record<string, unknown>): void;
 }
 
+/**
+ * The live job VMs of the platform, counted per app (the `tenant` tag; no tag is `reviewer`): the Dispatcher's own count of
+ * what each app occupies, whatever the app says (#730). Rejects when the platform cannot be listed.
+ */
+export type LiveVmCounter = (
+  signal: AbortSignal,
+) => Promise<ReadonlyMap<string, number>>;
+
 /** One app this Dispatcher serves (#730). The legacy variables define `reviewer`; `DISPATCHER_APPS` adds the others. */
 export type AppSettings = {
   id: string;

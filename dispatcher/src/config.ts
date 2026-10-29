@@ -18,7 +18,7 @@
 // | DISPATCHER_APP_<ID>_TOKEN                                   | Per further app (id upper-cased, `-` as `_`): its dispatcher credential | required per app |
 // | DISPATCHER_APP_<ID>_SIGNING_SECRET                          | Per further app: the secret its wake-up and stop calls are signed with | required per app |
 // | DISPATCHER_APP_<ID>_SIGNING_SECRET_PREVIOUS / ..._PREVIOUS_KEY_ID | Per further app: the previous key, accepted while rotating | none |
-// | DISPATCHER_OPERATOR_TOKEN (#730)                            | The credential of `POST /probe` and `POST /apps/check` (at least 32 characters) | none: `/probe` still takes the `reviewer` token, with a warning |
+// | DISPATCHER_OPERATOR_TOKEN (#730)                            | The credential of `POST /probe` and `POST /apps/check` (at least 32 characters) | none: `/probe` still takes the `reviewer` token while `reviewer` is the only app; required with `DISPATCHER_APPS` |
 // | CRON_SECRET (Vercel entry)                                  | The secret of the platform's cron for the reaper route (#364), at least 32 characters, distinct from every other secret | none: the route refuses everyone |
 // | DISPATCHER_SHUTDOWN_GRACE_SECONDS (Node entry)              | How long launches may finish after SIGTERM (0 to 600) | 60 |
 import { z } from "zod";
@@ -136,6 +136,11 @@ function parseAppUrl(raw: string, refuse: () => ConfigError): string {
   )
     throw refuse();
   return raw.replace(/\/+$/, "");
+}
+
+/** The address as the platform sees it (host in lower case, default port dropped, no trailing slash): what two apps are compared by. */
+function addressOf(url: string): string {
+  return new URL(url).href.replace(/\/+$/, "");
 }
 
 function appUrl(env: Environment): string {
@@ -308,7 +313,7 @@ function assertDistinct(input: {
     { name: "RUNNER_TOKEN", value: input.legacyToken },
   ];
   const kids = new Set<string>();
-  const urls = new Set<string>([input.legacyUrl]);
+  const urls = new Set<string>([addressOf(input.legacyUrl)]);
   const claim = (name: string, value: string) => {
     if (secrets.some((other) => other.value === value))
       throw new ConfigError(name, "not_distinct");
@@ -321,13 +326,14 @@ function assertDistinct(input: {
     kids.add(signing.kid);
   });
   for (const entry of input.extra) {
-    if (urls.has(entry.app.url))
+    const address = addressOf(entry.app.url);
+    if (urls.has(address))
       throw new ConfigError(
         "DISPATCHER_APPS",
         "duplicate",
         `${entry.app.id}: url`,
       );
-    urls.add(entry.app.url);
+    urls.add(address);
     claim(entry.tokenVariable, entry.app.token);
     entry.keys.forEach((signing, index) => {
       const name = entry.keyVariables[index] ?? entry.tokenVariable;
@@ -444,6 +450,13 @@ export function loadSettings(env: Environment): Settings {
   const url = appUrl(env);
   const extra = registryApps(env);
   const operator = operatorToken(env);
+  // `POST /probe` starts canary VMs: with several apps no app's credential, the reviewer's included, may open it.
+  if (extra.length > 0 && operator === undefined)
+    throw new ConfigError(
+      "DISPATCHER_OPERATOR_TOKEN",
+      "required",
+      "with DISPATCHER_APPS",
+    );
   assertDistinct({
     legacyToken: dispatcherToken,
     legacyKeys: legacy,

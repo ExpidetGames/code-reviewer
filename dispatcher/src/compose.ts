@@ -9,6 +9,7 @@ import { createLogger } from "./core/logger.ts";
 import type { Launcher, Logger } from "./core/types.ts";
 import type { LauncherContext, ReaperSetup } from "./launchers/sandbox-env.ts";
 import { createAppClient } from "./core/app-client.ts";
+import { liveJobVmsByApp } from "./reaper/live-vms.ts";
 import { createReaper } from "./reaper/reaper.ts";
 import { mountReaperRoute } from "./reaper/route.ts";
 import { mountStopRoute } from "./triggers/stop.ts";
@@ -54,6 +55,17 @@ export function composeDispatcher(
           background: options.background,
         })
       : options.launcher;
+  // A malformed CRON_SECRET matters only where the route exists: there it refuses the start (fail closed), elsewhere
+  // a Dispatcher that never reaps is not taken down by a variable it does not use.
+  if (settings.cronSecretProblem !== undefined) {
+    if (options.reaper !== undefined) throw settings.cronSecretProblem;
+    logger.warn("cron_secret_ignored", {
+      variable: settings.cronSecretProblem.variable,
+      reason: settings.cronSecretProblem.reason,
+    });
+  }
+  // The platform's side of the fleet (#364) is also what counts the live VMs of every app for its cap (#730).
+  const setup = options.reaper?.(settings);
   const dispatcher = createDispatcher({
     settings: settings.core,
     launcher,
@@ -61,6 +73,7 @@ export function composeDispatcher(
     trigger: webhookTrigger({ keys: settings.signingKeys }),
     logger,
     fetch: options.fetch,
+    ...(setup === undefined ? {} : { liveVms: liveJobVmsByApp(setup.fleet) }),
     ...(settings.operatorToken === undefined
       ? {}
       : { operatorToken: settings.operatorToken }),
@@ -71,17 +84,7 @@ export function composeDispatcher(
       ? {}
       : { snapshotId: options.env.SANDBOX_SNAPSHOT_ID }),
   });
-  // A malformed CRON_SECRET matters only where the route exists: there it refuses the start (fail closed), elsewhere
-  // a Dispatcher that never reaps is not taken down by a variable it does not use.
-  if (settings.cronSecretProblem !== undefined) {
-    if (options.reaper !== undefined) throw settings.cronSecretProblem;
-    logger.warn("cron_secret_ignored", {
-      variable: settings.cronSecretProblem.variable,
-      reason: settings.cronSecretProblem.reason,
-    });
-  }
-  if (options.reaper !== undefined) {
-    const setup = options.reaper(settings);
+  if (setup !== undefined) {
     // One client per app: a VM's job is asked about at the app its tenant tag names and at no other (#730).
     const clients = new Map(
       settings.core.apps.map((configured) => [
