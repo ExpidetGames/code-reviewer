@@ -20,7 +20,8 @@ credential, which is why step 3 ends with a run that has the switch still off.
    five random secrets into that file (mode 0600, never printed). Put each value into its key (the script's table says
    folder and key), add the Secret Sync from `prod` `/app-factory` to the new Vercel project, then **delete the file**.
    Put the database URLs, the project id, the bypass secret and the App's address into their keys too. The App's own keys
-   are not only the secrets: `PRODUCT_ID` (`factory`, **mandatory**; without it the project starts as code-review.com),
+   are not only the secrets: `PRODUCT_ID` (`factory`, **mandatory**; without it the project starts as code-review.com; the build copies it into
+   `NEXT_PUBLIC_PRODUCT_ID` for the crash page, so that one is not set by hand, and a mismatch is logged at start),
    `PRODUCT_CAPABILITIES` (`review,dynamic-review`, billing off), `RUNNER_DISPATCH` (`webhook`), `RUNNER_WEBHOOK_URL` (the
    Dispatcher's `/dispatch` address), `RUNNER_WEBHOOK_KEY_ID` (`factory-k1`), `RUNNER_DISPATCH_MAX_RUNNING` (`2`) and, if the
    Dispatcher is protected, `RUNNER_WEBHOOK_BYPASS_TOKEN`. In `/dispatcher` put `DISPATCHER_APPS` (its `keyId` and

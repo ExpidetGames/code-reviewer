@@ -16,7 +16,6 @@ import "./theme.css";
 export function generateMetadata(): Metadata {
   const { name } = getProductIdentity();
   return {
-    applicationName: name,
     title: { default: name, template: `%s · ${name}` },
     description: "Automatic code reviews for GitHub pull requests.",
   };

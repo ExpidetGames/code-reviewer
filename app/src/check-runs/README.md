@@ -1,7 +1,8 @@
 # Check runs and the review verdict (#405)
 
-A review shows up on its pull request as the check run **Code Reviewer** (for code-review.com; the name is a field of the product identity, `checkName`, so another product names its own) (Waiting, Reviewing, a conclusion) and, after
-a successful review, as a pull request review of the App (`REQUEST_CHANGES` or `APPROVE`). The operator view of this
+A review shows up on its pull request as the check run **Code Reviewer** (Waiting, Reviewing, a conclusion) and, after
+a successful review, as a pull request review of the App (`REQUEST_CHANGES` or `APPROVE`). The check's name is a field of the
+product identity (`checkName`), so another product names its own. The operator view of this
 is in `docs/github-app.md`, "Check runs and the review verdict".
 
 ## Where it happens

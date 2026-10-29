@@ -29,25 +29,27 @@ function page(children: ReactNode): string {
 
 describe("the root layout", () => {
   // #740-T03
-  it("titles the pages with code-review.com while PRODUCT_ID is not set", () => {
+  it("keeps the whole head metadata of code-review.com as it was before the identity (no new tag)", () => {
     vi.stubEnv("PRODUCT_ID", "");
 
-    const metadata = generateMetadata();
-
-    expect(metadata.title).toEqual({
-      default: "code-review.com",
-      template: "%s · code-review.com",
+    // toStrictEqual on the whole object: a key added for the identity (application-name, openGraph, ...) is a new tag in the
+    // <head> of every page of code-review.com and fails here.
+    expect(generateMetadata()).toStrictEqual({
+      title: {
+        default: "code-review.com",
+        template: "%s · code-review.com",
+      },
+      description: "Automatic code reviews for GitHub pull requests.",
     });
-    expect(metadata.applicationName).toBe("code-review.com");
   });
 
   // #740-T03
-  it("titles the pages with the factory when the deployment is the factory's", () => {
+  it("gives the factory the same metadata keys with its own name", () => {
     vi.stubEnv("PRODUCT_ID", "factory");
 
-    expect(generateMetadata().title).toEqual({
-      default: "Factory",
-      template: "%s · Factory",
+    expect(generateMetadata()).toStrictEqual({
+      title: { default: "Factory", template: "%s · Factory" },
+      description: "Automatic code reviews for GitHub pull requests.",
     });
   });
 

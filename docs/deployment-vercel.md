@@ -470,6 +470,8 @@ Not set in the project, on purpose:
   is not in `/app` and not in a function.
 - `VERCEL`: set by the platform.
 - `NODE_ENV`, `NEXT_RUNTIME`: set by Next.js.
+- `NEXT_PUBLIC_PRODUCT_ID`: the build copies `PRODUCT_ID` into it (`app/next.config.ts`) for the page that shows a crash in the root
+  layout. Set `PRODUCT_ID` only; the start logs a warning when the two differ.
 - `BETTER_AUTH_SECRET`: the deprecated name of `APP_SECRET`; a new instance never sets it.
 - The `GITHUB_*`, `ALLOWED_GITHUB_*`, `LLM_PROVIDER` and `LLM_API_KEY` variables: older ways to configure GitHub and the
   model from the environment. A hosted instance never sets them (the admin portal does).
