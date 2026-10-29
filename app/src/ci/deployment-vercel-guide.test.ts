@@ -1350,9 +1350,10 @@ describe("the second App in the guide (#732)", () => {
     const text = flat(second);
     expect(text).toContain("does not depend on the switch");
     expect(text).toContain(
-      "`DISPATCHER_OPERATOR_TOKEN` when Infisical `/dispatcher` has that key",
+      "`DISPATCHER_OPERATOR_TOKEN` when `/ci` has that key",
     );
     expect(text).toContain("`RUNNER_TOKEN` when it has not");
+    expect(text).toContain("`/ci` and in `/dispatcher` **together**");
     const off = text.split("**Switching it off.**")[1] as string;
     expect(off).toContain("The canary does not change");
     expect(off).not.toContain("operator_token");

@@ -275,7 +275,7 @@ yours.
   | `/app` | The runtime variables of the App project: the table of section 3.1 | Vercel, by Secret Sync |
   | `/dispatcher` | The runtime variables of the Dispatcher project: the table of section 3.2, and the three `SANDBOX_SNAPSHOT_*` keys the pipeline writes (below) | Vercel, by Secret Sync; the pipeline writes the three keys |
 
-- The keys of **`/ci`** (all required: a workflow that names a key that is missing or empty stops with its name):
+- The keys of **`/ci`** (all required, except `DISPATCHER_OPERATOR_TOKEN`, which the canary loads when it exists: a workflow that names a key that is missing or empty stops with its name):
 
   | Key | What it is | Read by |
   |---|---|---|
@@ -290,7 +290,7 @@ yours.
   | `VERCEL_FACTORY_PROJECT_ID` | The id of the second App's Vercel project (section 5.8; only with `FACTORY_ENABLED`) | the second App's deployment, the rollback |
   | `VERCEL_FACTORY_AUTOMATION_BYPASS_SECRET` | The second App project's *Protection Bypass for Automation* secret (section 5.8) | the second App's health check |
   | `DATABASE_URL_MIGRATE_FACTORY` | The direct URL of the migrate role of the second App's database (section 5.8) | the second App's migration |
-  | `DISPATCHER_OPERATOR_TOKEN` | The Dispatcher's operator credential, which opens `/probe` and `/apps/check` and no App's token (section 5.8). The canary does not read this copy: it reads `/dispatcher` (below) | the check of the Apps |
+  | `DISPATCHER_OPERATOR_TOKEN` | **Optional until the Dispatcher has its operator token** (#730): the credential that opens `/probe`. **The value of the Dispatcher's `DISPATCHER_OPERATOR_TOKEN`**; add it to `/ci` and to `/dispatcher` together (`dispatcher/README.md`, "Rollout of the operator token"). With the second App (section 5.8) it also opens `/apps/check`, and the lane's `apps-check` requires it | the canary, when the key exists; the check of the Apps |
 
 **Infisical Secret Sync** (the App's and the Dispatcher's variables reach Vercel from Infisical, never from a workflow):
 
@@ -1172,10 +1172,11 @@ settings and, only when you run it with `--out`, writes the five random secrets 
 only you can read (mode 0600), without ever printing or tracing one.
 
 **The operator credential of the canary does not depend on the switch.** The canary opens `/probe` with
-`DISPATCHER_OPERATOR_TOKEN` when Infisical `/dispatcher` has that key, and with `RUNNER_TOKEN` when it has not. It is the
-Dispatcher's own configuration that decides, so the canary follows the key and not `FACTORY_ENABLED`: a Dispatcher that has
-the operator token accepts nothing else on `/probe`, whether the lane runs or not. Add the key to `/dispatcher` only when
-the Dispatcher that reads it is released and the Secret Sync is done (the rollout order below).
+`DISPATCHER_OPERATOR_TOKEN` when `/ci` has that key, and with `RUNNER_TOKEN` when it has not (`dispatcher-canary.yml`, the
+same step whether the lane runs or not). A Dispatcher that has the operator token accepts nothing else on `/probe`. So the
+key must be in `/ci` and in `/dispatcher` **together**, and the Secret Sync must have carried the `/dispatcher` copy to the
+Dispatcher project before the next run: a `/ci` copy alone would make the canary of the first App fail with `401`.
+`tools/factory-bootstrap/factory-bootstrap.sh` lists both entries; fill them in one go (rollout order below).
 
 **The database.** A second Postgres database receives the same migrations, with the same roles and grants (section 2), a
 direct connection and a region near the projects. `pnpm --dir app setup-code` and the setup wizard create its first
@@ -1224,12 +1225,12 @@ App. What a failure of the lane can still affect, all of it:
    reviewer's own jobs run in the meantime, so only the part the lane needs beyond them is lost. While the App is promoted
    and the Dispatcher is not, the App runs against the previous Dispatcher, which is the state any failed run leaves
    between the two promotions.
-3. **Shared configuration, not jobs.** The Dispatcher is one deployment for both Apps. A malformed `DISPATCHER_APPS` or a
-   missing or short `DISPATCHER_APP_FACTORY_*` secret makes the Dispatcher refuse to start (section 3.2), and the next
-   canary of the first App fails with it, because the staged Dispatcher is the same one. So, before you set the switch,
+3. **Shared configuration, not jobs.** The Dispatcher is one deployment for both Apps. A malformed `DISPATCHER_APPS`, a
+   missing or short `DISPATCHER_APP_FACTORY_*` secret or a missing `DISPATCHER_OPERATOR_TOKEN` makes the Dispatcher refuse
+   to start (section 3.2), and the next canary of the first App fails with it, because the staged Dispatcher is the same one. So, before you set the switch,
    run *Deploy production* once with the switch still off after step 3 of the rollout: a green canary proves the Dispatcher
-   starts with the registry. The same holds for `DISPATCHER_OPERATOR_TOKEN` in `/dispatcher`: it changes what `/probe`
-   accepts for both Apps. The Dispatcher's Sandbox concurrency is shared too: the caps of the Apps (`maxRunning`) add up,
+   starts with the registry. The operator token in `/ci` and `/dispatcher` also changes what `/probe` accepts, for both
+   Apps. The Dispatcher's Sandbox concurrency is shared too: the caps of the Apps (`maxRunning`) add up,
    and their sum must fit what the team's Sandbox allows.
 
 Nothing else: the migration of the second database, its staging, its health, the Apps check and its promotion cannot stop
@@ -1238,18 +1239,19 @@ the migration, the staging, the health check, the canary or the promotion of the
 **Rollout order.** (1) Release the Dispatcher with the App registry (`docs/dispatcher.md`) and the App with the capability
 set; the lane's health check needs the product and the capabilities in `/api/health`. (2) Create the database and the
 project, run the bootstrap tool, fill Infisical, add the Secret Sync (`docs/factory-bring-up.md` has the short list).
-(3) Add `DISPATCHER_APPS`, the references and `DISPATCHER_OPERATOR_TOKEN` to `/dispatcher`, wait until the Secret Sync shows
+(3) Add `DISPATCHER_APPS`, the references and `DISPATCHER_OPERATOR_TOKEN` to `/dispatcher` and `/ci` together, wait until the Secret Sync shows
 them synced, and run *Deploy production* with the switch still off: the canary must pass. (4) Set `FACTORY_ENABLED` to
 `true` and run *Deploy production*; promote the second App by hand once (above). (5) Run `pnpm --dir app setup-code` against
 the second database and finish the wizard in the browser.
 
 **Switching it off.** Set `FACTORY_ENABLED` back to anything but `true`: the next run is the first App's pipeline again,
 and `factory-flag` is the only job left over. The canary does not change: its credential follows `DISPATCHER_OPERATOR_TOKEN`
-in `/dispatcher`, not the switch, so leave that key where it is while the Dispatcher has it (removing it from
-`/dispatcher` is a change of the Dispatcher, and the canary then goes back to `RUNNER_TOKEN` with the next Secret Sync).
-The second project, its database, the Dispatcher's registry and the App's wake-ups are not touched: remove
-`DISPATCHER_APPS` and the `DISPATCHER_APP_FACTORY_*` keys too if the Dispatcher should stop serving the App. To restore an
-earlier deployment of the second App, run *Rollback production* with `factory_deployment` (section 7).
+in `/ci`, not the switch, so leave that key (and the Dispatcher's copy) where it is while the Dispatcher has it: the
+Dispatcher then accepts no other credential on `/probe`, and removing the key from `/ci` alone would break the canary of
+the first App. The second project, its database, the Dispatcher's registry and the App's wake-ups are not touched: remove
+`DISPATCHER_APPS` and the `DISPATCHER_APP_FACTORY_*` keys from `/dispatcher` if the Dispatcher should stop serving the App
+(the operator token stays). To restore an earlier deployment of the second App, run *Rollback production* with
+`factory_deployment` (section 7).
 
 ## 6. Sizing the Worker VMs
 

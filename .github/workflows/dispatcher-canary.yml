@@ -111,24 +111,32 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: The canary did not run, so nothing is promoted.
-      # The Dispatcher's operator credential (#730, #732), when the Dispatcher has one: `/probe` is then opened by it
-      # and by no App's token. The rule does not depend on the factory switch: present in Infisical /dispatcher, it is
-      # exported as DISPATCHER_OPERATOR_TOKEN (masked) and `pnpm probe:canary` uses it; absent, the step fails
-      # harmlessly and the canary keeps using RUNNER_TOKEN, as before. /dispatcher, not /ci, because the question is
-      # whether the Dispatcher has the credential, and /dispatcher is where it gets it.
-      - name: Load the operator credential from Infisical (when the Dispatcher has one)
+      # The operator credential (#730): once the Dispatcher has `DISPATCHER_OPERATOR_TOKEN`, `POST /probe` is no longer opened by
+      # `RUNNER_TOKEN`, so the canary uses it. It is optional here: while the key is not in /ci (before the rollout in
+      # dispatcher/README.md, "More than one App") the step fails, is allowed to, and the canary command falls back to
+      # `RUNNER_TOKEN`. A failure of Infisical itself is not hidden by this: the canary then calls with the wrong
+      # credential, is refused (401) and blocks the promotion. The canary command prefers the operator credential and reads
+      # it from the environment; the loaded value is masked and never in a command line.
+      - name: Load the operator credential from Infisical, when there is one
+        id: operator
         continue-on-error: true
-        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        uses: ./.github/actions/infisical-ci-secrets
         with:
-          method: universal
+          secret-names: DISPATCHER_OPERATOR_TOKEN
           client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
-          env-slug: prod
-          secret-path: /dispatcher
-          secret-name: DISPATCHER_OPERATOR_TOKEN
-          export-type: env
+          consequence: The canary falls back to RUNNER_TOKEN.
+      - name: Say which credential the canary uses
+        env:
+          OPERATOR_OUTCOME: ${{ steps.operator.outcome }}
+        run: |
+          if [ "${OPERATOR_OUTCOME}" = "success" ]; then
+            echo "::notice::The canary opens POST /probe with DISPATCHER_OPERATOR_TOKEN."
+          else
+            echo "::notice::DISPATCHER_OPERATOR_TOKEN is not in /ci: the canary opens POST /probe with RUNNER_TOKEN."
+          fi
       # A snapshot that was removed since (a re-run of failed jobs after the run's snapshot was discarded) is said so
       # here, in a code, and not as a canary VM that cannot start.
       - name: Check that the golden snapshot still exists
@@ -138,7 +146,7 @@ jobs:
           PAIR_SNAPSHOT_ID: ${{ inputs.snapshot_id }}
         run: pnpm --dir dispatcher snapshot:ops exists
       # `--verify-vercel` reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the
-      # environment; the canary command reads RUNNER_TOKEN and the bypass secret from it too.
+      # environment; the canary command reads DISPATCHER_OPERATOR_TOKEN (else RUNNER_TOKEN) and the bypass secret from it too.
       - name: Run the canary
         working-directory: dispatcher
         env:

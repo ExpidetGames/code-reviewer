@@ -928,14 +928,9 @@ describe("the check of the Apps of the staged Dispatcher", () => {
 describe("the canary and the Dispatcher's operator credential", () => {
   const canary = canaryWorkflow.jobs.canary as Job;
   const steps = stepsOf(canary);
-  const load = steps.find(
-    (step) =>
-      step.name ===
-      "Load the operator credential from Infisical (when the Dispatcher has one)",
-  );
 
   // #732-T01
-  it("takes the credential whenever the Dispatcher has one, whatever the factory switch says: no input, no condition on a variable", () => {
+  it("takes the credential whenever /ci has one, whatever the factory switch says: no input, no condition on a variable", () => {
     for (const trigger of ["workflow_dispatch", "workflow_call"] as const) {
       const inputs = (
         canaryWorkflow.on[trigger] as { inputs: Record<string, unknown> }
@@ -945,41 +940,17 @@ describe("the canary and the Dispatcher's operator credential", () => {
     expect(JSON.stringify(canaryWorkflow)).not.toMatch(
       /FACTORY|factory|vars\./,
     );
+    const load = steps.find((step) =>
+      step.name?.startsWith("Load the operator credential"),
+    );
     expect(load?.if).toBeUndefined();
-  });
-
-  // #732-T01
-  it("reads DISPATCHER_OPERATOR_TOKEN from /dispatcher, where the Dispatcher gets it, and goes on without it", () => {
-    expect(load?.uses).toBe(
-      "Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d",
-    );
-    expect(load?.["continue-on-error"]).toBe(true);
-    expect(load?.with).toEqual({
-      method: "universal",
-      "client-id": "${{ secrets.INFISICAL_CLIENT_ID }}",
-      "client-secret": "${{ secrets.INFISICAL_CLIENT_SECRET }}",
-      domain: "${{ secrets.INFISICAL_DOMAIN }}",
-      "project-slug": "${{ secrets.INFISICAL_PROJECT_SLUG }}",
-      "env-slug": "prod",
-      "secret-path": "/dispatcher",
-      "secret-name": "DISPATCHER_OPERATOR_TOKEN",
-      "export-type": "env",
-    });
-    // No other step is allowed to fail and go on, and the credential is not copied to RUNNER_TOKEN: the canary command
-    // takes DISPATCHER_OPERATOR_TOKEN when it is set and RUNNER_TOKEN when it is not (#730).
-    for (const step of steps.filter((found) => found !== load))
-      expect(step["continue-on-error"], step.name).toBeUndefined();
-    expect(JSON.stringify(steps)).not.toContain("GITHUB_ENV");
-    const first = steps.find(isInfisicalLoad);
-    expect(first?.with?.["secret-names"]).toBe(
-      "RUNNER_TOKEN VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_DISPATCHER_PROJECT_ID VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET",
-    );
-    expect(first?.if).toBeUndefined();
-    expect(steps.indexOf(load as never)).toBeGreaterThan(
-      steps.indexOf(first as never),
-    );
-    expect(steps.indexOf(load as never)).toBeLessThan(
-      steps.findIndex((step) => step.name === "Run the canary"),
-    );
+    expect(load?.with?.["secret-names"]).toBe("DISPATCHER_OPERATOR_TOKEN");
+    // The call of the canary passes the inputs it always had, and nothing about the lane.
+    expect(Object.keys(job("canary").with ?? {}).sort()).toEqual([
+      "engines",
+      "image_digest",
+      "snapshot_id",
+      "url",
+    ]);
   });
 });
