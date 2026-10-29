@@ -99,8 +99,10 @@ describe("the CI job of the hosted lane", () => {
       )
       .join("\n");
 
-    expect(text).toMatch(/app\s+pnpm install --frozen-lockfile/);
-    expect(text).toMatch(/dispatcher\s+pnpm install --frozen-lockfile/);
+    // One workspace, one lockfile (#724): one install covers both projects.
+    expect(text).toContain(
+      "pnpm install --frozen-lockfile --filter code-reviewer-app... --filter code-reviewer-dispatcher...",
+    );
     expect(text).toContain("uv sync --locked");
     expect(text).toContain("playwright install chromium");
     expect(text).toContain("prime_tiktoken_cache.py");

@@ -1,0 +1,25 @@
+# One pnpm workspace and one lockfile (pnpm-lock.yaml) for the app and the Dispatcher (#724). `website/` is
+# deliberately not a member: it is a standalone Astro project with its own lockfile and its own pnpm and Node pins, built
+# by Cloudflare from its own root directory. `runner/` is Python (uv) and not a pnpm project.
+packages:
+  - app
+  - dispatcher
+
+# Dependencies that need no build script run (they were `ignoredBuiltDependencies` in app/pnpm-workspace.yaml, which pnpm
+# reads only at the workspace root).
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+
+# The versions both projects share, so they cannot drift apart again. A project writes `"catalog:"` as the specifier.
+# `vitest` is not here yet: the two lockfiles resolved ^5.0.3 to 5.0.3 (app) and 5.0.4 (Dispatcher), and a catalog entry
+# makes it one version, which this change must not do. Add it with the bump that aligns them.
+catalog:
+  "@types/node": ^24.19.2
+  "@vercel/functions": ^3.10.1
+  "@vitest/eslint-plugin": ^1.6.27
+  ajv: ^8.20.0
+  eslint: ^9
+  prettier: ^3.9.10
+  typescript: ^5
+  zod: 4.6.5

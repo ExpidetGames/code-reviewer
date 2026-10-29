@@ -15,11 +15,12 @@ and `CONTRIBUTING.md`.
 
 | Path | Content |
 |---|---|
-| `app/` | Next.js 16 (App Router, TypeScript strict, pnpm) |
+| `app/` | Next.js 16 (App Router, TypeScript strict, pnpm); a project of the root pnpm workspace |
 | `runner/` | Python (uv): the Worker that runs one job with PR-Agent or the Dynamic Review engine |
-| `dispatcher/` | TypeScript on Hono (pnpm): claims jobs and starts Workers in Sandbox VMs (#316), and the golden snapshot pipeline |
+| `dispatcher/` | TypeScript on Hono (pnpm): claims jobs and starts Workers in Sandbox VMs (#316), and the golden snapshot pipeline; a project of the root pnpm workspace |
 | `fakes/` | Fake servers and fixtures shared by all test suites |
-| `website/` | The code-review.com landing page: Astro, its own pnpm project, deployed by Cloudflare (`website/README.md`, `website/AGENTS.md`) |
+| `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json` | The pnpm workspace of `app/` and `dispatcher/`: one lockfile, a `catalog:` for the versions both share (#724) |
+| `website/` | The code-review.com landing page: Astro, its own pnpm project (not part of the workspace), deployed by Cloudflare (`website/README.md`, `website/AGENTS.md`) |
 | `TESTING.md` | The testing strategy; source of truth for tests |
 | `Makefile` | One entry point per task for all parts |
 
@@ -117,4 +118,4 @@ Cache Components, and more). Before writing Next.js code, read the relevant guid
 - Leave no background process running when you finish: no dev server, no Playwright browser.
 - Start Playwright and dev servers on your own port (`E2E_PORT`), never on 3000 or 3100.
 - Do not start `next build` or `next dev` twice in the same worktree.
-- Install dependencies from the lockfiles only. Add a dependency only when the issue needs it.
+- Install dependencies from the lockfiles only (`make install`, or `pnpm install --frozen-lockfile --filter <package>...` for one project). Add a dependency only when the issue needs it; a version both `app/` and `dispatcher/` use goes into the `catalog:` of `pnpm-workspace.yaml`.

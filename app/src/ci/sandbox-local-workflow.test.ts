@@ -48,16 +48,20 @@ describe("the CI job of the Sandbox-Launcher's privileged lane", () => {
   it("installs the Dispatcher from its lockfile and runs make test-sandbox-local, after the install", () => {
     const lines = commands();
 
-    expect(lines).toContain("pnpm --dir dispatcher install --frozen-lockfile");
+    const install =
+      "pnpm install --frozen-lockfile --filter code-reviewer-dispatcher...";
+
+    expect(lines).toContain(install);
     expect(lines).toContain("make test-sandbox-local");
-    expect(
-      lines.indexOf("pnpm --dir dispatcher install --frozen-lockfile"),
-    ).toBeLessThan(lines.indexOf("make test-sandbox-local"));
+    expect(lines.indexOf(install)).toBeLessThan(
+      lines.indexOf("make test-sandbox-local"),
+    );
+    // The pnpm version is the root package.json's (the action's default).
     expect(
       (lane().steps ?? []).find((step) =>
         step.uses?.startsWith("pnpm/action-setup@"),
-      )?.with?.package_json_file,
-    ).toBe("dispatcher/package.json");
+      )?.with,
+    ).toBeUndefined();
     expect(
       (lane().steps ?? []).find((step) =>
         step.uses?.startsWith("actions/setup-node@"),
