@@ -10,10 +10,10 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-/** The lowest start of an ephemeral range of the systems we run on (Linux 32768; macOS and Windows start higher). */
+/** The start of the Linux default ephemeral range; the ceiling of the fakes' ports, and the range assumed when the kernel's cannot be read. */
 export const EPHEMERAL_FLOOR = 32768;
 
-/** The range the kernel picks local ports of outgoing connections from; the Linux default when it cannot be read. */
+/** The range the kernel picks local ports of outgoing connections from, as the kernel says; the Linux default when it cannot be read. */
 export function ephemeralPortRange(): { low: number; high: number } {
   try {
     const [low, high] = readFileSync(
@@ -24,7 +24,7 @@ export function ephemeralPortRange(): { low: number; high: number } {
       .split(/\s+/)
       .map(Number);
     if (Number.isInteger(low) && Number.isInteger(high) && low! > 0)
-      return { low: Math.min(low!, EPHEMERAL_FLOOR), high: high! };
+      return { low: low!, high: high! };
   } catch {
     // Not Linux: the default below.
   }

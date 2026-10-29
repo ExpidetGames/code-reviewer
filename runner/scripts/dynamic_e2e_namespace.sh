@@ -15,7 +15,8 @@
 #      `opencode`, with a writable one it must not (the capability probe of the hosted deployment is this verdict);
 #   4. the journeys (the Worker inside them is started as root with the capabilities of the hardened container
 #      spec and no-new-privileges: runner/scripts/dynamic_e2e_worker_container.sh);
-#   5. the last word of the guard, and a check that no process of the lane is left.
+#   5. the last word of the guard (the counters, the destinations, and the lookups on the lane's own resolver: none by the
+#      engine user, only names of e2e/dynamic/dns-allowlist.txt by anyone), and a check that no process of the lane is left.
 set -euo pipefail
 
 : "${LANE_OPENCODE_BIN:?}" "${LANE_RIPGREP_BIN:?}" "${LANE_APP_DIR:?}" "${LANE_RUNNER_DIR:?}" "${LANE_STAGE:?}"
@@ -155,8 +156,8 @@ status=0
 
 # 5. The guard has the last word, and nothing may be left running.
 kill "$DNS_PID" 2>/dev/null && wait "$DNS_PID" 2>/dev/null && :
-echo "Names the lane asked for (its resolver answers none): $(sort "$DNS_LOG" | uniq -c | tr '\n' ';')"
-if ! "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-lane-guard-command.ts"; then
+echo "Names the lane asked for (its resolver answers none; the guard compares them with e2e/dynamic/dns-allowlist.txt): $(sort "$DNS_LOG" | uniq -c | tr '\n' ';')"
+if ! "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-lane-guard-command.ts" "$DNS_LOG"; then
   status=1
 fi
 leftovers=""

@@ -6,7 +6,6 @@
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  EPHEMERAL_FLOOR,
   ephemeralPortRange,
   pickFreePort,
 } from "../../e2e/helpers/free-port.ts";
@@ -92,10 +91,9 @@ describe("pickFreePort", () => {
   it("refuses a range that reaches into the ephemeral range of the machine", () => {
     const { low } = ephemeralPortRange();
 
-    expect(low).toBeLessThanOrEqual(EPHEMERAL_FLOOR);
+    // The kernel's own lower bound, not a floor of ours: the fakes' range ends below the Linux default.
+    expect(low).toBeGreaterThan(0);
     expect(() => pickFreePort({ low: 20000, high: low })).toThrow(/ephemeral/i);
-    expect(() => pickFreePort({ low: 40000, high: 40499 })).toThrow(
-      /ephemeral/i,
-    );
+    expect(() => pickFreePort({ low, high: low + 499 })).toThrow(/ephemeral/i);
   });
 });

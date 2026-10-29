@@ -191,6 +191,11 @@ Network guard (exists, applies to every automated test):
   (`app/e2e/helpers/dynamic-lane-guard.ts`; the journey reads it, and the lane's script reads it once more at
   the end). Positive controls (`e2e/dynamic/network-guard.e2e.ts`) make each kind of process connect to a
   reserved address and show that its counter moves, so the guard cannot pass vacuously.
+  Name lookups never leave the namespace: the lane has a resolver of its own on loopback
+  (`app/e2e/helpers/lane-dns-stub.ts`) that answers every name "no such name" and logs it. Because that traffic is
+  loopback, `guard.nft` counts it apart (`dns-*` counters, UDP and TCP port 53, per user, #714) and the lane
+  fails when the engine user sent any query, or when a name is asked that is not on the checked-in allowlist
+  (`app/e2e/dynamic/dns-allowlist.txt`, each entry with the issue that explains it).
 
 ## 6. Tooling
 

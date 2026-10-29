@@ -18,6 +18,7 @@ import { e2eEnv } from "../helpers/e2e-env";
 import {
   CONTROL_PREFIX,
   assertGuardQuiet,
+  readDns,
   readGuard,
   type ControlWho,
 } from "../helpers/dynamic-lane-guard";
@@ -164,6 +165,24 @@ test.describe("the network guard of the Dynamic lane", () => {
     }
 
     expect(readGuard().violations).toEqual(before.violations);
+  });
+
+  // #714-T02
+  test("counts a DNS-sized packet of the engine user on loopback in the control of the name lookups, which no name check fails", async () => {
+    const before = readGuard();
+    const dnsBefore = readDns();
+
+    // Nothing answers on 127.0.0.2: the packet is the control, not a lookup of the lane's resolver (a real lookup of the
+    // engine user would fail the lane at its end, by design; the gate logic is proven in src/test-support).
+    await asUser(ENGINE, home, "bash", [
+      "-c",
+      "exec 3<>/dev/udp/127.0.0.2/53; echo control >&3",
+    ]);
+
+    const dnsAfter = readDns();
+    expect(dnsAfter.controlEngine - dnsBefore.controlEngine).toBeGreaterThan(0);
+    expect(dnsAfter.queries).toEqual(dnsBefore.queries);
+    expect(readGuard()).toEqual(before);
   });
 
   // #253-G06

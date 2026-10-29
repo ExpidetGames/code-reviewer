@@ -8,8 +8,9 @@
 import { createSocket } from "node:dgram";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  formatErrorAnswer,
   noSuchNameAnswer,
   readQuestion,
   startLaneResolver,
@@ -100,6 +101,47 @@ describe("the resolver of the Dynamic lane", () => {
 
       expect(answer[3]! & 0x0f).toBe(3);
       expect(resolver.asked()).toEqual(["A registry.example.org"]);
+    } finally {
+      await resolver.close();
+    }
+  });
+
+  // #714-T02
+  it("answers a query it cannot read with 'format error' and writes it down as no name, and never answers an answer", async () => {
+    const resolver = await startLaneResolver({ port: 0 });
+    try {
+      const garbled = Buffer.concat([
+        query("a.example", 1).subarray(0, 12),
+        Buffer.from([200, 1, 2]),
+      ]);
+      expect(formatErrorAnswer(garbled)[3]! & 0x0f).toBe(1);
+
+      const client = createSocket("udp4");
+      const answers: Buffer[] = [];
+      client.on("message", (message) => answers.push(message));
+      const send = (message: Buffer) =>
+        new Promise<void>((resolve) => {
+          client.send(message, resolver.port, "127.0.0.1", () => {
+            resolve();
+          });
+        });
+      await send(garbled);
+      // An answer (QR set) is ignored; the query after it proves the resolver has handled both by then.
+      const response = Buffer.from(query("b.example", 1));
+      response[2] = response[2]! | 0x80;
+      await send(response);
+      await send(query("c.example", 1));
+      await vi.waitFor(() => {
+        expect(answers).toHaveLength(2);
+      });
+      client.close();
+
+      expect(answers[0]![3]! & 0x0f).toBe(1);
+      expect(answers[1]![3]! & 0x0f).toBe(3);
+      expect(resolver.asked()).toEqual([
+        "MALFORMED (not a query with one question)",
+        "A c.example",
+      ]);
     } finally {
       await resolver.close();
     }

@@ -16,11 +16,24 @@
 #   violation-*  a connection to anything but loopback. The lane must end with all of them at zero.
 #   control-*    a connection to 192.0.2.0/24 (TEST-NET-1, reserved for documentation, never routed). The
 #                lane itself connects there as each kind of process to prove the counters move.
+#   dns-*        a query to port 53 (UDP or TCP) on loopback, where the lane's own resolver (e2e/helpers/lane-dns-stub.ts) answers
+#                "no such name" at once, so nothing of it leaves the namespace and the violation counters never see it. These
+#                counters do (#714): the engine user must not ask for any name (its counter must end at zero), and the names asked
+#                by anyone are compared with e2e/dynamic/dns-allowlist.txt. The rules take no verdict and sit before the loopback
+#                accept; dns-control-engine is the engine user's query to 127.0.0.2:53, nothing answers there, which proves that
+#                the counters move for the engine without a name lookup that would fail the lane.
 # A rule without a counter name above would not be read, so every counter has the comment the reader looks for.
 
 add table inet cr_lane_guard
 flush table inet cr_lane_guard
 add chain inet cr_lane_guard output { type filter hook output priority -10 ; policy accept ; }
+
+# Name lookups on loopback (the lane's own resolver), per user, before loopback is accepted. Only the control accepts.
+add rule inet cr_lane_guard output oifname "lo" ip daddr 127.0.0.2 meta l4proto udp th dport 53 meta skuid 10101 counter accept comment "dns-control-engine"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 10101 counter comment "dns-engine"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 10001 counter comment "dns-job"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 0 counter comment "dns-root"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid != { 0, 10001, 10101 } counter comment "dns-other"
 
 # Loopback is the only way to the fakes.
 add rule inet cr_lane_guard output oifname "lo" accept

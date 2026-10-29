@@ -73,14 +73,6 @@ async function overviewOf(
   return result.view;
 }
 
-/** Every value at the end of an object or array, however deep. */
-function leafValues(node: unknown): unknown[] {
-  if (Array.isArray(node)) return node.flatMap(leafValues);
-  if (typeof node === "object" && node !== null)
-    return Object.values(node).flatMap(leafValues);
-  return [node];
-}
-
 describe("the billing page data of a workspace", () => {
   // #505-T01
   it("reports the balance, nothing held and the journal newest first with the right signs", async () => {
@@ -371,13 +363,11 @@ describe("the billing page data of a workspace", () => {
     });
     const spy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
-    const view = await overviewOf(t);
-    const text = JSON.stringify(view);
+    const text = JSON.stringify(await overviewOf(t));
 
-    // The minute count is a number: look for it as a value, never as text (a substring of "777" turns up inside the
-    // random ids of the view now and then, #714).
-    expect(leafValues(view)).not.toContain(777);
-    expect(leafValues(view)).not.toContain("777");
+    // The minute count as a standalone number; a substring of "777" turns up inside the random ids of the view now and
+    // then (#714).
+    expect(text).not.toMatch(/(?<![0-9A-Za-z])777(?![0-9A-Za-z])/);
     for (const secret of [
       "minutes",
       "corr-secret-ref",

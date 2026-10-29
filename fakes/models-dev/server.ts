@@ -17,6 +17,7 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { keepConnectionsOpen } from "../keep-alive.ts";
 
 export const MODELS_DEV_FIXTURE_PATH = join(
   import.meta.dirname,
@@ -149,6 +150,7 @@ export async function startModelsDevFake(
     }
     send(response, script);
   });
+  keepConnectionsOpen(server);
   await new Promise<void>((resolve) =>
     server.listen(options.port ?? 0, "127.0.0.1", resolve),
   );

@@ -64,6 +64,20 @@ export function noSuchNameAnswer(query: Buffer): Buffer {
   return answer;
 }
 
+/** The answer "format error" (FORMERR) to a message that is a query but not one with a single readable question. */
+export function formatErrorAnswer(query: Buffer): Buffer {
+  const answer = Buffer.from(query.subarray(0, HEADER));
+  answer[2] = 0x80 | (query[2]! & 0x79);
+  answer[3] = 0x80 | 1;
+  for (const at of [4, 6, 8, 10]) answer.writeUInt16BE(0, at);
+  return answer;
+}
+
+/** A packet that is a query (QR clear) with at least a header; anything else is not answered, so two resolvers cannot loop. */
+function isQueryWithHeader(message: Buffer): boolean {
+  return message.length >= HEADER && (message[2]! & 0x80) === 0;
+}
+
 export type LaneResolver = {
   port: number;
   /** `A name`, `AAAA name`, … in the order they were asked. */
@@ -79,8 +93,18 @@ export async function startLaneResolver(options: {
   const asked: string[] = [];
   const socket: Socket = createSocket("udp4");
   socket.on("message", (message, remote) => {
+    // An answer (QR set) is not a question, whatever follows its header: two resolvers cannot loop on each other.
+    if (message.length > 2 && (message[2]! & 0x80) !== 0) return;
     const question = readQuestion(message);
-    if (question === null) return;
+    if (question === null) {
+      if (!isQueryWithHeader(message)) return;
+      // Written down like a name that was asked: the allowlist of the guard has no such line, so the lane fails and says what.
+      const line = "MALFORMED (not a query with one question)";
+      asked.push(line);
+      options.onAsked?.(line);
+      socket.send(formatErrorAnswer(message), remote.port, remote.address);
+      return;
+    }
     const line = `${question.type} ${question.name}`;
     asked.push(line);
     options.onAsked?.(line);

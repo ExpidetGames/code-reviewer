@@ -33,6 +33,7 @@
 // fake (runner/tests/engine/fake_llm.py). Dummy values only; state is in memory.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { keepConnectionsOpen } from "../keep-alive.ts";
 import { CacheRequestRejected, PromptCache } from "./anthropic-cache.ts";
 import { StrictMessagesApi } from "./anthropic-rules.ts";
 import { defaultReplies, type PromptKind } from "./canned.ts";
@@ -710,6 +711,7 @@ export async function startLlmFake(
     });
   });
 
+  keepConnectionsOpen(server);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port ?? 0, host, resolve);

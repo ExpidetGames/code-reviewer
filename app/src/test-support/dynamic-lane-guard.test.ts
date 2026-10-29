@@ -8,15 +8,21 @@
 // (e2e/dynamic/network-guard.e2e.ts) and cannot be proven without root.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CONTROL_PREFIX,
   GUARD_CHAIN,
   GUARD_TABLE,
+  assertDnsQuiet,
   assertNoExternalAttempts,
   describeAttempts,
+  describeDnsProblems,
+  parseAskedNames,
   parseDestinations,
+  parseDnsAllowlist,
+  parseDns,
   parseGuard,
+  readGuardDestinations,
   type GuardReading,
 } from "../../e2e/helpers/dynamic-lane-guard.ts";
 
@@ -95,6 +101,20 @@ const QUIET = {
   "violation-other": 0,
 };
 
+const DNS_QUIET = {
+  "dns-control-engine": 0,
+  "dns-engine": 0,
+  "dns-job": 0,
+  "dns-root": 0,
+  "dns-other": 0,
+};
+const ALLOWLIST = readFileSync(
+  fileURLToPath(
+    new URL("../../e2e/dynamic/dns-allowlist.txt", import.meta.url),
+  ),
+  "utf8",
+);
+
 describe("the network guard of the privileged Dynamic e2e lane", () => {
   // #253-G01
   it("reads the counters of the violations and of the controls apart", () => {
@@ -158,7 +178,9 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
       (match) => match[1],
     );
 
-    expect(comments.sort()).toEqual(Object.keys(QUIET).sort());
+    expect(comments.sort()).toEqual(
+      [...Object.keys(QUIET), ...Object.keys(DNS_QUIET)].sort(),
+    );
     expect(RULES).toContain(`table inet ${GUARD_TABLE}`);
     expect(RULES).toContain(`add chain inet ${GUARD_TABLE} ${GUARD_CHAIN}`);
     // Loopback is the only way out that is accepted; everything else is counted and rejected.
@@ -233,6 +255,45 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
     ).toEqual(["[fd00:255::2]:53/udp"]);
   });
 
+  // #714-T03
+  it("reads the protocol of an element as a number as well as by name", () => {
+    expect(
+      parseDestinations({
+        nftables: [
+          {
+            set: {
+              elem: [
+                { elem: { val: { concat: ["10.255.255.2", 6, 443] } } },
+                { concat: ["10.255.255.2", 17, "53"] },
+                { concat: ["fd00:255::2", 132, 9] },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      "10.255.255.2:443/tcp",
+      "10.255.255.2:53/udp",
+      "[fd00:255::2]:9/132",
+    ]);
+  });
+
+  // #714-T03
+  it("says so when the destinations cannot be read, instead of returning none silently", () => {
+    // `nft` is not there, or not allowed to list the lane's table, outside the lane: either way the listing fails.
+    const written = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      expect(readGuardDestinations()).toEqual([]);
+      expect(
+        written.mock.calls.map((call) => String(call[0])).join(""),
+      ).toMatch(/destinations unreadable: nft list set seen4 failed/);
+    } finally {
+      written.mockRestore();
+    }
+  });
+
   // #667-T01
   it("records the destinations in sets that the loopback and the controls never reach, and loads them without being able to break the guard", () => {
     expect(TRACE).toMatch(
@@ -251,6 +312,141 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
     );
     expect(NAMESPACE.indexOf("guard.nft")).toBeLessThan(
       NAMESPACE.indexOf("guard-trace.nft"),
+    );
+  });
+});
+
+describe("the name lookups on the lane's own resolver", () => {
+  const ALLOWED = parseDnsAllowlist(ALLOWLIST);
+
+  // #714-T02
+  it("reads the DNS counters of each user and the engine control, apart from the violations", () => {
+    const reading = parseDns(
+      listing({ ...QUIET, ...DNS_QUIET, "dns-engine": 3, "dns-root": 2 }),
+    );
+
+    expect(reading).toEqual({
+      queries: { engine: 3, job: 0, root: 2, other: 0 },
+      controlEngine: 0,
+    });
+    // The loopback queries do not touch the counters that fail a test for leaving the machine.
+    expect(() => {
+      assertNoExternalAttempts(
+        parseGuard(listing({ ...QUIET, ...DNS_QUIET, "dns-engine": 3 })),
+      );
+    }).not.toThrow();
+  });
+
+  // #714-T02
+  it("refuses to read a ruleset without the DNS counters, because a guard that cannot see is not a guard", () => {
+    expect(() => parseDns(listing(QUIET))).toThrow(/dns-engine/);
+    expect(() => parseDns({ nftables: [] })).toThrow(/dns-engine/);
+    expect(() => parseDns("not nft output")).toThrow();
+  });
+
+  // #714-T02
+  it("fails the lane when the engine user sent any query, even for a name that is allowed", () => {
+    const dns = parseDns(listing({ ...QUIET, ...DNS_QUIET, "dns-engine": 1 }));
+
+    expect(() => {
+      assertDnsQuiet(dns, ["github.com"], ALLOWED);
+    }).toThrow(/engine user .* 1 DNS query packet/);
+  });
+
+  // #714-T02
+  it("fails the lane for a name that is not on the allowlist, and names it", () => {
+    const dns = parseDns(listing({ ...QUIET, ...DNS_QUIET, "dns-root": 2 }));
+
+    expect(() => {
+      assertDnsQuiet(
+        dns,
+        ["github.com", "registry.npmjs.org", "evil.test"],
+        ALLOWED,
+      );
+    }).toThrow(/registry\.npmjs\.org, evil\.test/);
+    expect(
+      describeDnsProblems(dns, ["github.com", "registry.npmjs.org"], ALLOWED),
+    ).toHaveLength(1);
+  });
+
+  // #714-T02
+  it("passes when nobody but root asked, and only for names on the allowlist, and when the control moved", () => {
+    const dns = parseDns(
+      listing({
+        ...QUIET,
+        ...DNS_QUIET,
+        "dns-root": 4,
+        "dns-control-engine": 2,
+      }),
+    );
+
+    expect(() => {
+      assertDnsQuiet(dns, ["github.com", "github.com"], ALLOWED);
+    }).not.toThrow();
+    expect(() => {
+      assertDnsQuiet(dns, [], ALLOWED);
+    }).not.toThrow();
+  });
+
+  // #714-T02
+  it("reads the names of the resolver's log and the allowlist the same way, whatever the type, case or root dot", () => {
+    expect(
+      parseAskedNames(
+        "A github.com\nAAAA GitHub.com.\n\nMALFORMED (not a query)\n",
+      ),
+    ).toEqual(["github.com", "github.com", "(not a query)"]);
+    expect(
+      parseDnsAllowlist("# comment\n\nGitHub.com # why\n  example.org  \n"),
+    ).toEqual(new Set(["github.com", "example.org"]));
+    // A malformed query is not a name that can be on a list.
+    expect(
+      describeDnsProblems(
+        parseDns(listing({ ...QUIET, ...DNS_QUIET })),
+        parseAskedNames("MALFORMED (not a query with one question)"),
+        ALLOWED,
+      ),
+    ).toHaveLength(1);
+  });
+
+  // #714-T02
+  it("has an allowlist that names github.com and the issue to find its asker, and nothing else", () => {
+    expect([...ALLOWED]).toEqual(["github.com"]);
+    expect(ALLOWLIST).toMatch(/github\.com .*#736/);
+  });
+
+  // #714-T02
+  it("counts queries to port 53 on loopback per user, before the loopback accept, with a control that does not fail the lane", () => {
+    const lines = RULES.split("\n");
+    const accept = lines.findIndex((line) => /oifname "lo" accept/.test(line));
+    const dnsRules = lines.filter((line) => /comment "dns-/.test(line));
+
+    expect(dnsRules).toHaveLength(5);
+    for (const line of dnsRules) {
+      expect(lines.indexOf(line)).toBeLessThan(accept);
+      expect(line).toMatch(/oifname "lo"/);
+      expect(line).toMatch(/th dport 53/);
+    }
+    // The engine user's counter covers UDP and TCP and is not the control's.
+    expect(RULES).toMatch(
+      /meta l4proto \{ tcp, udp \} th dport 53 meta skuid 10101 counter comment "dns-engine"/,
+    );
+    expect(RULES).toMatch(/meta skuid 10001 counter comment "dns-job"/);
+    expect(RULES).toMatch(/meta skuid 0 counter comment "dns-root"/);
+    expect(RULES).toMatch(
+      /meta skuid != \{ 0, 10001, 10101 \} counter comment "dns-other"/,
+    );
+    // The control goes to an address nothing answers on, and only it accepts (the others take no verdict).
+    expect(RULES).toMatch(
+      /ip daddr 127\.0\.0\.2 .*skuid 10101 counter accept comment "dns-control-engine"/,
+    );
+    expect(dnsRules.filter((line) => /\baccept\b/.test(line))).toHaveLength(1);
+  });
+
+  // #714-T02
+  it("reads the guard's last word from the files of the lane: the resolver's log goes to the command, which fails the lane", () => {
+    expect(NAMESPACE).toMatch(/dynamic-lane-guard-command\.ts" "\$DNS_LOG"/);
+    expect(NAMESPACE.indexOf('kill "$DNS_PID"')).toBeLessThan(
+      NAMESPACE.indexOf("dynamic-lane-guard-command.ts"),
     );
   });
 });
