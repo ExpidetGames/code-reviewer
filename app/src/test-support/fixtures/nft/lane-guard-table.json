@@ -8,6 +8,83 @@
       }
     },
     {
+      "table": {
+        "family": "inet",
+        "name": "cr_lane_guard",
+        "handle": 2
+      }
+    },
+    {
+      "set": {
+        "family": "inet",
+        "name": "seen4",
+        "table": "cr_lane_guard",
+        "type": ["ipv4_addr", "inet_proto", "inet_service"],
+        "handle": 25,
+        "size": 256,
+        "flags": ["dynamic"]
+      }
+    },
+    {
+      "set": {
+        "family": "inet",
+        "name": "seen6",
+        "table": "cr_lane_guard",
+        "type": ["ipv6_addr", "inet_proto", "inet_service"],
+        "handle": 26,
+        "size": 256,
+        "flags": ["dynamic"],
+        "elem": [
+          {
+            "concat": ["ff02::1:ffdc:122e", "ipv6-icmp", 56888]
+          },
+          {
+            "concat": ["ff02::2", "ipv6-icmp", 6220]
+          },
+          {
+            "concat": ["ff02::2", "ipv6-icmp", 27228]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 23680]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 22166]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 21661]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 9643]
+          },
+          {
+            "concat": ["ff02::1:ffcd:1805", "ipv6-icmp", 3028]
+          }
+        ]
+      }
+    },
+    {
+      "set": {
+        "family": "inet",
+        "name": "dns4",
+        "table": "cr_lane_guard",
+        "type": ["uid", "ipv4_addr", "inet_proto", "inet_service"],
+        "handle": 29,
+        "size": 256,
+        "flags": ["dynamic"]
+      }
+    },
+    {
+      "set": {
+        "family": "inet",
+        "name": "dns6",
+        "table": "cr_lane_guard",
+        "type": ["uid", "ipv6_addr", "inet_proto", "inet_service"],
+        "handle": 30,
+        "size": 256,
+        "flags": ["dynamic"]
+      }
+    },
+    {
       "chain": {
         "family": "inet",
         "table": "cr_lane_guard",
@@ -20,11 +97,179 @@
       }
     },
     {
+      "chain": {
+        "family": "inet",
+        "table": "cr_lane_guard",
+        "name": "output_after",
+        "handle": 2,
+        "type": "filter",
+        "hook": "output",
+        "prio": 10,
+        "policy": "accept"
+      }
+    },
+    {
       "rule": {
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 24,
+        "handle": 34,
+        "expr": [
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "oifname"
+                }
+              },
+              "right": "lo"
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "l4proto"
+                }
+              },
+              "right": {
+                "set": ["tcp", "udp"]
+              }
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "payload": {
+                  "protocol": "th",
+                  "field": "dport"
+                }
+              },
+              "right": 53
+            }
+          },
+          {
+            "set": {
+              "op": "add",
+              "elem": {
+                "concat": [
+                  {
+                    "meta": {
+                      "key": "skuid"
+                    }
+                  },
+                  {
+                    "payload": {
+                      "protocol": "ip6",
+                      "field": "daddr"
+                    }
+                  },
+                  {
+                    "meta": {
+                      "key": "l4proto"
+                    }
+                  },
+                  {
+                    "payload": {
+                      "protocol": "th",
+                      "field": "dport"
+                    }
+                  }
+                ]
+              },
+              "set": "@dns6"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rule": {
+        "family": "inet",
+        "table": "cr_lane_guard",
+        "chain": "output",
+        "handle": 32,
+        "expr": [
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "oifname"
+                }
+              },
+              "right": "lo"
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "l4proto"
+                }
+              },
+              "right": {
+                "set": ["tcp", "udp"]
+              }
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "payload": {
+                  "protocol": "th",
+                  "field": "dport"
+                }
+              },
+              "right": 53
+            }
+          },
+          {
+            "set": {
+              "op": "add",
+              "elem": {
+                "concat": [
+                  {
+                    "meta": {
+                      "key": "skuid"
+                    }
+                  },
+                  {
+                    "payload": {
+                      "protocol": "ip",
+                      "field": "daddr"
+                    }
+                  },
+                  {
+                    "meta": {
+                      "key": "l4proto"
+                    }
+                  },
+                  {
+                    "payload": {
+                      "protocol": "th",
+                      "field": "dport"
+                    }
+                  }
+                ]
+              },
+              "set": "@dns4"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rule": {
+        "family": "inet",
+        "table": "cr_lane_guard",
+        "chain": "output",
+        "handle": 28,
         "expr": [
           {
             "match": {
@@ -89,7 +334,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 23,
+        "handle": 27,
         "expr": [
           {
             "match": {
@@ -137,7 +382,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 2,
+        "handle": 3,
         "comment": "dns-control-engine",
         "expr": [
           {
@@ -203,7 +448,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 4,
+        "handle": 5,
         "comment": "dns-engine",
         "expr": [
           {
@@ -267,7 +512,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 6,
+        "handle": 7,
         "comment": "dns-job",
         "expr": [
           {
@@ -331,7 +576,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 8,
+        "handle": 9,
         "comment": "dns-root",
         "expr": [
           {
@@ -395,7 +640,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 11,
+        "handle": 12,
         "comment": "dns-other",
         "expr": [
           {
@@ -461,7 +706,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 12,
+        "handle": 13,
         "expr": [
           {
             "match": {
@@ -485,7 +730,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 13,
+        "handle": 14,
         "comment": "control-engine",
         "expr": [
           {
@@ -536,7 +781,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 14,
+        "handle": 15,
         "comment": "control-job",
         "expr": [
           {
@@ -587,7 +832,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 15,
+        "handle": 16,
         "comment": "control-root",
         "expr": [
           {
@@ -638,7 +883,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 16,
+        "handle": 17,
         "comment": "violation-engine",
         "expr": [
           {
@@ -672,7 +917,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 17,
+        "handle": 18,
         "comment": "violation-job",
         "expr": [
           {
@@ -706,7 +951,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 18,
+        "handle": 19,
         "comment": "violation-root",
         "expr": [
           {
@@ -722,8 +967,8 @@
           },
           {
             "counter": {
-              "packets": 5,
-              "bytes": 310
+              "packets": 0,
+              "bytes": 0
             }
           },
           {
@@ -740,7 +985,7 @@
         "family": "inet",
         "table": "cr_lane_guard",
         "chain": "output",
-        "handle": 20,
+        "handle": 21,
         "comment": "violation-other",
         "expr": [
           {
@@ -766,6 +1011,136 @@
             "reject": {
               "type": "icmpx",
               "expr": "port-unreachable"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "rule": {
+        "family": "inet",
+        "table": "cr_lane_guard",
+        "chain": "output_after",
+        "handle": 22,
+        "comment": "dns-control-delivered",
+        "expr": [
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "oifname"
+                }
+              },
+              "right": "lo"
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "payload": {
+                  "protocol": "ip",
+                  "field": "daddr"
+                }
+              },
+              "right": "127.0.0.2"
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "payload": {
+                  "protocol": "udp",
+                  "field": "dport"
+                }
+              },
+              "right": 53
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "skuid"
+                }
+              },
+              "right": 10001
+            }
+          },
+          {
+            "counter": {
+              "packets": 0,
+              "bytes": 0
+            }
+          },
+          {
+            "accept": null
+          }
+        ]
+      }
+    },
+    {
+      "rule": {
+        "family": "inet",
+        "table": "cr_lane_guard",
+        "chain": "output_after",
+        "handle": 24,
+        "comment": "dns-engine-delivered",
+        "expr": [
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "oifname"
+                }
+              },
+              "right": "lo"
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "l4proto"
+                }
+              },
+              "right": {
+                "set": ["tcp", "udp"]
+              }
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "payload": {
+                  "protocol": "th",
+                  "field": "dport"
+                }
+              },
+              "right": 53
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "skuid"
+                }
+              },
+              "right": 10101
+            }
+          },
+          {
+            "counter": {
+              "packets": 0,
+              "bytes": 0
             }
           }
         ]

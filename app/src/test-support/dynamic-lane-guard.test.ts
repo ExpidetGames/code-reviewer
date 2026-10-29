@@ -102,8 +102,8 @@ const QUIET = {
   "violation-other": 0,
 };
 
-/** Output of `nft -j` captured from the lane in CI (nft 1.0.9, run 40914162000), unchanged. */
-function captured(name: "chain" | "seen4" | "seen6"): unknown {
+/** Output of `nft -j` captured from the lane in CI (nft 1.0.9; the sets in run 40914162000, the table in run 40929640563), unchanged. */
+function captured(name: "table" | "seen4" | "seen6"): unknown {
   return JSON.parse(
     readFileSync(
       fileURLToPath(
@@ -287,10 +287,16 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
       "[ff02::2]:28092/ipv6-icmp",
       "[ff02::2]:21701/ipv6-icmp",
     ]);
-    // The chain was listed in a capture run that made three attempts on purpose; the guard had counted five as root.
-    expect(parseGuard(captured("chain"))).toEqual({
-      violations: { engine: 0, job: 0, root: 5, other: 0 },
+    // The whole table of the guard as the lane lists it before the journeys: all counters present, all at zero.
+    expect(parseGuard(captured("table"))).toEqual({
+      violations: { engine: 0, job: 0, root: 0, other: 0 },
       controls: { engine: 0, job: 0, root: 0 },
+    });
+    expect(parseDns(captured("table"))).toEqual({
+      queries: { engine: 0, job: 0, root: 0, other: 0 },
+      engineDelivered: 0,
+      controlEngine: 0,
+      controlDelivered: 0,
     });
   });
 
