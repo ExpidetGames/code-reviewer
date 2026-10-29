@@ -4,6 +4,7 @@
 // encrypted secret store and the credential store on it, the service with a clock, and the fake GitHub on a
 // loopback port (with the manifest flow switched on) as `github.com` and `api.github.com`. Every address the
 // service builds is made from `GITHUB_CONFIG_TEST_PUBLIC_URL`.
+import { getProductIdentity } from "../product-identity/current.ts";
 import { GITHUB_APP_SECRET_NAMES } from "../secret-names/names.ts";
 import type { FakeGithub } from "../../../fakes/github/server.ts";
 import {
@@ -68,6 +69,7 @@ export async function createGithubConfigHarness(
   });
   const logs: string[] = [];
   const service = createGithubConfigService({
+    product: getProductIdentity(),
     credentials,
     signedStates,
     rateLimits: createRateLimitsRepository(db, now),

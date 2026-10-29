@@ -3,6 +3,7 @@
 // The copy for the error codes of the sign-up and the email verification routes (the UI translates a code
 // to copy, never the other way round). Nothing here says whether an address has an account or is allowed:
 // the routes do not, so neither does the copy.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   PASSWORD_ERROR_COPY,
   type PasswordErrorCode,
@@ -41,6 +42,7 @@ const FIELD_ISSUE_COPY: Record<string, string> = {
 
 /** The sentence for a failed call of the sign-up, the resend or the verification. */
 export function describeSignUpFailure(
+  product: ProductIdentity,
   code: string,
   issues: RequestIssue[] = [],
 ): string {
@@ -51,7 +53,7 @@ export function describeSignUpFailure(
       return PASSWORD_ERROR_COPY[issue.code as PasswordErrorCode];
   }
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );

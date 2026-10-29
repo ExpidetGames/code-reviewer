@@ -7,6 +7,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VerifyEmailHelp } from "./verify-email-help.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -17,6 +20,7 @@ describe("the page that asks to confirm an address", () => {
   it("shows one line and the form for a new link, with the explanation behind a disclosure", () => {
     render(
       <VerifyEmailHelp
+        product={PRODUCT}
         email={null}
         isAdmin={false}
         signOutAction={signOutAction}
@@ -50,6 +54,7 @@ describe("the page that asks to confirm an address", () => {
   it("keeps a way out of a signed in session, and links back to the sign-in without one", () => {
     const signedIn = render(
       <VerifyEmailHelp
+        product={PRODUCT}
         email="me@example.com"
         isAdmin={false}
         signOutAction={signOutAction}
@@ -63,6 +68,7 @@ describe("the page that asks to confirm an address", () => {
 
     render(
       <VerifyEmailHelp
+        product={PRODUCT}
         email={null}
         isAdmin={false}
         signOutAction={signOutAction}
@@ -80,6 +86,7 @@ describe("the page that asks to confirm an address", () => {
   it("gives the instance admin one link to the portal", () => {
     render(
       <VerifyEmailHelp
+        product={PRODUCT}
         email="admin@example.com"
         isAdmin
         signOutAction={signOutAction}

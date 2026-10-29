@@ -4,6 +4,7 @@
 // The button that accepts an invitation. Opening a link accepts nothing; this POST does (a mail scanner or a
 // link preview that opens every link in a message must not use one up). The invitation is named by the
 // link's token or, from the list of a verified address, by its id.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
@@ -26,6 +27,7 @@ export function AcceptInvitation({
   api?: AccountApi;
   open?: (path: string) => void;
 }) {
+  const product = useProductIdentity();
   const capabilities = useCapabilities();
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function AcceptInvitation({
     const result = await api.accept(which);
     if (!result.ok) {
       setPending(false);
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       return;
     }
     // A full navigation: the frame (the switcher) is made again with the new workspace in it.

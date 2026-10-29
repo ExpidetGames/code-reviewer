@@ -4,6 +4,7 @@
 // the workspace's LLM hint, then the list of repositories. `loadProjectsPage` gathers the data from
 // the services (passed in, so a test uses real ones against a test database), `ProjectsPageContent`
 // renders it. The page file only wires the real services.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   NeedsAttention,
   type AttentionNotice,
@@ -51,6 +52,7 @@ export const ACTIVATION_BLOCKED_TEXT =
 export const ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS = `${GITHUB_NOT_CONFIGURED_COPY} Projects cannot be activated until then.`;
 
 export function ProjectsPageContent({
+  product,
   workspaceSlug,
   audience = "member",
   canManage = true,
@@ -61,6 +63,8 @@ export function ProjectsPageContent({
   api,
   manualReviewApi,
 }: {
+  /** Who the page speaks for (the configuration hints name the product). */
+  product: ProductIdentity;
   /** The workspace of the page. */
   workspaceSlug: string;
   /** Whether the person runs the instance (reads which variables are wrong) or is a member. */
@@ -81,7 +85,7 @@ export function ProjectsPageContent({
   // One attention region for the whole page (#173): the configuration hints and the workspace's LLM
   // hint are rows of the same strip instead of two separate notice regions.
   const notices: AttentionNotice[] = [
-    ...describeConfigNotices(data.config, audience),
+    ...describeConfigNotices(product, data.config, audience),
     ...(llmNotice === null ? [] : [llmNotice]),
   ];
   return (

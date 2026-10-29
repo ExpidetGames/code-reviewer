@@ -73,6 +73,22 @@ describe("the page for a crash in the root layout", () => {
     expect(text).not.toContain("4155470914");
   });
 
+  // #740-T03
+  it("shows the brand of the product the build was made for, and code-review.com when it knows none", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("NEXT_PUBLIC_PRODUCT_ID", "factory");
+    renderPage(vi.fn());
+    expect(document.documentElement.textContent).toContain("Factory");
+    expect(document.documentElement.textContent).not.toContain(
+      "code-review.com",
+    );
+    cleanup();
+
+    vi.stubEnv("NEXT_PUBLIC_PRODUCT_ID", "");
+    renderPage(vi.fn());
+    expect(document.documentElement.textContent).toContain("code-review.com");
+  });
+
   it("keeps the light or dark mode the person chose", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     window.localStorage.setItem(THEME_STORAGE_KEY, "dark");

@@ -16,6 +16,9 @@ import { createRunsFixture } from "../test-support/runs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { createRunsService } from "./runs-service.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const USD = 1_000_000;
 const it = vitestIt;
@@ -26,6 +29,7 @@ async function start(options: { pricesOn?: boolean } = {}) {
   await fundWorkspace(f.db, f.workspaceId, 50 * USD);
   const source = createRunPriceSource(f.db, f.workspaceId);
   const service = createRunsService({
+    product: PRODUCT,
     runs: f.runsRepository,
     now: f.clock.now,
     ...(options.pricesOn === false

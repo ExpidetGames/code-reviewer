@@ -3,6 +3,7 @@
 // The copy for review settings: what a problem with one field means and what to do about it, and what
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
 // problem); this is where a code becomes a sentence next to its field. A code is never shown.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { DEFAULT_LLM_MODEL } from "../../llm/config.ts";
 import { DEFAULT_LLM_PROVIDER_LABEL } from "../../llm/providers/index.ts";
 import {
@@ -62,10 +63,12 @@ export function formatDollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-const ISSUE_COPY: Record<
+const issueCopy = (
+  product: ProductIdentity,
+): Record<
   ReviewSettingIssueCode,
   (field: string, maximumCents?: number) => string
-> = {
+> => ({
   UNKNOWN_FIELD: () => "This setting does not exist.",
   INVALID_TYPE: (field) => {
     const choice = malformedChoice(field);
@@ -142,7 +145,7 @@ const ISSUE_COPY: Record<
   DYNAMIC_MODEL_UNKNOWN: () =>
     `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
   MODEL_MANAGED_BY_INSTANCE: () =>
-    "code-review.com provides the AI models for this workspace. Choose from the listed options instead.",
+    `${product.name} provides the AI models for this workspace. Choose from the listed options instead.`,
   PROVIDER_UNKNOWN: () => CHOOSE_PROVIDER,
   CATALOG_ENTRY_UNKNOWN: () => "This choice does not exist. Choose another.",
   CATALOG_ENTRY_NOT_RELEASED: () =>
@@ -168,21 +171,26 @@ const ISSUE_COPY: Record<
     "Some projects chose a model of their own for the current provider. Change those models first, or keep the provider.",
   // The user has to be on the operator's key before an entry can be chosen (#430): say so, and nothing about a model.
   CATALOG_ENTRY_OWN_KEY_MODE: () =>
-    "This workspace reviews with its own AI key, so the code-review.com choices cannot be used. They can be chosen once the workspace is billed via code-review.com.",
-};
+    `This workspace reviews with its own AI key, so the ${product.name} choices cannot be used. They can be chosen once the workspace is billed via ${product.name}.`,
+});
 
-function hasIssueCopy(code: string): code is ReviewSettingIssueCode {
-  return Object.hasOwn(ISSUE_COPY, code);
+function hasIssueCopy(
+  copy: object,
+  code: string,
+): code is ReviewSettingIssueCode {
+  return Object.hasOwn(copy, code);
 }
 
 /** The sentence shown next to a field for the code the validation reported. */
 export function describeIssue(
+  product: ProductIdentity,
   field: ReviewSettingField | string,
   code: string,
   maximumCents?: number,
 ): string {
-  return hasIssueCopy(code)
-    ? ISSUE_COPY[code](field, maximumCents)
+  const copy = issueCopy(product);
+  return hasIssueCopy(copy, code)
+    ? copy[code](field, maximumCents)
     : GENERIC_ISSUE;
 }
 
@@ -217,16 +225,19 @@ export function projectsNote(
  * The sentence for a refused save that has no field to mark (the reset of every default): what failed, each problem the
  * server reported once, and the projects the refusal names.
  */
-export function describeWholeRefusal(failure: {
-  code: string;
-  issues: readonly { field: string; code: string; maximumCents?: number }[];
-  details?: Record<string, unknown>;
-}): string {
+export function describeWholeRefusal(
+  product: ProductIdentity,
+  failure: {
+    code: string;
+    issues: readonly { field: string; code: string; maximumCents?: number }[];
+    details?: Record<string, unknown>;
+  },
+): string {
   const problems = failure.issues.map((issue) =>
-    describeIssue(issue.field, issue.code, issue.maximumCents),
+    describeIssue(product, issue.field, issue.code, issue.maximumCents),
   );
   return [
-    describeSaveFailure(failure.code),
+    describeSaveFailure(product, failure.code),
     ...new Set(problems),
     ...projectsNote(failure.details),
   ].join(" ");
@@ -252,8 +263,11 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
 };
 
 /** The sentence for a save (or reset) that failed as a whole. */
-export function describeSaveFailure(code: string): string {
+export function describeSaveFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   if (Object.hasOwn(SAVE_FAILURE_COPY, code))
     return SAVE_FAILURE_COPY[code as ReviewSettingsErrorCode];
-  return describeTransportFailure(code) ?? GENERIC_FAILURE;
+  return describeTransportFailure(product, code) ?? GENERIC_FAILURE;
 }

@@ -6,6 +6,7 @@
 // at start and whenever GitHub reports a change to an installation.) `SyncButton` reads the connections of the
 // workspace of the page (an Admin or an Owner); `InstanceSyncButton` reads the whole instance (the instance
 // admin, in the admin portal) and notes the installations nobody has linked.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr";
@@ -31,6 +32,7 @@ function addedText(added: number): string {
 }
 
 function SyncControl({ api }: { api: Pick<ProjectsApi, "sync"> }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -41,7 +43,10 @@ function SyncControl({ api }: { api: Pick<ProjectsApi, "sync"> }) {
     const result = await api.sync();
     setPending(false);
     if (!result.ok) {
-      setOutcome({ kind: "failed", text: describeFailure(result.code) });
+      setOutcome({
+        kind: "failed",
+        text: describeFailure(product, result.code),
+      });
       return;
     }
     setOutcome({

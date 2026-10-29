@@ -35,6 +35,8 @@ import { AdvancedSettingsPageContent } from "./advanced-settings-page.tsx";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 import { getProductIdentity } from "../../product-identity/current.ts";
 
+const PRODUCT = getProductIdentity();
+
 afterEach(cleanup);
 
 const GLOBAL_DATA = {
@@ -54,6 +56,7 @@ const renders = [
     label: "General",
     element: (
       <GeneralSettingsPageContent
+        product={PRODUCT}
         workspaceSlug="acme"
         workspaceName="Acme"
         canRename
@@ -82,6 +85,7 @@ const renders = [
     label: "LLM",
     element: (
       <LlmSettingsPageContent
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={[

@@ -40,7 +40,7 @@ export function CodeForm({
     const result = await api.submitCode(code.trim());
     setPending(false);
     if (!result.ok) {
-      setProblem(describeSetupFailure(result.code));
+      setProblem(describeSetupFailure(product, result.code));
       return;
     }
     onAccepted();

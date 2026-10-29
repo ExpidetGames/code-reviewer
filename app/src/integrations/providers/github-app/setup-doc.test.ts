@@ -17,6 +17,9 @@ import {
   SUBSCRIBED_EVENTS,
 } from "./manifest.ts";
 import { WEBHOOK_READ_FIELDS } from "./webhook-fields.ts";
+import { getProductIdentity } from "../../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const repoRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
 const guide = readFileSync(`${repoRoot}docs/github-app.md`, "utf8");
@@ -100,6 +103,7 @@ describe("the GitHub App setup guide", () => {
       ...permissionRows(subsection(permissions, "Organization permissions")),
     };
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: "https://reviews.example.test",
       tenancy: "single",
       name: "Code Reviewer",

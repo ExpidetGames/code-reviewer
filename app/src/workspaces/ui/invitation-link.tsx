@@ -6,6 +6,7 @@
 // sentence comes from its one owner (`messages.ts`), so it is written in exactly one place. The link is a
 // secret: it is in this component's state and in nothing else, it is not stored anywhere, and a new link
 // needs a revoke and a new invitation (or, with a mail server, a resend).
+import { useProductIdentity } from "@/product-identity/context";
 import { useId, useState } from "react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
@@ -18,6 +19,7 @@ import { INVITATION_LINK_LIFETIME } from "./messages.ts";
 export type ShownInvitation = { email: string; delivery: InvitationDelivery };
 
 export function InvitationLink({ shown }: { shown: ShownInvitation }) {
+  const product = useProductIdentity();
   const id = useId();
   const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
   const { delivery } = shown;
@@ -47,7 +49,7 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
       <AlertDescription className="flex flex-col gap-3">
         <span>
           {delivery.reason === "no_mail_server"
-            ? `code-review.com cannot send mail. Send this link to ${shown.email} yourself.`
+            ? `${product.name} cannot send mail. Send this link to ${shown.email} yourself.`
             : `The mail server did not accept the message. Send this link to ${shown.email} yourself.`}{" "}
           {INVITATION_LINK_LIFETIME}
         </span>

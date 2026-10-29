@@ -9,6 +9,7 @@
 // A switch that cannot be switched on explains itself through `aria-describedby` and a small hint
 // next to it, instead of a paragraph on every row (#173-T03). A Member gets no hint per row: the project
 // list says once, under the table, that only Admins and Owners switch projects (#633).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState } from "react";
 import { InfoHint } from "../../components/info-hint.tsx";
@@ -39,6 +40,7 @@ export function ProjectToggle({
   canManage?: boolean;
   api?: ProjectsApi;
 }) {
+  const product = useProductIdentity();
   // One client for the life of the component: a new one every render would restart what depends on it.
   const defaultApi = useMemo(
     () => browserProjectsApi(workspaceSlug),
@@ -65,7 +67,7 @@ export function ProjectToggle({
     const result = await api.setActive(repositoryId, !on);
     setPending(false);
     if (!result.ok) {
-      setProblem(describeFailure(result.code));
+      setProblem(describeFailure(product, result.code));
       return;
     }
     setConfirmed(result.data.active);

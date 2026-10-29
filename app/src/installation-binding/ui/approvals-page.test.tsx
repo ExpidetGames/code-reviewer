@@ -30,6 +30,9 @@ import type { ApprovalsApi } from "./api.ts";
 import { ApprovalsPageContent } from "./approvals-page.tsx";
 import type { UnclaimedInstallation } from "../../db/repositories/unclaimed-installations-repository.ts";
 import type { InstallationLinkRequestView } from "../../db/installation-link-request.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(() => {
   cleanup();
@@ -118,6 +121,7 @@ describe("the tabs of the page", () => {
   it("shows only the requests that wait on the Waiting tab", () => {
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[request({ accountLogin: "acme" })]}
         decided={[
           request({ id: "r2", status: "approved", accountLogin: "beta" }),
@@ -144,6 +148,7 @@ describe("the tabs of the page", () => {
     navigation.search = "?tab=decided";
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[request({ accountLogin: "acme" })]}
         decided={[
           request({ id: "r2", status: "approved", accountLogin: "beta" }),
@@ -166,6 +171,7 @@ describe("the tabs of the page", () => {
     navigation.search = "?tab=not-linked";
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[request({ accountLogin: "acme" })]}
         decided={[]}
         unclaimed={[unclaimed()]}
@@ -191,6 +197,7 @@ describe("the page header", () => {
   it("renders the one h1, the Admin / Approvals trail and Sync from GitHub as the header action", () => {
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[]}
         decided={[]}
         unclaimed={[]}
@@ -227,7 +234,12 @@ describe("a request that waits", () => {
   it("keeps the evidence behind a disclosure, closed at first", async () => {
     const user = userEvent.setup();
     render(
-      <ApprovalsPageContent pending={[request()]} decided={[]} api={api()} />,
+      <ApprovalsPageContent
+        product={PRODUCT}
+        pending={[request()]}
+        decided={[]}
+        api={api()}
+      />,
     );
 
     const trigger = screen.getByRole("button", { name: "Evidence for acme" });
@@ -246,7 +258,12 @@ describe("a request that waits", () => {
   it("shows who asked, the account of the installation, whether their token can use it, and the result of the role read", async () => {
     const user = userEvent.setup();
     render(
-      <ApprovalsPageContent pending={[request()]} decided={[]} api={api()} />,
+      <ApprovalsPageContent
+        product={PRODUCT}
+        pending={[request()]}
+        decided={[]}
+        api={api()}
+      />,
     );
 
     await openEvidence(user, "acme");
@@ -269,6 +286,7 @@ describe("a request that waits", () => {
     const user = userEvent.setup();
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[
           request({
             requesterGithubLogin: null,
@@ -298,6 +316,7 @@ describe("a request that waits", () => {
     const user = userEvent.setup();
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[
           request({
             requesterName: null,
@@ -322,7 +341,12 @@ describe("a request that waits", () => {
     const user = userEvent.setup();
     const calls = api();
     render(
-      <ApprovalsPageContent pending={[request()]} decided={[]} api={calls} />,
+      <ApprovalsPageContent
+        product={PRODUCT}
+        pending={[request()]}
+        decided={[]}
+        api={calls}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Approve acme" }));
@@ -338,6 +362,7 @@ describe("a request that waits", () => {
     const user = userEvent.setup();
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[request()]}
         decided={[]}
         api={api({
@@ -366,6 +391,7 @@ describe("a request that waits", () => {
     const hostile = '<script>alert("x")</script>';
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[request({ requesterName: hostile, workspaceName: hostile })]}
         decided={[]}
         api={api()}
@@ -385,6 +411,7 @@ describe("the page without requests", () => {
     navigation.search = "?tab=decided";
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[]}
         decided={[
           request({
@@ -425,7 +452,14 @@ describe("the page without requests", () => {
 
   // #183-T01
   it("shows an empty state on the Waiting tab while nothing waits", () => {
-    render(<ApprovalsPageContent pending={[]} decided={[]} api={api()} />);
+    render(
+      <ApprovalsPageContent
+        product={PRODUCT}
+        pending={[]}
+        decided={[]}
+        api={api()}
+      />,
+    );
 
     expect(screen.getByText("No requests waiting")).toBeTruthy();
     expect(
@@ -440,6 +474,7 @@ describe("the installations nobody has linked", () => {
     navigation.search = "?tab=not-linked";
     render(
       <ApprovalsPageContent
+        product={PRODUCT}
         pending={[]}
         decided={[]}
         unclaimed={[
@@ -480,7 +515,14 @@ describe("the installations nobody has linked", () => {
   // #103-IB-11
   it("says so when GitHub lists none, as an empty state on the Not linked tab", () => {
     navigation.search = "?tab=not-linked";
-    render(<ApprovalsPageContent pending={[]} decided={[]} api={api()} />);
+    render(
+      <ApprovalsPageContent
+        product={PRODUCT}
+        pending={[]}
+        decided={[]}
+        api={api()}
+      />,
+    );
 
     expect(
       screen.getByText("GitHub lists no installation that waits."),

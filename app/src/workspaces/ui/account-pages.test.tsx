@@ -18,6 +18,9 @@ import type { AccountApi } from "./api.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
 import { CreateWorkspaceForm } from "./create-workspace-form.tsx";
 import { NoAccessContent } from "./no-access-content.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(() => {
   cleanup();
@@ -48,6 +51,7 @@ describe("a person without a workspace", () => {
   it("is told to ask an admin for an invitation in a single-tenant instance, and is offered no way to create one", () => {
     render(
       <NoAccessContent
+        product={PRODUCT}
         multiTenant={false}
         pending={[]}
         isInstanceAdmin={false}
@@ -66,7 +70,12 @@ describe("a person without a workspace", () => {
   // #101-WM-01
   it("is offered the creation of a workspace in a multi-tenant instance", () => {
     render(
-      <NoAccessContent multiTenant pending={[]} isInstanceAdmin={false} />,
+      <NoAccessContent
+        product={PRODUCT}
+        multiTenant
+        pending={[]}
+        isInstanceAdmin={false}
+      />,
     );
 
     expect(
@@ -82,6 +91,7 @@ describe("a person without a workspace", () => {
     const open = vi.fn();
     render(
       <NoAccessContent
+        product={PRODUCT}
         multiTenant={false}
         isInstanceAdmin={false}
         pending={[
@@ -105,7 +115,14 @@ describe("a person without a workspace", () => {
   });
 
   it("shows the instance admin the way to the portal", () => {
-    render(<NoAccessContent multiTenant pending={[]} isInstanceAdmin />);
+    render(
+      <NoAccessContent
+        product={PRODUCT}
+        multiTenant
+        pending={[]}
+        isInstanceAdmin
+      />,
+    );
 
     expect(
       screen
@@ -118,6 +135,7 @@ describe("a person without a workspace", () => {
   it("renders the same card for the action in both instance modes, with at most one primary action", () => {
     const single = render(
       <NoAccessContent
+        product={PRODUCT}
         multiTenant={false}
         pending={[]}
         isInstanceAdmin={false}
@@ -132,7 +150,12 @@ describe("a person without a workspace", () => {
     single.unmount();
 
     const multi = render(
-      <NoAccessContent multiTenant pending={[]} isInstanceAdmin={false} />,
+      <NoAccessContent
+        product={PRODUCT}
+        multiTenant
+        pending={[]}
+        isInstanceAdmin={false}
+      />,
     );
     expect(multi.container.querySelectorAll('[data-slot="card"]')).toHaveLength(
       1,

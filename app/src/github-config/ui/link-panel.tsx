@@ -7,6 +7,7 @@
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5). It renders the content of a normal
 // card (the caller owns the card and its title), not a settings form, and the long merge explanation sits
 // behind a disclosure.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
@@ -42,6 +43,7 @@ export function LinkPanel({
   /** Only tests pass this. */
   go?: (url: string) => void;
 }) {
+  const product = useProductIdentity();
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -51,7 +53,7 @@ export function LinkPanel({
     const result = await startLink();
     if (!result.ok) {
       setPending(false);
-      setFailure(describeGithubFailure(result.code));
+      setFailure(describeGithubFailure(product, result.code));
       return;
     }
     go(result.data.url);

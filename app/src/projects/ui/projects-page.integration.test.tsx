@@ -28,6 +28,9 @@ import { createProjectService } from "../service.ts";
 import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { loadProjectsPage, ProjectsPageContent } from "./projects-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -84,6 +87,7 @@ async function openPage(
   });
   return render(
     <ProjectsPageContent
+      product={PRODUCT}
       workspaceSlug="acme"
       audience={audience}
       llmNotice={llmNotice}

@@ -5,6 +5,7 @@
 // Member). The role help sits in one tooltip next to the label, reachable with the keyboard (#177). Without
 // a mail server the answer holds the link, which is shown once to be copied; with one the link was mailed
 // and is not shown. The page keeps nothing of the link after the next invitation or a reload.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
@@ -39,6 +40,7 @@ export function InviteForm({
   /** Only tests pass this. */
   api?: WorkspaceApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const ids = useId();
   const roleId = `${ids}-role`;
@@ -72,7 +74,7 @@ export function InviteForm({
     if (!result.ok) {
       // R20: the address is the field a refusal is about, so it takes the focus back once shown.
       focusEmail.current = true;
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       return;
     }
     setShown({

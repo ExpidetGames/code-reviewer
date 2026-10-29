@@ -6,6 +6,8 @@
 // Approve otherwise). One choice for both review kinds; what "blocking" means differs, and the card says so for
 // the kind that is selected. Saved with the Review kind card (one project-only request). The text is short (#656):
 // one line per choice and one note.
+import { useProductIdentity } from "@/product-identity/context";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { useId } from "react";
 import { Badge } from "../../components/ui/badge.tsx";
 import { FieldDescription, FieldLabel } from "../../components/ui/field.tsx";
@@ -37,8 +39,8 @@ export const VERDICT_KIND_NOTES: Record<ProjectReviewKind, string> = {
   diff: "A Diff Review has no severities, so Blocking findings posts nothing.",
 };
 
-export const VERDICT_COMMON_NOTE =
-  "Posted as a pull request review by code-review.com after a complete review. Do not rely on it for branch protection.";
+export const verdictCommonNote = (product: ProductIdentity): string =>
+  `Posted as a pull request review by ${product.name} after a complete review. Do not rely on it for branch protection.`;
 
 function isMode(value: string): value is ReviewVerdictMode {
   return REVIEW_VERDICT_MODES.some((mode) => mode === value);
@@ -63,6 +65,7 @@ export function ReviewVerdictFieldset({
   /** The project has no verdict of its own: it follows the defaults of the workspace (#676). */
   followsDefault?: boolean;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const errorId = `${ids}-error`;
   return (
@@ -124,7 +127,7 @@ export function ReviewVerdictFieldset({
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        {VERDICT_KIND_NOTES[kind]} {VERDICT_COMMON_NOTE}
+        {VERDICT_KIND_NOTES[kind]} {verdictCommonNote(product)}
       </p>
     </SettingsCard>
   );

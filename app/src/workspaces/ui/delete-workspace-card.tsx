@@ -5,6 +5,7 @@
 // asks for the name of the workspace to be typed, so a stray click cannot do it. A refusal (credit left, a review running) is
 // said inside the dialog, which stays open; on success the person is sent to the start page, which leads to a workspace they
 // still have or to the page that says what to do without one.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr";
 import { useId, useState, type FormEvent } from "react";
 import {
@@ -42,6 +43,7 @@ export function DeleteWorkspaceCard({
   api?: Pick<WorkspaceApi, "deleteWorkspace">;
   navigate?: (path: string) => void;
 }) {
+  const product = useProductIdentity();
   const titleId = useId();
   const inputId = useId();
   const [open, setOpen] = useState(false);
@@ -65,7 +67,7 @@ export function DeleteWorkspaceCard({
     const result = await api.deleteWorkspace(typed.trim());
     if (!result.ok) {
       setPending(false);
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       return;
     }
     // The workspace is gone: the next page is a fresh load, nothing of it stays in the browser's router.

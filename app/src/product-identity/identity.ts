@@ -16,4 +16,10 @@ export type ProductIdentity = {
   readonly name: string;
   /** What the sender-name field of the mail settings shows while it is empty: the name the mail goes out under by default. */
   readonly mailSenderNamePlaceholder: string;
+  /** The name of the check run in the checks area of a pull request (#740). Branch protection rules match it, so it changes only on purpose. */
+  readonly checkName: string;
+  /** The name the form of the GitHub App starts with, before the host (#740): GitHub allows 34 characters for the whole name. It is also the bot name on the pull request comments. */
+  readonly githubAppName: string;
+  /** What the GitHub App says about itself in its settings on GitHub (#740). */
+  readonly githubAppDescription: string;
 };

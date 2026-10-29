@@ -14,11 +14,17 @@ import {
   CHECKOUT_REASON_COPY,
   describeCheckoutReason,
   describeErrorCode,
-  ERROR_COPY,
+  errorCopy,
   HISTORIC_ERROR_CODES,
-  UNKNOWN_ERROR_COPY,
-  UNKNOWN_REASON_COPY,
+  unknownErrorCopy,
+  unknownReasonCopy,
 } from "./error-copy.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
+const ERROR_COPY = errorCopy(PRODUCT);
+const UNKNOWN_ERROR_COPY = unknownErrorCopy(PRODUCT);
+const UNKNOWN_REASON_COPY = unknownReasonCopy(PRODUCT);
 
 const ALL_CODES = [
   ...new Set<string>([
@@ -43,7 +49,7 @@ describe("the sentences for error codes", () => {
   // CR-35-T08
   it("explains each code in a full sentence that is not the code itself", () => {
     for (const code of ALL_CODES) {
-      const { text, known } = describeErrorCode(code);
+      const { text, known } = describeErrorCode(PRODUCT, code);
       expect(known).toBe(true);
       expect(text).toMatch(/^[A-Z].*\.$/);
       expect(text).not.toContain(code);
@@ -54,11 +60,16 @@ describe("the sentences for error codes", () => {
   // #689-T26
   it("words the cost limit by whose limit it was, and says neither more than it knows", () => {
     const project = describeErrorCode(
+      PRODUCT,
       "cost_limit_reached",
       "project_cost_limit",
     );
-    const operator = describeErrorCode("cost_limit_reached", "cost_limit");
-    const unknown = describeErrorCode("cost_limit_reached");
+    const operator = describeErrorCode(
+      PRODUCT,
+      "cost_limit_reached",
+      "cost_limit",
+    );
+    const unknown = describeErrorCode(PRODUCT, "cost_limit_reached");
 
     // The customer's own limit: they can change it, and are told where.
     expect(project.text).toContain("cost limit set for this project");
@@ -79,14 +90,14 @@ describe("the sentences for error codes", () => {
       expect(described.known).toBe(true);
     }
     // Another code is not changed by a stop reason.
-    expect(describeErrorCode("timeout", "cost_limit").text).toBe(
+    expect(describeErrorCode(PRODUCT, "timeout", "cost_limit").text).toBe(
       ERROR_COPY["timeout"],
     );
   });
 
   // #499-T13
   it("gives the code of the hidden brake a sentence and shows no code, no number and no window", () => {
-    const described = describeErrorCode("reviews_paused");
+    const described = describeErrorCode(PRODUCT, "reviews_paused");
 
     expect(described.known).toBe(true);
     expect(described.code).toBeNull();
@@ -99,7 +110,7 @@ describe("the sentences for error codes", () => {
   // #434-X1: the code no part of the system produces any more, kept for the runs that ended with it.
   it("keeps the sentence of the removed tier code for old runs, points at the review options that replaced the levels, and the claim cannot end a job with it", () => {
     const code = "managed_tier_unavailable";
-    const { text, known } = describeErrorCode(code);
+    const { text, known } = describeErrorCode(PRODUCT, code);
 
     expect(HISTORIC_ERROR_CODES).toEqual([code]);
     expect(CLAIM_FAILURE_CODES).not.toContain(code);
@@ -114,7 +125,10 @@ describe("the sentences for error codes", () => {
   // #432-T19
   it("tells a person about an unavailable model choice without naming a model, and where to change it", () => {
     expect(CLAIM_FAILURE_CODES).toContain("managed_model_unavailable");
-    const { text, known } = describeErrorCode("managed_model_unavailable");
+    const { text, known } = describeErrorCode(
+      PRODUCT,
+      "managed_model_unavailable",
+    );
 
     expect(known).toBe(true);
     expect(text).toMatch(/Owner or Admin/);
@@ -127,7 +141,10 @@ describe("the sentences for error codes", () => {
   // #432-T19
   it("tells a person that the runner cannot use the provider chosen for the project, naming no provider", () => {
     expect(CLAIM_FAILURE_CODES).toContain("llm_provider_unsupported");
-    const { text, known } = describeErrorCode("llm_provider_unsupported");
+    const { text, known } = describeErrorCode(
+      PRODUCT,
+      "llm_provider_unsupported",
+    );
 
     expect(known).toBe(true);
     expect(text).toMatch(/no AI model was used/);
@@ -138,7 +155,10 @@ describe("the sentences for error codes", () => {
   // #588-T31
   it("tells a person that the address of the provider changed, that the key was not sent and who can confirm it", () => {
     expect(CLAIM_FAILURE_CODES).toContain("provider_address_changed");
-    const { text, known } = describeErrorCode("provider_address_changed");
+    const { text, known } = describeErrorCode(
+      PRODUCT,
+      "provider_address_changed",
+    );
 
     expect(known).toBe(true);
     expect(text).toMatch(/Owner or Admin/);
@@ -151,24 +171,26 @@ describe("the sentences for error codes", () => {
 
   // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
   it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
-    expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
+    expect(describeErrorCode(PRODUCT, "dynamic_review_disabled").text).toMatch(
       /server/i,
     );
-    expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
+    expect(describeErrorCode(PRODUCT, "dynamic_review_disabled").text).toMatch(
       /Diff Review/,
     );
-    expect(describeErrorCode("no_capable_runner").text).toMatch(/runner/);
+    expect(describeErrorCode(PRODUCT, "no_capable_runner").text).toMatch(
+      /runner/,
+    );
     expect(
-      describeErrorCode("dynamic_model_features_unsupported").text,
+      describeErrorCode(PRODUCT, "dynamic_model_features_unsupported").text,
     ).toMatch(/Choose another model/);
-    expect(describeErrorCode("dynamic_config_invalid").text).toMatch(
+    expect(describeErrorCode(PRODUCT, "dynamic_config_invalid").text).toMatch(
       /project page/,
     );
   });
 
   // #432-T22
   it("tells the user of a Dynamic Review that the Dynamic model counts as a model setting, without naming a model", () => {
-    const { text } = describeErrorCode("job_llm_options_invalid");
+    const { text } = describeErrorCode(PRODUCT, "job_llm_options_invalid");
 
     expect(text).toMatch(/Dynamic model/);
     expect(text).toMatch(/project page/);
@@ -181,7 +203,7 @@ describe("the sentences for error codes", () => {
       "quota_exhausted",
       "entitlements_invalid",
     ]) {
-      const { text, known } = describeErrorCode(code);
+      const { text, known } = describeErrorCode(PRODUCT, code);
 
       expect(known).toBe(true);
       expect(text).toMatch(/^[A-Z][^.]*\.(?: [A-Z][^.]*\.)*$/);
@@ -194,7 +216,10 @@ describe("the sentences for error codes", () => {
 
   // #290-T06
   it("tells a person that the request was larger than the model's context window", () => {
-    const { text, known } = describeErrorCode("llm_context_length_exceeded");
+    const { text, known } = describeErrorCode(
+      PRODUCT,
+      "llm_context_length_exceeded",
+    );
 
     expect(known).toBe(true);
     expect(text).toMatch(/context window/);
@@ -204,7 +229,10 @@ describe("the sentences for error codes", () => {
 
   // #477-T04
   it("tells a person that no provider can serve this model with the request's parameters, and what to do", () => {
-    const { text, known } = describeErrorCode("llm_parameters_unsupported");
+    const { text, known } = describeErrorCode(
+      PRODUCT,
+      "llm_parameters_unsupported",
+    );
 
     expect(known).toBe(true);
     expect(text).toMatch(/no provider/i);
@@ -215,7 +243,7 @@ describe("the sentences for error codes", () => {
 
   // #260: the code is also reported when the app could not be asked, not only when the job was lost.
   it("says for lease_lost that the job may have been lost or that this could not be confirmed, and that nothing was written", () => {
-    const { text } = describeErrorCode("lease_lost");
+    const { text } = describeErrorCode(PRODUCT, "lease_lost");
 
     expect(text).toMatch(/no longer held/);
     expect(text).toMatch(/could not be confirmed/);
@@ -224,7 +252,7 @@ describe("the sentences for error codes", () => {
 
   // #201-T20
   it("does not say the engine ran when review_not_published can come from the preparation", () => {
-    const { text } = describeErrorCode("review_not_published");
+    const { text } = describeErrorCode(PRODUCT, "review_not_published");
 
     // The Dynamic preparation raises this code before any engine starts, when the earlier review
     // on the pull request cannot be used as the starting point.
@@ -243,7 +271,7 @@ describe("the sentences for error codes", () => {
 
   // CR-35-T09
   it("gives an unknown code a general sentence and shows the code besides it", () => {
-    expect(describeErrorCode("flux_capacitor_overload")).toEqual({
+    expect(describeErrorCode(PRODUCT, "flux_capacitor_overload")).toEqual({
       code: "flux_capacitor_overload",
       text: UNKNOWN_ERROR_COPY,
       known: false,
@@ -259,19 +287,19 @@ describe("the sentences for error codes", () => {
       "x".repeat(65),
       "toString",
     ]) {
-      const described = describeErrorCode(odd);
+      const described = describeErrorCode(PRODUCT, odd);
       expect(described.known).toBe(false);
       expect(described.text).toBe(UNKNOWN_ERROR_COPY);
     }
-    expect(describeErrorCode("<script>").code).toBeNull();
-    expect(describeErrorCode("").code).toBeNull();
+    expect(describeErrorCode(PRODUCT, "<script>").code).toBeNull();
+    expect(describeErrorCode(PRODUCT, "").code).toBeNull();
   });
 
   // #296-T11
   it("has a full sentence for every reason the checkout can fail with", () => {
     for (const reason of RUNNER_CHECKOUT_REASONS) {
       expect(Object.hasOwn(CHECKOUT_REASON_COPY, reason)).toBe(true);
-      const description = describeCheckoutReason(reason);
+      const description = describeCheckoutReason(PRODUCT, reason);
       expect(description).toStrictEqual({
         code: reason,
         text: CHECKOUT_REASON_COPY[reason],
@@ -284,12 +312,14 @@ describe("the sentences for error codes", () => {
 
   // #296-T11
   it("shows a reason it does not know with the general sentence, and one that is not shaped like a code not at all", () => {
-    expect(describeCheckoutReason("brand_new_reason")).toStrictEqual({
+    expect(describeCheckoutReason(PRODUCT, "brand_new_reason")).toStrictEqual({
       code: "brand_new_reason",
       text: UNKNOWN_REASON_COPY,
       known: false,
     });
-    expect(describeCheckoutReason("<script>alert(1)</script>")).toBeNull();
-    expect(describeCheckoutReason("")).toBeNull();
+    expect(
+      describeCheckoutReason(PRODUCT, "<script>alert(1)</script>"),
+    ).toBeNull();
+    expect(describeCheckoutReason(PRODUCT, "")).toBeNull();
   });
 });

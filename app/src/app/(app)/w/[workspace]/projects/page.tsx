@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
@@ -32,7 +33,7 @@ export default async function ProjectsPage({
     <>
       <PageHeader
         title="Projects"
-        description="The repositories code-review.com watches."
+        description={`The repositories ${getProductIdentity().name} watches.`}
         actions={
           // The synchronization of the workspace: it reads the workspace's own connections, for an Owner or
           // an Admin (the instance admin's synchronization of everything is a route of the admin portal).
@@ -78,12 +79,14 @@ async function ProjectsContent({
   });
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
   const llmNotice = llmAccessAttention({
+    product: getProductIdentity(),
     workspaceSlug,
     summary: await getWorkspaceLlm().summaryFor(workspaceId),
     canManage: canManageLlmKey,
   });
   return (
     <ProjectsPageContent
+      product={getProductIdentity()}
       workspaceSlug={workspaceSlug}
       audience={configAudienceOf(user)}
       canManage={canManage}

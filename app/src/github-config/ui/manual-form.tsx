@@ -8,6 +8,7 @@
 // keeps it while the App id (and, for the client secret, the client id) is unchanged, and the saved value
 // never reaches this page. The server validates before it saves: the key parses, a call to GitHub with the
 // App JWT names the App id and the slug, GitHub accepts the client id and secret as a pair.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../../components/button.tsx";
@@ -45,6 +46,7 @@ export function ManualForm({
   /** Only tests pass this. */
   api?: GithubApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const router = useRouter();
   const [appId, setAppId] = useState(view.app?.appId ?? "");
@@ -67,7 +69,7 @@ export function ManualForm({
       // The radio group is required, so the browser stops this first; this is the same answer in words.
       setStatus({
         kind: "failed",
-        text: describeGithubFailure("invalid_input"),
+        text: describeGithubFailure(product, "invalid_input"),
         issues: [{ field: "privateApp", code: "private_app_invalid" }],
       });
       return;
@@ -87,7 +89,7 @@ export function ManualForm({
     if (!result.ok) {
       setStatus({
         kind: "failed",
-        text: describeGithubFailure(result.code),
+        text: describeGithubFailure(product, result.code),
         issues: result.issues,
       });
       return;

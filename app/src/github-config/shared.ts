@@ -10,6 +10,7 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { suggestedAppName } from "../integrations/registry.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { createSignedStates } from "../signed-state/state.ts";
 import { readEmailConflicts } from "./facts.ts";
 import {
@@ -48,6 +49,7 @@ export function getGithubConfigService(): GithubConfigService {
   // Every address the service uses comes from the configuration, never from a request header.
   const config = loadAuthConfig(process.env);
   return createGithubConfigService({
+    product: getProductIdentity(),
     credentials: getGithubCredentialStore(),
     signedStates: createSignedStates({ db, appSecret: appSecret() }),
     rateLimits: createRateLimitsRepository(db),
@@ -72,6 +74,6 @@ export async function getIntegrationsPageData() {
     view,
     conflicts,
     tenancy: tenancy ?? "single",
-    suggestedName: suggestedAppName(config.baseUrl),
+    suggestedName: suggestedAppName(getProductIdentity(), config.baseUrl),
   };
 }

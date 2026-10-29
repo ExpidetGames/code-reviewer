@@ -8,6 +8,7 @@
 // change is never dropped because a neighbour was refused), returns one outcome per change in order,
 // and refreshes as soon as one of them succeeded, so "Last changed" stays current also after a partial
 // refusal.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { RequestIssue } from "../../ui/json-request.ts";
@@ -25,6 +26,7 @@ export function useSave(
   workspaceCount?: number,
 ) {
   const router = useRouter();
+  const product = useProductIdentity();
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<SaveStatus>(null);
 
@@ -43,7 +45,7 @@ export function useSave(
       outcomes.push({
         kind: "failed",
         code: result.code,
-        text: describeAdminFailure(result.code, workspaceCount),
+        text: describeAdminFailure(product, result.code, workspaceCount),
         issues: result.issues,
       });
     }

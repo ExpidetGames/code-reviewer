@@ -11,6 +11,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { LlmAccessSection } from "../../llm/ui/llm-access-section.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -29,6 +32,7 @@ describe("the catalog providers on the LLM access page", () => {
   it("comes after the cards of the registry's providers for an Admin or an Owner", () => {
     render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={KEYS}
@@ -47,6 +51,7 @@ describe("the catalog providers on the LLM access page", () => {
   it("is shown to a Member as a list of what has a key, without a form", () => {
     render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage={false}
         keyStatuses={KEYS}
@@ -77,6 +82,7 @@ describe("the catalog providers on the LLM access page", () => {
   it("is not shown for a workspace on the instance's access: the note only, and no provider named", () => {
     const { container } = render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={KEYS}
@@ -98,6 +104,7 @@ describe("the catalog providers on the LLM access page", () => {
   it("is left out when the catalog offers nothing", () => {
     render(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={KEYS}

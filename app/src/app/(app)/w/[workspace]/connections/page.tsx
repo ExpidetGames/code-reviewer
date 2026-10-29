@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { lookupSessionId } from "@/auth/session";
 import { createInstallationLinkRequestsRepository } from "@/db/repositories/installation-link-requests-repository";
@@ -54,6 +55,7 @@ async function ConnectionsContent({
   const db = getDatabase();
   const sessionId = await lookupSessionId();
   const data = await loadConnectionsPage({
+    product: getProductIdentity(),
     canManage,
     workspaceId,
     integrations: createIntegrationsRepository(db, workspaceId),

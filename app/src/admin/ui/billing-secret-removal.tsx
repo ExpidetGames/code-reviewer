@@ -3,6 +3,7 @@
 "use client";
 // Forgetting a saved Stripe credential (#504), in a confirmed danger zone below the cards: only while billing is off (a removed
 // credential would turn a running billing off without a word), and only for a credential that is saved.
+import { useProductIdentity } from "@/product-identity/context";
 import { DangerZone } from "../../components/danger-zone.tsx";
 import type { BillingApi } from "./billing-api.ts";
 import { describeBillingFailure } from "./billing-messages.ts";
@@ -16,6 +17,7 @@ export function BillingSecretRemoval({
   billing: BillingView;
   api: BillingApi;
 }) {
+  const product = useProductIdentity();
   const { outcome, run } = useBillingRun();
   if (billing.adapter !== "stripe" || billing.enabled) return null;
   const secrets = (
@@ -31,7 +33,7 @@ export function BillingSecretRemoval({
         <DangerZone
           key={which}
           title={`Remove the ${what}`}
-          description={`Only when code-review.com should no longer use this ${what}.`}
+          description={`Only when ${product.name} should no longer use this ${what}.`}
           actionLabel={`Remove the ${what}`}
           confirmTitle={`Remove the ${what}?`}
           confirmDescription="Billing stays off until a new one is saved."
@@ -43,7 +45,11 @@ export function BillingSecretRemoval({
                 ? { kind: "ok", text: "Removed." }
                 : {
                     kind: "failed",
-                    text: describeBillingFailure(removed.code, removed.status),
+                    text: describeBillingFailure(
+                      product,
+                      removed.code,
+                      removed.status,
+                    ),
                     issues: [],
                     missing: [],
                   };

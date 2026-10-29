@@ -6,9 +6,13 @@ import { describe, expect, it } from "vitest";
 import { requestJson } from "./json-request.ts";
 import {
   describeTransportFailure,
-  TRANSPORT_FAILURE_COPY,
+  transportFailureCopy,
   unexpectedResponseCopy,
 } from "./transport-messages.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
+const TRANSPORT_FAILURE_COPY = transportFailureCopy(PRODUCT);
 
 describe("the copy for an unexpected answer", () => {
   // #690-T03
@@ -32,7 +36,7 @@ describe("the copy for an unexpected answer", () => {
       code: "UNEXPECTED_RESPONSE",
     });
     if (result.ok) throw new Error("unreachable");
-    expect(describeTransportFailure(result.code, result.status)).toBe(
+    expect(describeTransportFailure(PRODUCT, result.code, result.status)).toBe(
       "The server answered with HTTP 502. Reload the page and try again.",
     );
   });
@@ -42,16 +46,18 @@ describe("the copy for an unexpected answer", () => {
     expect(unexpectedResponseCopy(null)).toBe(
       TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE,
     );
-    expect(describeTransportFailure("UNEXPECTED_RESPONSE")).toBe(
+    expect(describeTransportFailure(PRODUCT, "UNEXPECTED_RESPONSE")).toBe(
       TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE,
     );
   });
 
   // #690-T03
   it("names a status only for the unexpected answer, not for the other transport codes", () => {
-    expect(describeTransportFailure("NETWORK_ERROR", 502)).toBe(
+    expect(describeTransportFailure(PRODUCT, "NETWORK_ERROR", 502)).toBe(
       TRANSPORT_FAILURE_COPY.NETWORK_ERROR,
     );
-    expect(describeTransportFailure("SOMETHING_ELSE", 502)).toBeUndefined();
+    expect(
+      describeTransportFailure(PRODUCT, "SOMETHING_ELSE", 502),
+    ).toBeUndefined();
   });
 });

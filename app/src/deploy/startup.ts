@@ -24,8 +24,26 @@ type Env = Readonly<Record<string, string | undefined>>;
 type StartOptions = {
   env?: Env;
   log?: (message: string) => void;
+  warn?: (message: string) => void;
   exit?: (code: number) => void;
+  /** `NEXT_PUBLIC_PRODUCT_ID` as the build inlined it; a parameter because only the literal expression below is replaced. */
+  builtProductId?: string;
 };
+
+/**
+ * `next.config.ts` inlines `PRODUCT_ID` of the build as `NEXT_PUBLIC_PRODUCT_ID` (read by the page for a crash in the root
+ * layout, #740). The server reads `PRODUCT_ID` when it runs, so a project whose variable changed after the build, or a value
+ * the build did not see, shows another product in that one page. Names the variables only, never a value.
+ */
+export function productIdBuildProblem(
+  env: Env,
+  builtProductId: string | undefined,
+): string | null {
+  const running = env.PRODUCT_ID?.trim() ?? "";
+  const built = builtProductId?.trim() ?? "";
+  if (running === built) return null;
+  return "NEXT_PUBLIC_PRODUCT_ID (set from PRODUCT_ID by the build) differs from PRODUCT_ID of the running server: redeploy so the page for a crash in the root layout shows the right product";
+}
 
 /** The problems of the deployment settings, each naming only the variables concerned. */
 export function findDeploymentConfigProblems(env: Env): string[] {
@@ -59,9 +77,13 @@ export function findDeploymentConfigProblems(env: Env): string[] {
 export async function checkDeploymentConfigOnStart({
   env = process.env,
   log = console.error,
+  warn = console.warn,
   exit = (code) => process.exit(code),
+  builtProductId = process.env.NEXT_PUBLIC_PRODUCT_ID,
 }: StartOptions = {}): Promise<void> {
   if (env.NODE_ENV !== "production") return;
+  const buildProblem = productIdBuildProblem(env, builtProductId);
+  if (buildProblem !== null) warn(`[deploy] ${buildProblem}.`);
   const problems = findDeploymentConfigProblems(env);
   if (problems.length > 0) {
     log(

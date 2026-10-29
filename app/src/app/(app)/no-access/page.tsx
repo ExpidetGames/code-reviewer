@@ -12,6 +12,7 @@
 // content flow (#171). A person who has a workspace is sent on to it. The proxy lets a person without a
 // workspace reach this page and a handful of others (src/auth/access.ts, NO_WORKSPACE_PATHS) and nothing
 // else.
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -51,6 +52,7 @@ async function WhatToDo() {
 
   return (
     <NoAccessContent
+      product={getProductIdentity()}
       multiTenant={view.multiTenant}
       pending={view.pending}
       isInstanceAdmin={lookup.user.isInstanceAdmin}

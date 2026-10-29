@@ -8,6 +8,7 @@ import { isBillingOn } from "../billing/enabled.ts";
 import { createRunPriceSource } from "../billing/run-prices.ts";
 import { createRunsRepository } from "../db/repositories/runs-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { knownSecretsFromEnv, redactText } from "../runner-api/redact.ts";
 import type { LastRunSource } from "../projects/ui/list-view.ts";
 import {
@@ -20,6 +21,7 @@ import {
 export function runsServiceFor(workspaceId: string): RunsService {
   const db = getDatabase();
   return createRunsService({
+    product: getProductIdentity(),
     runs: createRunsRepository(db, workspaceId),
     // The price of a review (#505): read only while billing is on, so a self-hoster who never switches it on sees no change. The
     // switch is the one instance setting; no billing table is read while it is off.

@@ -16,9 +16,13 @@ import {
   describeBindingFailure,
   describeResultCode,
   describeRoleDetail,
-  RESULT_COPY,
+  resultCopy,
   ROLE_RESULT_COPY,
 } from "./messages.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
+const RESULT_COPY = resultCopy(PRODUCT);
 
 describe("the copy of the binding", () => {
   // #103-IB-04
@@ -37,20 +41,24 @@ describe("the copy of the binding", () => {
 
   // #103-IB-16
   it("only knows the codes of its own list: anything else a query says is nothing", () => {
-    expect(describeResultCode("<script>")).toBeNull();
-    expect(describeResultCode("toString")).toBeNull();
+    expect(describeResultCode(PRODUCT, "<script>")).toBeNull();
+    expect(describeResultCode(PRODUCT, "toString")).toBeNull();
     expect(isBindingResultCode("linked")).toBe(true);
     expect(isBindingResultCode("https://evil.example")).toBe(false);
   });
 
   // #103-IB-09
   it("words a failed call by its code, by the transport failures, and generically", () => {
-    expect(describeBindingFailure("rate_limited")).toMatch(/Too many attempts/);
-    expect(describeBindingFailure("forbidden")).toMatch(/does not allow/);
-    expect(describeBindingFailure("NETWORK_ERROR")).toMatch(
+    expect(describeBindingFailure(PRODUCT, "rate_limited")).toMatch(
+      /Too many attempts/,
+    );
+    expect(describeBindingFailure(PRODUCT, "forbidden")).toMatch(
+      /does not allow/,
+    );
+    expect(describeBindingFailure(PRODUCT, "NETWORK_ERROR")).toMatch(
       /could not be reached/,
     );
-    expect(describeBindingFailure("something_new")).toMatch(
+    expect(describeBindingFailure(PRODUCT, "something_new")).toMatch(
       /Something went wrong/,
     );
   });
@@ -69,10 +77,14 @@ describe("the copy of the binding", () => {
   // #103-IB-20
   it("words each refusal of a decision, and falls back for one it does not know", () => {
     for (const code of Object.keys(APPROVAL_FAILURE_COPY))
-      expect(describeApprovalFailure(code)).toBe(APPROVAL_FAILURE_COPY[code]);
-    expect(describeApprovalFailure("NETWORK_ERROR")).toMatch(
+      expect(describeApprovalFailure(PRODUCT, code)).toBe(
+        APPROVAL_FAILURE_COPY[code],
+      );
+    expect(describeApprovalFailure(PRODUCT, "NETWORK_ERROR")).toMatch(
       /could not be reached/,
     );
-    expect(describeApprovalFailure("other")).toMatch(/Something went wrong/);
+    expect(describeApprovalFailure(PRODUCT, "other")).toMatch(
+      /Something went wrong/,
+    );
   });
 });

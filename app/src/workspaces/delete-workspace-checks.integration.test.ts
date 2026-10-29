@@ -9,6 +9,9 @@ import { createCheckRunsHarness } from "../test-support/check-runs-harness.ts";
 import { insertUser } from "../test-support/users.ts";
 import { createWorkspaceDeletion } from "./delete-workspace.ts";
 import { createCheckFinisher, DELETED_CHECK_SUMMARY } from "./finish-checks.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 async function start() {
   const t = await createCheckRunsHarness();
@@ -28,6 +31,7 @@ async function start() {
     now: t.fixture.clock.now,
     log: (line) => lines.push(line),
     finishChecks: createCheckFinisher({
+      product: PRODUCT,
       registry: { resolve: () => t.provider },
       log: (line) => lines.push(line),
     }),

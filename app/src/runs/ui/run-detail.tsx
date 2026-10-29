@@ -6,6 +6,7 @@
 // While the run waits or runs the browser asks for newer data; once it is settled it stops. Everything that came from outside
 // (the project name, the login, the question of an `/ask`, the review text) is rendered as text, and the one link made from
 // stored data is the comment link, already checked to be a github.com address.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import Link from "next/link";
 import { useId, useMemo, type ReactNode } from "react";
 import { DescriptionList } from "../../components/description-list.tsx";
@@ -147,6 +148,7 @@ export function RunDetail({
   initial: RunDetailSnapshot;
   api?: RunsApi;
 }) {
+  const product = useProductIdentity();
   // One client for the life of the component: a new one every render would restart what depends on it.
   const defaultApi = useMemo(
     () => browserRunsApi(workspaceSlug),
@@ -229,7 +231,12 @@ export function RunDetail({
       {/* The one polite region of the page; it stays in the DOM so an update result is announced. */}
       <StatusRegion label="Updating the run" className="text-warning">
         {failed
-          ? describePollFailure(failureCode, stopped, DETAIL_POLL_FAILED_TEXT)
+          ? describePollFailure(
+              product,
+              failureCode,
+              stopped,
+              DETAIL_POLL_FAILED_TEXT,
+            )
           : ""}
       </StatusRegion>
       <div className="flex flex-col gap-2">

@@ -6,6 +6,7 @@
 // newer commit that replaced the run), always with a reason in words. The text is fixed sentences, counts, a code
 // of the plain shape of one and a validated link; nothing a pull request or a runner wrote is copied into it.
 import type { ReviewCheck } from "../integrations/types.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { JobStatus } from "../db/job-status.ts";
 import { describeErrorCode } from "../runs/error-copy.ts";
 import type { ReviewFindings } from "../runner-api/contract.ts";
@@ -72,7 +73,10 @@ const VERDICT_SKIP_WAY_OUT: Readonly<Record<string, string>> = {
 };
 
 /** What a successful review says about its verdict when it submitted none; empty when it submitted one. */
-function verdictLine(verdict: VerdictDecision | undefined): string | null {
+function verdictLine(
+  product: ProductIdentity,
+  verdict: VerdictDecision | undefined,
+): string | null {
   if (verdict === undefined || verdict.kind === "submit") return null;
   if (verdict.reason === "off")
     return "The review verdict is switched off for this project.";
@@ -80,7 +84,7 @@ function verdictLine(verdict: VerdictDecision | undefined): string | null {
   const wayOut =
     VERDICT_SKIP_WAY_OUT[verdict.reason] ??
     "stays until it is dismissed by hand";
-  return `No review verdict was submitted: ${because}. An earlier request for changes by code-review.com on this pull request ${wayOut}.`;
+  return `No review verdict was submitted: ${because}. An earlier request for changes by ${product.name} on this pull request ${wayOut}.`;
 }
 
 function linkLine(commentUrl: string | null): string | null {
@@ -94,17 +98,21 @@ function paragraphs(...parts: Array<string | null>): string {
 
 /** The reason a job did not finish, in words, with its code when it has the shape of one. */
 function reasonLine(
+  product: ProductIdentity,
   errorCode: string | null,
   stoppedEarly: string | null,
 ): string {
   if (errorCode === null) return "The review did not finish.";
-  const described = describeErrorCode(errorCode, stoppedEarly);
+  const described = describeErrorCode(product, errorCode, stoppedEarly);
   return described.code === null
     ? described.text
     : `${described.text} (\`${described.code}\`)`;
 }
 
-export function describeCheck(subject: CheckSubject): CheckText {
+export function describeCheck(
+  product: ProductIdentity,
+  subject: CheckSubject,
+): CheckText {
   const link = safeLink(subject.commentUrl);
   const details = link === null ? {} : { detailsUrl: link };
   switch (subject.status) {
@@ -131,7 +139,7 @@ export function describeCheck(subject: CheckSubject): CheckText {
           subject.stoppedEarly === null
             ? null
             : (STOPPED_EARLY_TEXT[subject.stoppedEarly] ?? null),
-          verdictLine(subject.verdict),
+          verdictLine(product, subject.verdict),
           linkLine(subject.commentUrl),
         ),
         ...details,
@@ -150,7 +158,7 @@ export function describeCheck(subject: CheckSubject): CheckText {
         conclusion: "neutral",
         title: "Review cancelled",
         summary: paragraphs(
-          reasonLine(subject.errorCode, subject.stoppedEarly),
+          reasonLine(product, subject.errorCode, subject.stoppedEarly),
           "This check is informational and never blocks a merge.",
         ),
       };
@@ -160,7 +168,7 @@ export function describeCheck(subject: CheckSubject): CheckText {
         conclusion: "neutral",
         title: "Review did not finish",
         summary: paragraphs(
-          reasonLine(subject.errorCode, subject.stoppedEarly),
+          reasonLine(product, subject.errorCode, subject.stoppedEarly),
           linkLine(subject.commentUrl),
           "This check is informational and never blocks a merge. A new push or a review request runs the review again.",
         ),

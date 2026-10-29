@@ -30,6 +30,9 @@ import { enqueueInWorkspace } from "../test-support/other-workspace-jobs.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import type { EntitlementsData } from "../workspaces/entitlements.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const ENGINES = ["pr-agent", "opencode"] as const;
 const MINUTE = 60_000;
@@ -455,21 +458,21 @@ describe("the monthly limit and the hourly brake at claim", () => {
         errorCode: "reviews_paused",
       });
       if (stored === undefined) throw new Error("the refused job is missing");
-      const check = describeCheck({
+      const check = describeCheck(PRODUCT, {
         status: "failed",
         errorCode: stored.errorCode,
         commentUrl: null,
         findings: null,
         stoppedEarly: null,
       });
-      const detail = toRunDetailView(stored, "p", fixture.clock.now());
-      const row = toRunRowView(stored, "p", fixture.clock.now());
+      const detail = toRunDetailView(PRODUCT, stored, "p", fixture.clock.now());
+      const row = toRunRowView(PRODUCT, stored, "p", fixture.clock.now());
       const customerSees = [
         check.title,
         check.summary,
         detail.problem,
         row.problem,
-        noticeBody("reviews_paused", `head:${stored.headSha}`, null),
+        noticeBody(PRODUCT, "reviews_paused", `head:${stored.headSha}`, null),
       ].join("\n");
 
       expect(detail.errorCode).toBeNull();

@@ -4,6 +4,7 @@
 // The optional monthly spending limit (ADR 0006, 2.9; #499, #505): an Owner or an Admin types a limit in US dollars, an empty field
 // removes it. It counts only what reviews were actually charged this UTC month; when that has reached the limit no new review
 // starts until the next month or a higher limit, and a review that is running always finishes. The server judges the amount again.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
@@ -49,6 +50,7 @@ export function MonthlyLimitCard({
   chargedMicroUsd: number | null;
   api: WorkspaceBillingApi;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const { pending, outcome, run } = useAction();
   const [text, setText] = useState(() => textOfCents(limitCents));
@@ -58,7 +60,7 @@ export function MonthlyLimitCard({
     event.preventDefault();
     const amount = parseLimitCents(text);
     if (!amount.ok) {
-      setLocal(describeBillingFailure(amount.error));
+      setLocal(describeBillingFailure(product, amount.error));
       return;
     }
     setLocal(null);
@@ -67,7 +69,7 @@ export function MonthlyLimitCard({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(product, result.code),
           issues: [],
         };
       return {

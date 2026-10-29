@@ -24,6 +24,9 @@ import type {
 import type { LlmKeyApi } from "./api.ts";
 import { LlmAccessNotice } from "./llm-access-notice.tsx";
 import { LlmAccessSection } from "./llm-access-section.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(() => {
   cleanup();
@@ -77,6 +80,7 @@ function section(
 ) {
   return render(
     <LlmAccessSection
+      product={PRODUCT}
       workspaceSlug="acme"
       canManage
       keyStatuses={only(keyStatus)}
@@ -122,6 +126,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
     // What router.refresh() does: the same section with the new status from the server.
     view.rerender(
       <LlmAccessSection
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage
         keyStatuses={only(CONFIGURED)}
@@ -368,7 +373,12 @@ describe("the hint 'LLM not configured'", () => {
   // #104-LK-13
   it("shows nothing while a key works", () => {
     const { container } = render(
-      <LlmAccessNotice workspaceSlug="acme" summary={WORKS} canManage />,
+      <LlmAccessNotice
+        product={PRODUCT}
+        workspaceSlug="acme"
+        summary={WORKS}
+        canManage
+      />,
     );
 
     expect(container.textContent).toBe("");
@@ -377,7 +387,12 @@ describe("the hint 'LLM not configured'", () => {
   // #104-LK-13
   it("links an Admin to the section where the key is entered", () => {
     render(
-      <LlmAccessNotice workspaceSlug="acme" summary={MISSING} canManage />,
+      <LlmAccessNotice
+        product={PRODUCT}
+        workspaceSlug="acme"
+        summary={MISSING}
+        canManage
+      />,
     );
 
     expect(screen.getByText("LLM not configured")).toBeTruthy();
@@ -391,6 +406,7 @@ describe("the hint 'LLM not configured'", () => {
   it("tells a Member to ask an Admin or an Owner, and still links to the section", () => {
     const { container } = render(
       <LlmAccessNotice
+        product={PRODUCT}
         workspaceSlug="acme"
         summary={MISSING}
         canManage={false}
@@ -406,6 +422,7 @@ describe("the hint 'LLM not configured'", () => {
   it("says when the saved key cannot be read", () => {
     render(
       <LlmAccessNotice
+        product={PRODUCT}
         workspaceSlug="acme"
         summary={{ configured: false, reason: "key_unreadable" }}
         canManage
@@ -505,7 +522,12 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
   // #276-T09
   it("does not ask a workspace for a key it cannot use: the hint says code-review.com has no access to give, and does not link to the form", () => {
     const { container } = render(
-      <LlmAccessNotice workspaceSlug="acme" summary={UNAVAILABLE} canManage />,
+      <LlmAccessNotice
+        product={PRODUCT}
+        workspaceSlug="acme"
+        summary={UNAVAILABLE}
+        canManage
+      />,
     );
 
     expect(screen.getByText("LLM is not available")).toBeTruthy();
@@ -522,6 +544,7 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
     ] as const) {
       const { container, unmount } = render(
         <LlmAccessNotice
+          product={PRODUCT}
           workspaceSlug="acme"
           summary={{ configured: false, reason }}
           canManage={false}
@@ -538,7 +561,12 @@ describe("a workspace whose LLM access is provided by the instance (#276)", () =
   // #276-T09
   it("shows nothing while the instance provides access", () => {
     const { container } = render(
-      <LlmAccessNotice workspaceSlug="acme" summary={PROVIDED} canManage />,
+      <LlmAccessNotice
+        product={PRODUCT}
+        workspaceSlug="acme"
+        summary={PROVIDED}
+        canManage
+      />,
     );
 
     expect(container.textContent).toBe("");

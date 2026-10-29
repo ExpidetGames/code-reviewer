@@ -19,11 +19,21 @@ const validEnv = {
   RUNNER_TOKEN: "r".repeat(40),
 };
 
-async function run(env: Record<string, string | undefined>) {
+async function run(
+  env: Record<string, string | undefined>,
+  builtProductId?: string,
+) {
   const exit = vi.fn();
   const log = vi.fn();
-  await checkDeploymentConfigOnStart({ env, log, exit });
-  return { exit, log };
+  const warn = vi.fn();
+  await checkDeploymentConfigOnStart({
+    env,
+    log,
+    warn,
+    exit,
+    builtProductId,
+  });
+  return { exit, log, warn };
 }
 
 describe("checking the deployment settings when the server starts", () => {
@@ -274,5 +284,35 @@ describe("checking the dispatch webhook settings when the server starts", () => 
     });
 
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  // #740-T08
+  it("warns when the product of the build and PRODUCT_ID of the running server disagree", async () => {
+    const { exit, log, warn } = await run(
+      { ...validEnv, PRODUCT_ID: "factory" },
+      "",
+    );
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("NEXT_PUBLIC_PRODUCT_ID");
+    expect(line).toContain("PRODUCT_ID");
+    expect(line).not.toContain("\n");
+  });
+
+  // #740-T08
+  it("stays quiet when both name the same product, or both are unset, white space aside", async () => {
+    for (const [productId, built] of [
+      ["factory", "factory"],
+      [undefined, undefined],
+      [undefined, ""],
+      ["", undefined],
+      [" factory ", "factory"],
+    ] as const) {
+      const { warn } = await run({ ...validEnv, PRODUCT_ID: productId }, built);
+      expect(warn).not.toHaveBeenCalled();
+    }
   });
 });

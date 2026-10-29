@@ -5,6 +5,7 @@
 // the browser may see (`run-view.ts`) and checks what comes in from a URL. The clock is passed in so a
 // test fixes the time a running run's duration is counted to.
 import "server-only";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { RunsRepository } from "../db/repositories/runs-repository.ts";
 import type { LastRun, LastRunSource } from "../projects/ui/list-view.ts";
 import type { RunPriceView } from "../workspace-billing/view.ts";
@@ -68,6 +69,8 @@ export type RunsService = {
 };
 
 export function createRunsService(deps: {
+  /** Who the run texts speak for: the sentences of a failed run name the product. */
+  product: ProductIdentity;
   runs: RunsRepository;
   now?: () => Date;
   /** Takes secrets out of a log before it is shown. */
@@ -90,7 +93,10 @@ export function createRunsService(deps: {
       return {
         generatedAt: answeredAt.toISOString(),
         runs: runs.map(({ job, project }) =>
-          withPrice(toRunRowView(job, project, answeredAt), prices),
+          withPrice(
+            toRunRowView(deps.product, job, project, answeredAt),
+            prices,
+          ),
         ),
         limited: hasMore,
       };
@@ -106,6 +112,7 @@ export function createRunsService(deps: {
         generatedAt: answeredAt.toISOString(),
         run: withPrice(
           toCustomerRunDetailView(
+            deps.product,
             stored.job,
             stored.project,
             answeredAt,

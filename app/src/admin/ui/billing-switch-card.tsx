@@ -5,6 +5,7 @@
 // on here; the statement is the server's wording (`enablingNotice`) with the counts of this instance, and the list says what
 // still stands between the instance and a billing that can be on. The server judges every step: switching on an incomplete
 // setup is refused with the missing items named, switching off is always possible and leaves the journal alone.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId } from "react";
 import {
   Card,
@@ -33,6 +34,7 @@ export function BillingSwitchCard({
   notice: string[];
   api: BillingApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const { pending, outcome, run } = useBillingRun();
   const running = billing.on;
@@ -48,7 +50,7 @@ export function BillingSwitchCard({
         };
       return {
         kind: "failed",
-        text: describeBillingFailure(result.code, result.status),
+        text: describeBillingFailure(product, result.code, result.status),
         issues: result.issues,
         missing: missingOf(result.details),
       };

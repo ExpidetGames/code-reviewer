@@ -5,6 +5,7 @@
 // again follow the rights of inviting with that role (an Admin handles Member invitations only); a resend
 // needs a mail server, because a link is shown only once. The link itself is not here: only its hash is
 // stored. The empty state is not here either: the Invitations card owns it (#177).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
@@ -35,6 +36,7 @@ export function InvitationList({
   /** Only tests pass this. */
   api?: WorkspaceApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function InvitationList({
     setShown(null);
     const result = await api.revokeInvitation(id);
     setBusy(false);
-    if (!result.ok) setProblem(describeWorkspaceFailure(result.code));
+    if (!result.ok) setProblem(describeWorkspaceFailure(product, result.code));
     router.refresh();
   }
 
@@ -59,7 +61,7 @@ export function InvitationList({
     const result = await api.resendInvitation(id);
     setBusy(false);
     if (!result.ok) {
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       router.refresh();
       return;
     }

@@ -203,6 +203,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       });
       const rateLimits = createRateLimitsRepository(db);
       const service = createGithubConfigService({
+        product: getProductIdentity(),
         credentials,
         signedStates,
         rateLimits,

@@ -39,6 +39,7 @@ import type {
 import { IntegrationError } from "../integrations/errors.ts";
 import type { IntegrationProvider } from "../integrations/provider.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { Integration, RepoRef } from "../integrations/types.ts";
 import type { Job } from "../jobs/job-types.ts";
 import type { ReviewVerdictMode } from "../review-settings/settings.ts";
@@ -55,8 +56,6 @@ import {
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
-/** The name of the check run in the checks area of the pull request. */
-export const CHECK_NAME = "Code Reviewer";
 /** How long one sync holds the job: another instance does not sync it meanwhile. Under the 60 s of a function. */
 export const SYNC_LEASE_MS = 90 * SECOND;
 /** After a failed sync the job waits this long times the syncs so far, and never longer than `MAX_RETRY_WAIT_MS`. */
@@ -106,6 +105,8 @@ export const CHECK_RUN_LOG_CODES = [
 ] as const;
 
 export type CheckRunServiceDeps = {
+  /** Who the check run and the verdict speak for: the name of the check run and the words of both (`ProductIdentity`). */
+  product: ProductIdentity;
   /** A job by its id, whatever its workspace (the runner queue's `get`). */
   jobs: { get(id: string): Promise<Job | undefined> };
   repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
@@ -263,8 +264,8 @@ function postedCommentId(
     : null;
 }
 
-const WITHDRAW_MESSAGE =
-  "The review verdict of code-review.com is switched off for this project, so its earlier request for changes no longer applies.";
+export const withdrawMessage = (product: ProductIdentity): string =>
+  `The review verdict of ${product.name} is switched off for this project, so its earlier request for changes no longer applies.`;
 
 export function createCheckRunService(
   deps: CheckRunServiceDeps,
@@ -485,7 +486,7 @@ export function createCheckRunService(
       return "ok";
     }
     const facts = plan?.facts ?? readResultFacts(job.result);
-    const text = describeCheck({
+    const text = describeCheck(deps.product, {
       status: job.status,
       errorCode: job.errorCode,
       commentUrl: trustedCommentUrl(facts.commentUrl, repo, job.prNumber),
@@ -503,7 +504,7 @@ export function createCheckRunService(
           {
             jobId: job.id,
             headSha: job.headSha,
-            name: CHECK_NAME,
+            name: deps.product.checkName,
             ...text,
           },
           {
@@ -652,7 +653,10 @@ export function createCheckRunService(
           integration,
           repo,
           job.prNumber,
-          { message: WITHDRAW_MESSAGE, markerPrefix: VERDICT_MARKER_PREFIX },
+          {
+            message: withdrawMessage(deps.product),
+            markerPrefix: VERDICT_MARKER_PREFIX,
+          },
           budget.signal,
         ),
       );
@@ -714,7 +718,7 @@ export function createCheckRunService(
             jobId: job.id,
             headSha: job.headSha,
             event: decision.event,
-            body: verdictBody({
+            body: verdictBody(deps.product, {
               jobId: job.id,
               event: decision.event,
               mode,

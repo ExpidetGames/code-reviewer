@@ -13,6 +13,9 @@ import { createRunsService } from "../../src/runs/runs-service.ts";
 import { redactText } from "../../src/runner-api/redact.ts";
 import { startRunnerApiHarness } from "../../src/test-support/runner-api-harness.ts";
 import { addWorkspace } from "../../src/test-support/workspaces.ts";
+import { getProductIdentity } from "../../src/product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 type Harness = Awaited<ReturnType<typeof startRunnerApiHarness>>;
 
@@ -34,6 +37,7 @@ async function startDynamic(options: { llmKey?: string | null } = {}) {
     dynamicModel: "vendor/dynamic-model",
   });
   const runs = createRunsService({
+    product: PRODUCT,
     runs: createRunsRepository(h.db, h.workspaceId),
     now: h.clock.now,
   });
@@ -160,6 +164,7 @@ describe("a Dynamic job whose model id is not valid", () => {
       },
     });
     const runs = createRunsService({
+      product: PRODUCT,
       runs: createRunsRepository(h.db, h.workspaceId),
       now: h.clock.now,
     });
@@ -224,9 +229,11 @@ describe("a failed Dynamic review", () => {
         status: "failed",
         errorCode: code,
         errorCodeKnown: true,
-        problem: describeErrorCode(code).text,
+        problem: describeErrorCode(PRODUCT, code).text,
       });
-      expect(run?.problem).not.toBe(describeErrorCode("not_a_code").text);
+      expect(run?.problem).not.toBe(
+        describeErrorCode(PRODUCT, "not_a_code").text,
+      );
       // No fallback to another kind, model or provider: nothing else was queued for the pull request.
       expect(await h.queue.list()).toHaveLength(1);
       expect(
@@ -250,7 +257,7 @@ describe("a failed Dynamic review", () => {
 
     const run = (await runs.get(job.id))?.run;
     expect(run?.problem).toBe(
-      describeErrorCode("dynamic_model_features_unsupported").text,
+      describeErrorCode(PRODUCT, "dynamic_model_features_unsupported").text,
     );
     expect(JSON.stringify(run)).not.toContain("Ignore the rules");
   });

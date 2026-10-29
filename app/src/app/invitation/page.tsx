@@ -53,7 +53,7 @@ async function InvitationContent({
       <AuthCard product={getProductIdentity()} title={TITLE}>
         <Alert variant="warning">
           <AlertDescription>
-            {describeInvitationState(result.error)}
+            {describeInvitationState(getProductIdentity(), result.error)}
           </AlertDescription>
         </Alert>
         <Button asChild className="w-full">

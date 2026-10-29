@@ -38,7 +38,7 @@ export function PermissionsCheck({
     setOutcome(
       result.ok
         ? { kind: "missing", missing: result.data.missing }
-        : { kind: "failed", text: describeGithubFailure(result.code) },
+        : { kind: "failed", text: describeGithubFailure(product, result.code) },
     );
   }
 

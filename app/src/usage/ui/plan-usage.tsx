@@ -6,6 +6,8 @@
 // the Runs pages do), because reviews start and finish and the operator can change the limits. A failed update
 // keeps the last data on screen and says so. Nothing here is told by colour alone: every state has words, and
 // the usage bar has a text equivalent that is its accessible name.
+import { useProductIdentity } from "@/product-identity/context";
+import type { ProductIdentity } from "@/product-identity/identity";
 import { useId, useMemo } from "react";
 import { DescriptionList } from "../../components/description-list.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
@@ -27,8 +29,8 @@ import {
   PLAN_COST_SOFT_CAP,
   PLAN_CURRENT_HEADING,
   PLAN_LABEL_TERM,
-  PLAN_MANAGED,
-  PLAN_MANAGED_UNBILLED,
+  planManaged,
+  planManagedUnbilled,
   PLAN_NO_LIMITS,
   PLAN_PAUSED,
   PLAN_PAUSED_DETAIL,
@@ -47,7 +49,7 @@ import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import {
   describeTransportFailure,
-  TRANSPORT_FAILURE_COPY,
+  UNEXPECTED_RESPONSE_COPY,
 } from "../../ui/transport-messages.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import type { CostUsageView, PlanView } from "../plan-view.ts";
@@ -135,6 +137,7 @@ function RunUsage({ runs }: { runs: NonNullable<Limited["runs"]> }) {
 }
 
 function LimitedPlan({ plan }: { plan: Limited }) {
+  const product = useProductIdentity();
   return (
     <>
       {plan.suspended ? <PausedNotice /> : null}
@@ -155,7 +158,7 @@ function LimitedPlan({ plan }: { plan: Limited }) {
         />
         {plan.managed ? (
           <p className="text-sm text-muted-foreground">
-            {plan.billed ? PLAN_MANAGED : PLAN_MANAGED_UNBILLED}
+            {plan.billed ? planManaged(product) : planManagedUnbilled(product)}
           </p>
         ) : null}
       </Section>
@@ -179,13 +182,16 @@ function PlanBody({ plan }: { plan: PlanView }) {
   return <LimitedPlan plan={plan} />;
 }
 
-function describeFailure(code: string | null, stopped: boolean): string {
+function describeFailure(
+  product: ProductIdentity,
+  code: string | null,
+  stopped: boolean,
+): string {
   if (!stopped || code === null) return PLAN_POLL_FAILED;
   const sentence =
     code === "not_found"
       ? NOT_AVAILABLE_TO_YOU
-      : (describeTransportFailure(code) ??
-        TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE);
+      : (describeTransportFailure(product, code) ?? UNEXPECTED_RESPONSE_COPY);
   return `${sentence}${PLAN_POLL_STOPPED_SUFFIX}`;
 }
 
@@ -199,6 +205,7 @@ export function PlanUsage({
   initial: PlanView;
   api?: PlanApi;
 }) {
+  const product = useProductIdentity();
   // One client for the life of the component: a new one every render would restart the polling.
   const defaultApi = useMemo(
     () => browserPlanApi(workspaceSlug),
@@ -216,7 +223,7 @@ export function PlanUsage({
     <div className="flex max-w-[64rem] flex-col gap-6">
       {/* The one polite region for a failed update; it stays in the DOM so a change is announced. */}
       <StatusRegion label="Updating the page" className="text-warning">
-        {failed ? describeFailure(failureCode, stopped) : ""}
+        {failed ? describeFailure(product, failureCode, stopped) : ""}
       </StatusRegion>
       <PlanBody plan={data} />
     </div>

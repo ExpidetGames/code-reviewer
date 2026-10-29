@@ -8,6 +8,7 @@
 // no question: the only command is `/review`, and whether a project allows it is the `allowedCommands`
 // list. The dialog (`start-review-dialog`) mounts the panel only while it is open, so every opening
 // loads fresh pull requests, and the list is loaded in an effect for the same reason.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import Link from "next/link";
 import {
   useCallback,
@@ -42,6 +43,7 @@ export function StartReviewPanel({
   /** Only tests pass this. */
   api?: ManualReviewApi;
 }) {
+  const product = useProductIdentity();
   // One client for the life of the component: a new one every render would restart what depends on it.
   const defaultApi = useMemo(
     () => browserManualReviewApi(workspaceSlug),
@@ -96,7 +98,9 @@ export function StartReviewPanel({
     });
     setBusy(false);
     if (!result.ok) {
-      setOutcome({ problem: describeManualReviewFailure(result.code) });
+      setOutcome({
+        problem: describeManualReviewFailure(product, result.code),
+      });
       if (staleListFailure(result.code)) reload();
       return;
     }
@@ -121,7 +125,7 @@ export function StartReviewPanel({
       ) : null}
       {loadFailure !== null ? (
         <Alert variant="destructive">
-          <p>{describeManualReviewFailure(loadFailure)}</p>
+          <p>{describeManualReviewFailure(product, loadFailure)}</p>
           <Button variant="secondary" onClick={reload}>
             Try again
           </Button>

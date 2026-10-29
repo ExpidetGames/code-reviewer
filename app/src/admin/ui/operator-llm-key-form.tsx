@@ -8,6 +8,7 @@
 // server judges the key (src/llm/operator-key.ts); the form shows the reason it gets back. "Test key" asks the
 // provider whether it accepts the typed key, or the saved one when the field is empty (limited, with counters of its
 // own).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { DangerZone } from "../../components/danger-zone.tsx";
@@ -43,13 +44,14 @@ import { describeAdminIssue } from "./messages.ts";
 import { SaveResult, useSave } from "./use-save.tsx";
 
 function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
+  const product = useProductIdentity();
   if (status.state === "unreadable")
     return (
       <Alert variant="warning" role="note">
         <AlertDescription>
           <strong>The saved key cannot be read.</strong>{" "}
           {UNREADABLE_SECRET_CAUSE} Enter the key again and save. Until then
-          workspaces billed via code-review.com cannot run reviews on this
+          workspaces billed via {product.name} cannot run reviews on this
           provider.
         </AlertDescription>
       </Alert>
@@ -57,8 +59,8 @@ function StatusLine({ status }: { status: OperatorLlmKeyStatus }) {
   if (status.state === "not_configured")
     return (
       <FieldDescription>
-        No key is saved. Workspaces billed via code-review.com cannot run
-        reviews on this provider until there is one.
+        No key is saved. Workspaces billed via {product.name} cannot run reviews
+        on this provider until there is one.
       </FieldDescription>
     );
   return (
@@ -90,6 +92,7 @@ export function OperatorLlmKeyForm({
   /** Only tests pass this. */
   api?: AdminApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const [apiKey, setApiKey] = useState("");
   const { pending, status, save } = useSave(api);
@@ -127,7 +130,7 @@ export function OperatorLlmKeyForm({
             ? issue.code === "api_key_unreadable"
               ? describeAdminIssue(issue)
               : describeLlmKeyIssue(issue.code)
-            : describeLlmKeyFailure(result.code),
+            : describeLlmKeyFailure(product, result.code),
       });
       return;
     }
@@ -250,10 +253,10 @@ export function OperatorLlmKeyForm({
       {stored.state === "not_configured" ? null : (
         <DangerZone
           title={`Danger zone: ${label}`}
-          description={`Only when code-review.com should no longer offer its own ${label} key.`}
+          description={`Only when ${product.name} should no longer offer its own ${label} key.`}
           actionLabel="Remove the key"
           confirmTitle={`Remove the ${label} key?`}
-          confirmDescription={`Workspaces billed via code-review.com cannot run reviews on ${label} until a key is saved again. Their own keys and the keys of other providers are not touched.`}
+          confirmDescription={`Workspaces billed via ${product.name} cannot run reviews on ${label} until a key is saved again. Their own keys and the keys of other providers are not touched.`}
           confirmLabel="Remove the key"
           onConfirm={() => void save({ operatorLlmKeys: { [provider]: null } })}
         />
@@ -272,16 +275,17 @@ export function OperatorLlmKeys({
   /** Only tests pass this. */
   api?: AdminApi;
 }) {
+  const product = useProductIdentity();
   return (
     <>
       <HelpDisclosure label="How this works">
-        A workspace whose key mode is managed reviews with the code-review.com
+        A workspace whose key mode is managed reviews with the {product.name}
         key for the provider it runs on, instead of a key of its own; its own
         keys stay stored and are not used. Any other workspace never uses these
         keys. Each provider bills the account its key belongs to, and a key is
         only ever sent to its own provider. The keys are stored encrypted on
         this server with the key of this server (APP_SECRET), so anyone who
-        holds both can decrypt them. Only a code-review.com admin can save or
+        holds both can decrypt them. Only a {product.name} admin can save or
         remove them, here; the operator API cannot read or change them.
       </HelpDisclosure>
       {Object.entries(keys).map(([provider, status]) => (

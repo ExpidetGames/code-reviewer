@@ -5,6 +5,7 @@
 // merged — then the "Setup" card with one compact row per setting (a status icon, the value summary a
 // person would see on its own page and a Configure link), then the import notice as a one-line banner.
 // The old "Setting" badge and the page description are gone.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import Link from "next/link";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react/dist/ssr";
 import {
@@ -95,7 +96,10 @@ function mailRow(settings: AdminSettingsView): {
   };
 }
 
-function operatorKeyRow(settings: AdminSettingsView): {
+function operatorKeyRow(
+  product: ProductIdentity,
+  settings: AdminSettingsView,
+): {
   status: RowStatus;
   summary: string;
   hint?: string;
@@ -116,14 +120,14 @@ function operatorKeyRow(settings: AdminSettingsView): {
     return {
       status: "warn",
       summary,
-      hint: "Workspaces billed via code-review.com cannot run reviews on that provider until its key is entered again.",
+      hint: `Workspaces billed via ${product.name} cannot run reviews on that provider until its key is entered again.`,
     };
   if (keys.some(([, key]) => key.state === "configured"))
     return { status: "ok", summary };
   return {
     status: "ok",
     summary,
-    hint: "Optional. Only workspaces billed via code-review.com need one.",
+    hint: `Optional. Only workspaces billed via ${product.name} need one.`,
   };
 }
 
@@ -243,11 +247,14 @@ function reviewsNotice(count: number): AttentionNotice {
 }
 
 export function Overview({
+  product,
   settings,
   github,
   emailConflictCount = 0,
   billingReviewCount = 0,
 }: {
+  /** Who this portal administers: the checklist names the product. */
+  product: ProductIdentity;
   settings: AdminSettingsView;
   /** The GitHub integration (src/github-config/); left out, the checklist asks nothing about it. */
   github?: GithubConfigView;
@@ -269,7 +276,7 @@ export function Overview({
   ];
   const mail = mailRow(settings);
   const githubItem = githubRow(github, settings.githubConfigured);
-  const operatorKey = operatorKeyRow(settings);
+  const operatorKey = operatorKeyRow(product, settings);
   return (
     <>
       <NeedsAttention notices={attention} maxRows={3} />
@@ -303,7 +310,7 @@ export function Overview({
               href="/admin/integrations"
             />
             <SetupRow
-              title="code-review.com LLM keys"
+              title={`${product.name} LLM keys`}
               status={operatorKey.status}
               summary={operatorKey.summary}
               {...(operatorKey.hint === undefined
@@ -315,7 +322,7 @@ export function Overview({
               title="Model catalog"
               status="ok"
               summary={modelCatalogSummary(settings.modelCatalog)}
-              hint="Optional. Only workspaces billed via code-review.com need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them."
+              hint={`Optional. Only workspaces billed via ${product.name} need it: they can choose the released entries, by name. A kind with no released entry or no default cannot run a review for them.`}
               href="/admin/llm"
             />
             <SetupRow

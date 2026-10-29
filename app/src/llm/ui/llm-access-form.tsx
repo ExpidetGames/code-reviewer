@@ -7,6 +7,7 @@
 // value never reaches this page. A saved key that was made for another provider than this card's is not
 // carried over. Removing the key is a destructive action at the end of the LLM access page, not of the form
 // (`remove-workspace-key.tsx`).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
@@ -57,6 +58,7 @@ export function LlmAccessForm({
   /** Only tests pass this. */
   api?: LlmKeyApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const ids = useId();
   const stored = keyStatus.state === "not_configured" ? null : keyStatus;
@@ -82,7 +84,7 @@ export function LlmAccessForm({
     if (!result.ok) {
       setOutcome({
         kind: "failed",
-        text: describeLlmKeyFailure(result.code),
+        text: describeLlmKeyFailure(product, result.code),
         issues: result.issues,
       });
       return;
@@ -103,7 +105,7 @@ export function LlmAccessForm({
         text:
           result.code === "invalid_input" && result.issues[0] !== undefined
             ? describeLlmKeyIssue(result.issues[0].code)
-            : describeLlmKeyFailure(result.code),
+            : describeLlmKeyFailure(product, result.code),
         issues: result.issues,
       });
       return;

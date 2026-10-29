@@ -3,6 +3,7 @@
 // The copy for the codes of the binding (the UI translates a code to copy, never the other way round): what
 // the connections page and the result page say after a flow, what a failed call says, and how the approval
 // page words the evidence. Nothing here names another workspace, a token or an address of GitHub.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
@@ -15,10 +16,9 @@ import type { RoleResult } from "../../db/installation-link-request.ts";
 
 export type ResultTone = "success" | "info" | "error";
 
-export const RESULT_COPY: Record<
-  BindingResultCode,
-  { tone: ResultTone; text: string }
-> = {
+export const resultCopy = (
+  product: ProductIdentity,
+): Record<BindingResultCode, { tone: ResultTone; text: string }> => ({
   linked: {
     tone: "success",
     text: "GitHub is connected. The repositories of the installation are listed under Projects.",
@@ -33,7 +33,7 @@ export const RESULT_COPY: Record<
   },
   waiting_for_instance_admin: {
     tone: "info",
-    text: "Nothing is connected yet. GitHub did not let the app check your role in the organization, so a code-review.com admin has to approve the connection. You will see the decision below.",
+    text: `Nothing is connected yet. GitHub did not let the app check your role in the organization, so a ${product.name} admin has to approve the connection. You will see the decision below.`,
   },
   state_invalid: {
     tone: "error",
@@ -49,7 +49,7 @@ export const RESULT_COPY: Record<
   },
   user_authorization_not_configured: {
     tone: "error",
-    text: "Connecting GitHub is not available yet: a code-review.com admin has to finish setting up the GitHub App (its sign in with GitHub).",
+    text: `Connecting GitHub is not available yet: a ${product.name} admin has to finish setting up the GitHub App (its sign in with GitHub).`,
   },
   access_denied: {
     tone: "error",
@@ -69,7 +69,7 @@ export const RESULT_COPY: Record<
   },
   installation_not_accessible: {
     tone: "error",
-    text: "That installation is not one code-review.com can connect for you: your GitHub account cannot use it, or code-review.com has not heard of it yet. If it was installed just now, wait a moment and try again.",
+    text: `That installation is not one ${product.name} can connect for you: your GitHub account cannot use it, or ${product.name} has not heard of it yet. If it was installed just now, wait a moment and try again.`,
   },
   not_installation_admin: {
     tone: "error",
@@ -103,37 +103,39 @@ export const RESULT_COPY: Record<
     tone: "error",
     text: "Something went wrong and nothing was connected. Try again.",
   },
-};
+});
 
-export const AVAILABILITY_COPY: Record<
-  Exclude<ConnectAvailability, "available">,
-  string
-> = {
+export const availabilityCopy = (
+  product: ProductIdentity,
+): Record<Exclude<ConnectAvailability, "available">, string> => ({
   app_not_configured: GITHUB_NOT_CONFIGURED_COPY,
-  user_authorization_not_configured:
-    "Connecting GitHub is not available yet. A code-review.com admin sets up the sign in with GitHub of the GitHub App in the admin portal.",
-  needs_approval:
-    "code-review.com cannot check your rights on GitHub, so a code-review.com admin approves every connection. Connect GitHub sends the request.",
-};
+  user_authorization_not_configured: `Connecting GitHub is not available yet. A ${product.name} admin sets up the sign in with GitHub of the GitHub App in the admin portal.`,
+  needs_approval: `${product.name} cannot check your rights on GitHub, so a ${product.name} admin approves every connection. Connect GitHub sends the request.`,
+});
 
 /** The "how it works" text of the Connect card, behind its disclosure (#176). */
 export const CONNECT_HELP_COPY =
   "You connect an installation of the GitHub App if you own the account it is on: a personal account, or an organization you are an owner of. GitHub asks you to authorize the app, which proves that.";
 
-export function describeResultCode(code: string): {
+export function describeResultCode(
+  product: ProductIdentity,
+  code: string,
+): {
   tone: ResultTone;
   text: string;
 } | null {
-  return Object.hasOwn(RESULT_COPY, code)
-    ? RESULT_COPY[code as BindingResultCode]
-    : null;
+  const copy = resultCopy(product);
+  return Object.hasOwn(copy, code) ? copy[code as BindingResultCode] : null;
 }
 
 /** The sentence for a failed call of the page (a code of the routes, or a transport failure). */
-export function describeBindingFailure(code: string): string {
+export function describeBindingFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeResultCode(code)?.text ??
-    describeTransportFailure(code) ??
+    describeResultCode(product, code)?.text ??
+    describeTransportFailure(product, code) ??
     (code === "forbidden" ? ROLE_NOT_ALLOWED : GENERIC_FAILURE)
   );
 }
@@ -160,12 +162,13 @@ export function describeRoleDetail(detail: string | null): string | null {
 }
 
 /** How the decision on a request is told to the people who asked. */
-export const REQUEST_STATUS_COPY = {
-  pending: "Waiting for a code-review.com admin",
-  approved: "Approved",
-  denied: "Denied by a code-review.com admin",
-  withdrawn: "Connected in the meantime",
-} as const;
+export const requestStatusCopy = (product: ProductIdentity) =>
+  ({
+    pending: `Waiting for a ${product.name} admin`,
+    approved: "Approved",
+    denied: `Denied by a ${product.name} admin`,
+    withdrawn: "Connected in the meantime",
+  }) as const;
 
 export const APPROVAL_FAILURE_COPY: Record<string, string> = {
   request_not_found: "That request does not exist any more.",
@@ -180,10 +183,13 @@ export const APPROVAL_FAILURE_COPY: Record<string, string> = {
   unavailable: "Something went wrong. Try again.",
 };
 
-export function describeApprovalFailure(code: string): string {
+export function describeApprovalFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
     APPROVAL_FAILURE_COPY[code] ??
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     GENERIC_FAILURE
   );
 }

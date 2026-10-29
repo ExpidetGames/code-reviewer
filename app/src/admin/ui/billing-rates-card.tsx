@@ -7,6 +7,7 @@
 // whole numbers (parts per 10,000 for A, micro-USD for the money). No rate has a default: billing cannot be on before A and
 // both rates are set. The start credit is 2 US dollars until it is changed (0 switches it off). A rate can be changed any
 // time, also while billing is on.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { InfoHint } from "../../components/info-hint.tsx";
@@ -90,6 +91,7 @@ export function BillingRatesCard({
   billing: BillingView;
   api: BillingApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const { pending, outcome, run } = useBillingRun();
   const [draft, setDraft] = useState<Draft>(() => draftOf(billing));
@@ -209,7 +211,7 @@ export function BillingRatesCard({
         ? { kind: "ok", text: "Saved." }
         : {
             kind: "failed",
-            text: describeBillingFailure(result.code, result.status),
+            text: describeBillingFailure(product, result.code, result.status),
             issues: result.issues,
             missing: [],
           };

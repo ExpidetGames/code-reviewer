@@ -19,6 +19,9 @@ import {
   ConnectionsPageContent,
   loadConnectionsPage,
 } from "./connections-page.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -48,6 +51,7 @@ async function openPage(
   await options.setup?.(h);
   const canManage = options.canManage ?? true;
   const data = await loadConnectionsPage({
+    product: PRODUCT,
     canManage,
     workspaceId: a.id,
     integrations: createIntegrationsRepository(h.db, a.id),

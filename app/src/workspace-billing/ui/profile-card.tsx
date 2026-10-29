@@ -5,6 +5,7 @@
 // VAT ID. Only an Owner or an Admin ever receives them. The server judges every field and names the field and a code, never the
 // value; this card shows the sentence of the code under the field and keeps what was typed. The business confirmation is not
 // here: it is given with the first top-up.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
@@ -61,6 +62,7 @@ export function ProfileCard({
   profile: BillingProfileFormView | null;
   api: WorkspaceBillingApi;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   const { pending, outcome, run } = useAction();
   const [draft, setDraft] = useState<Draft>(() => draftOf(profile));
@@ -85,7 +87,7 @@ export function ProfileCard({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(product, result.code),
           issues: result.issues,
         };
       return { kind: "ok", text: PROFILE_SAVED_TEXT };

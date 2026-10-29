@@ -4,6 +4,7 @@
 // integration (installation 4242, repositories acme/widgets and acme/gadgets), the fake GitHub behind
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
+import { getProductIdentity } from "../product-identity/current.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { operatorCostLimitCentsFrom } from "../review-settings/operator-cost-limit-source.ts";
 import { managedModelsOf } from "../runner-api/managed-models.ts";
@@ -266,6 +267,7 @@ export async function startRunnerApiHarness(
   /** One app instance's notice service; another one shares nothing but the database and GitHub. */
   const buildNoticeService = () =>
     assembleRefusalNoticeService({
+      product: getProductIdentity(),
       db: fixture.db,
       registry,
       planPageUrl: noticeOptions?.planPageUrl ?? (() => null),

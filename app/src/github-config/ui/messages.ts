@@ -3,6 +3,7 @@
 // The copy for what the GitHub data routes answer: one sentence per stable code (src/github-config/errors.ts,
 // the issue codes of settings.ts and the outcomes of the manifest flow and of the linking). The codes are the
 // contract, these sentences are only what the page shows.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import {
   CROSS_SITE_REQUEST,
@@ -42,9 +43,12 @@ const FAILURE_COPY: Record<string, string> = {
   private_app_invalid: "Choose one of the two answers.",
 };
 
-export function describeGithubFailure(code: string): string {
+export function describeGithubFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );

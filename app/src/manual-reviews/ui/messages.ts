@@ -4,6 +4,7 @@
 // command. The routes answer with stable codes; this is where a code becomes a sentence (the UI
 // translates codes, never the other way round). Nothing a response carried (a raw answer of GitHub,
 // a token) is ever put into a sentence: the sentences are fixed. An unknown code gets a generic one.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   CROSS_SITE_REQUEST_RELOAD_PAGE,
   REQUEST_NOT_UNDERSTOOD,
@@ -39,9 +40,12 @@ function hasCopy(code: string): code is ManualReviewErrorCode {
 }
 
 /** The sentence for the code a route answered with (or a transport code). */
-export function describeManualReviewFailure(code: string): string {
+export function describeManualReviewFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   if (hasCopy(code)) return FAILURE_COPY[code];
-  return describeTransportFailure(code) ?? GENERIC_FAILURE;
+  return describeTransportFailure(product, code) ?? GENERIC_FAILURE;
 }
 
 /** Failures after which the list of pull requests is out of date and is loaded again. */

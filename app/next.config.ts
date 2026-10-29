@@ -12,6 +12,10 @@ import {
 import { SETUP_PAGE, SETUP_REWRITE_HEADER } from "./src/setup/paths.ts";
 
 const nextConfig: NextConfig = {
+  // The product of this build for the one page that renders outside the root layout and so outside its provider (the page
+  // for a crash in the root layout, src/app/global-error.tsx). Inlined at build time: a project of the other product has its
+  // own build and its own variables (src/product-identity/public.ts).
+  env: { NEXT_PUBLIC_PRODUCT_ID: process.env.PRODUCT_ID ?? "" },
   cacheComponents: true,
   partialPrefetching: true,
   async headers() {

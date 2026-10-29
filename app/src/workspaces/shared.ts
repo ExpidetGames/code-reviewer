@@ -26,7 +26,10 @@ function assembled(): AssembledWorkspaces {
     product: getProductIdentity(),
     githubConfigured: () => isGithubSignInConfigured(),
     // The check runs of the reviews a deleted workspace had waiting are completed on the platform (#658).
-    finishChecks: createCheckFinisher({ registry: integrationRegistry }),
+    finishChecks: createCheckFinisher({
+      product: getProductIdentity(),
+      registry: integrationRegistry,
+    }),
   });
 }
 
