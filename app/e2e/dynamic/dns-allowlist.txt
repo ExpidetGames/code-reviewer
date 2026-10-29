@@ -1,12 +1,11 @@
-# What the programs of the privileged Dynamic e2e lane may ask the lane's own resolver for (#714). The resolver answers
+# The names the programs of the privileged Dynamic e2e lane may ask the lane's own resolver for (#714). The resolver answers
 # "no such name" at once and logs every question; the network guard's last word (e2e/helpers/dynamic-lane-guard-command.ts)
-# fails the lane for a name that is not listed here and for more name lookups by the engine user (uid 10101) than the line
-# `engine-query-packets` allows. Each line has a reason with the issue that explains it; a comment starts with #.
+# fails the lane for a name that is not listed here, whoever asked. One name per line, lower case, exact (no wildcards); a
+# comment starts with #, and every entry says why it is allowed and which issue removes it.
 #
-# Names: one per line, lower case, exact (no wildcards). None are allowed now: the one that was asked, github.com, came from
-# Playwright's own `git fetch origin <sha>` for its report and is switched off in playwright.dynamic.config.ts (#736).
+# None are allowed now. The one that used to be asked, github.com, was Playwright's own `git fetch origin <sha>` for its report
+# (found with strace, #736) and is switched off in playwright.dynamic.config.ts.
 #
-# The engine user asks for no name; it is the intended rule. OpenCode still sends one lookup of registry.npmjs.org (A and AAAA,
-# found with strace, #739), which the runner's own nft table rejects, so the resolver never sees the name and the guard can only
-# count the packets. Set the value to 0 once #739 is fixed.
-engine-query-packets 2
+# The engine user's lookups are not names on this list: OpenCode still asks once per start for registry.npmjs.org (#739), and the
+# runner's own nft table rejects it before the resolver sees it. The guard counts those attempts and fails when one gets past that
+# table (guard.nft, dns-engine-delivered).

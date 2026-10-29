@@ -116,6 +116,8 @@ function captured(name: "chain" | "seen4" | "seen6"): unknown {
 
 const DNS_QUIET = {
   "dns-control-engine": 0,
+  "dns-control-engine-delivered": 0,
+  "dns-engine-delivered": 0,
   "dns-engine": 0,
   "dns-job": 0,
   "dns-root": 0,
@@ -290,10 +292,6 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
       violations: { engine: 0, job: 0, root: 5, other: 0 },
       controls: { engine: 0, job: 0, root: 0 },
     });
-    expect(parseDns(captured("chain"))).toEqual({
-      queries: { engine: 0, job: 0, root: 0, other: 0 },
-      controlEngine: 0,
-    });
   });
 
   // #714-T03
@@ -358,21 +356,26 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
 });
 
 describe("the name lookups on the lane's own resolver", () => {
-  /** The file's own allowlist, and one with a name and no engine lookups, the rule the file works toward (#739). */
   const FILE = parseDnsAllowlist(ALLOWLIST);
-  const ALLOWED = parseDnsAllowlist(
-    "example.org # a name for the tests\nengine-query-packets 0\n",
-  );
+  const ALLOWED = parseDnsAllowlist("example.org # a name for the tests\n");
+  const reading = (counts: Record<string, number>) =>
+    parseDns(listing({ ...QUIET, ...DNS_QUIET, ...counts }));
 
   // #714-T02
-  it("reads the DNS counters of each user and the engine control, apart from the violations", () => {
-    const reading = parseDns(
-      listing({ ...QUIET, ...DNS_QUIET, "dns-engine": 3, "dns-root": 2 }),
-    );
-
-    expect(reading).toEqual({
+  it("reads the DNS counters of each user, the engine's delivered packets and both controls, apart from the violations", () => {
+    expect(
+      reading({
+        "dns-engine": 3,
+        "dns-root": 2,
+        "dns-engine-delivered": 1,
+        "dns-control-engine": 4,
+        "dns-control-engine-delivered": 5,
+      }),
+    ).toEqual({
       queries: { engine: 3, job: 0, root: 2, other: 0 },
-      controlEngine: 0,
+      engineDelivered: 1,
+      controlEngine: 4,
+      controlEngineDelivered: 5,
     });
     // The loopback queries do not touch the counters that fail a test for leaving the machine.
     expect(() => {
@@ -384,47 +387,50 @@ describe("the name lookups on the lane's own resolver", () => {
 
   // #714-T02
   it("refuses to read a ruleset without the DNS counters, because a guard that cannot see is not a guard", () => {
-    expect(() => parseDns(listing(QUIET))).toThrow(/dns-engine/);
-    expect(() => parseDns({ nftables: [] })).toThrow(/dns-engine/);
+    expect(() => parseDns(listing(QUIET))).toThrow(/dns-/);
+    expect(() =>
+      parseDns(
+        listing(
+          Object.fromEntries(
+            Object.entries({ ...QUIET, ...DNS_QUIET }).filter(
+              ([name]) => name !== "dns-engine-delivered",
+            ),
+          ),
+        ),
+      ),
+    ).toThrow(/dns-engine-delivered/);
+    expect(() => parseDns({ nftables: [] })).toThrow(/dns-/);
     expect(() => parseDns("not nft output")).toThrow();
   });
 
   // #714-T02
-  it("fails the lane when the engine user sent a query, even for a name that is allowed for the others", () => {
-    const dns = parseDns(listing({ ...QUIET, ...DNS_QUIET, "dns-engine": 1 }));
+  it("fails the lane when a query of the engine user got past the runner's rules, and names where it went", () => {
+    const dns = reading({ "dns-engine": 1, "dns-engine-delivered": 1 });
 
     expect(() => {
       assertDnsQuiet(dns, ["example.org"], ALLOWED);
-    }).toThrow(/engine user .* 1 DNS query packet.* more than the 0/);
-    // The destinations of the set are named when there are any.
+    }).toThrow(
+      /1 DNS query packet.* engine user .* got past the runner's own network rules/,
+    );
     expect(() => {
       assertDnsQuiet(dns, [], ALLOWED, ["uid 10101 → 127.0.0.1:53/udp"]);
     }).toThrow(/uid 10101 → 127\.0\.0\.1:53\/udp/);
   });
 
   // #714-T02
-  it("fails the lane only above the documented baseline of the engine user's lookups", () => {
-    const baseline = FILE.engineQueryPackets;
-    const at = parseDns(
-      listing({ ...QUIET, ...DNS_QUIET, "dns-engine": baseline }),
-    );
-    const above = parseDns(
-      listing({ ...QUIET, ...DNS_QUIET, "dns-engine": baseline + 1 }),
-    );
+  it("passes the engine's attempts that the runner's rules rejected, they are reported by the lane and not failed (#739)", () => {
+    const dns = reading({
+      "dns-engine": 3,
+      "dns-control-engine": 1,
+      "dns-control-engine-delivered": 1,
+    });
 
-    expect(() => {
-      assertDnsQuiet(at, [], FILE);
-    }).not.toThrow();
-    expect(() => {
-      assertDnsQuiet(above, [], FILE);
-    }).toThrow(
-      /more than the \d+ that e2e\/dynamic\/dns-allowlist\.txt expects/,
-    );
+    expect(describeDnsProblems(dns, [], ALLOWED)).toEqual([]);
   });
 
   // #714-T02
   it("fails the lane for a name that is not on the allowlist, and names it", () => {
-    const dns = parseDns(listing({ ...QUIET, ...DNS_QUIET, "dns-root": 2 }));
+    const dns = reading({ "dns-root": 2 });
 
     expect(() => {
       assertDnsQuiet(dns, ["example.org", "github.com", "evil.test"], ALLOWED);
@@ -435,22 +441,13 @@ describe("the name lookups on the lane's own resolver", () => {
   });
 
   // #714-T02
-  it("passes when nobody but root asked, and only for names on the allowlist, and when the control moved", () => {
-    const dns = parseDns(
-      listing({
-        ...QUIET,
-        ...DNS_QUIET,
-        "dns-root": 4,
-        "dns-control-engine": 2,
-      }),
-    );
+  it("passes when only names of the allowlist were asked, however often, or none", () => {
+    const dns = reading({ "dns-root": 4 });
 
-    expect(() => {
-      assertDnsQuiet(dns, ["example.org", "example.org"], ALLOWED);
-    }).not.toThrow();
-    expect(() => {
-      assertDnsQuiet(dns, [], ALLOWED);
-    }).not.toThrow();
+    expect(
+      describeDnsProblems(dns, ["example.org", "example.org"], ALLOWED),
+    ).toEqual([]);
+    expect(describeDnsProblems(dns, [], ALLOWED)).toEqual([]);
   });
 
   // #714-T02
@@ -461,24 +458,15 @@ describe("the name lookups on the lane's own resolver", () => {
       ),
     ).toEqual(["example.org", "example.org", "(not a query)"]);
     expect(
-      parseDnsAllowlist(
-        "# comment\n\nExample.org # why\n  other.test  \nengine-query-packets 3 # why\n",
-      ),
-    ).toEqual({
-      names: new Set(["example.org", "other.test"]),
-      engineQueryPackets: 3,
-    });
+      parseDnsAllowlist("# comment\n\nExample.org # why\n  other.test  \n"),
+    ).toEqual(new Set(["example.org", "other.test"]));
     // A malformed query, or a packet that is no query, is not a name that can be on a list.
     for (const log of [
       "MALFORMED not a query with one question, 15 bytes 1234",
       "IGNORED an answer, 20 bytes 0000",
     ])
       expect(
-        describeDnsProblems(
-          parseDns(listing({ ...QUIET, ...DNS_QUIET })),
-          parseAskedNames(log),
-          ALLOWED,
-        ),
+        describeDnsProblems(reading({}), parseAskedNames(log), ALLOWED),
       ).toHaveLength(1);
   });
 
@@ -507,28 +495,28 @@ describe("the name lookups on the lane's own resolver", () => {
   });
 
   // #714-T02
-  it("has an allowlist where every entry points to an issue, with no name now and the engine baseline explained", () => {
-    const entries = ALLOWLIST.split("\n").filter(
-      (line) => line.trim() !== "" && !line.startsWith("#"),
-    );
-
-    expect([...FILE.names]).toEqual([]);
-    expect(FILE.engineQueryPackets).toBeGreaterThanOrEqual(0);
-    expect(entries).toEqual([
-      `engine-query-packets ${String(FILE.engineQueryPackets)}`,
-    ]);
-    // The reason of the baseline is in the file and names the issue that removes it.
-    expect(ALLOWLIST).toMatch(/#739/);
+  it("has an allowlist with no name now, whose reasons point to the issues that explain the lookups", () => {
+    expect([...FILE]).toEqual([]);
     expect(ALLOWLIST).toMatch(/#736/);
+    expect(ALLOWLIST).toMatch(/#739/);
   });
 
   // #714-T02
-  it("counts queries to port 53 on loopback per user, before the loopback accept, with a control that does not fail the lane", () => {
+  it("counts queries to port 53 on loopback per user before the loopback accept, and the engine's after the runner's table, with controls that do not fail the lane", () => {
     const lines = RULES.split("\n");
     const accept = lines.findIndex((line) => /oifname "lo" accept/.test(line));
-    const dnsRules = lines.filter((line) => /comment "dns-/.test(line));
+    const dnsRules = lines.filter((line) =>
+      / output oifname .*comment "dns-/.test(line),
+    );
+    const delivered = lines.filter((line) =>
+      /output_after .*comment "dns-/.test(line),
+    );
 
-    expect(dnsRules).toHaveLength(5);
+    expect(
+      dnsRules.filter((line) =>
+        /dns-(engine|job|root|other|control-engine)"/.test(line),
+      ),
+    ).toHaveLength(5);
     for (const line of dnsRules) {
       expect(lines.indexOf(line)).toBeLessThan(accept);
       expect(line).toMatch(/oifname "lo"/);
@@ -543,11 +531,40 @@ describe("the name lookups on the lane's own resolver", () => {
     expect(RULES).toMatch(
       /meta skuid != \{ 0, 10001, 10101 \} counter comment "dns-other"/,
     );
-    // The control goes to an address nothing answers on, and only it accepts (the others take no verdict).
     expect(RULES).toMatch(
-      /ip daddr 127\.0\.0\.2 .*skuid 10101 counter accept comment "dns-control-engine"/,
+      /output oifname "lo" ip daddr 127\.0\.0\.2 .*skuid 10101 counter accept comment "dns-control-engine"/,
     );
-    expect(dnsRules.filter((line) => /\baccept\b/.test(line))).toHaveLength(1);
+    // After the runner's table (priority 0 in netguard.py): the chain at priority 10 sees only what that table let pass.
+    expect(RULES).toMatch(
+      /add chain inet cr_lane_guard output_after \{ type filter hook output priority 10 ;/,
+    );
+    expect(delivered).toHaveLength(2);
+    expect(RULES).toMatch(
+      /output_after oifname "lo" ip daddr 127\.0\.0\.2 .*skuid 10101 counter accept comment "dns-control-engine-delivered"/,
+    );
+    expect(RULES).toMatch(
+      /output_after oifname "lo" meta l4proto \{ tcp, udp \} th dport 53 meta skuid 10101 counter comment "dns-engine-delivered"/,
+    );
+    // Only the two controls accept; the counters of the users take no verdict.
+    expect(
+      [...dnsRules, ...delivered].filter((line) => /\baccept\b/.test(line)),
+    ).toHaveLength(2);
+  });
+
+  // #714-T02
+  it("keeps the engine's boundary where the lane expects it: the runner's table is at priority 0 and rejects the engine user's other packets", () => {
+    const netguard = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../runner/src/code_reviewer_runner/dynamic_review/netguard.py",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+
+    expect(netguard).toMatch(/hook output priority 0 ;/);
+    expect(netguard).toMatch(/reject with icmpx type admin-prohibited/);
   });
 
   // #714-T02

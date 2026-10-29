@@ -110,12 +110,16 @@ export function assertNoExternalAttempts(
 
 /** Name lookups on loopback, where the lane's own resolver answers: they never reach the violation counters. */
 export type DnsReading = {
+  /** Packets to port 53 on loopback per user, counted before the runner's own table has seen them. */
   queries: Record<GuardWho, number>;
-  /** The engine user's query to 127.0.0.2:53 (the control that proves `queries.engine` counts for the engine user). */
+  /** The engine user's packets to port 53 that got past the runner's own table: the boundary of production. */
+  engineDelivered: number;
+  /** The engine user's query to 127.0.0.2:53, before and after that table (they prove the two counters move). */
   controlEngine: number;
+  controlEngineDelivered: number;
 };
 
-/** Reads the dns-* counters from the output of `nft -j list chain inet cr_lane_guard output`. */
+/** Reads the dns-* counters from the output of `nft -j list table inet cr_lane_guard` (or of the chains). */
 export function parseDns(json: unknown): DnsReading {
   const items =
     typeof json === "object" && json !== null && "nftables" in json
@@ -131,30 +135,20 @@ export function parseDns(json: unknown): DnsReading {
     queries: Object.fromEntries(
       VIOLATIONS.map((who) => [who, counterOf(rules, `dns-${who}`)]),
     ) as DnsReading["queries"],
+    engineDelivered: counterOf(rules, "dns-engine-delivered"),
     controlEngine: counterOf(rules, "dns-control-engine"),
+    controlEngineDelivered: counterOf(rules, "dns-control-engine-delivered"),
   };
 }
 
-/** What e2e/dynamic/dns-allowlist.txt allows: names anyone may ask for, and how many query packets the engine user may send. */
-export type DnsAllowlist = {
-  names: ReadonlySet<string>;
-  engineQueryPackets: number;
-};
-
-const ENGINE_LINE = /^engine-query-packets\s+(\d+)$/;
-
-/** The allowlist file: `engine-query-packets <n>` and one name per line, `#` starts a comment. */
-export function parseDnsAllowlist(text: string): DnsAllowlist {
-  const names = new Set<string>();
-  let engineQueryPackets = 0;
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/#.*$/, "").trim().toLowerCase();
-    if (line === "") continue;
-    const engine = ENGINE_LINE.exec(line);
-    if (engine !== null) engineQueryPackets = Number(engine[1]);
-    else names.add(line);
-  }
-  return { names, engineQueryPackets };
+/** The names of an allowlist file: one per line, lower case, `#` starts a comment. */
+export function parseDnsAllowlist(text: string): Set<string> {
+  return new Set(
+    text
+      .split("\n")
+      .map((line) => line.replace(/#.*$/, "").trim().toLowerCase())
+      .filter((line) => line !== ""),
+  );
 }
 
 /** The names in the resolver's log (`A github.com` → `github.com`), lower case, without the root dot. */
@@ -172,23 +166,23 @@ export function parseAskedNames(log: string): string[] {
 }
 
 /**
- * What is wrong with the name lookups of the lane: the engine user sent more query packets than the allowlist expects (none is
- * the rule, see the file), or a name is not on the allowlist. The names of the engine user are never read (its packets are
- * rejected before the lane's resolver), so no name on the list excuses a packet of it.
+ * What is wrong with the name lookups of the lane: a query of the engine user got past the runner's own table (it is rejected
+ * there, the boundary of production), or a name is not on the allowlist. The engine's attempts are not a problem here: they
+ * are counted and reported (#739), but a name the resolver was asked is checked whoever asked.
  */
 export function describeDnsProblems(
   reading: DnsReading,
   askedNames: readonly string[],
-  allowed: DnsAllowlist,
+  allowed: ReadonlySet<string>,
   destinations: readonly string[] = [],
 ): string[] {
   const problems: string[] = [];
-  if (reading.queries.engine > allowed.engineQueryPackets)
+  if (reading.engineDelivered > 0)
     problems.push(
-      `the engine user (the pinned OpenCode, or anything it started) sent ${String(reading.queries.engine)} DNS query packet(s) to the lane's resolver, more than the ${String(allowed.engineQueryPackets)} that e2e/dynamic/dns-allowlist.txt expects; the engine user may not look up any name${destinations.length === 0 ? "" : ` (lookups on loopback, by user: ${destinations.join(", ")})`}`,
+      `${String(reading.engineDelivered)} DNS query packet(s) of the engine user (the pinned OpenCode, or anything it started) got past the runner's own network rules; the engine user may reach loopback ports of its proxy only${destinations.length === 0 ? "" : ` (lookups on loopback, by user: ${destinations.join(", ")})`}`,
     );
   const unlisted = [
-    ...new Set(askedNames.filter((name) => !allowed.names.has(name))),
+    ...new Set(askedNames.filter((name) => !allowed.has(name))),
   ];
   if (unlisted.length > 0)
     problems.push(
@@ -201,7 +195,7 @@ export function describeDnsProblems(
 export function assertDnsQuiet(
   reading: DnsReading,
   askedNames: readonly string[],
-  allowed: DnsAllowlist,
+  allowed: ReadonlySet<string>,
   destinations: readonly string[] = [],
 ): void {
   const problems = describeDnsProblems(
@@ -221,7 +215,7 @@ export function readAskedNames(logFile = LANE_DNS_LOG): string[] {
   return parseAskedNames(readFileSync(logFile, "utf8"));
 }
 
-export function readDnsAllowlist(file = DNS_ALLOWLIST_FILE): DnsAllowlist {
+export function readDnsAllowlist(file = DNS_ALLOWLIST_FILE): Set<string> {
   return parseDnsAllowlist(readFileSync(file, "utf8"));
 }
 
@@ -367,13 +361,12 @@ export function readGuard(): GuardReading {
   return parseGuard(JSON.parse(done.stdout));
 }
 
-/** Reads the DNS counters of the kernel now (root only). */
+/** Reads the DNS counters of the kernel now (root only): both chains of the table. */
 export function readDns(): DnsReading {
-  const done = spawnSync(
-    "nft",
-    ["-j", "list", "chain", "inet", GUARD_TABLE, GUARD_CHAIN],
-    { encoding: "utf8", timeout: 30_000 },
-  );
+  const done = spawnSync("nft", ["-j", "list", "table", "inet", GUARD_TABLE], {
+    encoding: "utf8",
+    timeout: 30_000,
+  });
   if (done.status !== 0)
     throw new Error(
       `The network guard cannot be read (nft: ${done.error?.message ?? done.stderr.trim()}).`,
@@ -408,6 +401,6 @@ export function assertGuardQuiet(): void {
     dns,
     readAskedNames(),
     readDnsAllowlist(),
-    dns.queries.engine > 0 ? readDnsDestinations() : [],
+    dns.engineDelivered > 0 ? readDnsDestinations() : [],
   );
 }

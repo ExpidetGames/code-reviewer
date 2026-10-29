@@ -180,12 +180,13 @@ test.describe("the network guard of the Dynamic lane", () => {
   });
 
   // #714-T02
-  test("counts a DNS-sized packet of the engine user on loopback in the control of the name lookups, which no name check fails", async () => {
+  test("counts a query packet of the engine user to port 53, before and after the runner's rules, in a control that no check fails", async () => {
     const before = readGuard();
     const dnsBefore = readDns();
 
-    // Nothing answers on 127.0.0.2: the packet is the control, not a lookup of the lane's resolver (a real lookup of the
-    // engine user would fail the lane at its end, by design; the gate logic is proven in src/test-support).
+    // Nothing answers on 127.0.0.2, and the Worker has not installed its rules yet: the packet is the control, not a lookup
+    // of the lane's resolver. A real lookup of the engine user that got past the runner's rules would fail the lane at its
+    // end, by design; the gate logic is proven in src/test-support.
     await asUser(ENGINE, home, "bash", [
       "-c",
       "exec 3<>/dev/udp/127.0.0.2/53; echo control >&3",
@@ -193,7 +194,11 @@ test.describe("the network guard of the Dynamic lane", () => {
 
     const dnsAfter = readDns();
     expect(dnsAfter.controlEngine - dnsBefore.controlEngine).toBeGreaterThan(0);
-    expect(dnsAfter.queries).toEqual(dnsBefore.queries);
+    expect(
+      dnsAfter.controlEngineDelivered - dnsBefore.controlEngineDelivered,
+    ).toBeGreaterThan(0);
+    expect(dnsAfter.queries.engine).toBe(dnsBefore.queries.engine);
+    expect(dnsAfter.engineDelivered).toBe(dnsBefore.engineDelivered);
     expect(readGuard()).toEqual(before);
   });
 
