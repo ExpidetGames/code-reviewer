@@ -11,6 +11,7 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { assembleRefusalNoticeService } from "./assemble.ts";
 import { createBillingAwareLinks } from "./billing-link.ts";
 import { createPlanPageUrlResolver } from "./plan-link.ts";
@@ -35,6 +36,7 @@ export function getRefusalNoticeService(): RefusalNoticeService {
     }),
   });
   service = assembleRefusalNoticeService({
+    product: getProductIdentity(),
     db,
     registry: integrationRegistry,
     planPageUrl: links.planPageUrl,

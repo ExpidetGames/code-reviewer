@@ -2,6 +2,7 @@
 
 // The copy of the key mode card (#496). One honest sentence for each choice about what is charged: no rate, no formula. The UI
 // translates a code to copy, never the other way round; no sentence contains a value.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import {
   describeTransportFailure,
@@ -39,8 +40,13 @@ const FAILURE_COPY: Record<string, string> = {
   body_too_large: GENERIC_FAILURE,
 };
 
-export function describeKeyModeFailure(code: string): string {
+export function describeKeyModeFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ?? FAILURE_COPY[code] ?? GENERIC_FAILURE
+    describeTransportFailure(product, code) ??
+    FAILURE_COPY[code] ??
+    GENERIC_FAILURE
   );
 }

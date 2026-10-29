@@ -3,6 +3,7 @@
 // Puts the notice service together from a database: the repositories of the workspace of each refusal, the
 // registry that knows how to write to a platform, and the one thing the instance decides, where the plan page is.
 // The running server (shared.ts) and the tests make it the same way.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { Kysely } from "kysely";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRefusalNoticesRepository } from "../db/repositories/refusal-notices-repository.ts";
@@ -18,6 +19,7 @@ import {
 } from "./service.ts";
 
 export type RefusalNoticeAssembly = {
+  product: ProductIdentity;
   db: Kysely<Database>;
   registry: Pick<IntegrationRegistry, "resolve">;
   planPageUrl: RefusalNoticeDeps["planPageUrl"];
@@ -32,6 +34,7 @@ export function assembleRefusalNoticeService(
   const { db } = assembly;
   const now = assembly.now ?? (() => new Date());
   return createRefusalNoticeService({
+    product: assembly.product,
     repositories: (workspaceId) =>
       createRepositoriesRepository(db, workspaceId, now),
     integrations: (workspaceId) =>

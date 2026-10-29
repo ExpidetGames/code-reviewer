@@ -2,6 +2,7 @@
 
 // The overview of the admin portal. Only the instance admin sees it: anybody else gets a 404 as if the
 // page did not exist (src/admin/access.ts).
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
@@ -23,6 +24,7 @@ export default async function AdminPage() {
     <>
       <PageHeader title="Admin" />
       <Overview
+        product={getProductIdentity()}
         settings={settings}
         github={github.view}
         emailConflictCount={github.conflicts.length}

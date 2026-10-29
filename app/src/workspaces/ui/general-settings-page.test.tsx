@@ -33,6 +33,9 @@ import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { testGithubAppStatus } from "../../test-support/github-app.ts";
 import type { PlanHandoffErrorCode } from "../../plan-handoff/errors.ts";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(() => {
   cleanup();
@@ -69,6 +72,7 @@ function general({
 } = {}) {
   return render(
     <GeneralSettingsPageContent
+      product={PRODUCT}
       workspaceSlug="acme"
       workspaceName="Acme"
       canRename={canRename}

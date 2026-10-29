@@ -7,6 +7,9 @@ import { createRunsRepository } from "../db/repositories/runs-repository.ts";
 import type { EnqueueJobInput, Job, JobOutcome } from "../jobs/job-types.ts";
 import { createRunsService } from "../runs/runs-service.ts";
 import { createJobQueueFixture, type JobQueueFixture } from "./jobs.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 export type RunsFixture = JobQueueFixture & {
   runs: ReturnType<typeof createRunsService>;
@@ -37,6 +40,7 @@ export async function createRunsFixture(
   });
   const runsRepository = createRunsRepository(base.db, base.workspaceId);
   const runs = createRunsService({
+    product: PRODUCT,
     runs: runsRepository,
     now: base.clock.now,
   });

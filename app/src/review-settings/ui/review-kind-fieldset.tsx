@@ -5,6 +5,8 @@
 // Review, and, while Dynamic Review is chosen, its review skill. Its provider and model are chosen in the LLM section
 // (#656). The card never implies that Dynamic Review works while the instance has not enabled it (#195 gate): the
 // option says so and choosing it shows what happens to the runs. Switching is confirmed by the form when it is saved.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
+import { useProductIdentity } from "@/product-identity/context";
 import { useId } from "react";
 import { useCapabilities } from "../../capabilities/context.tsx";
 import { Alert, alertVariants } from "../../components/ui/alert.tsx";
@@ -28,11 +30,11 @@ const KIND_HINTS: Record<ProjectReviewKind, string> = {
 };
 
 export const GATE_OFF_BADGE = "Not enabled yet.";
-export const GATE_OFF_WARNING =
-  "Dynamic Review is not enabled yet. Reviews of this project fail until a code-review.com admin turns it on.";
+export const gateOffWarning = (product: ProductIdentity): string =>
+  `Dynamic Review is not enabled yet. Reviews of this project fail until a ${product.name} admin turns it on.`;
 /** The same, on the workspace defaults (#676). */
-export const GATE_OFF_WARNING_DEFAULTS =
-  "Dynamic Review is not enabled yet. Reviews of the projects that use it fail until a code-review.com admin turns it on.";
+export const gateOffWarningDefaults = (product: ProductIdentity): string =>
+  `Dynamic Review is not enabled yet. Reviews of the projects that use it fail until a ${product.name} admin turns it on.`;
 /** Next to the kind of a project that follows the defaults of the workspace (#676). */
 export const FOLLOWS_DEFAULT_BADGE = "Global default";
 const KINDS: readonly ProjectReviewKind[] = ["dynamic", "diff"];
@@ -79,6 +81,7 @@ export function ReviewKindFieldset({
   /** The project has no kind of its own: it follows the defaults of the workspace (#676). */
   followsDefault?: boolean;
 }) {
+  const product = useProductIdentity();
   const ids = useId();
   // #731: without the capability there is no choice to make: the card is not there.
   if (!useCapabilities().has("dynamic-review")) return null;
@@ -158,7 +161,9 @@ export function ReviewKindFieldset({
         // Static text, not a live region: it is true from the moment the page loads.
         <div className={alertVariants({ variant: "warning" })}>
           <p className="col-start-1 [grid-column:1/-1]">
-            {workspaceDefaults ? GATE_OFF_WARNING_DEFAULTS : GATE_OFF_WARNING}
+            {workspaceDefaults
+              ? gateOffWarningDefaults(product)
+              : gateOffWarning(product)}
           </p>
         </div>
       ) : null}

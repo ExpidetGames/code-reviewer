@@ -6,6 +6,7 @@
 // link is bound to it: somebody who clicks a link from another person's sign-up cannot complete it). A mail scanner or a link preview that opens every link in a message would
 // otherwise use the link up before the person does. The token comes from the link and is sent as it is; it
 // is never shown or kept.
+import { useProductIdentity } from "@/product-identity/context";
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
@@ -24,6 +25,7 @@ export function VerifyEmailForm({
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -57,7 +59,7 @@ export function VerifyEmailForm({
       setDone(true);
       return;
     }
-    setProblem(describeSignUpFailure(result.code, result.issues));
+    setProblem(describeSignUpFailure(product, result.code, result.issues));
   }
 
   return (

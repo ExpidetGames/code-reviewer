@@ -124,7 +124,7 @@ export function ProjectSettingsPageContent({
   // workspace's LLM hint are rows of the same strip instead of separate notice regions.
   const notices: AttentionNotice[] = [
     ...projectStateNotices(data.row),
-    ...describeConfigNotices(data.config, audience),
+    ...describeConfigNotices(product, data.config, audience),
     ...(llmNotice === null ? [] : [llmNotice]),
   ];
   return (

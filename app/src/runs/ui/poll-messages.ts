@@ -2,9 +2,10 @@
 
 // What the runs pages say when a poll fails: the generic notice (the last data stays, the page keeps
 // trying), and the sentence for a failure that ends polling for good.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import {
-  TRANSPORT_FAILURE_COPY,
+  UNEXPECTED_RESPONSE_COPY,
   describeTransportFailure,
 } from "../../ui/transport-messages.ts";
 
@@ -18,6 +19,7 @@ const STOPPED_SUFFIX = " This page no longer updates; reload it to try again.";
 
 /** The sentence for a failed poll; `stopped` says polling ended (a permanent failure). */
 export function describePollFailure(
+  product: ProductIdentity,
   code: string | null,
   stopped: boolean,
   generic: string,
@@ -28,7 +30,6 @@ export function describePollFailure(
       ? RUN_GONE_TEXT
       : code === "not_found"
         ? NOT_AVAILABLE_TO_YOU
-        : (describeTransportFailure(code) ??
-          TRANSPORT_FAILURE_COPY.UNEXPECTED_RESPONSE);
+        : (describeTransportFailure(product, code) ?? UNEXPECTED_RESPONSE_COPY);
   return `${sentence}${STOPPED_SUFFIX}`;
 }

@@ -8,6 +8,7 @@
 // read of their role in the organization gave) behind a disclosure, closed by default; "Decided" is a
 // quiet history list. The old page description and the essay above the sync button are gone.
 // Everything from GitHub or from a person is text; long names truncate instead of widening the page.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { Suspense } from "react";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
 import { DescriptionList } from "../../components/description-list.tsx";
@@ -29,7 +30,7 @@ import type { ApprovalsApi } from "./api.ts";
 import { ApprovalActions } from "./approval-actions.tsx";
 import {
   describeRoleDetail,
-  REQUEST_STATUS_COPY,
+  requestStatusCopy,
   ROLE_RESULT_COPY,
   TOKEN_CAN_ACCESS_COPY,
 } from "./messages.ts";
@@ -169,7 +170,13 @@ function WaitingTab({
   );
 }
 
-function DecidedTab({ decided }: { decided: InstallationLinkRequestView[] }) {
+function DecidedTab({
+  product,
+  decided,
+}: {
+  product: ProductIdentity;
+  decided: InstallationLinkRequestView[];
+}) {
   if (decided.length === 0)
     return (
       <EmptyTab
@@ -201,7 +208,7 @@ function DecidedTab({ decided }: { decided: InstallationLinkRequestView[] }) {
             </span>
           </div>
           <Badge variant={decidedBadgeVariant(request.status)}>
-            {REQUEST_STATUS_COPY[request.status]}
+            {requestStatusCopy(product)[request.status]}
           </Badge>
         </li>
       ))}
@@ -251,11 +258,14 @@ function NotLinkedTab({ unclaimed }: { unclaimed: UnclaimedInstallation[] }) {
 }
 
 export function ApprovalsPageContent({
+  product,
   pending,
   decided,
   unclaimed = [],
   api,
 }: {
+  /** Who the page speaks for: the decisions are worded with the name of the product. */
+  product: ProductIdentity;
   pending: InstallationLinkRequestView[];
   decided: InstallationLinkRequestView[];
   /** The installations of the App that no workspace has linked. */
@@ -299,7 +309,7 @@ export function ApprovalsPageContent({
               {
                 value: "decided",
                 label: "Decided",
-                content: <DecidedTab decided={decided} />,
+                content: <DecidedTab product={product} decided={decided} />,
               },
               {
                 value: "not-linked",

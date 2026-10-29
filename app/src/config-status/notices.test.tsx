@@ -13,6 +13,9 @@ import {
 import { ConfigNotices } from "./notices.tsx";
 import { describeConfigNotices, LLM_ISSUE_COPY } from "./notices.ts";
 import type { ConfigStatus } from "./status.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -29,16 +32,19 @@ const WORKING: ConfigStatus = {
 describe("the configuration hints", () => {
   // CR-34-T11
   it("show nothing when every value is there", () => {
-    const { container } = render(<ConfigNotices status={WORKING} />);
+    const { container } = render(
+      <ConfigNotices product={PRODUCT} status={WORKING} />,
+    );
 
     expect(container.textContent).toBe("");
-    expect(describeConfigNotices(WORKING)).toEqual([]);
+    expect(describeConfigNotices(PRODUCT, WORKING)).toEqual([]);
   });
 
   // CR-34-T10
   it("name each missing GitHub App variable and explain that activating is off", () => {
     render(
       <ConfigNotices
+        product={PRODUCT}
         status={{
           ...WORKING,
           githubApp: {
@@ -60,6 +66,7 @@ describe("the configuration hints", () => {
 
   it("separate a variable that is wrong from one that is missing", () => {
     const notices = describeConfigNotices(
+      PRODUCT,
       {
         ...WORKING,
         githubApp: {
@@ -79,6 +86,7 @@ describe("the configuration hints", () => {
 
   it("show a wrong optional LLM variable as a warning next to a working configuration", () => {
     const notices = describeConfigNotices(
+      PRODUCT,
       {
         ...WORKING,
         llm: {
@@ -119,18 +127,21 @@ describe("the configuration hints", () => {
       },
     };
 
-    const { container } = render(<ConfigNotices status={broken} />);
+    const { container } = render(
+      <ConfigNotices product={PRODUCT} status={broken} />,
+    );
 
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
     expect(container.textContent).toContain("Ask your admin");
     expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_|private key/i);
-    expect(describeConfigNotices(broken)).toHaveLength(1);
+    expect(describeConfigNotices(PRODUCT, broken)).toHaveLength(1);
   });
 
   // #101-WM-08
   it("show a member nothing about a setting that is ignored while everything works", () => {
     const { container } = render(
       <ConfigNotices
+        product={PRODUCT}
         status={{
           ...WORKING,
           llm: {

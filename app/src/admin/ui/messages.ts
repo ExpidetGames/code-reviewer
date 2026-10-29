@@ -2,6 +2,7 @@
 
 // The copy for what the admin data route answers: one sentence per stable code (src/admin/errors.ts) and
 // for the fields of the forms. The codes are the contract, these sentences are only what the page shows.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   CROSS_SITE_REQUEST,
   ENTRIES_REQUIRED,
@@ -34,11 +35,15 @@ const FAILURE_COPY: Record<string, string> = {
 };
 
 /** The sentence for a failed change. `count` is the number of workspaces for `too_many_workspaces`. */
-export function describeAdminFailure(code: string, count?: number): string {
+export function describeAdminFailure(
+  product: ProductIdentity,
+  code: string,
+  count?: number,
+): string {
   if (code === "too_many_workspaces" && count !== undefined)
     return `There are ${String(count)} workspaces, so it cannot become single-tenant. Single-tenant allows one workspace at most; remove the others first.`;
   return (
-    describeTransportFailure(code) ??
+    describeTransportFailure(product, code) ??
     (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
     GENERIC_FAILURE
   );

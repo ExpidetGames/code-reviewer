@@ -16,6 +16,7 @@ import { createRunnerJobsRepository } from "../db/repositories/runner-jobs-repos
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { REVIEW_DEFAULTS_KEY } from "../review-settings/settings.ts";
 import type { CheckNotifier } from "./notifying-queues.ts";
 import { createCheckRunService, type CheckRunService } from "./service.ts";
@@ -30,6 +31,7 @@ export function getCheckRunService(): CheckRunService {
   // Only `get`: the service never changes a job.
   const jobs = createRunnerJobsRepository(db);
   service = createCheckRunService({
+    product: getProductIdentity(),
     jobs: { get: (id) => jobs.get(id) },
     repositories: (workspaceId) =>
       createRepositoriesRepository(db, workspaceId),

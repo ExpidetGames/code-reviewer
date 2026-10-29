@@ -6,10 +6,10 @@
 // short reason. Best effort and never in the way of the deletion: a connection that cannot be reached (the App is not
 // configured, its token cannot be obtained, the installation is gone) is one log line with a stable code and ids only, and
 // the remaining check runs of that connection are not tried.
-import { CHECK_NAME } from "../check-runs/service.ts";
 import type { OpenCheck } from "../db/repositories/workspace-erasure-repository.ts";
 import { IntegrationError } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { Integration } from "../integrations/types.ts";
 
 /** What the deletion hands over after it committed: the connections it released and the check runs that stay open. */
@@ -29,10 +29,13 @@ export const DELETED_CHECK_SUMMARY = "The workspace was deleted.";
 const DEFAULT_BUDGET_MS = 10_000;
 
 export function createCheckFinisher({
+  product,
   registry,
   log = (line) => console.error(line),
   budgetMs = DEFAULT_BUDGET_MS,
 }: {
+  /** The check run keeps the name of the product that made it (`checkName`). */
+  product: ProductIdentity;
   registry: Pick<IntegrationRegistry, "resolve">;
   log?: (line: string) => void;
   budgetMs?: number;
@@ -63,7 +66,7 @@ export function createCheckFinisher({
           {
             jobId: check.jobId,
             headSha: check.headSha,
-            name: CHECK_NAME,
+            name: product.checkName,
             status: "completed",
             conclusion: "neutral",
             title: DELETED_CHECK_TITLE,

@@ -61,6 +61,7 @@ async function VerifyOrExplain({
   return (
     <AuthCard product={getProductIdentity()} title={TITLE}>
       <VerifyEmailHelp
+        product={getProductIdentity()}
         email={email}
         isAdmin={isAdmin}
         signOutAction={signOut}

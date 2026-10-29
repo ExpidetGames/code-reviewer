@@ -15,13 +15,16 @@ import {
   describeMissingItem,
   describeStripeDetail,
 } from "./billing-messages.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the copy for the billing codes", () => {
   // #504-T09
   it.each(BILLING_ERROR_CODES)(
     "has a sentence of its own for the error %s, which is not the code",
     (code) => {
-      const sentence = describeBillingFailure(code);
+      const sentence = describeBillingFailure(PRODUCT, code);
 
       expect(sentence).not.toBe(GENERIC_FAILURE);
       expect(sentence.length).toBeGreaterThan(20);
@@ -44,7 +47,10 @@ describe("the copy for the billing codes", () => {
 
   // #595
   it("tells to switch billing off before the unusable webhook endpoint is replaced, as replacing is refused while billing is on", () => {
-    const sentence = describeBillingFailure("webhook_endpoint_unusable");
+    const sentence = describeBillingFailure(
+      PRODUCT,
+      "webhook_endpoint_unusable",
+    );
 
     expect(sentence).toMatch(/Switch billing off, then replace it/);
     expect(sentence).not.toMatch(/Replace the endpoint here/);
@@ -72,7 +78,9 @@ describe("the copy for the billing codes", () => {
 
   // #504-T09
   it("falls back to the generic sentence for a code it does not know, and says nothing of it", () => {
-    expect(describeBillingFailure("something_new")).toBe(GENERIC_FAILURE);
+    expect(describeBillingFailure(PRODUCT, "something_new")).toBe(
+      GENERIC_FAILURE,
+    );
     expect(describeBillingIssue({ field: "x", code: "something_new" })).toBe(
       GENERIC_FAILURE,
     );
@@ -81,14 +89,20 @@ describe("the copy for the billing codes", () => {
 
   // #504-T09
   it("translates the transport failures like the other pages do", () => {
-    expect(describeBillingFailure("NETWORK_ERROR")).not.toBe(GENERIC_FAILURE);
-    expect(describeBillingFailure("UNAUTHENTICATED")).not.toBe(GENERIC_FAILURE);
+    expect(describeBillingFailure(PRODUCT, "NETWORK_ERROR")).not.toBe(
+      GENERIC_FAILURE,
+    );
+    expect(describeBillingFailure(PRODUCT, "UNAUTHENTICATED")).not.toBe(
+      GENERIC_FAILURE,
+    );
   });
 
   // #504-T12
   it("names no vendor of the removed design and no plan", () => {
     const all = [
-      ...BILLING_ERROR_CODES.map(describeBillingFailure),
+      ...BILLING_ERROR_CODES.map((code) =>
+        describeBillingFailure(PRODUCT, code),
+      ),
       ...BILLING_ISSUE_CODES.map((code) =>
         describeBillingIssue({ field: "x", code }),
       ),
@@ -103,6 +117,7 @@ describe("the copy for a failed Stripe check (#690)", () => {
   // #690-T04
   it("says in so many words that the account is not enabled for Managed Payments", () => {
     const sentence = describeBillingFailure(
+      PRODUCT,
       "stripe_managed_payments_unavailable",
     );
 
@@ -111,7 +126,7 @@ describe("the copy for a failed Stripe check (#690)", () => {
 
   // #690-T03
   it("names the HTTP status of an answer the page cannot read", () => {
-    expect(describeBillingFailure("UNEXPECTED_RESPONSE", 502)).toBe(
+    expect(describeBillingFailure(PRODUCT, "UNEXPECTED_RESPONSE", 502)).toBe(
       "The server answered with HTTP 502. Reload the page and try again.",
     );
   });

@@ -7,6 +7,7 @@
 // is out of date, or a request made by hand, gets the refusal. Names and addresses are text somebody else
 // typed: rendered as text, never as markup, and truncated when they are longer than the row (#177). Each row
 // starts with the member's GitHub avatar, or the initials of the name without one (#638).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
@@ -45,6 +46,7 @@ export function MemberList({
   /** Only tests pass this. */
   api?: WorkspaceApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export function MemberList({
     const result = await call();
     setBusy(false);
     if (!result.ok) {
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       // The page may be out of date: show what is true now.
       router.refresh();
       return;

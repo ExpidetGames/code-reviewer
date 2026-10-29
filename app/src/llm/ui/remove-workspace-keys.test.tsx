@@ -14,6 +14,9 @@ vi.mock("next/navigation", () => ({
 
 import type { LlmKeyApi } from "./api.ts";
 import { RemoveWorkspaceKeys } from "./remove-workspace-keys.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(() => {
   cleanup();
@@ -204,6 +207,7 @@ describe("the removal on the LLM access page (#658)", () => {
     const { LlmSettingsPageContent } = await import("./llm-settings-page.tsx");
     const page = (canManage: boolean) => (
       <LlmSettingsPageContent
+        product={PRODUCT}
         workspaceSlug="acme"
         canManage={canManage}
         keyStatuses={[

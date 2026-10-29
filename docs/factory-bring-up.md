@@ -20,7 +20,8 @@ credential, which is why step 3 ends with a run that has the switch still off.
    five random secrets into that file (mode 0600, never printed). Put each value into its key (the script's table says
    folder and key), add the Secret Sync from `prod` `/app-factory` to the new Vercel project, then **delete the file**.
    Put the database URLs, the project id, the bypass secret and the App's address into their keys too. The App's own keys
-   are not only the secrets: `PRODUCT_ID` (`factory`, **mandatory**; without it the project starts as code-review.com),
+   are not only the secrets: `PRODUCT_ID` (`factory`, **mandatory**; without it the project starts as code-review.com; the build copies it into
+   `NEXT_PUBLIC_PRODUCT_ID` for the crash page, so that one is not set by hand, and a mismatch is logged at start),
    `PRODUCT_CAPABILITIES` (`review,dynamic-review`, billing off), `RUNNER_DISPATCH` (`webhook`), `RUNNER_WEBHOOK_URL` (the
    Dispatcher's `/dispatch` address), `RUNNER_WEBHOOK_KEY_ID` (`factory-k1`), `RUNNER_DISPATCH_MAX_RUNNING` (`2`) and, if the
    Dispatcher is protected, `RUNNER_WEBHOOK_BYPASS_TOKEN`. In `/dispatcher` put `DISPATCHER_APPS` (its `keyId` and
@@ -37,6 +38,7 @@ credential, which is why step 3 ends with a run that has the switch still off.
 
 | Item | When you need it | Without it |
 |---|---|---|
+| The brand name of the second App | Before any user sees it. Everything it says (pages, mails, the check run and the GitHub App on GitHub) comes from one value, `app/src/product-identity/factory.ts`: the name is a one-line change there. Until then it is the codename "Factory", with no domain of its own (the address is `BETTER_AUTH_URL`). The browser icons are the shared mark | The App runs as "Factory" |
 | GitHub App for the second App | The first real review. One click in its admin portal (Integrations) creates it from the manifest | Login, workspaces and settings work; GitHub is shown as not connected |
 | A model key | The first review | Enter a workspace key in Settings, LLM access |
 | Own domain and DNS | A brand launch | It runs on the `vercel.app` address; moving later means editing the GitHub App's three URLs and `BETTER_AUTH_URL` |

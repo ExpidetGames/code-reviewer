@@ -10,6 +10,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { GithubConfigView } from "../../github-config/service.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { Overview } from "./overview.tsx";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 afterEach(cleanup);
 
@@ -116,7 +119,7 @@ function smtpView(
 describe("the needs attention region", () => {
   // #180-T01
   it("is not there while there is nothing to report", () => {
-    render(<Overview settings={view()} />);
+    render(<Overview product={PRODUCT} settings={view()} />);
 
     expect(
       screen.queryByRole("region", { name: "Needs attention" }),
@@ -128,6 +131,7 @@ describe("the needs attention region", () => {
   it("appears with the sign-up rule that cannot work yet", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({
           signUpRule: {
             value: { kind: "domains", entries: ["a.com"] },
@@ -151,6 +155,7 @@ describe("the needs attention region", () => {
   it("announces stored credentials that cannot be read, without naming a value", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({
           secrets: [
             {
@@ -174,7 +179,9 @@ describe("the needs attention region", () => {
 
   // #102-GH-27
   it("tells the admin how many users could not get their GitHub address", () => {
-    render(<Overview settings={view()} emailConflictCount={2} />);
+    render(
+      <Overview product={PRODUCT} settings={view()} emailConflictCount={2} />,
+    );
 
     const attention = screen.getByRole("region", { name: "Needs attention" });
     expect(
@@ -185,7 +192,10 @@ describe("the needs attention region", () => {
   // #180-T01
   it("renders the Needs attention region before the Setup card", () => {
     render(
-      <Overview settings={view({ signUpRuleState: { failClosed: true } })} />,
+      <Overview
+        product={PRODUCT}
+        settings={view({ signUpRuleState: { failClosed: true } })}
+      />,
     );
 
     const attention = screen.getByRole("region", { name: "Needs attention" });
@@ -200,6 +210,7 @@ describe("the needs attention region", () => {
   it("shows the three attention rows open and no overflow disclosure", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({
           signUpRuleState: { failClosed: true },
           secrets: [
@@ -229,7 +240,7 @@ describe("the needs attention region", () => {
 describe("the setup card", () => {
   // #98-AD-03, #180-T02
   it("lists the six settings with the value summary and a Configure link", () => {
-    render(<Overview settings={view()} />);
+    render(<Overview product={PRODUCT} settings={view()} />);
 
     expect(row("Mail server").textContent).toContain("Not configured");
     expect(configuredLink("Mail server").getAttribute("href")).toBe(
@@ -275,6 +286,7 @@ describe("the setup card", () => {
   it("shows what is configured as the value summary", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({
           mailConfigured: true,
           githubConfigured: true,
@@ -311,6 +323,7 @@ describe("the setup card", () => {
   it("states the tenancy with the number of workspaces", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({
           tenancy: { value: "multi", updatedBy: null, updatedAt: null },
           workspaceCount: 2,
@@ -326,6 +339,7 @@ describe("the setup card", () => {
   it("says in the sign-up rule row that the rule cannot work yet", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({
           signUpRule: {
             value: { kind: "domains", entries: ["a.com"] },
@@ -346,6 +360,7 @@ describe("the setup card", () => {
   it("says in the GitHub row that an App without the user authorization cannot sign people in yet", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({ githubConfigured: false })}
         github={githubView({
           userAuthorization: { configured: false, clientId: null },
@@ -359,6 +374,7 @@ describe("the setup card", () => {
   it("names what is wrong with the App's settings, as field names only", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view()}
         github={githubView({
           status: "problem",
@@ -374,6 +390,7 @@ describe("the setup card", () => {
   it("says that a saved mail server cannot send because its password cannot be read", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={view({ smtp: smtpView("unreadable"), mailConfigured: false })}
       />,
     );
@@ -391,7 +408,7 @@ describe("the LLM keys of the instance (#276, #427)", () => {
 
   // #276-T06
   it("is optional: no key is no warning and no attention notice, because only managed workspaces need it", () => {
-    render(<Overview settings={view()} />);
+    render(<Overview product={PRODUCT} settings={view()} />);
 
     expect(row("code-review.com LLM keys").textContent).toContain("Optional");
     expect(
@@ -408,6 +425,7 @@ describe("the LLM keys of the instance (#276, #427)", () => {
   it("says whether a key is configured and its last four characters, never the key", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={key({
           state: "configured",
           lastFour: "wxyz",
@@ -426,6 +444,7 @@ describe("the LLM keys of the instance (#276, #427)", () => {
   it("warns about a saved key that cannot be read, in the row and in the attention region", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={{
           ...key({
             state: "unreadable",
@@ -473,6 +492,7 @@ describe("the LLM key of each provider on the overview (#427)", () => {
   it("shows the status of every provider by its name, one after the other", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={keys({
           openrouter: CONFIGURED,
           fakeai: { state: "not_configured" },
@@ -491,6 +511,7 @@ describe("the LLM key of each provider on the overview (#427)", () => {
   it("warns when the key of any one provider cannot be read, and names that provider", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={keys({ openrouter: CONFIGURED, fakeai: UNREADABLE })}
       />,
     );
@@ -505,6 +526,7 @@ describe("the LLM key of each provider on the overview (#427)", () => {
   it("is optional while no provider has a key, and links to the page of the keys", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={keys({
           openrouter: { state: "not_configured" },
           fakeai: { state: "not_configured" },
@@ -532,6 +554,7 @@ describe("the model catalog (#429)", () => {
   it("shows how many entries are released for each kind and whether the kind has a default, in place of the tiers", () => {
     render(
       <Overview
+        product={PRODUCT}
         settings={catalog({
           diff: { released: 2, hasDefault: true },
           dynamic: { released: 0, hasDefault: false },
@@ -551,7 +574,7 @@ describe("the model catalog (#429)", () => {
       diff: { released: 1, hasDefault: false },
       dynamic: { released: 1, hasDefault: true },
     });
-    render(<Overview settings={settings} />);
+    render(<Overview product={PRODUCT} settings={settings} />);
 
     expect(Object.keys(settings.modelCatalog).sort()).toEqual([
       "diff",
@@ -564,7 +587,7 @@ describe("the model catalog (#429)", () => {
 
   // #429-T06
   it("links to the LLM page, where the catalog is managed", () => {
-    render(<Overview settings={view()} />);
+    render(<Overview product={PRODUCT} settings={view()} />);
 
     expect(
       within(row("Model catalog")).getByRole("link").getAttribute("href"),
@@ -573,7 +596,7 @@ describe("the model catalog (#429)", () => {
 
   // #429-T06
   it("is optional: an empty catalog is no warning and no attention notice", () => {
-    render(<Overview settings={view()} />);
+    render(<Overview product={PRODUCT} settings={view()} />);
 
     expect(row("Model catalog").textContent).toContain(
       "Diff: none released, no default",
@@ -585,7 +608,7 @@ describe("the model catalog (#429)", () => {
 
   // #434-X2
   it("has no row for the managed model tiers any more: a model is a catalog entry", () => {
-    render(<Overview settings={view()} />);
+    render(<Overview product={PRODUCT} settings={view()} />);
 
     expect(screen.queryByText("Managed model tiers")).toBeNull();
   });

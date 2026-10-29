@@ -3,6 +3,7 @@
 // The words of the plan and usage page of a workspace (#282). Fixed sentences: nothing in them is an amount of
 // money, a price, a model, a reason for a pause or a name of a person. The plan label is the one operator-supplied
 // text on the page and is shown as text (src/usage/ui/plan-usage.tsx), not written here.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { NOTICE_WORKSPACE_SUSPENDED } from "./refusal-notice.ts";
 
 export const PLAN_PAGE_TITLE = "Plan and usage";
@@ -16,12 +17,12 @@ export const PLAN_UNREADABLE =
   "The limits of this workspace cannot be read right now, so reviews are not started. Contact the operator.";
 
 /** The workspace reviews with the operator's key and billing is on. */
-export const PLAN_MANAGED =
-  "The models for your reviews are provided and billed via code-review.com.";
+export const planManaged = (product: ProductIdentity): string =>
+  `The models for your reviews are provided and billed via ${product.name}.`;
 
 /** The same while billing is off (#675): nothing is billed. */
-export const PLAN_MANAGED_UNBILLED =
-  "The models for your reviews are provided by code-review.com.";
+export const planManagedUnbilled = (product: ProductIdentity): string =>
+  `The models for your reviews are provided by ${product.name}.`;
 
 export const PLAN_PAUSED_TITLE = "Reviews are paused";
 /** No reason is given on purpose. */

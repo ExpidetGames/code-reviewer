@@ -4,6 +4,7 @@
 // Creates a workspace (multi-tenant instances): a name, and the person becomes its Owner and lands in it.
 // The name is checked on the server (1 to 80 characters, no line breaks); the field does not carry a
 // second, hard-coded limit (#171).
+import { useProductIdentity } from "@/product-identity/context";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -22,6 +23,7 @@ export function CreateWorkspaceForm({
   api?: AccountApi;
   open?: (path: string) => void;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const capabilities = useCapabilities();
   const [name, setName] = useState("");
@@ -35,7 +37,7 @@ export function CreateWorkspaceForm({
     const result = await api.createWorkspace(name);
     if (!result.ok) {
       setPending(false);
-      setProblem(describeWorkspaceFailure(result.code));
+      setProblem(describeWorkspaceFailure(product, result.code));
       return;
     }
     // A full navigation: the frame (the switcher) is made again with the new workspace in it.

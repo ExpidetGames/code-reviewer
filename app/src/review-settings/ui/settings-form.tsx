@@ -93,8 +93,8 @@ import { providerOptions } from "./provider-select.tsx";
 import { KIND_NAMES } from "../kind-names.ts";
 import { followersText } from "./followers-text.ts";
 import {
-  GATE_OFF_WARNING,
-  GATE_OFF_WARNING_DEFAULTS,
+  gateOffWarning,
+  gateOffWarningDefaults,
   ReviewKindFieldset,
   type ReviewKindHandlers,
 } from "./review-kind-fieldset.tsx";
@@ -225,6 +225,7 @@ function hiddenProblemOf(
 const UNCHANGED_TEXT = "No changes to save.";
 
 function confirmText(
+  product: ProductIdentity,
   kind: ProjectReviewKind,
   dynamicReviewEnabled: boolean,
   mode: SettingsFormModel["mode"],
@@ -235,7 +236,9 @@ function confirmText(
       ? followersText(kind, following)
       : "Reviews of this project that are still waiting are cancelled, and a review that is already running finishes. The next review posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
   const gateOff =
-    mode === "global" ? GATE_OFF_WARNING_DEFAULTS : GATE_OFF_WARNING;
+    mode === "global"
+      ? gateOffWarningDefaults(product)
+      : gateOffWarning(product);
   return kind === "dynamic" && !dynamicReviewEnabled
     ? `${base} ${gateOff}`
     : base;
@@ -249,14 +252,22 @@ const SAVED_TEXT =
  * (a problem with the settings as a whole, a field this version does not know): the second kind is
  * shown with the message at the foot of the form, never dropped.
  */
-function splitIssues(issues: readonly RequestIssue[]): {
+function splitIssues(
+  product: ProductIdentity,
+  issues: readonly RequestIssue[],
+): {
   fieldErrors: Errors;
   general: string[];
 } {
   const fieldErrors: Errors = {};
   const general: string[] = [];
   for (const issue of issues) {
-    const text = describeIssue(issue.field, issue.code, issue.maximumCents);
+    const text = describeIssue(
+      product,
+      issue.field,
+      issue.code,
+      issue.maximumCents,
+    );
     if (
       (REVIEW_SETTING_FIELDS as readonly string[]).includes(issue.field) ||
       (PROJECT_DYNAMIC_SETTING_FIELDS as readonly string[]).includes(
@@ -496,9 +507,9 @@ export function SettingsForm({
               })
             : await api.save(step.body);
         if (!result.ok) {
-          const { fieldErrors, general } = splitIssues(result.issues);
+          const { fieldErrors, general } = splitIssues(product, result.issues);
           const failure = [
-            describeSaveFailure(result.code),
+            describeSaveFailure(product, result.code),
             ...general,
             ...projectsNote(result.details),
           ].join(" ");
@@ -516,7 +527,7 @@ export function SettingsForm({
         }
         const next = modelFromAnswer(model.mode, result.data);
         if (next === null) {
-          refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
+          refuse({}, describeSaveFailure(product, "UNEXPECTED_RESPONSE"));
           return;
         }
         for (const warning of warningsFromAnswer(result.data)) {
@@ -545,15 +556,18 @@ export function SettingsForm({
     setKindError(null);
     // A model without the Dynamic part (an answer of an older server) cannot be planned.
     if (projectView === undefined) {
-      refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
+      refuse({}, describeSaveFailure(product, "UNEXPECTED_RESPONSE"));
       return;
     }
     const plan = planOf(model, state);
     if (!plan.ok) {
-      const { fieldErrors, general } = splitIssues(plan.issues);
+      const { fieldErrors, general } = splitIssues(product, plan.issues);
       refuse(
         fieldErrors,
-        [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(" "),
+        [
+          describeSaveFailure(product, "REVIEW_SETTINGS_INVALID"),
+          ...general,
+        ].join(" "),
       );
       return;
     }
@@ -579,11 +593,11 @@ export function SettingsForm({
     const result = await api.reset();
     setBusy(false);
     if (!result.ok) {
-      setFormError(describeSaveFailure(result.code));
+      setFormError(describeSaveFailure(product, result.code));
       return;
     }
     if (!adopt(result.data))
-      setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
+      setFormError(describeSaveFailure(product, "UNEXPECTED_RESPONSE"));
     else {
       setWarnings([]);
       setStatus("saved");
@@ -1026,6 +1040,7 @@ export function SettingsForm({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmText(
+                product,
                 confirming?.to ?? kind,
                 dynamicReviewEnabled,
                 model.mode,

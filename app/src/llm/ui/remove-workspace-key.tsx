@@ -9,6 +9,7 @@
 // The component owns the "a key is saved" state: after a removal it stays mounted (the LLM access page
 // always renders it for a person who may manage the key) with no zone but the confirmation, so the
 // `router.refresh()` that takes the key away does not unmount the result (#178 review M1).
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DangerZone } from "../../components/danger-zone.tsx";
@@ -39,6 +40,7 @@ export function RemoveWorkspaceKey({
   /** Only tests pass this. */
   api?: LlmKeyApi;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const [configured, setConfigured] = useState(keyConfigured);
   const [pending, setPending] = useState(false);
@@ -50,7 +52,10 @@ export function RemoveWorkspaceKey({
     const result = await api.remove(provider);
     setPending(false);
     if (!result.ok) {
-      setOutcome({ kind: "failed", text: describeLlmKeyFailure(result.code) });
+      setOutcome({
+        kind: "failed",
+        text: describeLlmKeyFailure(product, result.code),
+      });
       return;
     }
     setConfigured(false);

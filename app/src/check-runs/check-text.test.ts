@@ -3,10 +3,14 @@
 // What the check run of a review says for each state of its job (#405): the status GitHub shows, a conclusion
 // that is never red, a title, and a summary made of fixed sentences, counts and the link to the review. Nothing a
 // pull request or a runner wrote reaches the text except a validated link and a code of the plain shape of one.
+import { identityFor } from "../product-identity/identities.ts";
 import { describe, expect, it } from "vitest";
 import { JOB_STATUSES } from "../db/job-status.ts";
 import { describeCheck, type CheckSubject } from "./check-text.ts";
 import type { VerdictSkipReason } from "./verdict.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const COMMENT = "https://github.test/acme/widgets/pull/7#issuecomment-1001";
 
@@ -24,33 +28,38 @@ function subject(overrides: Partial<CheckSubject> = {}): CheckSubject {
 describe("the check run of a job that waits or runs", () => {
   // #405-T01
   it("is queued and says it is waiting", () => {
-    expect(describeCheck(subject({ status: "queued" }))).toMatchObject({
-      status: "queued",
-      title: "Waiting",
-    });
+    expect(describeCheck(PRODUCT, subject({ status: "queued" }))).toMatchObject(
+      {
+        status: "queued",
+        title: "Waiting",
+      },
+    );
   });
 
   // #405-T02
   it("is in progress and says it is reviewing", () => {
-    expect(describeCheck(subject({ status: "running" }))).toMatchObject({
+    expect(
+      describeCheck(PRODUCT, subject({ status: "running" })),
+    ).toMatchObject({
       status: "in_progress",
       title: "Reviewing",
     });
   });
 
   it("has no conclusion before it ends", () => {
-    expect(describeCheck(subject({ status: "queued" }))).not.toHaveProperty(
-      "conclusion",
-    );
-    expect(describeCheck(subject({ status: "running" }))).not.toHaveProperty(
-      "conclusion",
-    );
+    expect(
+      describeCheck(PRODUCT, subject({ status: "queued" })),
+    ).not.toHaveProperty("conclusion");
+    expect(
+      describeCheck(PRODUCT, subject({ status: "running" })),
+    ).not.toHaveProperty("conclusion");
   });
 });
 
 describe("what the check run says about the verdict", () => {
   const skipped = (reason: VerdictSkipReason) =>
     describeCheck(
+      PRODUCT,
       subject({
         status: "succeeded",
         verdict: { kind: "skip", reason },
@@ -100,6 +109,7 @@ describe("what the check run says about the verdict", () => {
   it("says nothing extra when a verdict is submitted, and nothing before the review is done", () => {
     expect(
       describeCheck(
+        PRODUCT,
         subject({
           status: "succeeded",
           verdict: { kind: "submit", event: "approve", blocking: 0 },
@@ -108,6 +118,7 @@ describe("what the check run says about the verdict", () => {
     ).not.toContain("verdict");
     expect(
       describeCheck(
+        PRODUCT,
         subject({
           status: "running",
           verdict: { kind: "skip", reason: "off" },
@@ -121,6 +132,7 @@ describe("the check run of a finished review", () => {
   // #405-T03
   it("succeeds and links to the review comment", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "succeeded", commentUrl: COMMENT }),
     );
 
@@ -136,6 +148,7 @@ describe("the check run of a finished review", () => {
   // #405-T04
   it("counts the open findings per severity of a Dynamic review", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "succeeded",
         findings: { open: 3, bySeverity: { P0: 1, P1: 0, P2: 2, P3: 0 } },
@@ -150,6 +163,7 @@ describe("the check run of a finished review", () => {
   // #405-T04
   it("counts the open findings of a Diff review without a breakdown", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "succeeded",
         findings: { open: 1, bySeverity: null },
@@ -163,6 +177,7 @@ describe("the check run of a finished review", () => {
   // #405-T04
   it("says no finding is open when none is", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "succeeded",
         findings: { open: 0, bySeverity: null },
@@ -174,7 +189,7 @@ describe("the check run of a finished review", () => {
 
   // #405-T04
   it("says nothing about findings it does not know", () => {
-    const check = describeCheck(subject({ status: "succeeded" }));
+    const check = describeCheck(PRODUCT, subject({ status: "succeeded" }));
 
     expect(check.summary).not.toMatch(/finding/i);
     expect(check.conclusion).toBe("success");
@@ -182,6 +197,7 @@ describe("the check run of a finished review", () => {
 
   it("says that a review stopped early at its limit may be incomplete, and still succeeds", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "succeeded", stoppedEarly: "cost_limit" }),
     );
 
@@ -193,6 +209,7 @@ describe("the check run of a finished review", () => {
   // #666-T01
   it("says that a review stopped at the cost limit of its project may be incomplete, and where to change it", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "succeeded", stoppedEarly: "project_cost_limit" }),
     );
 
@@ -205,6 +222,7 @@ describe("the check run of a finished review", () => {
   // #553-R07
   it("says that a review stopped at its token limit may be incomplete, and still succeeds", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "succeeded", stoppedEarly: "token_limit" }),
     );
 
@@ -219,7 +237,10 @@ describe("the check run of a finished review", () => {
       "not a url",
       "ftp://x/y",
     ]) {
-      const check = describeCheck(subject({ status: "succeeded", commentUrl }));
+      const check = describeCheck(
+        PRODUCT,
+        subject({ status: "succeeded", commentUrl }),
+      );
 
       expect(check.detailsUrl).toBeUndefined();
       expect(check.summary).not.toContain("](");
@@ -228,6 +249,7 @@ describe("the check run of a finished review", () => {
 
   it("never lets a link break out of its markup", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "succeeded",
         commentUrl: "https://github.test/a b)(https://evil.test",
@@ -245,6 +267,7 @@ describe("the check run of a job that did not finish", () => {
   // #405-T05
   it("is neutral for a failure, with the readable reason and the code", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "failed", errorCode: "llm_auth" }),
     );
 
@@ -260,6 +283,7 @@ describe("the check run of a job that did not finish", () => {
   // #666-T04
   it("says that a Diff Review stopped at the cost limit of its project, and where to change it", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "failed",
         errorCode: "cost_limit_reached",
@@ -276,6 +300,7 @@ describe("the check run of a job that did not finish", () => {
   // #689-T26
   it("says that a Diff Review stopped at the maximum cost per review of code-review.com, with no way to raise it", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "failed",
         errorCode: "cost_limit_reached",
@@ -293,6 +318,7 @@ describe("the check run of a job that did not finish", () => {
   // #689-T26
   it("keeps the project wording when the cost limit that stopped it was the project's", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "failed",
         errorCode: "cost_limit_reached",
@@ -306,6 +332,7 @@ describe("the check run of a job that did not finish", () => {
   // #499-T13
   it("says that reviews are paused for a refused job of the hidden brake, with no code, number or window", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "failed", errorCode: "reviews_paused" }),
     );
 
@@ -319,6 +346,7 @@ describe("the check run of a job that did not finish", () => {
   // #632-T02
   it("is neutral for a job refused because the billing setup is not complete, and says so with its stable code", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "failed", errorCode: "billing_rates_incomplete" }),
     );
 
@@ -335,7 +363,10 @@ describe("the check run of a job that did not finish", () => {
   // #405-T06
   it("is neutral for a timeout and a lease that ran out", () => {
     for (const errorCode of ["timeout", "lease_expired"]) {
-      const check = describeCheck(subject({ status: "failed", errorCode }));
+      const check = describeCheck(
+        PRODUCT,
+        subject({ status: "failed", errorCode }),
+      );
 
       expect(check.conclusion).toBe("neutral");
       expect(check.summary).toMatch(/run/);
@@ -344,9 +375,11 @@ describe("the check run of a job that did not finish", () => {
 
   it("gives a code nobody knows a general sentence and shows it only when it has the shape of a code", () => {
     const known = describeCheck(
+      PRODUCT,
       subject({ status: "failed", errorCode: "something_new" }),
     );
     const odd = describeCheck(
+      PRODUCT,
       subject({ status: "failed", errorCode: "<script>alert(1)</script>" }),
     );
 
@@ -358,6 +391,7 @@ describe("the check run of a job that did not finish", () => {
   // #405-T10
   it("is neutral for a cancel, with the reason", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({ status: "cancelled", errorCode: "pull_request_closed" }),
     );
 
@@ -371,7 +405,7 @@ describe("the check run of a job that did not finish", () => {
 
   // #405-T08
   it("says it was superseded by a newer commit", () => {
-    const check = describeCheck(subject({ status: "superseded" }));
+    const check = describeCheck(PRODUCT, subject({ status: "superseded" }));
 
     expect(check).toMatchObject({
       status: "completed",
@@ -383,6 +417,7 @@ describe("the check run of a job that did not finish", () => {
 
   it("links to a review that was posted although the run failed", () => {
     const check = describeCheck(
+      PRODUCT,
       subject({
         status: "failed",
         errorCode: "review_text_truncated",
@@ -399,7 +434,7 @@ describe("every check run", () => {
   it("has a conclusion of success or neutral, whatever the status of the job and its code", () => {
     for (const status of JOB_STATUSES)
       for (const errorCode of [null, "timeout", "llm_auth", "unheard_of"]) {
-        const check = describeCheck(subject({ status, errorCode }));
+        const check = describeCheck(PRODUCT, subject({ status, errorCode }));
 
         if (check.status === "completed")
           expect(["success", "neutral"]).toContain(check.conclusion);
@@ -410,8 +445,39 @@ describe("every check run", () => {
   it("is completed exactly when the job is final", () => {
     expect(
       JOB_STATUSES.filter(
-        (status) => describeCheck(subject({ status })).status === "completed",
+        (status) =>
+          describeCheck(PRODUCT, subject({ status })).status === "completed",
       ),
     ).toEqual(["succeeded", "failed", "superseded", "cancelled"]);
+  });
+});
+
+describe("the check of another product", () => {
+  const factory = identityFor("factory");
+
+  // #740-T05
+  it("names the product where the text says who requested changes", () => {
+    const check = describeCheck(
+      factory,
+      subject({
+        status: "succeeded",
+        verdict: { kind: "skip", reason: "review_incomplete" },
+      }),
+    );
+
+    expect(check.summary).toContain(
+      "An earlier request for changes by Factory",
+    );
+    expect(JSON.stringify(check)).not.toMatch(/code-review\.com/i);
+  });
+
+  // #740-T05
+  it("words a failed run for the product", () => {
+    const check = describeCheck(
+      factory,
+      subject({ status: "failed", errorCode: "billing_rates_incomplete" }),
+    );
+
+    expect(check.summary).toContain("Ask whoever runs Factory.");
   });
 });

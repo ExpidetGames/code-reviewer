@@ -4,6 +4,7 @@
 // the real route files with the wiring the running server uses. The old `/llm-key` routes stay as an alias for
 // the default provider and are pinned down by llm-key-route.integration.test.ts; here: the new routes by role
 // and workspace, the alias beside them, the shared limit of the test button and that no key is ever shown.
+import { getProductIdentity } from "../../src/product-identity/current.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -536,6 +537,7 @@ describe("what is shown", () => {
     const llm = getWorkspaceLlm();
     const page = renderToStaticMarkup(
       createElement(LlmAccessSection, {
+        product: getProductIdentity(),
         workspaceSlug: "alpha",
         canManage: true,
         keyStatuses: await llm.keyServiceFor(t.alpha.id).statusAll(),

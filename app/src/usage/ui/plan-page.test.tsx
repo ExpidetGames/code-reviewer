@@ -5,10 +5,11 @@
 // and an unreadable workspace, that the cost limit is a percentage with a text equivalent and never an amount,
 // that no state is told by colour alone, and that the numbers move on without a reload while a failed update
 // keeps the last data.
+import { getProductIdentity } from "../../product-identity/current.ts";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PLAN_MANAGED_UNBILLED } from "../../copy/plan-usage.ts";
+import { planManagedUnbilled } from "../../copy/plan-usage.ts";
 import type { RequestResult } from "../../ui/json-request.ts";
 import type { PlanView } from "../plan-view.ts";
 import type { PlanApi } from "./api.ts";
@@ -141,7 +142,9 @@ describe("the plan page of a workspace with limits", () => {
     page(limited({ managed: true, billed: false }));
 
     expect(screen.queryByText(/billed via code-review\.com/)).toBeNull();
-    expect(screen.getByText(PLAN_MANAGED_UNBILLED)).toBeTruthy();
+    expect(
+      screen.getByText(planManagedUnbilled(getProductIdentity())),
+    ).toBeTruthy();
   });
 
   it("does not say that for a workspace on its own key", () => {

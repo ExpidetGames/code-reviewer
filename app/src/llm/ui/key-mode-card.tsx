@@ -5,6 +5,7 @@
 // sentence about what is charged. An Owner or an Admin saves it; a Member sees it read-only. The own key needs a stored key (the
 // server refuses otherwise, and the option says so). The own-key settings below follow the choice (#656): they are shown while "Use my own
 // provider key" is selected, so the key can be saved first, and hidden while "Use our models" is.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../../components/button.tsx";
@@ -68,6 +69,7 @@ export function KeyModeCard({
   /** Only tests pass this: a function cannot cross from the server component that renders the card, so the card makes its own. */
   api?: LlmKeyModeApi;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   const router = useRouter();
   const [selected, setSelected] = useState<KeyMode>(keyMode);
@@ -82,7 +84,7 @@ export function KeyModeCard({
     const result = await api.set(selected);
     setPending(false);
     if (!result.ok) {
-      setProblem(describeKeyModeFailure(result.code));
+      setProblem(describeKeyModeFailure(product, result.code));
       return;
     }
     setSaved(true);

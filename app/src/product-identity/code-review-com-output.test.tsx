@@ -1,115 +1,26 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
-// #715 (cut 7): the brand is a value the application hands to the code that writes the words (`ProductIdentity`), not
+// #715 (cut 7), #740: the brand is a value the application hands to the code that writes the words (`ProductIdentity`), not
 // something that code imports. This test holds everything that value ends up in, as code-review.com shows it today: the
-// five mails, the words of the model chooser and the brand on a page. The golden file was recorded from the code before
-// the cut; to record it again on purpose: `WRITE_PRODUCT_GOLDEN=1 pnpm exec vitest run --project unit <this file>`.
+// five mails, the words of the model chooser and the brand on a page, and (#740) the check run, the verdict, the GitHub App
+// manifest, the refusal notices and the message modules. The golden file was recorded from the code before the cut and before
+// the sweep; to record it again on purpose: `WRITE_PRODUCT_GOLDEN=1 pnpm exec vitest run --project unit <this file>`.
 //
 // @vitest-environment node
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Brand, ProductName } from "../components/brand.tsx";
-import * as modelChoice from "../copy/model-choice.ts";
+import { productOutput } from "../test-support/product-output.tsx";
 import { getProductIdentity } from "./current.ts";
-import { balanceMessage } from "../mail/balance-message.ts";
-import { invitationMessage } from "../mail/invitation-message.ts";
-import { passwordResetMessage } from "../mail/password-reset-message.ts";
-import { testMessage } from "../mail/test-mail.ts";
-import { verificationMessage } from "../mail/verification-message.ts";
 
 const GOLDEN = join(import.meta.dirname, "code-review-com-output.golden.json");
-const LINK = "https://reviews.example.test/x?token=abc123";
-
-function output() {
-  const words = modelChoice.modelChoiceWords(getProductIdentity());
-  return {
-    productName: getProductIdentity().name,
-    passwordReset: passwordResetMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      link: LINK,
-      validForMinutes: 30,
-    }),
-    invitationAdmin: invitationMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      link: LINK,
-      workspaceName: "Acme <Team>",
-      inviterName: "Grace",
-      role: "admin",
-      validForDays: 7,
-    }),
-    invitationMember: invitationMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      link: LINK,
-      workspaceName: "Acme",
-      inviterName: "Grace",
-      role: "member",
-      validForDays: 7,
-    }),
-    verification: verificationMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      link: LINK,
-      validForHours: 24,
-    }),
-    balanceLow: balanceMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      level: "low",
-      workspaceName: "Acme",
-      balanceText: "$1.20",
-      link: LINK,
-    }),
-    balanceEmpty: balanceMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      level: "empty",
-      workspaceName: "Acme",
-      balanceText: "$0.00",
-      link: LINK,
-    }),
-    balanceNegative: balanceMessage({
-      product: getProductIdentity(),
-      to: "ada@example.test",
-      level: "negative",
-      workspaceName: "Acme",
-      balanceText: "-$0.40",
-      link: LINK,
-    }),
-    testMail: testMessage(
-      "ada@example.test",
-      "https://reviews.example.test",
-      getProductIdentity(),
-    ),
-    // Under the names the golden file was recorded with, when the five sentences were constants of the copy module.
-    modelChoice: Object.fromEntries([
-      ...Object.entries(modelChoice).filter(
-        ([, value]) => typeof value === "string",
-      ),
-      ["MODEL_CHOICE_BILLED_NOTE", words.billedNote],
-      ["MODEL_CHOICE_HINT", words.hint],
-      ["MODEL_CHOICE_DEFAULT_SOURCE", words.defaultSource],
-      ["MODEL_CHOICE_NONE_CHOSEN", words.noneChosen],
-      ["MODEL_CHOICE_NONE_OFFERED", words.noneOffered],
-    ]),
-    brand: renderToStaticMarkup(<Brand product={getProductIdentity()} />),
-    brandCompact: renderToStaticMarkup(
-      <Brand product={getProductIdentity()} compact />,
-    ),
-    productNameInText: renderToStaticMarkup(
-      <ProductName product={getProductIdentity()} />,
-    ),
-  };
-}
 
 describe("everything the product name ends up in", () => {
   // #715-T07
   it("reads as it did before the brand became a value the application hands in", () => {
-    const actual = JSON.parse(JSON.stringify(output())) as unknown;
+    const actual = JSON.parse(
+      JSON.stringify(productOutput(getProductIdentity())),
+    ) as unknown;
     if (process.env.WRITE_PRODUCT_GOLDEN === "1")
       writeFileSync(GOLDEN, `${JSON.stringify(actual, null, 2)}\n`);
 

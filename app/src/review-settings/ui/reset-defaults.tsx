@@ -5,6 +5,7 @@
 // its built-in value. It is confirmed in the kit's danger zone before the request. The reset sends an
 // empty patch through the same global settings route as a save (`updateGlobalSettings({})` removes
 // every override), so the validation and the authorization are unchanged.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DangerZone } from "../../components/danger-zone.tsx";
@@ -31,6 +32,7 @@ export function ResetReviewDefaults({
   /** Only tests pass this. */
   api?: Pick<SettingsApi, "save">;
 }) {
+  const product = useProductIdentity();
   const router = useRouter();
   const defaultApi = useMemo(
     () => browserGlobalSettingsApi(workspaceSlug),
@@ -47,7 +49,10 @@ export function ResetReviewDefaults({
     setPending(false);
     if (!result.ok) {
       // The refusal names the projects that hold the reset back, as the form does.
-      setOutcome({ kind: "failed", text: describeWholeRefusal(result) });
+      setOutcome({
+        kind: "failed",
+        text: describeWholeRefusal(product, result),
+      });
       return;
     }
     setOutcome({ kind: "reset" });

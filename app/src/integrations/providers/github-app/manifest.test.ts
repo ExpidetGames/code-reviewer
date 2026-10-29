@@ -3,6 +3,7 @@
 // The manifest the admin portal posts to GitHub: every address from the configured public URL, the
 // permissions and events of the App, public or private by tenancy, and the helper that names what an
 // imported App lacks.
+import { identityFor } from "../../../product-identity/identities.ts";
 import { describe, expect, it } from "vitest";
 import { JOB_TOKEN_PERMISSIONS } from "./job-access.ts";
 import {
@@ -12,6 +13,9 @@ import {
   missingPermissions,
   suggestedAppName,
 } from "./manifest.ts";
+import { getProductIdentity } from "../../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const PUBLIC_URL = "https://reviews.example.com";
 
@@ -19,6 +23,7 @@ describe("the GitHub App manifest", () => {
   // #102-GH-01
   it("derives the webhook, redirect, callback and setup addresses from the public URL of a multi-tenant instance", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "multi",
       name: "Code Reviewer",
@@ -42,6 +47,7 @@ describe("the GitHub App manifest", () => {
   // #102-GH-01
   it("makes the App private on a single-tenant instance", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "single",
       name: "Code Reviewer",
@@ -54,6 +60,7 @@ describe("the GitHub App manifest", () => {
   // #405-T13
   it("asks for the repository permissions of a review job plus Checks, Email addresses and Members", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "single",
       name: "Code Reviewer",
@@ -76,6 +83,7 @@ describe("the GitHub App manifest", () => {
 
   it("does not ask GitHub to authorize a person during the installation", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: PUBLIC_URL,
       tenancy: "single",
       name: "x",
@@ -86,6 +94,7 @@ describe("the GitHub App manifest", () => {
 
   it("ignores a trailing slash of the public URL", () => {
     const manifest = buildAppManifest({
+      product: PRODUCT,
       publicUrl: `${PUBLIC_URL}/`,
       tenancy: "single",
       name: "x",
@@ -99,14 +108,51 @@ describe("the GitHub App manifest", () => {
 
 describe("the suggested App name", () => {
   it("names the host of the instance and stays within what GitHub accepts", () => {
-    expect(suggestedAppName(PUBLIC_URL)).toBe(
+    expect(suggestedAppName(PRODUCT, PUBLIC_URL)).toBe(
       "Code Reviewer reviews.example.com",
     );
     const long = suggestedAppName(
+      PRODUCT,
       "https://a-very-long-subdomain.example-company.com",
     );
     expect(long.length).toBeLessThanOrEqual(APP_NAME_MAX_LENGTH);
     expect(long.startsWith("Code Reviewer")).toBe(true);
+  });
+});
+
+describe("the manifest of another product", () => {
+  const factory = identityFor("factory");
+
+  // #740-T04
+  it("takes the name and the description from the identity and every address from the configured URL", () => {
+    const manifest = buildAppManifest({
+      product: factory,
+      publicUrl: PUBLIC_URL,
+      tenancy: "single",
+      name: suggestedAppName(factory, PUBLIC_URL),
+    });
+
+    expect(manifest.name).toBe("Factory reviews.example.com");
+    expect(manifest.description).toBe(factory.githubAppDescription);
+    expect(JSON.stringify(manifest)).not.toMatch(
+      /code-review\.com|code reviewer/i,
+    );
+    expect(manifest.url).toBe(PUBLIC_URL);
+    expect(manifest.callback_urls).toEqual([
+      `${PUBLIC_URL}/api/auth/callback/github`,
+    ]);
+  });
+
+  // #740-T04
+  it("suggests a name within what GitHub accepts, whatever the host", () => {
+    const long = suggestedAppName(
+      factory,
+      "https://a-very-long-subdomain.example-company.com",
+    );
+
+    expect(long.length).toBeLessThanOrEqual(APP_NAME_MAX_LENGTH);
+    expect(long.startsWith("Factory")).toBe(true);
+    expect(suggestedAppName(factory, "not a url")).toBe("Factory");
   });
 });
 

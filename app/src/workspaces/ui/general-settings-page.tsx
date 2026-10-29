@@ -5,6 +5,7 @@
 // the workspace's LLM hint, #173). The Instance facts (tenancy, member count, GitHub App state) are gone (#658):
 // the strip already says when the App is not set up, and the members are on their own page. The body is a
 // server component; the only interactive part is the rename form.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   NeedsAttention,
   type AttentionNotice,
@@ -40,6 +41,7 @@ function SectionTitle({ id, children }: { id: string; children: string }) {
 }
 
 export function GeneralSettingsPageContent({
+  product,
   workspaceSlug,
   workspaceName,
   canRename,
@@ -53,6 +55,8 @@ export function GeneralSettingsPageContent({
   llmSummary,
   api,
 }: {
+  /** Who the page speaks for (the configuration hints name the product). */
+  product: ProductIdentity;
   workspaceSlug: string;
   workspaceName: string;
   /** An Owner may rename the workspace (`rename_workspace`). */
@@ -74,12 +78,13 @@ export function GeneralSettingsPageContent({
   api?: WorkspaceApi;
 }) {
   const llmNotice = llmAccessAttention({
+    product: product,
     workspaceSlug,
     summary: llmSummary,
     canManage: canManageLlmKey,
   });
   const notices: AttentionNotice[] = [
-    ...describeConfigNotices(config, audience),
+    ...describeConfigNotices(product, config, audience),
     ...(llmNotice === null ? [] : [llmNotice]),
   ];
   return (

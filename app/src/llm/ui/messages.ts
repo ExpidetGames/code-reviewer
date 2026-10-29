@@ -2,6 +2,7 @@
 
 // The copy for the codes of the LLM key routes (the UI translates a code to copy, never the other way round).
 // No sentence here contains a value; a provider's own words only ever appear as the `detail` the server cleaned.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
@@ -35,9 +36,14 @@ const FAILURE_COPY: Record<string, string> = {
     "The key was tested too often. Wait a few minutes and try again.",
 };
 
-export function describeLlmKeyFailure(code: string): string {
+export function describeLlmKeyFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
   return (
-    describeTransportFailure(code) ?? FAILURE_COPY[code] ?? GENERIC_FAILURE
+    describeTransportFailure(product, code) ??
+    FAILURE_COPY[code] ??
+    GENERIC_FAILURE
   );
 }
 

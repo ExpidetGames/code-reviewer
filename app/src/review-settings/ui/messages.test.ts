@@ -20,6 +20,9 @@ import {
   describeSaveFailure,
   describeWarning,
 } from "./messages.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 describe("the copy for a problem with one setting", () => {
   // CR-34-T06
@@ -27,7 +30,7 @@ describe("the copy for a problem with one setting", () => {
     "has a sentence for %s on every field that is not the code itself",
     (code) => {
       for (const field of REVIEW_SETTING_FIELDS) {
-        const text = describeIssue(field, code);
+        const text = describeIssue(PRODUCT, field, code);
 
         expect(text, `${field} ${code}`).not.toBe("");
         expect(text, `${field} ${code}`).not.toContain(code);
@@ -37,10 +40,10 @@ describe("the copy for a problem with one setting", () => {
 
   // CR-34-T06
   it("names the limits of the number fields", () => {
-    expect(describeIssue("maxFindings", "TOO_SMALL")).toBe(
+    expect(describeIssue(PRODUCT, "maxFindings", "TOO_SMALL")).toBe(
       `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.min)} or more.`,
     );
-    expect(describeIssue("maxFindings", "TOO_LARGE")).toBe(
+    expect(describeIssue(PRODUCT, "maxFindings", "TOO_LARGE")).toBe(
       `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.max)} or less.`,
     );
   });
@@ -52,57 +55,61 @@ describe("the copy for a problem with one setting", () => {
       "$0.01 to $100",
     );
     for (const code of ["TOO_SMALL", "TOO_LARGE"] as const)
-      expect(describeIssue("maxCostCents", code)).toBe(
+      expect(describeIssue(PRODUCT, "maxCostCents", code)).toBe(
         "Enter an amount from $0.01 to $100.",
       );
-    expect(describeIssue("maxCostCents", "INVALID_TYPE")).toBe(
+    expect(describeIssue(PRODUCT, "maxCostCents", "INVALID_TYPE")).toBe(
       "Enter an amount in dollars with up to two decimals, like 0.50 or 2.",
     );
   });
 
   // CR-34-T06
   it("asks for a whole number where a number field holds something else", () => {
-    expect(describeIssue("maxFindings", "INVALID_TYPE")).toBe(
+    expect(describeIssue(PRODUCT, "maxFindings", "INVALID_TYPE")).toBe(
       "Enter a whole number.",
     );
   });
 
   // CR-34-T06
   it("names the length limit of the project rules", () => {
-    expect(describeIssue("extraInstructions", "TOO_LONG")).toMatch(/4,000/);
+    expect(describeIssue(PRODUCT, "extraInstructions", "TOO_LONG")).toMatch(
+      /4,000/,
+    );
   });
 
   // CR-34-T06, #203
   it("says an unknown command is not one that exists", () => {
-    expect(describeIssue("allowedCommands", "INVALID_FORMAT")).toMatch(
+    expect(describeIssue(PRODUCT, "allowedCommands", "INVALID_FORMAT")).toMatch(
       /Only the command review exists/,
     );
   });
 
   // CR-34-T06
   it("says an empty required field needs a value", () => {
-    expect(describeIssue("model", "EMPTY")).toBe("Enter a model name.");
+    expect(describeIssue(PRODUCT, "model", "EMPTY")).toBe(
+      "Enter a model name.",
+    );
   });
 
   // #689-T06
   it("names the maximum per review when a cost limit is above it, and still says something without the amount", () => {
-    expect(describeIssue("maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM", 100)).toBe(
-      "The maximum cost per review is $1.00. Enter that or less.",
-    );
     expect(
-      describeIssue("maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM", 1250),
+      describeIssue(PRODUCT, "maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM", 100),
+    ).toBe("The maximum cost per review is $1.00. Enter that or less.");
+    expect(
+      describeIssue(PRODUCT, "maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM", 1250),
     ).toBe("The maximum cost per review is $12.50. Enter that or less.");
-    expect(describeIssue("maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM")).toBe(
-      "This is above the maximum cost per review. Enter a lower amount.",
-    );
+    expect(
+      describeIssue(PRODUCT, "maxCostCents", "EXCEEDS_OPERATOR_MAXIMUM"),
+    ).toBe("This is above the maximum cost per review. Enter a lower amount.");
   });
 
   // #689-T04
   it("has no copy for the token budget any more", () => {
-    expect(describeIssue("maxTokens", "TOO_SMALL")).toBe(
+    expect(describeIssue(PRODUCT, "maxTokens", "TOO_SMALL")).toBe(
       "This value is too small.",
     );
-    expect(describeIssue("model", "EXCEEDS_MODEL_CONTEXT")).toBe(
+    expect(describeIssue(PRODUCT, "model", "EXCEEDS_MODEL_CONTEXT")).toBe(
       "This value is not valid.",
     );
   });
@@ -112,7 +119,7 @@ describe("the copy for a problem with one setting", () => {
     "has a sentence for %s on every project-only field that is not the code itself",
     (code) => {
       for (const field of PROJECT_DYNAMIC_SETTING_FIELDS) {
-        const text = describeIssue(field, code);
+        const text = describeIssue(PRODUCT, field, code);
 
         expect(text, `${field} ${code}`).not.toBe("");
         expect(text, `${field} ${code}`).not.toContain(code);
@@ -122,7 +129,7 @@ describe("the copy for a problem with one setting", () => {
 
   // #200-T03
   it("names the byte limit of the review skill and says that multibyte characters count as their bytes", () => {
-    const text = describeIssue("reviewSkill", "TOO_LONG");
+    const text = describeIssue(PRODUCT, "reviewSkill", "TOO_LONG");
 
     expect(text).toContain(
       PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes.toLocaleString("en-US"),
@@ -132,13 +139,15 @@ describe("the copy for a problem with one setting", () => {
 
   // #200-T03
   it("tells the person to reset the skill instead of saving it empty", () => {
-    expect(describeIssue("reviewSkill", "EMPTY")).toMatch(/reset/i);
+    expect(describeIssue(PRODUCT, "reviewSkill", "EMPTY")).toMatch(/reset/i);
   });
 
   // #200-T03
   it("asks for a model name of the provider for the Dynamic model, not for an OpenRouter one", () => {
-    expect(describeIssue("dynamicModel", "EMPTY")).toBe("Enter a model name.");
-    expect(describeIssue("dynamicModel", "INVALID_FORMAT")).toMatch(
+    expect(describeIssue(PRODUCT, "dynamicModel", "EMPTY")).toBe(
+      "Enter a model name.",
+    );
+    expect(describeIssue(PRODUCT, "dynamicModel", "INVALID_FORMAT")).toMatch(
       /deepseek\/deepseek-v4\.1-flash/,
     );
   });
@@ -161,7 +170,7 @@ describe("the copy for a problem with one setting", () => {
         "catalogEntryDiff",
         "catalogEntryDynamic",
       ]) {
-        const text = describeIssue(field, code);
+        const text = describeIssue(PRODUCT, field, code);
 
         expect(text, `${field} ${code}`).not.toBe("This value is not valid.");
         expect(text, `${field} ${code}`).not.toContain(code);
@@ -174,11 +183,11 @@ describe("the copy for a problem with one setting", () => {
     "does not call a provider or an entry a model name when %s is reported for it",
     (code) => {
       for (const field of ["provider", "dynamicProvider"])
-        expect(describeIssue(field, code), `${field} ${code}`).toMatch(
+        expect(describeIssue(PRODUCT, field, code), `${field} ${code}`).toMatch(
           /provider/i,
         );
       for (const field of ["catalogEntryDiff", "catalogEntryDynamic"]) {
-        const text = describeIssue(field, code);
+        const text = describeIssue(PRODUCT, field, code);
         expect(text, `${field} ${code}`).toMatch(/choice|option|listed/i);
         expect(text, `${field} ${code}`).not.toMatch(/model/i);
       }
@@ -188,6 +197,7 @@ describe("the copy for a problem with one setting", () => {
   // #433-T07
   it("tells a workspace on its own key that choices come with the key of the instance", () => {
     const text = describeIssue(
+      PRODUCT,
       "catalogEntryDiff",
       "CATALOG_ENTRY_OWN_KEY_MODE",
     );
@@ -199,15 +209,19 @@ describe("the copy for a problem with one setting", () => {
   // #433-T07
   it("names the kind in the sentence about an entry that does not serve it", () => {
     expect(
-      describeIssue("catalogEntryDiff", "CATALOG_ENTRY_KIND_MISMATCH"),
+      describeIssue(PRODUCT, "catalogEntryDiff", "CATALOG_ENTRY_KIND_MISMATCH"),
     ).toMatch(/Diff Review/);
     expect(
-      describeIssue("catalogEntryDynamic", "CATALOG_ENTRY_KIND_MISMATCH"),
+      describeIssue(
+        PRODUCT,
+        "catalogEntryDynamic",
+        "CATALOG_ENTRY_KIND_MISMATCH",
+      ),
     ).toMatch(/Dynamic Review/);
   });
 
   it("falls back to a generic sentence for a field or code it does not know", () => {
-    expect(describeIssue("somethingNew", "SOMETHING_NEW")).toBe(
+    expect(describeIssue(PRODUCT, "somethingNew", "SOMETHING_NEW")).toBe(
       "This value is not valid.",
     );
   });
@@ -217,7 +231,7 @@ describe("the copy for a save that failed as a whole", () => {
   it.each([...REVIEW_SETTINGS_ERROR_CODES, ...TRANSPORT_ERROR_CODES])(
     "has a sentence for %s that is not the code itself",
     (code) => {
-      const text = describeSaveFailure(code);
+      const text = describeSaveFailure(PRODUCT, code);
 
       expect(text).not.toBe("");
       expect(text).not.toContain(code);
@@ -225,13 +239,15 @@ describe("the copy for a save that failed as a whole", () => {
   );
 
   it("tells the person to fix the marked fields when the settings were not valid", () => {
-    expect(describeSaveFailure("REVIEW_SETTINGS_INVALID")).toMatch(/marked/);
+    expect(describeSaveFailure(PRODUCT, "REVIEW_SETTINGS_INVALID")).toMatch(
+      /marked/,
+    );
   });
 
   it("says the repository was not found when it is gone", () => {
-    expect(describeSaveFailure("REVIEW_SETTINGS_PROJECT_NOT_FOUND")).toMatch(
-      /not found/i,
-    );
+    expect(
+      describeSaveFailure(PRODUCT, "REVIEW_SETTINGS_PROJECT_NOT_FOUND"),
+    ).toMatch(/not found/i);
   });
 });
 
@@ -239,11 +255,11 @@ describe("the copy for a save that failed as a whole", () => {
 describe("the copy for the check of the Dynamic model", () => {
   it("says in plain words what each outcome means", () => {
     expect(
-      describeIssue("dynamicModel", "DYNAMIC_MODEL_TOOLS_UNSUPPORTED"),
+      describeIssue(PRODUCT, "dynamicModel", "DYNAMIC_MODEL_TOOLS_UNSUPPORTED"),
     ).toMatch(/does not support tool calling/);
-    expect(describeIssue("dynamicModel", "DYNAMIC_MODEL_UNKNOWN")).toMatch(
-      /no model with this name/,
-    );
+    expect(
+      describeIssue(PRODUCT, "dynamicModel", "DYNAMIC_MODEL_UNKNOWN"),
+    ).toMatch(/no model with this name/);
   });
 
   it.each(REVIEW_SETTING_WARNING_CODES)(

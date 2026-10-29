@@ -13,6 +13,9 @@ import {
   startRunnerApiHarness,
   type RunnerApiHarness,
 } from "../../src/test-support/runner-api-harness.ts";
+import { getProductIdentity } from "../../src/product-identity/current.ts";
+
+const PRODUCT = getProductIdentity();
 
 const trace: RunnerCallTrace = {
   truncated: false,
@@ -41,6 +44,7 @@ async function claimedJob(h: RunnerApiHarness) {
 
 const viewOf = (h: RunnerApiHarness) =>
   createRunsService({
+    product: PRODUCT,
     runs: createRunsRepository(h.db, h.workspaceId),
     redact: (text) => text,
   });
@@ -49,7 +53,7 @@ const viewOf = (h: RunnerApiHarness) =>
 async function traceOf(h: RunnerApiHarness, id: string) {
   const job = await h.queue.get(id);
   if (job === undefined) throw new Error("No such job.");
-  return toRunDetailView(job, "acme/widgets", new Date()).callTrace;
+  return toRunDetailView(PRODUCT, job, "acme/widgets", new Date()).callTrace;
 }
 
 describe("the call trace of a completed job", () => {

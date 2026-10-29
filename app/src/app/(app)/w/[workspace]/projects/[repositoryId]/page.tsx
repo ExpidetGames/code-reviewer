@@ -98,6 +98,7 @@ async function ProjectSettingsContent({
       isBillingOn(getDatabase()),
     ]);
   const llmNotice = llmAccessAttention({
+    product: getProductIdentity(),
     workspaceSlug,
     summary: llmSummary,
     canManage: canManageLlmKey,

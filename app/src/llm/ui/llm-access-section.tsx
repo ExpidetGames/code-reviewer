@@ -6,6 +6,7 @@
 // the removal of a key is a destructive action and sits at the end of the page (`remove-workspace-keys.tsx`, #658). A workspace
 // whose access the instance provides gets the note instead of the cards. The model is not set here: it is the
 // `model` of the review defaults, whose built-in value is the instance's default model (`LLM_MODEL`).
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import type { ReactNode } from "react";
 import {
   Card,
@@ -34,8 +35,10 @@ import { LlmAccessForm } from "./llm-access-form.tsx";
  * workspace's own key (if it has one) is stored and not used, and nothing of it is shown.
  */
 function InstanceAccessCard({
+  product,
   access,
 }: {
+  product: ProductIdentity;
   access: NonNullable<ReturnType<typeof instanceAccessOf>>;
 }) {
   return (
@@ -53,12 +56,12 @@ function InstanceAccessCard({
       <CardContent className="flex flex-col gap-2">
         {access === "settings_unreadable" ? (
           <p>
-            code-review.com cannot set up the LLM for this workspace at the
+            {product.name} cannot set up the LLM for this workspace at the
             moment, so reviews cannot run. Contact the administrator.
           </p>
         ) : (
           <>
-            <p>The LLM for this workspace is billed via code-review.com.</p>
+            <p>The LLM for this workspace is billed via {product.name}.</p>
             <p className="text-sm text-muted-foreground">
               Reviews do not use a key of this workspace, so there is nothing to
               enter here: this workspace does not use a key of its own.
@@ -100,6 +103,7 @@ export type CatalogProvidersData = {
 export type KeyChoice = { keyMode: KeyMode; hasOwnKey: boolean };
 
 export function LlmAccessSection({
+  product,
   workspaceSlug,
   canManage,
   keyStatuses,
@@ -109,6 +113,8 @@ export function LlmAccessSection({
   api,
   keyModeApi,
 }: {
+  /** Who the page speaks for: the access card of a workspace on the product's key names it. */
+  product: ProductIdentity;
   workspaceSlug: string;
   /** An Admin or an Owner of the workspace (`manage_llm_key`). */
   canManage: boolean;
@@ -128,7 +134,7 @@ export function LlmAccessSection({
 }) {
   const instanceAccess = instanceAccessOf(summary);
   if (instanceAccess !== null && keyChoice === undefined)
-    return <InstanceAccessCard access={instanceAccess} />;
+    return <InstanceAccessCard product={product} access={instanceAccess} />;
   const catalogCard =
     catalog === undefined || catalog.providers.length === 0 ? null : (
       <CatalogProvidersCard

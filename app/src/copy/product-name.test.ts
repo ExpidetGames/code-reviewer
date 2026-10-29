@@ -26,16 +26,10 @@ const OLD = ["Code", "Reviewer"].join(" ");
 
 const EXCEPTIONS: readonly OldNameException[] = [
   {
-    path: "app/src/check-runs/service.ts",
+    path: "app/src/product-identity/code-review-com.ts",
     text: OLD,
     reason:
-      "the name of the check run on GitHub; branch protection rules match it",
-  },
-  {
-    path: "app/src/integrations/providers/github-app/manifest.ts",
-    text: OLD,
-    reason:
-      "the suggested name of the GitHub App (alone and before the host), an identifier on GitHub",
+      "the name of the check run and the base of the suggested name of the GitHub App of code-review.com (#740: they are fields of its identity): identifiers on GitHub, and branch protection rules match the check name",
   },
   {
     path: "app/src/review-settings/default-skill.ts",
@@ -45,8 +39,8 @@ const EXCEPTIONS: readonly OldNameException[] = [
   },
 ];
 
-// The modules that took the name from the identity (#715, cut 7): none writes the literal any more. The remaining
-// literals of the app are swept with the per-deployment selection of the identity.
+// The modules that took the name from the identity first (#715, cut 7); since #740 no text of the app writes it (the next
+// test), so this list is the minimum that can never get an exception.
 const WITHOUT_LITERAL_NAME: readonly string[] = [
   "app/src/components/brand.tsx",
   "app/src/copy/model-choice.ts",
@@ -55,6 +49,15 @@ const WITHOUT_LITERAL_NAME: readonly string[] = [
   "app/src/mail/password-reset-message.ts",
   "app/src/mail/test-mail.ts",
   "app/src/mail/verification-message.ts",
+];
+
+// The one place that writes the name of code-review.com: its identity (#740). Everything else gets it from there.
+const NAME_EXCEPTIONS: readonly OldNameException[] = [
+  {
+    path: "app/src/product-identity/code-review-com.ts",
+    text: "code-review.com",
+    reason: "the identity of code-review.com",
+  },
 ];
 
 function isScanned(path: string): boolean {
@@ -88,6 +91,41 @@ describe("the product name", () => {
       ),
     );
 
+    expect(findings).toEqual([]);
+  });
+
+  // #740-T06
+  it("is not a literal in any text of the app: every word of the product comes from its identity", () => {
+    const findings = listSourceFiles(repoRoot)
+      .filter(isScanned)
+      .flatMap((path) =>
+        findText(
+          path,
+          readFileSync(`${repoRoot}${path}`, "utf8"),
+          /code-review\.com/i,
+        ),
+      );
+
+    expect(withoutExceptions(findings, NAME_EXCEPTIONS)).toEqual([]);
+  });
+
+  // #740-T06
+  it("is not a literal in a file that takes a ProductIdentity, and no exception covers one", () => {
+    const takers = listSourceFiles(repoRoot)
+      .filter(isScanned)
+      .filter((path) =>
+        /product-identity\/identity(\.ts)?"/.test(
+          readFileSync(`${repoRoot}${path}`, "utf8"),
+        ),
+      );
+
+    // A file that takes the identity is found by its import of the type: the scan would pass vacuously on none.
+    expect(takers.length).toBeGreaterThan(20);
+    const findings = takers.flatMap((path) =>
+      [/code-review\.com/i, /code\s+reviewer/i].flatMap((pattern) =>
+        findText(path, readFileSync(`${repoRoot}${path}`, "utf8"), pattern),
+      ),
+    );
     expect(findings).toEqual([]);
   });
 

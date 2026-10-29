@@ -5,6 +5,7 @@
 // full; the log of a run, the question of an `/ask` and the lease never leave the server on this path (the
 // admin looks at what a run did, not at what the repository said). Everything is read through the job
 // directory (`job-directory-repository.ts`), which only reads.
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import "server-only";
 import type {
   DirectoryRunRow,
@@ -64,6 +65,8 @@ export type AdminRunsService = {
 };
 
 export function createAdminRunsService(deps: {
+  /** Who the run texts speak for: the sentences of a failed run name the product. */
+  product: ProductIdentity;
   directory: JobDirectoryRepository;
   /** Removes secrets from the text of a view (the second line of defense after the runner). */
   redact?: (text: string) => string;
@@ -106,6 +109,7 @@ export function createAdminRunsService(deps: {
       const stored = await deps.directory.get(id);
       if (stored === undefined) return undefined;
       const view = toRunDetailView(
+        deps.product,
         stored.job,
         stored.project,
         now(),

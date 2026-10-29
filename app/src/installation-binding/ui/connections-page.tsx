@@ -8,6 +8,7 @@
 // from the services (passed in, so a test uses the real ones against a test database),
 // `ConnectionsPageContent` renders it. The page file only wires the real services. Names that come from
 // GitHub (account logins) are untrusted and rendered as text.
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import { PageHeader } from "../../components/page-header.tsx";
 import type { InstallationLinkRequestsRepository } from "../../db/repositories/installation-link-requests-repository.ts";
 import type { IntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
@@ -57,6 +58,8 @@ export type ConnectionsPageData = {
 };
 
 export async function loadConnectionsPage(deps: {
+  /** Who the notice of the result page speaks for. */
+  product: ProductIdentity;
   canManage: boolean;
   integrations: Pick<IntegrationsRepository, "list">;
   repositories: Pick<RepositoriesRepository, "list">;
@@ -124,7 +127,7 @@ export async function loadConnectionsPage(deps: {
             decidedAt: request.decidedAt,
           })),
     // A flow that ended without a usable list says nothing about a list.
-    notice: code === null ? null : describeResultCode(code),
+    notice: code === null ? null : describeResultCode(deps.product, code),
     choices,
   };
 }

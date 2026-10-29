@@ -4,6 +4,7 @@
 // A payment that was started and has not been confirmed (ADR 0006, 2.13; #505): the amount, when it was started and, where the
 // provider can be asked, "Check payment". The check asks the provider what became of the payment and applies the answer once,
 // exactly as a webhook would have, so it repairs a webhook that was lost; the balance rises at most once, however often it is asked.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId } from "react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
@@ -67,6 +68,7 @@ export function PendingTopUps({
   items: PendingTopUpView[];
   api: WorkspaceBillingApi;
 }) {
+  const product = useProductIdentity();
   const id = useId();
   // The result of a check lives here, not in the row (#653): a credited payment leaves the list with the refresh that follows the
   // check, and its row with it, so the sentence would vanish before anyone read it. The card stays while it has a result to say.
@@ -77,7 +79,7 @@ export function PendingTopUps({
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code),
+          text: describeBillingFailure(product, result.code),
           issues: [],
         };
       return {

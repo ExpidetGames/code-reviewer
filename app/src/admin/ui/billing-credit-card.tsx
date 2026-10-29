@@ -6,6 +6,7 @@
 // off. The entry is written through the manual adapter with the admin as the actor; the note and the actor stay in the
 // journal. The server judges every value; the card shows the reason it gets back. A form token makes one entry however often
 // the form is sent.
+import { useProductIdentity } from "../../product-identity/context.tsx";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -65,6 +66,7 @@ function newRequestId(): string {
 }
 
 export function BillingCreditCard({ api }: { api: BillingApi }) {
+  const product = useProductIdentity();
   const ids = useId();
   const search = useBillingRun();
   const credit = useBillingRun();
@@ -93,7 +95,7 @@ export function BillingCreditCard({ api }: { api: BillingApi }) {
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: [],
           missing: [],
         };
@@ -108,7 +110,7 @@ export function BillingCreditCard({ api }: { api: BillingApi }) {
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: [],
           missing: [],
         };
@@ -142,7 +144,7 @@ export function BillingCreditCard({ api }: { api: BillingApi }) {
       if (!result.ok)
         return {
           kind: "failed",
-          text: describeBillingFailure(result.code, result.status),
+          text: describeBillingFailure(product, result.code, result.status),
           issues: result.issues,
           missing: [],
         };

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { instanceAccessOf } from "@/llm/access";
 import { getLlmKeyModeService } from "@/llm/key-mode-shared";
@@ -73,6 +74,7 @@ async function LlmSettingsContent({
         );
   return (
     <LlmSettingsPageContent
+      product={getProductIdentity()}
       workspaceSlug={workspaceSlug}
       canManage={canManage}
       instanceAccess={instanceAccessOf(summary)}

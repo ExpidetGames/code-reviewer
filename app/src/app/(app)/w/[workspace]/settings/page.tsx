@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
+import { getProductIdentity } from "@/product-identity/current";
 import type { Metadata } from "next";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
@@ -74,6 +75,7 @@ async function GeneralSettingsContent({
     ]);
   return (
     <GeneralSettingsPageContent
+      product={getProductIdentity()}
       workspaceSlug={workspaceSlug}
       workspaceName={workspaceName}
       canRename={canRename}

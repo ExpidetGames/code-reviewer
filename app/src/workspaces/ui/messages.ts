@@ -2,6 +2,7 @@
 
 // The copy for the error codes of the workspace routes (the UI translates a code to copy, never the other
 // way round).
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   CROSS_SITE_REQUEST,
   INVALID_EMAIL,
@@ -18,7 +19,7 @@ import {
 export const INVITATION_LINK_LIFETIME =
   "An invitation works once, for 7 days, for the address it was made for.";
 
-const FAILURE_COPY: Record<string, string> = {
+const failureCopy = (product: ProductIdentity): Record<string, string> => ({
   forbidden: ROLE_NOT_ALLOWED,
   not_found: NOT_AVAILABLE_TO_YOU,
   member_not_found: "That person is not a member of this workspace.",
@@ -28,15 +29,12 @@ const FAILURE_COPY: Record<string, string> = {
   invalid_email: INVALID_EMAIL,
   invalid_request:
     "The request was not complete. Reload the page and try again.",
-  email_not_allowed:
-    "The sign-up rule does not let that address in, so it can neither be invited nor accept an invitation. A code-review.com admin can change the rule.",
-  signup_closed:
-    "Invitations are closed right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs code-review.com.",
+  email_not_allowed: `The sign-up rule does not let that address in, so it can neither be invited nor accept an invitation. A ${product.name} admin can change the rule.`,
+  signup_closed: `Invitations are closed right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs ${product.name}.`,
   already_member: "That address belongs to a member of this workspace already.",
   already_invited:
     "That address has an invitation already. Revoke it first, or send it again.",
-  not_available:
-    "code-review.com cannot send mail, so a link cannot be sent again. Revoke the invitation and invite the address once more to get a new link.",
+  not_available: `${product.name} cannot send mail, so a link cannot be sent again. Revoke the invitation and invite the address once more to get a new link.`,
   rate_limited: TOO_MANY_ATTEMPTS,
   multi_tenant_required:
     "There is one workspace and people cannot create more.",
@@ -59,7 +57,7 @@ const FAILURE_COPY: Record<string, string> = {
     "A review is running right now. Try again when it has finished.",
   payment_open:
     "A payment is still open. Try again once it has gone through or has expired.",
-};
+});
 
 /** The words of the Advanced page: the one action it has. */
 export const DELETE_WORKSPACE_COPY = {
@@ -76,17 +74,25 @@ export const DELETE_WORKSPACE_COPY = {
 } as const;
 
 /** The sentence for a failed call of a workspace route. */
-export function describeWorkspaceFailure(code: string): string {
+export function describeWorkspaceFailure(
+  product: ProductIdentity,
+  code: string,
+): string {
+  const copy = failureCopy(product);
   return (
-    describeTransportFailure(code) ??
-    (Object.hasOwn(FAILURE_COPY, code) ? FAILURE_COPY[code] : undefined) ??
+    describeTransportFailure(product, code) ??
+    (Object.hasOwn(copy, code) ? copy[code] : undefined) ??
     GENERIC_FAILURE
   );
 }
 
 /** The sentence for the state of an invitation link on its page. */
-export function describeInvitationState(code: string): string {
+export function describeInvitationState(
+  product: ProductIdentity,
+  code: string,
+): string {
   return describeWorkspaceFailure(
+    product,
     ["invitation_expired", "invitation_revoked", "invitation_used"].includes(
       code,
     )

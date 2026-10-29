@@ -6,6 +6,8 @@
 // fonts and the light/dark choice. Inside it is the app's own error page (error.tsx), so both look and
 // behave the same: no error details, "Try again", a way back to the start page. It fetches no data.
 import { ERROR_COPY } from "@/components/system-page";
+import { ProductIdentityProvider } from "@/product-identity/context";
+import { builtProductIdentity } from "@/product-identity/public";
 import { ThemeSync } from "@/theme/theme-sync";
 import ErrorPage from "./error.tsx";
 import { fontVariables } from "./fonts.ts";
@@ -31,7 +33,10 @@ export default function GlobalError({
             inline script of the layout is no option here: this page is often rendered in the browser,
             where React never runs a <script> it renders. */}
         <ThemeSync />
-        <ErrorPage error={error} retry={retry} />
+        {/* Outside the root layout, so outside its provider: the product of this build. */}
+        <ProductIdentityProvider product={builtProductIdentity()}>
+          <ErrorPage error={error} retry={retry} />
+        </ProductIdentityProvider>
       </body>
     </html>
   );
