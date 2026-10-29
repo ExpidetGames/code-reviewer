@@ -55,3 +55,7 @@ add rule inet cr_lane_guard output meta skuid != { 0, 10001, 10101 } counter rej
 # The engine user's name lookups that the runner's table let pass: none may (the control does, before that table exists).
 add rule inet cr_lane_guard output_after oifname "lo" ip daddr 127.0.0.2 meta l4proto udp th dport 53 meta skuid 10101 counter accept comment "dns-control-engine-delivered"
 add rule inet cr_lane_guard output_after oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 10101 counter comment "dns-engine-delivered"
+add rule inet cr_lane_guard output_after counter comment "canary-all"
+add rule inet cr_lane_guard output_after oifname "lo" counter comment "canary-lo"
+add rule inet cr_lane_guard output_after oifname "lo" meta l4proto udp counter comment "canary-udp"
+add rule inet cr_lane_guard output_after oifname "lo" meta l4proto udp th dport 53 counter comment "canary-53"
