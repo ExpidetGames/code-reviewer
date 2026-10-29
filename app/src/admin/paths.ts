@@ -50,7 +50,7 @@ export const PROXY_SKIPPED_PATHS =
   "_next/static/|_next/image$|favicon\\.ico$|icon\\.svg$|apple-icon\\.png$";
 
 /** The path as the router sees it, or null when it cannot be decoded. */
-function normalize(pathname: string): string | null {
+export function normalizePath(pathname: string): string | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -67,7 +67,7 @@ function normalize(pathname: string): string | null {
 }
 
 export function isAdminPath(pathname: string): boolean {
-  const path = normalize(pathname);
+  const path = normalizePath(pathname);
   // Cannot be read: the router will not find a page for it either, but it must not be waved through.
   if (path === null) return true;
   return ADMIN_ROOTS.some(
@@ -81,7 +81,7 @@ export function isAdminPath(pathname: string): boolean {
  * cannot be read (it is then no route either).
  */
 export function portalRewriteTarget(pathname: string): string | null {
-  const path = normalize(pathname);
+  const path = normalizePath(pathname);
   if (path === null) return null;
   for (const [root, target] of [
     ["/admin", PORTAL_PAGE_ROOT],
@@ -98,7 +98,7 @@ export function portalRewriteTarget(pathname: string): string | null {
  * reached, or recognized, by this way.
  */
 export function isInternalPortalPath(pathname: string): boolean {
-  const path = normalize(pathname);
+  const path = normalizePath(pathname);
   if (path === null) return false;
   return [PORTAL_PAGE_ROOT, PORTAL_API_ROOT].some(
     (root) => path === root || path.startsWith(`${root}/`),
