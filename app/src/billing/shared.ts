@@ -7,9 +7,12 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { loadAuthConfig } from "../auth/config.ts";
+import { getCapabilities } from "../capabilities/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { runAfterResponse } from "../dispatch/shared.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { WORKSPACE_LLM_KEY_NAMES } from "../llm/secret-names.ts";
+import { STRIPE_SECRET_NAMES } from "../secret-names/names.ts";
 import { getSecretStore, getSecretStoreOn } from "../secrets/shared.ts";
 import { createAdapterRegistry } from "./adapter.ts";
 import {
@@ -63,15 +66,24 @@ import {
 import { createTopUpRoute, type TopUpRoute } from "./topup-http.ts";
 import { createTopUpService } from "./topup-service.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { loadBalanceBanner } from "./balance-banner.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createWallClockRecorder } from "./wall-clock.ts";
 import { createBillingWebhookHandler } from "./webhook-handler.ts";
 
+/** Whether this deployment has billing at all (#731). Without it none of the billing readers below is constructed or asked. */
+function hasBilling(): boolean {
+  return getCapabilities().has("billing");
+}
+
 /** The configured public address of the app (`BETTER_AUTH_URL`): the one place billing reads the environment. */
 function publicAddress(): string {
   return loadAuthConfig(process.env).baseUrl;
 }
+
+/** The secret store on the Stripe credentials, the only secrets billing reads. */
+const stripeSecrets = () => getSecretStore(STRIPE_SECRET_NAMES);
 
 /**
  * The adapters of this instance: the `manual` one, and Stripe, which reads its key and its webhook secret from the secret store
@@ -83,15 +95,15 @@ export function getBillingAdapterRegistry() {
     manualAdapter,
     createStripeAdapter({
       client: stripeClientFromSecrets({
-        secrets: getSecretStore,
+        secrets: stripeSecrets,
         baseUrl: stripeApiBaseUrl(),
       }),
       // Only a test stack that points the app at a loopback fake gets that fake's links; in production this is undefined.
       ...(linkOrigin === undefined ? {} : { allowedLinkOrigin: linkOrigin }),
       webhookSecret: stripeWebhookSecretFromSecrets({
-        secrets: getSecretStore,
+        secrets: stripeSecrets,
       }),
-      environment: stripeEnvironmentFromSecrets({ secrets: getSecretStore }),
+      environment: stripeEnvironmentFromSecrets({ secrets: stripeSecrets }),
     }),
   ]);
 }
@@ -126,6 +138,7 @@ export function getMonthlyLimitRoute(): MonthlyLimitRoute {
  * setting; with billing off nothing else is read.
  */
 export function billingPageLinkedFor(): Promise<boolean> {
+  if (!hasBilling()) return Promise.resolve(false);
   return isBillingOn(getDatabase());
 }
 
@@ -137,6 +150,7 @@ export async function balanceBannerFor(
   workspace: { id: string; slug: string },
   role: WorkspaceRole,
 ): Promise<BalanceBannerView | null> {
+  if (!hasBilling()) return null;
   try {
     return await loadBalanceBanner({ db: getDatabase(), workspace, role });
   } catch {
@@ -226,8 +240,10 @@ export function getBillingWebhookHandler(): (
 export function getBillingAdminService(): BillingAdminService {
   return createBillingAdminService({
     db: getDatabase(),
-    secretsOn: getSecretStoreOn,
+    secretsOn: (executor) => getSecretStoreOn(executor, STRIPE_SECRET_NAMES),
+    ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
     publicUrl: publicAddress(),
+    product: getProductIdentity(),
     clientFor: (apiKey, environment, options) =>
       createStripeClient({
         apiKey,
@@ -273,6 +289,7 @@ export function getBillingReviewService(): BillingReviewService {
  * cannot answer must not break every page of the portal, so it counts as none (the list itself says what is wrong).
  */
 export async function countOpenBillingReviews(): Promise<number> {
+  if (!hasBilling()) return 0;
   try {
     return await getBillingReviewService().openCount();
   } catch {
@@ -286,6 +303,7 @@ export async function countOpenBillingReviews(): Promise<number> {
  * answer must not break every page of the portal, so it names nothing (the Billing page itself says what is wrong).
  */
 export async function readIncompleteBilling(): Promise<BillingMissingItem[]> {
+  if (!hasBilling()) return [];
   try {
     return await incompleteBillingItems(getDatabase());
   } catch {
@@ -296,7 +314,7 @@ export async function readIncompleteBilling(): Promise<BillingMissingItem[]> {
 
 /** The claims of these jobs ended: records the wall clock of those that ran on a runner, where billing is on. Never throws, never delays the call. */
 export function recordWallClocks(jobIds: readonly string[]): void {
-  if (jobIds.length === 0) return;
+  if (jobIds.length === 0 || !hasBilling()) return;
   try {
     const recorder = createWallClockRecorder({ db: getDatabase() });
     runAfterResponse(() => recorder.recordFor(jobIds));
@@ -312,6 +330,7 @@ export function recordWallClocks(jobIds: readonly string[]): void {
  * logs only a stable code.
  */
 export function deliverBalanceMails(): void {
+  if (!hasBilling()) return;
   runAfterResponse(async () => {
     try {
       await deliverDueBalanceMailsNow();
@@ -329,9 +348,11 @@ export function deliverDueBalanceMailsNow(): Promise<{
   delivered: number;
   failed: number;
 }> {
+  if (!hasBilling()) return Promise.resolve({ delivered: 0, failed: 0 });
   return deliverDueBalanceMails({
     db: getDatabase(),
     mail: getMailSender(),
     baseUrl: publicAddress(),
+    product: getProductIdentity(),
   });
 }

@@ -7,6 +7,7 @@ import { currentLookup } from "@/auth/session";
 import { createWorkspacesRepository } from "@/db/repositories/workspaces-repository";
 import { getDatabase } from "@/db/startup";
 import { loginPath, NO_ACCESS_PAGE } from "@/auth/session-user";
+import { getCapabilities } from "@/capabilities/shared";
 import { workspaceHome } from "@/workspaces/paths";
 
 // The start page has no content of its own: a signed in person goes to the first workspace they belong to
@@ -33,6 +34,8 @@ async function GoToWorkspace(): Promise<null> {
     lookup.user.id,
   );
   redirect(
-    first === undefined ? NO_ACCESS_PAGE : workspaceHome(first.workspace.slug),
+    first === undefined
+      ? NO_ACCESS_PAGE
+      : workspaceHome(first.workspace.slug, getCapabilities()),
   );
 }

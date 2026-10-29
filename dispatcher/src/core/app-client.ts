@@ -198,7 +198,13 @@ export function createAppClient(options: AppClientOptions) {
     /** Does the App have what the split needs? An App without the version route is a previous release. */
     async checkVersion(): Promise<
       | { ok: true; features: readonly string[] }
-      | { ok: false; code: AppFailure; retryAfterSeconds?: number }
+      | {
+          ok: false;
+          code: AppFailure;
+          retryAfterSeconds?: number;
+          /** #730: with `app_too_old` because of the answer, the features of the split that it lacks. */
+          missingFeatures?: string[];
+        }
     > {
       const response = await send("/api/runners/v1/version", {
         method: "GET",
@@ -223,7 +229,7 @@ export function createAppClient(options: AppClientOptions) {
       );
       return missing.length === 0
         ? { ok: true, features: parsed.data.features }
-        : { ok: false, code: "app_too_old" };
+        : { ok: false, code: "app_too_old", missingFeatures: [...missing] };
     },
 
     /**

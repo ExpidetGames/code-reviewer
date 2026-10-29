@@ -20,6 +20,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
+import { keepConnectionsOpen } from "../keep-alive.ts";
 import { StripeHttpError, type StripeErrorBody } from "./errors.ts";
 import { createFaults, type Faults, type RawAnswer } from "./faults.ts";
 import { canonicalize, parseForm } from "./form.ts";
@@ -690,6 +691,7 @@ export async function startStripeFake(
       );
     });
   });
+  keepConnectionsOpen(server);
   await new Promise<void>((resolve) =>
     server.listen(options.port ?? 0, host, resolve),
   );

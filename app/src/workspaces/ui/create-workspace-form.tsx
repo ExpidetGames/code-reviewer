@@ -9,6 +9,7 @@ import { Button } from "@/components/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { useCapabilities } from "../../capabilities/context.tsx";
 import { workspaceHome } from "../paths.ts";
 import { browserAccountApi, type AccountApi } from "./api.ts";
 import { describeWorkspaceFailure } from "./messages.ts";
@@ -22,6 +23,7 @@ export function CreateWorkspaceForm({
   open?: (path: string) => void;
 }) {
   const id = useId();
+  const capabilities = useCapabilities();
   const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function CreateWorkspaceForm({
       return;
     }
     // A full navigation: the frame (the switcher) is made again with the new workspace in it.
-    open(workspaceHome(result.data.workspace.slug));
+    open(workspaceHome(result.data.workspace.slug, capabilities));
   }
 
   return (

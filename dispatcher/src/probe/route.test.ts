@@ -53,7 +53,7 @@ function build(
     logger,
     background: createBackgroundTracker().run,
     trigger: webhookTrigger({
-      keys: [{ kid: KEY_ID, secret: SIGNING_SECRET }],
+      keys: [{ kid: KEY_ID, secret: SIGNING_SECRET, appId: "reviewer" }],
     }),
     ...(imageDigest === undefined ? {} : { imageDigest }),
     ...(snapshotId === undefined ? {} : { snapshotId }),

@@ -618,6 +618,7 @@ function request(
   container?: WorkerContainerOverrides,
 ): LaunchSpec {
   return {
+    appId: "reviewer",
     appUrl: "https://app.example.invalid",
     jobId: `job-${kind}`,
     credential: CREDENTIAL,

@@ -21,6 +21,7 @@ import { loginPath } from "@/auth/session-user";
 import { PageHeader } from "@/components/page-header";
 import { PageLoading } from "@/components/page-loading";
 import { loadAccountView } from "@/workspaces/account-view";
+import { getCapabilities } from "@/capabilities/shared";
 import { workspaceHome } from "@/workspaces/paths";
 import { NoAccessContent } from "@/workspaces/ui/no-access-content";
 
@@ -45,7 +46,8 @@ async function WhatToDo() {
     redirect(loginPath(lookup));
   const view = await loadAccountView(lookup.user.id);
   const [first] = view.memberships;
-  if (first !== undefined) redirect(workspaceHome(first.workspace.slug));
+  if (first !== undefined)
+    redirect(workspaceHome(first.workspace.slug, getCapabilities()));
 
   return (
     <NoAccessContent

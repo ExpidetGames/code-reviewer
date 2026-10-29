@@ -15,7 +15,8 @@
 #      `opencode`, with a writable one it must not (the capability probe of the hosted deployment is this verdict);
 #   4. the journeys (the Worker inside them is started as root with the capabilities of the hardened container
 #      spec and no-new-privileges: runner/scripts/dynamic_e2e_worker_container.sh);
-#   5. the last word of the guard, and a check that no process of the lane is left.
+#   5. the last word of the guard (the counters, the destinations, and the lookups on the lane's own resolver: none by the
+#      engine user, only names of e2e/dynamic/dns-allowlist.txt by anyone), and a check that no process of the lane is left.
 set -euo pipefail
 
 : "${LANE_OPENCODE_BIN:?}" "${LANE_RIPGREP_BIN:?}" "${LANE_APP_DIR:?}" "${LANE_RUNNER_DIR:?}" "${LANE_STAGE:?}"
@@ -30,6 +31,8 @@ fail() {
 # 1. Network: loopback, the guard, and a default route into a veth pair that nothing answers on.
 ip link set lo up || fail "loopback cannot be brought up"
 nft -f "$LANE_APP_DIR/e2e/dynamic/guard.nft" || fail "the network guard cannot be loaded (nft, nf_tables and NET_ADMIN are needed)"
+# Where the rejected packets went (#667): only explains a failure, so the lane starts without it if it cannot be loaded.
+nft -f "$LANE_APP_DIR/e2e/dynamic/guard-trace.nft" || echo "The destinations of the network guard are not recorded (e2e/dynamic/guard-trace.nft did not load); a failure shows the counters only." >&2
 ip link add cr0 type veth peer name cr1 || fail "the veth pair of the network guard cannot be created"
 ip addr add 10.255.255.1/30 dev cr0
 ip link set cr0 up
@@ -72,6 +75,26 @@ install -m 0755 -o root -g root "$STAGE/tools/opencode" /usr/local/bin/opencode
 install -m 0755 -o root -g root "$STAGE/tools/rg" /usr/local/bin/rg
 install -d -m 0755 -o root -g root /opt/code-reviewer /opt/code-reviewer/pins
 install -m 0644 -o root -g root "$LANE_RUNNER_DIR/opencode-pin.json" "$LANE_RUNNER_DIR/ripgrep-pin.json" /opt/code-reviewer/pins/
+
+# The lane's own resolver (#667): the runner's (Azure's 168.63.129.16) is out of the namespace, and a lookup that reached it was
+# counted by the guard as a violation, on some runners and some runs only. The resolver here is on loopback, answers every name
+# with "no such name" at once and writes down what was asked; the log is printed at the end. /etc/resolv.conf of the host may be a
+# link into /run, which is this namespace's own tmpfs: then the file is made at the link's target.
+printf 'nameserver 127.0.0.1\noptions timeout:1 attempts:1\n' > "$STAGE/resolv.conf"
+RESOLV_TARGET="$(readlink -m /etc/resolv.conf)"
+case "$RESOLV_TARGET" in
+  /run/*) mkdir -p "$(dirname "$RESOLV_TARGET")" && cp "$STAGE/resolv.conf" "$RESOLV_TARGET" || fail "the lane's resolver address cannot be written" ;;
+  *) mount --bind "$STAGE/resolv.conf" "$RESOLV_TARGET" || fail "the lane's resolver address cannot be mounted over $RESOLV_TARGET" ;;
+esac
+DNS_LOG=/run/lane-dns.log
+: > "$DNS_LOG"
+"${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/lane-dns-stub-command.ts" "$DNS_LOG" > /run/lane-dns.out 2>&1 &
+DNS_PID=$!
+for _ in $(seq 1 50); do
+  grep -q ready /run/lane-dns.out && break
+  sleep 0.1
+done
+grep -q ready /run/lane-dns.out || { cat /run/lane-dns.out >&2; fail "the lane's resolver did not start"; }
 
 # 3. The preflight. It names what is missing and stops the lane.
 "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-preflight-command.ts"
@@ -125,13 +148,16 @@ case "$writable_verdict" in
 esac
 echo "probe entry mode: opencode with a read-only root, not with a writable one"
 
-# 4. The journeys.
+# 4. The journeys. What the guard has counted so far is printed first: a violation before the journeys began came from the setup.
 cd "$LANE_APP_DIR"
+"${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-lane-guard-report.ts"
 status=0
 ./node_modules/.bin/playwright test -c playwright.dynamic.config.ts "$@" || status=$?
 
 # 5. The guard has the last word, and nothing may be left running.
-if ! "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-lane-guard-command.ts"; then
+kill "$DNS_PID" 2>/dev/null && wait "$DNS_PID" 2>/dev/null && :
+echo "Names the lane asked for (its resolver answers none; the guard compares them with e2e/dynamic/dns-allowlist.txt): $(sort "$DNS_LOG" | uniq -c | tr '\n' ';')"
+if ! "${NODE[@]}" "$LANE_APP_DIR/e2e/helpers/dynamic-lane-guard-command.ts" "$DNS_LOG"; then
   status=1
 fi
 leftovers=""

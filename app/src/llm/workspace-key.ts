@@ -25,8 +25,8 @@ import {
 } from "../native-providers/lookup.ts";
 import { llmProviderDescriptors } from "./providers/index.ts";
 import type { LlmProviderDescriptor } from "./providers/types.ts";
-import type { WorkspaceSecretName } from "../secrets/names.ts";
 import type { WorkspaceSecretStore } from "../secrets/workspace-store.ts";
+import type { WorkspaceLlmKeyName } from "./secret-names.ts";
 import type { SecretValue } from "../secrets/secret-value.ts";
 import type { WorkspaceKeyForJob } from "./resolve.ts";
 
@@ -130,7 +130,7 @@ export function createWorkspaceLlmKeyService({
   store,
   providers = withNativeProviders(llmProviderDescriptors),
 }: {
-  store: WorkspaceSecretStore;
+  store: WorkspaceSecretStore<WorkspaceLlmKeyName>;
   providers?: ProviderLookup;
 }): WorkspaceLlmKeyService {
   // The slot of a provider: the name its adapter gave its workspace key. Registered names are validated when the
@@ -138,7 +138,7 @@ export function createWorkspaceLlmKeyService({
   // of a test may have providers the types do not know, hence the two casts.
   const slotOfDescriptor = (descriptor: KeyProvider) => ({
     id: descriptor.id as LlmProvider,
-    name: descriptor.secretNames.workspace as WorkspaceSecretName,
+    name: descriptor.secretNames.workspace as WorkspaceLlmKeyName,
   });
   // The slot a stored or computed provider id names, exactly: no trimming and no case folding.
   function slotOf(provider: string) {

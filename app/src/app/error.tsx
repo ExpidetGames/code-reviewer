@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { Button } from "@/components/button";
 import { ERROR_COPY, SystemPage } from "@/components/system-page";
+import { getProductIdentity } from "@/product-identity/current";
 
 export default function ErrorPage({
   error,
@@ -24,6 +25,7 @@ export default function ErrorPage({
 
   return (
     <SystemPage
+      product={getProductIdentity()}
       mark={
         <WarningIcon
           aria-hidden="true"

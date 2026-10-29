@@ -107,6 +107,7 @@ async function startHarness(
     repositories,
     logger: {
       info: (line) => intakeLog.push(line),
+      warn: (line) => intakeLog.push(line),
       error: (line) => intakeLog.push(line),
     },
   });
@@ -130,6 +131,7 @@ async function startHarness(
     },
     logger: {
       info: (line) => routeLog.push(line),
+      warn: (line) => routeLog.push(line),
       error: (line) => routeLog.push(line),
     },
   });

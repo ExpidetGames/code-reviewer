@@ -4,6 +4,10 @@
 // and nothing a failure said reaches the log. The steps against a real database are in sweep.integration.test.ts.
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createCapabilitySet,
+  type CapabilitySet,
+} from "../capabilities/capability.ts";
 import type { ExpiryReport } from "../db/repositories/runner-jobs-repository.ts";
 import type { CleanupResult } from "../maintenance/cleanup.ts";
 import type { RefreshOutcome } from "../models-dev/service.ts";
@@ -30,7 +34,13 @@ const cleaned = {
   jobDispatches: 0,
 };
 
-function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
+function setup(
+  options: {
+    settings?: SweepSettings;
+    poll?: boolean;
+    capabilities?: CapabilitySet;
+  } = {},
+) {
   const stored = new Map<string, string>();
   const mocks = {
     expireStaleJobs: vi.fn<() => Promise<ExpiryReport>>(async () => expiry),
@@ -95,6 +105,9 @@ function setup(options: { settings?: SweepSettings; poll?: boolean } = {}) {
     balanceMails: { deliverDue: mocks.deliverDue },
     journalCheck: { run: mocks.checkJournal },
     settings: options.settings ?? { giveUpMs: 3_600_000, maxRunning: null },
+    ...(options.capabilities === undefined
+      ? {}
+      : { capabilities: options.capabilities }),
     log: { info: mocks.info, error: mocks.error },
   });
   return { sweep, ...mocks };
@@ -543,5 +556,77 @@ describe("a run of the sweep that partly fails", () => {
 
     expect(t.cleanup).toHaveBeenCalledOnce();
     expect(second.cleanedUp).toBe(false);
+  });
+});
+
+describe("a run of the sweep of a deployment with a capability set (#731)", () => {
+  // #731-T03
+  it("runs no step of billing without the billing capability, and every other step", async () => {
+    const m = setup({
+      capabilities: createCapabilitySet(["review", "dynamic-review"]),
+    });
+
+    const report = await m.sweep.run();
+
+    expect(m.releaseStranded).not.toHaveBeenCalled();
+    expect(m.deliverDue).not.toHaveBeenCalled();
+    expect(m.checkJournal).not.toHaveBeenCalled();
+    for (const ran of [
+      m.expireStaleJobs,
+      m.failUndispatched,
+      m.reviveStopped,
+      m.sendDue,
+      m.retryDue,
+      m.reconcileDue,
+      m.cleanup,
+      m.refreshIfDue,
+    ])
+      expect(ran).toHaveBeenCalled();
+    expect(report.failedSteps).toEqual([]);
+  });
+
+  // #731-T04
+  it("moves no job without the review capability, and still cleans up and fetches the catalog", async () => {
+    const m = setup({ capabilities: createCapabilitySet([]) });
+
+    await m.sweep.run();
+
+    for (const idle of [
+      m.expireStaleJobs,
+      m.failUndispatched,
+      m.reviveStopped,
+      m.sendDue,
+      m.retryDue,
+      m.reconcileDue,
+      m.releaseStranded,
+      m.deliverDue,
+      m.checkJournal,
+    ])
+      expect(idle).not.toHaveBeenCalled();
+    expect(m.cleanup).toHaveBeenCalled();
+    expect(m.refreshIfDue).toHaveBeenCalled();
+  });
+
+  // #731-T01
+  it("runs every step with the whole set, and when no set is given", async () => {
+    for (const capabilities of [
+      createCapabilitySet(["review", "dynamic-review", "billing"]),
+      undefined,
+    ]) {
+      const m = setup(capabilities === undefined ? {} : { capabilities });
+
+      await m.sweep.run();
+
+      for (const ran of [
+        m.expireStaleJobs,
+        m.sendDue,
+        m.reconcileDue,
+        m.releaseStranded,
+        m.deliverDue,
+        m.checkJournal,
+        m.refreshIfDue,
+      ])
+        expect(ran).toHaveBeenCalled();
+    }
   });
 });

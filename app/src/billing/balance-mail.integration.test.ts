@@ -17,6 +17,7 @@ import { afterQueryPlugin } from "../test-support/query-hook.ts";
 import { insertUser } from "../test-support/users.ts";
 import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const USD = 1_000_000;
 const BASE_URL = "https://reviews.example.com";
@@ -39,6 +40,7 @@ for (const engine of BILLING_ENGINES) {
       const logged: string[] = [];
       const deliver = () =>
         deliverDueBalanceMails({
+          product: getProductIdentity(),
           db,
           mail,
           baseUrl: BASE_URL,
@@ -135,6 +137,7 @@ for (const engine of BILLING_ENGINES) {
       });
       const run = () =>
         deliverDueBalanceMails({
+          product: getProductIdentity(),
           db: t.db.withPlugin(rendezvous),
           mail: t.mail,
           baseUrl: BASE_URL,
@@ -311,7 +314,8 @@ for (const engine of BILLING_ENGINES) {
           message.text,
           message.html ?? "",
         ]) {
-          expect(body).not.toContain("777");
+          // The other workspace's balance as a number of its own, not as a piece of a random id in a link (#714).
+          expect(body).not.toMatch(/(?<![0-9A-Za-z])777(?![0-9A-Za-z])/);
           expect(body).not.toMatch(
             /\b(rate|rates|factor|formula|model|provider|stripe|anthropic|brake|minute|minutes)\b/i,
           );

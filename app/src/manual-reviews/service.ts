@@ -263,7 +263,8 @@ export function createManualReviewService(
         // the safety net for the rest). Asking again will not help, and nothing was written.
         if (
           error instanceof JobQueueError &&
-          error.code === "JOB_INPUT_INVALID"
+          (error.code === "JOB_INPUT_INVALID" ||
+            error.code === "JOB_KIND_UNAVAILABLE")
         )
           throw new ManualReviewError(
             "MANUAL_REVIEW_REQUEST_INVALID",

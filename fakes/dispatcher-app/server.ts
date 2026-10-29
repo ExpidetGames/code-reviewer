@@ -32,6 +32,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { join } from "node:path";
+import { keepConnectionsOpen } from "../keep-alive.ts";
 
 const CONTRACTS = join(import.meta.dirname, "..", "..", "contracts");
 const FIXTURES = join(import.meta.dirname, "..", "fixtures");
@@ -823,6 +824,7 @@ export async function startDispatcherAppFake(
     },
   };
 
+  keepConnectionsOpen(server);
   await new Promise<void>((resolve) =>
     server.listen(options.port ?? 0, options.host ?? "127.0.0.1", resolve),
   );

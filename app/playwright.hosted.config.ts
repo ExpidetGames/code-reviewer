@@ -102,7 +102,7 @@ export default defineConfig({
         `${process.env.E2E_REUSE_BUILD === "1" ? "true" : "pnpm build"} && ` +
         `rm -rf ${hostedEnv.directory} && mkdir -p ${hostedEnv.directory} && ` +
         "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && pnpm migrate && " +
-        `pnpm start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
       env: {
         NEXT_TELEMETRY_DISABLED: "1",
         E2E_ADMIN_DATABASE_URL: database.admin,
@@ -110,6 +110,10 @@ export default defineConfig({
         DATABASE_URL: database.app,
         DATABASE_URL_MIGRATE: database.app,
         APP_SECRET: hostedEnv.appSecret,
+        // The lane's app is the clone (#731): the factory product with review and dynamic-review, billing off. The journeys
+        // review without any balance, and e2e/hosted/capabilities.e2e.ts proves what is not there.
+        PRODUCT_ID: "factory",
+        PRODUCT_CAPABILITIES: "review,dynamic-review",
         // The sweep of the hosted lane would fetch the models.dev catalog (#548); no test reaches the internet.
         MODELS_DEV_FETCH: "off",
         BETTER_AUTH_URL: hostedEnv.appUrl,

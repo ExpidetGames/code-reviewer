@@ -856,6 +856,8 @@ describe("the webhook endpoint at Stripe", () => {
     expect(created?.form).toMatchObject({
       url: WEBHOOK_URL,
       enabled_events: [...STRIPE_WEBHOOK_EVENTS],
+      // #715-T07: the endpoint is named after the product.
+      description: "code-review.com",
     });
     const stored = await s.portal.secrets.use("stripe_webhook_secret");
     expect(stored.ok && stored.value.reveal()).toBe(

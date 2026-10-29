@@ -62,13 +62,21 @@ describe("the production deployment workflow", () => {
     expect(Object.keys(workflow.jobs)).toEqual([
       "fresh",
       "migrate",
+      // The dormant factory lane's switch and migration (#732): jobs of their own, the first App's `migrate` stays as it was.
+      "factory-flag",
+      "migrate-factory",
       "snapshot-decide",
       "snapshot-build",
       "stage-app",
       "stage-dispatcher",
+      // The dormant factory lane (#732, factory-lane-workflow.test.ts) sits among them, never in front of them.
+      "stage-factory",
       "health-app",
+      "health-factory",
       "canary",
+      "apps-check",
       "promote-app",
+      "promote-factory",
       "promote-dispatcher",
       "persist",
       "cleanup",
@@ -257,7 +265,12 @@ describe("the production deployment workflow", () => {
     const writers = Object.entries(workflow.jobs)
       .filter(([, found]) => found.permissions?.deployments === "write")
       .map(([name]) => name);
-    expect(writers.sort()).toEqual(["record", "stage-app", "stage-dispatcher"]);
+    expect(writers.sort()).toEqual([
+      "record",
+      "stage-app",
+      "stage-dispatcher",
+      "stage-factory",
+    ]);
     for (const found of [...Object.values(workflow.jobs), stageJob])
       expect(found.permissions?.contents, found.name).toBe("read");
   });
@@ -266,9 +279,13 @@ describe("the production deployment workflow", () => {
   it("runs every job that signs in to Infisical in the environment production", () => {
     for (const name of [
       "migrate",
+      "migrate-factory",
       "snapshot-decide",
       "health-app",
+      "health-factory",
+      "apps-check",
       "promote-app",
+      "promote-factory",
       "promote-dispatcher",
       "persist",
       "cleanup",
@@ -436,8 +453,10 @@ describe("the production deployment workflow", () => {
     expect(needsOf(record).sort()).toEqual([
       "promote-app",
       "promote-dispatcher",
+      "promote-factory",
       "stage-app",
       "stage-dispatcher",
+      "stage-factory",
     ]);
     expect(String(record.if)).toContain("always()");
     const script = stepsOf(record).find((step) =>

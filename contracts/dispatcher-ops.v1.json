@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Itegro-GmbH/code-reviewer/contracts/dispatcher-ops.v1.json",
+  "title": "Code Reviewer Dispatcher operator routes, version 1",
+  "description": "The routes of the Dispatcher that an operator or a deploy step calls with the operator credential (`Authorization: Bearer <DISPATCHER_OPERATOR_TOKEN>`, #730), next to `POST /probe` (probe-verdict.v1.json). No app credential opens them: an app must not be able to start canary VMs, which cost money. AppsCheckResponse is the answer of `POST /apps/check`: for each app the Dispatcher serves, whether its App could be reached with that app's credential and which features of the split it lacks. Ids, booleans and stable codes only: no URL, no credential, no text the App sent. 401 with the runner API's ErrorResponse, the same for every refusal, when the credential is missing or wrong. A reader ignores fields it does not know.",
+  "version": 1,
+  "$defs": {
+    "AppCheckCode": {
+      "description": "Why an app is not fine, from the Dispatcher's call to `GET /api/runners/v1/version` of that App with the app's dispatcher credential: `app_unreachable` (no answer), `app_rejected` (the App refused the credential or the request), `app_error` (the App failed, 5xx or 429), `app_too_old` (no version route, or features of the split are missing: see `missingFeatures`) or `app_answer_invalid` (an answer of another shape). Null: the App is reachable, takes the credential and has every feature the Dispatcher needs. The Dispatcher keeps the list in dispatcher/src/core/app-client.ts (`APP_FAILURES`); a test holds them equal.",
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "app_unreachable",
+        "app_rejected",
+        "app_error",
+        "app_too_old",
+        "app_answer_invalid"
+      ]
+    },
+    "AppCheck": {
+      "description": "The result for one app of the Dispatcher's registry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "reachable",
+        "credentialAccepted",
+        "missingFeatures",
+        "code"
+      ],
+      "properties": {
+        "id": {
+          "description": "The id of the app in the registry (`reviewer` for the legacy variables).",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,23}$"
+        },
+        "reachable": {
+          "description": "False only when no answer came.",
+          "type": "boolean"
+        },
+        "credentialAccepted": {
+          "description": "True when the App took the credential, false when it refused it, null when that is not known (no answer, or an App that failed before it checked).",
+          "type": ["boolean", "null"]
+        },
+        "missingFeatures": {
+          "description": "The features of the split (`VersionResponse.features`) the App lacks; empty unless the code is `app_too_old` because of the answer.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "maxItems": 16
+        },
+        "code": {
+          "$ref": "#/$defs/AppCheckCode"
+        }
+      }
+    },
+    "AppsCheckResponse": {
+      "description": "The answer of `POST /apps/check`: 200 with every app, whatever each one's result (the caller reads the codes: a deploy step blocks on `app_unreachable` and `app_rejected`, not on `app_too_old`, because the live Apps are the previous release while a new one is rolled out). `ok` is true when every `code` is null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "ok", "apps"],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "apps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AppCheck"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        }
+      }
+    }
+  }
+}

@@ -73,8 +73,9 @@ and holds only the App's address and the job credential, and nothing in it can c
 - **Log events.** `stop_received` (`jobId`, `vms`), `vm_stopped`, `vm_stop_failed`, `stop_replayed`, `stop_list_failed`
   (`code`), `stop_refused` (`verdict` only). No key, signature or platform text.
 
-A VM is scoped by the tag `app = code-reviewer` and the job's UUID, with no tag of the deployment: two deployments in one Vercel
-team must use different dispatch signing keys (and databases), or one's valid stop could name the other's job
+A VM is scoped by the tags `app = code-reviewer`, the job's UUID and, since #730, `tenant`, the app that claimed the job (see "More
+than one App"): a stop signed by one app of a Dispatcher never reaches a VM of another. Two separate Dispatcher deployments in
+one Vercel team must still use different dispatch signing keys (and databases), or one's valid stop could name the other's job
 (`docs/deployment-vercel.md`, section 5.5).
 
 A job that goes back to the queue is **not** stopped by the App (the next attempt's VM could already exist when the call
@@ -98,6 +99,92 @@ timeoutSeconds })` (the platform's name, the Dispatcher's clock and the VM's own
   delays a launch, a heartbeat or a job transition**: the App then measures the VM by the backstop of its own, or counts
   0 minutes when it got no report at all.
 - A Launcher that creates no VM (the fake) never calls the callback.
+
+## More than one App (#730)
+
+One Dispatcher can serve several Apps (the same code deployed twice, each with its own database). The protocol did not change:
+the key that signs a wake-up or stop call already identified the sender, so **a key belongs to exactly one app and the key is
+the whole identity of the sender**.
+
+- **Registry.** The legacy variables (`RUNNER_API_URL`, `RUNNER_TOKEN`, `DISPATCHER_SIGNING_*`, `DISPATCHER_MAX_RUNNING`,
+  `DISPATCHER_POOL_ID`) define the app `reviewer`, unchanged; with nothing else set the Dispatcher behaves exactly as before.
+  `DISPATCHER_APPS` adds apps (`id`, `url`, `kinds`, `keyId`, `maxRunning`, `poolId`), and the secrets come from variables
+  named after the id: `DISPATCHER_APP_<ID>_TOKEN`, `DISPATCHER_APP_<ID>_SIGNING_SECRET` and, while rotating,
+  `..._SIGNING_SECRET_PREVIOUS` with `..._SIGNING_SECRET_PREVIOUS_KEY_ID`. At start a refusal names the variable (and the app),
+  never a value: a repeated id, the reserved id `reviewer`, a repeated key id or address (addresses are compared as the platform
+  reads them: `https://APP.example:443/` and `https://app.example` are one address), a kind that is not on the list in code
+  (`diff`, `dynamic`; a later `implementer` is added there and in the contracts, never by configuration), a missing or short
+  secret, `DISPATCHER_APPS` without `DISPATCHER_OPERATOR_TOKEN`, and a secret equal to any other secret of any app, to the
+  operator token or to `CRON_SECRET`. **A malformed `DISPATCHER_APPS` or one missing per-app secret fails the whole Dispatcher at
+  start, `reviewer` included** (it does not serve one app and skip another): the pre-promote health check and the canary catch
+  it before the deployment is promoted, and the previous deployment keeps serving.
+- **Per-app core.** `core.handle({appId, jobId, reviewKind})`: the app comes from the verified key. Each app has its own client
+  (address, credential, `X-Runner-Id`), its own cap (`maxRunning`, also sent with its claim; one app at its cap answers `busy`
+  and takes no slot of another, so the ceiling is the sum of the caps; see "The cap is counted here too" below), its own memory of the version answer, and its own
+  heartbeats, releases and VM reports. `LaunchSpec.appUrl` is the registry's address of the app that claimed the job, never a
+  value of a request. A claim answered `204` is `ignored`: there is no fallback to another app.
+- **Job kinds per app.** A wake-up call for a kind outside the app's `kinds` is answered `200 ignored` with `not_capable` (an
+  answer the App already understands and does not resend on), logged as `kind_not_allowed`, and **no claim is made**. The claim
+  asks for the engines of the app's kinds only. A claimed job of another kind, **or of a kind whose engine this Dispatcher does
+  not serve** (a Dynamic job when `opencode` is not in `DISPATCHER_ENGINES` or not advertised), is released (`launch_failed`),
+  logged as the error `kind_not_allowed` (`reason` `kind` or `engine`), and no VM is created. The `reviewer`'s kinds are the ones whose engine is in `DISPATCHER_ENGINES`.
+- **VM isolation.** Every job VM carries the tag `tenant=<app id>` next to `{app, kind, job}`; the name format is unchanged.
+  The stop route lists with the app of the verified key and returns only VMs whose tenant is that app (a VM without the tag was
+  created before this release and belongs to `reviewer`): **a stop signed by one app can never end a VM of another**. Stop ids
+  are remembered per app. The reaper asks the state of a VM's job at the app its tag names, through that app's client, and
+  never at another; an unreadable answer or a tenant this Dispatcher does not serve keeps the VM until its lifetime ends.
+  Canary VMs have no tenant. The platform's listing narrows by one tag only, so the tenant is checked in code.
+- **The cap is counted here too.** The App enforces an app's cap at the claim, but an app that is buggy or compromised can
+  ignore its cap, and one app must not take the Sandbox concurrency of another. Where the platform can be listed (the
+  Sandbox-Launcher, i.e. wherever the reaper exists) **and more than one app is configured**, the Dispatcher counts for each claim what the app occupies by its own
+  numbers: the live job VMs of its `tenant` tag (a VM without the tag counts for `reviewer`; canaries and VMs the platform is
+  ending do not count), the VMs created since the listing, and its launches in progress that have no VM yet. Above the app's
+  `maxRunning` **plus a tolerance of the cap and two more** (so twice the cap plus two VMs in all, the VM this call would start
+  counted) the wake-up call is answered `busy` (`app_cap_reached` in the log) and **the app is not called at all**. It is a
+  backstop against a runaway app, not a fair share: it counts VMs, and a VM outlives its job for a while (the listing is up to
+  five seconds old, the stop call of a finished job comes after its result, and the VM of a Worker that died stays until the
+  reaper stops it, one per attempt of a crash loop). An exact comparison would refuse the job the App rightly sends, and
+  nothing wakes it again before the sweep (the hosted E2E of a crash loop at cap 1 showed it). Even with the tolerance, an app
+  in a crash loop whose dead Workers leave more than twice the cap plus two VMs can have a job **delayed, not lost**: the
+  wake-up call is answered `busy` and the App offers the job again, until the reaper has stopped the leftovers. The cap is that of the app: for
+  `reviewer` `DISPATCHER_MAX_RUNNING`, unchanged. _Cost:_ one listing of the project's `cr-` VMs (all pages) per five seconds at most, shared by every claim in that time;
+  claims that arrive together share one call. A claim therefore sees a VM that ended up to five seconds late (the safe side)
+  and one that started in that time through the count of the Dispatcher's own launches. A listing that gives no answer in four
+  seconds counts as a failed one (claims never wait longer, and a waiting claim holds no launch slot). If the listing fails,
+  the last good one is used for up to a minute; after that the claim answers `unavailable` (retry in 60 s, `fleet_list_failed` in the log) and
+  nothing is claimed. Without a fleet (a local Launcher), **and with one app only (today's production, a Dispatcher with no
+  `DISPATCHER_APPS`)**, the platform is not listed for the cap at all: the cap is the launches in progress and the App's own,
+  exactly as before #730, so the cap adds no platform call and no new way to refuse. The count starts with the second app. The sum of the caps
+  plus their tolerances should stay within the team's Sandbox concurrency (a platform limit not verified here); then no app
+  can starve another.
+- **Operator credential.** `POST /probe` (it starts canary VMs, which cost money) and `POST /apps/check` are opened by
+  `DISPATCHER_OPERATOR_TOKEN`, not by an app's token. **With `DISPATCHER_APPS` it is required** (the Dispatcher does not start
+  without it): next to another app the token of `reviewer` must not open `/probe` either. With only `reviewer` and no operator
+  token (rollout, as before #730) `/probe` is still opened by the token of `reviewer`, without a warning; `/apps/check`
+  refuses everyone. Several apps assembled without the token (not possible through the environment) open `/probe` to nobody
+  and log `operator_token_missing`. `pnpm probe:canary` reads `DISPATCHER_OPERATOR_TOKEN`, else `RUNNER_TOKEN`.
+- **`POST /apps/check`** asks each app's `GET /api/runners/v1/version` with that app's credential and answers
+  `AppsCheckResponse` (`contracts/dispatcher-ops.v1.json`): ids, booleans and stable codes, no address, secret or text.
+- **Rollout.** (1) Release this version with no change of environment: only `reviewer` exists. (2) Add `DISPATCHER_APPS`, the
+  app's secrets and `DISPATCHER_OPERATOR_TOKEN`, deploy. Rolling back to an older Dispatcher is safe: it ignores the unknown
+  variables.
+- **Rollout of the operator token and the deploy canary.** Once the Dispatcher has `DISPATCHER_OPERATOR_TOKEN`, `/probe` is no
+  longer opened by `RUNNER_TOKEN`, so the canary of `.github/workflows/dispatcher-canary.yml` must call with the operator
+  token or every promotion is blocked. The workflow loads `DISPATCHER_OPERATOR_TOKEN` from Infisical `/ci` **when the key is
+  there** (a failed load of that one key is allowed) and `pnpm probe:canary` prefers it over `RUNNER_TOKEN`. In this order:
+  (a) release the workflow change to `main` (the key is not in `/ci` yet, so the canary still uses `RUNNER_TOKEN`);
+  (b) in one sitting generate the token (`openssl rand -hex 32`, different from every other secret), add it to Infisical as
+  `DISPATCHER_OPERATOR_TOKEN` in `/ci` **and** as `${prod.ci.DISPATCHER_OPERATOR_TOKEN}` in `/dispatcher` (the Secret Sync to
+  the Dispatcher project; never only one of the two: a canary with the token against a Dispatcher without it, or the other way
+  round, is refused with 401 and blocks the promotion); (c) wait for the sync, run _Deploy production_: the staged Dispatcher
+  has the variable, the canary uses it, and the run summary says which credential it used. To undo, remove the key from both
+  places and deploy. Before (b) the token may exist in no place at all; the order "token into Infisical, then workflow, then
+  Dispatcher" works only if (b) is not split. PR #733 (the factory lane) adds the same secret name and an opt-in input to the
+  same workflow; the two are compatible: the input forces the operator credential and fails when it is missing, the optional
+  load here is for the time before it is on.
+- **Not built.** Fair sharing between apps beyond the cap per app, and a per-app snapshot or Worker configuration. A job VM
+  now has four tags (`app`, `kind`, `job`, `tenant`); the Sandbox API's typings allow at most five. The limit on the length of
+  a tag value is not verified (`tenant` is at most 24 characters, the longest value is the 36 characters of the job id).
 
 ## What the core does
 

@@ -3,6 +3,7 @@
 // The sweep of the running server (#328): the real database, queue, dispatch service and settings from the
 // environment. The route (src/app/api/internal/dispatch-sweep) only calls this.
 import "server-only";
+import { getCapabilities } from "../capabilities/shared.ts";
 import { createAppMetaRepository } from "../db/repositories/app-meta-repository.ts";
 import { createJobDispatchesRepository } from "../db/repositories/job-dispatches-repository.ts";
 import { getDatabase } from "../db/startup.ts";
@@ -23,6 +24,7 @@ export function getDispatchSweep(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): DispatchSweep {
   const db = getDatabase();
+  const capabilities = getCapabilities(env);
   let dispatch: ReturnType<typeof getDispatchService>;
   try {
     dispatch = getDispatchService(env);
@@ -59,5 +61,7 @@ export function getDispatchSweep(
         mailConfigured: () => getMailSender().isConfigured(),
       }),
     settings: loadSweepSettings(env),
+    // #731: the steps of a capability this deployment does not have are not run.
+    capabilities,
   });
 }

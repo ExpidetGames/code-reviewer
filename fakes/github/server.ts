@@ -22,6 +22,7 @@ import {
   type AppPart,
   type FakeGithubAppControls,
 } from "./app-api.ts";
+import { keepConnectionsOpen } from "../keep-alive.ts";
 import { basicToken } from "./git-http.ts";
 import { send, sendJson } from "./http.ts";
 import { createInstallPart, type InstallPart } from "./install-flow.ts";
@@ -359,6 +360,7 @@ export async function startGithubFake(
     }
   });
 
+  keepConnectionsOpen(server);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port ?? 0, host, resolve);

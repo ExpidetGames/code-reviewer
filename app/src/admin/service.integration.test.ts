@@ -4,6 +4,7 @@
 // validated, recorded with the admin and the time, and shown back; the rules for the sign-in methods
 // and the tenancy hold; two admins saving at once end with one complete write; and the saved secrets
 // show up as "configured" and never as a value.
+import { SECRET_NAMES } from "./secret-names.ts";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -16,6 +17,7 @@ import { createTestDatabase } from "../test-support/test-database.ts";
 import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { createAdminService } from "./service.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const APP_SECRET = "service-test-app-secret-0123456789-0123456789";
 
@@ -39,6 +41,7 @@ async function startService(
   };
   const secrets = createSecretStore({
     db,
+    names: SECRET_NAMES,
     appSecret: APP_SECRET,
     now: () => now,
   });
@@ -52,6 +55,7 @@ async function startService(
     secrets,
     smtp,
     testMail: createTestMailService({
+      product: getProductIdentity(),
       config: smtp,
       rateLimits: createRateLimitsRepository(db, () => now),
       baseUrl: "https://code-reviewer.example.com",

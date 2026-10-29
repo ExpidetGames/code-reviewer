@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "ok": false,
+  "apps": [
+    {
+      "id": "reviewer",
+      "reachable": true,
+      "credentialAccepted": true,
+      "missingFeatures": [],
+      "code": null
+    },
+    {
+      "id": "factory",
+      "reachable": true,
+      "credentialAccepted": true,
+      "missingFeatures": ["pool_cap"],
+      "code": "app_too_old"
+    }
+  ]
+}

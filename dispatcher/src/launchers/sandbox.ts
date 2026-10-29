@@ -186,6 +186,7 @@ export function validateKindConfig(
 /** The VM size and container memory a Worker kind gets (what a launch of that kind uses; the canary of #331 too). */
 export function planForKind(kind: ReviewKind, config: LaunchConfig): Plan {
   return planOf({
+    appId: "validation",
     appUrl: "https://app.invalid",
     jobId: "validation",
     credential: "validation",
@@ -290,7 +291,13 @@ export function createSandboxLauncher(
           region: SANDBOX_REGION,
           vcpus: plan.vcpus,
           timeoutMs: (spec.timeoutSeconds + vmTimeoutMarginSeconds) * 1000,
-          tags: { app: "code-reviewer", kind: spec.kind, job: spec.jobId },
+          // `tenant` names the app that claimed the job (#730): a stop or a reap for one app never touches a VM of another.
+          tags: {
+            app: "code-reviewer",
+            kind: spec.kind,
+            job: spec.jobId,
+            tenant: spec.appId,
+          },
           persistent: false,
         },
         signal,

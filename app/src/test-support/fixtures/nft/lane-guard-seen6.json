@@ -1,0 +1,51 @@
+{
+  "nftables": [
+    {
+      "metainfo": {
+        "version": "1.0.9",
+        "release_name": "Old Doc Yak #3",
+        "json_schema_version": 1
+      }
+    },
+    {
+      "set": {
+        "family": "inet",
+        "name": "seen6",
+        "table": "cr_lane_guard",
+        "type": ["ipv6_addr", "inet_proto", "inet_service"],
+        "handle": 22,
+        "size": 256,
+        "flags": ["dynamic"],
+        "elem": [
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 11266]
+          },
+          {
+            "concat": ["ff02::1:ff18:4370", "ipv6-icmp", 22555]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 43803]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 39756]
+          },
+          {
+            "concat": ["ff02::16", "ipv6-icmp", 44885]
+          },
+          {
+            "concat": ["ff02::1:ffb4:bd65", "ipv6-icmp", 48039]
+          },
+          {
+            "concat": ["fd00:255::2", "tcp", 443]
+          },
+          {
+            "concat": ["ff02::2", "ipv6-icmp", 28092]
+          },
+          {
+            "concat": ["ff02::2", "ipv6-icmp", 21701]
+          }
+        ]
+      }
+    }
+  ]
+}

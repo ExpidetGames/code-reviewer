@@ -1,6 +1,7 @@
 name: Rollback production
 
-# Puts a previous deployment of the hosted version back into production (#403): the App, the Dispatcher or both, each
+# Puts a previous deployment of the hosted version back into production (#403): the App, the Dispatcher, the factory
+# App (#732, the second App of the dormant factory lane) or any of them, each
 # with the deployment id (dpl_...) or the deployment address (https://....vercel.app) to restore, from the Vercel
 # dashboard or from the summary of an earlier run of deploy-production. It first checks, with the Vercel API, that
 # each deployment is a ready production deployment of the right project and team, then runs `vercel rollback` with the
@@ -26,6 +27,10 @@ on:
         default: ""
       dispatcher_deployment:
         description: "Dispatcher: deployment id (dpl_...) or address (https://....vercel.app) to restore; empty leaves the Dispatcher alone"
+        required: false
+        default: ""
+      factory_deployment:
+        description: "Factory App: deployment id (dpl_...) or address (https://....vercel.app) to restore; empty leaves the factory alone"
         required: false
         default: ""
 
@@ -56,14 +61,15 @@ jobs:
         env:
           APP_DEPLOYMENT: ${{ inputs.app_deployment }}
           DISPATCHER_DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
+          FACTORY_DEPLOYMENT: ${{ inputs.factory_deployment }}
         run: |
           set -euo pipefail
 
-          if [ -z "${APP_DEPLOYMENT}" ] && [ -z "${DISPATCHER_DEPLOYMENT}" ]; then
+          if [ -z "${APP_DEPLOYMENT}" ] && [ -z "${DISPATCHER_DEPLOYMENT}" ] && [ -z "${FACTORY_DEPLOYMENT}" ]; then
             echo "::error::Give at least one deployment to restore."
             exit 1
           fi
-          for value in "${APP_DEPLOYMENT}" "${DISPATCHER_DEPLOYMENT}"; do
+          for value in "${APP_DEPLOYMENT}" "${DISPATCHER_DEPLOYMENT}" "${FACTORY_DEPLOYMENT}"; do
             [ -z "${value}" ] && continue
             if ! [[ "${value}" =~ ^dpl_[A-Za-z0-9]{8,64}$ ]] && ! [[ "${value}" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]]; then
               echo "::error::A deployment is a Vercel deployment id (dpl_...) or a deployment address (https://....vercel.app)."
@@ -88,7 +94,19 @@ jobs:
           domain: ${{ secrets.INFISICAL_DOMAIN }}
           project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
           consequence: Nothing was rolled back.
-      # Both are checked before either is rolled back: a mistake in the second must not leave the first moved.
+      # Only for a factory rollback (#732): the factory's project id is read when it is needed, so that a rollback of
+      # the other two does not depend on a key the factory lane may not have yet.
+      - name: Load the factory project id from Infisical
+        if: ${{ inputs.factory_deployment != '' }}
+        uses: ./.github/actions/infisical-ci-secrets
+        with:
+          secret-names: VERCEL_FACTORY_PROJECT_ID
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: ${{ secrets.INFISICAL_DOMAIN }}
+          project-slug: ${{ secrets.INFISICAL_PROJECT_SLUG }}
+          consequence: Nothing was rolled back.
+      # All given deployments are checked before any is rolled back: a mistake in a later one must not leave an earlier one moved.
       - name: Check that the App deployment is a production deployment of the App
         if: ${{ inputs.app_deployment != '' }}
         env:
@@ -104,6 +122,12 @@ jobs:
           DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
         run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT" --check-snapshot
+      - name: Check that the factory deployment is a production deployment of the factory App
+        if: ${{ inputs.factory_deployment != '' }}
+        env:
+          DEPLOYMENT: ${{ inputs.factory_deployment }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_FACTORY_PROJECT_ID }}
+        run: pnpm --dir dispatcher snapshot:ops verify --deployment "$DEPLOYMENT"
       - name: Roll the App back
         if: ${{ inputs.app_deployment != '' }}
         env:
@@ -117,6 +141,13 @@ jobs:
           DEPLOYMENT: ${{ inputs.dispatcher_deployment }}
           VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ env.VERCEL_DISPATCHER_PROJECT_ID }}
+        run: vercel rollback "$DEPLOYMENT" --yes --timeout 5m
+      - name: Roll the factory App back
+        if: ${{ inputs.factory_deployment != '' }}
+        env:
+          DEPLOYMENT: ${{ inputs.factory_deployment }}
+          VERCEL_ORG_ID: ${{ env.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_FACTORY_PROJECT_ID }}
         run: vercel rollback "$DEPLOYMENT" --yes --timeout 5m
       - name: Write the restored Dispatcher's golden snapshot pair back to Infisical
         if: ${{ inputs.dispatcher_deployment != '' }}

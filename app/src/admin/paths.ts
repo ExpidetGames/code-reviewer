@@ -12,6 +12,8 @@
 // apart. An admin path that is not recognized would skip the guard in front of the portal.
 // (Case is not folded: Next.js routes are case sensitive, so `/ADMIN` is no page at all.)
 
+import { normalizePath } from "../capabilities/path.ts";
+
 const ADMIN_ROOTS = ["/admin", "/api/admin"] as const;
 
 /** Where the pages and the data routes of the portal live. Not addresses anybody uses. */
@@ -49,25 +51,8 @@ export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
 export const PROXY_SKIPPED_PATHS =
   "_next/static/|_next/image$|favicon\\.ico$|icon\\.svg$|apple-icon\\.png$";
 
-/** The path as the router sees it, or null when it cannot be decoded. */
-function normalize(pathname: string): string | null {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return null;
-  }
-  const segments: string[] = [];
-  for (const segment of decoded.split("/")) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") segments.pop();
-    else segments.push(segment);
-  }
-  return `/${segments.join("/")}`;
-}
-
 export function isAdminPath(pathname: string): boolean {
-  const path = normalize(pathname);
+  const path = normalizePath(pathname);
   // Cannot be read: the router will not find a page for it either, but it must not be waved through.
   if (path === null) return true;
   return ADMIN_ROOTS.some(
@@ -81,7 +66,7 @@ export function isAdminPath(pathname: string): boolean {
  * cannot be read (it is then no route either).
  */
 export function portalRewriteTarget(pathname: string): string | null {
-  const path = normalize(pathname);
+  const path = normalizePath(pathname);
   if (path === null) return null;
   for (const [root, target] of [
     ["/admin", PORTAL_PAGE_ROOT],
@@ -98,7 +83,7 @@ export function portalRewriteTarget(pathname: string): string | null {
  * reached, or recognized, by this way.
  */
 export function isInternalPortalPath(pathname: string): boolean {
-  const path = normalize(pathname);
+  const path = normalizePath(pathname);
   if (path === null) return false;
   return [PORTAL_PAGE_ROOT, PORTAL_API_ROOT].some(
     (root) => path === root || path.startsWith(`${root}/`),

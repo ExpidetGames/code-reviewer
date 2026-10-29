@@ -4,10 +4,17 @@
 // links and the active state. The Setup group holds the three sub-pages of the split (#181) and the
 // Integrations group nests the GitHub App page under its index (#182/#185).
 
+import type {
+  Capability,
+  CapabilitySet,
+} from "../../capabilities/capability.ts";
+
 export type AdminNavItem = {
   href: string;
   label: string;
   exact: boolean;
+  /** Shown only in a deployment that has this capability (src/capabilities/). */
+  capability?: Capability;
   /** Shows the number of open billing review rows next to the label (#603). */
   showsReviewCount?: boolean;
   /** Sub-pages of this section, rendered nested under its link (for example GitHub App under Integrations). */
@@ -22,7 +29,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin", label: "Overview", exact: true },
       { href: "/admin/approvals", label: "Approvals", exact: false },
       // The newest runs of every workspace, with the call trace of each (#541).
-      { href: "/admin/runs", label: "Runs", exact: false },
+      {
+        href: "/admin/runs",
+        label: "Runs",
+        exact: false,
+        capability: "review",
+      },
     ],
   },
   {
@@ -58,6 +70,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         href: "/admin/billing",
         label: "Billing",
         exact: true,
+        capability: "billing",
         showsReviewCount: true,
         children: [
           {
@@ -73,6 +86,22 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     ],
   },
 ];
+
+/**
+ * The groups a deployment shows: the sections of a capability it does not have are left out (a section takes its children with
+ * it), and a group without sections with it.
+ */
+export function adminNavGroupsFor(
+  capabilities: CapabilitySet,
+): AdminNavGroup[] {
+  return ADMIN_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(
+      (item) =>
+        item.capability === undefined || capabilities.has(item.capability),
+    ),
+  })).filter((group) => group.items.length > 0);
+}
 
 /** Every section in one list, in the order the sidebar shows them (a parent before its children). */
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_NAV_GROUPS.flatMap(

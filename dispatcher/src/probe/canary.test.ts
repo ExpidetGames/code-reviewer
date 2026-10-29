@@ -1007,6 +1007,25 @@ describe("the arguments of the deploy canary", () => {
     ).toThrow(/RUNNER_TOKEN/);
   });
 
+  // #730-T15
+  it("takes DISPATCHER_OPERATOR_TOKEN as the credential, and RUNNER_TOKEN only when there is none", () => {
+    const argv = ["--url", "https://d.example"];
+
+    expect(
+      parseCanaryArguments(argv, {
+        DISPATCHER_OPERATOR_TOKEN: "dummy-operator-token-123456",
+        RUNNER_TOKEN: "dummy-token-1234567890",
+      }).token,
+    ).toBe("dummy-operator-token-123456");
+    expect(
+      parseCanaryArguments(argv, { RUNNER_TOKEN: "dummy-token-1234567890" })
+        .token,
+    ).toBe("dummy-token-1234567890");
+    expect(() => parseCanaryArguments(argv, {})).toThrow(
+      /DISPATCHER_OPERATOR_TOKEN/,
+    );
+  });
+
   it("accepts the engines to require and the time to wait", () => {
     const parsed = parseCanaryArguments(
       [

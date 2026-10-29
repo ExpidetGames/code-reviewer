@@ -10,7 +10,7 @@ import {
   type DispatcherAppFakeOptions,
 } from "../../../fakes/dispatcher-app/server.ts";
 import { signDispatch } from "../../../fakes/dispatcher-app/signing.ts";
-import type { CoreSettings, Logger } from "../core/types.ts";
+import type { CoreSettings, Logger, ReviewKind } from "../core/types.ts";
 
 export const DISPATCHER_TOKEN = "dummy-dispatcher-token-for-tests";
 export const SIGNING_SECRET = "dummy-signing-secret-current-0000000000";
@@ -56,20 +56,48 @@ export async function startApp(
   });
 }
 
+/** The one app `reviewer` as the legacy variables define it, and the rest of the core's settings. */
+export type SettingsOverrides = Partial<Omit<CoreSettings, "apps">> & {
+  /** Fields of the app `reviewer`. */
+  appUrl?: string;
+  token?: string;
+  poolId?: string;
+  maxRunning?: number;
+  kinds?: readonly ReviewKind[];
+  /** Further apps next to `reviewer` (#730). */
+  more?: CoreSettings["apps"];
+};
+
 export function settingsFor(
   appUrl: string,
-  overrides: Partial<CoreSettings> = {},
+  overrides: SettingsOverrides = {},
 ): CoreSettings {
+  const {
+    token,
+    poolId,
+    maxRunning,
+    kinds,
+    more,
+    appUrl: url,
+    ...core
+  } = overrides;
   return {
-    appUrl,
-    token: DISPATCHER_TOKEN,
-    poolId: "test-pool",
-    maxRunning: 4,
     engines: ["pr-agent", "opencode"],
     jobTimeoutSeconds: 1200,
     launchDeadlineSeconds: 300,
     workerConfig: { diff: {}, dynamic: {} },
-    ...overrides,
+    ...core,
+    apps: [
+      {
+        id: "reviewer",
+        url: url ?? appUrl,
+        token: token ?? DISPATCHER_TOKEN,
+        poolId: poolId ?? "test-pool",
+        maxRunning: maxRunning ?? 4,
+        kinds: kinds ?? ["diff", "dynamic"],
+      },
+      ...(more ?? []),
+    ],
   };
 }
 

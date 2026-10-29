@@ -4,6 +4,7 @@
 // route, the runner API, the pages) asks for them here; tests build their own with `createJobQueue`
 // and `createRunnerQueue`.
 import "server-only";
+import { getCapabilities } from "../capabilities/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { checkNotifier } from "../check-runs/shared.ts";
 import {
@@ -37,8 +38,13 @@ export function jobQueueFor(workspaceId: string): JobQueue {
     }
   };
   // #405: a waiting job that was dropped changes what GitHub should show: the check run is completed after it.
+  // #731: a job of a review kind this deployment has no capability for is never queued.
+  const capabilities = getCapabilities();
   return notifyingJobQueue(
-    createJobQueue(getDatabase(), workspaceId, { onEnqueued }),
+    createJobQueue(getDatabase(), workspaceId, {
+      onEnqueued,
+      kindAllowed: (kind) => capabilities.allowsReviewKind(kind),
+    }),
     checkNotifier,
   );
 }

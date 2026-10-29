@@ -6,6 +6,8 @@ export const JOB_ERROR_CODE_SET = [
   "JOB_INPUT_INVALID",
   /** A trigger names a repository the app has no row for (yet). */
   "JOB_REPOSITORY_UNKNOWN",
+  /** The review kind of the job needs a capability this deployment does not have (#731); nothing is written. */
+  "JOB_KIND_UNAVAILABLE",
 ] as const;
 export type JobQueueErrorCode = (typeof JOB_ERROR_CODE_SET)[number];
 

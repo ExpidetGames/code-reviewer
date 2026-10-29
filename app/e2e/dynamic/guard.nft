@@ -16,11 +16,29 @@
 #   violation-*  a connection to anything but loopback. The lane must end with all of them at zero.
 #   control-*    a connection to 192.0.2.0/24 (TEST-NET-1, reserved for documentation, never routed). The
 #                lane itself connects there as each kind of process to prove the counters move.
+#   dns-*        a query to port 53 (UDP or TCP) on loopback, where the lane's own resolver (e2e/helpers/lane-dns-stub.ts) answers
+#                "no such name" at once, so nothing of it leaves the namespace and the violation counters never see it (#714).
+#                dns-<user> counts the attempts at the output hook before the runner's own table (priority 0) has seen them;
+#                dns-engine-delivered counts the engine user's queries that got past that table (chain output_after, priority
+#                10), which is the boundary of production: it must end at zero, and the names asked by anyone are compared with
+#                e2e/dynamic/dns-allowlist.txt. The engine's attempts are rejected by the runner's table and are reported, not
+#                failed (OpenCode still asks once per start, #739). The controls are queries to 127.0.0.2:53, which nothing
+#                answers: the engine user's (dns-control-engine) proves that the first counters move for it, the Diff job user's
+#                (dns-control-delivered) that the second chain counts such a query, without a lookup that would fail the lane.
 # A rule without a counter name above would not be read, so every counter has the comment the reader looks for.
 
 add table inet cr_lane_guard
 flush table inet cr_lane_guard
 add chain inet cr_lane_guard output { type filter hook output priority -10 ; policy accept ; }
+# After the runner's own table for the engine user (priority 0): only a packet that table let pass gets here.
+add chain inet cr_lane_guard output_after { type filter hook output priority 10 ; policy accept ; }
+
+# Name lookups on loopback (the lane's own resolver), per user, before loopback is accepted. Only the controls accept.
+add rule inet cr_lane_guard output oifname "lo" ip daddr 127.0.0.2 meta l4proto udp th dport 53 meta skuid 10101 counter accept comment "dns-control-engine"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 10101 counter comment "dns-engine"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 10001 counter comment "dns-job"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 0 counter comment "dns-root"
+add rule inet cr_lane_guard output oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid != { 0, 10001, 10101 } counter comment "dns-other"
 
 # Loopback is the only way to the fakes.
 add rule inet cr_lane_guard output oifname "lo" accept
@@ -33,3 +51,9 @@ add rule inet cr_lane_guard output meta skuid 10101 counter reject comment "viol
 add rule inet cr_lane_guard output meta skuid 10001 counter reject comment "violation-job"
 add rule inet cr_lane_guard output meta skuid 0 counter reject comment "violation-root"
 add rule inet cr_lane_guard output meta skuid != { 0, 10001, 10101 } counter reject comment "violation-other"
+
+# The engine user's name lookups that the runner's table let pass: none may. The control is the Diff job user's query to
+# 127.0.0.2:53: that user is not under the runner's table (the engine user is, since the probe of the lane's setup), so it
+# proves that this chain counts a query to port 53 on loopback, which the engine's rule above matches the same way.
+add rule inet cr_lane_guard output_after oifname "lo" ip daddr 127.0.0.2 meta l4proto udp th dport 53 meta skuid 10001 counter accept comment "dns-control-delivered"
+add rule inet cr_lane_guard output_after oifname "lo" meta l4proto { tcp, udp } th dport 53 meta skuid 10101 counter comment "dns-engine-delivered"

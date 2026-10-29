@@ -17,6 +17,7 @@
 //   GET  /__fake/messages[?to=<address>]     the accepted messages, oldest first
 //   POST /__fake/reset                       forgets the messages and sessions
 import { createServer } from "node:http";
+import { keepConnectionsOpen } from "../keep-alive.ts";
 import { startSmtpFake } from "./server.ts";
 
 function requiredPort(name: string): number {
@@ -74,6 +75,7 @@ const control = createServer((request, response) => {
   }
   return send(404, { error: "not_found" });
 });
+keepConnectionsOpen(control);
 await new Promise<void>((resolve) =>
   control.listen(requiredPort("SMTP_FAKE_CONTROL_PORT"), host, resolve),
 );

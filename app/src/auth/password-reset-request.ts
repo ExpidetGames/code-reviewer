@@ -28,6 +28,7 @@ import {
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import {
   passwordResetLink,
   passwordResetMessage,
@@ -62,6 +63,8 @@ export type ResetRequestDependencies = {
   emailPasswordOn: () => Promise<boolean>;
   /** The configured public address of the app: the link never comes from a request header. */
   baseUrl: string;
+  /** Whose name the mail carries. */
+  product: ProductIdentity;
   /**
    * Runs work after the answer has been sent. It takes a function, not a promise: nothing of the work (not
    * even the look at the account) may start before the answer is on its way.
@@ -101,6 +104,7 @@ async function mailResetLink(
     mail,
     limits,
     baseUrl,
+    product,
     now,
     log = console.error,
   }: ResetRequestDependencies,
@@ -129,6 +133,7 @@ async function mailResetLink(
         to: account.email,
         link: passwordResetLink(baseUrl, token),
         validForMinutes: RESET_TOKEN_TTL_MS / 60_000,
+        product,
       }),
     );
     if (!result.ok)

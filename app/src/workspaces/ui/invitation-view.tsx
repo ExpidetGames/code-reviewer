@@ -13,8 +13,10 @@ import type { WorkspaceRole } from "../../db/workspace-roles.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
 import type { AccountApi } from "./api.ts";
 import { ROLE_LABEL } from "./role-copy.ts";
+import type { ProductIdentity } from "@/product-identity/identity.ts";
 
 export function InvitationView({
+  product,
   token,
   workspaceName,
   role,
@@ -24,6 +26,8 @@ export function InvitationView({
   api,
   open,
 }: {
+  /** The product the invitation is for. */
+  product: ProductIdentity;
   token: string;
   workspaceName: string;
   role: WorkspaceRole;
@@ -47,8 +51,8 @@ export function InvitationView({
     <>
       <p className="text-sm text-muted-foreground text-pretty">
         You are invited to join <strong>{workspaceName}</strong> at{" "}
-        <ProductName /> as {role === "admin" ? "an" : "a"} {ROLE_LABEL[role]}.
-        The invitation is for <strong>{email}</strong>.
+        <ProductName product={product} /> as {role === "admin" ? "an" : "a"}{" "}
+        {ROLE_LABEL[role]}. The invitation is for <strong>{email}</strong>.
       </p>
       {signedInAs === null ? (
         <div className="flex flex-col gap-3">

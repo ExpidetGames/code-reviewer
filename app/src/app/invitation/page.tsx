@@ -20,6 +20,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getInvitationService } from "@/workspaces/shared";
 import { InvitationView } from "@/workspaces/ui/invitation-view";
 import { describeInvitationState } from "@/workspaces/ui/messages";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = {
   title: "You have an invitation",
@@ -33,7 +34,9 @@ export default function InvitationPage({
   searchParams,
 }: PageProps<"/invitation">) {
   return (
-    <Suspense fallback={<AuthCard title={TITLE} />}>
+    <Suspense
+      fallback={<AuthCard product={getProductIdentity()} title={TITLE} />}
+    >
       <InvitationContent searchParams={searchParams} />
     </Suspense>
   );
@@ -47,7 +50,7 @@ async function InvitationContent({
   const result = await getInvitationService().preview(token);
   if (!result.ok)
     return (
-      <AuthCard title={TITLE}>
+      <AuthCard product={getProductIdentity()} title={TITLE}>
         <Alert variant="warning">
           <AlertDescription>
             {describeInvitationState(result.error)}
@@ -75,8 +78,9 @@ async function InvitationContent({
   }
 
   return (
-    <AuthCard title={TITLE}>
+    <AuthCard product={getProductIdentity()} title={TITLE}>
       <InvitationView
+        product={getProductIdentity()}
         token={String(token)}
         workspaceName={workspaceName}
         role={role}

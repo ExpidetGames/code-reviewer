@@ -404,4 +404,10 @@ describe("the Vercel entry", () => {
 function stubSandbox(): void {
   vi.stubEnv("SANDBOX_SNAPSHOT_ID", "snap_dummy_golden_0001");
   vi.stubEnv("SANDBOX_IMAGE_DIGEST", `sha256:${"d".repeat(64)}`);
+  // The Dispatcher counts the live VMs of every app before it claims (the cap, #730): the platform shows none.
+  sdk.list.mockResolvedValue({
+    async *[Symbol.asyncIterator]() {
+      // No VM.
+    },
+  });
 }

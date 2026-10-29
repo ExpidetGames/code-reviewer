@@ -435,7 +435,7 @@ export default defineConfig({
     {
       command:
         `pnpm build && ${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.appPort} > ${e2eEnv.logFiles.app} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.appPort} > ${e2eEnv.logFiles.app} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("main"),
@@ -451,7 +451,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.pipelineAppPort} > ${e2eEnv.logFiles.pipeline} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.pipelineAppPort} > ${e2eEnv.logFiles.pipeline} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("pipeline"),
@@ -468,7 +468,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.setupAppPort} > ${e2eEnv.logFiles.setup} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.setupAppPort} > ${e2eEnv.logFiles.setup} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("setup"),
@@ -481,7 +481,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.signupAppPort} > ${e2eEnv.logFiles.signup} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.signupAppPort} > ${e2eEnv.logFiles.signup} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("signup"),
@@ -494,7 +494,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.multiAppPort} > ${e2eEnv.logFiles.multi} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.multiAppPort} > ${e2eEnv.logFiles.multi} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("multi"),
@@ -510,7 +510,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.operatorAppPort} > ${e2eEnv.logFiles.operator} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.operatorAppPort} > ${e2eEnv.logFiles.operator} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("operator"),
@@ -532,7 +532,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.catalogAppPort} > ${e2eEnv.logFiles.catalog} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.catalogAppPort} > ${e2eEnv.logFiles.catalog} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("catalog"),
@@ -552,7 +552,7 @@ export default defineConfig({
     {
       command:
         `${PREPARE_DATABASE} && ` +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.catalogAdminAppPort} > ${e2eEnv.logFiles.catalogAdmin} 2>&1`,
+        `pnpm start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${e2eEnv.catalogAdminAppPort} > ${e2eEnv.logFiles.catalogAdmin} 2>&1`,
       env: {
         ...appEnv,
         ...databaseEnv("catalog_admin"),

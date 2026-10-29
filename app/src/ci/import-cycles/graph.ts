@@ -272,3 +272,70 @@ export function checkImportCycles(
       );
   return problems;
 }
+
+/** The migrations (`db/migrations/`) are frozen data: their code, and what it imports, must give the same result forever. */
+const MIGRATIONS = "db/migrations/";
+/** The only code outside `db/migrations/` a migration may import: two leaf files of `db` that import nothing. */
+export const MIGRATION_SHARED_FILES: readonly string[] = [
+  "db/codecs.ts",
+  "db/driver.ts",
+];
+/** Constants and helpers a frozen migration carries for itself; the migrations import them, nothing else does. */
+const MIGRATION_SUPPORT = `${MIGRATIONS}support/`;
+
+/**
+ * The rules for frozen migrations (#715, cut 9). A migration imports no application module (an LLM provider, the model
+ * catalog, a repository: they change, the migration must not), and only the files of `db/migrations/` import
+ * `db/migrations/support/`. Applies to every migration and to the helpers beside them, now and later.
+ */
+export function checkMigrationIsolation(graph: FileGraph): string[] {
+  const problems: string[] = [];
+  for (const [file, imports] of graph) {
+    const inMigrations = file.startsWith(MIGRATIONS);
+    for (const target of [...imports].sort()) {
+      if (
+        inMigrations &&
+        !target.startsWith(MIGRATIONS) &&
+        !MIGRATION_SHARED_FILES.includes(target)
+      )
+        problems.push(
+          `${file} imports ${target}: a migration is frozen and imports no application code; carry the constant or helper in ${MIGRATION_SUPPORT}`,
+        );
+      if (target.startsWith(MIGRATION_SUPPORT) && !inMigrations)
+        problems.push(
+          `${file} imports ${target}: ${MIGRATION_SUPPORT} belongs to the migrations and nothing else may import it`,
+        );
+    }
+  }
+  return problems.sort();
+}
+
+/** The value that says who the product is (#715, cut 7); the type next to it (`identity.ts`) is what the code that writes the words takes. */
+const PRODUCT_IDENTITY_VALUE = "product-identity/code-review-com.ts";
+/** The one file that picks the identity of the deployment: every composition root gets the value from its `getProductIdentity()`. */
+export const PRODUCT_IDENTITY_SELECTOR = "product-identity/current.ts";
+
+/**
+ * The rule for the brand (#715, cut 7). A module that writes a word of the product takes a `ProductIdentity` as a parameter
+ * and never imports the product's value, so it can move to a package that other products use. The composition roots (a route,
+ * a page, a `shared.ts`, the singletons of `auth/`) get the identity from `getProductIdentity()` in
+ * `product-identity/current.ts`, and that selector is the only file that imports `product-identity/code-review-com.ts`:
+ * choosing the identity per deployment later changes that one file. `identity.ts` imports nothing.
+ */
+export function checkProductIdentityImports(graph: FileGraph): string[] {
+  const problems: string[] = [];
+  for (const [file, imports] of graph) {
+    if (
+      imports.has(PRODUCT_IDENTITY_VALUE) &&
+      file !== PRODUCT_IDENTITY_SELECTOR
+    )
+      problems.push(
+        `${file} imports ${PRODUCT_IDENTITY_VALUE}: get the identity from getProductIdentity() in ${PRODUCT_IDENTITY_SELECTOR} (a composition root) or take a ProductIdentity as a parameter (any other module); only the selector imports the value`,
+      );
+    if (file === "product-identity/identity.ts" && imports.size > 0)
+      problems.push(
+        `${file} imports ${[...imports].sort().join(", ")}: the type of the identity imports nothing, so it can move to a package as it is`,
+      );
+  }
+  return problems.sort();
+}

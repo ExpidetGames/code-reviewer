@@ -26,10 +26,11 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useCapabilities } from "@/capabilities/context";
 import { Badge } from "@/components/ui/badge";
 import { SIDEBAR_LINK_CLASS } from "@/shell/nav-items.ts";
 import {
-  ADMIN_NAV_GROUPS,
+  adminNavGroupsFor,
   isCurrentSection,
   type AdminNavItem,
 } from "./nav-items.ts";
@@ -55,9 +56,10 @@ export function SectionLinks({
   /** How many billing review rows are open (#603). */
   reviewCount?: number;
 }) {
+  const groups = adminNavGroupsFor(useCapabilities());
   return (
     <SidebarContent>
-      {ADMIN_NAV_GROUPS.map((group, index) => (
+      {groups.map((group, index) => (
         <Fragment key={group.label}>
           {index > 0 ? <SidebarSeparator /> : null}
           <SidebarGroup>
@@ -86,7 +88,7 @@ function AdminLink({
   pathname,
   reviewCount,
 }: {
-  item: (typeof ADMIN_NAV_GROUPS)[number]["items"][number];
+  item: AdminNavItem;
   pathname: string | null;
   reviewCount: number;
 }) {

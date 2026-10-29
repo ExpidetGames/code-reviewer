@@ -48,6 +48,9 @@ export default defineConfig({
   testMatch: /.*\.e2e\.ts$/,
   // Before anything else: the lane says what is missing and stops (e2e/helpers/dynamic-preflight.ts).
   globalSetup: "./e2e/dynamic/preflight.global-setup.ts",
+  // Playwright reads the commit of the checkout for its report and, on CI, runs `git fetch origin <sha>` for it: a name lookup of
+  // github.com by root, inside the lane's network namespace, found with strace (#714, #736). The lane's report does not need it.
+  captureGitInfo: { commit: false, diff: false },
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   // No retry: the journey and its fixtures are written once per run, and a retry would hide what failed.
@@ -115,7 +118,7 @@ export default defineConfig({
         `rm -rf ${hostedEnv.directory} && mkdir -p ${hostedEnv.directory} && ` +
         "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON e2e/prepare-database.ts && " +
         "node --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/db/migrate-cli.ts && " +
-        `./node_modules/.bin/next start --hostname 127.0.0.1 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
+        `./node_modules/.bin/next start --hostname 127.0.0.1 --keepAliveTimeout 120000 --port ${String(hostedEnv.appPort)} > ${hostedEnv.logFiles.app} 2>&1`,
       env: {
         APP_SECRET: e2eEnv.appSecret,
         // A production server fetches the models.dev catalog on its own (#548); no test reaches the internet.

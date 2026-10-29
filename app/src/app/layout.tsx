@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
-import { PRODUCT_NAME } from "@/copy/product-name";
+import { CapabilitiesProvider } from "@/capabilities/context";
+import { getCapabilities } from "@/capabilities/shared";
+import { getProductIdentity } from "@/product-identity/current";
 import { initialThemeScript } from "@/theme/theme";
 import { ThemeSync } from "@/theme/theme-sync";
 import { fontVariables } from "./fonts.ts";
@@ -9,7 +11,10 @@ import { fontVariables } from "./fonts.ts";
 import "./theme.css";
 
 export const metadata: Metadata = {
-  title: { default: PRODUCT_NAME, template: `%s · ${PRODUCT_NAME}` },
+  title: {
+    default: getProductIdentity().name,
+    template: `%s · ${getProductIdentity().name}`,
+  },
   description: "Automatic code reviews for GitHub pull requests.",
 };
 
@@ -25,7 +30,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body>
         {/* Only for the Strict Mode remount of `next dev`, see theme-sync.tsx. */}
         {process.env.NODE_ENV !== "production" && <ThemeSync />}
-        {children}
+        {/* What this deployment offers (src/capabilities/), for the navigation and the other client components. */}
+        <CapabilitiesProvider capabilities={getCapabilities().list()}>
+          {children}
+        </CapabilitiesProvider>
       </body>
     </html>
   );

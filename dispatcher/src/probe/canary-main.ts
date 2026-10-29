@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // `pnpm probe:canary --url <dispatcher>`: the command of the deploy canary (canary.ts), for a step of the release
-// pipeline. The credential is `RUNNER_TOKEN` in the environment.
+// pipeline. The credential is `DISPATCHER_OPERATOR_TOKEN` in the environment, else `RUNNER_TOKEN` (#730).
 import { systemClock } from "../core/clock.ts";
 import { CanaryUsageError, parseCanaryArguments, runCanary } from "./canary.ts";
 

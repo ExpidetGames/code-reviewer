@@ -42,8 +42,12 @@ function build(launcherOptions: Parameters<typeof createFakeLauncher>[0] = {}) {
     background: background.run,
     trigger: webhookTrigger({
       keys: [
-        { kid: KEY_ID, secret: SIGNING_SECRET },
-        { kid: PREVIOUS_KEY_ID, secret: PREVIOUS_SIGNING_SECRET },
+        { kid: KEY_ID, secret: SIGNING_SECRET, appId: "reviewer" },
+        {
+          kid: PREVIOUS_KEY_ID,
+          secret: PREVIOUS_SIGNING_SECRET,
+          appId: "reviewer",
+        },
       ],
       nowSeconds: () => NOW,
     }),
@@ -384,7 +388,7 @@ describe("POST /dispatch", () => {
       logger: recordingLogger(),
       background: createBackgroundTracker().run,
       trigger: webhookTrigger({
-        keys: [{ kid: KEY_ID, secret: SIGNING_SECRET }],
+        keys: [{ kid: KEY_ID, secret: SIGNING_SECRET, appId: "reviewer" }],
         nowSeconds: () => NOW,
       }),
     });

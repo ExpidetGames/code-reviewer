@@ -9,6 +9,7 @@
 // Stripe, and calls nobody. This is the one reader of the switch.
 import "server-only";
 import type { Kysely } from "kysely";
+import { getCapabilities } from "../capabilities/shared.ts";
 import { createInstanceSettingsStore } from "../db/repositories/instance-settings-store.ts";
 import { createSecretsRepository } from "../db/repositories/secrets-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -82,7 +83,6 @@ export type BillingSwitch = {
 export async function readBillingSwitch(
   db: Kysely<Database>,
 ): Promise<BillingSwitch> {
-  const stored = await readStoredBillingSettings(db);
   const off = {
     enabled: false,
     missing: [],
@@ -90,6 +90,11 @@ export async function readBillingSwitch(
     hourlyReviewLimit: DEFAULT_HOURLY_REVIEW_LIMIT,
     lowBalanceMicroUsd: DEFAULT_LOW_BALANCE_MICRO_USD,
   } satisfies BillingSwitch;
+  // #731: a deployment without the `billing` capability has no billing, whatever a stored setting says: nothing is
+  // read, no credit is checked, no review waits for a balance. This is the one reader of the switch, so every route, page,
+  // sweep step and claim that asks it gets the answer "off".
+  if (!getCapabilities().has("billing")) return off;
+  const stored = await readStoredBillingSettings(db);
   if (stored === undefined) return off;
   const settings = readBillingSettings(stored);
   if (!settings.enabled) return off;

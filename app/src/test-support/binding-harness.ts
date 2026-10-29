@@ -269,7 +269,11 @@ export async function createBindingHarness(
       intake: createJobQueueReviewTriggerIntake({
         queue: createJobQueue(db, workspaceId),
         repositories,
-        logger: { info: () => undefined, error: () => undefined },
+        logger: {
+          info: () => undefined,
+          warn: () => undefined,
+          error: () => undefined,
+        },
       }),
     };
   }
@@ -293,7 +297,11 @@ export async function createBindingHarness(
       sync,
       workspace,
       automatic: {},
-      logger: { info: () => undefined, error: () => undefined },
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
     });
     return {
       handler,

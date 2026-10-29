@@ -25,6 +25,7 @@ import {
   PROJECT_REVIEW_KINDS,
   type ProjectReviewKind,
 } from "../../job-kind/job-kind.ts";
+import { JobQueueError } from "../../jobs/errors.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
   createInstanceDynamicReviewGate,
@@ -99,6 +100,11 @@ export type JobsRepositoryOptions = {
    * #195 rollout gate: whether Dynamic Review may be queued. Default: the instance setting, off.
    */
   dynamicReviewEnabled?: DynamicReviewGate;
+  /**
+   * #731: whether this deployment has the capability a review kind needs (src/capabilities/). A job of a kind it does not
+   * have is refused with `JOB_KIND_UNAVAILABLE` before anything is written. Left out, every kind is allowed.
+   */
+  kindAllowed?: (kind: ProjectReviewKind) => boolean;
 };
 
 export type JobsRepository = {
@@ -337,6 +343,12 @@ export function createJobsRepository(
         const reviewKind =
           input.reviewKind ??
           (await resolveReviewKind(trx, input.repositoryId));
+        // #731: a kind this deployment has no capability for is never queued (the transaction ends, nothing is written).
+        if (options.kindAllowed?.(reviewKind) === false)
+          throw new JobQueueError(
+            "JOB_KIND_UNAVAILABLE",
+            `This deployment has no capability for review kind ${reviewKind}.`,
+          );
         // #195 rollout gate: with Dynamic Review off, the job is created failed instead of queued, so
         // a previous-release app can never claim a Dynamic row as Diff and no run is silently a Diff
         // review.

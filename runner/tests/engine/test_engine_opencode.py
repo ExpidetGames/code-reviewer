@@ -178,6 +178,21 @@ def reads(export: Path, *names: str) -> Any:
     return step
 
 
+def until_executed(sentinels: Path, export: Path) -> Any:
+    """A model step that reads once more, after the engine has run every hostile input (or 60 s)."""
+    wanted = {"dot-opencode-plugins", "root-plugin", "skill-frontmatter"}
+
+    def step(body: dict[str, Any]) -> dict[str, Any]:
+        deadline = time.monotonic() + 60
+        while not wanted <= {path.name for path in sentinels.iterdir()}:
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.1)
+        return reads(export, "src/sub/mod.py")(body)
+
+    return step
+
+
 # #197-T02
 @pytest.mark.smoke
 def test_the_hostile_repository_is_neither_loaded_nor_executed_through_the_real_export(
@@ -294,9 +309,12 @@ def test_the_same_tree_unsanitized_runs_the_plugins_which_is_why_the_export_is_s
     write_tree(raw, hostile_files(sentinels))
     (tmp_path / "prepared").mkdir()
     content = prepare(tmp_path / "prepared", {"src/app.py": b"def handler(user): ...\n"})
-    # The engine loads plugins lazily, when the first tool runs, so the model reads a file.
+    # The engine loads plugins lazily, when the first tool runs, so the model reads a file. The load
+    # runs beside the session, and how long it takes varies (1 run in 12 here, 1 in CI ended the
+    # session first), so the model does not answer until the sentinels are there (#714).
     model = ScriptedModel(
-        steps=[reads(raw, "src/sub/mod.py")], final=findings_for(content.head_sha)
+        steps=[reads(raw, "src/sub/mod.py"), until_executed(sentinels, raw)],
+        final=findings_for(content.head_sha),
     )
     with model:
         run_engine(model, content, scratch=tmp_path / "scratch", export=raw)

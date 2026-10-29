@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // What both entry points share: the settings from the environment, the Webhook-Trigger over the
-// configured keys, the stop route and the reaper where there is a platform fleet, and a logger that masks every
-// secret of this deployment.
+// configured keys (one set per app, #730), the stop route and the reaper where there is a platform fleet (with several apps
+// also the fleet cap), and a logger that masks every secret of this deployment, every app's included.
 import { createDispatcher, type Dispatcher } from "./dispatcher-app.ts";
 import { loadSettings, type Settings } from "./config.ts";
 import { createLogger } from "./core/logger.ts";
 import type { Launcher, Logger } from "./core/types.ts";
 import type { LauncherContext, ReaperSetup } from "./launchers/sandbox-env.ts";
 import { createAppClient } from "./core/app-client.ts";
+import { liveJobVmsByApp } from "./reaper/live-vms.ts";
 import { createReaper } from "./reaper/reaper.ts";
 import { mountReaperRoute } from "./reaper/route.ts";
 import { mountStopRoute } from "./triggers/stop.ts";
@@ -37,8 +38,11 @@ export function composeDispatcher(
     createLogger(
       (line) => console.log(line),
       [
-        settings.core.token,
+        ...settings.core.apps.map((configured) => configured.token),
         ...settings.signingKeys.map((key) => key.secret),
+        ...(settings.operatorToken === undefined
+          ? []
+          : [settings.operatorToken]),
         ...(settings.cronSecret === undefined ? [] : [settings.cronSecret]),
         ...(options.secrets ?? []),
       ],
@@ -51,20 +55,6 @@ export function composeDispatcher(
           background: options.background,
         })
       : options.launcher;
-  const dispatcher = createDispatcher({
-    settings: settings.core,
-    launcher,
-    background: options.background,
-    trigger: webhookTrigger({ keys: settings.signingKeys }),
-    logger,
-    fetch: options.fetch,
-    ...(options.env.SANDBOX_IMAGE_DIGEST === undefined
-      ? {}
-      : { imageDigest: options.env.SANDBOX_IMAGE_DIGEST }),
-    ...(options.env.SANDBOX_SNAPSHOT_ID === undefined
-      ? {}
-      : { snapshotId: options.env.SANDBOX_SNAPSHOT_ID }),
-  });
   // A malformed CRON_SECRET matters only where the route exists: there it refuses the start (fail closed), elsewhere
   // a Dispatcher that never reaps is not taken down by a variable it does not use.
   if (settings.cronSecretProblem !== undefined) {
@@ -74,19 +64,57 @@ export function composeDispatcher(
       reason: settings.cronSecretProblem.reason,
     });
   }
-  if (options.reaper !== undefined) {
-    const setup = options.reaper(settings);
-    const client = createAppClient({
-      appUrl: settings.core.appUrl,
-      token: settings.core.token,
-      poolId: settings.core.poolId,
-      fetch: options.fetch ?? fetch,
-    });
+  const setup = options.reaper?.(settings);
+  // The platform's side of the fleet (#364) is also what counts the live VMs of every app for its cap (#730), but only where
+  // there is another app to protect: with one app the listing would cost a platform call and two new ways to refuse, for
+  // nothing the App's own cap does not already do.
+  const liveVms =
+    setup !== undefined && settings.core.apps.length > 1
+      ? liveJobVmsByApp(setup.fleet)
+      : undefined;
+  const dispatcher = createDispatcher({
+    settings: settings.core,
+    launcher,
+    background: options.background,
+    trigger: webhookTrigger({ keys: settings.signingKeys }),
+    logger,
+    fetch: options.fetch,
+    ...(liveVms === undefined ? {} : { liveVms }),
+    ...(settings.operatorToken === undefined
+      ? {}
+      : { operatorToken: settings.operatorToken }),
+    ...(options.env.SANDBOX_IMAGE_DIGEST === undefined
+      ? {}
+      : { imageDigest: options.env.SANDBOX_IMAGE_DIGEST }),
+    ...(options.env.SANDBOX_SNAPSHOT_ID === undefined
+      ? {}
+      : { snapshotId: options.env.SANDBOX_SNAPSHOT_ID }),
+  });
+  if (setup !== undefined) {
+    // One client per app: a VM's job is asked about at the app its tenant tag names and at no other (#730).
+    const clients = new Map(
+      settings.core.apps.map((configured) => [
+        configured.id,
+        createAppClient({
+          appUrl: configured.url,
+          token: configured.token,
+          poolId: configured.poolId,
+          fetch: options.fetch ?? fetch,
+        }),
+      ]),
+    );
     mountReaperRoute(dispatcher.app, {
       cronSecret: settings.cronSecret,
       reaper: createReaper({
         fleet: setup.fleet,
-        jobs: client,
+        jobs: {
+          async jobState(jobId, appId) {
+            const client = clients.get(appId);
+            // A tenant this Dispatcher does not serve: nothing to ask, so only the VM's lifetime ends it.
+            if (client === undefined) return { kind: "unreadable" };
+            return client.jobState(jobId);
+          },
+        },
         logger,
         jobLifetimeSeconds: setup.jobLifetimeSeconds,
         canaryLifetimeSeconds: setup.canaryLifetimeSeconds,
