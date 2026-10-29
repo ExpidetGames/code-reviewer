@@ -72,11 +72,17 @@ export function webhookTrigger(options: WebhookTriggerOptions): Trigger {
 
         const { jobId, reviewKind, attempt } = webhook.data;
         context.logger.info("dispatch_received", {
+          app: verified.appId,
           jobId,
           reviewKind,
           attempt,
         });
-        const result = await context.core.handle({ jobId, reviewKind });
+        // The app is the one whose key verified the call: the body has no say in it.
+        const result = await context.core.handle({
+          appId: verified.appId,
+          jobId,
+          reviewKind,
+        });
         return answer(c, result, context);
       });
     },

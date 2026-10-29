@@ -17,8 +17,24 @@ export const ENGINE_BY_KIND: Readonly<Record<ReviewKind, Engine>> = {
   dynamic: "opencode",
 };
 
-/** What a Trigger knows about the job it wakes the core for. Poll knows nothing, Webhook knows the job. */
-export type JobHint = { jobId?: string; reviewKind?: ReviewKind };
+/**
+ * The job kinds this Dispatcher knows (#730). An app is allowed a subset of them (`AppSettings.kinds`); a later kind is
+ * added here and in the contracts, never by the configuration of an app.
+ */
+export const KNOWN_KINDS: readonly ReviewKind[] = ["diff", "dynamic"];
+
+/** The id of the app that is configured by the legacy variables (`RUNNER_API_URL`, `RUNNER_TOKEN`, ...). */
+export const LEGACY_APP_ID = "reviewer";
+
+/**
+ * What a Trigger knows about the job it wakes the core for. `appId` is the app the verified signing key belongs to (#730):
+ * never anything the request says. The core claims at that app and nowhere else.
+ */
+export type JobHint = {
+  appId: string;
+  jobId?: string;
+  reviewKind?: ReviewKind;
+};
 
 /** Per Worker kind configuration the core passes through to the Launcher. */
 export type LaunchConfig = {
@@ -40,6 +56,9 @@ export type CreatedVm = {
 
 /** Everything a Launcher needs to start the Worker of one job. The credential is a secret: never log it. */
 export type LaunchSpec = {
+  /** The app the job belongs to (#730): the id of the registry entry that claimed it. */
+  appId: string;
+  /** The registry's URL of that app, never a value from a request. */
   appUrl: string;
   jobId: string;
   credential: string;
@@ -113,15 +132,32 @@ export interface Logger {
   error(event: string, fields?: Record<string, unknown>): void;
 }
 
-export type CoreSettings = {
-  /** The base URL of the App (RUNNER_API_URL). */
-  appUrl: string;
-  /** The dispatcher credential (RUNNER_TOKEN). A secret. */
+/**
+ * The live job VMs of the platform, counted per app (the `tenant` tag; no tag is `reviewer`): the Dispatcher's own count of
+ * what each app occupies, whatever the app says (#730). Rejects when the platform cannot be listed.
+ */
+export type LiveVmCounter = (
+  signal: AbortSignal,
+) => Promise<ReadonlyMap<string, number>>;
+
+/** One app this Dispatcher serves (#730). The legacy variables define `reviewer`; `DISPATCHER_APPS` adds the others. */
+export type AppSettings = {
+  id: string;
+  /** The base URL of the App (RUNNER_API_URL for `reviewer`). */
+  url: string;
+  /** The dispatcher credential of this app (RUNNER_TOKEN for `reviewer`). A secret. */
   token: string;
   /** The pool: sent as X-Runner-Id, so the App counts the running jobs of this Dispatcher. */
   poolId: string;
-  /** The pool cap sent with every claim, and the cap on launches in progress. */
+  /** The pool cap sent with every claim of this app, and the cap on its launches in progress. */
   maxRunning: number;
+  /** The job kinds this app may submit and be given. Anything else is refused on both sides of the claim. */
+  kinds: readonly ReviewKind[];
+};
+
+export type CoreSettings = {
+  /** The apps this Dispatcher serves; at least one. */
+  apps: readonly AppSettings[];
   /** The engines this deployment is configured to serve. */
   engines: readonly Engine[];
   /** How long a Worker may live. */

@@ -9,8 +9,8 @@
 //   exit 1  it does not, it could not be reached, or it answered something that is not a report: block the release
 //   exit 2  wrong use (nothing was sent)
 //
-// The credential is `RUNNER_TOKEN` in the environment, never an argument (an argument shows up in process lists
-// and logs).
+// The credential is `DISPATCHER_OPERATOR_TOKEN` in the environment (#730), else `RUNNER_TOKEN` while the Dispatcher has no
+// operator token yet; never an argument (an argument shows up in process lists and logs).
 //
 // Which URL may get the credential is decided before any request to it: by a list of host names (a person at a
 // terminal), by the platform (`verifyDeployment`: the Vercel API says the deployment behind the host belongs to the
@@ -114,7 +114,7 @@ export class CanaryUsageError extends Error {
 }
 
 const USAGE =
-  "usage: probe:canary --url <https://dispatcher> [--allowed-hosts <host,host>] [--verify-vercel [--expect-commit <sha>]] [--check-only] [--engines pr-agent,opencode] [--wait-seconds <n>] [--timeout-seconds <n>]; the credential is RUNNER_TOKEN in the environment, the allowed hosts may also be CANARY_ALLOWED_HOSTS; CANARY_EXPECT_IMAGE_DIGEST is the image id the deployment must report; --verify-vercel reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the environment";
+  "usage: probe:canary --url <https://dispatcher> [--allowed-hosts <host,host>] [--verify-vercel [--expect-commit <sha>]] [--check-only] [--engines pr-agent,opencode] [--wait-seconds <n>] [--timeout-seconds <n>]; the credential is DISPATCHER_OPERATOR_TOKEN in the environment, else RUNNER_TOKEN (before the Dispatcher has an operator token), the allowed hosts may also be CANARY_ALLOWED_HOSTS; CANARY_EXPECT_IMAGE_DIGEST is the image id the deployment must report; --verify-vercel reads VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID (the Dispatcher project) from the environment";
 
 function seconds(value: string | undefined, name: string, max: number): number {
   const number = Number(value);
@@ -168,10 +168,12 @@ export function parseCanaryArguments(
   const url = values.get("--url");
   if (url === undefined)
     throw new CanaryUsageError(`--url is required. ${USAGE}`);
-  const token = env.RUNNER_TOKEN ?? "";
+  // The operator's credential opens `POST /probe` of a Dispatcher that has one; the reviewer's token still does until then.
+  const operator = env.DISPATCHER_OPERATOR_TOKEN ?? "";
+  const token = operator === "" ? (env.RUNNER_TOKEN ?? "") : operator;
   if (token === "" && !checkOnly)
     throw new CanaryUsageError(
-      "RUNNER_TOKEN is required (the dispatcher credential)",
+      "DISPATCHER_OPERATOR_TOKEN (or RUNNER_TOKEN) is required (the credential of POST /probe)",
     );
   const listed = values.get("--allowed-hosts") ?? env.CANARY_ALLOWED_HOSTS;
   const allowedHosts =

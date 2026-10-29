@@ -5,10 +5,16 @@
 // one tag) only narrows the listing and is never the check. Everything else in the project is not ours: the golden
 // snapshot's builder and check VMs (they carry the same `app` tag, a `role` tag and `code-reviewer-golden-` names),
 // another deployment's VMs, a person's. A VM that does not match is not touched, not asked about and not logged by name.
+import { LEGACY_APP_ID } from "../core/types.ts";
 import type { ListedVm } from "../launchers/sandbox-service.ts";
 
 /** The tag every VM of ours carries, and the one the listing is narrowed by. */
 export const APP_TAG = "code-reviewer";
+/**
+ * The tag that names the app a job VM belongs to (#730): the id of the registry entry that claimed the job. A VM without it
+ * was created before the Dispatcher served several apps, when `reviewer` was the only one.
+ */
+export const TENANT_TAG = "tenant";
 /** The name prefix of every VM of ours (job VMs and canaries); the listing is narrowed by it. */
 export const NAME_PREFIX = "cr-";
 
@@ -17,8 +23,11 @@ const JOB_NAME =
 const CANARY_NAME = /^cr-canary-[0-9a-f]{8}$/;
 
 export type VmShape =
-  /** The VM of one job; its job id is the one in the name and in the `job` tag. */
-  | { kind: "job"; jobId: string }
+  /**
+   * The VM of one job; its job id is the one in the name and in the `job` tag. `appId` is the app its `tenant` tag names
+   * (`reviewer` when there is none); it may name an app this Dispatcher does not serve, which callers treat as not theirs.
+   */
+  | { kind: "job"; jobId: string; appId: string }
   /** The VM of one capability probe: no job. */
   | { kind: "canary" };
 
@@ -31,7 +40,7 @@ export function shapeOf(vm: ListedVm): VmShape | null {
   if (job !== null) {
     const [, kind, jobId] = job;
     return vm.tags.kind === kind && vm.tags.job === jobId && jobId !== undefined
-      ? { kind: "job", jobId }
+      ? { kind: "job", jobId, appId: vm.tags[TENANT_TAG] ?? LEGACY_APP_ID }
       : null;
   }
   if (CANARY_NAME.test(vm.name))

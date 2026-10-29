@@ -80,7 +80,10 @@ const handoverSeconds = integer(env, "E2E_HANDOVER_SECONDS", {
 });
 const logger = createLogger(
   (line) => console.log(line),
-  [settings.core.token, ...settings.signingKeys.map((key) => key.secret)],
+  [
+    ...settings.core.apps.map((configured) => configured.token),
+    ...settings.signingKeys.map((key) => key.secret),
+  ],
 );
 
 const local = new LocalSandboxService({

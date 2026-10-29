@@ -115,7 +115,11 @@ function build(bin: string) {
 
 async function runJob(core: ReturnType<typeof build>["core"]): Promise<string> {
   const jobId = app.enqueue({ reviewKind: "diff" });
-  const handled = await core.handle({ jobId, reviewKind: "diff" });
+  const handled = await core.handle({
+    appId: "reviewer",
+    jobId,
+    reviewKind: "diff",
+  });
   expect(handled.outcome).toBe("started");
   if (handled.outcome === "started") await handled.background;
   await waitFor(

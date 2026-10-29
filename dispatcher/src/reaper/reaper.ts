@@ -12,7 +12,9 @@
 //   - a canary (no job): kept, only its lifetime ends it
 //   - a job VM: stopped when the App says its job is not `running`; kept when it is, kept while the job is draining (a
 //     superseded run whose Worker is finishing its requests and reporting, #397), and kept when the App's answer
-//     cannot be read (fail safe: only the lifetime stops it then)
+//     cannot be read (fail safe: only the lifetime stops it then). With several apps (#730) the question goes to the app
+//     the VM's `tenant` tag names (no tag: `reviewer`), and to no other; a tag that names an app this Dispatcher does not
+//     serve is an answer that cannot be read
 //
 // Stopping is by the listed name; a failed stop is counted and retried by the next run. Nothing here logs a credential
 // or the platform's own error text.
@@ -67,7 +69,11 @@ export type ReapReport = {
 
 export type ReaperOptions = {
   fleet: SandboxFleet;
-  jobs: { jobState(jobId: string): Promise<JobStateResult> };
+  /**
+   * The state of a job in the app `appId`. It answers `unreadable` for an app it does not know, so a VM of an unknown
+   * tenant is left to its lifetime.
+   */
+  jobs: { jobState(jobId: string, appId: string): Promise<JobStateResult> };
   logger: Logger;
   now?: () => number;
   /** A job VM's lifetime when the platform reports none: the job timeout plus the VM margin. */
@@ -80,6 +86,10 @@ export type Reaper = { run(signal?: AbortSignal): Promise<ReapReport> };
 
 type Candidate = { vm: ListedVm; shape: VmShape };
 type Verdict = "stop_lifetime" | "stop_job_ended" | "keep";
+
+function askKey(shape: { jobId: string; appId: string }): string {
+  return `${shape.appId}:${shape.jobId}`;
+}
 
 async function mapLimit<T, R>(
   items: readonly T[],
@@ -128,9 +138,12 @@ export function createReaper(options: ReaperOptions): Reaper {
     return own + LIFETIME_GRACE_MS;
   }
 
-  async function stateOf(jobId: string): Promise<JobStateResult> {
+  async function stateOf(
+    jobId: string,
+    appId: string,
+  ): Promise<JobStateResult> {
     try {
-      return await jobs.jobState(jobId);
+      return await jobs.jobState(jobId, appId);
     } catch {
       return { kind: "unreadable" };
     }
@@ -170,26 +183,32 @@ export function createReaper(options: ReaperOptions): Reaper {
         else toAsk.push(candidate);
       }
 
-      const jobIds = [
-        ...new Set(
+      // One question per job of one app: the same job id in two apps is two jobs.
+      const questions = [
+        ...new Map(
           toAsk.flatMap(({ shape }) =>
-            shape.kind === "job" ? [shape.jobId] : [],
+            shape.kind === "job"
+              ? [[askKey(shape), { jobId: shape.jobId, appId: shape.appId }]]
+              : [],
           ),
         ),
       ];
       const states = new Map<string, JobStateResult>();
-      await mapLimit(jobIds, CONCURRENCY, async (jobId) => {
-        states.set(jobId, await stateOf(jobId));
+      await mapLimit(questions, CONCURRENCY, async ([key, question]) => {
+        states.set(key, await stateOf(question.jobId, question.appId));
       });
       let unreadable = 0;
-      for (const jobId of jobIds)
-        if (states.get(jobId)?.kind !== "known") {
-          logger.warn("job_state_unreadable", { jobId });
+      for (const [key, question] of questions)
+        if (states.get(key)?.kind !== "known") {
+          logger.warn("job_state_unreadable", {
+            app: question.appId,
+            jobId: question.jobId,
+          });
         }
       for (const candidate of toAsk) {
         const state =
           candidate.shape.kind === "job"
-            ? states.get(candidate.shape.jobId)
+            ? states.get(askKey(candidate.shape))
             : undefined;
         // A superseded job that drains (#397) is not over: its Worker is finishing the requests in flight and
         // reporting what they cost, so its VM stays until the claim ends.

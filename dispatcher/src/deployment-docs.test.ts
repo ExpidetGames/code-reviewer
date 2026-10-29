@@ -205,7 +205,7 @@ describe("dispatcher/.env.example", () => {
   it("keeps the required variables uncommented, and they load once the secrets are filled in", () => {
     for (const name of Object.keys(VALID))
       expect(envExample, name).toMatch(new RegExp(`^${name}=`, "m"));
-    expect(loadSettings(VALID).core.maxRunning).toBe(2);
+    expect(loadSettings(VALID).core.apps[0]?.maxRunning).toBe(2);
   });
 });
 
@@ -415,7 +415,7 @@ describe("the Dispatcher section of the guide", () => {
     expect(row("DISPATCHER_JOB_TIMEOUT_SECONDS").text).toContain(
       "(at most 300 s)",
     );
-    expect(core.poolId).toBe("dispatcher");
+    expect(core.apps[0]?.poolId).toBe("dispatcher");
     expect(row("DISPATCHER_POOL_ID").text).toContain("Default `dispatcher`");
     expect(core.engines).toEqual(["pr-agent", "opencode"]);
     expect(row("DISPATCHER_ENGINES").text).toContain("(default both)");

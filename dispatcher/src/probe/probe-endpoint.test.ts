@@ -69,6 +69,7 @@ describe("the probe endpoint of a Launcher (#479)", () => {
       Promise.resolve(DENYING),
     );
     const spec = {
+      appId: "reviewer",
       appUrl: "http://app.invalid",
       jobId: "job",
       credential: "dummy",
@@ -148,7 +149,7 @@ describe("a Dispatcher with a probe endpoint, against the fake App (#479)", () =
       logger: parts.logger,
       background: parts.background.run,
       trigger: webhookTrigger({
-        keys: [{ kid: KEY_ID, secret: SIGNING_SECRET }],
+        keys: [{ kid: KEY_ID, secret: SIGNING_SECRET, appId: "reviewer" }],
         nowSeconds: () => NOW,
       }),
     });

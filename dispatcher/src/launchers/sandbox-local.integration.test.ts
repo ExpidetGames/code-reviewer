@@ -79,6 +79,7 @@ function launcher(runSeconds: number, exitCode = 0) {
 
 function spec(jobId: string, credential: string): LaunchSpec {
   return {
+    appId: "reviewer",
     appUrl: "http://127.0.0.1:9",
     jobId,
     credential,
