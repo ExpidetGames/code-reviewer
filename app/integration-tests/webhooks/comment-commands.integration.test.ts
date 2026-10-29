@@ -76,6 +76,7 @@ async function start(
         repositories: createRepositoriesRepository(h.db, workspaceId),
         logger: {
           info: (line) => logLines.push(line),
+          warn: (line) => logLines.push(line),
           error: (line) => logLines.push(line),
         },
       }),
@@ -83,6 +84,7 @@ async function start(
     automatic: h.automatic,
     logger: {
       info: (line) => logLines.push(line),
+      warn: (line) => logLines.push(line),
       error: (line) => logLines.push(line),
     },
   });

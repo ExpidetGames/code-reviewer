@@ -29,7 +29,11 @@ describe("the workspace of a delivery", () => {
       sync: h.sync,
       workspace,
       automatic: h.automatic,
-      logger: { info: () => undefined, error: () => undefined },
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
     });
 
     const response = await handler(
@@ -56,7 +60,11 @@ describe("the workspace of a delivery", () => {
       sync: h.sync,
       workspace,
       automatic: h.automatic,
-      logger: { info: () => undefined, error: () => undefined },
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
     });
 
     const response = await handler(
