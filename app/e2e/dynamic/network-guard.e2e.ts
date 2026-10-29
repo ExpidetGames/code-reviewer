@@ -8,7 +8,7 @@
 // test (anything that is not loopback) are read by the journey, and a connection to a fake on loopback
 // moves none of them. Which counter fails a test is proven without root in
 // src/test-support/dynamic-lane-guard.test.ts.
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -196,6 +196,7 @@ test.describe("the network guard of the Dynamic lane", () => {
     expect(dnsAfter.controlEngine - dnsBefore.controlEngine).toBeGreaterThan(0);
     expect(
       dnsAfter.controlEngineDelivered - dnsBefore.controlEngineDelivered,
+      `the rules now: ${spawnSync("nft", ["list", "table", "inet", "cr_lane_guard"], { encoding: "utf8" }).stdout}`,
     ).toBeGreaterThan(0);
     expect(dnsAfter.queries.engine).toBe(dnsBefore.queries.engine);
     expect(dnsAfter.engineDelivered).toBe(dnsBefore.engineDelivered);
