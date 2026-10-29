@@ -34,6 +34,7 @@ import {
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
+import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
 
 afterEach(cleanup);
 
@@ -130,7 +131,12 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     const model = projectModel({ maxFindings: 9 });
     render(
-      <SettingsForm workspaceSlug="acme" initial={model} api={fakeApi().api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={model}
+        api={fakeApi().api}
+      />,
     );
 
     expect(
@@ -154,6 +160,7 @@ describe("the settings form", () => {
   it("places where a checkbox value comes from right beside the checkbox text", () => {
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ largePrChunking: false })}
         api={fakeApi().api}
@@ -178,6 +185,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -195,6 +203,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -216,7 +225,12 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     const findings = screen.getByLabelText("Most findings per review");
@@ -254,6 +268,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -303,7 +318,12 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await user.click(screen.getByLabelText("Project rules"));
@@ -321,6 +341,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -341,7 +362,12 @@ describe("the settings form", () => {
     const saved = projectModel({ maxFindings: 12 });
     const { api, save } = fakeApi({ ok: true, data: answerFor(saved) });
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     const findings = screen.getByLabelText("Most findings per review");
@@ -368,7 +394,12 @@ describe("the settings form", () => {
       issues: [{ field: "maxCostCents", code: "TOO_LARGE" }],
     });
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await openSection(user, "Limits");
@@ -405,7 +436,12 @@ describe("the settings form", () => {
       ],
     });
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await openSection(user, "Limits");
@@ -431,7 +467,12 @@ describe("the settings form", () => {
       issues: [],
     });
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await changeSomething(user);
@@ -453,6 +494,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ maxFindings: 9 })}
         api={api}
@@ -485,6 +527,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ maxFindings: 9 })}
         api={api}
@@ -512,6 +555,7 @@ describe("the settings form", () => {
     const { api, reset } = fakeApi();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ maxFindings: 9 })}
         api={api}
@@ -531,6 +575,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -560,7 +605,12 @@ describe("the settings form", () => {
       issues: [{ field: "settings", code: "INVALID_TYPE" }],
     });
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await changeSomething(user);
@@ -581,6 +631,7 @@ describe("the settings form", () => {
     );
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={{ save }}
@@ -607,6 +658,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({
           largePrChunking: false,
@@ -641,7 +693,12 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     const { api } = fakeApi();
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await openSection(user, "LLM");
@@ -667,6 +724,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ model: "acme/mystery-1" })}
         api={fakeApi().api}
@@ -686,6 +744,7 @@ describe("the settings form", () => {
       '<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>';
     const { container } = render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ extraInstructions: hostile })}
         api={fakeApi().api}
@@ -710,7 +769,12 @@ describe("the settings form", () => {
     const save = vi.fn<SettingsApi["save"]>();
 
     render(
-      <SettingsForm workspaceSlug="acme" initial={model} api={{ save }} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={model}
+        api={{ save }}
+      />,
     );
 
     expect(
@@ -734,6 +798,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         repositoryId="repo-9"
@@ -760,6 +825,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -785,6 +851,7 @@ describe("the LLM section follows the provider (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -819,6 +886,7 @@ describe("the Limits section (#656)", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel(
           { maxCostCents: 100 },
@@ -860,7 +928,12 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await openSection(user, "Limits");
@@ -880,6 +953,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     const diff = render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -896,6 +970,7 @@ describe("the Limits section (#656)", () => {
 
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -914,6 +989,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={{
           ...projectModel({ maxCostCents: 600 }),
@@ -941,6 +1017,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={{
           ...projectModel({}, { ...BUILT_IN, maxCostCents: 800 }),
@@ -963,6 +1040,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -989,7 +1067,12 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     render(
-      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={api}
+      />,
     );
 
     await openSection(user, "Limits");
@@ -1023,6 +1106,7 @@ describe("the settings form of a workspace on its own key keeps its stored tier 
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({ model: "vendor/project-model" })}
         api={fakeApi().api}
@@ -1047,6 +1131,7 @@ describe("the form of the workspace defaults has the sections of a project (#676
     const { api, save } = fakeApi();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={ownModel({ mode: "global" })}
         api={api}
@@ -1102,7 +1187,14 @@ describe("the form of the workspace defaults has the sections of a project (#676
     const user = userEvent.setup();
     const { api, save } = fakeApi();
     const model = ownModel({ mode: "global" });
-    render(<SettingsForm workspaceSlug="acme" initial={model} api={api} />);
+    render(
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={model}
+        api={api}
+      />,
+    );
 
     await user.click(
       screen.getByRole("button", { name: "Save review defaults" }),
@@ -1144,7 +1236,12 @@ describe("the form of the workspace defaults has the sections of a project (#676
       },
     };
     render(
-      <SettingsForm workspaceSlug="acme" initial={model} api={fakeApi().api} />,
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={model}
+        api={fakeApi().api}
+      />,
     );
 
     expect(
@@ -1197,6 +1294,7 @@ describe("a project form follows the workspace defaults (#676)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={followingModel()}
         repositoryId="r1"
@@ -1236,6 +1334,7 @@ describe("a project form follows the workspace defaults (#676)", () => {
     };
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={model}
         repositoryId="r1"
@@ -1274,6 +1373,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     const base = ownModel({ mode: "global" });
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={{
           ...base,
@@ -1325,7 +1425,14 @@ describe("the confirmation and the version of a save of the workspace defaults",
       ...ownModel({ mode: "global" }),
       lastSaved: { at: "2026-10-10T08:00:00.000Z", by: "ada" },
     };
-    render(<SettingsForm workspaceSlug="acme" initial={model} api={api} />);
+    render(
+      <SettingsForm
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        initial={model}
+        api={api}
+      />,
+    );
     await changeSomething(user);
     await user.click(screen.getByRole("button", SAVE_DEFAULTS));
 
@@ -1338,6 +1445,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     const project = fakeApi();
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={projectModel({})}
         api={project.api}
@@ -1363,6 +1471,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     });
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={ownModel({ mode: "global" })}
         api={api}
@@ -1397,6 +1506,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     });
     render(
       <SettingsForm
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         initial={ownModel({ mode: "global" })}
         api={api}

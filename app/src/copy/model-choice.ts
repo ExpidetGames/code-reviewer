@@ -6,30 +6,15 @@
 // words. Nothing here names a model, a vendor, a price or a cost. A test scans every string (`model-choice.test.ts`); the
 // sentences about the plan are the one place where the word "plan" is needed.
 
-import { PRODUCT_NAME } from "./product-name.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 
 export const MODEL_CHOICE_HEADING = "Quality";
-
-/** Next to the dropdowns of a workspace on the code-review.com key (#675): who the reviews are billed through. It is not a provider. */
-export const MODEL_CHOICE_BILLED_NOTE = `Billed via ${PRODUCT_NAME}`;
 
 /** The option of the provider dropdown that takes the choice back, so the default of code-review.com applies (#675: it is not a provider, so it does not carry the name). */
 export const MODEL_CHOICE_DEFAULT_OPTION = "Default";
 
 /** The provider dropdown while the entry in force is not in the list any more (#675): it is neither the default nor a provider. */
 export const MODEL_CHOICE_UNAVAILABLE_OPTION = "Unavailable option";
-
-/** The one sentence under the heading. */
-export const MODEL_CHOICE_HINT = `How reviews of this kind are done. ${PRODUCT_NAME} takes care of the rest.`;
-
-/** Under the heading while the project has chosen nothing: the default of code-review.com applies. */
-export const MODEL_CHOICE_DEFAULT_SOURCE = `${PRODUCT_NAME} default`;
-
-/** Under the choices while none is made. */
-export const MODEL_CHOICE_NONE_CHOSEN = `Nothing is chosen yet, so the ${PRODUCT_NAME} default applies.`;
-
-/** Instead of the choices while code-review.com has none for the kind. */
-export const MODEL_CHOICE_NONE_OFFERED = `${PRODUCT_NAME} offers no choice for this kind of review yet. Reviews use its default.`;
 
 /** Next to an entry the workspace's plan does not include. */
 export const MODEL_CHOICE_LOCKED_BADGE = "Not included in your plan";
@@ -43,3 +28,23 @@ export const MODEL_CHOICE_RETIRED_BADGE = "No longer available";
 /** Under the choices while the one in force cannot be used: its reviews would not start. */
 export const MODEL_CHOICE_CHOSEN_UNAVAILABLE =
   "The chosen option is not available right now, so reviews do not start until another one is chosen.";
+
+/**
+ * The sentences of the chooser that name the product (#715, cut 7): the application hands in the product, the words are
+ * made from its name. For code-review.com they read as they did when the name was a constant here.
+ */
+export function modelChoiceWords(product: ProductIdentity) {
+  const { name } = product;
+  return {
+    /** Next to the dropdowns of a workspace on the operator's key (#675): who the reviews are billed through. It is not a provider. */
+    billedNote: `Billed via ${name}`,
+    /** The one sentence under the heading. */
+    hint: `How reviews of this kind are done. ${name} takes care of the rest.`,
+    /** Under the heading while the project has chosen nothing: the default of the product applies. */
+    defaultSource: `${name} default`,
+    /** Under the choices while none is made. */
+    noneChosen: `Nothing is chosen yet, so the ${name} default applies.`,
+    /** Instead of the choices while the product has none for the kind. */
+    noneOffered: `${name} offers no choice for this kind of review yet. Reviews use its default.`,
+  } as const;
+}

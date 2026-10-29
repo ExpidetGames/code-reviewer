@@ -24,6 +24,7 @@ import type { RunsSnapshot } from "../run-view.ts";
 import type { RunsApi, RunsFilter } from "./api.ts";
 import { RunsFilterToolbar } from "./runs-filter.tsx";
 import { RunsList } from "./runs-list.tsx";
+import type { ProductIdentity } from "@/product-identity/identity.ts";
 
 export type RunsPageData =
   | { kind: "invalid_filter" }
@@ -85,10 +86,13 @@ export async function loadRunsPage(
 }
 
 export function RunsPageContent({
+  product,
   workspaceSlug,
   data,
   api,
 }: {
+  /** The product whose name the page uses in its sentences. */
+  product: ProductIdentity;
   /** The workspace of the page: every link and call stays in it. */
   workspaceSlug: string;
   data: RunsPageData;
@@ -103,8 +107,8 @@ export function RunsPageContent({
             <h2>This filter is not valid</h2>
           </EmptyTitle>
           <EmptyDescription>
-            The project or status in the address is not one <ProductName />{" "}
-            knows.
+            The project or status in the address is not one{" "}
+            <ProductName product={product} /> knows.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>

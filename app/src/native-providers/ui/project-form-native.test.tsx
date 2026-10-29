@@ -20,10 +20,11 @@ import {
   DEFAULT_DYNAMIC_MODEL,
   PROJECT_DYNAMIC_LIMITS,
 } from "../../review-settings/settings.ts";
-import { MODEL_CHOICE_NONE_OFFERED } from "../../copy/model-choice.ts";
+import { modelChoiceWords } from "../../copy/model-choice.ts";
 import type { NativeFormData } from "../form-data.ts";
 import type { NativeModelView } from "../catalog.ts";
 import type { CatalogModelsApi } from "./api.ts";
+import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
 
 // The picker fetches its list from the app's own route: a stand-in for `fetch` gives it the models.
 const MODELS: NativeModelView[] = [
@@ -137,6 +138,7 @@ function renderForm(
 ) {
   return render(
     <SettingsForm
+      product={CODE_REVIEW_COM}
       workspaceSlug="acme"
       initial={initial}
       api={api}
@@ -284,7 +286,9 @@ describe("the Dynamic provider and model of a project on its own key", () => {
 
     expect(screen.queryByLabelText("Search models")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Provider" })).toBeNull();
-    expect(screen.getByText(MODEL_CHOICE_NONE_OFFERED)).toBeTruthy();
+    expect(
+      screen.getByText(modelChoiceWords(CODE_REVIEW_COM).noneOffered),
+    ).toBeTruthy();
     expect(document.body.textContent).not.toContain("DeepSeek");
   });
 });

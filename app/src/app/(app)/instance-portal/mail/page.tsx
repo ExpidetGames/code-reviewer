@@ -9,6 +9,7 @@ import { MailForm } from "@/admin/ui/mail-form";
 import { TestMailPanel } from "@/admin/ui/test-mail-panel";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { PageHeader } from "@/components/page-header";
+import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
 
 export const metadata: Metadata = { title: "Mail · Admin" };
 
@@ -29,7 +30,7 @@ export default async function AdminMailPage() {
         {/* Not keyed on the saved values: the form keeps what was typed (which is what was saved) and its
             "Saved." sentence while the page's data is refreshed; it clears itself after a removal. The
             test mail card is a child so the danger zone stays the last card. */}
-        <MailForm settings={settings}>
+        <MailForm product={CODE_REVIEW_COM} settings={settings}>
           <TestMailPanel
             configured={settings.smtp.value !== null}
             adminEmail={user.email}

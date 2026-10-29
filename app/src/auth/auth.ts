@@ -18,7 +18,8 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
-import { PRODUCT_NAME } from "../copy/product-name.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { getDatabase } from "../db/startup.ts";
 import { captureLandingIdentityAtSignIn } from "../landing-identity/sign-in.ts";
 import { getMailSender } from "../mail/shared.ts";
@@ -62,6 +63,8 @@ export type GithubSignInOptions = {
 export type CreateAuthOptions = {
   db: Kysely<Database>;
   config: AuthConfig;
+  /** The product Better Auth names itself after (`appName`). */
+  product: ProductIdentity;
   /** Left out: the sign in with GitHub does not exist on this instance of Better Auth. */
   githubSignIn?: GithubSignInOptions;
   /** How long a call to GitHub may take. Only tests change the default. */
@@ -78,12 +81,13 @@ export type CreateAuthOptions = {
 export function createAuth({
   db,
   config,
+  product,
   githubSignIn,
   githubRequestTimeoutMs,
   verificationRequired,
 }: CreateAuthOptions) {
   return betterAuth({
-    appName: PRODUCT_NAME,
+    appName: product.name,
     baseURL: config.baseUrl,
     secret: config.secret,
     database: { db, type: "sqlite", transaction: true },
@@ -372,6 +376,7 @@ export function getAuth(): Auth {
   holder[globalKey] ??= createAuth({
     db: getDatabase(),
     config: loadAuthConfig(process.env),
+    product: CODE_REVIEW_COM,
     verificationRequired: () => getMailSender().isConfigured(),
   });
   return holder[globalKey];

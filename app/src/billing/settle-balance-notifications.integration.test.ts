@@ -22,6 +22,7 @@ import {
 import { insertUser } from "../test-support/users.ts";
 import { deliverDueBalanceMails } from "./balance-mail.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
 const USD = 1_000_000;
@@ -120,6 +121,7 @@ describe("the notices at a settlement", () => {
       lines,
       run: () =>
         deliverDueBalanceMails({
+          product: CODE_REVIEW_COM,
           db: fixture.db,
           mail,
           baseUrl: "https://reviews.example.com",

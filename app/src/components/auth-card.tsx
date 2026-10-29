@@ -10,12 +10,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Brand } from "@/components/brand";
 import { TITLE_GRADIENT_CLASS } from "@/components/page-header";
+import type { ProductIdentity } from "@/product-identity/identity";
 
 export function AuthCard({
+  product,
   title,
   children,
   className,
 }: {
+  /** The product whose brand the page shows. */
+  product: ProductIdentity;
   /**
    * The one h1 of the page: the action it serves, for example "Sign in". Left out when the page
    * brings its own heading in `children` (the first-run setup, whose wizard owns the h1 per step).
@@ -26,7 +30,7 @@ export function AuthCard({
 }) {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-background px-4 py-16 text-foreground">
-      <Brand />
+      <Brand product={product} />
       <Card className={cn("w-full max-w-md gap-6 py-8", className)}>
         <CardContent className="flex flex-col gap-6 px-8">
           {title === undefined ? null : (

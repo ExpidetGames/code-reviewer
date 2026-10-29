@@ -11,6 +11,7 @@ import { getGithubCredentialStore } from "../github-config/shared.ts";
 import { createGithubSignInDecider } from "../github-signin/decider.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 import { readSignUpFacts } from "../signup/state.ts";
 import { createAuth, type Auth } from "./auth.ts";
 import { loadAuthConfig } from "./config.ts";
@@ -38,6 +39,7 @@ export async function getGithubAuth(): Promise<Auth | null> {
       auth: createAuth({
         db,
         config: loadAuthConfig(process.env),
+        product: CODE_REVIEW_COM,
         githubSignIn: {
           clientId: userAuthorization.clientId,
           clientSecret,

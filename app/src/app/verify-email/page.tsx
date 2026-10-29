@@ -12,6 +12,7 @@ import { currentLookup } from "@/auth/session";
 import { AuthCard } from "@/components/auth-card";
 import { VerifyEmailForm } from "@/signup/ui/verify-email-form";
 import { VerifyEmailHelp } from "@/signup/ui/verify-email-help";
+import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
 
 export const metadata: Metadata = {
   title: "Confirm your email address",
@@ -25,7 +26,7 @@ export default function VerifyEmailPage({
   searchParams,
 }: PageProps<"/verify-email">) {
   return (
-    <Suspense fallback={<AuthCard title={TITLE} />}>
+    <Suspense fallback={<AuthCard product={CODE_REVIEW_COM} title={TITLE} />}>
       <VerifyOrExplain searchParams={searchParams} />
     </Suspense>
   );
@@ -37,7 +38,7 @@ async function VerifyOrExplain({
   const { token } = await searchParams;
   if (typeof token === "string")
     return (
-      <AuthCard title={TITLE}>
+      <AuthCard product={CODE_REVIEW_COM} title={TITLE}>
         <VerifyEmailForm token={token} />
       </AuthCard>
     );
@@ -56,7 +57,7 @@ async function VerifyOrExplain({
     // The page works without knowing who is asking.
   }
   return (
-    <AuthCard title={TITLE}>
+    <AuthCard product={CODE_REVIEW_COM} title={TITLE}>
       <VerifyEmailHelp
         email={email}
         isAdmin={isAdmin}

@@ -10,6 +10,7 @@ import { getDatabase } from "../db/startup.ts";
 import { llmApiBaseUrl } from "../llm/endpoint.ts";
 import { createOperatorKeyTestService } from "../llm/operator-key-test.ts";
 import { getSmtpConfigStore } from "../mail/shared.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { getCatalogService } from "../model-catalog/shared.ts";
 import { getSecretStore } from "../secrets/shared.ts";
@@ -27,6 +28,7 @@ export function getAdminService(): AdminService {
       rateLimits: createRateLimitsRepository(getDatabase()),
       // The address in the test mail is the configured one, never a request header.
       baseUrl: loadAuthConfig(process.env).baseUrl,
+      product: CODE_REVIEW_COM,
     }),
     // The Test button of the operator's keys: counters of its own, and the provider's own address (src/llm/endpoint.ts;
     // the test stack may point it at the fake LLM), never one from a request.

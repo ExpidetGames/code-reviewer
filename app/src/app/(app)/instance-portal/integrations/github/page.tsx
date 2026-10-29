@@ -8,6 +8,7 @@ import { requireAdmin } from "@/admin/session";
 import { getIntegrationsPageData } from "@/github-config/shared";
 import { GithubSection } from "@/github-config/ui/github-section";
 import { singleSearchParam } from "@/http/search-params";
+import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
 
 export const metadata: Metadata = { title: "GitHub App · Admin" };
 
@@ -20,6 +21,7 @@ export default async function AdminGithubAppPage(
   const query = await props.searchParams;
   return (
     <GithubSection
+      product={CODE_REVIEW_COM}
       view={data.view}
       tenancy={data.tenancy}
       suggestedName={data.suggestedName}

@@ -14,6 +14,7 @@ import { createRunsFixture } from "../../test-support/runs.ts";
 import { loadRunDetailPage, RunDetailPageContent } from "./run-detail-page.tsx";
 import { loadRunsPage, RunsPageContent } from "./runs-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
+import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -50,7 +51,13 @@ async function openRuns() {
       projects,
       lastRuns,
     });
-    return render(<RunsPageContent workspaceSlug="acme" data={data} />);
+    return render(
+      <RunsPageContent
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        data={data}
+      />,
+    );
   }
   return {
     f,
@@ -159,6 +166,7 @@ describe("the Runs page", () => {
       });
     const { rerender } = render(
       <RunsPageContent
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         data={await data({
           repository: app.f.repositoryId,
@@ -173,12 +181,19 @@ describe("the Runs page", () => {
     expect(values()).toEqual(["acme/gadgets", "Failed"]);
 
     // "Reset filter" is a link to /runs: the page renders again with no filter, without a remount key.
-    rerender(<RunsPageContent workspaceSlug="acme" data={await data({})} />);
+    rerender(
+      <RunsPageContent
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        data={await data({})}
+      />,
+    );
     expect(values()).toEqual(["All projects", "All statuses"]);
 
     // Back brings the filter back.
     rerender(
       <RunsPageContent
+        product={CODE_REVIEW_COM}
         workspaceSlug="acme"
         data={await data({ status: "succeeded" })}
       />,
@@ -207,7 +222,13 @@ describe("the Runs page", () => {
       },
     );
 
-    render(<RunsPageContent workspaceSlug="acme" data={data} />);
+    render(
+      <RunsPageContent
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        data={data}
+      />,
+    );
 
     expect(await optionLabels("Project")).toEqual(["All projects"]);
   });
@@ -248,7 +269,13 @@ describe("the Runs page", () => {
     });
     const data = await loadRunsPage({}, { runs: f.runs, projects });
 
-    render(<RunsPageContent workspaceSlug="acme" data={data} />);
+    render(
+      <RunsPageContent
+        product={CODE_REVIEW_COM}
+        workspaceSlug="acme"
+        data={data}
+      />,
+    );
 
     expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
     expect(

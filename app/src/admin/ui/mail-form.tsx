@@ -38,7 +38,7 @@ import {
 } from "../../components/ui/field.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { Label } from "../../components/ui/label.tsx";
-import { PRODUCT_NAME } from "../../copy/product-name.ts";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -104,10 +104,13 @@ function fieldElementId(ids: string, field: string): string {
 }
 
 export function MailForm({
+  product,
   settings,
   children,
   api = browserAdminApi,
 }: {
+  /** The product the mail goes out for: its name is what the sender-name field shows while empty. */
+  product: ProductIdentity;
   settings: AdminSettingsView;
   /**
    * The cards between the settings form and the danger zone (the test mail card), so the danger zone
@@ -490,7 +493,7 @@ export function MailForm({
                 id={`${ids}-sender-name`}
                 type="text"
                 autoComplete="off"
-                placeholder={PRODUCT_NAME}
+                placeholder={product.mailSenderNamePlaceholder}
                 value={senderName}
                 onChange={(event) => setSenderName(event.target.value)}
                 aria-invalid={invalid("senderName")}

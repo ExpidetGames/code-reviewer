@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { AdminNav } from "@/admin/ui/admin-nav.tsx";
 import { AppShell } from "./app-shell.tsx";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 
 afterEach(() => {
   cleanup();
@@ -42,7 +43,7 @@ describe("the sidebar keyboard shortcut", () => {
   it("toggles only the admin sidebar on an admin page, where two providers are mounted", () => {
     navigation.pathname = "/admin";
     render(
-      <AppShell userMenu={<span>user</span>}>
+      <AppShell product={CODE_REVIEW_COM} userMenu={<span>user</span>}>
         <ProviderState name="shell" />
         <SidebarProvider>
           <AdminNav />
@@ -65,7 +66,7 @@ describe("the sidebar keyboard shortcut", () => {
   it("toggles the workspace sidebar on a workspace page", () => {
     navigation.pathname = "/w/acme/projects";
     render(
-      <AppShell userMenu={<span>user</span>}>
+      <AppShell product={CODE_REVIEW_COM} userMenu={<span>user</span>}>
         <ProviderState name="shell" />
       </AppShell>,
     );

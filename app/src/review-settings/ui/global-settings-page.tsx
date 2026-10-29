@@ -11,6 +11,7 @@ import { SettingsScreen } from "../../workspaces/ui/settings-shell.tsx";
 import { modelFromGlobalView, type SettingsFormModel } from "./form-model.ts";
 import { ResetReviewDefaults } from "./reset-defaults.tsx";
 import { SettingsForm } from "./settings-form.tsx";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 
 export type GlobalSettingsPageData = {
   model: SettingsFormModel;
@@ -29,6 +30,7 @@ export async function loadGlobalSettingsPage(deps: {
 }
 
 export function GlobalSettingsPageContent({
+  product,
   workspaceSlug,
   canEdit = true,
   showPlan = false,
@@ -39,6 +41,8 @@ export function GlobalSettingsPageContent({
   api,
   resetApi,
 }: {
+  /** The product whose name the sentences of the page use. */
+  product: ProductIdentity;
   /** The workspace of the page. */
   workspaceSlug: string;
   /** Whether the person may change the defaults (an Admin or an Owner). */
@@ -83,6 +87,7 @@ export function GlobalSettingsPageContent({
         {/* Keyed on the server data, see project-settings-page.tsx. */}
         <SettingsForm
           key={JSON.stringify([data.model, data.dynamicReviewEnabled])}
+          product={product}
           workspaceSlug={workspaceSlug}
           readOnly={!canEdit}
           dynamicReviewEnabled={data.dynamicReviewEnabled}

@@ -21,6 +21,7 @@ import {
   GlobalSettingsPageContent,
   loadGlobalSettingsPage,
 } from "./global-settings-page.tsx";
+import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
 
 afterEach(cleanup);
 
@@ -46,7 +47,12 @@ async function openReviewDefaults() {
   );
   const data = await loadGlobalSettingsPage({ settings: s.service });
   const view = render(
-    <GlobalSettingsPageContent workspaceSlug="acme" data={data} api={api} />,
+    <GlobalSettingsPageContent
+      product={CODE_REVIEW_COM}
+      workspaceSlug="acme"
+      data={data}
+      api={api}
+    />,
   );
   return { ...s, view };
 }

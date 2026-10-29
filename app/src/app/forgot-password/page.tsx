@@ -12,6 +12,7 @@ import { Suspense } from "react";
 import { getPasswordResetAvailable } from "@/auth/password-reset-runtime";
 import { ForgotPasswordForm } from "@/auth/ui/forgot-password-form";
 import { AuthCard } from "@/components/auth-card";
+import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
 
 export const metadata: Metadata = {
   title: "Reset your password",
@@ -22,7 +23,7 @@ const TITLE = "Reset your password";
 
 export default function ForgotPasswordPage() {
   return (
-    <Suspense fallback={<AuthCard title={TITLE} />}>
+    <Suspense fallback={<AuthCard product={CODE_REVIEW_COM} title={TITLE} />}>
       <FormOrNotFound />
     </Suspense>
   );
@@ -32,7 +33,7 @@ async function FormOrNotFound() {
   await connection();
   if (!(await getPasswordResetAvailable())) notFound();
   return (
-    <AuthCard title={TITLE}>
+    <AuthCard product={CODE_REVIEW_COM} title={TITLE}>
       <ForgotPasswordForm />
       <Link className="text-sm underline underline-offset-4" href="/login">
         Back to sign in

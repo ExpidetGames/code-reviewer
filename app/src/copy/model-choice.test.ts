@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { describeErrorCode } from "../runs/error-copy.ts";
 import { describeIssue } from "../review-settings/ui/messages.ts";
 import { MEMBER_COPY_FORBIDDEN } from "./member-copy-scan.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 import * as choice from "./model-choice.ts";
 
 /** Every string the module exports. */
@@ -17,6 +18,7 @@ function allStrings(): string[] {
       Object.values(value).forEach(visit);
   };
   visit(choice);
+  visit(choice.modelChoiceWords(CODE_REVIEW_COM));
   return found;
 }
 
@@ -26,7 +28,7 @@ function allStrings(): string[] {
  */
 function withoutThePlanWord(text: string): string {
   return text
-    .replace(choice.MODEL_CHOICE_BILLED_NOTE, "")
+    .replace(choice.modelChoiceWords(CODE_REVIEW_COM).billedNote, "")
     .replace(/\bplan\b/gi, "");
 }
 

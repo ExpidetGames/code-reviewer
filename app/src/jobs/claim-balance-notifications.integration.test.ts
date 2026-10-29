@@ -20,6 +20,7 @@ import {
 } from "../test-support/jobs.ts";
 import { insertUser } from "../test-support/users.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
 const USD = 1_000_000;
@@ -81,12 +82,14 @@ describe("the balance notices at the claim", () => {
     ]);
     const mail = createFakeMail();
     await deliverDueBalanceMails({
+      product: CODE_REVIEW_COM,
       db: fixture.db,
       mail,
       baseUrl: "https://reviews.example.com",
       log: () => undefined,
     });
     await deliverDueBalanceMails({
+      product: CODE_REVIEW_COM,
       db: fixture.db,
       mail,
       baseUrl: "https://reviews.example.com",
@@ -119,6 +122,7 @@ describe("the balance notices at the claim", () => {
 
     const mail = createFakeMail();
     await deliverDueBalanceMails({
+      product: CODE_REVIEW_COM,
       db: fixture.db,
       mail,
       baseUrl: "https://reviews.example.com",
@@ -142,6 +146,7 @@ describe("the balance notices at the claim", () => {
     const mail = createFakeMail(false);
     const lines: string[] = [];
     await deliverDueBalanceMails({
+      product: CODE_REVIEW_COM,
       db: fixture.db,
       mail,
       baseUrl: "https://reviews.example.com",

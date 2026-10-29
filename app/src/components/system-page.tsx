@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Brand } from "@/components/brand";
 import { cn } from "@/lib/utils";
+import type { ProductIdentity } from "@/product-identity/identity";
 
 /** The words of the page that is not found (the design board, K1). */
 export const NOT_FOUND_COPY = {
@@ -25,11 +26,14 @@ export const ERROR_COPY = {
 } as const;
 
 export function SystemPage({
+  product,
   mark,
   title,
   description,
   children,
 }: {
+  /** The product whose brand the page shows. */
+  product: ProductIdentity;
   /** The large mark above the title: the "404" or a symbol. Decorative. */
   mark: ReactNode;
   title: string;
@@ -45,7 +49,7 @@ export function SystemPage({
             href="/"
             className="flex min-h-11 items-center rounded-full py-1 pr-3 pl-2 no-underline"
           >
-            <Brand />
+            <Brand product={product} />
           </Link>
         </div>
       </header>

@@ -25,6 +25,7 @@ import type { Database } from "../db/schema.ts";
 import type { LandingIdentity } from "../landing-identity/identity.ts";
 import { landingIdentityColumns } from "../landing-identity/store.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import {
   signUpAvailability,
   type SignUpUnavailableCode,
@@ -55,6 +56,8 @@ export type SignUpDependencies = {
   limits: SignUpLimits;
   facts: () => Promise<SignUpFacts>;
   baseUrl: string;
+  /** Whose name the mail carries. */
+  product: ProductIdentity;
   /**
    * Runs work after the answer is on its way. It takes a function, not a promise: nothing of the work (not
    * even the look at the account) may start before the answer is sent, so neither its content nor its time
@@ -238,7 +241,7 @@ async function provisionAccount(
     landingIdentity: LandingIdentity | null;
   },
 ): Promise<void> {
-  const { db, mail, baseUrl, now, log = console.error } = dependencies;
+  const { db, mail, baseUrl, product, now, log = console.error } = dependencies;
   try {
     if (!evaluateSignUpRule(rule, email).ok) return;
     const created = await createAccount(
@@ -251,7 +254,7 @@ async function provisionAccount(
       created ?? (verifyByMail ? await findWaitingAccount(db, email) : null);
     if (account === null || !verifyByMail) return;
     await sendVerificationMail(
-      { db, mail, baseUrl, now, log },
+      { db, mail, baseUrl, product, now, log },
       { id: account.id, email },
       passwordHash,
     );

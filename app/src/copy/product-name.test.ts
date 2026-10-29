@@ -15,7 +15,7 @@ import {
   type OldNameException,
   withoutExceptions,
 } from "./old-name-scan.ts";
-import { PRODUCT_NAME } from "./product-name.ts";
+import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
 import { DEFAULT_REVIEW_SKILL } from "../review-settings/default-skill.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -67,7 +67,7 @@ describe("the product name", () => {
 
   // #635-T01
   it("is written in lowercase as code-review.com", () => {
-    expect(PRODUCT_NAME).toBe("code-review.com");
+    expect(CODE_REVIEW_COM.name).toBe("code-review.com");
   });
 
   // #635-T01

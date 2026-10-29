@@ -10,6 +10,7 @@ import type { Kysely } from "kysely";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import type { Database } from "../db/schema.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import type { SignUpLimits } from "./limits.ts";
 import { canonicalEmail } from "./rule.ts";
 import { sendVerificationMail } from "./verification-mail.ts";
@@ -26,6 +27,8 @@ export type ResendDependencies = {
   mail: MailSender;
   limits: SignUpLimits;
   baseUrl: string;
+  /** Whose name the mail carries. */
+  product: ProductIdentity;
   /** Runs work after the answer is sent; a function, so nothing of it starts before. */
   defer: (work: () => Promise<void>) => void;
   now?: () => Date;
@@ -33,7 +36,7 @@ export type ResendDependencies = {
 };
 
 export async function resendVerification(
-  { db, mail, limits, baseUrl, defer, now, log }: ResendDependencies,
+  { db, mail, limits, baseUrl, product, defer, now, log }: ResendDependencies,
   rawEmail: unknown,
 ): Promise<ResendOutcome> {
   if (!(await mail.isConfigured())) return { kind: "unavailable" };
@@ -61,7 +64,7 @@ export async function resendVerification(
         .executeTakeFirst();
       if (waiting?.password)
         await sendVerificationMail(
-          { db, mail, baseUrl, now, log },
+          { db, mail, baseUrl, product, now, log },
           { id: waiting.id, email: waiting.email },
           waiting.password,
         );

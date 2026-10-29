@@ -7,6 +7,7 @@ import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import type { MailSender } from "../mail/sender.ts";
+import type { ProductIdentity } from "../product-identity/identity.ts";
 import { createSignUpRouteHandlers } from "./http.ts";
 import { createSignUpLimits } from "./limits.ts";
 import { resendVerification } from "./resend.ts";
@@ -27,6 +28,8 @@ export type AssembleSignUpOptions = {
   githubConfigured: () => boolean | Promise<boolean>;
   /** The configured public address of the app. */
   baseUrl: string;
+  /** Whose name the mail carries. */
+  product: ProductIdentity;
   currentUserId: (request: Request) => Promise<string | null>;
   /** Runs work after the answer is sent (Next's `after()` on the server). */
   defer: (work: () => Promise<void>) => void;
@@ -45,6 +48,7 @@ export function assembleSignUp(options: AssembleSignUpOptions) {
     mail,
     limits,
     baseUrl: options.baseUrl,
+    product: options.product,
     defer: options.defer,
     now,
     log: options.log,
