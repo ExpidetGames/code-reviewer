@@ -17,7 +17,8 @@ import { expect, test } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
 import {
   CONTROL_PREFIX,
-  assertNoExternalAttempts,
+  assertGuardQuiet,
+  readDns,
   readGuard,
   type ControlWho,
 } from "../helpers/dynamic-lane-guard";
@@ -113,8 +114,15 @@ test.describe("the network guard of the Dynamic lane", () => {
     attempt: () => Promise<{ status: number | string; stderr: string }>,
   ) {
     const before = readGuard();
+    const dnsBefore = readDns();
     const done = await attempt();
     const after = readGuard();
+    // The addresses of an attempt are literal: the engine user looked up no name (root's counter is left out, the
+    // lane's own programs ask for a name now and then while a test runs).
+    expect(
+      readDns().queries.engine,
+      "name lookups of the engine user during the attempt",
+    ).toBe(dnsBefore.queries.engine);
     expect(
       after.controls[who] - before.controls[who],
       `the attempt ended with ${JSON.stringify(done)}`,
@@ -141,6 +149,7 @@ test.describe("the network guard of the Dynamic lane", () => {
     // The engine starts slowly the first time; the condition that matters is the counter, so the test waits
     // for that and then ends the process.
     const before = readGuard();
+    const dnsBefore = readDns();
     const child = spawn(
       "setpriv",
       asUserCommand(ENGINE, home, OPENCODE_PATH, [
@@ -164,6 +173,33 @@ test.describe("the network guard of the Dynamic lane", () => {
     }
 
     expect(readGuard().violations).toEqual(before.violations);
+    expect(
+      readDns().queries.engine,
+      "name lookups of the engine user while OpenCode ran",
+    ).toBe(dnsBefore.queries.engine);
+  });
+
+  // #714-T02
+  test("counts a query packet to port 53 on loopback, of the engine user before the runner's rules and of the job user after them, in controls that no check fails", async () => {
+    const before = readGuard();
+    const dnsBefore = readDns();
+
+    // Nothing answers on 127.0.0.2: these packets are the controls, not lookups of the lane's resolver. The runner's rules
+    // for the engine user are in place since the probe of the lane's setup, so its packet is rejected after being counted;
+    // the job user is not under them, so its packet reaches the chain behind them. A real lookup of the engine user that
+    // got past the runner's rules would fail the lane at its end, by design (src/test-support proves the gate).
+    const script = "exec 3<>/dev/udp/127.0.0.2/53; echo control >&3";
+    await asUser(ENGINE, home, "bash", ["-c", script]);
+    await asUser(JOB, home, "bash", ["-c", script]);
+
+    const dnsAfter = readDns();
+    expect(dnsAfter.controlEngine - dnsBefore.controlEngine).toBeGreaterThan(0);
+    expect(
+      dnsAfter.controlDelivered - dnsBefore.controlDelivered,
+    ).toBeGreaterThan(0);
+    expect(dnsAfter.queries.engine).toBe(dnsBefore.queries.engine);
+    expect(dnsAfter.engineDelivered).toBe(dnsBefore.engineDelivered);
+    expect(readGuard()).toEqual(before);
   });
 
   // #253-G06
@@ -214,6 +250,6 @@ test.describe("the network guard of the Dynamic lane", () => {
     expect(git.status).not.toBe(0);
     expect(shell.status).toBe(0);
     expect(readGuard()).toEqual(before);
-    assertNoExternalAttempts(readGuard());
+    assertGuardQuiet();
   });
 });

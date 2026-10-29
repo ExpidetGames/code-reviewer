@@ -314,7 +314,8 @@ for (const engine of BILLING_ENGINES) {
           message.text,
           message.html ?? "",
         ]) {
-          expect(body).not.toContain("777");
+          // The other workspace's balance as a number of its own, not as a piece of a random id in a link (#714).
+          expect(body).not.toMatch(/(?<![0-9A-Za-z])777(?![0-9A-Za-z])/);
           expect(body).not.toMatch(
             /\b(rate|rates|factor|formula|model|provider|stripe|anthropic|brake|minute|minutes)\b/i,
           );

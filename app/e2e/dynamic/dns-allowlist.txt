@@ -1,0 +1,11 @@
+# The names the programs of the privileged Dynamic e2e lane may ask the lane's own resolver for (#714). The resolver answers
+# "no such name" at once and logs every question; the network guard's last word (e2e/helpers/dynamic-lane-guard-command.ts)
+# fails the lane for a name that is not listed here, whoever asked. One name per line, lower case, exact (no wildcards); a
+# comment starts with #, and every entry says why it is allowed and which issue removes it.
+#
+# None are allowed now. The one that used to be asked, github.com, was Playwright's own `git fetch origin <sha>` for its report
+# (found with strace, #736) and is switched off in playwright.dynamic.config.ts.
+#
+# The engine user's lookups are not names on this list: OpenCode still asks once per start for registry.npmjs.org (#739), and the
+# runner's own nft table rejects it before the resolver sees it. The guard counts those attempts and fails when one gets past that
+# table (guard.nft, dns-engine-delivered).

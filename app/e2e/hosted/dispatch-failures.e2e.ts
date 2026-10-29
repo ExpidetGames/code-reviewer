@@ -219,8 +219,10 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     try {
       const { number } = await openPullRequest(page, request, 27, "b");
       const job = await onlyJobOf(REPOSITORY.fullName, number);
-      await eventually("the app's first call to be answered 503", async () => {
-        return notReady.calls() >= 1;
+      // The row is the app's own record of the answer: a call that has only arrived at the stand-in may still be
+      // unanswered (ending the stand-in then cuts the connection and the row says nothing, #714).
+      await eventually("the app to record the 503", async () => {
+        return (await dispatchOf(job.id))?.lastStatus === 503;
       });
       expect(await dispatchOf(job.id)).toMatchObject({
         lastStatus: 503,
@@ -255,8 +257,10 @@ test.describe("what the hosted deployment does when the Dispatcher, the platform
     try {
       const waiting = await openPullRequest(page, request, 28, "c");
       const job = await onlyJobOf(REPOSITORY.fullName, waiting.number);
-      await eventually("the app's call to be answered 503", async () => {
-        return notReady.calls() >= 1;
+      // Not until the app has recorded the answer: ending the stand-in while the 503 is on its way would reset the
+      // connection, and the row would say nothing (#714).
+      await eventually("the app to record the 503", async () => {
+        return (await dispatchOf(job.id))?.lastStatus === 503;
       });
       await notReady.release();
       // Not repeated inside the request: one call, and the row says "not before two minutes".

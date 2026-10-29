@@ -365,8 +365,10 @@ describe("the billing page data of a workspace", () => {
 
     const text = JSON.stringify(await overviewOf(t));
 
+    // The minute count as a standalone number; a substring of "777" turns up inside the random ids of the view now and
+    // then (#714).
+    expect(text).not.toMatch(/(?<![0-9A-Za-z])777(?![0-9A-Za-z])/);
     for (const secret of [
-      "777",
       "minutes",
       "corr-secret-ref",
       "pi_ref_marker",
