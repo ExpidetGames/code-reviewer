@@ -35,11 +35,9 @@ describe("saving settings in a deployment without dynamic-review", () => {
 
     expect(
       await issuesOf(
-        app.service.updateProjectSettings(
-          app.first.id,
-          { reviewKind: "dynamic" },
-          "ada",
-        ),
+        app.service.updateProjectSettings(app.first.id, {
+          reviewKind: "dynamic",
+        }),
       ),
     ).toEqual([{ field: "reviewKind", code: "INVALID_FORMAT" }]);
     expect((await app.projects.get(app.first.id))?.settings).toEqual({});
@@ -64,15 +62,12 @@ describe("saving settings in a deployment without dynamic-review", () => {
   it("still saves the Diff kind and the Diff settings", async () => {
     const app = await start(DIFF_ONLY);
 
-    const saved = await app.service.updateProjectSettings(
-      app.first.id,
-      { reviewKind: "diff", maxFindings: 4 },
-      "ada",
-    );
+    const saved = await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "diff",
+      maxFindings: 4,
+    });
 
-    expect(
-      saved.effective.reviewKind ?? saved.dynamic.effective.reviewKind,
-    ).toBe("diff");
+    expect(saved.dynamic.effective.reviewKind).toBe("diff");
     await app.service.updateGlobalSettings({ maxFindings: 9 }, "ada");
   });
 
@@ -80,11 +75,9 @@ describe("saving settings in a deployment without dynamic-review", () => {
   it("accepts the Dynamic kind where the capability exists, as before", async () => {
     const app = await start();
 
-    const saved = await app.service.updateProjectSettings(
-      app.first.id,
-      { reviewKind: "dynamic" },
-      "ada",
-    );
+    const saved = await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "dynamic",
+    });
 
     expect(saved.dynamic.effective.reviewKind).toBe("dynamic");
   });

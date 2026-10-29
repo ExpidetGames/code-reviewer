@@ -3,6 +3,7 @@
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import { portalRewriteTarget } from "../admin/paths.ts";
 import { createCapabilitySet } from "./capability.ts";
 import {
   capabilityOfPath,
@@ -103,6 +104,23 @@ describe("the route classification", () => {
 describe("capabilityOfPath and isAbsentPath", () => {
   const factory = createCapabilitySet(["review", "dynamic-review"]);
   const nothing = createCapabilitySet([]);
+
+  it("reads the admin addresses as the portal does: the files that serve them", () => {
+    for (const path of [
+      "/admin",
+      "/admin/billing",
+      "/admin/runs/1",
+      "/admin/setup/instance",
+      "/api/admin",
+      "/api/admin/billing/reviews",
+      "/api/admin/settings",
+    ]) {
+      const served = classOfRoute(portalRewriteTarget(path) ?? path);
+      expect(capabilityOfPath(path), path).toBe(
+        served === "core" ? undefined : served,
+      );
+    }
+  });
 
   it("read a request path the way the router does, the admin addresses as the files that serve them", () => {
     expect(capabilityOfPath("/w/acme/settings/billing")).toBe("billing");

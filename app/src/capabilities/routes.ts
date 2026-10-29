@@ -8,7 +8,7 @@
 // `/w/[workspace]/settings/billing` can belong to billing inside the core `/w/[workspace]/settings`.
 // `capabilities/routes.test.ts` fails for a page or route file that no pattern covers, so a route added later
 // has to be classified before it can be merged.
-import { normalizePath, portalRewriteTarget } from "../admin/paths.ts";
+import { normalizePath } from "./path.ts";
 import type { Capability, CapabilitySet } from "./capability.ts";
 
 export type RouteClass = "core" | Capability;
@@ -126,11 +126,27 @@ export function classOfRoute(route: string): RouteClass | undefined {
  * of the app, so it is missing anyway). The admin portal's addresses (`/admin/...`, `/api/admin/...`) are read as the
  * files that serve them. A path that cannot be decoded has no page either.
  */
+/**
+ * The files that serve an admin address (`/admin/billing` is `/instance-portal/billing`). The same two roots as
+ * `portalRewriteTarget` in src/admin/paths.ts (a test keeps them equal); repeated here so that the capability table
+ * imports nothing from the admin portal, which imports the capability set.
+ */
+const ADMIN_SERVED_BY = [
+  ["/admin", "/instance-portal"],
+  ["/api/admin", "/api/instance-portal"],
+] as const;
+
+function servedPath(path: string): string {
+  for (const [root, target] of ADMIN_SERVED_BY)
+    if (path === root || path.startsWith(`${root}/`))
+      return `${target}${path.slice(root.length)}`;
+  return path;
+}
+
 export function capabilityOfPath(pathname: string): Capability | undefined {
   const path = normalizePath(pathname);
   if (path === null) return undefined;
-  const served = portalRewriteTarget(path) ?? path;
-  const result = classOfRoute(served);
+  const result = classOfRoute(servedPath(path));
   return result === undefined || result === "core" ? undefined : result;
 }
 

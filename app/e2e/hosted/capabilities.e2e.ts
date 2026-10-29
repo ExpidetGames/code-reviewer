@@ -18,7 +18,11 @@ const MISSING_HOOK = "/api/webhooks/there-is-no-such-hook";
 function observe(
   page: Page,
   path: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {},
 ) {
   return rawRequest(page, hostedEnv.appUrl, path, init);
 }
@@ -32,7 +36,9 @@ const READS: Array<[string, string, Record<string, string>]> = [
 ];
 
 test.describe("a deployment with the capabilities review and dynamic-review", () => {
-  test("the health check says which product and capabilities run", async ({ page }) => {
+  test("the health check says which product and capabilities run", async ({
+    page,
+  }) => {
     const answer = await observe(page, "/api/health");
 
     expect(answer.status).toBe(200);
@@ -43,8 +49,13 @@ test.describe("a deployment with the capabilities review and dynamic-review", ()
     });
   });
 
-  test("answers the billing webhook, which is public, as a hook that does not exist, to a visitor without a session", async ({ page }) => {
-    const expected = await observe(page, MISSING_HOOK, { method: "POST", body: "{}" });
+  test("answers the billing webhook, which is public, as a hook that does not exist, to a visitor without a session", async ({
+    page,
+  }) => {
+    const expected = await observe(page, MISSING_HOOK, {
+      method: "POST",
+      body: "{}",
+    });
     const answer = await observe(page, "/api/billing/webhook", {
       method: "POST",
       body: "{}",
@@ -56,7 +67,9 @@ test.describe("a deployment with the capabilities review and dynamic-review", ()
     expect(answer.body).toBe(expected.body);
   });
 
-  test("answers every billing page and API as a path that does not exist, to the admin, in every detail, and lists nothing of billing", async ({ page }) => {
+  test("answers every billing page and API as a path that does not exist, to the admin, in every detail, and lists nothing of billing", async ({
+    page,
+  }) => {
     await signInAsAdmin(page);
     const slug = /\/w\/([a-z0-9-]+)\//.exec(page.url())?.[1];
     expect(slug).toBeDefined();
@@ -84,7 +97,10 @@ test.describe("a deployment with the capabilities review and dynamic-review", ()
       }
     }
     for (const path of absent) {
-      const expected = await observe(page, MISSING_API, { method: "POST", body: "{}" });
+      const expected = await observe(page, MISSING_API, {
+        method: "POST",
+        body: "{}",
+      });
       const answer = await observe(page, path, { method: "POST", body: "{}" });
       expect(answer, `POST ${path}`).toEqual(expected);
     }
@@ -93,10 +109,14 @@ test.describe("a deployment with the capabilities review and dynamic-review", ()
     await page.goto(`/w/${slug}/projects`);
     await expect(page.getByRole("link", { name: "Runs" })).toBeVisible();
     await page.goto(`/w/${slug}/settings`);
-    await expect(page.getByRole("link", { name: "Review defaults" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Review defaults" }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Billing" })).toHaveCount(0);
     await page.goto("/admin");
-    await expect(page.getByRole("link", { name: "Integrations" }).first()).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Integrations" }).first(),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Billing" })).toHaveCount(0);
   });
 });

@@ -12,6 +12,8 @@
 // apart. An admin path that is not recognized would skip the guard in front of the portal.
 // (Case is not folded: Next.js routes are case sensitive, so `/ADMIN` is no page at all.)
 
+import { normalizePath } from "../capabilities/path.ts";
+
 const ADMIN_ROOTS = ["/admin", "/api/admin"] as const;
 
 /** Where the pages and the data routes of the portal live. Not addresses anybody uses. */
@@ -48,23 +50,6 @@ export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
  */
 export const PROXY_SKIPPED_PATHS =
   "_next/static/|_next/image$|favicon\\.ico$|icon\\.svg$|apple-icon\\.png$";
-
-/** The path as the router sees it, or null when it cannot be decoded. */
-export function normalizePath(pathname: string): string | null {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return null;
-  }
-  const segments: string[] = [];
-  for (const segment of decoded.split("/")) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") segments.pop();
-    else segments.push(segment);
-  }
-  return `/${segments.join("/")}`;
-}
 
 export function isAdminPath(pathname: string): boolean {
   const path = normalizePath(pathname);
