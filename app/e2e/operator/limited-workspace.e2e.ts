@@ -54,7 +54,7 @@ import {
   type OperatorClient,
   type UsageItem,
 } from "../helpers/operator-api";
-import { CODE_REVIEW_COM } from "../../src/product-identity/code-review-com";
+import { getProductIdentity } from "../../src/product-identity/current";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
 import { chooseOption, openSection } from "../helpers/settings-form";
 import { deliverPullRequestEvent } from "../helpers/webhooks";
@@ -565,10 +565,10 @@ test.describe("a limited workspace on an instance with the operator API on", () 
       exact: true,
     });
     await expect(providerDropdown).toHaveText("Default");
-    await expect(providerDropdown).not.toContainText(CODE_REVIEW_COM.name);
+    await expect(providerDropdown).not.toContainText(getProductIdentity().name);
     // This instance never switches billing on, and nothing is billed while it is off: no "Billed via" note (#675).
     await expect(
-      page.getByText(`Billed via ${CODE_REVIEW_COM.name}`),
+      page.getByText(`Billed via ${getProductIdentity().name}`),
     ).toHaveCount(0);
     await chooseOption(page, "Provider", "Acme Labs");
     await page.getByRole("combobox", { name: "Model" }).click();
@@ -611,7 +611,7 @@ test.describe("a limited workspace on an instance with the operator API on", () 
     // Billing is off on this instance, so the choice carries no "Billed via" note (#675).
     await expect(providerDropdown).toBeVisible();
     await expect(
-      page.getByText(`Billed via ${CODE_REVIEW_COM.name}`),
+      page.getByText(`Billed via ${getProductIdentity().name}`),
     ).toHaveCount(0);
     await providerDropdown.click();
     await expect(page.getByRole("option")).toHaveCount(2);

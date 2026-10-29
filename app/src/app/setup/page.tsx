@@ -15,7 +15,7 @@ import { SETUP_SESSION_COOKIE } from "@/setup/setup-session";
 import { checkCurrentSetupSession, getSetupStateReader } from "@/setup/shared";
 import { CodeForm } from "@/setup/ui/code-form";
 import { Wizard } from "@/setup/ui/wizard";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = {
   title: "Set up",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 
 export default function SetupPage() {
   return (
-    <AuthCard product={CODE_REVIEW_COM}>
+    <AuthCard product={getProductIdentity()}>
       {/* Everything here depends on the request (the cookie) and the database. */}
       <Suspense fallback={<PageLoading label="Loading the setup" />}>
         <SetupContent />
@@ -45,7 +45,7 @@ async function SetupContent() {
   if (session.ok) return <Wizard existingInstallation={existingInstallation} />;
   return (
     <CodeForm
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       existingInstallation={existingInstallation}
     />
   );

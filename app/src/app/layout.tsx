@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 import { initialThemeScript } from "@/theme/theme";
 import { ThemeSync } from "@/theme/theme-sync";
 import { fontVariables } from "./fonts.ts";
@@ -10,8 +10,8 @@ import "./theme.css";
 
 export const metadata: Metadata = {
   title: {
-    default: CODE_REVIEW_COM.name,
-    template: `%s · ${CODE_REVIEW_COM.name}`,
+    default: getProductIdentity().name,
+    template: `%s · ${getProductIdentity().name}`,
   },
   description: "Automatic code reviews for GitHub pull requests.",
 };

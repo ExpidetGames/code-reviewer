@@ -34,7 +34,7 @@ import {
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -132,7 +132,7 @@ describe("the settings form", () => {
     const model = projectModel({ maxFindings: 9 });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={model}
         api={fakeApi().api}
@@ -160,7 +160,7 @@ describe("the settings form", () => {
   it("places where a checkbox value comes from right beside the checkbox text", () => {
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ largePrChunking: false })}
         api={fakeApi().api}
@@ -185,7 +185,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -203,7 +203,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -226,7 +226,7 @@ describe("the settings form", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -268,7 +268,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -319,7 +319,7 @@ describe("the settings form", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -341,7 +341,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -363,7 +363,7 @@ describe("the settings form", () => {
     const { api, save } = fakeApi({ ok: true, data: answerFor(saved) });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -395,7 +395,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -437,7 +437,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -468,7 +468,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -494,7 +494,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ maxFindings: 9 })}
         api={api}
@@ -527,7 +527,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ maxFindings: 9 })}
         api={api}
@@ -555,7 +555,7 @@ describe("the settings form", () => {
     const { api, reset } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ maxFindings: 9 })}
         api={api}
@@ -575,7 +575,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -606,7 +606,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -631,7 +631,7 @@ describe("the settings form", () => {
     );
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={{ save }}
@@ -658,7 +658,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({
           largePrChunking: false,
@@ -694,7 +694,7 @@ describe("the settings form", () => {
     const { api } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -724,7 +724,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ model: "acme/mystery-1" })}
         api={fakeApi().api}
@@ -744,7 +744,7 @@ describe("the settings form", () => {
       '<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>';
     const { container } = render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ extraInstructions: hostile })}
         api={fakeApi().api}
@@ -770,7 +770,7 @@ describe("the settings form", () => {
 
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={model}
         api={{ save }}
@@ -798,7 +798,7 @@ describe("the settings form", () => {
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         repositoryId="repo-9"
@@ -825,7 +825,7 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -851,7 +851,7 @@ describe("the LLM section follows the provider (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -886,7 +886,7 @@ describe("the Limits section (#656)", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel(
           { maxCostCents: 100 },
@@ -929,7 +929,7 @@ describe("the Limits section (#656)", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -953,7 +953,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     const diff = render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -970,7 +970,7 @@ describe("the Limits section (#656)", () => {
 
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -989,7 +989,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={{
           ...projectModel({ maxCostCents: 600 }),
@@ -1017,7 +1017,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={{
           ...projectModel({}, { ...BUILT_IN, maxCostCents: 800 }),
@@ -1040,7 +1040,7 @@ describe("the Limits section (#656)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={fakeApi().api}
@@ -1068,7 +1068,7 @@ describe("the Limits section (#656)", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel()}
         api={api}
@@ -1106,7 +1106,7 @@ describe("the settings form of a workspace on its own key keeps its stored tier 
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({ model: "vendor/project-model" })}
         api={fakeApi().api}
@@ -1131,7 +1131,7 @@ describe("the form of the workspace defaults has the sections of a project (#676
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({ mode: "global" })}
         api={api}
@@ -1189,7 +1189,7 @@ describe("the form of the workspace defaults has the sections of a project (#676
     const model = ownModel({ mode: "global" });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={model}
         api={api}
@@ -1237,7 +1237,7 @@ describe("the form of the workspace defaults has the sections of a project (#676
     };
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={model}
         api={fakeApi().api}
@@ -1294,7 +1294,7 @@ describe("a project form follows the workspace defaults (#676)", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={followingModel()}
         repositoryId="r1"
@@ -1334,7 +1334,7 @@ describe("a project form follows the workspace defaults (#676)", () => {
     };
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={model}
         repositoryId="r1"
@@ -1373,7 +1373,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     const base = ownModel({ mode: "global" });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={{
           ...base,
@@ -1427,7 +1427,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     };
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={model}
         api={api}
@@ -1445,7 +1445,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     const project = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={projectModel({})}
         api={project.api}
@@ -1471,7 +1471,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({ mode: "global" })}
         api={api}
@@ -1506,7 +1506,7 @@ describe("the confirmation and the version of a save of the workspace defaults",
     });
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({ mode: "global" })}
         api={api}

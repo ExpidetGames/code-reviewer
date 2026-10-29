@@ -20,7 +20,7 @@ import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi, SettingChange, TestMailAnswer } from "./api.ts";
 import { MailForm } from "./mail-form.tsx";
 import { TestMailPanel } from "./test-mail-panel.tsx";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -109,7 +109,11 @@ describe("the mail form", () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
 
     await user.clear(screen.getByLabelText("Host"));
@@ -139,7 +143,11 @@ describe("the mail form", () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
 
     await user.type(screen.getByLabelText("Password"), "new-password-value");
@@ -161,7 +169,11 @@ describe("the mail form", () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
 
     await user.click(
@@ -182,7 +194,7 @@ describe("the mail form", () => {
   it("says that a password is saved and never has it", () => {
     render(
       <MailForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         settings={configured()}
         api={api().api}
       />,
@@ -196,7 +208,11 @@ describe("the mail form", () => {
 
   it("says that none is saved when there is none, and offers no clear", () => {
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={view()} api={api().api} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={view()}
+        api={api().api}
+      />,
     );
 
     expect(screen.getByText(/No password is saved/)).toBeTruthy();
@@ -209,7 +225,7 @@ describe("the mail form", () => {
   it("tells the admin to enter a password that cannot be read again", () => {
     render(
       <MailForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         settings={configured({ password: "unreadable" })}
         api={api().api}
       />,
@@ -239,7 +255,9 @@ describe("the mail form", () => {
       ],
     });
     const user = userEvent.setup();
-    render(<MailForm product={CODE_REVIEW_COM} settings={view()} api={mock} />);
+    render(
+      <MailForm product={getProductIdentity()} settings={view()} api={mock} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Save mail server" }));
 
@@ -260,7 +278,11 @@ describe("the mail form", () => {
   it("follows the usual port when the security changes, and a port that was typed stays", async () => {
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={view()} api={api().api} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={view()}
+        api={api().api}
+      />,
     );
 
     await user.click(screen.getByRole("radio", { name: /^TLS/ }));
@@ -278,7 +300,11 @@ describe("the mail form", () => {
   it("warns about a connection that is not encrypted, and has no self-signed option for it", async () => {
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={view()} api={api().api} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={view()}
+        api={api().api}
+      />,
     );
 
     await user.click(screen.getByRole("radio", { name: /None/ }));
@@ -294,7 +320,9 @@ describe("the mail form", () => {
   it("warns when the certificate check is switched off", async () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
-    render(<MailForm product={CODE_REVIEW_COM} settings={view()} api={mock} />);
+    render(
+      <MailForm product={getProductIdentity()} settings={view()} api={mock} />,
+    );
     expect(screen.queryByRole("note")).toBeNull();
 
     await user.click(
@@ -320,7 +348,11 @@ describe("the mail form", () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
 
     await user.click(screen.getByRole("radio", { name: /None/ }));
@@ -357,7 +389,11 @@ describe("the mail form", () => {
     });
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
     expect(
       screen.queryByRole("checkbox", {
@@ -386,7 +422,11 @@ describe("the mail form", () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
 
     await user.click(
@@ -412,7 +452,11 @@ describe("the mail form", () => {
 
   it("offers no removal when there is no mail server", () => {
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={view()} api={api().api} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={view()}
+        api={api().api}
+      />,
     );
 
     expect(
@@ -424,7 +468,11 @@ describe("the mail form", () => {
   it("shows only the warning of the chosen security mode", async () => {
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={view()} api={api().api} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={view()}
+        api={api().api}
+      />,
     );
 
     // STARTTLS with the certificate checked: nothing to warn about.
@@ -462,7 +510,11 @@ describe("the mail form", () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(
-      <MailForm product={CODE_REVIEW_COM} settings={configured()} api={mock} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={configured()}
+        api={mock}
+      />,
     );
 
     const danger = screen.getByRole("region", { name: "Danger zone" });
@@ -496,14 +548,18 @@ describe("the mail form", () => {
   // #184-T04
   it("renders one line per password state", () => {
     const { rerender } = render(
-      <MailForm product={CODE_REVIEW_COM} settings={view()} api={api().api} />,
+      <MailForm
+        product={getProductIdentity()}
+        settings={view()}
+        api={api().api}
+      />,
     );
     expect(screen.getByText("No password is saved.")).toBeTruthy();
     expect(screen.queryByRole("note")).toBeNull();
 
     rerender(
       <MailForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         settings={configured()}
         api={api().api}
       />,
@@ -517,7 +573,7 @@ describe("the mail form", () => {
 
     rerender(
       <MailForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         settings={configured({ password: "unreadable" })}
         api={api().api}
       />,
@@ -541,7 +597,9 @@ describe("the mail form", () => {
       ],
     });
     const user = userEvent.setup();
-    render(<MailForm product={CODE_REVIEW_COM} settings={view()} api={mock} />);
+    render(
+      <MailForm product={getProductIdentity()} settings={view()} api={mock} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Save mail server" }));
 

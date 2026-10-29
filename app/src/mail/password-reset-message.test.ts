@@ -8,7 +8,7 @@ import {
   passwordResetLink,
   passwordResetMessage,
 } from "./password-reset-message.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 describe("the password reset link", () => {
   it("is built from the configured address of the app with the token in the query", () => {
@@ -29,7 +29,7 @@ describe("the password reset message", () => {
 
   it("is addressed to one recipient and holds the link, the time and the advice to ignore it in both bodies", () => {
     const message = passwordResetMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "a@example.com",
       link: LINK,
       validForMinutes: 30,
@@ -46,7 +46,7 @@ describe("the password reset message", () => {
 
   it("escapes the link in the HTML body", () => {
     const message = passwordResetMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "a@example.com",
       link: 'https://x.example/?a=1&b="2"',
       validForMinutes: 30,
@@ -58,7 +58,7 @@ describe("the password reset message", () => {
 
   it("carries no address of the recipient in the subject, so nothing about the account is in a header line", () => {
     const message = passwordResetMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "a@example.com",
       link: LINK,
       validForMinutes: 30,

@@ -17,7 +17,7 @@ import { createTestDatabase } from "../test-support/test-database.ts";
 import { markWorkspaceDeleted } from "../test-support/workspaces.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { createAdminService } from "./service.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const APP_SECRET = "service-test-app-secret-0123456789-0123456789";
 
@@ -55,7 +55,7 @@ async function startService(
     secrets,
     smtp,
     testMail: createTestMailService({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       config: smtp,
       rateLimits: createRateLimitsRepository(db, () => now),
       baseUrl: "https://code-reviewer.example.com",

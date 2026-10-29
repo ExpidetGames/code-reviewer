@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Brand, ProductName } from "../components/brand.tsx";
 import * as modelChoice from "../copy/model-choice.ts";
-import { CODE_REVIEW_COM } from "./code-review-com.ts";
+import { getProductIdentity } from "./current.ts";
 import { balanceMessage } from "../mail/balance-message.ts";
 import { invitationMessage } from "../mail/invitation-message.ts";
 import { passwordResetMessage } from "../mail/password-reset-message.ts";
@@ -23,17 +23,17 @@ const GOLDEN = join(import.meta.dirname, "code-review-com-output.golden.json");
 const LINK = "https://reviews.example.test/x?token=abc123";
 
 function output() {
-  const words = modelChoice.modelChoiceWords(CODE_REVIEW_COM);
+  const words = modelChoice.modelChoiceWords(getProductIdentity());
   return {
-    productName: CODE_REVIEW_COM.name,
+    productName: getProductIdentity().name,
     passwordReset: passwordResetMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       link: LINK,
       validForMinutes: 30,
     }),
     invitationAdmin: invitationMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       link: LINK,
       workspaceName: "Acme <Team>",
@@ -42,7 +42,7 @@ function output() {
       validForDays: 7,
     }),
     invitationMember: invitationMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       link: LINK,
       workspaceName: "Acme",
@@ -51,13 +51,13 @@ function output() {
       validForDays: 7,
     }),
     verification: verificationMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       link: LINK,
       validForHours: 24,
     }),
     balanceLow: balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       level: "low",
       workspaceName: "Acme",
@@ -65,7 +65,7 @@ function output() {
       link: LINK,
     }),
     balanceEmpty: balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       level: "empty",
       workspaceName: "Acme",
@@ -73,7 +73,7 @@ function output() {
       link: LINK,
     }),
     balanceNegative: balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "ada@example.test",
       level: "negative",
       workspaceName: "Acme",
@@ -83,7 +83,7 @@ function output() {
     testMail: testMessage(
       "ada@example.test",
       "https://reviews.example.test",
-      CODE_REVIEW_COM,
+      getProductIdentity(),
     ),
     // Under the names the golden file was recorded with, when the five sentences were constants of the copy module.
     modelChoice: Object.fromEntries([
@@ -96,12 +96,12 @@ function output() {
       ["MODEL_CHOICE_NONE_CHOSEN", words.noneChosen],
       ["MODEL_CHOICE_NONE_OFFERED", words.noneOffered],
     ]),
-    brand: renderToStaticMarkup(<Brand product={CODE_REVIEW_COM} />),
+    brand: renderToStaticMarkup(<Brand product={getProductIdentity()} />),
     brandCompact: renderToStaticMarkup(
-      <Brand product={CODE_REVIEW_COM} compact />,
+      <Brand product={getProductIdentity()} compact />,
     ),
     productNameInText: renderToStaticMarkup(
-      <ProductName product={CODE_REVIEW_COM} />,
+      <ProductName product={getProductIdentity()} />,
     ),
   };
 }

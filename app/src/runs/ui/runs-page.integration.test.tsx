@@ -14,7 +14,7 @@ import { createRunsFixture } from "../../test-support/runs.ts";
 import { loadRunDetailPage, RunDetailPageContent } from "./run-detail-page.tsx";
 import { loadRunsPage, RunsPageContent } from "./runs-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -53,7 +53,7 @@ async function openRuns() {
     });
     return render(
       <RunsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={data}
       />,
@@ -166,7 +166,7 @@ describe("the Runs page", () => {
       });
     const { rerender } = render(
       <RunsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={await data({
           repository: app.f.repositoryId,
@@ -183,7 +183,7 @@ describe("the Runs page", () => {
     // "Reset filter" is a link to /runs: the page renders again with no filter, without a remount key.
     rerender(
       <RunsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={await data({})}
       />,
@@ -193,7 +193,7 @@ describe("the Runs page", () => {
     // Back brings the filter back.
     rerender(
       <RunsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={await data({ status: "succeeded" })}
       />,
@@ -224,7 +224,7 @@ describe("the Runs page", () => {
 
     render(
       <RunsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={data}
       />,
@@ -271,7 +271,7 @@ describe("the Runs page", () => {
 
     render(
       <RunsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={data}
       />,

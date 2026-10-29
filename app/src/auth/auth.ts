@@ -18,7 +18,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import type { ProductIdentity } from "../product-identity/identity.ts";
 import { getDatabase } from "../db/startup.ts";
 import { captureLandingIdentityAtSignIn } from "../landing-identity/sign-in.ts";
@@ -376,7 +376,7 @@ export function getAuth(): Auth {
   holder[globalKey] ??= createAuth({
     db: getDatabase(),
     config: loadAuthConfig(process.env),
-    product: CODE_REVIEW_COM,
+    product: getProductIdentity(),
     verificationRequired: () => getMailSender().isConfigured(),
   });
   return holder[globalKey];

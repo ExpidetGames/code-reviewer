@@ -8,12 +8,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthCard } from "@/components/auth-card";
 import { InvitationView } from "./invitation-view.tsx";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
 const base = {
-  product: CODE_REVIEW_COM,
+  product: getProductIdentity(),
   token: "T".repeat(43),
   workspaceName: "Acme <script>",
   role: "member" as const,
@@ -23,7 +23,7 @@ const base = {
 
 function renderInCard(props: Parameters<typeof InvitationView>[0]) {
   return render(
-    <AuthCard product={CODE_REVIEW_COM} title="You have an invitation">
+    <AuthCard product={getProductIdentity()} title="You have an invitation">
       <InvitationView {...props} />
     </AuthCard>,
   );

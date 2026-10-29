@@ -17,7 +17,7 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
 } from "./ui/breadcrumb.tsx";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -55,7 +55,7 @@ describe("the auth card", () => {
   it("renders one h1 from the title, its children, and merges the given class", () => {
     render(
       <AuthCard
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         title="Sign in"
         className="custom-frame"
       >
@@ -78,7 +78,7 @@ describe("the auth card", () => {
   // is given no title.
   it("renders no heading of its own when no title is given", () => {
     render(
-      <AuthCard product={CODE_REVIEW_COM}>
+      <AuthCard product={getProductIdentity()}>
         <h1>Set up code-review.com</h1>
       </AuthCard>,
     );

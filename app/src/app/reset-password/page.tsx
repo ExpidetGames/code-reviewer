@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { ResetPasswordForm } from "@/auth/ui/reset-password-form";
 import { AuthCard } from "@/components/auth-card";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = {
   title: "Set a new password",
@@ -21,7 +21,7 @@ export default function ResetPasswordPage({
   return (
     <Suspense
       fallback={
-        <AuthCard product={CODE_REVIEW_COM} title="Set a new password" />
+        <AuthCard product={getProductIdentity()} title="Set a new password" />
       }
     >
       <ResetForm searchParams={searchParams} />
@@ -34,7 +34,7 @@ async function ResetForm({
 }: Pick<PageProps<"/reset-password">, "searchParams">) {
   const { token } = await searchParams;
   return (
-    <AuthCard product={CODE_REVIEW_COM} title="Set a new password">
+    <AuthCard product={getProductIdentity()} title="Set a new password">
       <ResetPasswordForm token={typeof token === "string" ? token : null} />
     </AuthCard>
   );

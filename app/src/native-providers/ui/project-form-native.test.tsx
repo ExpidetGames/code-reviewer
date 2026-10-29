@@ -24,7 +24,7 @@ import { modelChoiceWords } from "../../copy/model-choice.ts";
 import type { NativeFormData } from "../form-data.ts";
 import type { NativeModelView } from "../catalog.ts";
 import type { CatalogModelsApi } from "./api.ts";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 // The picker fetches its list from the app's own route: a stand-in for `fetch` gives it the models.
 const MODELS: NativeModelView[] = [
@@ -138,7 +138,7 @@ function renderForm(
 ) {
   return render(
     <SettingsForm
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       workspaceSlug="acme"
       initial={initial}
       api={api}
@@ -287,7 +287,7 @@ describe("the Dynamic provider and model of a project on its own key", () => {
     expect(screen.queryByLabelText("Search models")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Provider" })).toBeNull();
     expect(
-      screen.getByText(modelChoiceWords(CODE_REVIEW_COM).noneOffered),
+      screen.getByText(modelChoiceWords(getProductIdentity()).noneOffered),
     ).toBeTruthy();
     expect(document.body.textContent).not.toContain("DeepSeek");
   });

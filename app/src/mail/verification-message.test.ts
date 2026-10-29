@@ -7,7 +7,7 @@ import {
   verificationLink,
   verificationMessage,
 } from "./verification-message.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 describe("the verification link", () => {
   it("is built from the configured address of the app with the token in the query", () => {
@@ -20,7 +20,7 @@ describe("the verification link", () => {
 describe("the verification message", () => {
   it("is addressed to one recipient and holds the link in both bodies", () => {
     const message = verificationMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "a@example.com",
       link: "https://reviews.example.com/verify-email?token=t",
       validForHours: 24,
@@ -38,7 +38,7 @@ describe("the verification message", () => {
 
   it("escapes the link in the HTML body", () => {
     const message = verificationMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       to: "a@example.com",
       link: 'https://x.example/?a=1&b="2"',
       validForHours: 24,

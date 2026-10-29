@@ -4,7 +4,7 @@
 // of that workspace and where to add credit, and nothing about how a review is priced.
 import { describe, expect, it } from "vitest";
 import { balanceMessage } from "./balance-message.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const LINK = "https://reviews.example.com/w/acme/settings/billing";
 const BASE = {
@@ -18,7 +18,7 @@ describe("the balance mails", () => {
   // #506-T01
   it("tells a low balance with the balance and the link, in both bodies", () => {
     const message = balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       ...BASE,
       level: "low",
     });
@@ -36,7 +36,7 @@ describe("the balance mails", () => {
   // #506-T04
   it("tells an empty balance, and that new reviews wait for credit", () => {
     const message = balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       ...BASE,
       balanceText: "$0.00",
       level: "empty",
@@ -50,7 +50,7 @@ describe("the balance mails", () => {
   // #506-T05
   it("tells a balance below zero as such", () => {
     const message = balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       ...BASE,
       balanceText: "-$1.50",
       level: "negative",
@@ -66,7 +66,7 @@ describe("the balance mails", () => {
     "says nothing about rates, formulas, models, providers or limits in the %s mail",
     (level) => {
       const message = balanceMessage({
-        product: CODE_REVIEW_COM,
+        product: getProductIdentity(),
         ...BASE,
         level,
       });
@@ -80,7 +80,7 @@ describe("the balance mails", () => {
   // #506-T07
   it("makes the workspace name one line and escapes it in the HTML", () => {
     const message = balanceMessage({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       ...BASE,
       workspaceName: 'Acme\r\nBcc: x@evil.test <b>"hi"</b>',
       level: "low",

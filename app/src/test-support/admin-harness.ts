@@ -65,7 +65,7 @@ import {
   SETUP_TEST_SECRET,
   WIZARD_BODY,
 } from "./setup-harness.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 export const ADMIN_TEST_BASE_URL = SETUP_TEST_BASE_URL;
 export { SETUP_TEST_ADMIN as ADMIN_TEST_CREDENTIALS };
@@ -163,7 +163,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     smtp,
     catalogSummary: () => catalog.summary(),
     testMail: createTestMailService({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       config: smtp,
       rateLimits: createRateLimitsRepository(db),
       baseUrl: ADMIN_TEST_BASE_URL,
@@ -299,7 +299,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   // Stripe (an address where nothing answers when a test brings none), the audit lines kept in a list.
   const billingLog: string[] = [];
   const billingService = createBillingAdminService({
-    product: CODE_REVIEW_COM,
+    product: getProductIdentity(),
     db,
     secretsOn: (executor) =>
       createSecretStore({

@@ -48,7 +48,7 @@ import {
   releaseStrandedHoldsWhileBillingOn,
 } from "./stranded-holds.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const ENGINES = ["pr-agent", "opencode"] as const;
 const SECOND = 1000;
@@ -328,7 +328,7 @@ describe("the holds of ended jobs", () => {
     const adminId = await insertUser(fixture.db, { id: "admin-591" });
     const job = await endedWhileOff(fixture);
     const service = createBillingAdminService({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       db: fixture.db,
       secretsOn: (executor) =>
         createSecretStore({
@@ -369,7 +369,7 @@ describe("the holds of ended jobs", () => {
     const adminId = await insertUser(fixture.db, { id: "admin-591b" });
     await endedWhileOff(fixture);
     const service = createBillingAdminService({
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       db: fixture.db,
       secretsOn: (executor) =>
         createSecretStore({

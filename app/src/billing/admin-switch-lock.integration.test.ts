@@ -17,7 +17,7 @@ import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { createSecretStore, type SecretStore } from "../secrets/store.ts";
 import { createBillingAdminService } from "./admin-service.ts";
 import { createStripeClient } from "./stripe-client.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const RATES = {
   factorA: 50_000,
@@ -64,7 +64,7 @@ describe.each(BILLING_ENGINES)(
         },
       });
       const service = createBillingAdminService({
-        product: CODE_REVIEW_COM,
+        product: getProductIdentity(),
         db,
         secretsOn: (executor) =>
           holding(

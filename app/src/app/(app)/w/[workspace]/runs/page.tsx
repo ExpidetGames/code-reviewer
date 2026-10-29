@@ -6,7 +6,7 @@ import { loadRunsPage, RunsPageContent } from "@/runs/ui/runs-page";
 import { lastRunSourceFor, runsServiceFor } from "@/runs/shared";
 import { PageHeader } from "@/components/page-header";
 import { requireWorkspace } from "@/workspaces/access-runtime";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 export const metadata: Metadata = { title: "Runs" };
 
@@ -48,7 +48,7 @@ async function RunsContent({
   });
   return (
     <RunsPageContent
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       workspaceSlug={workspaceSlug}
       data={data}
     />

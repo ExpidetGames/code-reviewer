@@ -10,12 +10,12 @@ import {
   NOT_FOUND_COPY,
   SystemPage,
 } from "@/components/system-page";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 export default function NotFound() {
   return (
     <SystemPage
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       mark={<BigNumber>404</BigNumber>}
       title={NOT_FOUND_COPY.title}
       description={NOT_FOUND_COPY.description}

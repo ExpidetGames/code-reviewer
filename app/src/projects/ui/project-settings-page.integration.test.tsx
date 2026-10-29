@@ -46,7 +46,7 @@ import { createReviewSettingsService } from "../../review-settings/service.ts";
 import { createAppSettingsRepository } from "../../db/repositories/app-settings-repository.ts";
 import { builtInReviewSettings } from "../../review-settings/settings.ts";
 import type { NativeFormData } from "../../native-providers/form-data.ts";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -104,7 +104,7 @@ function renderReady(
 ) {
   return render(
     <ProjectSettingsPageContent
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       workspaceSlug="acme"
       audience={options.audience ?? "member"}
       data={data}
@@ -277,7 +277,7 @@ describe("the settings page of a project", () => {
     if (after.kind !== "ready") throw new Error("expected a project");
     view.rerender(
       <ProjectSettingsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={after}
         api={app.api}
@@ -397,7 +397,7 @@ describe("the settings page of a project", () => {
 
     const { container } = render(
       <ProjectSettingsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         audience="member"
         data={data}

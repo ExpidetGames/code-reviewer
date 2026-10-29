@@ -9,7 +9,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { Button } from "@/components/button";
 import { ERROR_COPY, SystemPage } from "@/components/system-page";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 export default function ErrorPage({
   error,
@@ -25,7 +25,7 @@ export default function ErrorPage({
 
   return (
     <SystemPage
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       mark={
         <WarningIcon
           aria-hidden="true"

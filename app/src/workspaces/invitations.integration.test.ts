@@ -12,7 +12,7 @@ import {
   WORKSPACE_TEST_BASE_URL,
   type WorkspaceHarness,
 } from "../test-support/workspace-harness.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 import { createInvitationService, INVITATION_TTL_MS } from "./invitations.ts";
 import {
   ACCEPT_PERSON_MAX,
@@ -200,7 +200,7 @@ describe("creating an invitation", () => {
       db: h.db,
       mail: h.mail,
       baseUrl: "https://reviews.example.test",
-      product: CODE_REVIEW_COM,
+      product: getProductIdentity(),
       githubConfigured: () => false,
       now: h.now,
       limits: {

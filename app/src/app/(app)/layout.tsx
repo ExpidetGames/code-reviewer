@@ -13,12 +13,12 @@ import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
 import { loadAccountView } from "@/workspaces/account-view";
 import { WorkspaceSwitcher } from "@/shell/workspace-switcher";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <AppShell
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       userMenu={
         <Suspense
           fallback={

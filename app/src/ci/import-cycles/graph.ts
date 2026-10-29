@@ -312,32 +312,25 @@ export function checkMigrationIsolation(graph: FileGraph): string[] {
 
 /** The value that says who the product is (#715, cut 7); the type next to it (`identity.ts`) is what the code that writes the words takes. */
 const PRODUCT_IDENTITY_VALUE = "product-identity/code-review-com.ts";
-/**
- * The files outside `app/` (the routes and pages, which are the application) and the `shared.ts` files that may import the
- * value: where the application is composed. `auth/auth.ts` holds the singleton `getAuth` until the singletons move to the
- * application with the composition roots; the other two wire the running server of their module.
- */
-export const PRODUCT_IDENTITY_COMPOSITION_FILES: readonly string[] = [
-  "auth/auth.ts",
-  "auth/github-auth.ts",
-  "auth/password-reset-runtime.ts",
-];
+/** The one file that picks the identity of the deployment: every composition root gets the value from its `getProductIdentity()`. */
+export const PRODUCT_IDENTITY_SELECTOR = "product-identity/current.ts";
 
 /**
  * The rule for the brand (#715, cut 7). A module that writes a word of the product takes a `ProductIdentity` as a parameter
- * and never imports the product's value, so it can move to a package that other products use. Only a route, a page or a
- * `shared.ts` of the running server may import `product-identity/code-review-com.ts`, and `identity.ts` imports nothing.
+ * and never imports the product's value, so it can move to a package that other products use. The composition roots (a route,
+ * a page, a `shared.ts`, the singletons of `auth/`) get the identity from `getProductIdentity()` in
+ * `product-identity/current.ts`, and that selector is the only file that imports `product-identity/code-review-com.ts`:
+ * choosing the identity per deployment later changes that one file. `identity.ts` imports nothing.
  */
 export function checkProductIdentityImports(graph: FileGraph): string[] {
   const problems: string[] = [];
   for (const [file, imports] of graph) {
-    const composition =
-      file.startsWith("app/") ||
-      file.endsWith("/shared.ts") ||
-      PRODUCT_IDENTITY_COMPOSITION_FILES.includes(file);
-    if (imports.has(PRODUCT_IDENTITY_VALUE) && !composition)
+    if (
+      imports.has(PRODUCT_IDENTITY_VALUE) &&
+      file !== PRODUCT_IDENTITY_SELECTOR
+    )
       problems.push(
-        `${file} imports ${PRODUCT_IDENTITY_VALUE}: a module takes a ProductIdentity as a parameter; only a route, a page or a shared.ts composes the application with it`,
+        `${file} imports ${PRODUCT_IDENTITY_VALUE}: get the identity from getProductIdentity() in ${PRODUCT_IDENTITY_SELECTOR} (a composition root) or take a ProductIdentity as a parameter (any other module); only the selector imports the value`,
       );
     if (file === "product-identity/identity.ts" && imports.size > 0)
       problems.push(

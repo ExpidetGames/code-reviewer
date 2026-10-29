@@ -18,7 +18,7 @@ import {
 import { modelFromGlobalView } from "./form-model.ts";
 import { GlobalSettingsPageContent } from "./global-settings-page.tsx";
 import { ResetReviewDefaults } from "./reset-defaults.tsx";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
@@ -49,7 +49,7 @@ describe("resetting every review default", () => {
   it("is at the end of the Review defaults page for a person who may change them, and not for anybody else", () => {
     const { unmount } = render(
       <GlobalSettingsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={DATA}
       />,
@@ -61,7 +61,7 @@ describe("resetting every review default", () => {
 
     render(
       <GlobalSettingsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={DATA}
         canEdit={false}
@@ -124,7 +124,7 @@ describe("resetting every review default", () => {
     };
     render(
       <GlobalSettingsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={{ model: modelFromGlobalView(view), dynamicReviewEnabled: true }}
       />,
@@ -144,7 +144,7 @@ describe("resetting every review default", () => {
     const view = { ...untouchedGlobalView(), followingProjects: 3 };
     render(
       <GlobalSettingsPageContent
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         data={{ model: modelFromGlobalView(view), dynamicReviewEnabled: true }}
       />,

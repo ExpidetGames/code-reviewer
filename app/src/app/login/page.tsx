@@ -18,7 +18,7 @@ import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { signUpAvailability } from "@/signup/availability";
 import { getSignUpFacts } from "@/signup/shared";
-import { CODE_REVIEW_COM } from "@/product-identity/code-review-com";
+import { getProductIdentity } from "@/product-identity/current";
 
 /** What the login page draws, gathered from the state of the instance and the `?error=` code. */
 export type LoginPageData = {
@@ -38,7 +38,9 @@ export type LoginPageData = {
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
-    <Suspense fallback={<AuthCard product={CODE_REVIEW_COM} title="Sign in" />}>
+    <Suspense
+      fallback={<AuthCard product={getProductIdentity()} title="Sign in" />}
+    >
       <LoginBoundary searchParams={searchParams} />
     </Suspense>
   );
@@ -89,7 +91,7 @@ export function LoginPageContent({ data }: { data: LoginPageData }) {
       </Alert>
     );
   return (
-    <AuthCard product={CODE_REVIEW_COM} title="Sign in">
+    <AuthCard product={getProductIdentity()} title="Sign in">
       {data.emailPassword ? (
         <form
           action={signInWithPassword}

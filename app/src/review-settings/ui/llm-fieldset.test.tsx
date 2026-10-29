@@ -33,11 +33,11 @@ import {
 import type { CatalogChoices } from "../catalog-selection.ts";
 import { DEFAULT_DYNAMIC_MODEL } from "../settings.ts";
 import { SettingsForm } from "./settings-form.tsx";
-import { CODE_REVIEW_COM } from "../../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../../product-identity/current.ts";
 
 afterEach(cleanup);
 
-const WORDS = modelChoiceWords(CODE_REVIEW_COM);
+const WORDS = modelChoiceWords(getProductIdentity());
 const SAVE = { name: "Save review settings" };
 const SAVE_DEFAULTS = { name: "Save review defaults" };
 const FALLBACK_REMOVED =
@@ -84,7 +84,7 @@ async function renderManaged(
   const { api, save } = fakeApi();
   render(
     <SettingsForm
-      product={CODE_REVIEW_COM}
+      product={getProductIdentity()}
       workspaceSlug="acme"
       initial={initial}
       dynamicReviewEnabled
@@ -605,7 +605,7 @@ describe("a stored fallback model", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({
           overrides: { fallbackModel: "vendor/fallback-model" },
@@ -640,7 +640,7 @@ describe("a stored fallback model", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({
           overrides: { fallbackModel: "vendor/fallback-model" },
@@ -668,7 +668,7 @@ describe("a stored fallback model", () => {
     const user = userEvent.setup();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel()}
         keyedProviders={["openrouter", "anthropic"]}
@@ -688,7 +688,7 @@ describe("a stored fallback model", () => {
     const { api, save } = fakeApi();
     render(
       <SettingsForm
-        product={CODE_REVIEW_COM}
+        product={getProductIdentity()}
         workspaceSlug="acme"
         initial={ownModel({
           overrides: { fallbackModel: "vendor/fallback-model" },

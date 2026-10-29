@@ -19,7 +19,7 @@ import { startTestSmtp } from "../test-support/smtp-fake.ts";
 import { completePasswordReset, isKnownResetToken } from "./password-reset.ts";
 import { createPasswordResetHandler } from "./password-reset-http.ts";
 import { requestPasswordReset } from "./password-reset-request.ts";
-import { CODE_REVIEW_COM } from "../product-identity/code-review-com.ts";
+import { getProductIdentity } from "../product-identity/current.ts";
 
 const QUICK = {
   connectionMs: 1_500,
@@ -61,7 +61,7 @@ async function start() {
     verifyPassword: context.password.verify,
     githubConfigured: () => false,
     baseUrl: ADMIN_TEST_BASE_URL,
-    product: CODE_REVIEW_COM,
+    product: getProductIdentity(),
     currentUserId: () => Promise.resolve(null),
     defer: (work) => {
       pending.push(work);
@@ -125,7 +125,7 @@ async function start() {
           limits,
           emailPasswordOn: () => Promise.resolve(true),
           baseUrl: ADMIN_TEST_BASE_URL,
-          product: CODE_REVIEW_COM,
+          product: getProductIdentity(),
           defer: (work) => {
             pending.push(work);
           },
