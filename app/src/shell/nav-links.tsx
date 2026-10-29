@@ -8,6 +8,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useEffect, useRef } from "react";
+import { useCapabilities } from "@/capabilities/context";
 import {
   Sidebar,
   SidebarContent,
@@ -35,7 +36,7 @@ export const SIDEBAR_TOP_CLASS =
   "relative z-0 h-auto self-start group-data-[side=left]:border-r-0 group-data-[collapsible=offcanvas]:hidden";
 
 export function NavLinks({ pathname }: { pathname: string | null }) {
-  const groups = navGroupsFor(pathname);
+  const groups = navGroupsFor(pathname, useCapabilities());
   if (groups.length === 0) return null;
   return (
     <SidebarContent>
@@ -91,6 +92,7 @@ function NavLink({
 export function CurrentWorkspaceSidebar() {
   const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
+  const capabilities = useCapabilities();
   const shownPath = useRef(pathname);
 
   // The page changed, by whatever means (a link anywhere, back and forward): the drawer has done
@@ -101,7 +103,7 @@ export function CurrentWorkspaceSidebar() {
     setOpenMobile(false);
   }, [pathname, setOpenMobile]);
 
-  if (navGroupsFor(pathname).length === 0) return null;
+  if (navGroupsFor(pathname, capabilities).length === 0) return null;
   return (
     <>
       <SidebarShortcut />
@@ -121,7 +123,8 @@ export function CurrentWorkspaceSidebar() {
  */
 export function WorkspaceSidebarTrigger() {
   const pathname = usePathname();
-  if (navGroupsFor(pathname).length === 0) return null;
+  const capabilities = useCapabilities();
+  if (navGroupsFor(pathname, capabilities).length === 0) return null;
   // A drawer on a narrow screen; a wide one shows the side column (Ctrl/Cmd+B still folds it away).
   return <SidebarTrigger className="size-11 md:hidden" />;
 }

@@ -10,6 +10,7 @@
 // one that does not exist.
 //
 // Pure functions, usable on the server and in the browser.
+import type { CapabilitySet } from "../capabilities/capability.ts";
 import { WORKSPACE_SLUG_MAX_LENGTH, WORKSPACE_SLUG_PATTERN } from "./names.ts";
 
 /** Whether the text can be the slug of a workspace (the shape only; it says nothing about membership). */
@@ -73,7 +74,14 @@ export function legacyWorkspaceTarget(
   return null;
 }
 
-/** Where a workspace opens when no page is named. */
-export function workspaceHome(slug: string): string {
-  return workspacePath(slug, "/projects");
+/**
+ * Where a workspace opens when no page is named: its projects, or, in a deployment without the `review` capability (which has no
+ * projects, src/capabilities/), its connections. Without a set the deployment is code-review.com.
+ */
+export function workspaceHome(
+  slug: string,
+  capabilities?: CapabilitySet,
+): string {
+  const hasProjects = capabilities === undefined || capabilities.has("review");
+  return workspacePath(slug, hasProjects ? "/projects" : "/connections");
 }

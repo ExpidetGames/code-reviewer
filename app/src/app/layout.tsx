@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 import type { Metadata } from "next";
+import { CapabilitiesProvider } from "@/capabilities/context";
+import { getCapabilities } from "@/capabilities/shared";
 import { PRODUCT_NAME } from "@/copy/product-name";
 import { initialThemeScript } from "@/theme/theme";
 import { ThemeSync } from "@/theme/theme-sync";
@@ -25,7 +27,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body>
         {/* Only for the Strict Mode remount of `next dev`, see theme-sync.tsx. */}
         {process.env.NODE_ENV !== "production" && <ThemeSync />}
-        {children}
+        {/* What this deployment offers (src/capabilities/), for the navigation and the other client components. */}
+        <CapabilitiesProvider capabilities={getCapabilities().list()}>
+          {children}
+        </CapabilitiesProvider>
       </body>
     </html>
   );
