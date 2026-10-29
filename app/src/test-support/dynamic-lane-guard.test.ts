@@ -101,6 +101,18 @@ const QUIET = {
   "violation-other": 0,
 };
 
+/** Output of `nft -j` captured from the lane in CI (nft 1.0.9, run 40914162000), unchanged. */
+function captured(name: "chain" | "seen4" | "seen6"): unknown {
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(`./fixtures/nft/lane-guard-${name}.json`, import.meta.url),
+      ),
+      "utf8",
+    ),
+  );
+}
+
 const DNS_QUIET = {
   "dns-control-engine": 0,
   "dns-engine": 0,
@@ -253,6 +265,34 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
         nftables: [{ set: { elem: [{ concat: ["fd00:255::2", "udp", 53] }] } }],
       }),
     ).toEqual(["[fd00:255::2]:53/udp"]);
+  });
+
+  // #714-T03
+  it("reads the sets and the chain as nft prints them in the lane (captured output, not a hand-written listing)", () => {
+    expect(parseDestinations(captured("seen4"))).toEqual([
+      "10.255.255.2:53/udp",
+      "10.255.255.2:443/tcp",
+    ]);
+    expect(parseDestinations(captured("seen6"))).toEqual([
+      "[ff02::16]:11266/ipv6-icmp",
+      "[ff02::1:ff18:4370]:22555/ipv6-icmp",
+      "[ff02::16]:43803/ipv6-icmp",
+      "[ff02::16]:39756/ipv6-icmp",
+      "[ff02::16]:44885/ipv6-icmp",
+      "[ff02::1:ffb4:bd65]:48039/ipv6-icmp",
+      "[fd00:255::2]:443/tcp",
+      "[ff02::2]:28092/ipv6-icmp",
+      "[ff02::2]:21701/ipv6-icmp",
+    ]);
+    // The chain was listed in a capture run that made three attempts on purpose; the guard had counted five as root.
+    expect(parseGuard(captured("chain"))).toEqual({
+      violations: { engine: 0, job: 0, root: 5, other: 0 },
+      controls: { engine: 0, job: 0, root: 0 },
+    });
+    expect(parseDns(captured("chain"))).toEqual({
+      queries: { engine: 0, job: 0, root: 0, other: 0 },
+      controlEngine: 0,
+    });
   });
 
   // #714-T03
