@@ -152,12 +152,61 @@ describe("dispatcher canary workflow", () => {
     );
     expect(withSecrets.map((step) => step.uses)).toEqual([
       "./.github/actions/infisical-ci-secrets",
+      "./.github/actions/infisical-ci-secrets",
     ]);
     expect(canary.run).not.toContain("secrets.");
     expect(canary.run).not.toMatch(
       /echo[^\n]*(RUNNER_TOKEN|BYPASS|VERCEL_TOKEN)/,
     );
     expect(canary.run).not.toMatch(/set -x|--debug|xtrace|--token/);
+  });
+
+  // #730-T20
+  it("loads the operator credential of the Dispatcher when /ci has one, and falls back to RUNNER_TOKEN when it has none", () => {
+    const operator = stepNamed(
+      "Load the operator credential from Infisical, when there is one",
+    );
+    expect(operator.uses).toBe("./.github/actions/infisical-ci-secrets");
+    expect(operator.with?.["secret-names"]).toBe("DISPATCHER_OPERATOR_TOKEN");
+    // Optional: a missing key must not fail the canary of a Dispatcher that has no operator token yet.
+    expect(operator["continue-on-error"]).toBe(true);
+    // The same sign-in as the first load, from the secrets of the environment.
+    expect(operator.with).toMatchObject({
+      "client-id": "${{ secrets.INFISICAL_CLIENT_ID }}",
+      "client-secret": "${{ secrets.INFISICAL_CLIENT_SECRET }}",
+      domain: "${{ secrets.INFISICAL_DOMAIN }}",
+      "project-slug": "${{ secrets.INFISICAL_PROJECT_SLUG }}",
+    });
+    // The first load keeps RUNNER_TOKEN, which a Dispatcher without an operator token still takes.
+    const first = job.steps.find(
+      (step) => step.uses === "./.github/actions/infisical-ci-secrets",
+    );
+    expect(String(first?.with?.["secret-names"]).split(" ")).toContain(
+      "RUNNER_TOKEN",
+    );
+    // After the dependencies and the first load, and before the canary itself.
+    const names = job.steps.map((step) => step.name);
+    const at = names.indexOf(operator.name);
+    expect(at).toBeGreaterThan(names.indexOf("Install dependencies"));
+    expect(at).toBeGreaterThan(job.steps.findIndex((step) => step === first));
+    expect(at).toBeLessThan(names.indexOf("Run the canary"));
+    // The canary command takes the credential from the environment by itself: no step copies it into another variable.
+    expect(source).not.toMatch(/RUNNER_TOKEN=|GITHUB_ENV/);
+    const canary = stepNamed("Run the canary");
+    expect(canary.run).not.toMatch(/OPERATOR_TOKEN|RUNNER_TOKEN/);
+    expect(Object.keys(canary.env ?? {})).not.toContain("RUNNER_TOKEN");
+  });
+
+  // #730-T20
+  it("says, without printing it, which credential the canary uses", () => {
+    const say = stepNamed("Say which credential the canary uses");
+    expect(say.env).toStrictEqual({
+      OPERATOR_OUTCOME: "${{ steps.operator.outcome }}",
+    });
+    expect(say.run).toContain("::notice::");
+    expect(say.run).not.toMatch(
+      /\$\{?(DISPATCHER_OPERATOR_TOKEN|RUNNER_TOKEN)/,
+    );
   });
 
   // #403-T01
@@ -202,8 +251,15 @@ describe("dispatcher canary workflow", () => {
   });
 
   // #331-extra-workflow
-  it("does not ignore a failure of any step", () => {
+  it("does not ignore a failure of any step, except the optional load of the operator credential (#730)", () => {
+    const optional =
+      "Load the operator credential from Infisical, when there is one";
     for (const step of job.steps)
-      expect(step["continue-on-error"], step.name).toBeUndefined();
+      if (step.name === optional)
+        expect(step["continue-on-error"], step.name).toBe(true);
+      else expect(step["continue-on-error"], step.name).toBeUndefined();
+    expect(
+      job.steps.filter((step) => step["continue-on-error"] !== undefined),
+    ).toHaveLength(1);
   });
 });

@@ -957,7 +957,7 @@ describe("the deployment pipeline in the guide", () => {
     ])
       loaded.add(name);
     expect(documented.sort()).toEqual([...loaded].sort());
-    expect(documented).toHaveLength(8);
+    expect(documented).toHaveLength(9);
   });
 
   // #403-T11

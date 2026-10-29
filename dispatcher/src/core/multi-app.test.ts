@@ -757,6 +757,45 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
   });
 
   // #730-T22
+  it("counts the VMs of launches that are over but newer than the listing, so a cached listing cannot be outrun", async () => {
+    // Each launch creates its VM and ends: the VM lives on, and the listing (cached, taken before them) does not show it.
+    const { core } = build({
+      factory: { maxRunning: 2 },
+      liveVms: counts({}),
+      launcher: {
+        onLaunch: (spec) => {
+          spec.onVmCreated?.({
+            name: "cr-diff-x",
+            startedAt: new Date(0),
+            timeoutSeconds: 1500,
+          });
+          return Promise.resolve();
+        },
+      },
+    });
+    const next = () =>
+      handled(
+        core.handle({
+          appId: "factory",
+          jobId: factory.enqueue(),
+          reviewKind: "diff",
+        }),
+      );
+
+    expect((await next()).outcome).toBe("started");
+    expect((await next()).outcome).toBe("started");
+    expect(await next()).toStrictEqual({
+      outcome: "busy",
+      retryAfterSeconds: 30,
+    });
+
+    // A new listing shows what is really there (here: nothing is left), and the count starts from it. (The fake app has its
+    // own cap and answers the claim with `ignored`; what matters is that the Dispatcher no longer refuses.)
+    await clock.advance(6000);
+    expect((await next()).outcome).not.toBe("busy");
+  });
+
+  // #730-T22
   it("lists the platform once for the claims of a few seconds, and again after that", async () => {
     const counter = counts({});
     const { core } = build({ liveVms: counter });

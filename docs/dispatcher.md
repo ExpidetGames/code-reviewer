@@ -21,7 +21,7 @@ Dispatcher's code, configuration and Launchers are in [`dispatcher/README.md`](.
 **More than one App (#730).** One Dispatcher can serve several Apps. The key that signs a call names the app (a key belongs to
 exactly one app), the core claims, heartbeats, releases and reports at that app only, each app may submit only the job kinds
 the registry lists for it, and every job VM is tagged with its app (`tenant`), so one app can never claim, stop or read
-another's jobs or VMs. The legacy variables define the app `reviewer`; `DISPATCHER_APPS` adds the others
+another's jobs or VMs, and the Dispatcher counts each app's live VMs against its cap itself, so one app cannot take the Sandbox concurrency of another. The legacy variables define the app `reviewer`; `DISPATCHER_APPS` adds the others
 ([`dispatcher/README.md`](../dispatcher/README.md), "More than one App"; variables in
 [`deployment-vercel.md`](deployment-vercel.md), 3.2).
 
@@ -42,7 +42,7 @@ service names, `/api/runners/v1`) stay until a dedicated rename.
 | Worker to App (Worker contract) | `GET /api/workers/v1/jobs/{id}` (job details, where the git token and the model key are revealed), `POST .../heartbeat`, `POST .../result`, with the per-job credential | `contracts/worker-api.v1.json` |
 | Dispatcher to App (reaper) | `GET /api/runners/v1/jobs/{id}`: the state of a job, so that the reaper stops the VM of a job that is not `running` | `contracts/runner-api.v1.json` |
 | Platform cron to Dispatcher | `GET /api/cron/reap-sandboxes` with `Authorization: Bearer <CRON_SECRET>` every 5 minutes | `dispatcher/README.md`, "The reaper" |
-| Dispatcher to operator | `GET /health`; `POST /probe` (the canary probe of the deploy canary, with the operator credential `DISPATCHER_OPERATOR_TOKEN`, else the `reviewer` token while that is unset; dispatch never runs it); `POST /apps/check` (per app: reachable, credential, features; operator credential only) | `dispatcher/README.md`, "The canary probe" and "More than one App", `contracts/dispatcher-ops.v1.json` |
+| Dispatcher to operator | `GET /health`; `POST /probe` (the canary probe of the deploy canary, with the operator credential `DISPATCHER_OPERATOR_TOKEN`, required with several Apps, else the `reviewer` token while `reviewer` is the only App and the token is unset; dispatch never runs it); `POST /apps/check` (per app: reachable, credential, features; operator credential only) | `dispatcher/README.md`, "The canary probe" and "More than one App", `contracts/dispatcher-ops.v1.json` |
 | Operator to App | `/api/operator/v1`: workspaces, entitlements, limits, usage; only with `OPERATOR_API_TOKEN` | `contracts/operator-api.v1.json`, `app/src/operator-api/README.md` |
 
 Nothing here is shared as source: the three projects (`app/`, `dispatcher/`, `runner/`) exchange only the contracts
