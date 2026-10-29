@@ -909,9 +909,9 @@ describe("the cap of each app against the platform's fleet", () => {
       env: environment({ DISPATCHER_MAX_RUNNING: "3" }),
       withFleet: true,
     });
-    // The factory's cap is 2 (the environment) and the Dispatcher tolerates one more: it has 3. The reviewer has 2 of its 3
+    // The factory's cap is 2 (the environment) and the Dispatcher tolerates 4 more: it has 6. The reviewer has 2 of its 3
     // (one of them untagged).
-    seedLive(sandbox, "factory", 3, 100);
+    seedLive(sandbox, "factory", 6, 100);
     seedLive(sandbox, "reviewer", 1, 200);
     seedLive(sandbox, undefined, 1, 300);
 
@@ -947,7 +947,7 @@ describe("the cap of each app against the platform's fleet", () => {
       withFleet: true,
     });
     seedLive(sandbox, undefined, 1, 300);
-    seedLive(sandbox, "reviewer", 2, 200);
+    seedLive(sandbox, "reviewer", 5, 200);
 
     const result = await core.handle({
       appId: "reviewer",

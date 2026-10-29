@@ -139,12 +139,13 @@ the whole identity of the sender**.
   Sandbox-Launcher, i.e. wherever the reaper exists), the Dispatcher counts for each claim what the app occupies by its own
   numbers: the live job VMs of its `tenant` tag (a VM without the tag counts for `reviewer`; canaries and VMs the platform is
   ending do not count), the VMs created since the listing, and its launches in progress that have no VM yet. Above the app's
-  `maxRunning` **plus a tolerance of half the cap, at least one** (counting the VM this call would start) the wake-up call is
-  answered `busy` (`app_cap_reached` in the log) and **the app is not called at all**. The tolerance is there because the
-  listing is up to five seconds old and the VM of a finished job lives until the App's stop call: an exact comparison refused the
-  job the App sends the moment another one ends, and nothing wakes it again before the sweep (found by reasoning, not by a test). So an
-  app that ignores its cap can occupy 1.5 times its cap, not more. The cap is that of the app: for `reviewer`
-  `DISPATCHER_MAX_RUNNING`, unchanged. _Cost:_ one listing of the project's `cr-` VMs (all pages) per five seconds at most, shared by every claim in that time;
+  `maxRunning` **plus a tolerance of the cap and two more** (so twice the cap plus two VMs in all, the VM this call would start
+  counted) the wake-up call is answered `busy` (`app_cap_reached` in the log) and **the app is not called at all**. It is a
+  backstop against a runaway app, not a fair share: it counts VMs, and a VM outlives its job for a while (the listing is up to
+  five seconds old, the stop call of a finished job comes after its result, and the VM of a Worker that died stays until the
+  reaper stops it, one per attempt of a crash loop). An exact comparison would refuse the job the App rightly sends, and
+  nothing wakes it again before the sweep (the hosted E2E of a crash loop at cap 1 showed it). The cap is that of the app: for
+  `reviewer` `DISPATCHER_MAX_RUNNING`, unchanged. _Cost:_ one listing of the project's `cr-` VMs (all pages) per five seconds at most, shared by every claim in that time;
   claims that arrive together share one call. A claim therefore sees a VM that ended up to five seconds late (the safe side)
   and one that started in that time through the count of the Dispatcher's own launches. If the listing fails, the last good one
   is used for up to a minute; after that the claim answers `unavailable` (retry in 60 s, `fleet_list_failed` in the log) and

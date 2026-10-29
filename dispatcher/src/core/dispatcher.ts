@@ -58,13 +58,15 @@ const LIVE_VMS_TTL_MS = 5 * 1000;
 /** A listing that failed is replaced by the last good one only while it is this young; then the claim waits. */
 const LIVE_VMS_STALE_MS = 60 * 1000;
 /**
- * How far above its cap an app may be by the Dispatcher's count before a call is refused. The App enforces the exact cap at
- * the claim; this is a backstop against an app that ignores it. The listing is up to `LIVE_VMS_TTL_MS` old and a VM whose job
- * has ended lives until the App's stop call or the reaper, so an exact comparison would refuse a job the App rightly sends the
- * moment another ends (and nothing wakes it again until the sweep). Half the cap, at least one, absorbs those.
+ * How far above its cap an app may be by the Dispatcher's count before a call is refused: twice the cap plus two VMs in all.
+ * The App enforces the exact cap at the claim; this is a backstop against an app that ignores it (a runaway, not a fair
+ * share). It counts VMs, not jobs, and a VM outlives its job for a while: the listing is up to `LIVE_VMS_TTL_MS` old, the
+ * stop call of a finished job comes a moment after its result, and the VM of a Worker that died stays until the reaper
+ * stops it (every attempt of a crash loop leaves one). An exact comparison would refuse the job the App rightly sends and
+ * nothing would wake it again before the sweep (the hosted E2E of a crash loop at cap 1 showed it).
  */
 function capTolerance(maxRunning: number): number {
-  return Math.max(1, Math.ceil(maxRunning / 2));
+  return maxRunning + 2;
 }
 
 /** #493: the pauses before the repeats of a report of the VM that the App could not take (three tries). */

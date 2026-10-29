@@ -647,8 +647,8 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     const jobId = factory.enqueue();
     const { core, launcher, logger } = build({
       factory: { maxRunning: 2 },
-      // The cap is 2 and the Dispatcher tolerates one more (the lag of a listing and of the stop of a finished job).
-      liveVms: counts({ factory: 3 }),
+      // The cap is 2 and the Dispatcher tolerates 4 more (VMs outlive their jobs for a while): 6 VMs in all.
+      liveVms: counts({ factory: 6 }),
     });
 
     const result = await core.handle({
@@ -661,7 +661,7 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     expect(factory.requests()).toHaveLength(0);
     expect(launcher.launches).toHaveLength(0);
     expect(logger.text()).toContain(
-      'app_cap_reached {"app":"factory","occupied":3,"maxRunning":2,"tolerance":1}',
+      'app_cap_reached {"app":"factory","occupied":6,"maxRunning":2,"tolerance":4}',
     );
   });
 
@@ -689,8 +689,8 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     const jobId = reviewer.enqueue();
     const { core } = build({
       reviewer: { maxRunning: 3 },
-      // `liveJobVmsByApp` puts an untagged VM under `reviewer`. The cap is 3, the tolerance 2.
-      liveVms: counts({ reviewer: 5 }),
+      // `liveJobVmsByApp` puts an untagged VM under `reviewer`. The cap is 3, the tolerance 5.
+      liveVms: counts({ reviewer: 8 }),
     });
 
     const result = await core.handle({
@@ -708,8 +708,8 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     const hold = deferred();
     const { core } = build({
       factory: { maxRunning: 2 },
-      // Two live VMs: with the launch in progress that is the cap (2) plus the tolerance (1).
-      liveVms: counts({ factory: 2 }),
+      // Five live VMs: with the launch in progress that is the cap (2) plus the tolerance (4).
+      liveVms: counts({ factory: 5 }),
       launcher: { onLaunch: () => hold.promise },
     });
 
@@ -733,11 +733,11 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
   // #730-T22
   it("counts a launch whose VM is already in the listing once, not twice", async () => {
     const hold = deferred();
-    // The first launch has its VM; a listing taken after that shows it. The second call must see 2 VMs and 1 launch
-    // without a VM yet (its own), not 2 VMs and 2 launches.
+    // The first launch has its VM; a listing taken after that shows it. The second call must see 5 VMs and 1 launch
+    // without a VM yet (its own), not 5 VMs and 2 launches.
     const { core, launcher } = build({
       factory: { maxRunning: 2 },
-      liveVms: counts({ factory: 2 }),
+      liveVms: counts({ factory: 5 }),
       launcher: {
         onLaunch: (spec) => {
           spec.onVmCreated?.({
@@ -775,7 +775,7 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     // A launch creates its VM and ends: the VM lives on, and the listing (cached, taken before it) does not show it.
     const { core } = build({
       factory: { maxRunning: 2 },
-      liveVms: counts({ factory: 2 }),
+      liveVms: counts({ factory: 5 }),
       launcher: {
         onLaunch: (spec) => {
           spec.onVmCreated?.({
@@ -802,20 +802,20 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
       retryAfterSeconds: 30,
     });
 
-    // A new listing shows what is really there (two VMs), and the count starts from it. (The fake app has its own cap;
+    // A new listing shows what is really there (five VMs), and the count starts from it. (The fake app has its own cap;
     // what matters is that the Dispatcher no longer refuses.)
     await clock.advance(6000);
     expect((await next()).outcome).not.toBe("busy");
   });
 
   // #730-T22
-  it("tolerates half the cap, at least one: the lag of a listing and of the stop of a finished job is not an app over its cap", async () => {
+  it("tolerates the cap plus two: a VM outlives its job for a while, so VMs are not jobs", async () => {
     const outcomes: string[] = [];
     for (const [cap, live] of [
-      [1, 1],
-      [1, 2],
-      [4, 5],
-      [4, 6],
+      [1, 3],
+      [1, 4],
+      [4, 9],
+      [4, 10],
     ] as const) {
       reviewer.reset();
       const { core } = build({
@@ -832,7 +832,7 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
       outcomes.push(result.outcome === "busy" ? "busy" : "passed");
     }
 
-    // The VM the call would start included: cap 1 allows 2 VMs in all, cap 4 allows 6.
+    // The VM the call would start included: cap 1 allows 4 VMs in all, cap 4 allows 10.
     expect(outcomes).toStrictEqual(["passed", "busy", "passed", "busy"]);
   });
 
