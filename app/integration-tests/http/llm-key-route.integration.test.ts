@@ -8,6 +8,7 @@
 // one exists and is refused everything else; the key is encrypted at rest and in no answer, log line or error;
 // the request is read the one way every JSON route is (same site, JSON only, small, once); the test button is
 // limited; and the workspace of the address is the only one that is ever touched.
+import { OPERATOR_LLM_KEY_NAMES } from "../../src/llm/secret-names.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -605,11 +606,11 @@ async function managed() {
     },
     null,
   );
-  await createSecretStore({ db: t.db, appSecret: APP_SECRET }).save(
-    "operator_llm_key",
-    OPERATOR_KEY_FOR_ROUTES,
-    { updatedBy: null },
-  );
+  await createSecretStore({
+    db: t.db,
+    names: OPERATOR_LLM_KEY_NAMES,
+    appSecret: APP_SECRET,
+  }).save("operator_llm_key", OPERATOR_KEY_FOR_ROUTES, { updatedBy: null });
   // The assembly the pages and the claim use, on the database of this test.
   const { getWorkspaceLlm } = await import("../../src/llm/shared.ts");
   const llm = getWorkspaceLlm();

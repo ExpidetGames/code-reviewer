@@ -4,6 +4,7 @@
 // validated, recorded with the admin and the time, and shown back; the rules for the sign-in methods
 // and the tenancy hold; two admins saving at once end with one complete write; and the saved secrets
 // show up as "configured" and never as a value.
+import { SECRET_NAMES } from "./secret-names.ts";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -39,6 +40,7 @@ async function startService(
   };
   const secrets = createSecretStore({
     db,
+    names: SECRET_NAMES,
     appSecret: APP_SECRET,
     now: () => now,
   });

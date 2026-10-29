@@ -62,6 +62,14 @@ const ALLOWED: ReadonlyArray<{ path: string; why: string }> = [
     why: "the migration's test",
   },
   {
+    path: "app/src/db/migrations/support/model-tier-rules.ts",
+    why: "what the migration that turns the old data into catalog entries carries of the application, frozen (#715)",
+  },
+  {
+    path: "app/src/db/migrations/migration-sql-golden.integration.test.ts",
+    why: "holds the SQL of that migration, run on the shape of the old data (#715)",
+  },
+  {
     path: "app/integration-tests/http/model-tiers-migration-claim.integration.test.ts",
     why: "the differential test of the claim after the migration",
   },

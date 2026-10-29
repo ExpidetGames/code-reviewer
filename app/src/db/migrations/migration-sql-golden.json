@@ -1,0 +1,115 @@
+[
+  {
+    "sql": "\n      select value from instance_settings where key = 'managed_model_tiers'\n    ",
+    "parameters": []
+  },
+  {
+    "sql": "select id, name_key, sort_order from model_catalog_entries",
+    "parameters": []
+  },
+  {
+    "sql": "insert into \"model_catalog_entries\" (\"id\", \"name\", \"name_key\", \"description\", \"provider\", \"model_id\", \"serves_diff\", \"serves_dynamic\", \"status\", \"sort_order\", \"created_at\", \"updated_at\", \"updated_by\") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    "parameters": [
+      "mce_2ae07e49840ec4f4d8b28226e43f05b7",
+      "Low (migrated 2)",
+      "low (migrated 2)",
+      "Faster, lighter reviews that point out the obvious problems quickly.",
+      "openrouter",
+      "acme/low-1",
+      1,
+      1,
+      "released",
+      8,
+      "2026-10-18T09:30:00.000Z",
+      "2026-10-18T09:30:00.000Z",
+      null
+    ]
+  },
+  {
+    "sql": "insert into \"model_catalog_entries\" (\"id\", \"name\", \"name_key\", \"description\", \"provider\", \"model_id\", \"serves_diff\", \"serves_dynamic\", \"status\", \"sort_order\", \"created_at\", \"updated_at\", \"updated_by\") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    "parameters": [
+      "mce_b9f708fafd975c8a91fd540a9e95ecb1",
+      "Medium (Diff)",
+      "medium (diff)",
+      "A balance of speed and depth that suits most pull requests.",
+      "openrouter",
+      "acme/mid-d",
+      1,
+      0,
+      "released",
+      9,
+      "2026-10-18T09:30:00.000Z",
+      "2026-10-18T09:30:00.000Z",
+      null
+    ]
+  },
+  {
+    "sql": "insert into \"model_catalog_entries\" (\"id\", \"name\", \"name_key\", \"description\", \"provider\", \"model_id\", \"serves_diff\", \"serves_dynamic\", \"status\", \"sort_order\", \"created_at\", \"updated_at\", \"updated_by\") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    "parameters": [
+      "mce_4224b7e38128c80eb9c16b295b4d6e6e",
+      "Medium (Dynamic)",
+      "medium (dynamic)",
+      "A balance of speed and depth that suits most pull requests.",
+      "openrouter",
+      "acme/mid-y",
+      0,
+      1,
+      "released",
+      10,
+      "2026-10-18T09:30:00.000Z",
+      "2026-10-18T09:30:00.000Z",
+      null
+    ]
+  },
+  {
+    "sql": "insert into \"model_catalog_entries\" (\"id\", \"name\", \"name_key\", \"description\", \"provider\", \"model_id\", \"serves_diff\", \"serves_dynamic\", \"status\", \"sort_order\", \"created_at\", \"updated_at\", \"updated_by\") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    "parameters": [
+      "mce_93d8356c8833c3fb661d11011078aeed",
+      "High (Diff)",
+      "high (diff)",
+      "Slower, deeper reviews that take more time to look at a change closely.",
+      "openrouter",
+      "acme/high-d",
+      1,
+      0,
+      "released",
+      11,
+      "2026-10-18T09:30:00.000Z",
+      "2026-10-18T09:30:00.000Z",
+      null
+    ]
+  },
+  {
+    "sql": "\n    select value from instance_settings where key = 'catalog_defaults'\n  ",
+    "parameters": []
+  },
+  {
+    "sql": "\n    insert into instance_settings (key, value, updated_by, updated_at)\n    values ('catalog_defaults', $1, null, $2)\n    on conflict (key) do update set value = excluded.value, updated_at = excluded.updated_at\n  ",
+    "parameters": [
+      "{\"diff\":\"mce_operator\",\"dynamic\":\"mce_4224b7e38128c80eb9c16b295b4d6e6e\"}",
+      "2026-10-18T09:30:00.000Z"
+    ]
+  },
+  {
+    "sql": "\n    select workspace_id, value from app_settings where key = 'review_defaults'\n  ",
+    "parameters": []
+  },
+  {
+    "sql": "\n      select p.id as id, r.workspace_id as workspace_id, p.settings as settings\n      from projects p join repositories r on r.id = p.repository_id\n      order by p.id\n    ",
+    "parameters": []
+  },
+  {
+    "sql": "\n      with changes (id, read, written) as (values ($1, $2, $3), ($4, $5, $6), ($7, $8, $9))\n      update projects set settings = changes.written\n      from changes\n      where projects.id = changes.id and projects.settings = changes.read\n      returning projects.id as id\n    ",
+    "parameters": [
+      "p-1",
+      "{\"modelTier\":\"low\",\"maxFindings\":3}",
+      "{\"modelTier\":\"low\",\"maxFindings\":3,\"catalogEntryDiff\":\"mce_2ae07e49840ec4f4d8b28226e43f05b7\",\"catalogEntryDynamic\":\"mce_2ae07e49840ec4f4d8b28226e43f05b7\"}",
+      "p-2",
+      "{}",
+      "{\"catalogEntryDiff\":\"mce_93d8356c8833c3fb661d11011078aeed\"}",
+      "p-5",
+      "{\"modelTier\":\"high\"}",
+      "{\"modelTier\":\"high\",\"catalogEntryDiff\":\"mce_93d8356c8833c3fb661d11011078aeed\"}"
+    ]
+  }
+]

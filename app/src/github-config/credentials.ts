@@ -30,7 +30,10 @@ import {
   type SecretStatus,
   type SecretStore,
 } from "../secrets/store.ts";
-import type { SecretName } from "../secrets/names.ts";
+import {
+  GITHUB_APP_SECRET_NAMES,
+  type GithubAppSecretName,
+} from "../secret-names/names.ts";
 import { readStoredGithubApp, type StoredGithubApp } from "./settings.ts";
 
 export const PRIVATE_KEY_SECRET = "github_app_private_key" as const;
@@ -150,7 +153,12 @@ export function createGithubCredentialStore({
   // The same stores on another connection: a transaction.
   const on = (connection: Kysely<Database>) => ({
     settings: createInstanceSettingsRepository(connection, now),
-    secrets: createSecretStore({ db: connection, appSecret, now }),
+    secrets: createSecretStore({
+      db: connection,
+      names: GITHUB_APP_SECRET_NAMES,
+      appSecret,
+      now,
+    }),
   });
 
   async function storedApp(settings: InstanceSettingsRepository) {
@@ -162,7 +170,7 @@ export function createGithubCredentialStore({
 
   async function userAuthorizationOf(
     stored: StoredGithubApp,
-    secrets: SecretStore,
+    secrets: SecretStore<GithubAppSecretName>,
   ): Promise<UserAuthorizationState> {
     if (stored.clientId === null) return { state: "none" };
     const used = await secrets.use(CLIENT_SECRET);
@@ -177,7 +185,7 @@ export function createGithubCredentialStore({
 
   async function loadFromDatabase(
     stored: StoredGithubApp,
-    secrets: SecretStore,
+    secrets: SecretStore<GithubAppSecretName>,
   ): Promise<GithubAppState> {
     const [key, hook] = await Promise.all([
       secrets.use(PRIVATE_KEY_SECRET),
@@ -245,7 +253,7 @@ export function createGithubCredentialStore({
       const { secrets } = on(db);
       const [privateKey, webhookSecret, clientSecret] = await Promise.all(
         [PRIVATE_KEY_SECRET, WEBHOOK_SECRET, CLIENT_SECRET].map(
-          (name: SecretName) => secrets.status(name),
+          (name: GithubAppSecretName) => secrets.status(name),
         ),
       );
       return {
@@ -264,7 +272,7 @@ export function createGithubCredentialStore({
     }) {
       await db.transaction().execute(async (trx) => {
         const { settings, secrets } = on(trx);
-        const save = async (name: SecretName, value: string) => {
+        const save = async (name: GithubAppSecretName, value: string) => {
           const saved = await secrets.save(name, value, {
             updatedBy: actorId,
           });

@@ -13,13 +13,14 @@ import { getSmtpConfigStore } from "../mail/shared.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { getCatalogService } from "../model-catalog/shared.ts";
 import { getSecretStore } from "../secrets/shared.ts";
+import { SECRET_NAMES } from "./secret-names.ts";
 import { createAdminService, type AdminService } from "./service.ts";
 
 export function getAdminService(): AdminService {
   const smtp = getSmtpConfigStore();
   return createAdminService({
     db: getDatabase(),
-    secrets: getSecretStore(),
+    secrets: getSecretStore(SECRET_NAMES),
     smtp,
     testMail: createTestMailService({
       config: smtp,

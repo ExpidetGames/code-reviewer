@@ -9,8 +9,7 @@
 // (`app_settings`, key `review_defaults`). The new data: catalog entries, the instance setting `catalog_defaults`, and
 // `catalogEntryDiff` / `catalogEntryDynamic` in the settings of a project.
 import { createHash } from "node:crypto";
-import { isModelId } from "../../llm/config.ts";
-import { DEFAULT_LLM_PROVIDER } from "../../llm/providers/index.ts";
+import { isTierMigrationModelId } from "./support/model-tier-rules.ts";
 
 export const TIERS = ["low", "medium", "high"] as const;
 export type Tier = (typeof TIERS)[number];
@@ -67,7 +66,7 @@ export function readTierConfiguration(stored: unknown): TierConfiguration {
       if (
         typeof model === "string" &&
         model.length <= MAX_MODEL_ID_CHARS &&
-        isModelId(model, DEFAULT_LLM_PROVIDER)
+        isTierMigrationModelId(model)
       )
         models[kind] = model;
     }
