@@ -7,7 +7,7 @@
 // the counters move for each kind of process. Needs root (`nft`), so only the lane can read it.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 export const GUARD_TABLE = "cr_lane_guard";
 export const GUARD_CHAIN = "output";
@@ -19,9 +19,10 @@ export const CONTROL_PREFIX = {
 
 /** The questions the lane's resolver was asked (one `TYPE name` per line), written by lane-dns-stub-command.ts. */
 export const LANE_DNS_LOG = "/run/lane-dns.log";
-/** The names the lane's programs may ask for (#714). */
-export const DNS_ALLOWLIST_FILE = fileURLToPath(
-  new URL("../dynamic/dns-allowlist.txt", import.meta.url),
+/** The names the lane's programs may ask for (#714). Relative to the working directory (app/), not import.meta: Playwright loads this file as CommonJS. */
+export const DNS_ALLOWLIST_FILE = resolve(
+  process.cwd(),
+  "e2e/dynamic/dns-allowlist.txt",
 );
 
 export type GuardWho = "engine" | "job" | "root" | "other";
