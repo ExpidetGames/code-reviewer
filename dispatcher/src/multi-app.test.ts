@@ -892,8 +892,9 @@ describe("the cap of each app against the platform's fleet", () => {
       env: environment({ DISPATCHER_MAX_RUNNING: "3" }),
       withFleet: true,
     });
-    // The factory's cap is 2 (the environment): it is at it. The reviewer has 2 of its 3 (one of them untagged).
-    seedLive(sandbox, "factory", 2, 100);
+    // The factory's cap is 2 (the environment) and the Dispatcher tolerates one more: it has 3. The reviewer has 2 of its 3
+    // (one of them untagged).
+    seedLive(sandbox, "factory", 3, 100);
     seedLive(sandbox, "reviewer", 1, 200);
     seedLive(sandbox, undefined, 1, 300);
 
@@ -923,13 +924,13 @@ describe("the cap of each app against the platform's fleet", () => {
   });
 
   // #730-T22
-  it("holds the reviewer to DISPATCHER_MAX_RUNNING with the same count", async () => {
+  it("holds the reviewer to DISPATCHER_MAX_RUNNING plus the tolerance with the same count", async () => {
     const { core, sandbox } = build({
       env: environment({ DISPATCHER_MAX_RUNNING: "2" }),
       withFleet: true,
     });
     seedLive(sandbox, undefined, 1, 300);
-    seedLive(sandbox, "reviewer", 1, 200);
+    seedLive(sandbox, "reviewer", 2, 200);
 
     const result = await core.handle({
       appId: "reviewer",

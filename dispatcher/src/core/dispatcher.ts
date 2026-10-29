@@ -57,6 +57,16 @@ const MIN_HEARTBEAT_SECONDS = 5;
 const LIVE_VMS_TTL_MS = 5 * 1000;
 /** A listing that failed is replaced by the last good one only while it is this young; then the claim waits. */
 const LIVE_VMS_STALE_MS = 60 * 1000;
+/**
+ * How far above its cap an app may be by the Dispatcher's count before a call is refused. The App enforces the exact cap at
+ * the claim; this is a backstop against an app that ignores it. The listing is up to `LIVE_VMS_TTL_MS` old and a VM whose job
+ * has ended lives until the App's stop call or the reaper, so an exact comparison would refuse a job the App rightly sends the
+ * moment another ends (and nothing wakes it again until the sweep). Half the cap, at least one, absorbs those.
+ */
+function capTolerance(maxRunning: number): number {
+  return Math.max(1, Math.ceil(maxRunning / 2));
+}
+
 /** #493: the pauses before the repeats of a report of the VM that the App could not take (three tries). */
 const VM_REPORT_RETRY_MS: readonly number[] = [1000, 3000];
 
@@ -279,11 +289,13 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
             retryAfterSeconds: DEFAULT_RETRY_UNAVAILABLE_SECONDS,
           };
         const used = occupied(state, snapshot);
-        if (used > state.settings.maxRunning) {
+        const tolerance = capTolerance(state.settings.maxRunning);
+        if (used > state.settings.maxRunning + tolerance) {
           logger.warn("app_cap_reached", {
             app: appId,
             occupied: used - 1,
             maxRunning: state.settings.maxRunning,
+            tolerance,
           });
           return {
             outcome: "busy",
