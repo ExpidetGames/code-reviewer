@@ -5,6 +5,9 @@
 // gate and the access proxy in front, the real admin data routes behind them, and the real settings
 // service and secret store over a real Postgres database. Requests are real `Request` objects with cookies, the
 // way a browser sends them; nothing listens on a port.
+import { SECRET_NAMES } from "../admin/secret-names.ts";
+import { STRIPE_SECRET_NAMES } from "../secret-names/names.ts";
+import { WORKSPACE_LLM_KEY_NAMES } from "../llm/secret-names.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { NextRequest } from "next/server";
 import { adminAccessOf } from "../admin/access.ts";
@@ -124,7 +127,11 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       setup.gateState.mail = value;
     },
   };
-  const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
+  const secrets = createSecretStore({
+    db,
+    names: SECRET_NAMES,
+    appSecret: SETUP_TEST_SECRET,
+  });
   // The GitHub credentials as the portal saves and reads them. The addresses of GitHub are the fake's, which
   // is started when the first GitHub route is used; the store itself reads them from this object.
   const githubEnv: Record<string, string | undefined> = {
@@ -292,7 +299,12 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   const billingService = createBillingAdminService({
     db,
     secretsOn: (executor) =>
-      createSecretStore({ db: executor, appSecret: SETUP_TEST_SECRET }),
+      createSecretStore({
+        db: executor,
+        names: STRIPE_SECRET_NAMES,
+        appSecret: SETUP_TEST_SECRET,
+      }),
+    ownKeySecretNames: WORKSPACE_LLM_KEY_NAMES,
     publicUrl: options.billingPublicUrl ?? "https://reviews.example.test",
     clientFor: (apiKey, environment, clientOptions) =>
       createStripeClient({

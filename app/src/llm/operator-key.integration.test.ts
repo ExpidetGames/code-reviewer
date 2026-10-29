@@ -4,6 +4,7 @@
 // 2.8): what a save accepts and refuses (the rules of the workspace key), that the answers carry the status and the
 // last four characters only, that the stored value is encrypted, and that a key another APP_SECRET sealed is
 // reported as unreadable instead of being used.
+import { OPERATOR_LLM_KEY_NAMES } from "./secret-names.ts";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createSecretStore } from "../secrets/store.ts";
@@ -35,7 +36,11 @@ async function start() {
     values ('admin-1', 'Admin', 'admin@example.test', 0, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z')`.execute(
     db,
   );
-  const store = createSecretStore({ db, appSecret: APP_SECRET });
+  const store = createSecretStore({
+    db,
+    names: OPERATOR_LLM_KEY_NAMES,
+    appSecret: APP_SECRET,
+  });
   return {
     db,
     store,
@@ -148,6 +153,7 @@ describe("the operator's key as a job needs it", () => {
     const other = createOperatorLlmKeyService({
       store: createSecretStore({
         db,
+        names: OPERATOR_LLM_KEY_NAMES,
         appSecret: "another-app-secret-0123456789-0123456789-0",
       }),
       providers,

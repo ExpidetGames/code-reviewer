@@ -30,7 +30,6 @@ import {
   type WorkspaceSecretRow,
 } from "../db/repositories/workspace-secrets-repository.ts";
 import type { Database } from "../db/schema.ts";
-import type { WorkspaceSecretName } from "./names.ts";
 import { SecretValue } from "./secret-value.ts";
 import {
   LAST_FOUR_MIN_LENGTH,
@@ -40,18 +39,15 @@ import {
 
 const TABLE = "workspace_secrets";
 
-function locationOf(
-  workspaceId: string,
-  name: WorkspaceSecretName,
-): SecretLocation {
+function locationOf(workspaceId: string, name: string): SecretLocation {
   // The workspace id is the row id and the name the field: both are bound into the ciphertext.
   return { table: TABLE, rowId: workspaceId, field: name };
 }
 
 export type WorkspaceSecretStatus =
-  | { name: WorkspaceSecretName; state: "not_configured" }
+  | { name: string; state: "not_configured" }
   | {
-      name: WorkspaceSecretName;
+      name: string;
       state: "configured";
       /** What the secret was made for (the provider of an LLM key). */
       binding: string;
@@ -62,7 +58,7 @@ export type WorkspaceSecretStatus =
       updatedBy: string | null;
     }
   | {
-      name: WorkspaceSecretName;
+      name: string;
       state: "undecryptable";
       binding: string;
       code: SecretBoxErrorCode;
@@ -89,17 +85,18 @@ export type UseWorkspaceSecretResult =
         | "secret_key_version_unknown";
     };
 
-export type WorkspaceSecretStore = {
+/** The store of the secrets of one workspace, for the names `Name` (the application says which: they are not listed here). */
+export type WorkspaceSecretStore<Name extends string = string> = {
   save(
-    name: WorkspaceSecretName,
+    name: Name,
     value: string,
     options: SaveWorkspaceSecretOptions,
   ): Promise<SaveSecretResult>;
-  status(name: WorkspaceSecretName): Promise<WorkspaceSecretStatus>;
+  status(name: Name): Promise<WorkspaceSecretStatus>;
   /** The value, for code on the server that needs it. Never hand it to a response. */
-  use(name: WorkspaceSecretName): Promise<UseWorkspaceSecretResult>;
+  use(name: Name): Promise<UseWorkspaceSecretResult>;
   /** Forgets the secret; false when there was none. */
-  remove(name: WorkspaceSecretName): Promise<boolean>;
+  remove(name: Name): Promise<boolean>;
   /** The names of the secrets the workspace holds (configured or not readable); never a value. */
   names(): Promise<string[]>;
 };
@@ -117,17 +114,17 @@ function lastFourOf(value: string): string {
   return [...value].slice(-4).join("");
 }
 
-export function createWorkspaceSecretStore({
+export function createWorkspaceSecretStore<Name extends string>({
   db,
   workspaceId,
   appSecret,
   now = () => new Date(),
-}: WorkspaceSecretStoreOptions): WorkspaceSecretStore {
+}: WorkspaceSecretStoreOptions): WorkspaceSecretStore<Name> {
   const rows = createWorkspaceSecretsRepository(db, workspaceId, now);
 
   // Decrypts one row; the failure is a value, not an exception.
   function open(
-    name: WorkspaceSecretName,
+    name: Name,
     row: WorkspaceSecretRow,
   ): { ok: true; value: string } | { ok: false; code: SecretBoxErrorCode } {
     try {

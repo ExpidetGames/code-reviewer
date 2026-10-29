@@ -17,6 +17,10 @@ import {
 } from "./access.ts";
 import { readLlmDefaults } from "./config.ts";
 import {
+  OPERATOR_LLM_KEY_NAMES,
+  type WorkspaceLlmKeyName,
+} from "./secret-names.ts";
+import {
   DEFAULT_LLM_PROVIDER,
   llmProviderDescriptors,
 } from "./providers/index.ts";
@@ -112,7 +116,7 @@ export function createWorkspaceLlm({
   const ownProviders = withNativeProviders(providers);
   const keyServiceFor = (workspaceId: string) =>
     createWorkspaceLlmKeyService({
-      store: createWorkspaceSecretStore({
+      store: createWorkspaceSecretStore<WorkspaceLlmKeyName>({
         db,
         workspaceId,
         appSecret: appSecret(),
@@ -125,6 +129,7 @@ export function createWorkspaceLlm({
     createOperatorLlmKeyService({
       store: createSecretStore({
         db,
+        names: OPERATOR_LLM_KEY_NAMES,
         appSecret: appSecret(),
         ...(now === undefined ? {} : { now }),
       }),

@@ -27,7 +27,6 @@ import {
   type SecretRow,
 } from "../db/repositories/secrets-repository.ts";
 import type { Database } from "../db/schema.ts";
-import { SECRET_NAMES, type SecretName } from "./names.ts";
 import { SecretValue } from "./secret-value.ts";
 
 export const SECRET_STORE_ERROR_CODES = [
@@ -56,10 +55,14 @@ function locationOf(name: string): SecretLocation {
   return { table: TABLE, rowId: name, field: FIELD };
 }
 
+/**
+ * What is known of one secret. `name` is a plain string, not the `Name` of the store: a store typed for the names one
+ * module needs can then be a view of the store that knows all of them.
+ */
 export type SecretStatus =
-  | { name: SecretName; state: "not_configured" }
+  | { name: string; state: "not_configured" }
   | {
-      name: SecretName;
+      name: string;
       state: "configured";
       /** The last four characters, if the hint was asked for when it was saved; else null. */
       lastFour: string | null;
@@ -68,7 +71,7 @@ export type SecretStatus =
       updatedBy: string | null;
     }
   | {
-      name: SecretName;
+      name: string;
       state: "undecryptable";
       code: SecretBoxErrorCode;
       updatedAt: string;
@@ -95,23 +98,29 @@ export type UseSecretResult =
         | "secret_key_version_unknown";
     };
 
-export type SecretStore = {
+/**
+ * The store of the secrets of the server, for the names `Name`. The store does not know which names exist: the
+ * application that composes it says so (`names`), and the module that uses it types it with the names it needs.
+ */
+export type SecretStore<Name extends string = string> = {
   save(
-    name: SecretName,
+    name: Name,
     value: string,
     options: SaveSecretOptions,
   ): Promise<SaveSecretResult>;
-  status(name: SecretName): Promise<SecretStatus>;
-  /** The status of every known secret, in the order of `SECRET_NAMES`. */
+  status(name: Name): Promise<SecretStatus>;
+  /** The status of every known secret, in the order of `names`. */
   statuses(): Promise<SecretStatus[]>;
   /** The value, for code on the server that needs it. Never hand it to a response. */
-  use(name: SecretName): Promise<UseSecretResult>;
+  use(name: Name): Promise<UseSecretResult>;
   /** Forgets the secret; false when there was none. */
-  remove(name: SecretName): Promise<boolean>;
+  remove(name: Name): Promise<boolean>;
 };
 
-export type SecretStoreOptions = {
+export type SecretStoreOptions<Name extends string> = {
   db: Kysely<Database>;
+  /** The closed list of the secrets this store knows, in the order `statuses` answers them (see `composeSecretNames`). */
+  names: readonly Name[];
   /** The master key (`APP_SECRET`). */
   appSecret: string;
   now?: () => Date;
@@ -121,11 +130,12 @@ function lastFourOf(value: string): string {
   return [...value].slice(-4).join("");
 }
 
-export function createSecretStore({
+export function createSecretStore<Name extends string>({
   db,
+  names,
   appSecret,
   now = () => new Date(),
-}: SecretStoreOptions): SecretStore {
+}: SecretStoreOptions<Name>): SecretStore<Name> {
   const rows = createSecretsRepository(db, now);
 
   // Decrypts one row; the failure is a value, not an exception.
@@ -149,10 +159,7 @@ export function createSecretStore({
     }
   }
 
-  function describe(
-    name: SecretName,
-    row: SecretRow | undefined,
-  ): SecretStatus {
+  function describe(name: Name, row: SecretRow | undefined): SecretStatus {
     if (row === undefined) return { name, state: "not_configured" };
     const opened = open(row);
     if (!opened.ok)
@@ -199,7 +206,7 @@ export function createSecretStore({
 
     async statuses() {
       const stored = new Map((await rows.list()).map((row) => [row.name, row]));
-      return SECRET_NAMES.map((name) => describe(name, stored.get(name)));
+      return names.map((name) => describe(name, stored.get(name)));
     },
 
     async use(name) {
