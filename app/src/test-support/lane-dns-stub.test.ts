@@ -107,7 +107,7 @@ describe("the resolver of the Dynamic lane", () => {
   });
 
   // #714-T02
-  it("answers a query it cannot read with 'format error' and writes it down as no name, and never answers an answer", async () => {
+  it("answers a query it cannot read with 'format error', never answers an answer, and writes both down", async () => {
     const resolver = await startLaneResolver({ port: 0 });
     try {
       const garbled = Buffer.concat([
@@ -139,7 +139,10 @@ describe("the resolver of the Dynamic lane", () => {
       expect(answers[0]![3]! & 0x0f).toBe(1);
       expect(answers[1]![3]! & 0x0f).toBe(3);
       expect(resolver.asked()).toEqual([
-        "MALFORMED (not a query with one question)",
+        expect.stringMatching(
+          /^MALFORMED not a query with one question, 15 bytes /,
+        ),
+        expect.stringMatching(/^IGNORED an answer, \d+ bytes /),
         "A c.example",
       ]);
     } finally {

@@ -114,8 +114,15 @@ test.describe("the network guard of the Dynamic lane", () => {
     attempt: () => Promise<{ status: number | string; stderr: string }>,
   ) {
     const before = readGuard();
+    const dnsBefore = readDns();
     const done = await attempt();
     const after = readGuard();
+    // The addresses of an attempt are literal: the engine user looked up no name (root's counter is left out, the
+    // lane's own programs ask for a name now and then while a test runs).
+    expect(
+      readDns().queries.engine,
+      "name lookups of the engine user during the attempt",
+    ).toBe(dnsBefore.queries.engine);
     expect(
       after.controls[who] - before.controls[who],
       `the attempt ended with ${JSON.stringify(done)}`,
@@ -142,6 +149,7 @@ test.describe("the network guard of the Dynamic lane", () => {
     // The engine starts slowly the first time; the condition that matters is the counter, so the test waits
     // for that and then ends the process.
     const before = readGuard();
+    const dnsBefore = readDns();
     const child = spawn(
       "setpriv",
       asUserCommand(ENGINE, home, OPENCODE_PATH, [
@@ -165,6 +173,10 @@ test.describe("the network guard of the Dynamic lane", () => {
     }
 
     expect(readGuard().violations).toEqual(before.violations);
+    expect(
+      readDns().queries.engine,
+      "name lookups of the engine user while OpenCode ran",
+    ).toBe(dnsBefore.queries.engine);
   });
 
   // #714-T02

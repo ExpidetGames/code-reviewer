@@ -92,22 +92,30 @@ export async function startLaneResolver(options: {
 }): Promise<LaneResolver> {
   const asked: string[] = [];
   const socket: Socket = createSocket("udp4");
+  // Everything that arrives is written down, also what is no question: the guard's allowlist has no such line, so the lane
+  // fails and the line says what arrived (its length and first bytes).
+  const note = (line: string) => {
+    asked.push(line);
+    options.onAsked?.(line);
+  };
   socket.on("message", (message, remote) => {
+    const what = `${String(message.length)} bytes ${message.subarray(0, 24).toString("hex")}`;
     // An answer (QR set) is not a question, whatever follows its header: two resolvers cannot loop on each other.
-    if (message.length > 2 && (message[2]! & 0x80) !== 0) return;
+    if (message.length > 2 && (message[2]! & 0x80) !== 0) {
+      note(`IGNORED an answer, ${what}`);
+      return;
+    }
     const question = readQuestion(message);
     if (question === null) {
-      if (!isQueryWithHeader(message)) return;
-      // Written down like a name that was asked: the allowlist of the guard has no such line, so the lane fails and says what.
-      const line = "MALFORMED (not a query with one question)";
-      asked.push(line);
-      options.onAsked?.(line);
+      if (!isQueryWithHeader(message)) {
+        note(`IGNORED a packet too short to be a query, ${what}`);
+        return;
+      }
+      note(`MALFORMED not a query with one question, ${what}`);
       socket.send(formatErrorAnswer(message), remote.port, remote.address);
       return;
     }
-    const line = `${question.type} ${question.name}`;
-    asked.push(line);
-    options.onAsked?.(line);
+    note(`${question.type} ${question.name}`);
     socket.send(noSuchNameAnswer(message), remote.port, remote.address);
   });
   await new Promise<void>((resolve, reject) => {

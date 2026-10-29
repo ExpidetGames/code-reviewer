@@ -442,7 +442,9 @@ describe("the name lookups on the lane's own resolver", () => {
     expect(
       describeDnsProblems(
         parseDns(listing({ ...QUIET, ...DNS_QUIET })),
-        parseAskedNames("MALFORMED (not a query with one question)"),
+        parseAskedNames(
+          "MALFORMED not a query with one question, 15 bytes 1234",
+        ),
         ALLOWED,
       ),
     ).toHaveLength(1);
