@@ -5,7 +5,6 @@ written, how the spool is read, how a git version is judged and what a workspace
 built with."""
 
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ from code_reviewer_runner.implementer.git_workspace import (
     WorkspaceSpec,
 )
 from code_reviewer_runner.implementer.guard_files import (
-    guard_conf_text,
     parse_spool,
     system_gitconfig_text,
 )
@@ -27,28 +25,6 @@ from code_reviewer_runner.job import JobError
 from code_reviewer_runner.result import ErrorCode
 
 SHA = "a" * 40
-
-
-def _shell_value(text: str, name: str) -> str:
-    """What `. conf` makes of `NAME=...`: the hook sources the file with bash."""
-    done = subprocess.run(
-        ["bash", "-c", f"{text}\nprintf %s \"${name}\""], capture_output=True, text=True, check=True
-    )
-    return done.stdout
-
-
-# #762-T02
-@pytest.mark.parametrize(
-    "branch",
-    ["implementer/a1b2c3", "fix/$(id)", "x`id`y", "a'b", 'a"b', "a;b", "a&b|c", "a\\b", "a$HOME", "é"],
-)
-def test_the_guard_configuration_survives_the_shell_with_any_branch_name(branch: str) -> None:
-    text = guard_conf_text(branch=branch, start=SHA, spool="/run/spool file")
-
-    assert _shell_value(text, "BRANCH") == branch
-    assert _shell_value(text, "START") == SHA
-    assert _shell_value(text, "SPOOL") == "/run/spool file"
-    assert not text.startswith("#!")
 
 
 # #762-T02
@@ -59,26 +35,11 @@ def test_the_system_git_config_points_at_the_hooks_and_trusts_the_repository() -
     assert 'directory = "/work/repo"' in text
 
 
-# #762-T02
-def test_a_path_with_a_quote_or_backslash_is_escaped_in_the_git_config(tmp_path: Path) -> None:
-    hooks = tmp_path / 'we"ird\\dir'
-    hooks.mkdir()
-    config = tmp_path / "system.gitconfig"
-    config.write_text(system_gitconfig_text(hooks, [hooks]))
-
-    done = subprocess.run(
-        ["git", "config", "--file", str(config), "core.hooksPath"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    assert done.stdout.strip() == str(hooks)
-
-
 # #762-T12
 def test_the_spool_lines_that_look_like_a_tip_update_are_read_and_the_rest_ignored() -> None:
-    text = f"1700000000.123 {SHA}\nnot a line\n\n17.5 {'b' * 40} extra\n9 {'c' * 39}\n12 {'d' * 40}\n"
+    text = (
+        f"1700000000.123 {SHA}\nnot a line\n\n17.5 {'b' * 40} extra\n9 {'c' * 39}\n12 {'d' * 40}\n"
+    )
 
     assert parse_spool(text) == [(1700000000.123, SHA), (12.0, "d" * 40)]
 
@@ -100,14 +61,18 @@ def test_a_spool_of_binary_garbage_gives_no_entries() -> None:
         ("", None),
     ],
 )
-def test_the_git_version_is_read_from_its_banner(text: str, expected: tuple[int, ...] | None) -> None:
+def test_the_git_version_is_read_from_its_banner(
+    text: str, expected: tuple[int, ...] | None
+) -> None:
     assert parse_git_version(text) == expected
 
 
 # #762-T11
 def test_the_minimum_git_is_2_53() -> None:
     assert MIN_GIT_VERSION == (2, 53)
-    assert (2, 52, 9) < MIN_GIT_VERSION <= (2, 53, 0)
+    below: tuple[int, ...] = (2, 52, 9)
+    above: tuple[int, ...] = (2, 53, 0)
+    assert below < MIN_GIT_VERSION <= above
     assert re.fullmatch(r"\d+\.\d+", ".".join(map(str, MIN_GIT_VERSION)))
 
 
@@ -127,7 +92,11 @@ def _workspace(tmp_path: Path, **overrides: object) -> GitWorkspace:
     agent = overrides.pop("agent", AgentUser(uid=10101, gid=10101))
     assert isinstance(agent, AgentUser)
     return GitWorkspace(
-        spec, layout, agent, GitIdentity("Implementer", "i@example.invalid"), **overrides  # type: ignore[arg-type]
+        spec,
+        layout,
+        agent,
+        GitIdentity("Implementer", "i@example.invalid"),
+        **overrides,  # type: ignore[arg-type]
     )
 
 

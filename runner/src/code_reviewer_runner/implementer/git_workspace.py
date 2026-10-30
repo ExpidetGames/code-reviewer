@@ -14,8 +14,8 @@ What the system does, and what the agent can and cannot:
   a hand-written ref gets around it.
 * **The guarantee is the push.** From the mirror, as root: fetch the agent's branch without force,
   check that the tip still contains the start commit, push without force. A rewrite below what was
-  already pushed makes the fetch refuse; the turn then ends `branch_violation` and the provider keeps
-  the last good tip.
+  already pushed makes the fetch refuse; the turn then ends `branch_violation` and the provider
+  keeps the last good tip.
 * Root never runs git with the agent's repository as working directory or git directory (it would
   run the `core.fsmonitor`, hooks and aliases the agent can write). `git status` and the leftover
   commit run as the agent's user. The mirror reads the agent's branch through `git upload-pack` that
@@ -57,7 +57,8 @@ from .guard_files import (
 )
 
 LEFTOVER_MESSAGE = "Implementer: uncommitted changes of the turn"
-# The most often a batch of commits is pushed while the agent works (the final push is not held back).
+# The most often a batch of commits is pushed while the agent works (the final push is not held
+# back).
 PUSH_INTERVAL_SECONDS = 120.0
 SELF_TEST_TIMEOUT = 180.0
 _PLAIN_FETCH = ("--no-tags", "--no-write-fetch-head")
@@ -257,7 +258,9 @@ class GitWorkspace:
                 **spawn_options(self.agent.uid, self.agent.gid),
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            raise fail(ErrorCode.SETUP_FAILED, f"the guard matrix cannot run: {type(error).__name__}") from None
+            raise fail(
+                ErrorCode.SETUP_FAILED, f"the guard matrix cannot run: {type(error).__name__}"
+            ) from None
         if done.returncode != 0:
             lines = [
                 line
@@ -283,7 +286,9 @@ class GitWorkspace:
             ["init", "-q", "--bare", f"--initial-branch={base}", str(mirror)], protocols="file"
         )
         if init.returncode != 0:
-            raise fail(ErrorCode.SETUP_FAILED, "the mirror cannot be created: " + self._detail(init))
+            raise fail(
+                ErrorCode.SETUP_FAILED, "the mirror cannot be created: " + self._detail(init)
+            )
         fetched = self._root(
             [
                 "--git-dir",
@@ -334,7 +339,10 @@ class GitWorkspace:
             protocols="file",
         )
         if cloned.returncode != 0:
-            raise fail(ErrorCode.SETUP_FAILED, "the agent repository cannot be cloned: " + self._detail(cloned))
+            raise fail(
+                ErrorCode.SETUP_FAILED,
+                "the agent repository cannot be cloned: " + self._detail(cloned),
+            )
         _hand_over(self.repo, self.agent)
         setup = (
             ["remote", "remove", "origin"],
@@ -378,7 +386,7 @@ class GitWorkspace:
     # -- the leftover API (as the agent's user) ---------------------------------------------------
 
     def dirty(self) -> bool:
-        """Whether the working tree has changes, untracked files included. Runs as the agent's user."""
+        """Whether the working tree has changes, untracked files included. Runs as the agent."""
         done = self._as_agent(
             ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
         )
@@ -430,7 +438,9 @@ class GitWorkspace:
         """Fetch the agent's branch into the mirror without force, check that it still contains
         the start commit, and push it from the mirror without force."""
         if self._poisoned:
-            raise fail(ErrorCode.BRANCH_VIOLATION, "the agent's branch was rewritten earlier in this turn")
+            raise fail(
+                ErrorCode.BRANCH_VIOLATION, "the agent's branch was rewritten earlier in this turn"
+            )
         self.verifications += 1
         branch = self.spec.branch
         ref = f"refs/heads/{branch}"
@@ -478,7 +488,14 @@ class GitWorkspace:
 
     def _push_from_mirror(self, ref: str, tip: str) -> PushResult:
         pushed = self._root(
-            ["--git-dir", str(self.mirror), "push", "--porcelain", self.spec.clone_url, f"{ref}:{ref}"],
+            [
+                "--git-dir",
+                str(self.mirror),
+                "push",
+                "--porcelain",
+                self.spec.clone_url,
+                f"{ref}:{ref}",
+            ],
             protocols=":".join(self._schemes),
             token=True,
         )
@@ -495,7 +512,7 @@ class GitWorkspace:
         self._pushed = tip
         return PushResult(PushOutcome.PUSHED, tip)
 
-    # -- internals -----------------------------------------------------------------------------------
+    # -- internals ------------------------------------------------------------------------
 
     def _check_names(self) -> None:
         """The branch names are used in refspecs: git itself says whether they are fine."""
@@ -516,7 +533,9 @@ class GitWorkspace:
             os.chmod(directory, 0o755)
         for existing in (self.mirror, self.repo):
             if existing.exists() or existing.is_symlink():
-                raise fail(ErrorCode.SETUP_FAILED, f"{existing.name} exists already in the work directory")
+                raise fail(
+                    ErrorCode.SETUP_FAILED, f"{existing.name} exists already in the work directory"
+                )
 
     def _drops_privileges(self) -> bool:
         return bool(spawn_options(self.agent.uid, self.agent.gid))
@@ -525,8 +544,8 @@ class GitWorkspace:
         return shutil.which("setpriv", path=TRUSTED_PATH)
 
     def _upload_pack(self) -> str:
-        """The command git runs on the far side of a local fetch. It reads the agent's repository, so
-        it runs as the agent's user: the config of that repository is read with the agent's rights."""
+        """The command git runs on the far side of a local fetch. It reads the agent's repository,
+        so it runs as the agent's user: that repository's config is read with the agent's rights."""
         command = [self.git, "upload-pack"]
         if self._drops_privileges():
             setpriv = self._setpriv()
@@ -565,7 +584,7 @@ class GitWorkspace:
         return done.stdout.strip() or None if done.returncode == 0 else None
 
     def _restore(self, ref: str, previous: str | None) -> None:
-        """Put the mirror's branch back to what was pushed (or remove it): a rejected tip is not kept."""
+        """Put the mirror's branch back to what was pushed (or remove it)."""
         arguments = ["update-ref", "-d", ref] if previous is None else ["update-ref", ref, previous]
         self._root(["--git-dir", str(self.mirror), *arguments], protocols="file")
 

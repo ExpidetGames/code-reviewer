@@ -6,11 +6,7 @@ and `AgentUser` names the current one."""
 
 import os
 import subprocess
-from collections.abc import Iterator
 from pathlib import Path
-
-import pytest
-from git_support import TOKEN, Origin, guard_directory, guard_git, raw
 
 from code_reviewer_runner.implementer.git_workspace import (
     AgentUser,
@@ -19,6 +15,7 @@ from code_reviewer_runner.implementer.git_workspace import (
     WorkspaceLayout,
     WorkspaceSpec,
 )
+from git_support import TOKEN, Origin, guard_directory, raw
 
 IDENTITY = GitIdentity(name="Code Review Implementer", email="implementer@example.invalid")
 BRANCH = "implementer/a1b2c3"
@@ -59,16 +56,10 @@ class Rig:
             spec, self.layout, _agent(), IDENTITY, git=git or self.git, schemes=schemes
         )
 
-    def prepared(self, **options: str) -> GitWorkspace:
-        workspace = self.workspace(**options)
+    def prepared(self, base_branch: str = "main", branch: str = BRANCH) -> GitWorkspace:
+        workspace = self.workspace(base_branch=base_branch, branch=branch)
         workspace.prepare(self_test=False)
         return workspace
-
-
-@pytest.fixture
-def rig(tmp_path: Path) -> Iterator[Rig]:
-    git = guard_git()
-    yield Rig(tmp_path, git, Origin(tmp_path, git))
 
 
 def agent_git(workspace: GitWorkspace, *args: str) -> subprocess.CompletedProcess[str]:
@@ -85,9 +76,31 @@ def agent_git(workspace: GitWorkspace, *args: str) -> subprocess.CompletedProces
 
 def reset_to(workspace: GitWorkspace, sha: str) -> None:
     """Back to a known state between actions, without the guard (a test's own set-up)."""
-    raw("checkout", "-qf", BRANCH, cwd=workspace.repo, git=workspace.git, GIT_CONFIG_SYSTEM="/dev/null")
-    raw("update-ref", f"refs/heads/{BRANCH}", sha, cwd=workspace.repo, git=workspace.git, GIT_CONFIG_SYSTEM="/dev/null")
-    raw("reset", "-q", "--hard", sha, cwd=workspace.repo, git=workspace.git, GIT_CONFIG_SYSTEM="/dev/null")
+    raw(
+        "checkout",
+        "-qf",
+        BRANCH,
+        cwd=workspace.repo,
+        git=workspace.git,
+        GIT_CONFIG_SYSTEM="/dev/null",
+    )
+    raw(
+        "update-ref",
+        f"refs/heads/{BRANCH}",
+        sha,
+        cwd=workspace.repo,
+        git=workspace.git,
+        GIT_CONFIG_SYSTEM="/dev/null",
+    )
+    raw(
+        "reset",
+        "-q",
+        "--hard",
+        sha,
+        cwd=workspace.repo,
+        git=workspace.git,
+        GIT_CONFIG_SYSTEM="/dev/null",
+    )
     raw("clean", "-qfd", cwd=workspace.repo, git=workspace.git, GIT_CONFIG_SYSTEM="/dev/null")
 
 

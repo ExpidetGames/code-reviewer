@@ -3,10 +3,10 @@
 """Running git for the Implementer's workspace (#762): a closed environment, the token only in the
 environment of the one process that talks to the provider, and errors that never carry it.
 
-Two kinds of caller. The *runner* (root) runs git on the mirror it owns and, to talk to the provider,
-with the token. The *agent's user* runs git in the agent's repository. Root never runs git with the
-agent's repository as working directory or git directory: that would run the `core.fsmonitor`, hooks
-and aliases the agent can write.
+Two kinds of caller. The *runner* (root) runs git on the mirror it owns and, to talk to the
+provider, with the token. The *agent's user* runs git in the agent's repository. Root never runs
+git with the agent's repository as working directory or git directory: that would run the
+`core.fsmonitor`, hooks and aliases the agent can write.
 """
 
 import base64
@@ -25,7 +25,7 @@ from ..result import ErrorCode
 TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
 # The guard hook is blind to a change of branch on older git (spike section 2.2): the self-test
 # refuses to run a turn on it.
-MIN_GIT_VERSION = (2, 53)
+MIN_GIT_VERSION: tuple[int, ...] = (2, 53)
 # Characters of git's own output that may travel in an error detail.
 DETAIL_CHARS = 600
 DEFAULT_TIMEOUT = 600.0
@@ -88,9 +88,7 @@ class GitProcess:
         self.path = path
         self._home = home
         self._token = token
-        self._redactor = Redactor(
-            [token, f"x-access-token:{token}", basic_authorization(token)]
-        )
+        self._redactor = Redactor([token, f"x-access-token:{token}", basic_authorization(token)])
 
     def base_environment(self, protocols: str) -> dict[str, str]:
         return {

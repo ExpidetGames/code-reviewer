@@ -1165,6 +1165,24 @@ protect it:
   image); on another minor version they differ, so the fingerprint tests first assert the
   interpreter and say so instead of reporting a PR-Agent change that does not exist.
 
+## The Implementer's git workspace (#762)
+
+`code_reviewer_runner/implementer/` is the git side of an Implementer turn (the agent, the egress proxy and the job glue come
+later). It is the safety core of the slice; the rules, in short:
+
+| Piece | What it is |
+|---|---|
+| Mirror `/work/mirror.git` | A bare, `--depth 1` clone of the base branch, root-owned, mode 0700. The provider token is in the environment (`GIT_CONFIG_COUNT`, `http.extraHeader`) of the one git process that clones or pushes: never in argv, a config file, a URL or anything the engine user can read. Redirects are not followed. |
+| Agent repository `/work/repo` | A local clone of the mirror (no hard links) owned by the engine user: no remote, system identity, the new branch at the base tip. Root never runs git with it as working directory or git directory; `dirty()` and `commit_all()` run as the engine user. |
+| Guard | `/run/code-reviewer/guard.conf` (`BRANCH`, `START`, `SPOOL`, quoted, read by the hook from `CODE_REVIEWER_GUARD_CONF`) and `system.gitconfig` (`GIT_CONFIG_SYSTEM`: `core.hooksPath` = `/opt/code-reviewer/guard`, `safe.directory`), written by root. The hook is the image's (#761). It is an accident guard; `git -c core.hooksPath=/dev/null` gets around it. |
+| Spool | A hint, never evidence: a line per tip update, appended by the engine user. The runner also polls the branch every 2 s (`PushLoop.tick`). A forged line costs one verified push attempt. |
+| Push (the guarantee) | As root, from the mirror: `fetch` of the agent's branch without `+`, `merge-base --is-ancestor <start> <tip>`, `push` without force. The fetch reads the agent's repository through a `git upload-pack` run as the engine user (`setpriv`), so the repository's config is never read with root's rights. A rewrite below what was pushed makes the fetch refuse: `branch_violation`, the provider keeps the last good tip, and nothing is pushed afterwards. A branch that exists on the provider: `branch_exists`; any other refusal (workflow file, permission, network): `push_rejected`. |
+| Self-test | `GitWorkspace.self_test()` runs `guard_matrix.sh` as the engine user (and needs git 2.53 or newer, where the hook sees a branch switch): any failure is `setup_failed`, never a turn without a guard. |
+
+The tests need git 2.53 or newer first on `PATH` and the guard files of the image change (`runner/guard/`, `runner/scripts/guard_matrix.sh`);
+without them they fail with the reason and never skip. The user separation (uids, what the engine user can read) is proven by
+`tests/privileged/test_implementer_git_users.py`.
+
 ## Engine tests
 
 `tests/engine/` runs the real, pinned PR-Agent through `code-reviewer-run-job` (one process per job)

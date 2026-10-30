@@ -31,11 +31,7 @@ _ENTRY = re.compile(r"(\d+(?:\.\d+)?) ([0-9a-f]{40})")
 
 def guard_conf_text(*, branch: str, start: str, spool: str) -> str:
     """The configuration of the hook. Sourced by bash, so every value is single-quoted."""
-    return (
-        f"BRANCH={shlex.quote(branch)}\n"
-        f"START={shlex.quote(start)}\n"
-        f"SPOOL={shlex.quote(spool)}\n"
-    )
+    return f"BRANCH={shlex.quote(branch)}\nSTART={shlex.quote(start)}\nSPOOL={shlex.quote(spool)}\n"
 
 
 def _git_quoted(value: str) -> str:
@@ -69,7 +65,7 @@ def write_file(path: Path, text: str, mode: int) -> None:
 
 
 class SpoolWatcher:
-    """Reads the spool from where it stopped last time and says whether a tip update was signalled."""
+    """Reads the spool from where it stopped and says whether a tip update was signalled."""
 
     def __init__(self, path: Path) -> None:
         self._path = path

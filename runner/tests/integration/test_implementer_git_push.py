@@ -11,12 +11,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from git_support import TOKEN, HttpOrigin, raw
-from workspace_support import (  # noqa: F401 - rig is a fixture
+from workspace_support import (
     BRANCH,
     Rig,
     agent_git,
-    rig,
 )
 
 from code_reviewer_runner.implementer.git_workspace import (
@@ -26,6 +24,7 @@ from code_reviewer_runner.implementer.git_workspace import (
 )
 from code_reviewer_runner.job import JobError
 from code_reviewer_runner.result import ErrorCode
+from git_support import TOKEN, HttpOrigin, raw
 
 NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
 
@@ -174,9 +173,7 @@ def test_a_branch_that_no_longer_contains_the_start_is_a_violation_and_nothing_i
     workspace = rig.prepared()
     commit(workspace, "a.txt")
     empty_tree = raw("hash-object", "-t", "tree", "/dev/null", cwd=workspace.repo, git=rig.git)
-    unrelated = raw(
-        "commit-tree", empty_tree, "-m", "unrelated", cwd=workspace.repo, git=rig.git
-    )
+    unrelated = raw("commit-tree", empty_tree, "-m", "unrelated", cwd=workspace.repo, git=rig.git)
     bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", unrelated)
 
     with pytest.raises(JobError) as refused:
@@ -184,11 +181,22 @@ def test_a_branch_that_no_longer_contains_the_start_is_a_violation_and_nothing_i
 
     assert refused.value.code is ErrorCode.BRANCH_VIOLATION
     assert rig.origin.tip(BRANCH) is None
-    assert subprocess.run(
-        [rig.git, "--git-dir", str(workspace.mirror), "rev-parse", "-q", "--verify", f"refs/heads/{BRANCH}"],
-        capture_output=True,
-        check=False,
-    ).returncode != 0, "the mirror does not keep the rejected tip"
+    assert (
+        subprocess.run(
+            [
+                rig.git,
+                "--git-dir",
+                str(workspace.mirror),
+                "rev-parse",
+                "-q",
+                "--verify",
+                f"refs/heads/{BRANCH}",
+            ],
+            capture_output=True,
+            check=False,
+        ).returncode
+        != 0
+    ), "the mirror does not keep the rejected tip"
 
 
 # #762-T06
@@ -353,14 +361,23 @@ def test_binary_and_large_commits_are_pushed_and_the_shallow_mirror_passes_the_c
 
     assert result.outcome is PushOutcome.PUSHED
     assert rig.origin.tip(BRANCH) == tip
-    size = raw("cat-file", "-s", f"{tip}:data.bin", cwd=rig.origin.seed, git=rig.git, GIT_DIR=str(rig.origin.path))
+    size = raw(
+        "cat-file",
+        "-s",
+        f"{tip}:data.bin",
+        cwd=rig.origin.seed,
+        git=rig.git,
+        GIT_DIR=str(rig.origin.path),
+    )
     assert int(size) == len(blob)
     assert (Path(workspace.mirror) / "shallow").exists(), "the mirror is a depth 1 clone"
     assert os.environ.get("GIT_DIR") is None
 
 
 # #762-T09
-def test_the_runner_never_executes_the_config_of_the_agent_repository(rig: Rig, tmp_path: Path) -> None:
+def test_the_runner_never_executes_the_config_of_the_agent_repository(
+    rig: Rig, tmp_path: Path
+) -> None:
     workspace = rig.prepared()
     marker = tmp_path / "marker"
     script = tmp_path / "trap.sh"
@@ -383,11 +400,26 @@ def test_the_runner_never_executes_the_config_of_the_agent_repository(rig: Rig, 
     agent_env = workspace.agent_environment()
     subprocess.run(
         [rig.git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "add", "-A"],
-        cwd=workspace.repo, env=agent_env, check=True, capture_output=True,
+        cwd=workspace.repo,
+        env=agent_env,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
-        [rig.git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "commit", "-qm", "x"],
-        cwd=workspace.repo, env=agent_env, check=True, capture_output=True,
+        [
+            rig.git,
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            "commit",
+            "-qm",
+            "x",
+        ],
+        cwd=workspace.repo,
+        env=agent_env,
+        check=True,
+        capture_output=True,
     )
     assert commit_ref != raw("rev-parse", "HEAD", cwd=workspace.repo, git=rig.git)
     marker.unlink(missing_ok=True)

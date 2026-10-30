@@ -114,7 +114,15 @@ class Origin:
 
     def tip(self, branch: str = "main") -> str | None:
         done = subprocess.run(
-            [self.git, "--git-dir", str(self.path), "rev-parse", "-q", "--verify", f"refs/heads/{branch}"],
+            [
+                self.git,
+                "--git-dir",
+                str(self.path),
+                "rev-parse",
+                "-q",
+                "--verify",
+                f"refs/heads/{branch}",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -168,7 +176,7 @@ class HttpOrigin:
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
-            def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            def log_message(self, format: str, *args: Any) -> None:
                 return
 
             def _serve(self) -> None:
@@ -201,7 +209,11 @@ class HttpOrigin:
                     "GIT_CONFIG_NOSYSTEM": "1",
                 }
                 done = subprocess.run(
-                    [outer.git, "http-backend"], input=body, env=env, capture_output=True, check=False
+                    [outer.git, "http-backend"],
+                    input=body,
+                    env=env,
+                    capture_output=True,
+                    check=False,
                 )
                 head, _, payload = done.stdout.partition(b"\r\n\r\n")
                 status = 200
@@ -236,8 +248,8 @@ class HttpOrigin:
                     data = gzip.decompress(data)
                 return data
 
-            do_GET = _serve  # noqa: N815
-            do_POST = _serve  # noqa: N815
+            do_GET = _serve
+            do_POST = _serve
 
         self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -270,7 +282,9 @@ def processes_mentioning(*needles: str) -> list[str]:
         if not entry.name.isdigit() or int(entry.name) == os.getpid():
             continue
         try:
-            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+            command = (
+                (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+            )
         except OSError:
             continue
         if any(needle in command for needle in needles):

@@ -14,35 +14,30 @@ import os
 import stat
 import subprocess
 import threading
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from git_support import (
-    TOKEN,
-    HttpOrigin,
-    Origin,
-    environments_mentioning,
-    files_mentioning,
-    guard_directory,
-    guard_git,
-    processes_mentioning,
-    raw,
-)
-
-from workspace_support import (  # noqa: F401 - rig is a fixture
+from workspace_support import (
     BRANCH,
     IDENTITY,
     Rig,
     agent_git,
     reset_to,
-    rig,
     spool_lines,
 )
 
 from code_reviewer_runner.implementer.git_workspace import LEFTOVER_MESSAGE, GitWorkspace
 from code_reviewer_runner.job import JobError
 from code_reviewer_runner.result import ErrorCode
+from git_support import (
+    TOKEN,
+    HttpOrigin,
+    environments_mentioning,
+    files_mentioning,
+    processes_mentioning,
+    raw,
+)
+
 
 # #762-T01
 def test_the_base_branch_is_cloned_into_a_root_owned_mirror(rig: Rig) -> None:
@@ -68,7 +63,7 @@ def test_the_token_is_in_no_argv_no_file_and_no_url(rig: Rig) -> None:
         def clone() -> None:
             try:
                 workspace.clone_mirror()
-            except BaseException as error:  # noqa: BLE001 - handed to the test thread
+            except BaseException as error:
                 done.append(error)
 
         thread = threading.Thread(target=clone)
@@ -219,7 +214,11 @@ ALLOWED = {
         "-c",
         "git fetch -q {side} side && git cherry-pick FETCH_HEAD",
     ],
-    "ff-merge of a new commit": ["sh", "-c", "git fetch -q {side} side && git merge -q --ff-only FETCH_HEAD"],
+    "ff-merge of a new commit": [
+        "sh",
+        "-c",
+        "git fetch -q {side} side && git merge -q --ff-only FETCH_HEAD",
+    ],
 }
 
 
@@ -240,7 +239,10 @@ def test_allowed_actions_work_and_signal(rig: Rig, name: str) -> None:
     done = subprocess.run(
         command if command[0] != "git" else [rig.git, *command[1:]],
         cwd=workspace.repo,
-        env={**workspace.agent_environment(), "PATH": f"{Path(rig.git).parent}:{os.environ['PATH']}"},
+        env={
+            **workspace.agent_environment(),
+            "PATH": f"{Path(rig.git).parent}:{os.environ['PATH']}",
+        },
         capture_output=True,
         text=True,
         check=False,
@@ -320,7 +322,9 @@ def test_blocked_actions_fail_and_leave_the_branch(rig: Rig, name: str) -> None:
 def test_deleting_the_branch_is_blocked(rig: Rig) -> None:
     workspace = rig.prepared()
     tip = raw("rev-parse", "HEAD", cwd=workspace.repo, git=rig.git)
-    raw("checkout", "-q", "--detach", cwd=workspace.repo, git=rig.git, GIT_CONFIG_SYSTEM="/dev/null")
+    raw(
+        "checkout", "-q", "--detach", cwd=workspace.repo, git=rig.git, GIT_CONFIG_SYSTEM="/dev/null"
+    )
 
     done = agent_git(workspace, "branch", "-D", BRANCH)
 
@@ -418,7 +422,7 @@ def test_commit_all_commits_everything_with_the_fixed_message_and_signals(rig: R
         f"{IDENTITY.name} <{IDENTITY.email}>"
     )
     assert workspace.dirty() is False
-    assert spool_lines(workspace)[-1].endswith(sha)
+    assert sha is not None and spool_lines(workspace)[-1].endswith(sha)
 
 
 # #762-T08
