@@ -13,7 +13,9 @@
 //   from the runner's model proxy. A request that offers tools gets the next scripted tool calls and, when they
 //   are used up, the structured findings through the engine's `StructuredOutput` tool; a request without tools
 //   (the engine's title request) gets plain text. The engine suite has its own Python twin of this
-//   (`ScriptedModel` in runner/tests/engine/opencode_support.py);
+//   (`ScriptedModel` in runner/tests/engine/opencode_support.py). The same script plays a coding agent (#766): its
+//   steps are calls of `write`, `edit` and `bash` with any arguments, it can end with a plain assistant message
+//   (`finalText`) instead of `StructuredOutput`, and a list of scripts answers by the last user message (`when`);
 // - `GET <api base>/key`, the cheap call that tells whether a key is accepted (the app's "test key"
 //   button): 200 for an accepted key, 401 for any other once `acceptKeys` names the accepted ones. The
 //   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried;
@@ -61,17 +63,36 @@ export type AgentToolCall = {
   arguments: Record<string, unknown>;
 };
 
-/** What the agent answers: `steps[i]` for the i-th request that offers tools, then `final` for every later one. */
+/**
+ * What the agent answers: `steps[i]` for the i-th request that offers tools, then the end for every later one:
+ * `final` through `StructuredOutput` (a Dynamic Review), or `finalText` as a plain assistant message (a coding agent
+ * that is done, #766).
+ */
 export type AgentScript = {
   steps: AgentToolCall[][];
-  /** The structured answer (Dynamic findings, schema version 1) given through `StructuredOutput`. */
-  final: Record<string, unknown>;
+  /**
+   * Which requests this script answers, when `scriptAgent` is given several: the first script whose text is part of
+   * the last user message (the text of the last message with the role `user` that carries text; a tool result is not
+   * one). A script without `when` answers any request. Each script counts its own steps.
+   */
+  when?: { lastUserContains: string };
   /**
    * The Messages API only (#533): every answer that asks for tools opens with a signed `thinking` block, as a model
    * that always thinks does, and the next request has to give it back (the fake answers a 400 when it does not).
    */
   thinking?: boolean;
-};
+} & (
+  | {
+      /** The structured answer (Dynamic findings, schema version 1) given through `StructuredOutput`. */
+      final: Record<string, unknown>;
+      finalText?: undefined;
+    }
+  | {
+      /** The last answer: a plain assistant message with this text and no tool call. */
+      finalText: string;
+      final?: undefined;
+    }
+);
 
 /** One endpoint (provider) of a model in the metadata answer. */
 export type FakeModelEndpoint = {
@@ -125,8 +146,12 @@ export type FakeLlm = {
   acceptKeys(keys: string[] | null): void;
   /** The whole `Authorization` header of every `GET /key` received, in order. */
   keyChecks(): string[];
-  /** Answers like the model of a Dynamic Review (see `AgentScript`); null is the canned reply again. */
-  scriptAgent(script: AgentScript | null): void;
+  /**
+   * Answers like the model of a Dynamic Review or a coding agent (see `AgentScript`); several scripts answer by the
+   * last user message, and a request that none of them matches is refused with a 400; null is the canned reply
+   * again.
+   */
+  scriptAgent(script: AgentScript | AgentScript[] | null): void;
   /** The `x-api-key` and `anthropic-version` of every `GET /models` received, in order (the Anthropic key test). */
   anthropicKeyChecks(): Array<{ apiKey: string; version: string }>;
   /** Every `POST /messages` received, in order. */
@@ -202,6 +227,30 @@ function textOf(messages: ChatMessage[], role: string): string {
         .join("\n");
     })
     .join("\n");
+}
+
+/**
+ * The text of the last user message that carries text, in the chat shape and in the Messages shape alike (a tool
+ * result is a message of its own in the first and a block of a user message in the second; neither is a question).
+ */
+function lastUserText(messages: unknown): string {
+  if (!Array.isArray(messages)) return "";
+  for (const message of [...(messages as ChatMessage[])].reverse()) {
+    if (message.role !== "user") continue;
+    const { content } = message;
+    const text =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? (content as Array<{ type?: unknown; text?: unknown }>)
+              .map((piece) =>
+                typeof piece.text === "string" ? piece.text : "",
+              )
+              .join("\n")
+          : "";
+    if (text !== "") return text;
+  }
+  return "";
 }
 
 /** The kind of prompt a request holds. `/review` is the only tool (#203). */
@@ -361,6 +410,9 @@ function messagesToolUse(
   };
 }
 
+const NO_SCRIPT_MATCHES =
+  "The fake LLM has no agent script for the last user message";
+
 /** The error shape of the Messages API. */
 function messagesError(status: number, message: string) {
   const type =
@@ -414,7 +466,9 @@ export async function startLlmFake(
   let quoteKey = false;
   let accepted: string[] | null = null;
   let keyChecks: string[] = [];
-  let agent: AgentScript | null = null;
+  let agent: AgentScript[] | null = null;
+  // How many requests that offered tools each script answered, and how many all of them together (the call ids).
+  let agentUsed: number[] = [];
   let agentRequests = 0;
   let models = new Map<string, FakeModelEndpoint[]>();
   let modelLog: Array<{ path: string; authorization: string }> = [];
@@ -432,6 +486,40 @@ export async function startLlmFake(
     held = [];
     for (const answer of waiting) answer();
   };
+
+  /**
+   * The next scripted answer to a request that offers tools: the next step of the script the last user message
+   * selects, then its end. Null when no script matches.
+   */
+  function nextAgentAnswer(lastUser: string): {
+    id: number;
+    thinking: boolean;
+    calls: AgentToolCall[] | null;
+    text: string;
+  } | null {
+    const position = (agent ?? []).findIndex(
+      (script) =>
+        script.when === undefined ||
+        lastUser.includes(script.when.lastUserContains),
+    );
+    const script = agent?.[position];
+    if (script === undefined) return null;
+    const used = agentUsed[position] ?? 0;
+    agentUsed[position] = used + 1;
+    const id = agentRequests;
+    agentRequests += 1;
+    const thinking = script.thinking === true;
+    const step = script.steps[used];
+    if (step !== undefined) return { id, thinking, calls: step, text: "" };
+    if (script.finalText !== undefined)
+      return { id, thinking, calls: null, text: script.finalText };
+    return {
+      id,
+      thinking,
+      calls: [{ name: "StructuredOutput", arguments: script.final }],
+      text: "",
+    };
+  }
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -539,19 +627,19 @@ export async function startLlmFake(
           if (queued !== undefined) return accept(queued);
           const tools = anthropicToolNames(parsed.tools);
           if (agent !== null && tools.length > 0) {
-            const index = agentRequests;
-            agentRequests += 1;
-            const calls = agent.steps[index] ?? [
-              { name: "StructuredOutput", arguments: agent.final },
-            ];
+            const answer = nextAgentAnswer(lastUserText(parsed.messages));
+            if (answer === null)
+              return send(400, messagesError(400, NO_SCRIPT_MATCHES));
             return accept(
-              messagesToolUse(
-                model,
-                `toolu_${String(index)}`,
-                calls,
-                usage,
-                agent.thinking === true,
-              ),
+              answer.calls === null
+                ? messagesText(model, answer.text, usage)
+                : messagesToolUse(
+                    model,
+                    `toolu_${String(answer.id)}`,
+                    answer.calls,
+                    usage,
+                    answer.thinking,
+                  ),
             );
           }
           if (agent !== null) return accept(messagesText(model, "ok", usage));
@@ -694,14 +782,21 @@ export async function startLlmFake(
         if (agent !== null) {
           if (toolNames((body as { tools?: unknown }).tools).length === 0)
             return send(200, completion(model, "ok", chatUsage));
-          const index = agentRequests;
-          agentRequests += 1;
-          const calls = agent.steps[index] ?? [
-            { name: "StructuredOutput", arguments: agent.final },
-          ];
+          const answer = nextAgentAnswer(lastUserText(messages));
+          if (answer === null)
+            return send(400, {
+              error: { message: NO_SCRIPT_MATCHES, code: 400 },
+            });
+          if (answer.calls === null)
+            return send(200, completion(model, answer.text, chatUsage));
           return send(
             200,
-            toolCompletion(model, `call_${String(index)}`, calls, chatUsage),
+            toolCompletion(
+              model,
+              `call_${String(answer.id)}`,
+              answer.calls,
+              chatUsage,
+            ),
           );
         }
         send(200, completion(model, replies[kind], chatUsage));
@@ -747,7 +842,9 @@ export async function startLlmFake(
       queuedAnswers.push(answer);
     },
     scriptAgent(script) {
-      agent = script;
+      agent =
+        script === null ? null : Array.isArray(script) ? script : [script];
+      agentUsed = [];
       agentRequests = 0;
     },
     hold(on) {
@@ -762,6 +859,7 @@ export async function startLlmFake(
       promptCache = null;
       release();
       agent = null;
+      agentUsed = [];
       agentRequests = 0;
       log = [];
       replies = defaultReplies();
