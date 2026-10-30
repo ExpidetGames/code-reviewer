@@ -35,6 +35,7 @@ import { createBillingTopUpIntentsRepository } from "./billing-topup-intents-rep
 import { createBillingProfilesRepository } from "./billing-profiles-repository.ts";
 import { createBillingNotificationsRepository } from "./billing-notifications-repository.ts";
 import { createBillingWorkspaceSettingsRepository } from "./billing-workspace-settings-repository.ts";
+import { createImplementerRepository } from "./implementer-repository.ts";
 
 const SHA = "b".repeat(40);
 const FAILED_SHA = "c".repeat(40);
@@ -62,6 +63,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     profiles: createBillingProfilesRepository(db, workspaceId),
     limits: createBillingWorkspaceSettingsRepository(db, workspaceId),
     notifications: createBillingNotificationsRepository(db, workspaceId),
+    implementer: createImplementerRepository(db, workspaceId),
     erasure: createWorkspaceErasureRepository(db, workspaceId),
   };
 }
@@ -335,7 +337,23 @@ async function seed(
   // workspace's rows are there to be read, re-armed and marked.
   await repos.notifications.markSent("empty", "due");
   if (tag === "b") await repos.notifications.markSent("low", "none");
+  // The Implementer's session and turn (#751): a task on the seeded job's repository, so the other workspace has a session, a
+  // turn and a job to reach for.
+  const started = await repos.implementer.createSessionWithTurn(
+    {
+      repositoryId: repository.id,
+      baseBranch: "main",
+      branch: `implementer/${tag}`,
+      instruction: `Instruction ${tag}`,
+      modelChoice: { entryId: `entry-${tag}` },
+      costLimitCents: 100,
+      createdBy: `user-${tag}`,
+    },
+    async () => enqueued.job.id,
+  );
   return {
+    session: started.session,
+    turn: started.turn,
     topUpIntentId: topUpIntent.id,
     unpagedIntentId: unpagedIntent.id,
     workspaceId,
@@ -478,6 +496,18 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll("projects")
       .where("repositories.workspace_id", "=", workspaceId)
       .orderBy("projects.id")
+      .execute(),
+    implementerSessions: await db
+      .selectFrom("implementer_sessions")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    implementerTurns: await db
+      .selectFrom("implementer_turns")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
       .execute(),
   };
 }
@@ -1569,6 +1599,51 @@ const CASES: Case[] = [
         deletedAt: new Date("2026-10-23T12:00:00.000Z"),
       }),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // implementer sessions (#751-T02): B's session, turn and branch are not A's to read, extend or change
+  {
+    name: "implementer.getSession",
+    run: (a, b) => a.implementer.getSession(b.session.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "implementer.getTurnByJob",
+    run: (a, b) => a.implementer.getTurnByJob(b.turn.jobId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "implementer.listForRepository",
+    run: (a, b) => a.implementer.listForRepository(b.repository.id),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
+    name: "implementer.recordTurnResult",
+    run: (a, b) =>
+      a.implementer.recordTurnResult(b.session.id, {
+        headCommit: "e".repeat(40),
+        opencode: { sessionId: "hijacked", version: "1.0.0" },
+        summary: "hijacked",
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "implementer.createSessionWithTurn",
+    run: (a, b) =>
+      settle(() =>
+        a.implementer.createSessionWithTurn(
+          {
+            repositoryId: b.repository.id,
+            baseBranch: "main",
+            branch: "implementer/from-a",
+            instruction: "Do it.",
+            modelChoice: { entryId: "entry-a" },
+            costLimitCents: null,
+            createdBy: "user-a",
+          },
+          async () => b.job.id,
+        ),
+      ),
+    expectAnswer: notFound("IMPLEMENTER_REPOSITORY_NOT_FOUND"),
   },
   // runs
   {
