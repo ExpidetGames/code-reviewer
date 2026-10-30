@@ -1049,6 +1049,21 @@ describe("the arguments of the deploy canary", () => {
     });
   });
 
+  // #759-T11
+  it("still requires `pr-agent,opencode` by default and has no probe for the implementer engine", () => {
+    const env = { RUNNER_TOKEN: "dummy-token-1234567890" };
+
+    expect(
+      parseCanaryArguments(["--url", "https://d.example"], env).requiredEngines,
+    ).toStrictEqual(["pr-agent", "opencode"]);
+    expect(() =>
+      parseCanaryArguments(
+        ["--url", "https://d.example", "--engines", "implementer"],
+        env,
+      ),
+    ).toThrow(/pr-agent and opencode/);
+  });
+
   // #331-R01
   it("takes the allowed hosts from the option or from CANARY_ALLOWED_HOSTS, and checks only with --check-only", () => {
     const env = { RUNNER_TOKEN: "dummy-token-1234567890" };
