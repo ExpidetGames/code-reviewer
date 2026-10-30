@@ -46,6 +46,12 @@ export type FakeGithubAppClientData = {
   reviews?: Record<string, PullRequestReview[]>;
   /** Makes `getPullRequest` reject with this error (an unknown pull request is rejected anyway). */
   getPullRequestFailure?: Error;
+  /** The default branch of every repository (#750). Default: main. */
+  defaultBranch?: string;
+  /** The branches of every repository, by name, each with its head commit (#750). Default: the default branch only. */
+  branches?: Record<string, string>;
+  /** Makes `getRepositoryFacts`, `listBranches` and `getBranch` reject with this error (#750). */
+  branchReadFailure?: Error;
 };
 
 export type FakeGithubAppClient = GithubAppClient & {
@@ -82,6 +88,9 @@ export function fakeGithubAppClient(
   const pullRequests = data.pullRequests ?? {
     "acme/widgets": [FAKE_PULL_REQUEST],
   };
+
+  const branchesOf = (): Record<string, string> =>
+    data.branches ?? { [data.defaultBranch ?? "main"]: "a".repeat(40) };
 
   return {
     calls,
@@ -148,6 +157,51 @@ export function fakeGithubAppClient(
       return (pullRequests[repoFullName] ?? []).filter(
         (pr) => pr.state === "open",
       );
+    },
+    async getRepositoryFacts(installationId, scope, repoFullName, signal) {
+      record(
+        "getRepositoryFacts",
+        installationId,
+        scope,
+        repoFullName,
+        ...(signal === undefined ? [] : [signal]),
+      );
+      throwIfAborted(signal);
+      if (data.branchReadFailure) throw data.branchReadFailure;
+      return { defaultBranch: data.defaultBranch ?? "main" };
+    },
+    async listBranches(installationId, scope, repoFullName, signal) {
+      record(
+        "listBranches",
+        installationId,
+        scope,
+        repoFullName,
+        ...(signal === undefined ? [] : [signal]),
+      );
+      throwIfAborted(signal);
+      if (data.branchReadFailure) throw data.branchReadFailure;
+      const defaultBranch = data.defaultBranch ?? "main";
+      const all = [
+        defaultBranch,
+        ...Object.keys(branchesOf())
+          .filter((name) => name !== defaultBranch)
+          .sort(),
+      ];
+      return { names: all.slice(0, 100), truncated: all.length > 100 };
+    },
+    async getBranch(installationId, scope, repoFullName, name, signal) {
+      record(
+        "getBranch",
+        installationId,
+        scope,
+        repoFullName,
+        name,
+        ...(signal === undefined ? [] : [signal]),
+      );
+      throwIfAborted(signal);
+      if (data.branchReadFailure) throw data.branchReadFailure;
+      const sha = branchesOf()[name];
+      return sha === undefined ? null : { sha };
     },
     async getCollaboratorPermission(installationId, repoFullName, login) {
       record("getCollaboratorPermission", installationId, repoFullName, login);

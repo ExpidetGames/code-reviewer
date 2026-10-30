@@ -353,6 +353,29 @@ describe("the fake integration provider", () => {
     ]);
   });
 
+  // #750
+  it("answers the branch reads from its settings: the default branch first, an unknown branch is null", async () => {
+    const provider = fakeIntegrationProvider({
+      defaultBranch: "trunk",
+      branches: { zeta: "z".repeat(40), trunk: "t".repeat(40), alpha: "a" },
+    });
+
+    expect(await provider.getRepositoryFacts(integration, repo)).toEqual({
+      defaultBranch: "trunk",
+    });
+    expect(await provider.listBranches(integration, repo)).toEqual({
+      names: ["trunk", "alpha", "zeta"],
+      truncated: false,
+    });
+    expect(await provider.getBranch(integration, repo, "zeta")).toEqual({
+      sha: "z".repeat(40),
+    });
+    expect(await provider.getBranch(integration, repo, "nope")).toBeNull();
+    expect(
+      await fakeIntegrationProvider().getBranch(integration, repo, "main"),
+    ).not.toBeNull();
+  });
+
   it("records the calls it receives", async () => {
     const provider = fakeIntegrationProvider();
 
