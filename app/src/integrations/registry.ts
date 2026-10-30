@@ -90,6 +90,7 @@ export {
   buildAppManifest,
   GITHUB_APP_PATHS,
   MANIFEST_PERMISSIONS,
+  manifestPermissions,
   missingPermissions,
   suggestedAppName,
   type GithubAppManifest,

@@ -28,11 +28,13 @@ import { parseGithubEvent } from "./events.ts";
 import {
   BRANCH_READ_TOKEN_PERMISSIONS,
   CHECK_TOKEN_PERMISSIONS,
+  IMPLEMENTER_TOKEN_PERMISSIONS,
   JOB_TOKEN_PERMISSIONS,
   COMMENT_READ_TOKEN_PERMISSIONS,
   NOTICE_TOKEN_PERMISSIONS,
   VERDICT_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
+  toImplementerAccessError,
   toJobAccessError,
   toReadError,
   toWriteError,
@@ -252,6 +254,53 @@ export function createGithubAppProvider(
         });
       } catch (error) {
         throw toJobAccessError(error);
+      }
+    },
+
+    async implementerAccess(integration, repo) {
+      // Like `jobAccess`: a fresh token for exactly this repository on every call, never cached or shared. The
+      // permission is the Implementer's (contents write, metadata read); a 422 because the installation has not
+      // accepted it is its own stable code, and nothing broader is tried instead.
+      try {
+        const config = await getConfig();
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const minted = await (
+          await getClient()
+        ).mintInstallationToken(integration.externalId, {
+          repositoryIds,
+          permissions: IMPLEMENTER_TOKEN_PERMISSIONS,
+        });
+        return createGitAccess({
+          provider: "github",
+          baseUrl: config.apiBaseUrl,
+          token: minted.token,
+          authType: "token",
+          botLogin: `${config.slug}[bot]`,
+          expiresAt: minted.expiresAt,
+        });
+      } catch (error) {
+        throw toImplementerAccessError(error);
+      }
+    },
+
+    async installationPermissions(integration) {
+      try {
+        const installation = await (
+          await getClient()
+        ).getInstallation(integration.externalId);
+        if (installation === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_CONNECTION_GONE",
+            "The installation no longer exists.",
+          );
+        return { contentsWrite: installation.permissions.contents === "write" };
+      } catch (error) {
+        throw toReadError(error);
       }
     },
 

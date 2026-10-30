@@ -222,6 +222,15 @@ export type FakeGithubAppControls = {
   /** The permissions the app itself is granted; token requests may not exceed them (422). */
   setAppPermissions(permissions: FakePermissions): void;
   /**
+   * The permissions this installation has accepted (#749): what `GET /app/installations/:id` reports, and a ceiling
+   * for its tokens next to the app's own, so a permission the app was raised to but the installation has not approved
+   * yet is refused with 422, like GitHub. Without a call the installation holds whatever the app is granted.
+   */
+  setInstallationPermissions(
+    installationId: number,
+    permissions: FakePermissions,
+  ): void;
+  /**
    * The account and organization permissions (`emails`, `members`) the user tokens of the app
    * registered at start hold, and what `GET /app` reports for them. Default: both read-only. Without
    * `emails`, `GET /user/emails` answers 404 for a user token, like GitHub for an app that lacks it.
@@ -342,6 +351,8 @@ export function createAppPart(
   });
 
   const installations = new Map<number, FakeInstallation>();
+  // What an installation has accepted, when a test says (#749); the app's permissions otherwise.
+  const installationPermissions = new Map<number, FakePermissions>();
   const repositories = new Map<number, FakeRepository[]>();
   const pullRequests = new Map<string, FakePullRequest[]>();
   // Every head a pull request has had ("owner/name#7"): a review may name any of its commits (#405).
@@ -357,6 +368,19 @@ export function createAppPart(
   const revoked: string[] = [];
   const tokenRequests: FakeTokenRequest[] = [];
   let appPermissions: FakePermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
+
+  /** What an installation holds: the app's permissions, cut down to what the installation accepted. */
+  function permissionsOfInstallation(installationId: number): FakePermissions {
+    const accepted = installationPermissions.get(installationId);
+    if (accepted === undefined) return { ...appPermissions };
+    return Object.fromEntries(
+      Object.entries(appPermissions).flatMap(([name, level]) => {
+        const held = accepted[name];
+        if (held === undefined) return [];
+        return [[name, levelOf(held) < levelOf(level) ? held : level]];
+      }),
+    ) as FakePermissions;
+  }
   const omitted = new Map<number, number[]>();
   const rawInstallationRecords: Record<string, unknown>[] = [];
   let jwtsRejected = false;
@@ -616,6 +640,7 @@ export function createAppPart(
           account: accountJson(installation.account, webBase()),
           suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
           app_id: Number(appForJwt(bearer)?.id),
+          permissions: permissionsOfInstallation(installation.id),
         }),
       );
       list.push(...rawInstallationRecords);
@@ -632,6 +657,7 @@ export function createAppPart(
         account: accountJson(installation.account, webBase()),
         suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
         app_id: Number(appForJwt(bearer)?.id),
+        permissions: permissionsOfInstallation(installation.id),
       });
     }
 
@@ -697,11 +723,12 @@ export function createAppPart(
           message:
             "There is at least one repository that does not exist or is not accessible",
         });
+      const held = permissionsOfInstallation(installationId);
       if (
         requested !== null &&
         Object.entries(requested).some(
           ([key, level]) =>
-            levelOf(level) < 0 || levelOf(level) > levelOf(appPermissions[key]),
+            levelOf(level) < 0 || levelOf(level) > levelOf(held[key]),
         )
       )
         return send(422, {
@@ -719,9 +746,7 @@ export function createAppPart(
           )
           .map((repo) => repo.id);
       const granted: FakePermissions =
-        requested === null
-          ? { ...appPermissions }
-          : (requested as FakePermissions);
+        requested === null ? { ...held } : (requested as FakePermissions);
 
       const token = `ghs_fake${randomBytes(16).toString("hex")}`;
       const expiresAtMs = now() + TOKEN_LIFETIME_MS;
@@ -898,6 +923,7 @@ export function createAppPart(
     },
     removeInstallation(id) {
       installations.delete(id);
+      installationPermissions.delete(id);
       repositories.delete(id);
     },
     suspendInstallation(id, suspended) {
@@ -970,6 +996,9 @@ export function createAppPart(
     setAppPermissions(permissions) {
       appPermissions = { ...permissions };
     },
+    setInstallationPermissions(installationId, permissions) {
+      installationPermissions.set(installationId, { ...permissions });
+    },
     setAppAccountPermissions(permissions) {
       const start = options.appId && registry.byId(options.appId);
       if (start) start.accountPermissions = { ...permissions };
@@ -1006,6 +1035,7 @@ export function createAppPart(
       jwtsRejected = false;
       tokenAnswerPatch = null;
       appPermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
+      installationPermissions.clear();
       const start = options.appId && registry.byId(options.appId);
       if (start) {
         start.accountPermissions = { ...DEFAULT_ACCOUNT_PERMISSIONS };
