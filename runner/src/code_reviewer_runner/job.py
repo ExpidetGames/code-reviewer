@@ -868,7 +868,10 @@ def _matching(value: object, pattern: re.Pattern[str], path: str, what: str) -> 
     return value
 
 
-def _implementer_repo(spec: dict[str, Any]) -> ImplementerRepo:
+def _implementer_repo(spec: dict[str, Any], git: GitAccess) -> ImplementerRepo:
+    """The repository of a turn. The job carries a token that may write it and the runner sends that
+    token to `cloneUrl`: the address must be the provider's web host and exactly this repository,
+    never another host, another repository or a loopback address (#762)."""
     repo = _section(spec, "repo")
     _check_fields(repo, _IMPLEMENTER_REPO_FIELDS, "implementer.repo.")
     full_name = _matching(
@@ -877,6 +880,14 @@ def _implementer_repo(spec: dict[str, Any]) -> ImplementerRepo:
     clone_url = _matching(
         repo.get("cloneUrl"), _CLONE_URL, "implementer.repo.cloneUrl", "an https URL"
     )
+    parts = _checked_url(clone_url, "implementer.repo.cloneUrl")
+    if parts.netloc != _web_host(git.base_url):
+        raise _invalid("implementer.repo.cloneUrl must point to the host of git.baseUrl")
+    if parts.path not in (f"/{full_name}", f"/{full_name}.git"):
+        raise _invalid(
+            "implementer.repo.cloneUrl must be https://<host>/<owner>/<name>[.git] of "
+            "implementer.repo.fullName"
+        )
     return ImplementerRepo(full_name=full_name, clone_url=clone_url)
 
 
@@ -896,7 +907,7 @@ def _implementer_limits(spec: dict[str, Any]) -> ImplementerLimits:
     return ImplementerLimits(time_limit_seconds=seconds)
 
 
-def _implementer_spec(data: dict[str, Any]) -> ImplementerSpec:
+def _implementer_spec(data: dict[str, Any], git: GitAccess) -> ImplementerSpec:
     """The `implementer` object (#746). Closed: an unknown field is refused. The instruction is
     literal data and is never interpreted. The cost policy and the model entry are required."""
     spec = _section(data, "implementer")
@@ -912,12 +923,16 @@ def _implementer_spec(data: dict[str, Any]) -> ImplementerSpec:
     cost = _job_cost_policy(spec)
     entry = _job_model_entry(spec)
     assert cost is not None and entry is not None  # both keys are present, so both parse or raise
+    base_branch = _matching(
+        spec.get("baseBranch"), _BRANCH_NAME, "implementer.baseBranch", "a branch name"
+    )
+    branch = _matching(spec.get("branch"), _BRANCH_NAME, "implementer.branch", "a branch name")
+    if branch == base_branch:
+        raise _invalid("implementer.branch must differ from implementer.baseBranch")
     return ImplementerSpec(
-        repo=_implementer_repo(spec),
-        base_branch=_matching(
-            spec.get("baseBranch"), _BRANCH_NAME, "implementer.baseBranch", "a branch name"
-        ),
-        branch=_matching(spec.get("branch"), _BRANCH_NAME, "implementer.branch", "a branch name"),
+        repo=_implementer_repo(spec, git),
+        base_branch=base_branch,
+        branch=branch,
         instruction=instruction,
         limits=_implementer_limits(spec),
         cost=cost,
@@ -928,8 +943,8 @@ def _implementer_spec(data: dict[str, Any]) -> ImplementerSpec:
 
 def _implementer_input(job: dict[str, Any]) -> ImplementerInput:
     _check_fields(job, _IMPLEMENTER_TOP_LEVEL_FIELDS, "")
-    spec = _implementer_spec(job)
     git = _git_access(job)
+    spec = _implementer_spec(job, git)
     # A native job only: its provider may be a provider of the catalog, and the key goes to the
     # address of the entry and to no other.
     llm = _llm_access(job, catalog=True)
