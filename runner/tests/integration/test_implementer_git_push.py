@@ -262,7 +262,7 @@ def test_a_failed_push_never_names_the_token(rig: Rig) -> None:
     with HttpOrigin(rig.origin, TOKEN, git) as server:
         workspace = rig.workspace(url=server.url, schemes=("http",), git=git)
         workspace.clone_mirror()
-        server.token = "ghs_somethingElse0123456789abcdef"  # the credential stops working
+        server.token = "ghs_something-else-token-0123456789"  # the credential stops working
         workspace.create_agent_repository()
         workspace.install_guard()
         commit(workspace, "a.txt")

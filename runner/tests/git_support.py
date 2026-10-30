@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HOOK = ROOT / "runner" / "guard" / "reference-transaction"
 MATRIX = ROOT / "runner" / "scripts" / "guard_matrix.sh"
 MIN_GIT = (2, 53)
-TOKEN = "ghs_dummyInstallationToken0123456789abcdef"
+TOKEN = "ghs_dummy-installation-token-0123456789"
 
 
 def git_version(executable: str) -> tuple[int, ...]:

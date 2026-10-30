@@ -92,7 +92,7 @@ def test_a_token_the_server_does_not_know_is_a_clone_failure_that_does_not_name_
     git = "/usr/bin/git"
     with HttpOrigin(rig.origin, TOKEN, git) as server:
         workspace = rig.workspace(
-            url=server.url, schemes=("http",), git=git, token="ghs_anotherToken0123456789abcdef"
+            url=server.url, schemes=("http",), git=git, token="ghs_another-installation-token-0123"
         )
 
         with pytest.raises(JobError) as refused:
