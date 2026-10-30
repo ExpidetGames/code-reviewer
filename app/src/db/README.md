@@ -565,6 +565,12 @@ database too: the old check is dropped and the wider one added under the same na
 can be run again). Both take an exclusive lock on a leaf table (nothing references them, `jobs` is untouched) until the batch commits, so `lock_timeout` is 5 s and
 `statement_timeout` 30 s for its statements, put back afterwards; a long writer makes it give up with `MIGRATION_FAILED` and the deployment can be run again
 (`widen-review-kind-checks-for-implementer.integration.test.ts`).
+**In one batch with #771's migration its waits cost the queue too.** The unique index of `20261030140000_create_implementer_sessions_and_turns` is a plain
+`create unique index` on `jobs`: it holds a `SHARE` lock on `jobs` (reads go on, every write waits) until the batch commits, not only while it builds. When both
+migrations are pending, they run in one batch (one transaction), so this migration's two lock waits on `usage_records` and `billing_journal_entries` (up to
+2 x 5 s with `lock_timeout` 5 s, if a long writer holds either) happen while `jobs` is still locked: during them the claims, heartbeats and enqueues of the queue wait as
+well, not only the writers of the two leaf tables. A batch that gives up rolls back, and with it that `SHARE` lock. The window is bounded, and a database that ran #771's
+migration in an earlier deployment does not have it.
 
 ### A database that ran the removed billing migrations
 
