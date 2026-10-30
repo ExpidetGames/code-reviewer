@@ -445,9 +445,11 @@ describe("a job of the implementer kind in the claim", () => {
     runnerProviders: null,
   };
 
-  // #746-T07
-  it("serves no kind from the engine implementer and leaves the kinds of the others as they were", () => {
-    expect(reviewKindsForEngines(["implementer"])).toStrictEqual([]);
+  // #746-T07, #752-T04
+  it("serves the kind implementer, and only that, from the engine implementer and leaves the kinds of the others as they were", () => {
+    expect(reviewKindsForEngines(["implementer"])).toStrictEqual([
+      "implementer",
+    ]);
     expect(reviewKindsForEngines(["pr-agent"])).toStrictEqual(["diff"]);
     expect(reviewKindsForEngines(["pr-agent", "opencode"])).toStrictEqual([
       "diff",
@@ -455,7 +457,7 @@ describe("a job of the implementer kind in the claim", () => {
     ]);
     expect(
       reviewKindsForEngines(["pr-agent", "opencode", "implementer"]),
-    ).toStrictEqual(["diff", "dynamic"]);
+    ).toStrictEqual(["diff", "dynamic", "implementer"]);
   });
 
   // #746-T07

@@ -20,7 +20,7 @@ import {
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { formatDuration } from "../run-duration.ts";
-import { KIND_NAMES } from "../../review-settings/kind-names.ts";
+import { JOB_KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { isSettled } from "../run-status.ts";
 import type { CustomerRunDetailView, RunDetailSnapshot } from "../run-view.ts";
 import { browserRunsApi, RUNS_POLL, type RunsApi } from "./api.ts";
@@ -198,7 +198,7 @@ export function RunDetail({
     },
     {
       term: "Review kind",
-      description: KIND_NAMES[run.reviewKind],
+      description: JOB_KIND_NAMES[run.reviewKind],
     },
     ...usage.model,
     ...costItem(run, usage),

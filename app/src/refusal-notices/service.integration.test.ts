@@ -20,6 +20,7 @@ import {
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
 import { sha } from "../test-support/jobs.ts";
+import { addUser } from "../test-support/workspace-deletion-fixture.ts";
 import type { EntitlementsData } from "../workspaces/entitlements.ts";
 import { MAX_ATTEMPTS, RETRY_WAIT_MS } from "./service.ts";
 
@@ -887,5 +888,46 @@ describe("the refusal for the monthly limit and the hidden brake (#499)", () => 
       errorCode: "billing_limits_unreadable",
     });
     expect(comments(h)).toEqual([]);
+  });
+});
+
+describe("the refusal of a turn of the Implementer", () => {
+  // #752-T09
+  it("posts no comment on any pull request and creates no notice row, whatever the repository's pull requests are", async () => {
+    const h = await start();
+    await limit(h, SUSPENDED);
+    await addUser(h.db, "user-1");
+    const result = await h.queue.enqueueImplementerTurn({
+      repositoryId: h.repositoryId,
+      baseBranch: "main",
+      baseSha: sha("b"),
+      branch: "implementer/abc",
+      instruction: "Do it.",
+      modelChoice: { entryId: "entry-1" },
+      costLimitCents: null,
+      createdBy: "user-1",
+      actorLogin: "octocat",
+      clientRequestId: "req-1",
+    });
+
+    expect(await h.queue.claimNext("runner", ["implementer"])).toBeNull();
+    await h.notices.settled();
+
+    expect(await h.queue.get(result.job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "workspace_suspended",
+    });
+    expect(h.notices.refusals).toEqual([
+      expect.objectContaining({
+        jobId: result.job.id,
+        reviewKind: "implementer",
+      }),
+    ]);
+    for (const number of [1, 7, 8, 9, 10])
+      expect(comments(h, number)).toEqual([]);
+    expect(
+      await h.db.selectFrom("refusal_notices").selectAll().execute(),
+    ).toEqual([]);
+    expect(h.github.fake.tokenRequests()).toEqual([]);
   });
 });

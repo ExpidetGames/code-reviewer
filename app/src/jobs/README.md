@@ -112,6 +112,49 @@ that writes the defaults. That transaction first locks every repository row of t
 an enqueue takes before it reads the default) and only then reads which projects follow, so a review that is being queued meanwhile
 is either cancelled with the others or reads the new kind. The hook is `createJobReviewSettingsHooks`, wired in `review-settings/shared.ts`.
 
+## The implementer kind (#752)
+
+A turn of the Implementer (part of #745, the Software Factory deployment) travels through this queue as a job of the kind
+`implementer`, so claim, lease, heartbeat, release, stop, dispatch, usage records and entitlements are the ones of every job.
+`createJobQueue(...).enqueueImplementerTurn` makes the session, its first turn (`src/db/repositories/implementer-repository.ts`) and
+the job in one transaction. The `jobs` table is shaped like a pull request review, so **`implementer/job-shape.ts` is the one place
+that writes the pull request columns** of a turn:
+
+| Column | Value |
+|---|---|
+| `review_kind` / `trigger_kind` / `actor_login` | `implementer` / `manual` / the person |
+| `pr_number` | `-slot` of the session: never a GitHub pull request, and the unique index "one running job per repository and pull request" becomes "one running turn per session" (two sessions of a repository run in parallel) |
+| `pr_url` | `<repository url>/tree/<branch>` |
+| `head_sha` | the tip of the base branch when the task was accepted |
+| `command` / `args` | `review` / empty |
+| `delivery_id` | `implementer:<workspace id>:<clientRequestId>`: the workspace is part of it because the unique index spans every workspace |
+
+What differs from a review, and why a consumer that assumes a pull request is gated by the kind:
+
+- **Enqueue.** Refused with `JOB_KIND_UNAVAILABLE`, writing nothing, without the capability `implementer`. The Dynamic gate is not
+  consulted (it is about Dynamic Review, not a runtime flag for this kind). A repeated `clientRequestId` returns the turn it made
+  (`status: "existing"`) and writes nothing; it is looked up before the session is created, and two racing requests find each other.
+- **Claim.** `REVIEW_KINDS_OF_ENGINE`: the engine `implementer` serves this kind and nothing else, and no other engine serves it. A
+  runner without the engine never selects the job, so no attempt is counted and no credential made. It waits for such a runner at
+  most `noCapableRunnerMs`, then it is cancelled with `no_capable_runner`, as a Dynamic job is.
+- **Limits.** `maxAttempts` is 1 (`IMPLEMENTER_MAX_ATTEMPTS`): a lost lease or a released claim fails the turn (`lease_expired`, the
+  released reason), it is never queued again, because a second run would meet the branch the first one pushed. The hard timeout is
+  70 minutes (`implementerMaxRuntimeMs`, the Dispatcher's 60 plus 10), the other kinds keep 25.
+- **The session.** A job that ends without a report of its run (lease, give-up, never dispatched, no capable runner, refused claim,
+  cancelled by its holder) sets the session `idle` (`idleSessionsOfEndedTurns`, called from the sweep that closes usage records and
+  from `complete`), otherwise it would stay `running` for good. A report records the result with `recordTurnResult` (#754).
+- **Pull request consumers.** `cancelWaiting` (project deactivated, review kind changed, pull request closed, draft) never touches the
+  kind. `previousReviewedSha` and `attemptedShas` answer nothing for it. The check run reconciler and its sweep skip it (it would
+  otherwise fill the sweep's batch for good). A claim refused for the entitlements fails the turn with the code and tells the refusal
+  hook its kind; the notice on a pull request is not made for it. The claim of the runner API refuses the kind until its input is
+  built (#753).
+- **Usage and billing.** The record is reserved at claim with the kind `implementer` (billing off and on). For the plan's run limits,
+  the rate of a minute and the model catalog it counts and costs as `dynamic` (`projectKindOf`), the engine it runs on; the journal
+  entry keeps its own kind. The checks on `usage_records.review_kind` and `billing_journal_entries.review_kind` take the value
+  (migration `20261030190000`).
+
+A project still selects `diff` or `dynamic` and nothing else (`PROJECT_REVIEW_KINDS`); `JOB_KINDS` adds `implementer`.
+
 ## Enqueueing
 
 `enqueue` runs in one transaction (the write lock is taken up front), in this order:

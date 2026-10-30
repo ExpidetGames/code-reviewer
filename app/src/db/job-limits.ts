@@ -23,9 +23,24 @@ export const DEFAULT_MAX_ATTEMPTS = 3;
  */
 export const DEFAULT_NO_CAPABLE_RUNNER_MS = 30 * 60 * 1000;
 
+/**
+ * #752: a turn of the Implementer is started once and never silently run again: a second run would meet the branch the first one
+ * already pushed to. A lost lease or a released claim fails the turn on its first attempt. Not a setting: nothing may raise it.
+ */
+export const IMPLEMENTER_MAX_ATTEMPTS = 1;
+
+/**
+ * #752: the hard timeout of a turn: the Dispatcher's job timeout for the kind (60 minutes, `IMPLEMENTER_JOB_TIMEOUT_SECONDS` in
+ * `billing/hold.ts`) plus 10 of grace. Another kind keeps `DEFAULT_MAX_RUNTIME_MS`.
+ */
+export const DEFAULT_IMPLEMENTER_MAX_RUNTIME_MS = 70 * 60 * 1000;
+
 export type JobQueueLimits = {
   leaseMs: number;
+  /** The hard timeout of a Diff or Dynamic job. */
   maxRuntimeMs: number;
+  /** The hard timeout of a turn of the Implementer (#752). */
+  implementerMaxRuntimeMs: number;
   maxAttempts: number;
   noCapableRunnerMs: number;
 };
@@ -33,6 +48,7 @@ export type JobQueueLimits = {
 export const DEFAULT_JOB_QUEUE_LIMITS: JobQueueLimits = {
   leaseMs: DEFAULT_LEASE_MS,
   maxRuntimeMs: DEFAULT_MAX_RUNTIME_MS,
+  implementerMaxRuntimeMs: DEFAULT_IMPLEMENTER_MAX_RUNTIME_MS,
   maxAttempts: DEFAULT_MAX_ATTEMPTS,
   noCapableRunnerMs: DEFAULT_NO_CAPABLE_RUNNER_MS,
 };
