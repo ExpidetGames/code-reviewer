@@ -1,7 +1,7 @@
 # Capabilities (#731)
 
 One codebase is deployed more than once (code-review.com, and a clone with another product). What a deployment
-offers is its **capability set**: `review`, `dynamic-review`, `billing` (and later `implementer`). A feature outside
+offers is its **capability set**: `review`, `dynamic-review`, `billing`, `implementer`. A feature outside
 the set is **absent**, not switched off: no route, no navigation entry, no API endpoint, nothing enqueued or run in
 the background.
 
@@ -13,9 +13,13 @@ the background.
 | `PRODUCT_CAPABILITIES` | comma list; it can only narrow what the product `allowed`; unset = the product's `default` |
 
 Unset, a deployment is exactly today's code-review.com: no new required variable. Every set contains `review`;
-`dynamic-review` needs it, and so does a set of `billing` alone (refused by name). An empty entry in the list (`review,,billing`) is refused as
+`dynamic-review` needs it, `implementer` needs `dynamic-review`, and so does a set of `billing` alone (refused by name). An empty entry in the list (`review,,billing`) is refused as
 such.
-`implementer` is known but allowed by no product (the code wall). A wrong setting stops the start
+`implementer` (#747) is allowed by the product `factory` only and is in no product's default, so an unset
+`PRODUCT_CAPABILITIES` never turns it on; code-review.com refuses it by name (the code wall). It needs `dynamic-review`
+(and so `review`), and it adds no route, navigation entry or job by itself: those come with later changes of the
+Implementer (#745). The job kind `implementer` is already mapped to it (`CAPABILITY_OF_REVIEW_KIND`), so
+`allowsReviewKind("implementer")` is true only in a set that has the capability. A wrong setting stops the start
 (`DEPLOY_CONFIG_INVALID`, `src/deploy/startup.ts`); it names the variable and never repeats an unknown value.
 
 ## Where the set is enforced
@@ -28,7 +32,7 @@ such.
 | Jobs                                   | the job repository refuses a review kind without its capability (`JOB_KIND_UNAVAILABLE`); the settings service refuses to save the Dynamic kind without `dynamic-review`                                                                                                                                                                                                                                                                               |
 | Background                             | the sweep (`dispatch/sweep.ts`) skips the steps of an absent capability; the billing helpers (`billing/shared.ts`) do nothing without `billing`                                                                                                                                                                                                                                                                                                        |
 | Billing                                | `billing/enabled.ts` (the one reader of the switch) answers "off" without `billing`, so no balance is read, no credit checked, no start credit granted, whatever a stored setting says                                                                                                                                                                                                                                                                 |
-| Health                                 | `GET /api/health` reports `product` and `capabilities`, the latter **sorted alphabetically** (a stable contract: `["dynamic-review","review"]`). The `health-factory` job of `deploy-production.yml` compares the sorted list, `dynamic-review,review`, in any order                                                                                                                                                                                   |
+| Health                                 | `GET /api/health` reports `product` and `capabilities`, the latter **sorted alphabetically** (a stable contract: `["dynamic-review","review"]`, with the Implementer `["dynamic-review","implementer","review"]`). The `health-factory` job of `deploy-production.yml` compares the sorted list, `dynamic-review,review`, in any order                                                                                                                 |
 
 A new page or route: add an entry of its own to `ROUTE_CLASSES` or the classification test fails.
 

@@ -1239,6 +1239,34 @@ describe("the second App in the guide (#732)", () => {
     ).toContain("`FACTORY_ENABLED`");
   });
 
+  // #747-T08
+  it("documents the implementer capability: where it is allowed, that it is off by default, what it needs, and the health expectation", () => {
+    const row = section("### 3.1 The App project")
+      .split("\n")
+      .find((line) => line.startsWith("| `PRODUCT_CAPABILITIES` |"));
+    expect(row).toBeDefined();
+    const variable = flat(row as string);
+    expect(variable).toContain("`implementer` (needs `dynamic-review`;");
+    expect(variable).toContain("`factory` only");
+    expect(variable).toContain("stops the start");
+    expect(variable).toContain("`factory`: `review,dynamic-review`");
+
+    const capabilities = flat(second);
+    expect(capabilities).toContain("**The capability set of the factory.**");
+    expect(capabilities).toContain("`implementer`");
+    expect(capabilities).toContain("never turns it on");
+    expect(capabilities).toContain("`dynamic-review,implementer,review`");
+    expect(capabilities).toContain("`health-factory` compares the set exactly");
+    expect(capabilities).toContain("code-review.com refuses");
+
+    const checklist = flat(bringUp);
+    expect(checklist).toContain("`implementer` is allowed on this product");
+    expect(checklist).toContain(
+      "off until the rollout of the Implementer sets it",
+    );
+    expect(checklist).not.toContain("—");
+  });
+
   // #732-T09
   it("names every job of the lane, in the order the workflow has them", () => {
     const jobs = [
