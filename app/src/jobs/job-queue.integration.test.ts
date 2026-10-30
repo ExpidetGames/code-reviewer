@@ -1731,6 +1731,127 @@ describe("a Dynamic job no capable runner can claim (#195)", () => {
       status: "queued",
     });
   });
+
+  // A pool that is only busy is a capable runner: `no_capable_runner` must mean what it says (#752 review).
+  describe("while a runner of the engine is busy", () => {
+    const HOUR = 60 * MINUTE;
+    // A long run, so the hard timeout and the lease do not end the busy job before the cases below look.
+    const limits = { leaseMs: 5 * HOUR, maxRuntimeMs: 5 * HOUR };
+
+    async function busyPool() {
+      const fixture = await createJobQueueFixture({
+        dynamicReview: true,
+        limits,
+      });
+      const running = await fixture.enqueueNew({ reviewKind: "dynamic" });
+      fixture.clock.advance(1); // jobs are claimed oldest first
+      const waiting = await fixture.enqueueNew({
+        prNumber: 8,
+        headSha: sha("b"),
+        reviewKind: "dynamic",
+      });
+      expect(
+        (await fixture.queue.claimNext("capable", ["opencode"]))?.job.id,
+      ).toBe(running.id);
+      return { fixture, running, waiting };
+    }
+
+    it("keeps a waiting Dynamic job while another one runs, past the deadline", async () => {
+      const { fixture, waiting } = await busyPool();
+
+      fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS + MINUTE);
+      const report = await fixture.queue.expireStaleJobs();
+
+      expect(report.noCapableRunner).toBe(0);
+      expect(await fixture.queue.get(waiting.id)).toMatchObject({
+        status: "queued",
+        attempts: 0,
+      });
+    });
+
+    it("keeps it for the deadline after the last Dynamic job finished, then cancels it", async () => {
+      const { fixture, running, waiting } = await busyPool();
+      fixture.clock.advance(40 * MINUTE);
+      await fixture.queue.complete(
+        running.id,
+        await fixture.tokenOf(running.id),
+        { ok: true, result: {} },
+      );
+
+      fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS - 1);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+      expect((await fixture.queue.get(waiting.id))?.status).toBe("queued");
+
+      fixture.clock.advance(1);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+      expect(await fixture.queue.get(waiting.id)).toMatchObject({
+        status: "cancelled",
+        errorCode: "no_capable_runner",
+        attempts: 0,
+      });
+    });
+
+    it("cancels it at the absolute limit of 3 hours although the pool stays busy", async () => {
+      const { fixture, waiting } = await busyPool();
+
+      fixture.clock.advance(3 * HOUR - 1);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+      expect((await fixture.queue.get(waiting.id))?.status).toBe("queued");
+
+      fixture.clock.advance(1);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+      expect(await fixture.queue.get(waiting.id)).toMatchObject({
+        status: "cancelled",
+        errorCode: "no_capable_runner",
+        attempts: 0,
+      });
+    });
+
+    it("counts only a runner of the same kind: a running Diff job does not keep a Dynamic job", async () => {
+      const fixture = await createJobQueueFixture({
+        dynamicReview: true,
+        limits,
+      });
+      const diff = await fixture.enqueueNew({ reviewKind: "diff" });
+      const dynamic = await fixture.enqueueNew({
+        prNumber: 8,
+        headSha: sha("b"),
+        reviewKind: "dynamic",
+      });
+      expect(
+        (await fixture.queue.claimNext("diff-runner", ["pr-agent"]))?.job.id,
+      ).toBe(diff.id);
+
+      fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+      expect((await fixture.queue.get(dynamic.id))?.errorCode).toBe(
+        "no_capable_runner",
+      );
+    });
+
+    it("does not take a job that was itself cancelled as stranded for a runner", async () => {
+      const fixture = await createJobQueueFixture({ dynamicReview: true });
+      const first = await fixture.enqueueNew({ reviewKind: "dynamic" });
+      fixture.clock.advance(10 * MINUTE);
+      const second = await fixture.enqueueNew({
+        prNumber: 8,
+        headSha: sha("b"),
+        reviewKind: "dynamic",
+      });
+      fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS - 10 * MINUTE);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+      expect((await fixture.queue.get(first.id))?.errorCode).toBe(
+        "no_capable_runner",
+      );
+
+      // The first job ended 10 minutes ago without any runner: that is no sign of one.
+      fixture.clock.advance(10 * MINUTE);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+      expect((await fixture.queue.get(second.id))?.errorCode).toBe(
+        "no_capable_runner",
+      );
+    });
+  });
 });
 
 describe("resolving the review kind inside the enqueue transaction (#195)", () => {

@@ -749,6 +749,72 @@ describe("the end of a turn without a report", () => {
     expect((await t.fixture.queue.get(diff.id))?.status).toBe("queued");
     expect(await t.sessionOf(session.id)).toMatchObject({ status: "idle" });
   });
+
+  // #752 review: `no_capable_runner` means there is none; a pool busy with long turns is not that.
+  it("keeps a turn behind two 50-minute turns, and cancels it at the absolute limit of 3 hours", async () => {
+    const t = await start({ limits: { leaseMs: 300 * MINUTE } });
+    const first = await t.turn();
+    const second = await t.turn();
+    const waiting = await t.turn();
+    expect((await t.fixture.queue.claimNext("r", IMPLEMENTER))?.job.id).toBe(
+      first.job.id,
+    );
+
+    t.fixture.clock.advance(50 * MINUTE);
+    await t.fixture.queue.complete(
+      first.job.id,
+      await t.fixture.tokenOf(first.job.id),
+      { ok: true, result: {} },
+    );
+    expect((await t.fixture.queue.claimNext("r", IMPLEMENTER))?.job.id).toBe(
+      second.job.id,
+    );
+    // 31 minutes after the creation, a capable runner is only busy: no cancellation.
+    t.fixture.clock.advance(50 * MINUTE);
+    expect((await t.fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+    await t.fixture.queue.complete(
+      second.job.id,
+      await t.fixture.tokenOf(second.job.id),
+      { ok: true, result: {} },
+    );
+    expect(await t.fixture.queue.get(waiting.job.id)).toMatchObject({
+      status: "queued",
+      attempts: 0,
+    });
+
+    // The pool is silent from here: the turn waits for the deadline after the last turn, then goes.
+    t.fixture.clock.advance(30 * MINUTE);
+    expect((await t.fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+    expect(await t.fixture.queue.get(waiting.job.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "no_capable_runner",
+      attempts: 0,
+    });
+  });
+
+  // #752 review
+  it("cancels a turn at 3 hours although a turn of the pool still runs", async () => {
+    const t = await start({
+      limits: { leaseMs: 300 * MINUTE, implementerMaxRuntimeMs: 300 * MINUTE },
+    });
+    const running = await t.turn();
+    const waiting = await t.turn();
+    await t.fixture.queue.claimNext("r", IMPLEMENTER);
+
+    t.fixture.clock.advance(180 * MINUTE - 2);
+    expect((await t.fixture.queue.get(running.job.id))?.status).toBe("running");
+    await t.fixture.queue.heartbeat(
+      running.job.id,
+      await t.fixture.tokenOf(running.job.id),
+    );
+    expect((await t.fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+
+    t.fixture.clock.advance(2);
+    expect((await t.fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+    expect((await t.fixture.queue.get(waiting.job.id))?.errorCode).toBe(
+      "no_capable_runner",
+    );
+  });
 });
 
 describe("the hard timeout", () => {

@@ -537,6 +537,11 @@ export function createRunnerJobsRepository(
    * because eligibility excludes it and expiry only handles running jobs. It is cancelled (not failed
    * for a review reason), with the stable code `no_capable_runner`, without an attempt and without a
    * credential. The deadline is operator-owned (`noCapableRunnerMs`).
+   *
+   * #752 review: the code says there is no capable runner, so a busy one must not trigger it. A job of the same kind that is
+   * running, or that a runner claimed and ended within the deadline, shows the pool of that engine is alive; the queue then keeps the job
+   * until the absolute limit (`noCapableRunnerAbsoluteMs`, never shorter than the deadline). Every job of this database counts, whatever
+   * its workspace: the runner pool is shared. A job that ended without a claim (`claimed_at` is null), such as one cancelled here, is no sign.
    */
   async function cancelStrandedDynamic(
     executor: Kysely<Database>,
@@ -545,6 +550,12 @@ export function createRunnerJobsRepository(
     const timestamp = formatTimestamp(current);
     const strandedBefore = formatTimestamp(
       new Date(current.getTime() - limits.noCapableRunnerMs),
+    );
+    const absoluteBefore = formatTimestamp(
+      new Date(
+        current.getTime() -
+          Math.max(limits.noCapableRunnerAbsoluteMs, limits.noCapableRunnerMs),
+      ),
     );
     const result = await executor
       .updateTable("jobs")
@@ -560,6 +571,31 @@ export function createRunnerJobsRepository(
       .where("attempts", "=", 0)
       .where("created_at", "<=", strandedBefore)
       .where("run_after", "<=", strandedBefore)
+      .where((eb) =>
+        eb.or([
+          eb.and([
+            eb("created_at", "<=", absoluteBefore),
+            eb("run_after", "<=", absoluteBefore),
+          ]),
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom("jobs as served")
+                .select("served.id")
+                .whereRef("served.review_kind", "=", "jobs.review_kind")
+                .where((served) =>
+                  served.or([
+                    served("served.status", "=", "running"),
+                    served.and([
+                      served("served.claimed_at", "is not", null),
+                      served("served.finished_at", ">", strandedBefore),
+                    ]),
+                  ]),
+                ),
+            ),
+          ),
+        ]),
+      )
       .executeTakeFirst();
     return Number(result.numUpdatedRows);
   }
