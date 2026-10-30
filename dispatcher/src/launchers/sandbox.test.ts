@@ -703,6 +703,16 @@ describe("the Sandbox-Launcher", () => {
     ).toStrictEqual(["pr-agent"]);
   });
 
+  // #759 (additional): the container profile of the Implementer is P15 (#760); until then no VM is made for the kind
+  it("refuses a job of the implementer kind before it creates a VM: the hardened spec of Diff and Dynamic cannot host it", async () => {
+    const result = await launch(build(), spec({ kind: "implementer" }));
+
+    const error = failure(result);
+    expect(error.code).toBe("implementer_profile_unavailable");
+    expect(error.retryable).toBe(false);
+    expect(service.creates).toStrictEqual([]);
+  });
+
   // #329 (additional): the Launcher and the golden snapshot pipeline (#330) name the same things
   it("agrees with the golden snapshot pipeline on the script, the image tag and the region", () => {
     expect(VM_PREPARE_PATH).toBe(PATHS.vmPrepareInstalled);

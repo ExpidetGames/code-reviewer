@@ -17,6 +17,7 @@ import { createDispatcherCore } from "./dispatcher.ts";
 import {
   LaunchError,
   type AppSettings,
+  type CoreSettings,
   type CreatedVm,
   type HandleResult,
   type LiveVmCounter,
@@ -1168,5 +1169,242 @@ describe("the cap of an app is counted by the Dispatcher too", () => {
     );
 
     expect(result.outcome).toBe("started");
+  });
+});
+
+// #759: the kind `implementer` is the factory's alone; the reviewer's entry cannot get it, whatever the engines say.
+describe("the core with the implementer kind", () => {
+  const ENGINES = ["pr-agent", "opencode", "implementer"] as const;
+
+  function buildImplementing(
+    options: {
+      factoryKinds?: AppSettings["kinds"];
+      core?: Partial<CoreSettings>;
+      launcherEngines?: Parameters<typeof createFakeLauncher>[0];
+    } = {},
+  ) {
+    const logger = recordingLogger();
+    const launcher = createFakeLauncher(
+      options.launcherEngines ?? { engines: ENGINES },
+    );
+    const recorded = recordingFetch();
+    const core = createDispatcherCore({
+      settings: settingsFor(reviewer.url, {
+        engines: ENGINES,
+        ...options.core,
+        more: [
+          factoryApp({
+            kinds: options.factoryKinds ?? ["diff", "dynamic", "implementer"],
+          }),
+        ],
+      }),
+      launcher,
+      clock,
+      logger,
+      fetch: recorded.fetch,
+      now: () => clock.now(),
+    });
+    return { core, launcher, logger, recorded };
+  }
+
+  const claimsOf = (recorded: ReturnType<typeof recordingFetch>) =>
+    recorded.calls.filter((call) => call.url.endsWith("/claim"));
+
+  // #759-T04
+  it("claims a job of the implementer kind at the factory, and at the factory only, and starts it with the kind", async () => {
+    const jobId = factory.enqueue({ reviewKind: "implementer" });
+    const { core, launcher, recorded } = buildImplementing();
+
+    const result = await handled(
+      core.handle({ appId: "factory", jobId, reviewKind: "implementer" }),
+    );
+
+    expect(result.outcome).toBe("started");
+    const claims = claimsOf(recorded);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]?.url.startsWith(factory.url)).toBe(true);
+    expect(reviewer.requests()).toHaveLength(0);
+    expect(launcher.launches.map((spec) => [spec.appId, spec.kind])).toEqual([
+      ["factory", "implementer"],
+    ]);
+  });
+
+  // #759-T04
+  it("answers `not_capable` for the implementer kind named by the reviewer, with no claim and no launch, although the engine is served", async () => {
+    const jobId = reviewer.enqueue();
+    const { core, launcher, recorded, logger } = buildImplementing();
+
+    const result = await core.handle({
+      appId: "reviewer",
+      jobId,
+      reviewKind: "implementer",
+    });
+
+    expect(result).toStrictEqual({ outcome: "not_capable" });
+    expect(claimsOf(recorded)).toHaveLength(0);
+    expect(reviewer.requests()).toHaveLength(0);
+    expect(launcher.launches).toHaveLength(0);
+    expect(
+      logger.lines.some((line) => line.startsWith("warn kind_not_allowed")),
+    ).toBe(true);
+  });
+
+  // #759-T05
+  it("asks for the implementer engine in the factory's claim only because the factory's kinds name it", async () => {
+    const withKind = buildImplementing();
+    await handled(
+      withKind.core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+    const withoutKind = buildImplementing({
+      factoryKinds: ["diff", "dynamic"],
+    });
+    await handled(
+      withoutKind.core.handle({
+        appId: "factory",
+        jobId: factory.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+
+    expect(claimsOf(withKind.recorded)[0]?.body).toMatchObject({
+      engines: ["pr-agent", "opencode", "implementer"],
+    });
+    expect(claimsOf(withoutKind.recorded)[0]?.body).toMatchObject({
+      engines: ["pr-agent", "opencode"],
+    });
+  });
+
+  // #759-T05
+  it("keeps the reviewer's claim engines as they are, although the deployment serves the implementer engine", async () => {
+    const { core, recorded } = buildImplementing();
+
+    await handled(
+      core.handle({
+        appId: "reviewer",
+        jobId: reviewer.enqueue(),
+        reviewKind: "diff",
+      }),
+    );
+
+    expect(claimsOf(recorded)[0]?.body).toMatchObject({
+      engines: ["pr-agent", "opencode"],
+    });
+  });
+
+  // #759-T05
+  it("does not hand an implementer job to a claim that did not ask for the engine", async () => {
+    const jobId = factory.enqueue({ reviewKind: "implementer" });
+    const { core, launcher } = buildImplementing({
+      factoryKinds: ["diff", "dynamic"],
+    });
+
+    const result = await core.handle({
+      appId: "factory",
+      jobId,
+      reviewKind: "diff",
+    });
+
+    expect(result).toStrictEqual({ outcome: "ignored" });
+    expect(launcher.launches).toHaveLength(0);
+  });
+
+  // #759-T06
+  it("releases a claimed implementer job of the reviewer app unlaunched, logs `kind_not_allowed` at error level and makes no VM", async () => {
+    const jobId = "00000000-0000-4000-8000-0000000000f1";
+    reviewer.enqueue({ id: jobId });
+    reviewer.script("claim", [
+      {
+        status: 200,
+        body: {
+          version: 1,
+          job: {
+            id: jobId,
+            credential: `crj_${"A".repeat(43)}`,
+            reviewKind: "implementer",
+            leaseExpiresAt: "2026-10-10T12:02:00.000Z",
+            heartbeatIntervalSeconds: 30,
+          },
+        },
+      },
+    ]);
+    const { core, launcher, logger } = buildImplementing();
+
+    const done = core.handle({ appId: "reviewer", jobId, reviewKind: "diff" });
+    let result: HandleResult | undefined;
+    void done.then((answer) => {
+      result = answer;
+    });
+    for (let step = 0; step < 100 && result === undefined; step += 1) {
+      await clock.advance(1000);
+      await settle();
+    }
+
+    expect(await done).toStrictEqual({ outcome: "not_capable" });
+    expect(launcher.launches).toHaveLength(0);
+    expect(seen(reviewer, "release").length).toBeGreaterThan(0);
+    expect(
+      logger.lines.some((line) => line.startsWith("error kind_not_allowed")),
+    ).toBe(true);
+    expect(logger.text()).not.toContain("crj_");
+  });
+
+  // #759-T07
+  it.each([
+    ["3600 seconds by default", undefined, 3600],
+    ["the configured value when there is one", 7200, 7200],
+  ])(
+    "starts an implementer launch with %s, and Diff and Dynamic with the job timeout",
+    async (_name, configured, implementer) => {
+      const { core, launcher } = buildImplementing({
+        core:
+          configured === undefined
+            ? {}
+            : { implementerTimeoutSeconds: configured },
+      });
+      for (const [app, reviewKind] of [
+        ["factory", "implementer"],
+        ["factory", "dynamic"],
+        ["reviewer", "diff"],
+      ] as const)
+        await handled(
+          core.handle({
+            appId: app,
+            jobId: (app === "factory" ? factory : reviewer).enqueue({
+              reviewKind,
+            }),
+            reviewKind,
+          }),
+        );
+
+      expect(
+        launcher.launches.map((spec) => [spec.kind, spec.timeoutSeconds]),
+      ).toEqual([
+        ["implementer", implementer],
+        ["dynamic", 1200],
+        ["diff", 1200],
+      ]);
+    },
+  );
+
+  // #759-T08
+  it("passes the implementer's launch configuration to the launcher, and nothing of another kind's", async () => {
+    const config = { launcher: { vcpus: 2 } };
+    const { core, launcher } = buildImplementing({
+      core: { workerConfig: { diff: {}, dynamic: {}, implementer: config } },
+    });
+
+    await handled(
+      core.handle({
+        appId: "factory",
+        jobId: factory.enqueue({ reviewKind: "implementer" }),
+        reviewKind: "implementer",
+      }),
+    );
+
+    expect(launcher.launches[0]?.config).toStrictEqual(config);
   });
 });

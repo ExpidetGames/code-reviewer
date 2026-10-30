@@ -323,6 +323,84 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
     });
   });
 
+  // #759 (additional)
+  it("lets the reaper wait for the longest job a served kind can have: the implementer's 3600 seconds only when an app has the kind", () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+    const registry = {
+      DISPATCHER_APPS: JSON.stringify([
+        {
+          id: "factory",
+          url: "https://factory.example.test",
+          kinds: ["diff", "implementer"],
+          keyId: "factory-k1",
+          maxRunning: 1,
+        },
+      ]),
+      DISPATCHER_APP_FACTORY_TOKEN: "factory-dispatcher-token-for-tests-0001",
+      DISPATCHER_APP_FACTORY_SIGNING_SECRET:
+        "factory-signing-secret-for-tests-000001",
+      DISPATCHER_OPERATOR_TOKEN: "operator-token-for-the-tests-0000000001",
+    };
+
+    expect(
+      sandbox.reaper?.(loadSettings({ ...BASE, ...registry }))
+        ?.jobLifetimeSeconds,
+    ).toBe(3600 + 300);
+    expect(
+      sandbox.reaper?.(
+        loadSettings({
+          ...BASE,
+          ...registry,
+          DISPATCHER_WORKER_CONFIG: JSON.stringify({
+            implementer: { timeoutSeconds: 7200 },
+          }),
+        }),
+      )?.jobLifetimeSeconds,
+    ).toBe(7200 + 300);
+    // Nothing changes for a deployment that serves no implementer job, configured timeout or not.
+    expect(
+      sandbox.reaper?.(
+        loadSettings({
+          ...BASE,
+          DISPATCHER_WORKER_CONFIG: JSON.stringify({
+            implementer: { timeoutSeconds: 7200 },
+          }),
+        }),
+      )?.jobLifetimeSeconds,
+    ).toBe(1200 + 300);
+  });
+
+  // #759 (additional)
+  it("does not advertise the implementer engine yet: its container profile is P15 (#760), so a dispatch for the kind is `not_capable`", async () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+    const settings = loadSettings({
+      ...BASE,
+      DISPATCHER_APPS: JSON.stringify([
+        {
+          id: "factory",
+          url: "https://factory.example.test",
+          kinds: ["diff", "dynamic", "implementer"],
+          keyId: "factory-k1",
+          maxRunning: 1,
+        },
+      ]),
+      DISPATCHER_APP_FACTORY_TOKEN: "factory-dispatcher-token-for-tests-0001",
+      DISPATCHER_APP_FACTORY_SIGNING_SECRET:
+        "factory-signing-secret-for-tests-000001",
+      DISPATCHER_OPERATOR_TOKEN: "operator-token-for-the-tests-0000000001",
+    });
+
+    const launcher = sandbox.launcher({
+      settings,
+      logger: recordingLogger(),
+      background: () => undefined,
+    });
+
+    expect(
+      await launcher.capabilities(new AbortController().signal),
+    ).toStrictEqual(["pr-agent", "opencode"]);
+  });
+
   // #364-T18
   it("loads the SDK only when the reaper first lists, not at start", () => {
     let loads = 0;

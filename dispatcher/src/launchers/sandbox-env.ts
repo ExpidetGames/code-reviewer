@@ -24,7 +24,11 @@ import {
   type Environment,
   type Settings,
 } from "../config.ts";
-import type { Launcher, Logger } from "../core/types.ts";
+import {
+  longestJobTimeoutSeconds,
+  type Launcher,
+  type Logger,
+} from "../core/types.ts";
 import { systemClock } from "../core/clock.ts";
 import { createCapabilityProbe } from "../probe/capability-probe.ts";
 import { withProbeEndpoint } from "../probe/probe-endpoint.ts";
@@ -181,7 +185,7 @@ export function sandboxFromEnvironment(
     reaper: (settings) => ({
       fleet: service,
       jobLifetimeSeconds:
-        settings.core.jobTimeoutSeconds + vmTimeoutMarginSeconds,
+        longestJobTimeoutSeconds(settings.core) + vmTimeoutMarginSeconds,
       canaryLifetimeSeconds: probeTimeoutSeconds + vmTimeoutMarginSeconds,
     }),
     launcher({ settings, logger }) {
