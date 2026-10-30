@@ -11,13 +11,12 @@ import os
 import shutil
 import stat
 import subprocess
-import tempfile
 import threading
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from privileged_support import ENGINE_GID, ENGINE_UID, run_as
+from privileged_support import ENGINE_GID, ENGINE_UID, exec_directory, run_as
 
 from code_reviewer_runner.implementer.git_workspace import (
     AgentUser,
@@ -41,8 +40,8 @@ IDENTITY = GitIdentity(name="Code Review Implementer", email="implementer@exampl
 
 @pytest.fixture
 def base() -> Iterator[Path]:
-    directory = Path(tempfile.mkdtemp(prefix="cr-implementer-git-"))
-    directory.chmod(0o755)
+    """A directory where programs may run (the hook and the scripts), enterable by everybody."""
+    directory = exec_directory("cr-implementer-git-")
     yield directory
     shutil.rmtree(directory, ignore_errors=True)
 
