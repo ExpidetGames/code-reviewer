@@ -835,7 +835,7 @@ const CASES: Case[] = [
           instruction: "Do it.",
           modelChoice: { entryId: "entry-1" },
           costLimitCents: null,
-          createdBy: a.userId,
+          createdBy: b.userId,
           actorLogin: "octocat",
           clientRequestId: "foreign-request",
         }),

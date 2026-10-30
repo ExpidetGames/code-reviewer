@@ -11,7 +11,7 @@
 //  - `delivery_id` is `implementer:<workspace id>:<client request id>`. The unique index of the column spans every workspace
 //    (a webhook delivery id is a GUID), so the workspace is part of the key: two workspaces cannot collide on, or probe, a
 //    request id; the same request in one workspace is the same job.
-import type { StoredReviewCommand } from "../integrations/types.ts";
+// This module imports nothing: the database layer imports it, and it must not pull a cycle back in.
 
 export type ImplementerJobShapeInput = {
   workspaceId: string;
@@ -29,7 +29,7 @@ export type ImplementerJobShape = {
   prNumber: number;
   prUrl: string;
   headSha: string;
-  command: Extract<StoredReviewCommand, "review">;
+  command: "review";
   args: "";
   deliveryId: string;
 };

@@ -1946,6 +1946,8 @@ describe("a turn of the Implementer", () => {
   // #752-T09
   it("does not take the place of a review in the list of jobs that need check work", async () => {
     const { t, turn } = await withTurn();
+    // The turn is older, so a list that did not skip it would put it first.
+    t.fixture.clock.advance(1000);
     const review = await t.fixture.enqueueNew();
 
     const due = await listJobsWithCheckWork(
