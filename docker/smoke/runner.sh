@@ -572,6 +572,16 @@ git_paths=$(in_image "$image" sh -c 'command -v git; ls /usr/bin/git 2>/dev/null
 $git_paths"
 printf '    %s\n' "$git_reported"
 
+# #761-T07: git is GPL-2.0-only, so OpenSSL 3 (Apache-2.0) must not be linked into it. `git-imap-send` is the
+# program that would link it; https goes through libcurl, a separate library.
+step "no program of git links OpenSSL (NO_OPENSSL), and https still works through libcurl"
+git_libs=$(in_image "$image" sh -c 'for f in /usr/local/bin/git /usr/local/libexec/git-core/git-imap-send; do ldd "$f"; done')
+if grep -Eq 'libssl|libcrypto' <<<"$git_libs"; then
+  fail "git or git-imap-send links OpenSSL:
+$(grep -E 'libssl|libcrypto' <<<"$git_libs")"
+fi
+in_image "$image" sh -c 'ldd /usr/local/libexec/git-core/git-remote-https | grep -q libcurl' || fail "git-remote-https does not use libcurl"
+
 # #761-T02
 step "node, pnpm, python3, uv, gcc, make, jq and unzip are there at the pinned versions"
 node_pinned=$(pin_value "$node_pin" version)
@@ -641,7 +651,7 @@ docker run --rm --network none --user 10101:10101 --env HOME=/tmp --env GUARD_DI
 # the sum of the layers above the layer of the pin files (the toolchain layer and what follows it), in bytes as
 # `docker history` reports them (uncompressed). It is measured inside this one image, so it is the same under every
 # image store and needs no baseline from another build. Above the budget the PR must propose a per-kind image.
-GROWTH_BUDGET_BYTES=900000000
+GROWTH_BUDGET_BYTES=600000000
 step "the toolchain layer grew the image by less than the budget of the shared Worker image"
 history=$(docker history --human=false --no-trunc --format '{{.Size}} {{.CreatedBy}}' "$image")
 image_bytes=$(printf '%s\n' "$history" | awk '{ total += $1 } END { printf "%d", total }')

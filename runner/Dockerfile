@@ -89,19 +89,21 @@ RUN python /fetch/scripts/fetch_toolchain.py --component pnpm --dest /toolchain/
 # Debian bookworm ships git 2.39. The branch guard of the Implementer is a reference-transaction hook, and
 # only git 2.53 or newer shows it a switch of the branch (checkout, switch); on older git the guard is blind
 # to that, so the Worker's self-test refuses to run a turn on it. The release is built here, once, from the
-# pinned source: no Perl, Python, Tcl, gettext or expat (nothing the agent needs; `git add -p` is the one
-# loss), the system config in /etc (the Worker points GIT_CONFIG_SYSTEM at a file under /run per job, and the
-# image bakes none in), builtins as symlinks so the copy into the final image keeps one binary.
+# pinned source: no Perl, Python, Tcl, gettext, expat or OpenSSL (nothing the agent needs; `git add -p` is the
+# one loss; NO_OPENSSL keeps OpenSSL 3, whose Apache-2.0 license is incompatible with git's GPL-2.0-only, out of
+# `git-imap-send`, and https goes through the system libcurl), the system config in /etc (the Worker points
+# GIT_CONFIG_SYSTEM at a file under /run per job, and the image bakes none in), builtins as symlinks so the copy
+# into the final image keeps one binary.
 FROM ${PYTHON_IMAGE} AS git-build
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev zlib1g-dev \
+    && apt-get install --yes --no-install-recommends build-essential libcurl4-openssl-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=toolchain-fetch /toolchain/git /git-src
 WORKDIR /git-src
 RUN make -j2 prefix=/usr/local sysconfdir=/etc INSTALL_SYMLINKS=1 \
-        NO_GETTEXT=1 NO_PERL=1 NO_PYTHON=1 NO_TCLTK=1 NO_EXPAT=1 NO_LIBPCRE2=1 all strip \
+        NO_GETTEXT=1 NO_PERL=1 NO_PYTHON=1 NO_TCLTK=1 NO_EXPAT=1 NO_LIBPCRE2=1 NO_OPENSSL=1 all strip \
     && make prefix=/usr/local sysconfdir=/etc INSTALL_SYMLINKS=1 \
-        NO_GETTEXT=1 NO_PERL=1 NO_PYTHON=1 NO_TCLTK=1 NO_EXPAT=1 NO_LIBPCRE2=1 DESTDIR=/out install
+        NO_GETTEXT=1 NO_PERL=1 NO_PYTHON=1 NO_TCLTK=1 NO_EXPAT=1 NO_LIBPCRE2=1 NO_OPENSSL=1 DESTDIR=/out install
 
 # ---- runtime-base: Python, the venv and nothing else (no uv, no compiler, no sources) ----
 FROM ${PYTHON_IMAGE} AS runtime-base

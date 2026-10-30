@@ -95,6 +95,21 @@ describe("git of the Worker image", () => {
     expect(building()).toContain("DESTDIR=/out");
   });
 
+  // #761-T07 (review of #777, finding 6): git is GPL-2.0-only; OpenSSL 3 (Apache-2.0) must not be linked
+  // into it. `git-imap-send` is the program that would link it, and nothing the agent needs uses it.
+  it("is built without OpenSSL, in both make invocations, and without the OpenSSL headers of its own", () => {
+    const makes = stage("git-build").lines.filter((line) =>
+      /\bmake\b/.test(line),
+    );
+
+    expect(makes.length).toBeGreaterThan(0);
+    for (const line of makes)
+      expect(line.match(/\bNO_OPENSSL=1\b/g), line).toHaveLength(
+        (line.match(/\bmake\b/g) ?? []).length,
+      );
+    expect(building()).not.toMatch(/\blibssl-dev\b/);
+  });
+
   // #761-T01: Debian's git (2.39) would be found first on a path and is too old for the guard.
   it("is the only git: the distribution's package is never installed", () => {
     const installs = stages(dockerfile)
