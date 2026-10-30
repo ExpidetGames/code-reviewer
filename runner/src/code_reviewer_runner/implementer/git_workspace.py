@@ -469,11 +469,13 @@ class GitWorkspace:
 
     def push(self) -> PushResult:
         """Fetch the agent's branch into the mirror without force, check that it still contains
-        the start commit and is by the system identity, and push it from the mirror without force.
+        the start commit and was committed by the system identity, and push it from the mirror
+        without force.
 
         Only a refusal of the branch itself (a rewrite, an object that is no commit, a bad object,
-        a commit by someone else, a branch without the start commit) ends the turn for good; a look
-        that failed for another reason raises `PushUnverified` and the next call tries again."""
+        a commit by another committer, a branch without the start commit) ends the turn for good;
+        a look that failed for another reason raises `PushUnverified` and the next call tries
+        again."""
         with self._lock:
             return self._push()
 
@@ -523,8 +525,11 @@ class GitWorkspace:
         return self._push_from_mirror(ref, tip)
 
     def _check_tip(self, ref: str, tip: str, previous: str | None) -> None:
-        """The fetched tip contains the start commit and every commit since is by the system
-        identity. A tip that does not pass is taken out of the mirror again."""
+        """The fetched tip contains the start commit and every commit since was committed by the
+        system identity. Only the committer is checked: `git cherry-pick`, `git am` and a merge keep
+        the foreign author of a legitimate commit, while the committer is always the agent's
+        environment. A forged author stays possible and is visible, because the committer of the
+        same commit shows the system. A tip that does not pass is taken out of the mirror again."""
         contains_start = self._root(
             ["--git-dir", str(self.mirror), "merge-base", "--is-ancestor", self.start_commit, tip],
             protocols="file",
@@ -541,18 +546,20 @@ class GitWorkspace:
                 str(self.mirror),
                 "log",
                 "--no-show-signature",
-                "--format=%H%x00%an%x00%ae%x00%cn%x00%ce",
+                "--format=%H%x00%cn%x00%ce",
                 f"{self.start_commit}..{tip}",
             ],
             protocols="file",
         )
         if listed.returncode != 0:
             raise PushUnverified("the commits of the branch could not be listed (git log)")
-        system = (self.identity.name, self.identity.email) * 2
+        system = (self.identity.name, self.identity.email)
         for line in listed.stdout.splitlines():
             sha, _, people = line.partition("\0")
             if tuple(people.split("\0")) != system:
-                self._reject(ref, previous, f"commit {sha[:12]} is not by the system identity")
+                self._reject(
+                    ref, previous, f"commit {sha[:12]} was not committed by the system identity"
+                )
 
     def _reject(self, ref: str, previous: str | None, reason: str) -> NoReturn:
         self._restore(ref, previous)

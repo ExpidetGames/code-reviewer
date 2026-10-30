@@ -670,12 +670,15 @@ def test_what_the_agent_makes_git_print_is_not_in_the_error(rig: Rig, tmp_path: 
 
 VICTIM = "Victim Human"
 VICTIM_EMAIL = "victim@example.com"
+# Only the committer is checked (a cherry-pick, `git am` and a merge keep the foreign author), so
+# the forgeries that count are the ones that change the committer.
 FORGERIES: dict[str, tuple[tuple[str, ...], dict[str, str]]] = {
-    "author in the environment": (("commit",), {"GIT_AUTHOR_EMAIL": VICTIM_EMAIL}),
-    "author name in the environment": (("commit",), {"GIT_AUTHOR_NAME": VICTIM}),
     "committer in the environment": (("commit",), {"GIT_COMMITTER_EMAIL": VICTIM_EMAIL}),
     "committer name in the environment": (("commit",), {"GIT_COMMITTER_NAME": VICTIM}),
-    "--author": (("commit", f"--author={VICTIM} <{VICTIM_EMAIL}>"), {}),
+    "committer and author in the environment": (
+        ("commit",),
+        {"GIT_COMMITTER_EMAIL": VICTIM_EMAIL, "GIT_AUTHOR_EMAIL": VICTIM_EMAIL},
+    ),
 }
 
 
@@ -708,7 +711,7 @@ def test_a_forged_commit_is_taken_out_of_the_mirror_again(rig: Rig) -> None:
     workspace = rig.prepared()
     commit(workspace, "a.txt")
     made = as_agent(
-        workspace, "commit", "--allow-empty", "-qm", "forged", GIT_AUTHOR_EMAIL=VICTIM_EMAIL
+        workspace, "commit", "--allow-empty", "-qm", "forged", GIT_COMMITTER_EMAIL=VICTIM_EMAIL
     )
     assert made.returncode == 0
 
@@ -774,21 +777,41 @@ def test_dash_c_forges_a_commit_when_the_environment_has_no_identity_and_is_caug
 
 
 # #762-T16
-def test_known_limit_a_cherry_picked_commit_of_someone_else_is_a_violation_too(rig: Rig) -> None:
-    """The guard allows `git fetch` and `git cherry-pick` (T03); the commit keeps its author, and a
-    forged author cannot be told from it. The push refuses both, and says so."""
+def test_known_limit_a_cherry_picked_commit_of_someone_else_is_pushed(rig: Rig) -> None:
+    """The guard allows `git fetch` and `git cherry-pick` (T03). The commit keeps its foreign
+    author, the committer is the system (the agent's environment), and only the committer is
+    checked: a legitimate turn is not aborted. A forged author stays possible; it is visible,
+    because the committer of the same commit shows the system."""
     workspace = rig.prepared()
     rig.origin.commit_on("side", "theirs.txt")
     fetched = agent_git(workspace, "fetch", "-q", rig.origin.url, "side")
     assert fetched.returncode == 0, fetched.stderr
     picked = agent_git(workspace, "cherry-pick", "FETCH_HEAD")
     assert picked.returncode == 0, picked.stderr
+    tip = raw("rev-parse", "HEAD", cwd=workspace.repo, git=rig.git)
+    people = raw("log", "-1", "--format=%ae|%ce", cwd=workspace.repo, git=rig.git)
+    author_email, committer_email = people.split("|")
+    assert author_email != IDENTITY.email
+    assert committer_email == IDENTITY.email
 
-    with pytest.raises(JobError) as refused:
-        workspace.push()
+    assert workspace.push().head == tip
+    assert rig.origin.tip(BRANCH) == tip
 
-    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
-    assert "system identity" in refused.value.detail
+
+# #762-T16
+def test_known_limit_a_forged_author_is_pushed_and_shows_the_system_as_committer(
+    rig: Rig,
+) -> None:
+    workspace = rig.prepared()
+    (workspace.repo / "a.txt").write_text("a\n")
+    assert agent_git(workspace, "add", "-A").returncode == 0
+    made = as_agent(workspace, "commit", "-qm", "x", GIT_AUTHOR_EMAIL=VICTIM_EMAIL)
+    assert made.returncode == 0, made.stderr
+    tip = raw("rev-parse", "HEAD", cwd=workspace.repo, git=rig.git)
+    people = raw("log", "-1", "--format=%ae|%ce", cwd=workspace.repo, git=rig.git)
+    assert people == f"{VICTIM_EMAIL}|{IDENTITY.email}"
+
+    assert workspace.push().head == tip
 
 
 # -- what the fetch checks ---------------------------------------------------------------------
