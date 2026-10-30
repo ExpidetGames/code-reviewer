@@ -15,7 +15,10 @@ import {
   setBillingSwitch,
 } from "../test-support/billing-switch.ts";
 import { createFakeBillingAdapter } from "../test-support/fake-billing-adapter.ts";
-import { createJobQueueFixture } from "../test-support/jobs.ts";
+import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
+import { createCapabilitySet } from "../capabilities/capability.ts";
+import { createJobQueue } from "../jobs/job-queue.ts";
+import { addUser } from "../test-support/workspace-deletion-fixture.ts";
 import type { Database } from "../db/schema.ts";
 import { insertUser } from "../test-support/users.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
@@ -428,5 +431,70 @@ describe("the billing page data of a workspace", () => {
         label: expect.stringMatching(/^acme\/(widgets|gadgets) #8$/),
       },
     });
+  });
+
+  // #752 review: a turn of the Implementer has no pull request, so its negative placeholder number is never shown.
+  it("names the charge of a turn of the Implementer by its branch, and leaves the labels of Diff and Dynamic rows as they were", async () => {
+    const t = await start();
+    await fundWorkspace(t.db, t.workspaceId, 50 * USD, t.fixture.clock.now);
+    await addUser(t.db, "user-1");
+    const capable = createCapabilitySet([
+      "review",
+      "dynamic-review",
+      "implementer",
+    ]);
+    const queue = createJobQueue(t.db, t.workspaceId, {
+      now: t.fixture.clock.now,
+      kindAllowed: (kind) => capable.allowsReviewKind(kind),
+    });
+    const diff = await t.fixture.enqueueNew({ prNumber: 7 });
+    const turn = await queue.enqueueImplementerTurn({
+      repositoryId: t.fixture.repositoryId,
+      baseBranch: "main",
+      baseSha: sha("b"),
+      branch: "implementer/add-health",
+      instruction: "Add a health endpoint.",
+      modelChoice: { entryId: "entry-1" },
+      costLimitCents: null,
+      createdBy: "user-1",
+      actorLogin: "octocat",
+      clientRequestId: "request-1",
+    });
+    if (turn.status !== "created") throw new Error("expected a new turn");
+    const records = createUsageRecordsRepository(
+      t.db,
+      t.workspaceId,
+      t.fixture.clock.now,
+    );
+    await records.reserve(diff.id, "managed");
+    await records.reserve(turn.job.id, "managed");
+    await t.journal().charge(diff.id, {
+      aiMicroUsd: 1 * USD,
+      infraMicroUsd: 100_000,
+      minutes: 1,
+      reviewKind: "diff",
+    });
+    await t.journal().charge(turn.job.id, {
+      aiMicroUsd: 2 * USD,
+      infraMicroUsd: 300_000,
+      minutes: 3,
+      reviewKind: "implementer",
+    });
+
+    const view = await overviewOf(t);
+
+    const labels = view.journal.rows.flatMap((row) =>
+      row.run === null ? [] : [row.run.label],
+    );
+    expect(labels).toHaveLength(2);
+    expect(labels).toContainEqual(
+      expect.stringMatching(
+        /^acme\/(widgets|gadgets) implementer\/add-health$/,
+      ),
+    );
+    expect(labels).toContainEqual(
+      expect.stringMatching(/^acme\/(widgets|gadgets) #7$/),
+    );
+    expect(labels.join(" ")).not.toContain("#-");
   });
 });
