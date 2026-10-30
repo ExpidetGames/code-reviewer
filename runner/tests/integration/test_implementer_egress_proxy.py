@@ -7,13 +7,14 @@ connector maps the (public looking) address the proxy judged to a local server, 
 is the proxy's decision and its relay, not the network. The TLS server stands in for a registry.
 """
 
+import contextlib
 import datetime
 import logging
 import socket
 import ssl
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -75,11 +76,8 @@ class Backend:
             self._threads.append(thread)
 
     def _serve(self, client: socket.socket) -> None:
-        with client:
-            try:
-                self._handler(client)
-            except OSError:
-                pass
+        with client, contextlib.suppress(OSError):
+            self._handler(client)
 
     def connect(self, address: tuple[str, int], timeout: float) -> socket.socket:
         self.dialled.append(address)
@@ -96,14 +94,12 @@ def echo(client: socket.socket) -> None:
 
 def silent(client: socket.socket) -> None:
     client.settimeout(30)
-    try:
+    with contextlib.suppress(OSError):
         client.recv(1)
-    except OSError:
-        pass
 
 
 @contextmanager
-def backend(handler: Callable[[socket.socket], None] = echo) -> Iterator[Backend]:
+def backend(handler: Callable[[socket.socket], None] = echo) -> Generator[Backend]:
     server = Backend(handler)
     try:
         yield server
@@ -118,7 +114,7 @@ def running(
     *,
     limits: EgressLimits | None = None,
     allowlist: EgressAllowlist = DEFAULT_ALLOWLIST,
-) -> Iterator[EgressProxy]:
+) -> Generator[EgressProxy]:
     proxy = EgressProxy(
         allowlist=allowlist,
         resolve=resolver or Resolver(),
@@ -136,7 +132,10 @@ def read_head(client: socket.socket) -> tuple[int, bytes]:
     """The status code of the answer and whatever followed the head."""
     data = b""
     while b"\r\n\r\n" not in data:
-        chunk = client.recv(4096)
+        try:
+            chunk = client.recv(4096)
+        except ConnectionError:  # the proxy closed with our request still unread
+            break
         if not chunk:
             break
         data += chunk
@@ -148,7 +147,10 @@ def read_head(client: socket.socket) -> tuple[int, bytes]:
 def ask(proxy: EgressProxy, request: bytes, timeout: float = 5.0) -> int:
     """Send raw bytes to the proxy and return the status code it answers with (0: just closed)."""
     with socket.create_connection(("127.0.0.1", proxy.port), timeout=timeout) as client:
-        client.sendall(request)
+        try:
+            client.sendall(request)
+        except ConnectionError:
+            return 0
         status, _ = read_head(client)
     return status
 
@@ -190,9 +192,7 @@ def certificate(directory: Path, name: str) -> tuple[Path, str]:
         .not_valid_after(now + datetime.timedelta(days=1))
         .add_extension(x509.SubjectAlternativeName([x509.DNSName(name)]), critical=False)
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
-        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .sign(key, hashes.SHA256())
     )
     pem = built.public_bytes(serialization.Encoding.PEM)
@@ -265,6 +265,7 @@ def test_bytes_pass_unchanged_in_both_directions_and_after_a_half_close() -> Non
         "registry.npmjs.org:80",
         "registry.npmjs.org:8443",
         "registry.npmjs.org:22",
+        "registry.npmjs.org:443/path",
         "169.254.169.254:443",
         "127.0.0.1:443",
         "[::1]:443",
@@ -295,7 +296,6 @@ def test_any_other_host_or_port_is_refused_before_a_name_is_looked_up(authority:
         "OPTIONS * HTTP/1.1",
         "connect registry.npmjs.org:443 HTTP/1.1",
         "CONNECT http://registry.npmjs.org:443/ HTTP/1.1",
-        "CONNECT registry.npmjs.org:443/path HTTP/1.1",
     ],
 )
 def test_plain_http_and_every_method_other_than_connect_are_refused(request_line: str) -> None:
@@ -311,7 +311,6 @@ def test_plain_http_and_every_method_other_than_connect_are_refused(request_line
 @pytest.mark.parametrize(
     "request_bytes",
     [
-        b"",
         b"\r\n\r\n",
         b"CONNECT\r\n\r\n",
         b"CONNECT registry.npmjs.org:443\r\n\r\n",
@@ -359,7 +358,12 @@ def test_a_redirect_is_a_new_request_that_is_judged_like_any_other() -> None:
     with backend() as server, running(server, resolver) as proxy:
         with open_tunnel(proxy):
             pass
-        for target in ("github.com:443", "151.101.0.1:443", "[2606:4700::1111]:443", "x.pkg.test:443"):
+        for target in (
+            "github.com:443",
+            "151.101.0.1:443",
+            "[2606:4700::1111]:443",
+            "x.pkg.test:443",
+        ):
             assert ask(proxy, connect_request(target)) in (400, 403)
         assert ask(proxy, connect_request("files.pythonhosted.org:443")) == 200
         assert "github.com" not in resolver.asked

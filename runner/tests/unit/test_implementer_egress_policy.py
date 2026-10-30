@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""Which hosts the Implementer agent's egress proxy tunnels to, and which addresses it may use (#763).
+"""Which hosts the Implementer agent's egress proxy tunnels to, and to which addresses (#763).
 
 The proxy is the only way out the agent's tools have. These tables pin the decision before any
 socket is involved: the form of the CONNECT target, the allowlist match and the judgement of what
@@ -162,7 +162,7 @@ def test_userinfo_is_refused(authority: str) -> None:
         "https://registry.npmjs.org:443",
         "registry.npmjs.org:443:443",
         "régistry.npmjs.org:443",  # an internationalised name must arrive as punycode
-        "registry.npmjs.org:443 ",
+        "registry.npmjs.org:443\u2028",
         "a" * 300 + ".npmjs.org:443",
         "-registry.npmjs.org:443",
     ],

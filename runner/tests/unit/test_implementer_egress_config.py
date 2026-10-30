@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""The network setting of an Implementer container and what it puts in the engine's environment (#763).
+"""The network setting of an Implementer container and the engine's environment (#763).
 
 `RUNNER_IMPLEMENTER_NETWORK` and `RUNNER_IMPLEMENTER_EGRESS_PORT` come from the Dispatcher's
 container spec (#746); nothing else configures the egress boundary. The allowlist is not a setting
@@ -15,6 +15,11 @@ from pathlib import Path
 import pytest
 
 from code_reviewer_runner import job as runner_job
+from code_reviewer_runner.dynamic_review.static_isolation import (
+    EGRESS_PORT_VARIABLE,
+    NETWORK_VARIABLE,
+    ImplementerNetwork,
+)
 from code_reviewer_runner.implementer import egress_config, egress_policy, egress_proxy
 from code_reviewer_runner.implementer.egress_config import (
     EgressConfigError,
@@ -25,11 +30,6 @@ from code_reviewer_runner.implementer.egress_config import (
     start_egress,
 )
 from code_reviewer_runner.implementer.egress_policy import DEFAULT_ALLOWLIST
-from code_reviewer_runner.dynamic_review.static_isolation import (
-    EGRESS_PORT_VARIABLE,
-    NETWORK_VARIABLE,
-    ImplementerNetwork,
-)
 
 ROOT = Path(__file__).resolve().parents[3]
 PROXY_VARIABLES = {
@@ -46,9 +46,15 @@ def registries(port: int = 10182) -> EgressSettings:
 
 
 def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+    """A free loopback port below the ephemeral range, where the settings allow ports to be."""
+    for port in range(31000, 32000):
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise AssertionError("no free port")
 
 
 def test_the_variable_names_are_the_ones_of_the_contract() -> None:
@@ -98,7 +104,11 @@ def test_the_engine_environment_loses_every_other_proxy_name_and_keeps_the_rest(
 
 # #763-T05
 def test_none_also_removes_inherited_proxy_names() -> None:
-    inherited = {"PATH": "/usr/bin", "HTTPS_PROXY": "http://corporate.example:3128", "NO_PROXY": "*"}
+    inherited = {
+        "PATH": "/usr/bin",
+        "HTTPS_PROXY": "http://corporate.example:3128",
+        "NO_PROXY": "*",
+    }
 
     assert apply_egress_environment(inherited, EgressSettings(ImplementerNetwork.NONE, None)) == {
         "PATH": "/usr/bin"
@@ -220,8 +230,14 @@ def test_a_job_cannot_bring_its_own_hosts() -> None:
     for name in ("allowedHosts", "egress", "allowlist", "network", "proxy"):
         for where in (document, document["implementer"], document["implementer"]["limits"]):
             attempt = json.loads(json.dumps(document))
-            target = attempt if where is document else (
-                attempt["implementer"] if where is document["implementer"] else attempt["implementer"]["limits"]
+            target = (
+                attempt
+                if where is document
+                else (
+                    attempt["implementer"]
+                    if where is document["implementer"]
+                    else attempt["implementer"]["limits"]
+                )
             )
             target[name] = ["github.com"]
             with pytest.raises(runner_job.JobError):

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-"""The probe that proves the egress port is reachable for the engine user and nothing else is (#763).
+"""The probe that proves the egress port is reachable and nothing else is (#763).
 
 The kernel's part is the privileged suite's; here is how the runner builds the probe and judges
 its answer, with real loopback listeners for the sentinels.
@@ -8,6 +8,7 @@ its answer, with real loopback listeners for the sentinels.
 
 import json
 import socket
+from collections.abc import Mapping
 
 import pytest
 
@@ -18,7 +19,7 @@ UID = GID = 10101
 CONFINED = {"allowed": True, "other_port": False, "other_host": False}
 
 
-def probe_that(reaches: dict[str, object], seen: list[list[str]]) -> netguard.ProbeRunner:
+def probe_that(reaches: Mapping[str, object], seen: list[list[str]]) -> netguard.ProbeRunner:
     def run(argv: list[str], uid: int, gid: int) -> str:
         seen.append(argv)
         return json.dumps(reaches)

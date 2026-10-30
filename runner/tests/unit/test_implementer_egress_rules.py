@@ -8,11 +8,13 @@ it was (`test_dynamic_review_egress_modes.py`). What the kernel does with the ru
 privileged suite.
 """
 
+import socket
 from pathlib import Path
 
 import pytest
 
-from code_reviewer_runner.dynamic_review import static_isolation
+from code_reviewer_runner.dynamic_review import engine_user, self_check, static_isolation
+from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.netguard import (
     EgressMode,
     IsolationError,
@@ -137,11 +139,14 @@ def test_the_egress_port_must_lie_outside_the_ephemeral_range_like_the_others(
 def test_startup_hands_the_egress_port_to_the_installer_and_only_then() -> None:
     asked: list[tuple[int, ...]] = []
 
+    def install(proxy: int, engine: int, *egress: int) -> None:
+        asked.append((proxy, engine, *egress))
+
     for ports in (SlotPorts(10180, 10181), SlotPorts(10180, 10181, 10182)):
         secure_startup(
             UID,
             ports,
-            install=lambda *given: asked.append(given),
+            install=install,
             drop=lambda: None,
             detect=lambda: EgressMode.FULL,
         )
@@ -154,11 +159,11 @@ def test_the_default_installer_writes_the_egress_port_into_the_ruleset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scripts: list[str] = []
-    monkeypatch.setattr(
-        static_isolation,
-        "NetworkConfinement",
-        lambda uid, mode: NetworkConfinement(uid, run=scripts.append, mode=mode),
-    )
+
+    def confinement(uid: int, mode: EgressMode) -> NetworkConfinement:
+        return NetworkConfinement(uid, run=scripts.append, mode=mode)
+
+    monkeypatch.setattr(static_isolation, "NetworkConfinement", confinement)
 
     setup = secure_startup(
         UID,
@@ -169,3 +174,76 @@ def test_the_default_installer_writes_the_egress_port_into_the_ruleset(
 
     assert setup.rules_installed
     assert scripts == [ruleset(UID, 10180, 10181, egress_port=10182)]
+
+
+# #763-T06
+def test_an_implementer_launch_has_its_egress_port_probed_with_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probed: list[tuple[int, ...]] = []
+
+    def probe(uid: int, gid: int, *ports: int) -> None:
+        probed.append(ports)
+
+    monkeypatch.setattr(engine_user, "verify_confinement", probe)
+    monkeypatch.setattr(engine_user, "require_startup_capabilities_gone", lambda: None)
+    for egress in (None, 10182):
+        launch = EngineLaunch(
+            uid=10101,
+            gid=10101,
+            home=str(tmp_path),
+            tmpdir=str(tmp_path),
+            config_dir=tmp_path,
+            egress_port=egress,
+        )
+        launch.sweep = lambda: True  # type: ignore[method-assign]
+        launch.confine(launch.proxy_port, launch.engine_port)
+
+    assert probed == [(10180,), (10180, 10182)]
+
+
+def _free_ports(count: int) -> list[int]:
+    found: list[int] = []
+    for port in range(31000, 32000):
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        found.append(port)
+        if len(found) == count:
+            return found
+    raise AssertionError("no free ports")
+
+
+# #763-T06
+def test_the_startup_probe_listens_on_the_egress_port_while_the_engine_user_is_probed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy, egress = _free_ports(2)
+    reached: list[tuple[int, ...]] = []
+
+    def probe(uid: int, gid: int, *ports: int) -> None:
+        for port in ports:  # the supervisor's stand-ins must accept, as the real proxies will
+            with socket.create_connection(("127.0.0.1", port), timeout=2):
+                pass
+        reached.append(ports)
+
+    monkeypatch.setattr(self_check, "verify_confinement", probe)
+
+    self_check.startup_probe(10101, 10101, proxy, egress)
+
+    assert reached == [(proxy, egress)]
+
+
+# #763-T06
+def test_a_taken_egress_port_fails_the_startup_probe_without_naming_the_port() -> None:
+    proxy, egress = _free_ports(2)
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", egress))
+        holder.listen(1)
+
+        with pytest.raises(IsolationError, match="egress proxy port of the slot is not free") as e:
+            self_check.startup_probe(10101, 10101, proxy, egress)
+
+    assert str(egress) not in str(e.value)
