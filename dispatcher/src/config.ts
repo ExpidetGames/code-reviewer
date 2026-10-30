@@ -529,9 +529,10 @@ export function loadSettings(env: Environment): Settings {
   if (reviewer.kinds.length === 0)
     throw new ConfigError("DISPATCHER_ENGINES", "invalid");
   const keys = [...legacy.keys, ...extra.flatMap((entry) => entry.keys)];
+  // The literals are read by app/src/billing/hold.test.ts (the hold of the App follows this default).
   const jobTimeoutSeconds = integer(env, "DISPATCHER_JOB_TIMEOUT_SECONDS", {
-    min: MIN_JOB_TIMEOUT_SECONDS,
-    max: MAX_JOB_TIMEOUT_SECONDS,
+    min: 60,
+    max: 21600,
     fallback: 1200,
   });
   const configured = workerConfigs(env);
