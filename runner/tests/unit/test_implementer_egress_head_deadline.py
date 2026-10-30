@@ -42,8 +42,8 @@ def test_a_byte_that_arrives_after_the_head_deadline_is_answered_with_408(
     client = LateClient(clock)
     proxy = EgressProxy(limits=EgressLimits(head_timeout=10))
 
-    with pytest.raises(egress_proxy._Done):
-        proxy._read_head(client)  # type: ignore[arg-type]
+    with pytest.raises(egress_proxy._Done):  # pyright: ignore[reportPrivateUsage]
+        proxy._read_head(client)  # pyright: ignore[reportPrivateUsage, reportArgumentType]
 
     assert client.sent and client.sent[0].startswith(b"HTTP/1.1 408 ")
     assert all(timeout > 0 for timeout in client.timeouts)

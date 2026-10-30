@@ -122,12 +122,20 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   (`RUNNER_IMPLEMENTER_NETWORK=registries`, `RUNNER_IMPLEMENTER_EGRESS_PORT`, default 10182) gets
   one more accepted loopback port in the same rules. Behind it the root supervisor runs a CONNECT
   proxy (`implementer/egress_proxy.py`): only `CONNECT host:443` to the built-in registry allowlist
-  (npm, yarn, PyPI, Go proxy and sum, crates), the name is resolved by the proxy, every address it
-  resolves to must be public (the model proxy's rule), and the tunnel goes to an address it
-  judged. GitHub, the Dispatcher, the App and cloud metadata are not on the list. The allowlist is
-  code, not configuration. The agent's tools find the proxy through `HTTPS_PROXY` and the npm/pip
-  variables; a tool that ignores them has no network. `none` starts no proxy and opens no port.
-  The job log gets one line at the end with the tunnels per host (never paths or content).
+  (npm, yarn, PyPI, crates), the name is resolved by the proxy, every address it resolves to must be
+  public (the model proxy's rule), and the tunnel goes to an address it judged. GitHub, the
+  Dispatcher, the App and cloud metadata are not on the list, and neither is the Go module proxy:
+  Go is not a stack of this slice, and that proxy fetches any host named in its path for the client,
+  which would be a way out without a token. The allowlist is code, not configuration. The agent's
+  tools find the proxy through `HTTPS_PROXY` and the npm/pip variables; a tool that ignores them has
+  no network. `none` starts no proxy and opens no port. The job log gets one line at the end with
+  the tunnels per host (never paths or content).
+  **What the allowlist does not stop.** The proxy sees only the CONNECT name. After its 200 the
+  bytes are the client's: any SNI and any `Host` go inside the tunnel, so other tenants on a
+  registry's CDN addresses may be reachable under the registry's name. And `registry.npmjs.org` is
+  writable: a prompt injection that brings an attacker's npm token can publish any file the agent
+  can read. This is accepted for internal use on our own repositories; issue #784 (read-only
+  registry access) closes it before external users run an Implementer.
 - **Two rulesets, one policy (#345).** The kernel decides which one the runner installs, at start,
   before it drops `NET_ADMIN`. It asks the kernel by installing and removing a throw-away
   `table inet` with a `reject` rule (it matches no process).

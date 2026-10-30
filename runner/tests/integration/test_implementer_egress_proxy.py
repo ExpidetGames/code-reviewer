@@ -589,6 +589,20 @@ def test_a_head_of_exactly_the_limit_is_served_and_one_byte_more_is_refused() ->
 
 
 # #763-T04
+def test_a_head_that_is_not_complete_yet_at_the_limit_is_waited_for() -> None:
+    limits = EgressLimits(max_head_bytes=200)
+    with backend() as server, running(server, limits=limits) as proxy:
+        request = padded_connect(197)  # 197 + 4 bytes; everything but the last one is 200 bytes
+        with socket.create_connection(("127.0.0.1", proxy.port), timeout=5) as client:
+            client.sendall(request[:-1])
+            time.sleep(0.3)  # the proxy has read exactly the limit and must go on reading
+            client.sendall(request[-1:])
+            status, _ = read_head(client)
+
+        assert status == 200
+
+
+# #763-T04
 def test_a_head_that_never_ends_is_refused_once_it_is_too_long_not_when_the_time_is_up() -> None:
     with backend() as server, running(server, limits=EgressLimits(head_timeout=30)) as proxy:
         started = time.monotonic()
@@ -758,6 +772,7 @@ def test_a_handler_that_cannot_start_costs_that_client_only_and_stop_still_logs(
                 proxy.stop()
 
     assert proxy.refused_counts() == {"limit": 1}
+    assert not proxy._handlers  # pyright: ignore[reportPrivateUsage]  # a failed start is not kept
     assert f"{REGISTRY}=1" in "\n".join(record.getMessage() for record in caplog.records)
 
 
@@ -768,8 +783,9 @@ def test_stop_does_not_raise_on_a_thread_that_never_started_and_still_logs(
     with backend() as server:
         proxy = EgressProxy(resolve=Resolver(), connect=server.connect)
         proxy.start()
-        with proxy._lock:  # a handler registered whose start failed
-            proxy._handlers.add(threading.Thread(target=lambda: None))
+        # A handler that is registered but never started.
+        with proxy._lock:  # pyright: ignore[reportPrivateUsage]
+            proxy._handlers.add(threading.Thread(target=lambda: None))  # pyright: ignore[reportPrivateUsage]
         with caplog.at_level(logging.INFO):
             proxy.stop()
 

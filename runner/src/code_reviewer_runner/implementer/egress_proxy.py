@@ -188,10 +188,9 @@ class EgressProxy:
             for sock in sockets:
                 self._close(sock)
             for handler in handlers:
-                # A thread whose start failed has no ident and cannot be joined.
-                with contextlib.suppress(RuntimeError):
-                    if handler.ident is not None:
-                        handler.join(2)
+                # A thread that never started has no ident and cannot be joined.
+                if handler.ident is not None:
+                    handler.join(2)
         finally:
             self._log_summary()
 
