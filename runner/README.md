@@ -603,6 +603,17 @@ and the enum agree. Callers branch on the code, never on the text.
 | `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires (a forced tool choice, #511), or OpenRouter found no provider that supports every parameter of a request (404, #270); there is no fallback model or provider |
 | `lease_lost` | A Dynamic job was no longer held by this runner (lease lost, job cancelled) or could not be confirmed as held right before it would have written its summary; nothing was written (#260) |
 | `superseded` | A newer push replaced this run while it was running (#396): it finished the model requests in flight, sent no more, published nothing and reports what it used. Not a failure of the job ("A superseded run", below) |
+| `branch_exists` | An implementer job (#746): the branch the turn should create is already on the remote; nothing was changed |
+| `base_branch_not_found` | An implementer job (#746): the base branch the turn should start from does not exist on the remote |
+| `clone_failed` | An implementer job (#746): the repository could not be cloned |
+| `setup_failed` | An implementer job (#746): the repository's own set-up steps did not complete |
+| `agent_gave_up` | An implementer job (#746): the agent ended without a result it stands behind |
+| `push_rejected` | An implementer job (#746): the remote refused the push of the branch |
+| `branch_violation` | An implementer job (#746): the work left the branch it was given, so it was stopped and nothing was pushed |
+| `time_limit_reached` | An implementer job (#746): the turn ran into its time limit (`implementer.limits.timeLimitSeconds`) |
+| `git_write_not_granted` | An implementer job (#746): the token cannot write the contents of the repository |
+| `implementer_engine_unavailable` | An implementer job (#746) arrived at a runner with no engine for it (this release has none); it is never run as a Diff or Dynamic job |
+| `implementer_config_invalid` | An implementer job (#746): the options of the turn cannot be used |
 | `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the Worker for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
 
