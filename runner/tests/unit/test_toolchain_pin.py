@@ -312,7 +312,7 @@ def test_a_file_is_not_written_through_a_link_of_the_tree(tmp_path: Path) -> Non
         )
 
 
-# #761-T02: links that stay inside the tree, as node's `bin/npm` and the `include` tree have, are fine.
+# #761-T02: links that stay inside the tree, like node's `bin/npm`, are fine.
 def test_links_that_stay_inside_the_tree_are_kept(tmp_path: Path) -> None:
     script = load_script()
     archive = archive_of_entries(

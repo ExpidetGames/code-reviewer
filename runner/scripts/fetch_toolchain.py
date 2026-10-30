@@ -76,7 +76,7 @@ def inner_parts(name: str) -> tuple[str, ...]:
 
 
 def inside(tree: Path, path: Path) -> bool:
-    """Whether `path` is `tree` or below it once every link on the way is followed (it need not exist)."""
+    """Whether `path` is in `tree` once every link on the way is followed (it need not exist)."""
     root = os.path.realpath(tree)
     return os.path.commonpath([root, os.path.realpath(path)]) == root
 
