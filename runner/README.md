@@ -193,7 +193,11 @@ a launcher's stays with the launcher), reads the same variables as the Worker, n
 
 **Image.** `runner/Dockerfile` has one target, `sandbox`, the Worker image of the hosted deployment and the only image of
 the project: the golden snapshot builds it and every review job runs it in a Vercel Sandbox VM, as `worker-once` or
-`probe`, nothing else. It carries no Dispatcher bundle and no Node.js. Build:
+`probe`, nothing else. It carries no Dispatcher bundle. Since #761 it also carries the toolchain of the Implementer's agent:
+git 2.53 or newer (built from its pinned source), Node.js 24, pnpm, Python and uv, `gcc`, `g++`, `make`, `jq` and `unzip`, and
+the guard hook with its matrix in `/opt/code-reviewer/guard/` (root-owned, read-only; the image bakes in no `core.hooksPath`,
+the Worker sets it per job through `GIT_CONFIG_SYSTEM`). Everything downloaded is pinned and verified (`runner/*-pin.json`,
+`scripts/fetch_toolchain.py`). Build:
 `docker build -f runner/Dockerfile --target sandbox -t code-reviewer-runner-sandbox .` (`make test-images` builds it and
 runs its smoke test).
 
