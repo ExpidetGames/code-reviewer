@@ -194,6 +194,8 @@ describe("POST /stop", () => {
     expect(sandbox.lists).toStrictEqual([
       { namePrefix: `cr-diff-${JOB}-`, tags: { app: "code-reviewer" } },
       { namePrefix: `cr-dynamic-${JOB}-`, tags: { app: "code-reviewer" } },
+      // #759: the VM of an Implementer job is named like the others, so it is found and stopped like them.
+      { namePrefix: `cr-implementer-${JOB}-`, tags: { app: "code-reviewer" } },
     ]);
   });
 

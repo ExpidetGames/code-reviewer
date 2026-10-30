@@ -31,7 +31,6 @@ import {
   type CoreSettings,
   type Engine,
   type ReviewKind,
-  type LaunchConfig,
 } from "./core/types.ts";
 import type { AppSigningKey } from "./triggers/signature.ts";
 
