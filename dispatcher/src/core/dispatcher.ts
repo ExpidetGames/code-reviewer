@@ -29,7 +29,8 @@ import {
 import { systemClock } from "./clock.ts";
 import {
   ENGINE_BY_KIND,
-  isServedKind,
+  jobTimeoutFor,
+  launchConfigFor,
   type AppSettings,
   type Clock,
   type CoreSettings,
@@ -42,7 +43,6 @@ import {
   LaunchError,
   type LiveVmCounter,
   type Logger,
-  type ReviewKind,
 } from "./types.ts";
 
 const DEFAULT_RETRY_BUSY_SECONDS = 30;
@@ -125,9 +125,6 @@ type LiveSnapshot = {
   /** `vmsCreated` of every app when the listing was asked for: what was created after it is not in `counts`. */
   created: ReadonlyMap<string, number>;
 };
-
-/** A claimed job of a kind this Dispatcher serves (#746): the only jobs that reach a Launcher. */
-type ServedJob = ClaimedJob & { reviewKind: ReviewKind };
 
 export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   const { settings, launcher, logger } = deps;
@@ -292,8 +289,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     // The first wall of the job kinds (#730): a kind the app may not submit is never claimed.
     if (
       hint.reviewKind !== undefined &&
-      (!isServedKind(hint.reviewKind) ||
-        !state.settings.kinds.includes(hint.reviewKind))
+      !state.settings.kinds.includes(hint.reviewKind)
     ) {
       logger.warn("kind_not_allowed", {
         app: appId,
@@ -393,15 +389,10 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       // The second wall (#730): a job of a kind the app may not have, or of a kind whose engine this Dispatcher does not
       // serve (a misconfigured or compromised app answers a claim for Diff engines with a Dynamic job), is given back
       // unlaunched, so no VM is created for it.
-      // #746: a kind the contract knows and this Dispatcher does not serve (`implementer`) is a kind it may not have.
+      // #759: `implementer` is a kind like the others here; only an app whose kinds name it is ever given one.
       const claimedKind = claimed.job.reviewKind;
-      const kindAllowed =
-        isServedKind(claimedKind) && state.settings.kinds.includes(claimedKind);
-      if (
-        !isServedKind(claimedKind) ||
-        !kindAllowed ||
-        !claimEngines.includes(ENGINE_BY_KIND[claimedKind])
-      ) {
+      const kindAllowed = state.settings.kinds.includes(claimedKind);
+      if (!kindAllowed || !claimEngines.includes(ENGINE_BY_KIND[claimedKind])) {
         logger.error("kind_not_allowed", {
           app: appId,
           jobId: claimed.job.id,
@@ -416,10 +407,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       handedOver = true;
       return {
         outcome: "started",
-        background: runLaunch(state, {
-          ...claimed.job,
-          reviewKind: claimedKind,
-        }),
+        background: runLaunch(state, claimed.job),
       };
     } finally {
       if (!handedOver) state.launching -= 1;
@@ -427,7 +415,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   }
 
   /** The launch phase of one claimed job. Never rejects. The credential lives in this scope only. */
-  async function runLaunch(state: AppState, job: ServedJob): Promise<void> {
+  async function runLaunch(state: AppState, job: ClaimedJob): Promise<void> {
     const app = state.client;
     const appId = state.settings.id;
     const startedAt = now();
@@ -548,7 +536,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
 
   async function launchWith(
     state: AppState,
-    job: ServedJob,
+    job: ClaimedJob,
     guard: Abort,
     onVmCreated: (vm: CreatedVm) => void,
   ): Promise<void> {
@@ -566,8 +554,8 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
         jobId: job.id,
         credential: job.credential,
         kind: job.reviewKind,
-        timeoutSeconds: settings.jobTimeoutSeconds,
-        config: settings.workerConfig[job.reviewKind],
+        timeoutSeconds: jobTimeoutFor(settings, job.reviewKind),
+        config: launchConfigFor(settings, job.reviewKind),
         onVmCreated,
       },
       guard.signal,

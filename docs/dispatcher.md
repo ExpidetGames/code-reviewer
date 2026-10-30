@@ -25,6 +25,24 @@ another's jobs or VMs, and the Dispatcher counts each app's live VMs against its
 ([`dispatcher/README.md`](../dispatcher/README.md), "More than one App"; variables in
 [`deployment-vercel.md`](deployment-vercel.md), 3.2).
 
+**The kind `implementer` (#759).** The Implementer's job kind (engine `implementer`, contract `runner-api.v1.json`) is served
+for an app of `DISPATCHER_APPS` that names it in `kinds`, and for no other: the app `reviewer` (the legacy variables,
+code-review.com) never has it, whatever `DISPATCHER_ENGINES` says (`REVIEWER_KINDS` in `dispatcher/src/core/types.ts`), so
+code-review.com cannot start an agent job even if its app is misconfigured. The same three checks as for the other kinds
+apply: a wake-up call for the kind from another app is `200 ignored` with `not_capable` and no claim, the claim asks for the
+`implementer` engine only for an app whose kinds name it, and a claimed job of the kind for another app is released
+unlaunched (`kind_not_allowed`). A job of the kind lives 3600 s by default (`DISPATCHER_WORKER_CONFIG.implementer.timeoutSeconds`,
+60 to 21600) where Diff and Dynamic keep `DISPATCHER_JOB_TIMEOUT_SECONDS`. The Sandbox launcher does not advertise the engine
+yet: it needs the container profile of the Implementer (#760), until then a dispatch for the kind is `not_capable`.
+The deploy canary (`POST /probe`) follows the same rule: it requires the engines of Diff and Dynamic whatever else is
+configured, and requires `implementer` only when the Launcher advertises it, so the release that introduces the kind does not
+fail its own canary and a missing reviewer engine still does. Once #760 makes the Launcher advertise the engine, the route
+requires the report to name it, and no report can today: `KNOWN_ENGINES` (`dispatcher/src/probe/verdict.ts`), the `ProbeEngine`
+enum and the two `maxItems: 2` of `contracts/probe-verdict.v1.json`, and `runner/src/code_reviewer_runner/verdict.py` accept
+`pr-agent` and `opencode` only. The PR that adds `implementer` to the Sandbox launcher's capabilities has to extend all of them
+and the probe of the canary VM, else `POST /probe` answers `503` on every deploy. The answer lists the engines it required
+(`required`), and the canary prints the missing ones (`missing=`).
+
 "Runner" is retired as a concept: the former runner process conflated the Dispatcher
 (claim, cap) and the Worker host (heartbeat, supervise, deliver). Its identifiers (`RUNNER_*` variables, image and
 service names, `/api/runners/v1`) stay until a dedicated rename.

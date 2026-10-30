@@ -11,17 +11,10 @@ import type { WorkerContainerOverrides } from "../contracts/worker-container.ts"
 export type Engine = ContractEngine;
 /** A kind as the contract names it (and as a signed wake-up call or a claim answer may carry it). */
 export type WireReviewKind = ContractReviewKind;
-/**
- * A kind this Dispatcher serves: a launcher, a configuration and a pool exist for it. The contract knows one more
- * (`implementer`, #746) that a later change serves (#759); until then it is a `WireReviewKind` only, so no table of this
- * Dispatcher is keyed by it and no code path can take it for a Diff or Dynamic job.
- */
-export type ReviewKind = Exclude<WireReviewKind, "implementer">;
-
-/** Whether a kind from the wire is one this Dispatcher serves. */
-export function isServedKind(kind: WireReviewKind): kind is ReviewKind {
-  return (KNOWN_KINDS as readonly WireReviewKind[]).includes(kind);
-}
+/** A kind this Dispatcher serves: a launcher, a configuration and a timeout exist for it. Every kind of the contract (#759). */
+export type ReviewKind = WireReviewKind;
+/** The kinds of the app `reviewer` (code-review.com): pull request reviews. */
+export type ReviewerKind = Exclude<ReviewKind, "implementer">;
 
 /** Every kind of the contract (`ReviewKind` of runner-api.v1.json), in the order of the file: what a signed wake-up call may name. */
 export const CONTRACT_REVIEW_KINDS = [
@@ -31,18 +24,27 @@ export const CONTRACT_REVIEW_KINDS = [
 ] as const;
 
 /** The engine that runs a job of a kind: PR-Agent for Diff, OpenCode for Dynamic, the Implementer's own for `implementer` (#746). */
-export const ENGINE_BY_KIND: Readonly<Record<WireReviewKind, Engine>> = {
+export const ENGINE_BY_KIND: Readonly<Record<ReviewKind, Engine>> = {
   diff: "pr-agent",
   dynamic: "opencode",
   implementer: "implementer",
 };
 
 /**
- * The job kinds this Dispatcher serves (#730). An app is allowed a subset of them (`AppSettings.kinds`); a later kind is
- * added here and in the contracts, never by the configuration of an app. `implementer` is in the contract but not in this
- * list yet (#759 adds it with its Launcher), so a wake-up call or a claim for it is refused and never run by another engine.
+ * The job kinds this Dispatcher serves (#730, #759). An app is allowed a subset of them (`AppSettings.kinds`); a later kind
+ * is added here and in the contracts, never by the configuration of an app.
  */
-export const KNOWN_KINDS: readonly ReviewKind[] = ["diff", "dynamic"];
+export const KNOWN_KINDS: readonly ReviewKind[] = CONTRACT_REVIEW_KINDS;
+
+/**
+ * The kinds the app `reviewer` (the legacy variables, code-review.com) can have, whatever `DISPATCHER_ENGINES` says: it
+ * never has `implementer` (#759), so that code-review.com cannot start an agent job even when its app is misconfigured.
+ * Only an app of `DISPATCHER_APPS` can be given the kind, by naming it in its `kinds`.
+ */
+export const REVIEWER_KINDS: readonly ReviewerKind[] = ["diff", "dynamic"];
+
+/** How long a Worker of the Implementer may live when nothing is configured: a session works far longer than a review (#759). */
+export const DEFAULT_IMPLEMENTER_TIMEOUT_SECONDS = 3600;
 
 /** The id of the app that is configured by the legacy variables (`RUNNER_API_URL`, `RUNNER_TOKEN`, ...). */
 export const LEGACY_APP_ID = "reviewer";
@@ -181,12 +183,57 @@ export type CoreSettings = {
   apps: readonly AppSettings[];
   /** The engines this deployment is configured to serve. */
   engines: readonly Engine[];
-  /** How long a Worker may live. */
+  /** How long a Worker of Diff or Dynamic may live (`DISPATCHER_JOB_TIMEOUT_SECONDS`). Read per kind through `jobTimeoutFor`. */
   jobTimeoutSeconds: number;
+  /** How long a Worker of the Implementer may live; absent: `DEFAULT_IMPLEMENTER_TIMEOUT_SECONDS` (#759). */
+  implementerTimeoutSeconds?: number;
   /** How long a launch may take, from the claim. */
   launchDeadlineSeconds: number;
-  workerConfig: Readonly<Record<ReviewKind, LaunchConfig>>;
+  /** Per kind; `implementer` is absent unless the operator configured it. Read through `launchConfigFor`. */
+  workerConfig: Readonly<Record<ReviewerKind, LaunchConfig>> & {
+    readonly implementer?: LaunchConfig;
+  };
 };
+
+/** How long a Worker of a kind may live, from the start (#759): Diff and Dynamic share one timeout, the Implementer has its own. */
+export function jobTimeoutFor(
+  settings: Pick<
+    CoreSettings,
+    "jobTimeoutSeconds" | "implementerTimeoutSeconds"
+  >,
+  kind: ReviewKind,
+): number {
+  if (kind !== "implementer") return settings.jobTimeoutSeconds;
+  return (
+    settings.implementerTimeoutSeconds ?? DEFAULT_IMPLEMENTER_TIMEOUT_SECONDS
+  );
+}
+
+/**
+ * The longest a Worker of a kind that some app may have can live (#759): what the reaper waits for when a VM reports no
+ * timeout of its own. The Implementer's timeout counts only when an app has the kind, so a deployment that serves
+ * Diff and Dynamic alone is reaped exactly as before.
+ */
+export function longestJobTimeoutSeconds(
+  settings: Pick<
+    CoreSettings,
+    "apps" | "jobTimeoutSeconds" | "implementerTimeoutSeconds"
+  >,
+): number {
+  const served = new Set(settings.apps.flatMap((app) => app.kinds));
+  return Math.max(
+    ...[...served].map((kind) => jobTimeoutFor(settings, kind)),
+    settings.jobTimeoutSeconds,
+  );
+}
+
+/** What the Launcher gets to configure a Worker of a kind: nothing when the operator configured nothing. */
+export function launchConfigFor(
+  settings: Pick<CoreSettings, "workerConfig">,
+  kind: ReviewKind,
+): LaunchConfig {
+  return settings.workerConfig[kind] ?? {};
+}
 
 /**
  * The answer of the core. Only `started` has work left: `background` is the launch (it never rejects),
