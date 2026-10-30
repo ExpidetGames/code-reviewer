@@ -17,6 +17,7 @@ import { adminNavGroupsFor } from "../admin/ui/nav-items.ts";
 import { AppShell } from "../shell/app-shell.tsx";
 import { navGroupsFor, navItemsFor } from "../shell/nav-items.ts";
 import { getProductIdentity } from "../product-identity/current.ts";
+import { identityFor } from "../product-identity/identities.ts";
 import { workspaceHome } from "../workspaces/paths.ts";
 import { SettingsNav } from "../workspaces/ui/settings-nav.tsx";
 import { CapabilitiesProvider } from "./context.tsx";
@@ -82,17 +83,62 @@ describe("the workspace sidebar", () => {
 
   it("has the pure lists agree, and starts a workspace on a page it has", () => {
     const none = createCapabilitySet([]);
-    expect(navItemsFor("/w/acme", none).map((item) => item.label)).toEqual([
-      "Connections",
-      "Members",
-      "Settings",
-    ]);
-    expect(navGroupsFor("/w/acme", none)).toHaveLength(1);
+    const product = getProductIdentity();
+    expect(
+      navItemsFor("/w/acme", product, none).map((item) => item.label),
+    ).toEqual(["Connections", "Members", "Settings"]);
+    expect(navGroupsFor("/w/acme", product, none)).toHaveLength(1);
     expect(workspaceHome("acme")).toBe("/w/acme/projects");
     expect(workspaceHome("acme", createCapabilitySet(FACTORY))).toBe(
       "/w/acme/projects",
     );
     expect(workspaceHome("acme", none)).toBe("/w/acme/connections");
+  });
+});
+
+describe("the name of the QA area in the sidebar", () => {
+  // #757-T01
+  it("is Projects for code-review.com, with the address it always had", () => {
+    const product = identityFor("code-review-com");
+
+    expect(
+      navItemsFor("/w/acme", product).map((item) => [item.label, item.href]),
+    ).toEqual([
+      ["Projects", "/w/acme/projects"],
+      ["Runs", "/w/acme/runs"],
+      ["Connections", "/w/acme/connections"],
+      ["Members", "/w/acme/members"],
+      ["Settings", "/w/acme/settings"],
+    ]);
+  });
+
+  // #757-T02
+  it("is QA for the factory, and the address stays /projects", () => {
+    const product = identityFor("factory");
+
+    expect(
+      navItemsFor("/w/acme", product).map((item) => [item.label, item.href]),
+    ).toEqual([
+      ["QA", "/w/acme/projects"],
+      ["Runs", "/w/acme/runs"],
+      ["Connections", "/w/acme/connections"],
+      ["Members", "/w/acme/members"],
+      ["Settings", "/w/acme/settings"],
+    ]);
+  });
+
+  // #757-T02
+  it("is what the rendered sidebar of the factory shows", () => {
+    render(
+      <CapabilitiesProvider capabilities={FACTORY}>
+        <AppShell product={identityFor("factory")} userMenu={<span>menu</span>}>
+          <h1>Page</h1>
+        </AppShell>
+      </CapabilitiesProvider>,
+    );
+
+    expect(labels()).toEqual(expect.arrayContaining(["QA", "Runs"]));
+    expect(labels()).not.toContain("Projects");
   });
 });
 
