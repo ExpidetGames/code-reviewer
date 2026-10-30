@@ -48,6 +48,7 @@ export type {
   FakeInstallation,
   FakePermissions,
   FakePullRequest,
+  FakePush,
   FakeRepository,
   FakeTokenRequest,
 } from "./app-api.ts";
@@ -100,7 +101,12 @@ export type FakeGithubOptions = {
   port?: number;
 };
 
-export type FakeGithubRequest = { method: string; path: string };
+export type FakeGithubRequest = {
+  method: string;
+  path: string;
+  /** A push (`git-receive-pack`): the names of the refs it asked to update, never a token. */
+  refs?: string[];
+};
 
 /** Makes matching requests fail before they are looked at. */
 export type FakeFailure = {
@@ -279,7 +285,8 @@ export async function startGithubFake(
       const url = new URL(request.url ?? "/", "http://fake.invalid");
       const path = url.pathname;
       const method = request.method ?? "GET";
-      log.push({ method, path });
+      const entry: FakeGithubRequest = { method, path };
+      log.push(entry);
       response.on("close", () => {
         if (!response.writableFinished) aborted.push({ method, path });
       });
@@ -334,6 +341,9 @@ export async function startGithubFake(
           response,
           url,
           bearer,
+          logRefs: (refs) => {
+            entry.refs = refs;
+          },
           // The answer is worked out now (when the request arrived) and sent later.
           reply: async (status, body) => {
             if (failure?.responseDelayMs !== undefined)

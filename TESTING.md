@@ -460,7 +460,10 @@ its own projects: `prepare` (the first-run setup and the GitHub App of the app),
 - Fakes the lane added: the fake GitHub serves Git over smart HTTP (`fakes/github/git-http.ts`, repositories made with
   `fakes/github/git-fixture.ts`, registered through `POST /__fake/git-repositories`), and the fake LLM can answer as the
   model of an agent (`scriptAgent`), tests in `src/integrations/providers/github-app/fake-github-git.integration.test.ts`
-  and `src/test-support/llm-fake-agent.integration.test.ts`.
+  and `src/test-support/llm-fake-agent.integration.test.ts`. Since #766 the fake GitHub also takes a push
+  (`git-receive-pack`, only with a token minted with `contents: write`; `fake-github-push.integration.test.ts` in the
+  same directory) and the script of the fake LLM can play a coding agent (`finalText`, `when`; `fakes/llm/README.md`),
+  for the Implementer journey.
 - What it does not cover: a real model, a real GitHub, the Docker image itself (`image-runner-sandbox` and `sandbox-local` do), worst-case memory, and the operational
   items on a staging instance (#250 review: T07, T10).
 
