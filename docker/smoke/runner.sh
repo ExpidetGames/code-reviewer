@@ -637,18 +637,21 @@ docker run --rm --network none --user 10101:10101 --env HOME=/tmp --env GUARD_DI
   --entrypoint /opt/code-reviewer/guard/guard_matrix.sh "$image" >/dev/null 2>&1 || status=$?
 [ "$status" -eq 2 ] || fail "the guard matrix without a hook ended with status $status, expected 2"
 
-# #761-T05: the image serves every kind of job, so the reviewer pays for what the Implementer needs. The size is
-# the sum of the layers (uncompressed, the same under every image store); the baseline is the image before the
-# toolchain layer, built from the same Dockerfile base. Above the budget the PR must propose a per-kind image.
-BASE_IMAGE_BYTES=998952960
+# #761-T05: the image serves every kind of job, so the reviewer pays for what the Implementer needs. The growth is
+# the sum of the layers above the layer of the pin files (the toolchain layer and what follows it), in bytes as
+# `docker history` reports them (uncompressed). It is measured inside this one image, so it is the same under every
+# image store and needs no baseline from another build. Above the budget the PR must propose a per-kind image.
 GROWTH_BUDGET_BYTES=900000000
-step "the image grew by less than the budget of the shared Worker image"
-image_bytes=$(docker history --human=false --no-trunc --format '{{.Size}}' "$image" | awk '{ total += $1 } END { printf "%d", total }')
-growth=$((image_bytes - BASE_IMAGE_BYTES))
-printf '    image %d MB (layers), before the toolchain %d MB, growth %d MB, budget %d MB\n' \
-  $((image_bytes / 1000000)) $((BASE_IMAGE_BYTES / 1000000)) $((growth / 1000000)) $((GROWTH_BUDGET_BYTES / 1000000))
+step "the toolchain layer grew the image by less than the budget of the shared Worker image"
+history=$(docker history --human=false --no-trunc --format '{{.Size}} {{.CreatedBy}}' "$image")
+image_bytes=$(printf '%s\n' "$history" | awk '{ total += $1 } END { printf "%d", total }')
+growth=$(printf '%s\n' "$history" | awk '/ripgrep-pin.json \/opt\/code-reviewer\/pins/ { exit } { total += $1 } END { printf "%d", total }')
+printf '%s\n' "$history" | awk '$1 > 1000000 { printf "    %6d MB  %s\n", $1 / 1000000, substr($0, index($0, " ") + 1, 90) }'
+printf '    image %d MB (layers), the layers above the pins layer add %d MB, budget %d MB\n' \
+  $((image_bytes / 1000000)) $((growth / 1000000)) $((GROWTH_BUDGET_BYTES / 1000000))
+[ "$growth" -gt 100000000 ] || fail "the growth of $((growth / 1000000)) MB is implausibly small: is the pins layer still there?"
 [ "$growth" -le "$GROWTH_BUDGET_BYTES" ] ||
-  fail "the image grew by $((growth / 1000000)) MB, above the budget of $((GROWTH_BUDGET_BYTES / 1000000)) MB: propose a per-kind image"
+  fail "the toolchain layer added $((growth / 1000000)) MB, above the budget of $((GROWTH_BUDGET_BYTES / 1000000)) MB: propose a per-kind image"
 
 step "the image is labelled as the Worker image"
 title=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image")
