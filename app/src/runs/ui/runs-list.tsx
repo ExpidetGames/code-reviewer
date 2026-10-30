@@ -7,6 +7,7 @@
 // later shows up too. Everything in a run that came from outside (the project name, the login) is
 // rendered as text and truncated instead of widening the page.
 import { useProductIdentity } from "../../product-identity/context.tsx";
+import type { ProductIdentity } from "../../product-identity/identity.ts";
 import Link from "next/link";
 import { useMemo } from "react";
 import { Button } from "../../components/button.tsx";
@@ -150,9 +151,11 @@ function RunTableRow({
 }
 
 export function RunsEmptyState({
+  product,
   filtered,
   workspaceSlug,
 }: {
+  product: ProductIdentity;
   filtered: boolean;
   workspaceSlug: string;
 }) {
@@ -190,7 +193,7 @@ export function RunsEmptyState({
       <EmptyContent>
         <Button asChild variant="primary">
           <Link href={workspacePath(workspaceSlug, "/projects")}>
-            Open projects
+            Open {product.qaAreaNameInSentence}
           </Link>
         </Button>
       </EmptyContent>
@@ -238,7 +241,11 @@ export function RunsList({
           : ""}
       </StatusRegion>
       {data.runs.length === 0 ? (
-        <RunsEmptyState filtered={filtered} workspaceSlug={workspaceSlug} />
+        <RunsEmptyState
+          product={product}
+          filtered={filtered}
+          workspaceSlug={workspaceSlug}
+        />
       ) : (
         <Table aria-label="Runs" className="table-fixed">
           <TableHeader>
