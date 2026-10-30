@@ -108,6 +108,10 @@ describe("git of the Worker image", () => {
         (line.match(/\bmake\b/g) ?? []).length,
       );
     expect(building()).not.toMatch(/\blibssl-dev\b/);
+    // libcurl's TLS is OpenSSL's in the usual flavour: the GnuTLS one, here and in the final image.
+    expect(building()).toContain("libcurl4-gnutls-dev");
+    expect(building()).not.toContain("libcurl4-openssl-dev");
+    expect(sandbox().join("\n")).not.toMatch(/\blibcurl4\b/);
   });
 
   // #761-T01: Debian's git (2.39) would be found first on a path and is too old for the guard.
@@ -146,7 +150,7 @@ describe("the rest of the toolchain in the Worker image", () => {
       "libc6-dev",
       "jq",
       "unzip",
-      "libcurl4",
+      "libcurl3-gnutls",
     ])
       expect(packages, name).toContain(name);
   });

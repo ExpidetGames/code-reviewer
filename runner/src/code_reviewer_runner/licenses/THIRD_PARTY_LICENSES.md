@@ -236,9 +236,9 @@ used unmodified and as separate programs that the agent starts as commands; none
   exception on the entry itself (`exception`): git is a separate program of the image that the agent runs
   as a command, built unmodified and linked into none of our code, and the image is never handed to a third
   party (code-review.com is a hosted service). The complete source is the pinned tarball, and the license
-  text travels with the image in `/usr/local/share/doc/git/COPYING`. It is built with `NO_OPENSSL=1`, so no part of git
-  (`git-imap-send` is the one that would) links OpenSSL 3, whose Apache-2.0 license is incompatible with
-  GPL-2.0-only; https goes through the separate system libcurl. Parts of the source tree carry other open source
+  text travels with the image in `/usr/local/share/doc/git/COPYING`. It is built with `NO_OPENSSL=1` against the GnuTLS flavour of
+  libcurl (`libcurl3-gnutls`, LGPL-2.1-or-later, as Debian's own git does), so no program of git, not `git-imap-send`
+  and not the https helper, reaches OpenSSL 3, whose Apache-2.0 license is incompatible with GPL-2.0-only. Parts of the source tree carry other open source
   licenses (for example `xdiff` under LGPL-2.1-or-later); they belong to the same unmodified release and
   are covered by the same review.
 
@@ -291,7 +291,7 @@ SOFTWARE.
   build stage already uses (`ARG UV_IMAGE` in `runner/Dockerfile`); the two executables `uv` and `uvx` are
   copied unmodified. The MIT option is used.
 - `gcc`, `g++`, `make`, `libc6-dev` (GPL and LGPL, with the GCC runtime library exception), `jq` (MIT),
-  `unzip` (Info-ZIP) and `libcurl4` (curl license) are Debian's signed packages, installed with apt and,
+  `unzip` (Info-ZIP) and `libcurl3-gnutls` (curl license, with GnuTLS under LGPL-2.1-or-later) are Debian's signed packages, installed with apt and,
   like `tini` and `nftables`, not version-pinned. Their license texts are in `/usr/share/doc/<package>/copyright`
   inside the image. They are separate programs; the image is never distributed.
 

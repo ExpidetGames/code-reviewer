@@ -90,13 +90,14 @@ RUN python /fetch/scripts/fetch_toolchain.py --component pnpm --dest /toolchain/
 # only git 2.53 or newer shows it a switch of the branch (checkout, switch); on older git the guard is blind
 # to that, so the Worker's self-test refuses to run a turn on it. The release is built here, once, from the
 # pinned source: no Perl, Python, Tcl, gettext, expat or OpenSSL (nothing the agent needs; `git add -p` is the
-# one loss; NO_OPENSSL keeps OpenSSL 3, whose Apache-2.0 license is incompatible with git's GPL-2.0-only, out of
-# `git-imap-send`, and https goes through the system libcurl), the system config in /etc (the Worker points
-# GIT_CONFIG_SYSTEM at a file under /run per job, and the image bakes none in), builtins as symlinks so the copy
-# into the final image keeps one binary.
+# one loss), against the GnuTLS flavour of libcurl, and with NO_OPENSSL: git is GPL-2.0-only and OpenSSL 3
+# (Apache-2.0) is not compatible with it, so no program of git may reach OpenSSL, neither its own `git-imap-send`
+# nor libcurl's TLS in `git-remote-https` (Debian's own git takes libcurl3-gnutls for the same reason); the system
+# config is in /etc (the Worker points GIT_CONFIG_SYSTEM at a file under /run per job, and the image bakes none in),
+# builtins as symlinks so the copy into the final image keeps one binary.
 FROM ${PYTHON_IMAGE} AS git-build
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential libcurl4-openssl-dev zlib1g-dev \
+    && apt-get install --yes --no-install-recommends build-essential libcurl4-gnutls-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=toolchain-fetch /toolchain/git /git-src
 WORKDIR /git-src
@@ -166,12 +167,13 @@ COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/ /usr/local/bin/
 RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins
 COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/
 # ---- the toolchain of the Implementer's agent (#761) ----
-# Compiler, make, jq, unzip and the libcurl git needs for https, from Debian's signed packages, NOT
+# Compiler, make, jq, unzip and the GnuTLS flavour of libcurl that git needs for https (Debian's own git takes it for
+# the same reason: no OpenSSL in a GPL-2.0-only program), from Debian's signed packages, NOT
 # version-pinned (like nftables above); without build-essential's dpkg-dev and Perl, which saves about
 # 50 MB and which no build of the agent's needs. Debian's `git` package is not installed: the git below is
 # the only one, and the guard needs its version.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends gcc g++ make libc6-dev jq unzip libcurl4 \
+    && apt-get install --yes --no-install-recommends gcc g++ make libc6-dev jq unzip libcurl3-gnutls \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=git-build --chown=0:0 /out/usr/local/ /usr/local/
 COPY --from=toolchain-fetch --chown=0:0 /toolchain/node /opt/node

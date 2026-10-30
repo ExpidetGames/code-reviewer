@@ -581,15 +581,15 @@ git_paths=$(in_image "$image" sh -c 'command -v git; ls /usr/bin/git 2>/dev/null
 $git_paths"
 printf '    %s\n' "$git_reported"
 
-# #761-T07: git is GPL-2.0-only, so OpenSSL 3 (Apache-2.0) must not be linked into it. `git-imap-send` is the
-# program that would link it; https goes through libcurl, a separate library.
-step "no program of git links OpenSSL (NO_OPENSSL), and https still works through libcurl"
-git_libs=$(in_image "$image" sh -c 'for f in /usr/local/bin/git /usr/local/libexec/git-core/git-imap-send; do ldd "$f"; done')
-if grep -Eq 'libssl|libcrypto' <<<"$git_libs"; then
-  fail "git or git-imap-send links OpenSSL:
-$(grep -E 'libssl|libcrypto' <<<"$git_libs")"
+# #761-T07: git is GPL-2.0-only, so OpenSSL 3 (Apache-2.0) must not be linked into any program of it. NO_OPENSSL keeps it
+# out of `git-imap-send` itself, and the GnuTLS flavour of libcurl keeps it out of the https helper and of imap-send's curl.
+step "no program of git reaches OpenSSL, and https still works through libcurl"
+git_libs=$(in_image "$image" sh -c 'for f in /usr/local/bin/git /usr/local/libexec/git-core/git-imap-send /usr/local/libexec/git-core/git-remote-https; do ldd "$f"; done')
+if grep -Eq 'libssl\.so|libcrypto\.so' <<<"$git_libs"; then
+  fail "a program of git links OpenSSL:
+$(grep -E 'libssl\.so|libcrypto\.so' <<<"$git_libs")"
 fi
-in_image "$image" sh -c 'ldd /usr/local/libexec/git-core/git-remote-https | grep -q libcurl' || fail "git-remote-https does not use libcurl"
+grep -q 'libcurl-gnutls\.so' <<<"$git_libs" || fail "git-remote-https does not use the GnuTLS libcurl"
 
 # #761-T02
 step "node, pnpm, python3, uv, gcc, make, jq and unzip are there at the pinned versions"
