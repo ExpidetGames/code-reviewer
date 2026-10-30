@@ -75,8 +75,20 @@ def inner_parts(name: str) -> tuple[str, ...]:
     return parts[1:]
 
 
+def inside(tree: Path, path: Path) -> bool:
+    """Whether `path` is `tree` or below it once every link on the way is followed (it need not exist)."""
+    root = os.path.realpath(tree)
+    return os.path.commonpath([root, os.path.realpath(path)]) == root
+
+
 def unpack(archive: Path, tree: Path) -> None:
-    """Write every member without its top directory into `tree`, with a bounded copy."""
+    """Write every member without its top directory into `tree`, with a bounded copy.
+
+    The check is made on the disk, not on the names: a link that is inside the tree by its text can
+    lead out of it through the links unpacked before it (`d/up -> ..`, then `esc -> d/up/..`), and a
+    file below such a link would be written outside. So every member's parent and every link's
+    target are resolved for real, and a file is never written onto a link.
+    """
     written = 0
     with tarfile.open(archive, "r:*") as bundle:
         for member in bundle:
@@ -84,6 +96,10 @@ def unpack(archive: Path, tree: Path) -> None:
             if not rest:
                 continue
             target = tree.joinpath(*rest)
+            if not inside(tree, target.parent) or target.is_symlink():
+                raise PinError(
+                    "a member would be written outside the destination or through a link"
+                )
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
             elif member.issym():
@@ -93,6 +109,8 @@ def unpack(archive: Path, tree: Path) -> None:
                 if resolved == ".." or resolved.startswith("../"):
                     raise PinError("a link points outside the destination")
                 target.parent.mkdir(parents=True, exist_ok=True)
+                if not inside(tree, target.parent / member.linkname):
+                    raise PinError("a link leads outside the destination")
                 target.symlink_to(member.linkname)
             elif member.isreg():
                 source = bundle.extractfile(member)

@@ -252,6 +252,85 @@ def test_a_link_out_of_the_tree_is_refused(tmp_path: Path) -> None:
         )
 
 
+def archive_of_entries(entries: list[tuple[str, bytes, str | None]]) -> bytes:
+    """Members in order: (name, content, link target); a link target makes the member a symlink."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
+        for name, content, linkname in entries:
+            info = tarfile.TarInfo(name)
+            if linkname is None:
+                info.size = len(content)
+                bundle.addfile(info, io.BytesIO(content))
+            else:
+                info.type = tarfile.SYMTYPE
+                info.linkname = linkname
+                bundle.addfile(info)
+    return buffer.getvalue()
+
+
+# #761-T02 (review of #777, finding 4): each link of the chain is inside the tree when it is read
+# lexically, and together they lead out of it, so a file below the last one is written outside.
+def test_a_chain_of_links_that_leads_out_of_the_tree_is_refused(tmp_path: Path) -> None:
+    script = load_script()
+    archive = archive_of_entries(
+        [
+            ("tool-1.0/d/up", b"", ".."),
+            ("tool-1.0/esc", b"", "d/up/.."),
+            ("tool-1.0/esc/pwned", b"escaped", None),
+        ]
+    )
+
+    with pytest.raises(script.PinError, match="outside"):
+        script.install(
+            tmp_path / "out",
+            pin=fake_pin(archive),
+            key="linux-x64",
+            download=serving(archive),
+        )
+
+    assert not (tmp_path / "out").exists()
+    assert not list(tmp_path.rglob("pwned"))
+
+
+# #761-T02: a file is never written through a link, even one that points inside the tree.
+def test_a_file_is_not_written_through_a_link_of_the_tree(tmp_path: Path) -> None:
+    script = load_script()
+    archive = archive_of_entries(
+        [
+            ("tool-1.0/real", b"original", None),
+            ("tool-1.0/alias", b"", "real"),
+            ("tool-1.0/alias", b"changed", None),
+        ]
+    )
+
+    with pytest.raises(script.PinError, match="link"):
+        script.install(
+            tmp_path / "out",
+            pin=fake_pin(archive),
+            key="linux-x64",
+            download=serving(archive),
+        )
+
+
+# #761-T02: links that stay inside the tree, as node's `bin/npm` and the `include` tree have, are fine.
+def test_links_that_stay_inside_the_tree_are_kept(tmp_path: Path) -> None:
+    script = load_script()
+    archive = archive_of_entries(
+        [
+            ("tool-1.0/lib/node_modules/npm/bin/npm-cli.js", b"cli", None),
+            ("tool-1.0/bin/npm", b"", "../lib/node_modules/npm/bin/npm-cli.js"),
+            ("tool-1.0/lib/up", b"", ".."),
+        ]
+    )
+
+    tree = script.install(
+        tmp_path / "out", pin=fake_pin(archive), key="linux-x64", download=serving(archive)
+    )
+
+    assert (tree / "bin" / "npm").read_text(encoding="utf-8") == "cli"
+    assert (tree / "lib" / "up").resolve() == tree.resolve()
+
+
 # #761-T02
 def test_a_platform_without_a_pin_fails_the_build(tmp_path: Path) -> None:
     script = load_script()
