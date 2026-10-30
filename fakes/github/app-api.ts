@@ -17,7 +17,7 @@
 import { createPublicKey, randomBytes, verify } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFixtureBranches } from "./git-branches.ts";
-import { basicToken, serveUploadPack } from "./git-http.ts";
+import { basicToken, serveReceivePack, serveUploadPack } from "./git-http.ts";
 import { readBody } from "./http.ts";
 import {
   DEFAULT_ACCOUNT_PERMISSIONS,
@@ -244,7 +244,15 @@ export type FakeGithubAppControls = {
   issuedInstallationTokens(): string[];
   /** Every installation token switched off with `DELETE /installation/token`, in order. */
   revokedInstallationTokens(): string[];
+  /**
+   * Every push received (`git-receive-pack`), in order: the repository and the names of the refs the client asked
+   * to update, whether or not Git accepted them (the branch endpoints tell what is there). No tokens, no objects.
+   */
+  pushes(): FakePush[];
 };
+
+/** One push as the fake saw it. */
+export type FakePush = { repository: string; refs: string[] };
 
 export type AppPart = {
   controls: FakeGithubAppControls;
@@ -259,6 +267,8 @@ export type AppPart = {
     url: URL;
     bearer: string | undefined;
     reply: (status: number, body: unknown) => Promise<void>;
+    /** Puts the names of the refs a push asked to update on the entry of this request in the request log. */
+    logRefs: (refs: string[]) => void;
   }): Promise<boolean>;
   /** Removes all state of the App API. */
   reset(): void;
@@ -357,6 +367,7 @@ export function createAppPart(
   const revoked: string[] = [];
   const tokenRequests: FakeTokenRequest[] = [];
   let appPermissions: FakePermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
+  const pushes: FakePush[] = [];
   const omitted = new Map<number, number[]>();
   const rawInstallationRecords: Record<string, unknown>[] = [];
   let jwtsRejected = false;
@@ -471,9 +482,10 @@ export function createAppPart(
 
   // Answers through `send`; a path that is not part of the GitHub App API is left unanswered.
   async function route(
-    { request, url, bearer, response }: Parameters<AppPart["handle"]>[0],
+    context: Parameters<AppPart["handle"]>[0],
     send: (status: number, body: unknown) => Promise<void>,
   ): Promise<void> {
+    const { request, url, bearer, response } = context;
     const path = url.pathname;
     const method = request.method ?? "GET";
 
@@ -529,9 +541,13 @@ export function createAppPart(
       return send(201, { ok: true });
     }
 
-    // Git over HTTP, the way the runner's checkout reads a pull request: the token is the Basic password.
+    // Git over HTTP: the way the runner's checkout reads a pull request (`git-upload-pack`, needs Contents: read)
+    // and the way the Implementer's turn publishes its branch (`git-receive-pack`, needs Contents: write). The
+    // token is the Basic password.
     const gitMatch =
-      /^\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-upload-pack)$/.exec(path);
+      /^\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
+        path,
+      );
     if (gitMatch) {
       const gitToken = basicToken(request.headers.authorization);
       const gitIssued =
@@ -543,14 +559,42 @@ export function createAppPart(
       );
       const directory = gitRepositories.get(gitName);
       if (visible === undefined || directory === undefined) return notFound();
-      if (!mayDo(gitIssued, "contents", "read"))
-        return send(403, { message: "Resource not accessible by integration" });
       const advertise = gitMatch[3] === "info/refs";
-      if (advertise !== (method === "GET")) return notFound();
-      if (advertise && url.searchParams.get("service") !== "git-upload-pack")
+      const service = advertise ? url.searchParams.get("service") : gitMatch[3];
+      if (service !== "git-upload-pack" && service !== "git-receive-pack")
         return notFound();
-      await serveUploadPack(request, response, directory, advertise);
+      const pushing = service === "git-receive-pack";
+      if (!mayDo(gitIssued, "contents", pushing ? "write" : "read"))
+        return send(403, { message: "Resource not accessible by integration" });
+      if (advertise !== (method === "GET")) return notFound();
+      if (!pushing) {
+        await serveUploadPack(request, response, directory, advertise);
+        return;
+      }
+      const refs = await serveReceivePack(
+        request,
+        response,
+        directory,
+        advertise,
+      );
+      if (!advertise) {
+        pushes.push({ repository: gitName, refs });
+        context.logRefs(refs);
+      }
       return;
+    }
+
+    // Control endpoint for a test that runs the fake as its own process (Playwright): the pushes received, as
+    // `{ pushes }`, of one repository when `?repository=owner/name` is given (`pushes`).
+    if (path === "/__fake/pushes" && method === "GET") {
+      const repository = url.searchParams.get("repository");
+      return send(200, {
+        pushes: controls
+          .pushes()
+          .filter(
+            (push) => repository === null || push.repository === repository,
+          ),
+      });
     }
 
     // Control endpoint for a test that runs the fake as its own process (Playwright): the comments
@@ -983,6 +1027,7 @@ export function createAppPart(
     tokenRequests: () => [...tokenRequests],
     issuedInstallationTokens: () => [...issuedTokens],
     revokedInstallationTokens: () => [...revoked],
+    pushes: () => pushes.map((push) => ({ ...push, refs: [...push.refs] })),
   };
 
   return {
@@ -1003,6 +1048,7 @@ export function createAppPart(
       issuedTokens.length = 0;
       revoked.length = 0;
       tokenRequests.length = 0;
+      pushes.length = 0;
       jwtsRejected = false;
       tokenAnswerPatch = null;
       appPermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };

@@ -147,7 +147,10 @@ async function push(
   ...args: string[]
 ): Promise<{ ok: boolean; output: string }> {
   try {
-    await git(clone, token, "push", "--quiet", ...args, remote);
+    // Options first, then the remote, then the refspecs.
+    const options = args.filter((arg) => arg.startsWith("--"));
+    const refspecs = args.filter((arg) => !arg.startsWith("--"));
+    await git(clone, token, "push", "--quiet", ...options, remote, ...refspecs);
     return { ok: true, output: "" };
   } catch (failure) {
     return {
@@ -199,7 +202,7 @@ describe("the push of the fake GitHub", () => {
     );
     expect(
       ((await listed.json()) as Array<{ name: string }>).map((b) => b.name),
-    ).toEqual(["main", "implementer/add-agent"]);
+    ).toEqual(["implementer/add-agent", "main"]);
     expect(await branchSha(context.fake, token, "implementer/add-agent")).toBe(
       head,
     );
@@ -369,9 +372,16 @@ describe("the push of the fake GitHub", () => {
       ":refs/heads/implementer/x",
     );
 
+    // The client stops the plain push itself ("fetch first"); the forced push and the deletion reach the fake, which
+    // refuses them like GitHub does.
     expect(diverged.ok).toBe(false);
+    expect(diverged.output).toContain("[rejected]");
     expect(forced.ok).toBe(false);
+    expect(forced.output).toContain("[remote rejected]");
+    expect(forced.output).toContain("non-fast-forward");
     expect(deleted.ok).toBe(false);
+    expect(deleted.output).toContain("[remote rejected]");
+    expect(deleted.output).toContain("deletion prohibited");
     expect(await branchSha(context.fake, token, "implementer/x")).toBe(stored);
   });
 
