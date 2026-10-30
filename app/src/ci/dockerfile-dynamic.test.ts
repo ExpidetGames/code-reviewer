@@ -110,7 +110,12 @@ describe("the engine of the Worker image", () => {
     expect(fetching).toContain(
       "COPY runner/opencode-pin.json runner/ripgrep-pin.json /fetch/",
     );
-    expect(dockerfile).not.toMatch(/\b(curl|wget|npm|npx|bun|pnpm)\b/);
+    // The toolchain layer of the Implementer (#761) brings Node.js, so the tools are named in links; what
+    // stays forbidden is fetching with them, or with curl, wget or bun.
+    expect(dockerfile).not.toMatch(/\b(curl|wget|bun)\b/);
+    expect(dockerfile).not.toMatch(
+      /\b(npm|npx|pnpm|corepack)\s+(install|i|add|ci|exec|dlx|view|pack|enable|prepare)\b/,
+    );
     expect(dockerfile).not.toMatch(/releases\/latest|@latest/);
     // ripgrep comes from the pinned release, never from the distribution's unpinned package.
     expect(image()).not.toMatch(/apt-get install[^\n]*ripgrep/);

@@ -22,8 +22,10 @@ set -u
 GUARD_DIR=${GUARD_DIR:-/opt/code-reviewer/guard}
 MIN_GIT=2.53.0
 
-# kind|branch signal (signal: the branch moves and the spool gets a line; quiet: neither; head: HEAD stays on
-# the branch; free: HEAD may be changed by the action itself)|name|function
+# kind|effect|name|function. An allowed action's effect is signal (the branch moves and the spool gets a line),
+# quiet (neither) or keep (the branch stays; git may still report a same-tip update, e.g. `stash` resets the
+# branch to itself, and a spool hint costs the runner one verified push attempt). A blocked action's effect
+# is head (HEAD stays on the branch) or free (the action itself leaves HEAD detached before it is tried).
 ACTIONS=(
   "allow|signal|commit|a_commit"
   "allow|signal|commit -a --no-verify|a_commit_no_verify"
@@ -31,7 +33,7 @@ ACTIONS=(
   "allow|signal|revert HEAD|a_revert"
   "allow|signal|merge --ff-only of a new commit|a_ff_merge"
   "allow|signal|cherry-pick of a new commit|a_cherry_pick"
-  "allow|quiet|stash and stash pop|a_stash"
+  "allow|keep|stash and stash pop|a_stash"
   "allow|quiet|fetch (updates refs/remotes)|a_fetch"
   "allow|quiet|restore a file|a_restore"
   "block|head|commit --amend|b_amend"
@@ -195,11 +197,17 @@ for spec in "${ACTIONS[@]}"; do
   problem=""
   if [ "$kind" = allow ]; then
     [ "$rc" -eq 0 ] || problem="exit status $rc"
-    if [ "$effect" = signal ]; then
-      { [ "$tip1" != "$tip0" ] && [ "$signals" -ge 1 ]; } || problem="${problem:+$problem, }the branch did not move or the spool got no line"
-    else
-      { [ "$tip1" = "$tip0" ] && [ "$signals" -eq 0 ]; } || problem="${problem:+$problem, }the branch moved or the spool got a line"
-    fi
+    case "$effect" in
+      signal)
+        { [ "$tip1" != "$tip0" ] && [ "$signals" -ge 1 ]; } || problem="${problem:+$problem, }the branch did not move or the spool got no line"
+        ;;
+      keep)
+        [ "$tip1" = "$tip0" ] || problem="${problem:+$problem, }the branch moved"
+        ;;
+      *)
+        { [ "$tip1" = "$tip0" ] && [ "$signals" -eq 0 ]; } || problem="${problem:+$problem, }the branch moved or the spool got a line"
+        ;;
+    esac
   else
     [ "$rc" -ne 0 ] || problem="it succeeded"
     [ "$tip1" = "$tip0" ] || problem="${problem:+$problem, }the branch moved"

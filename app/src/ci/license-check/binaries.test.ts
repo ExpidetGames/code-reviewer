@@ -211,6 +211,92 @@ describe("auditBinaries", () => {
     expect(result.violations.map(describeBinaryViolation)).toEqual([]);
   });
 
+  // #761-T07: git is GPL-2.0-only and built from source; the policy entry carries the documented exception.
+  describe("a release built from source with a license outside the allow list", () => {
+    const GIT_COMMIT = "67ad42147a7acc2af6074753ebd03d904476118f";
+    const gitPolicy: Policy = {
+      ...policy,
+      binaries: [
+        {
+          name: "git",
+          pin: "runner/git-pin.json",
+          version: "2.53.0",
+          commit: GIT_COMMIT,
+          license: "GPL-2.0-only",
+          build: "source",
+          exception: "A separate program of the image, used unmodified.",
+          reason: "The version control of the Implementer's agent.",
+        },
+      ],
+    };
+    const gitPin = (overrides: Json = {}): Json => ({
+      name: "git",
+      repository: "https://github.com/git/git",
+      version: "2.53.0",
+      commit: GIT_COMMIT,
+      license: "GPL-2.0-only",
+      licenseUrl: "https://github.com/git/git/blob/v2.53.0/COPYING",
+      platforms: { "linux-x64": { archiveSha256: HEX_A } },
+      ...overrides,
+    });
+    const gitFiles = (overrides: Files = {}): Files => ({
+      "runner/git-pin.json": JSON.stringify(gitPin()),
+      "THIRD_PARTY_LICENSES.md": `git 2.53.0, source commit ${GIT_COMMIT}\n`,
+      NOTICE: `git 2.53.0 (${GIT_COMMIT})\n`,
+      ...overrides,
+    });
+    const auditGit = (overrides: Files = {}, p: Policy = gitPolicy) => {
+      const files = gitFiles(overrides);
+      return auditBinaries({ policy: p, readText: (path) => files[path] });
+    };
+
+    it("passes with only the archive digest, because there is no executable to pin", () => {
+      expect(auditGit().violations.map(describeBinaryViolation)).toEqual([]);
+    });
+
+    it("still needs a valid archive digest", () => {
+      const result = auditGit({
+        "runner/git-pin.json": JSON.stringify(
+          gitPin({ platforms: { "linux-x64": { archiveSha256: "abc" } } }),
+        ),
+      });
+
+      expect(codes(result.violations)).toEqual(["BINARY_DIGEST_MISSING"]);
+    });
+
+    it("fails on the license without the exception", () => {
+      const withoutException: Policy = {
+        ...gitPolicy,
+        binaries: gitPolicy.binaries.map(
+          ({ exception: _exception, ...entry }) => entry,
+        ),
+      };
+
+      expect(codes(auditGit({}, withoutException).violations)).toEqual([
+        "BINARY_LICENSE_NOT_ALLOWED",
+      ]);
+    });
+
+    it("does not let the exception hide a pin whose license is another one", () => {
+      const result = auditGit({
+        "runner/git-pin.json": JSON.stringify(gitPin({ license: "AGPL-3.0-only" })),
+      });
+
+      expect(codes(result.violations)).toContain("BINARY_POLICY_MISMATCH");
+    });
+
+    it("still needs the executable digest of a release that is not built from source", () => {
+      const prebuilt: Policy = {
+        ...gitPolicy,
+        binaries: gitPolicy.binaries.map(({ build: _build, ...entry }) => entry),
+      };
+
+      expect(codes(auditGit({}, prebuilt).violations)).toEqual([
+        "BINARY_DIGEST_MISSING",
+      ]);
+    });
+  });
+
   // #202-T06
   it("fails when the policy entry disagrees with the pin on version, commit or license", () => {
     const result = audit({
