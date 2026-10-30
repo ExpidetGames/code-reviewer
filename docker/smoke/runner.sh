@@ -566,7 +566,7 @@ git_pinned=$(pin_value "$git_pin" version)
 git_reported=$(as_engine git --version) || fail "git --version failed as the engine user"
 [ "$git_reported" = "git version $git_pinned" ] || fail "git reports '$git_reported', the pin says '$git_pinned'"
 [ "$(printf '%s\n%s\n' 2.53.0 "$git_pinned" | sort -V | head -n 1)" = 2.53.0 ] || fail "the pinned git $git_pinned is older than 2.53.0"
-git_paths=$(in_image "$image" sh -c 'command -v -a git; ls /usr/bin/git 2>/dev/null; ls /usr/local/libexec/git-core/git-remote-https') || fail "git or its https helper is missing"
+git_paths=$(in_image "$image" sh -c 'command -v git; ls /usr/bin/git 2>/dev/null; ls /usr/local/libexec/git-core/git-remote-https') || fail "git or its https helper is missing"
 [ "$git_paths" = "$(printf '/usr/local/bin/git\n/usr/local/libexec/git-core/git-remote-https')" ] ||
   fail "unexpected git files (a distribution git, or no https helper):
 $git_paths"
