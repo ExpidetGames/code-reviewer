@@ -34,6 +34,10 @@ apply: a wake-up call for the kind from another app is `200 ignored` with `not_c
 unlaunched (`kind_not_allowed`). A job of the kind lives 3600 s by default (`DISPATCHER_WORKER_CONFIG.implementer.timeoutSeconds`,
 60 to 21600) where Diff and Dynamic keep `DISPATCHER_JOB_TIMEOUT_SECONDS`. The Sandbox launcher does not advertise the engine
 yet: it needs the container profile of the Implementer (#760), until then a dispatch for the kind is `not_capable`.
+The deploy canary (`POST /probe`) follows the same rule: it requires the engines of Diff and Dynamic whatever else is
+configured, and requires `implementer` only when the Launcher advertises it, so the release that introduces the kind does not
+fail its own canary and a missing reviewer engine still does. Once #760 makes the Launcher advertise the engine, the canary
+requires the report to name it (the probe has to prove it by then).
 
 "Runner" is retired as a concept: the former runner process conflated the Dispatcher
 (claim, cap) and the Worker host (heartbeat, supervise, deliver). Its identifiers (`RUNNER_*` variables, image and
