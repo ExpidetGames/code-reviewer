@@ -11,7 +11,11 @@ import {
 import { IntegrationError } from "../../errors.ts";
 import { createGitAccess } from "../../normalized.ts";
 import type { IntegrationProvider } from "../../provider.ts";
-import type { DiscoveredConnection, RepoRef } from "../../types.ts";
+import type {
+  DiscoveredConnection,
+  Integration,
+  RepoRef,
+} from "../../types.ts";
 import {
   createGithubAppClient,
   type GithubAppClient,
@@ -22,12 +26,15 @@ import type { GithubAppConfig } from "./config.ts";
 import { GithubAppError } from "./errors.ts";
 import { parseGithubEvent } from "./events.ts";
 import {
+  BRANCH_READ_TOKEN_PERMISSIONS,
   CHECK_TOKEN_PERMISSIONS,
+  IMPLEMENTER_TOKEN_PERMISSIONS,
   JOB_TOKEN_PERMISSIONS,
   COMMENT_READ_TOKEN_PERMISSIONS,
   NOTICE_TOKEN_PERMISSIONS,
   VERDICT_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
+  toImplementerAccessError,
   toJobAccessError,
   toReadError,
   toWriteError,
@@ -77,6 +84,17 @@ async function readJson(request: Request): Promise<unknown> {
   } catch {
     return undefined;
   }
+}
+
+/** The token of a branch read: this one repository, contents read; refused for a repository of another integration. */
+function branchReadScope(integration: Integration, repo: RepoRef) {
+  const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+  if (repo.integrationId !== integration.id || repositoryIds === null)
+    throw new IntegrationError(
+      "INTEGRATION_ACCESS_SCOPE_REFUSED",
+      "The repository does not belong to this integration or has no usable id.",
+    );
+  return { repositoryIds, permissions: BRANCH_READ_TOKEN_PERMISSIONS };
 }
 
 export function createGithubAppProvider(
@@ -236,6 +254,53 @@ export function createGithubAppProvider(
         });
       } catch (error) {
         throw toJobAccessError(error);
+      }
+    },
+
+    async implementerAccess(integration, repo) {
+      // Like `jobAccess`: a fresh token for exactly this repository on every call, never cached or shared. The
+      // permission is the Implementer's (contents write, metadata read); a 422 because the installation has not
+      // accepted it is its own stable code, and nothing broader is tried instead.
+      try {
+        const config = await getConfig();
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const minted = await (
+          await getClient()
+        ).mintInstallationToken(integration.externalId, {
+          repositoryIds,
+          permissions: IMPLEMENTER_TOKEN_PERMISSIONS,
+        });
+        return createGitAccess({
+          provider: "github",
+          baseUrl: config.apiBaseUrl,
+          token: minted.token,
+          authType: "token",
+          botLogin: `${config.slug}[bot]`,
+          expiresAt: minted.expiresAt,
+        });
+      } catch (error) {
+        throw toImplementerAccessError(error);
+      }
+    },
+
+    async installationPermissions(integration) {
+      try {
+        const installation = await (
+          await getClient()
+        ).getInstallation(integration.externalId);
+        if (installation === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_CONNECTION_GONE",
+            "The installation no longer exists.",
+          );
+        return { contentsWrite: installation.permissions.contents === "write" };
+      } catch (error) {
+        throw toReadError(error);
       }
     },
 
@@ -509,6 +574,52 @@ export function createGithubAppProvider(
             `Pull request ${prNumber} does not exist in ${repo.fullName}.`,
             { cause: error },
           );
+        throw toReadError(error);
+      }
+    },
+
+    async getRepositoryFacts(integration, repo, signal) {
+      try {
+        return await (
+          await getClient()
+        ).getRepositoryFacts(
+          integration.externalId,
+          branchReadScope(integration, repo),
+          repo.fullName,
+          signal,
+        );
+      } catch (error) {
+        throw toReadError(error);
+      }
+    },
+
+    async listBranches(integration, repo, signal) {
+      try {
+        return await (
+          await getClient()
+        ).listBranches(
+          integration.externalId,
+          branchReadScope(integration, repo),
+          repo.fullName,
+          signal,
+        );
+      } catch (error) {
+        throw toReadError(error);
+      }
+    },
+
+    async getBranch(integration, repo, name, signal) {
+      try {
+        return await (
+          await getClient()
+        ).getBranch(
+          integration.externalId,
+          branchReadScope(integration, repo),
+          repo.fullName,
+          name,
+          signal,
+        );
+      } catch (error) {
         throw toReadError(error);
       }
     },

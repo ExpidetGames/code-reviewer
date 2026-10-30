@@ -81,6 +81,7 @@ import {
 import type { RunnerEngine } from "../jobs/runner-capabilities.ts";
 import type { JobOptions, JobOptionsSource } from "./job-options.ts";
 import { describeError, type RunnerApiLogger } from "./logger.ts";
+import { refusalForKind } from "./kind-guard.ts";
 import { callerLlmProviders } from "./requests.ts";
 import { errorResponse, jsonResponse, noContent } from "./responses.ts";
 import type { ClaimOptions } from "../db/repositories/runner-jobs-repository.ts";
@@ -106,6 +107,8 @@ export const CLAIM_FAILURE_CODES = [
   // Dynamic options are missing/unusable. The runner is never silently given the other engine.
   "dynamic_engine_unavailable",
   "dynamic_config_invalid",
+  // #746: the claimed job is of a kind the claim does not build (the Implementer's, until its claim exists, #753).
+  "implementer_engine_unavailable",
   // #279: the provider's metadata says the model lacks tool calling or a required tool choice.
   "dynamic_model_features_unsupported",
   // #432 (ADR 0005, 2.8): the job runs on the operator's key and the catalog entry it selects cannot be used (none
@@ -669,6 +672,10 @@ export async function checkJob(
   job: Job,
   { engines, classifyReadFailures, runnerProviders }: CheckOptions,
 ): Promise<Checked | Refusal> {
+  // #746: first, before the guard, the entitlements or the key are looked at: a kind this claim does not build is never read as a
+  // Diff job (everything below branches on `dynamic` alone).
+  const unbuilt = refusalForKind(job.reviewKind);
+  if (unbuilt !== null) return refuse(unbuilt);
   const decision = await deps.guard.check(job);
   if (!decision.allow)
     return decision.outcome === "cancel"
@@ -861,6 +868,9 @@ export async function buildJobInput(
     integration,
     repo,
   } = checked;
+  // #746: a second wall for the kind, in case a caller reaches the build without the check.
+  const unbuilt = refusalForKind(job.reviewKind);
+  if (unbuilt !== null) return refuse(unbuilt);
   // #553: a cost policy goes only to a caller that enforces one. A runner that did not read it would run without the bound
   // (the price book of the managed key, the token cap of an own key), so the job ends here, before any credential exists.
   if (cost !== null && !features.includes("dynamic_cost_policy"))

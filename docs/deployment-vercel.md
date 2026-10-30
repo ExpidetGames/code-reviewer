@@ -261,7 +261,7 @@ yours.
 
   Set them without typing a value into a command line, for example
   `read -rs -p 'value: ' V; printf '%s' "$V" | gh secret set INFISICAL_CLIENT_SECRET --env production; unset V`.
-- No repository variable is needed, except `FACTORY_ENABLED` when you run a second App (section 5.8; a *repository* variable, not a variable of the environment `production`). Unset, the pipeline is exactly the one described here.
+- No repository variable is needed, except `FACTORY_ENABLED` when you run a second App, and `FACTORY_EXPECTED_CAPABILITIES` when that App's capability set is not the default (section 5.8; both are *repository* variables, not variables of the environment `production`). Unset, the pipeline is exactly the one described here.
 - Retired: the environments `hosted-snapshot` and `hosted-canary`, the repository variables `DISPATCHER_CANARY_HOSTS`
   and `GOLDEN_SNAPSHOT_ENABLED`.
 
@@ -1157,7 +1157,7 @@ section 3.1, with its own values, and these are the ones that differ or are mand
 | Key in `/app-factory` | Value |
 |---|---|
 | `PRODUCT_ID` | `factory`. **Mandatory:** unset, the project starts as `code-review-com` (section 3.1) |
-| `PRODUCT_CAPABILITIES` | `review,dynamic-review` (billing off). This is the product's default; it is set explicitly so that the value `health-factory` checks is written down |
+| `PRODUCT_CAPABILITIES` | `review,dynamic-review` (billing off). This is the product's default; it is set explicitly so that the value `health-factory` checks is written down. Changing it means changing the repository variable `FACTORY_EXPECTED_CAPABILITIES` at the same time (below) |
 | `RUNNER_DISPATCH` | `webhook` |
 | `RUNNER_WEBHOOK_URL` | `https://<dispatcher production domain>/dispatch`, the same Dispatcher as the first App's |
 | `RUNNER_WEBHOOK_KEY_ID` | `factory-k1`: the `keyId` of the App's entry in `DISPATCHER_APPS` |
@@ -1170,8 +1170,9 @@ Implementer; code-review.com refuses it and the start stops by name. It needs `d
 `implementer` and without `dynamic-review` stops the start too. The product's default stays `review,dynamic-review`, so
 an unset `PRODUCT_CAPABILITIES` never turns it on; the rollout of the Implementer sets the value explicitly, and the staged
 App then reports `dynamic-review,implementer,review` (sorted). `health-factory` compares the set exactly with
-`dynamic-review,review`, so a project whose `PRODUCT_CAPABILITIES` names `implementer` is not promoted until the expectation
-of that job is changed with it; nothing live changes in the meantime. The capability alone adds no page, no navigation entry
+the repository variable `FACTORY_EXPECTED_CAPABILITIES` (`dynamic-review,review` while it is unset), so a project whose
+`PRODUCT_CAPABILITIES` names `implementer` is not promoted until that variable is changed with it (below); nothing live
+changes in the meantime. The capability alone adds no page, no navigation entry
 and no job: they come with later changes of the Implementer.
 
 The keys of `/ci` for the lane are in the table of section 2.1. The Dispatcher learns about the App from `/dispatcher`,
@@ -1210,12 +1211,38 @@ to finish (below).
 | `factory-flag` | Reads `FACTORY_ENABLED` and outputs `enabled` (`true` only for the text `true`) | 2 min | The lane is skipped |
 | `migrate-factory` | `pnpm --dir app migrate` against `DATABASE_URL_MIGRATE_FACTORY` (the second App's migrate role). A job of its own: the first App's `migrate` does not run it and does not wait for it | 15 min | The second App is not staged. Nothing of the first App's path changes |
 | `stage-factory` | `vercel-stage.yml` for the second project, from the `app/` directory, after `migrate-factory`, in parallel with `stage-app` | 30 min | The second App is not promoted |
-| `health-factory` | `GET /api/health` of the staged second App must answer `200` with `{"status":"ok"}`, **and** report `product` `factory` and the capabilities `dynamic-review,review` (`PRODUCT_MISMATCH` stops at once). This is one-sided: the first App's `health-app` does not yet assert its own product (#738) | 10 min | The second App is not promoted |
+| `health-factory` | `GET /api/health` of the staged second App must answer `200` with `{"status":"ok"}`, **and** report `product` `factory` and exactly the capabilities of the repository variable `FACTORY_EXPECTED_CAPABILITIES`, `dynamic-review,review` while it is unset (`PRODUCT_MISMATCH` stops at once; a malformed variable stops the step before any request). This is one-sided: the first App's `health-app` does not yet assert its own product (#738) | 10 min | The second App is not promoted |
 | `apps-check` | `POST /apps/check` of the staged Dispatcher (operator credential): every App it serves must be reachable and accept its credential (`app_unreachable`, `app_rejected`); a missing feature is a warning, because the live Apps are still the previous release | 5 min | The second App is not promoted |
 | `promote-factory` | `vercel promote` of the second App, after `promote-app`, `health-factory`, `apps-check` and the canary | 10 min | The second App keeps its previous deployment |
 
 `canary` runs once, for the Dispatcher, as without the lane. The promotion order is the App, the second App, the
 Dispatcher (apps first, section 5.6). `record` also closes a `factory-production` deployment record.
+
+**The capability set the health check expects (`FACTORY_EXPECTED_CAPABILITIES`).** `health-factory` compares the set the
+staged App reports at `/api/health` with the **repository variable** `FACTORY_EXPECTED_CAPABILITIES` (a repository variable
+like `FACTORY_ENABLED`, read by this job only). Unset or empty, the expectation is `dynamic-review,review`, which is the
+check as it was before the variable existed, so nothing has to be set until the second App's capability set changes. The
+value is the App's `PRODUCT_CAPABILITIES` as the health check lists it: the capability names, comma separated,
+**sorted alphabetically**, with no space, no empty entry and no duplicate, for example `dynamic-review,implementer,review`.
+The step checks that shape (and that every name is a known capability) first and fails before it asks the App anything;
+the comparison itself stays exact, and `PRODUCT_MISMATCH` is final, not retried. Why a variable: the code that allows a new
+capability has to be live before the App's `PRODUCT_CAPABILITIES` names it, and the expectation has to change in the same
+moment as that setting; a literal in the workflow, changed by a pull request, cannot be both.
+
+The order, for a capability added to the second App (the Implementer's `implementer` is the first case):
+
+1. Release the code that allows the capability to `main` (the pipeline runs with the variable unset: the old set, green).
+2. Only then, together: set `PRODUCT_CAPABILITIES` in Infisical `prod` `/app-factory` to the new list and set
+   `FACTORY_EXPECTED_CAPABILITIES` to the new sorted list. Then run *Deploy production* once (the Secret Sync carries
+   the setting to the project; the staged App starts with it).
+3. To go back: reset both and deploy again. Removing the repository variable is the return to the default set.
+
+**If only one of the two is changed**, the lane stops at `health-factory` with `PRODUCT_MISMATCH` (the variable names a
+set the staged App does not report, or the other way round). The staged App is not promoted, `promote-factory` is skipped
+and nothing live changes: the live second App keeps its previous deployment and settings. The release of the first App and
+the Dispatcher is not affected (the lane never blocks it). A variable with a malformed value fails the same job earlier,
+with an error that names the variable and shows the value with every character outside letters, digits, `,` and `-`
+replaced by `?`. Fix the variable and run *Deploy production* again.
 
 **The first promotion needs one manual step.** `apps-check` asks the staged Dispatcher about the Apps as they are *live*:
 the address in `DISPATCHER_APPS` is the second App's production address. On the first run the second project has nothing

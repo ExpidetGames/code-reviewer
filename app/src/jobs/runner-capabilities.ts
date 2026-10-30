@@ -8,10 +8,10 @@
 import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
 
 /**
- * The engines a runner may claim for. `pr-agent` runs Diff Review, `opencode` runs Dynamic Review.
- * The names are the enum of `Engine` in the contract; a test compares this list with the file.
+ * The engines a runner may claim for. `pr-agent` runs Diff Review, `opencode` runs Dynamic Review, `implementer` (#746) the
+ * Implementer. The names are the enum of `Engine` in the contract; a test compares this list with the file.
  */
-export const RUNNER_ENGINES = ["pr-agent", "opencode"] as const;
+export const RUNNER_ENGINES = ["pr-agent", "opencode", "implementer"] as const;
 export type RunnerEngine = (typeof RUNNER_ENGINES)[number];
 
 /** The one engine a caller that sends no list (a previous-release runner) is trusted with. */
@@ -24,6 +24,9 @@ export const REVIEW_KINDS_OF_ENGINE: Record<
 > = {
   "pr-agent": ["diff"],
   opencode: ["dynamic"],
+  // #746: the engine is part of the contract, the kind is not part of the queue yet (#752): a runner that names it is handed
+  // no job of any kind by it, so it can never be given a Diff or Dynamic job in its place.
+  implementer: [],
 };
 
 /** Every kind the given engines together can run, without duplicates. */

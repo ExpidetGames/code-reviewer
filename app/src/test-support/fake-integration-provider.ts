@@ -48,8 +48,16 @@ export type FakeIntegrationProviderOptions = {
   access?: Partial<GitAccess>;
   /** Makes `jobAccess` fail with this error (platform down, installation removed, ...). */
   jobAccessFailure?: Error;
+  /** Makes `implementerAccess` fail with this error (#749), for example `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED`. */
+  implementerAccessFailure?: Error;
+  /** Whether the connections have accepted the permission to write contents (#749). Default: yes. */
+  contentsWrite?: boolean;
   /** The pull requests every repository has. Defaults to an open #7 and a draft #8. */
   pullRequests?: PullRequestRef[];
+  /** The default branch every repository has (#750). Default: main. */
+  defaultBranch?: string;
+  /** The branches every repository has, by name, each with its head commit (#750). Default: just the default branch. */
+  branches?: Record<string, string>;
 };
 
 export type FakeProviderCall = { method: string; args: unknown[] };
@@ -175,6 +183,8 @@ export function fakeIntegrationProvider(
   ];
   const secret = options.webhookSecret ?? FAKE_WEBHOOK_SECRET;
   const pullRequests = options.pullRequests ?? DEFAULT_PULL_REQUESTS;
+  const defaultBranch = options.defaultBranch ?? "main";
+  const branches = options.branches ?? { [defaultBranch]: "a".repeat(40) };
   const calls: FakeProviderCall[] = [];
   const record = (method: string, ...args: unknown[]) =>
     calls.push({ method, args });
@@ -311,6 +321,26 @@ export function fakeIntegrationProvider(
       });
     },
 
+    async implementerAccess(integration, repo) {
+      record("implementerAccess", integration, repo);
+      if (options.implementerAccessFailure)
+        throw options.implementerAccessFailure;
+      return createGitAccess({
+        provider: "github",
+        baseUrl: "https://fake.test/api",
+        token: `fake-write-token-for-${repo.fullName}`,
+        authType: "token",
+        botLogin: "fake-reviewer[bot]",
+        expiresAt: "2026-10-10T13:00:00.000Z",
+        ...options.access,
+      });
+    },
+
+    async installationPermissions(integration) {
+      record("installationPermissions", integration);
+      return { contentsWrite: options.contentsWrite ?? true };
+    },
+
     async getPullRequest(integration, repo, prNumber, signal) {
       record("getPullRequest", integration, repo, prNumber);
       throwIfAborted(signal);
@@ -321,6 +351,31 @@ export function fakeIntegrationProvider(
           `No pull request #${prNumber} in ${repo.fullName}.`,
         );
       return { ...found, url: `${repo.url}/pull/${found.number}` };
+    },
+
+    async getRepositoryFacts(integration, repo, signal) {
+      record("getRepositoryFacts", integration, repo);
+      throwIfAborted(signal);
+      return { defaultBranch };
+    },
+
+    async listBranches(integration, repo, signal) {
+      record("listBranches", integration, repo);
+      throwIfAborted(signal);
+      const all = [
+        defaultBranch,
+        ...Object.keys(branches)
+          .filter((name) => name !== defaultBranch)
+          .sort(),
+      ];
+      return { names: all.slice(0, 100), truncated: all.length > 100 };
+    },
+
+    async getBranch(integration, repo, name, signal) {
+      record("getBranch", integration, repo, name);
+      throwIfAborted(signal);
+      const sha = branches[name];
+      return sha === undefined ? null : { sha };
     },
 
     async listOpenPullRequests(integration, repo, signal) {

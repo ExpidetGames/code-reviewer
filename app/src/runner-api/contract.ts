@@ -8,7 +8,10 @@ import type { ReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../db/job-status.ts";
 import type { CostPolicyJson } from "../native-cost/policy.ts";
 import type { JobModelEntry } from "../models-dev/job-entry.ts";
-import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../job-kind/job-kind.ts";
 import {
   RUNNER_ENGINES,
   type RunnerEngine,
@@ -232,6 +235,19 @@ export const RUNNER_ERROR_CODES = [
   "lease_lost",
   // #396: the run was replaced by a newer push; it stopped gracefully and reports what it used.
   "superseded",
+  // #746: the Implementer (the factory deployment only). Stable codes a caller branches on; a turn that fails is never
+  // run again silently. `cost_limit_reached` above is the cost limit of a turn as well.
+  "branch_exists",
+  "base_branch_not_found",
+  "clone_failed",
+  "setup_failed",
+  "agent_gave_up",
+  "push_rejected",
+  "branch_violation",
+  "time_limit_reached",
+  "git_write_not_granted",
+  "implementer_engine_unavailable",
+  "implementer_config_invalid",
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
@@ -292,8 +308,34 @@ export type ErrorResponse = {
   };
 };
 
-/** The review kind of a job (`ReviewKind` in the contract). Diff is the legacy shape. */
-export type ReviewKind = ProjectReviewKind;
+/**
+ * The kinds of job on the wire (`ReviewKind` in the contract): the kinds a project can select and, since #746, the
+ * Implementer's `implementer`. A project never selects the last one (`PROJECT_REVIEW_KINDS` stays `diff` and `dynamic`).
+ */
+export const RUNNER_REVIEW_KINDS = [
+  ...PROJECT_REVIEW_KINDS,
+  "implementer",
+] as const;
+export type ReviewKind = (typeof RUNNER_REVIEW_KINDS)[number];
+
+/**
+ * #746: the names of the environment variables the Worker container of an implementer job gets
+ * (`KnownImplementerEnvironmentName` in the contract). The Dispatcher sets them; they hold no secret.
+ */
+export const IMPLEMENTER_ENVIRONMENT_NAMES = [
+  "RUNNER_IMPLEMENTER_WORK_DIR",
+  "RUNNER_IMPLEMENTER_EGRESS_PORT",
+  "RUNNER_IMPLEMENTER_NETWORK",
+] as const;
+export type ImplementerEnvironmentName =
+  (typeof IMPLEMENTER_ENVIRONMENT_NAMES)[number];
+
+/** #746: what the Worker of an implementer job can reach besides the model proxy and its repository (`ImplementerNetworkMode`). */
+export const IMPLEMENTER_NETWORK_MODES = ["registries", "none"] as const;
+export type ImplementerNetworkMode = (typeof IMPLEMENTER_NETWORK_MODES)[number];
+
+/** #746: the directory of the work volume (`RUNNER_IMPLEMENTER_WORK_DIR`). */
+export const IMPLEMENTER_WORK_DIR = "/work";
 
 /**
  * The Dynamic options of a tagged job (#195). Only model/skill/limits: the fixed core, the tools, the
@@ -362,7 +404,7 @@ export type RunnerJobInput = {
    * #195: absent means Diff, the legacy shape. `dynamic` is only sent to a runner that advertised
    * `opencode`; a previous-release runner never receives it.
    */
-  reviewKind?: ReviewKind;
+  reviewKind?: ProjectReviewKind;
   /** Present exactly when `reviewKind` is `dynamic`. */
   dynamic?: DynamicReviewOptions;
   /** Checkout facts; present with `dynamic`. */
@@ -394,6 +436,32 @@ export type RunnerJobInput = {
     fallbackModels?: string[];
   };
   env: Record<string, string>;
+};
+
+/** #746: `ImplementerJob` in the contract: what a turn of the Implementer asks for. A closed object. */
+export type ImplementerJobOptions = {
+  repo: { fullName: string; cloneUrl: string };
+  baseBranch: string;
+  branch: string;
+  /** The task as the user wrote it, at most 20 000 characters; literal data. */
+  instruction: string;
+  limits: { timeLimitSeconds: number };
+  /** The cost policy and the model entry of the native Dynamic job, unchanged. */
+  cost: CostPolicyJson;
+  modelEntry: JobModelEntry;
+  capabilities?: DynamicModelCapabilities;
+};
+
+/**
+ * #746: the job an implementer runner reads on stdin. It has no pull request: `prUrl`, `command`, `base` and `dynamic` are
+ * absent, and `git.token` may write the contents of exactly `implementer.repo`. The claim does not build it yet (#753).
+ */
+export type ImplementerJobInput = Omit<
+  RunnerJobInput,
+  "prUrl" | "command" | "reviewKind" | "dynamic" | "base" | "args"
+> & {
+  reviewKind: "implementer";
+  implementer: ImplementerJobOptions;
 };
 
 export type ClaimResponse = {
@@ -570,6 +638,37 @@ export type RunnerResult = {
   usage: RunnerUsage | null;
   /** #405: the findings left open by a successful review; absent where the runner could not say. */
   findings?: ReviewFindings;
+  /** #746: what a turn of the Implementer did; only a result of an implementer job carries it. */
+  implementer?: ImplementerResult;
+};
+
+/** What happened to a file between the base commit and the head commit (`ImplementerFileStatus`). */
+export const IMPLEMENTER_FILE_STATUSES = [
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  "copied",
+  "typechange",
+] as const;
+export type ImplementerFileStatus = (typeof IMPLEMENTER_FILE_STATUSES)[number];
+
+/** The bounds of `ImplementerResult`, the same as the schema. */
+export const IMPLEMENTER_RESULT_LIMITS = {
+  commits: 200,
+  filesChanged: 500,
+  summaryChars: 8192,
+} as const;
+
+/** #746: `ImplementerResult` in the contract: facts the runner measured in the repository, and a plain-text summary. */
+export type ImplementerResult = {
+  baseCommit: string;
+  headCommit: string | null;
+  pushed: boolean;
+  commits: { sha: string; subject: string }[];
+  filesChanged: { path: string; status: ImplementerFileStatus }[];
+  summary: string;
+  opencode: { sessionId: string; version: string } | null;
 };
 
 export type CompleteRequest = { leaseToken: string; result: RunnerResult };

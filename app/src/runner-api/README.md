@@ -237,6 +237,12 @@ The claim only hands out a job whose review kind one of those engines can run (`
 empty list is `400 RUNNER_REQUEST_INVALID`, and a body over 64 KiB is `413`, both before any job is
 claimed and any credential is created. The token check comes first.
 
+**#746:** the contract names a third engine, `implementer`, and a third kind of job, `implementer` (the Implementer of the factory
+deployment, `contracts/README.md`, "The Implementer kind"). Neither is served yet. A claim that names the engine gets no job of any
+kind from it (a claim that names only that engine is `204`), and a claimed job of the kind is refused by `kind-guard.ts` with
+`implementer_engine_unavailable` before the guard, the key or a credential is looked at, so no later branch on `dynamic` can build it
+as a Diff job. The claim of the kind replaces this refusal (#753).
+
 The body may also name `features` (#279): `["dynamic_capabilities"]` says the runner reads
 `dynamic.capabilities`. Unknown names are ignored; a list that is not a list of plain names is
 `400 RUNNER_REQUEST_INVALID`. A previous-release runner names none.

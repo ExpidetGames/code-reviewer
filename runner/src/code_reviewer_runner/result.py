@@ -76,6 +76,19 @@ class ErrorCode(StrEnum):
     # A newer push replaced this run while it was running (#396). It stopped sending model requests,
     # published nothing and reports what it used. Not a failure of the job.
     SUPERSEDED = "superseded"
+    # The Implementer (#746). Stable codes a caller branches on; a turn that fails is never run
+    # again silently. `COST_LIMIT_REACHED` above is the cost limit of a turn as well.
+    BRANCH_EXISTS = "branch_exists"
+    BASE_BRANCH_NOT_FOUND = "base_branch_not_found"
+    CLONE_FAILED = "clone_failed"
+    SETUP_FAILED = "setup_failed"
+    AGENT_GAVE_UP = "agent_gave_up"
+    PUSH_REJECTED = "push_rejected"
+    BRANCH_VIOLATION = "branch_violation"
+    TIME_LIMIT_REACHED = "time_limit_reached"
+    GIT_WRITE_NOT_GRANTED = "git_write_not_granted"
+    IMPLEMENTER_ENGINE_UNAVAILABLE = "implementer_engine_unavailable"
+    IMPLEMENTER_CONFIG_INVALID = "implementer_config_invalid"
     UNKNOWN = "unknown"
 
 

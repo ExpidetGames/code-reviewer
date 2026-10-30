@@ -9,17 +9,38 @@ import type {
 import type { WorkerContainerOverrides } from "../contracts/worker-container.ts";
 
 export type Engine = ContractEngine;
-export type ReviewKind = ContractReviewKind;
+/** A kind as the contract names it (and as a signed wake-up call or a claim answer may carry it). */
+export type WireReviewKind = ContractReviewKind;
+/**
+ * A kind this Dispatcher serves: a launcher, a configuration and a pool exist for it. The contract knows one more
+ * (`implementer`, #746) that a later change serves (#759); until then it is a `WireReviewKind` only, so no table of this
+ * Dispatcher is keyed by it and no code path can take it for a Diff or Dynamic job.
+ */
+export type ReviewKind = Exclude<WireReviewKind, "implementer">;
 
-/** The engine that runs a job of a kind: PR-Agent for Diff, OpenCode for Dynamic. */
-export const ENGINE_BY_KIND: Readonly<Record<ReviewKind, Engine>> = {
+/** Whether a kind from the wire is one this Dispatcher serves. */
+export function isServedKind(kind: WireReviewKind): kind is ReviewKind {
+  return (KNOWN_KINDS as readonly WireReviewKind[]).includes(kind);
+}
+
+/** Every kind of the contract (`ReviewKind` of runner-api.v1.json), in the order of the file: what a signed wake-up call may name. */
+export const CONTRACT_REVIEW_KINDS = [
+  "diff",
+  "dynamic",
+  "implementer",
+] as const;
+
+/** The engine that runs a job of a kind: PR-Agent for Diff, OpenCode for Dynamic, the Implementer's own for `implementer` (#746). */
+export const ENGINE_BY_KIND: Readonly<Record<WireReviewKind, Engine>> = {
   diff: "pr-agent",
   dynamic: "opencode",
+  implementer: "implementer",
 };
 
 /**
- * The job kinds this Dispatcher knows (#730). An app is allowed a subset of them (`AppSettings.kinds`); a later kind is
- * added here and in the contracts, never by the configuration of an app.
+ * The job kinds this Dispatcher serves (#730). An app is allowed a subset of them (`AppSettings.kinds`); a later kind is
+ * added here and in the contracts, never by the configuration of an app. `implementer` is in the contract but not in this
+ * list yet (#759 adds it with its Launcher), so a wake-up call or a claim for it is refused and never run by another engine.
  */
 export const KNOWN_KINDS: readonly ReviewKind[] = ["diff", "dynamic"];
 
@@ -33,7 +54,7 @@ export const LEGACY_APP_ID = "reviewer";
 export type JobHint = {
   appId: string;
   jobId?: string;
-  reviewKind?: ReviewKind;
+  reviewKind?: WireReviewKind;
 };
 
 /** Per Worker kind configuration the core passes through to the Launcher. */

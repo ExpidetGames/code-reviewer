@@ -48,6 +48,15 @@ credential, which is why step 3 ends with a run that has the switch still off.
 | PostHog, landing page | Never for the second App | The App has no such code path |
 | Making the lane a gate for the release | When the second App has users | A failure of the lane fails the run but never blocks code-review.com. It can delay the Dispatcher's promotion by the time limits of the lane's jobs (section 5.8) |
 
+## Changing the capability set later
+
+The pipeline's `health-factory` compares the staged second App's capabilities with the repository variable
+`FACTORY_EXPECTED_CAPABILITIES` (unset: `dynamic-review,review`, the default; sorted alphabetically, comma separated, no
+spaces). When a new capability is added to the second App, release the code that allows it first, then change
+`PRODUCT_CAPABILITIES` (Infisical `prod` `/app-factory`) and the repository variable **together** and run *Deploy
+production* once (`docs/deployment-vercel.md`, section 5.8). If only one of the two is changed, `health-factory` fails with
+`PRODUCT_MISMATCH`, the staged App is not promoted and nothing live changes; set the other one and run it again.
+
 ## After step 4
 
 Run `pnpm --dir app setup-code` against the new database (with its migrate URL) and finish the setup wizard in the
