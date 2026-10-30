@@ -7,17 +7,19 @@ it with `GITHUB_OAUTH_BASE_URL` (GitHub's web pages: the authorization and the c
 well, because the client secret, the App JWT and the tokens are sent to that address. State is in
 memory. Dummy values only.
 
-| File            | Part                                                                                                               |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `server.ts`     | The server (`startGithubFake`), the request log, failure injection, the control endpoints.                         |
-| `oauth.ts`      | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership.                        |
-| `manifest.ts`   | The GitHub App manifest flow: the creation page, the one-time code, the conversion.                                |
-| `registry.ts`   | The Apps the fake knows (the one registered at start and the ones the manifest flow created), shared by the parts. |
-| `app-api.ts`    | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests.                        |
-| `review-api.ts` | What a reviewer reads and writes: diff, commits, file contents and comments of a pull request.                     |
-| `webhooks.ts`   | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.                              |
-| `http.ts`       | Small helpers for answering and reading HTTP messages.                                                             |
-| `main.ts`       | Starts the sign in part as its own process (Playwright).                                                           |
+| File                                | Part                                                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `server.ts`                         | The server (`startGithubFake`), the request log, failure injection, the control endpoints.                         |
+| `oauth.ts`                          | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership.                        |
+| `manifest.ts`                       | The GitHub App manifest flow: the creation page, the one-time code, the conversion.                                |
+| `registry.ts`                       | The Apps the fake knows (the one registered at start and the ones the manifest flow created), shared by the parts. |
+| `app-api.ts`                        | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests.                        |
+| `git-http.ts`                       | Git over smart HTTP: fetch (`git-upload-pack`) and push (`git-receive-pack`) of a registered repository.           |
+| `git-fixture.ts`, `git-branches.ts` | The Git repository a test registers, and its branches as the branch endpoints report them.                         |
+| `review-api.ts`                     | What a reviewer reads and writes: diff, commits, file contents and comments of a pull request.                     |
+| `webhooks.ts`                       | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.                              |
+| `http.ts`                           | Small helpers for answering and reading HTTP messages.                                                             |
+| `main.ts`                           | Starts the sign in part as its own process (Playwright).                                                           |
 
 A part is switched on by its options. `clientId` and `clientSecret` give the sign in; `appId` and
 `publicKeyPem` give the GitHub App API (give both options of a part or neither); `manifestFlow: true`
@@ -107,6 +109,25 @@ branch (at `BASE_SHA`) and the branches its pull requests name (the head at the 
 Any other name is a 404 (`Branch not found`). The list is ordered by name and paged like GitHub (`per_page` up to 100,
 default 30, and `page`); the GitHub App client puts the default branch first.
 
+Git over HTTP (`git-http.ts`), for the repositories a test registered with `addGitRepository`: the real `git upload-pack`
+and `git receive-pack` behind the smart HTTP framing, with the installation token as the Basic password (user
+`x-access-token`). Without a valid token the answer is 401, for a repository the token does not reach or nobody
+registered 404.
+
+| Endpoint                                                                         | Behavior                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /:o/:r.git/info/refs?service=git-upload-pack`, `POST .../git-upload-pack`   | Fetch and clone, as the runner's checkout does. The token needs `contents: read` (403 without).                                                                                                                                      |
+| `GET /:o/:r.git/info/refs?service=git-receive-pack`, `POST .../git-receive-pack` | Push (#766), as the Implementer's turn does. The token must have been minted with `contents: write` for the repository (403 for `contents: read`, so for a token minted without a permission list from an app that holds read only). |
+| `GET /__fake/pushes?repository=owner/name`                                       | Control endpoint: every push received, `{ pushes: [{ repository, refs }] }` (the `repository` filter is optional). The same list is `github.pushes()`.                                                                               |
+
+A push is judged by Git itself with GitHub's default settings: a new branch is accepted, and so is a push that moves a
+branch forward (a fast-forward); a history that is not a fast-forward of the branch (which stops `git push --force` as
+well) and the deletion of a branch are refused per ref (`[remote rejected]`, HTTP 200 like GitHub); no hook runs. The
+repository is a fixture, so a push to its checked out branch is accepted too and leaves its working tree alone. The
+pushed branch is there at once for the branch endpoints above and for a fetch. `github.requests()` has the push as
+`{ method: "POST", path: ".../git-receive-pack", refs: ["refs/heads/..."] }`: the names of the refs the client asked
+to update (whether or not Git accepted them; the branch endpoints tell what is there), never a token or an object.
+
 Links (`html_url`) point to `https://github.test` unless the fake is started with `selfLinks`
 (`GITHUB_FAKE_SELF_LINKS=true` as its own process): then they point to the fake itself, which is what
 the runner needs, because it demands that the pull request and the API address of a job are on one
@@ -175,7 +196,8 @@ github.fail({
 github.fail({ pathIncludes: "/pulls/", hang: true }); // never answers; stays open until the client gives up
 github.fail({ pathIncludes: "/pulls/", hangBody: true }); // sends the headers and the first byte of the answer, then stalls
 github.abortedRequests(); // requests the client closed before an answer was complete (an aborted request, not one merely no longer waited for)
-github.requests(); // method and path of every request, no credentials
+github.requests(); // method and path of every request (a push also its ref names), no credentials
+github.pushes(); // every push received: the repository and the ref names (#766)
 github.seenCredentials(); // every JWT or token received, to search outputs for leaks
 github.reset(); // all state, the request log and the injected failures (not failTokenEndpoint / failMembershipEndpoint)
 await github.close();
