@@ -178,7 +178,18 @@ def test_a_branch_that_no_longer_contains_the_start_is_a_violation_and_nothing_i
     workspace = rig.prepared()
     commit(workspace, "a.txt")
     empty_tree = raw("hash-object", "-t", "tree", "/dev/null", cwd=workspace.repo, git=rig.git)
-    unrelated = raw("commit-tree", empty_tree, "-m", "unrelated", cwd=workspace.repo, git=rig.git)
+    unrelated = raw(
+        "commit-tree",
+        empty_tree,
+        "-m",
+        "unrelated",
+        cwd=workspace.repo,
+        git=rig.git,
+        GIT_AUTHOR_NAME=IDENTITY.name,
+        GIT_AUTHOR_EMAIL=IDENTITY.email,
+        GIT_COMMITTER_NAME=IDENTITY.name,
+        GIT_COMMITTER_EMAIL=IDENTITY.email,
+    )
     bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", unrelated)
 
     with pytest.raises(JobError) as refused:
