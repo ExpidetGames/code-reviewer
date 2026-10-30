@@ -37,8 +37,6 @@ def refusal_of(authority: str, allowlist: EgressAllowlist = DEFAULT_ALLOWLIST) -
         ("registry.yarnpkg.com:443", "registry.yarnpkg.com"),
         ("pypi.org:443", "pypi.org"),
         ("files.pythonhosted.org:443", "files.pythonhosted.org"),
-        ("proxy.golang.org:443", "proxy.golang.org"),
-        ("sum.golang.org:443", "sum.golang.org"),
         ("index.crates.io:443", "index.crates.io"),
         ("static.crates.io:443", "static.crates.io"),
     ],
@@ -56,8 +54,6 @@ def test_the_default_allowlist_is_exactly_the_package_registries() -> None:
         "registry.yarnpkg.com",
         "pypi.org",
         "files.pythonhosted.org",
-        "proxy.golang.org",
-        "sum.golang.org",
         "index.crates.io",
         "static.crates.io",
     )
@@ -74,6 +70,8 @@ def test_the_default_allowlist_is_exactly_the_package_registries() -> None:
         "evil.registry.npmjs.org:443",  # no wildcard in the default list
         "registry.npmjs.org.evil.com:443",
         "xregistry.npmjs.org:443",
+        "proxy.golang.org:443",  # a fetcher: it fetches any host named in the path
+        "sum.golang.org:443",
         "localhost:443",
         "metadata.google.internal:443",
         "dispatcher.internal:443",
@@ -169,6 +167,15 @@ def test_userinfo_is_refused(authority: str) -> None:
 )
 def test_an_odd_target_is_malformed_and_never_allowed(authority: str) -> None:
     assert not _allowed(authority)
+
+
+# #763-T02
+def test_a_name_that_only_lowercases_to_an_allowed_one_is_malformed_not_allowed() -> None:
+    kelvin = "\u212a"  # KELVIN SIGN: not ASCII, but `str.lower()` turns it into "k"
+    assert kelvin.lower() == "k"
+    assert judge_authority("registry.yarnpkg.com:443", DEFAULT_ALLOWLIST) == "registry.yarnpkg.com"
+    assert refusal_of(f"registry.yarnp{kelvin}g.com:443") is Refusal.MALFORMED
+    assert refusal_of(f"REGISTRY.YARNP{kelvin}G.COM:443") is Refusal.MALFORMED
 
 
 # #763-T02

@@ -15,7 +15,9 @@ the network mode and the port). The proxy judges in two steps:
 
 A `*.` entry matches exactly one label below it and never the apex. Matching is on the name the
 client asked for; the proxy cannot see inside the tunnel (SNI, `Host`), which is why only names
-whose operators serve nothing else on those addresses belong on the list.
+whose operators serve nothing else on those addresses belong on the list. A name whose service
+fetches other hosts for the client (the Go module proxy fetches any host named in the path) is
+never one of them: it would be a way out.
 """
 
 import re
@@ -92,8 +94,6 @@ DEFAULT_ALLOWLIST: Final = EgressAllowlist(
         "registry.yarnpkg.com",
         "pypi.org",
         "files.pythonhosted.org",
-        "proxy.golang.org",
-        "sum.golang.org",
         "index.crates.io",
         "static.crates.io",
     )

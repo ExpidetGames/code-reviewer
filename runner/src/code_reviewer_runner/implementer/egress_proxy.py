@@ -4,7 +4,7 @@
 
 The root supervisor runs one of these for the agent phase. The engine user's nft rules let it open
 connections to loopback ports only (the model proxy, the engine's own port and this one,
-`netguard.py`), so every tool of the agent (npm, pip, cargo, go) that honours `HTTPS_PROXY` comes
+`netguard.py`), so every tool of the agent (npm, pip, cargo) that honours `HTTPS_PROXY` comes
 here, and a tool that ignores the variable has no network at all.
 
 What the proxy does with a connection:
@@ -30,6 +30,7 @@ here reads the environment or a file: the allowlist and the limits come from the
 """
 
 import contextlib
+import errno
 import logging
 import re
 import select
@@ -53,6 +54,9 @@ from .egress_policy import (
 LOOPBACK: Final = "127.0.0.1"
 _CHUNK: Final = 65536
 _MAX_REFUSED_HOSTS: Final = 10
+# Seconds to wait after an `accept` that failed (out of descriptors, an aborted connection), so a
+# failure that stays cannot turn the acceptor into a busy loop.
+_ACCEPT_BACKOFF: Final = 0.1
 _SAFE_HOST: Final = re.compile(r"^[a-z0-9][a-z0-9.-]{0,252}$")
 _HEADER_NAME: Final = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 _VERSIONS: Final = ("HTTP/1.0", "HTTP/1.1")
@@ -172,18 +176,24 @@ class EgressProxy:
         if self._stopping.is_set():
             return
         self._stopping.set()
-        if self._acceptor is not None:
-            self._acceptor.join(2)
-        if self._listener is not None:
-            self._listener.close()
-        with self._lock:
-            sockets = list(self._open)
-            handlers = list(self._handlers)
-        for sock in sockets:
-            self._close(sock)
-        for handler in handlers:
-            handler.join(2)
-        self._log_summary()
+        try:
+            if self._acceptor is not None:
+                self._acceptor.join(2)
+            if self._listener is not None:
+                with contextlib.suppress(OSError):
+                    self._listener.close()
+            with self._lock:
+                sockets = list(self._open)
+                handlers = list(self._handlers)
+            for sock in sockets:
+                self._close(sock)
+            for handler in handlers:
+                # A thread whose start failed has no ident and cannot be joined.
+                with contextlib.suppress(RuntimeError):
+                    if handler.ident is not None:
+                        handler.join(2)
+        finally:
+            self._log_summary()
 
     def __enter__(self) -> "EgressProxy":
         self.start()
@@ -219,13 +229,25 @@ class EgressProxy:
     def _accept_loop(self) -> None:
         listener = self._listener
         assert listener is not None
+        failing = False
         while not self._stopping.is_set():
             try:
                 client, _ = listener.accept()
             except TimeoutError:
                 continue
-            except OSError:
-                return
+            except OSError as error:
+                if self._stopping.is_set() or listener.fileno() == -1:
+                    return
+                # An aborted connection, no descriptors left, no buffers: the listener is fine and
+                # the next client must still be served. Wait a moment so a failure that stays
+                # does not spin, and say it once per streak.
+                if not failing:
+                    name = errno.errorcode.get(error.errno or 0, type(error).__name__)
+                    _log.warning("egress proxy: accept failed (%s); going on", name)
+                failing = True
+                self._stopping.wait(_ACCEPT_BACKOFF)
+                continue
+            failing = False
             with self._lock:
                 full = self._connections >= self.limits.max_connections
                 if not full:
@@ -236,9 +258,21 @@ class EgressProxy:
                 self._close(client)
                 continue
             handler = threading.Thread(target=self._serve, args=(client,), daemon=True)
+            # Registered before it runs: a handler that ends at once removes itself, and a
+            # registration after the start could outlive it.
             with self._lock:
                 self._handlers.add(handler)
-            handler.start()
+            try:
+                handler.start()
+            except RuntimeError:
+                # No thread to be had (the pids limit): this client pays, the acceptor goes on.
+                with self._lock:
+                    self._handlers.discard(handler)
+                    self._connections -= 1
+                    self._refused[Refusal.LIMIT.value] += 1
+                self._reply(client, 503, "Service Unavailable")
+                self._close(client)
+                self._stopping.wait(_ACCEPT_BACKOFF)
 
     def _serve(self, client: socket.socket) -> None:
         try:

@@ -9,6 +9,7 @@ is the proxy's decision and its relay, not the network. The TLS server stands in
 
 import contextlib
 import datetime
+import errno
 import logging
 import socket
 import ssl
@@ -26,6 +27,8 @@ from cryptography.x509.oid import NameOID
 
 from code_reviewer_runner.implementer.egress_policy import DEFAULT_ALLOWLIST, EgressAllowlist
 from code_reviewer_runner.implementer.egress_proxy import EgressLimits, EgressProxy
+
+_THREAD = threading.Thread
 
 PUBLIC = "151.101.0.1"
 REGISTRY = "registry.npmjs.org"
@@ -569,3 +572,205 @@ def test_the_proxy_listens_on_loopback_only() -> None:
     with backend() as server, running(server) as proxy:
         assert proxy.address == ("127.0.0.1", proxy.port)
         assert proxy.port > 0
+
+
+def padded_connect(head_bytes: int) -> bytes:
+    """A CONNECT request whose head (without the blank line) is exactly `head_bytes` long."""
+    base = f"CONNECT {REGISTRY}:443 HTTP/1.1\r\nHost: {REGISTRY}:443\r\nX-Pad: "
+    return (base + "a" * (head_bytes - len(base)) + "\r\n\r\n").encode("ascii")
+
+
+# #763-T04
+def test_a_head_of_exactly_the_limit_is_served_and_one_byte_more_is_refused() -> None:
+    limits = EgressLimits(max_head_bytes=200)
+    with backend() as server, running(server, limits=limits) as proxy:
+        assert ask(proxy, padded_connect(200)) == 200
+        assert ask(proxy, padded_connect(201)) == 431
+
+
+# #763-T04
+def test_a_head_that_never_ends_is_refused_once_it_is_too_long_not_when_the_time_is_up() -> None:
+    with backend() as server, running(server, limits=EgressLimits(head_timeout=30)) as proxy:
+        started = time.monotonic()
+        # 9 000 bytes, more than the limit of 8 192, and no blank line anywhere.
+        status = ask(proxy, b"CONNECT " + b"a" * 9_000, timeout=5)
+
+        assert status in (0, 431)
+        assert time.monotonic() - started < 5
+        assert server.dialled == []
+        assert proxy.refused_counts() == {"malformed": 1}
+
+
+# #763-T04
+def test_a_client_that_drips_its_request_cannot_hold_a_slot_past_the_head_deadline() -> None:
+    with backend() as server, running(server, limits=EgressLimits(head_timeout=0.6)) as proxy:
+        request = connect_request(f"{REGISTRY}:443")
+        started = time.monotonic()
+        sent = 0
+        ended = False
+        with socket.create_connection(("127.0.0.1", proxy.port), timeout=5) as client:
+            # One byte every 0.4 s: each read returns well inside the 0.6 s, the whole head would
+            # take half a minute. Only a deadline for the head as a whole ends this.
+            while not ended and time.monotonic() - started < 4:
+                client.sendall(request[sent : sent + 1])
+                sent += 1
+                client.settimeout(0.4)
+                try:
+                    client.recv(1024)  # the 408, or just the end of the connection
+                    ended = True
+                except TimeoutError:
+                    pass
+                except OSError:
+                    ended = True
+
+        assert ended
+        assert time.monotonic() - started < 2
+        assert sent < len(request)
+        assert server.dialled == []
+
+
+# #763-T01
+def test_bytes_sent_right_behind_the_request_head_reach_the_target() -> None:
+    seen: list[bytes] = []
+
+    def record_then_answer(client: socket.socket) -> None:
+        seen.append(client.recv(64))
+        client.sendall(b"server-hello")
+
+    with backend(record_then_answer) as server, running(server) as proxy:
+        with socket.create_connection(("127.0.0.1", proxy.port), timeout=5) as client:
+            # The client does not wait for the 200: its first TLS bytes ride in the same segment.
+            client.sendall(connect_request(f"{REGISTRY}:443") + b"client-hello")
+            status, rest = read_head(client)
+            while len(rest) < len(b"server-hello"):
+                rest += client.recv(64)
+
+        assert status == 200
+        assert rest == b"server-hello"
+        assert seen == [b"client-hello"]
+
+
+class AcceptFaults:
+    """Makes `accept` of the proxy's own listener (no other socket) raise the queued errors."""
+
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        address: tuple[str, int],
+        *errors: OSError,
+        after: int,
+    ) -> None:
+        self.errors = list(errors)
+        self.after = after
+        self.raised = 0
+        self.accepted = 0
+        original = socket.socket.accept
+
+        def accept(listener: socket.socket) -> tuple[socket.socket, object]:
+            try:
+                ours = listener.getsockname() == address
+            except OSError:
+                ours = False
+            if ours and self.accepted >= self.after and self.errors:
+                self.raised += 1
+                raise self.errors.pop(0)
+            accepted = original(listener)
+            if ours:
+                self.accepted += 1
+            return accepted
+
+        monkeypatch.setattr(socket.socket, "accept", accept)
+
+
+# #763-T04
+def test_an_accept_that_fails_for_one_client_does_not_end_the_acceptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with backend() as server, running(server) as proxy:
+        faults = AcceptFaults(
+            monkeypatch, proxy.address, OSError(errno.ECONNABORTED, "aborted"), after=2
+        )
+        for _ in range(4):
+            with open_tunnel(proxy) as tunnel:
+                tunnel.settimeout(5)
+                tunnel.sendall(b"x")
+                assert tunnel.recv(1) == b"x"
+
+        assert faults.raised == 1
+
+
+# #763-T04
+def test_an_accept_that_keeps_failing_is_retried_slowly_and_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_of_files = OSError(errno.EMFILE, "too many open files")
+    with backend() as server, running(server) as proxy:
+        faults = AcceptFaults(monkeypatch, proxy.address, *[out_of_files] * 100_000, after=0)
+        time.sleep(0.5)
+
+        assert 1 <= faults.raised <= 20  # a loop without a pause would raise it thousands of times
+        faults.errors.clear()
+        with open_tunnel(proxy) as tunnel:
+            tunnel.settimeout(5)
+            tunnel.sendall(b"x")
+            assert tunnel.recv(1) == b"x"
+
+
+class ThreadsThatCannotStart:
+    """The proxy's handler threads (and only those) fail to start, like at the pids limit."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, times: int) -> None:
+        self.remaining = times
+        outer = self
+
+        class Thread(_THREAD):
+            def start(self) -> None:
+                serving = getattr(self._target, "__name__", "") == "_serve"  # type: ignore[attr-defined]
+                if serving and outer.remaining > 0:
+                    outer.remaining -= 1
+                    raise RuntimeError("can't start new thread")
+                super().start()
+
+        monkeypatch.setattr(threading, "Thread", Thread)
+
+
+# #763-T04
+def test_a_handler_that_cannot_start_costs_that_client_only_and_stop_still_logs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    with backend() as server:
+        proxy = EgressProxy(
+            resolve=Resolver(), connect=server.connect, limits=EgressLimits(max_connections=1)
+        )
+        proxy.start()
+        failing = ThreadsThatCannotStart(monkeypatch, times=1)
+        try:
+            assert ask(proxy, connect_request(f"{REGISTRY}:443")) == 503
+            assert failing.remaining == 0
+            # The place of that client is free again (the limit is one connection), and the
+            # acceptor is alive.
+            with open_tunnel(proxy) as tunnel:
+                tunnel.settimeout(5)
+                tunnel.sendall(b"x")
+                assert tunnel.recv(1) == b"x"
+        finally:
+            with caplog.at_level(logging.INFO):
+                proxy.stop()
+
+    assert proxy.refused_counts() == {"limit": 1}
+    assert f"{REGISTRY}=1" in "\n".join(record.getMessage() for record in caplog.records)
+
+
+# #763-T04
+def test_stop_does_not_raise_on_a_thread_that_never_started_and_still_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with backend() as server:
+        proxy = EgressProxy(resolve=Resolver(), connect=server.connect)
+        proxy.start()
+        with proxy._lock:  # a handler registered whose start failed
+            proxy._handlers.add(threading.Thread(target=lambda: None))
+        with caplog.at_level(logging.INFO):
+            proxy.stop()
+
+    assert any("egress proxy: tunnels per host" in r.getMessage() for r in caplog.records)
