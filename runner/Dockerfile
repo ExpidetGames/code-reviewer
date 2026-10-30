@@ -26,6 +26,10 @@ FROM ${UV_IMAGE} AS uv
 FROM scratch AS licenses
 COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /
 
+# ---- guard-files: the hook and the matrix of the Implementer's branch guard (#761), copied into the sandbox stage ----
+FROM scratch AS guard-files
+COPY runner/guard/reference-transaction runner/scripts/guard_matrix.sh /
+
 # ---- builder: create the virtual environment from uv.lock ----
 FROM ${PYTHON_IMAGE} AS builder
 COPY --from=uv /uv /usr/local/bin/uv
@@ -181,5 +185,5 @@ RUN ln -s /opt/node/bin/node /usr/local/bin/node \
 # in no core.hooksPath: the Worker sets it per job in a GIT_CONFIG_SYSTEM file under /run (the root file
 # system is read-only) and writes the guard configuration there.
 RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/guard
-COPY --chown=0:0 --chmod=0755 runner/guard/reference-transaction runner/scripts/guard_matrix.sh /opt/code-reviewer/guard/
+COPY --from=guard-files --chown=0:0 --chmod=0755 / /opt/code-reviewer/guard/
 USER 10001:10001

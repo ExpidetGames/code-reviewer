@@ -79,7 +79,9 @@ describe("git of the Worker image", () => {
   // #761-T01
   it("is built from the verified source of the fetch stage, with nothing downloaded here", () => {
     expect(stage("git-build").base).toBe("${PYTHON_IMAGE}");
-    expect(building()).toContain("COPY --from=toolchain-fetch /toolchain/git /git-src");
+    expect(building()).toContain(
+      "COPY --from=toolchain-fetch /toolchain/git /git-src",
+    );
     expect(building()).toMatch(/\bmake\b[^\n]*\binstall\b/);
     expect(building()).not.toMatch(/\b(curl|wget|git clone)\b/);
   });
@@ -121,7 +123,15 @@ describe("the rest of the toolchain in the Worker image", () => {
     const packages = installLine().split(/\s+/);
 
     expect(installLine()).toContain("--no-install-recommends");
-    for (const name of ["gcc", "g++", "make", "libc6-dev", "jq", "unzip", "libcurl4"])
+    for (const name of [
+      "gcc",
+      "g++",
+      "make",
+      "libc6-dev",
+      "jq",
+      "unzip",
+      "libcurl4",
+    ])
       expect(packages, name).toContain(name);
   });
 
@@ -173,8 +183,13 @@ describe("the accident guard files in the Worker image", () => {
     expect(sandbox()).toContain(
       "RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/guard",
     );
+    // Through a scratch stage, like the license files: the final stage copies nothing but pins from the context.
+    expect(stage("guard-files").base).toBe("scratch");
+    expect(stage("guard-files").lines).toEqual([
+      "COPY runner/guard/reference-transaction runner/scripts/guard_matrix.sh /",
+    ]);
     expect(sandbox()).toContain(
-      "COPY --chown=0:0 --chmod=0755 runner/guard/reference-transaction runner/scripts/guard_matrix.sh /opt/code-reviewer/guard/",
+      "COPY --from=guard-files --chown=0:0 --chmod=0755 / /opt/code-reviewer/guard/",
     );
   });
 

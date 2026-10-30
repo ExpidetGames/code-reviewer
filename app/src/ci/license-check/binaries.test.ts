@@ -279,7 +279,9 @@ describe("auditBinaries", () => {
 
     it("does not let the exception hide a pin whose license is another one", () => {
       const result = auditGit({
-        "runner/git-pin.json": JSON.stringify(gitPin({ license: "AGPL-3.0-only" })),
+        "runner/git-pin.json": JSON.stringify(
+          gitPin({ license: "AGPL-3.0-only" }),
+        ),
       });
 
       expect(codes(result.violations)).toContain("BINARY_POLICY_MISMATCH");
@@ -288,7 +290,9 @@ describe("auditBinaries", () => {
     it("still needs the executable digest of a release that is not built from source", () => {
       const prebuilt: Policy = {
         ...gitPolicy,
-        binaries: gitPolicy.binaries.map(({ build: _build, ...entry }) => entry),
+        binaries: gitPolicy.binaries.map(
+          ({ build: _build, ...entry }) => entry,
+        ),
       };
 
       expect(codes(auditGit({}, prebuilt).violations)).toEqual([
