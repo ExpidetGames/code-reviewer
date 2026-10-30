@@ -19,6 +19,10 @@ from code_reviewer_runner.result import ErrorCode
 
 ENGINE_DIFF = "pr-agent"
 ENGINE_DYNAMIC = "opencode"
+# The Implementer's engine (#746) is named by the contract, but this release has no engine behind it
+# and its start-up self-check does not exist yet: a runner never advertises it, so it is not in
+# `ALL_ENGINES`.
+ENGINE_IMPLEMENTER = "implementer"
 ALL_ENGINES: tuple[str, ...] = (ENGINE_DIFF, ENGINE_DYNAMIC)
 
 

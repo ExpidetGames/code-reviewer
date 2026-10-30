@@ -181,6 +181,19 @@ export const ERROR_CODE_CLASSES = {
   checkout_incomplete: "charged",
   // Replaced by a newer push; it reported what it used. In full.
   superseded: "charged",
+  // The Implementer (#746). Provisional classes until its completion is built (#754): what ended before the agent ran is free, and
+  // what ended after the model was used is classed by whether it was (`AI_COST_FAILURE_CLASS`). `cost_limit_reached` is above.
+  branch_exists: "free",
+  base_branch_not_found: "free",
+  clone_failed: "free",
+  setup_failed: "free",
+  git_write_not_granted: "free",
+  implementer_engine_unavailable: "free",
+  implementer_config_invalid: "free",
+  agent_gave_up: AI_COST_FAILURE_CLASS,
+  push_rejected: AI_COST_FAILURE_CLASS,
+  branch_violation: AI_COST_FAILURE_CLASS,
+  time_limit_reached: AI_COST_FAILURE_CLASS,
 } as const satisfies Record<
   JobErrorCode | KnownRunnerErrorCode | ReleaseReason | ClaimCode,
   OutcomeClass
