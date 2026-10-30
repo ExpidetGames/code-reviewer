@@ -133,6 +133,15 @@
         "failure": {
           "$ref": "#/$defs/ProbeFailure"
         },
+        "required": {
+          "description": "The engines this Dispatcher required for `ok`: those of the reviewer kinds, and `implementer` only once the Launcher advertises it. A deploy step names the ones `engines` lacks when it blocks. Unlike `engines`, it may hold `implementer`, which a container verdict cannot yet (ProbeVerdict still lists two engines).",
+          "type": "array",
+          "items": {
+            "enum": ["pr-agent", "opencode", "implementer"]
+          },
+          "uniqueItems": true,
+          "maxItems": 3
+        },
         "checkedAt": {
           "$ref": "runner-api.v1.json#/$defs/Timestamp"
         },

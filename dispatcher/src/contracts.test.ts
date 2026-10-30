@@ -18,6 +18,7 @@ import {
   CONTRACT_REVIEW_KINDS,
   ENGINE_BY_KIND,
   KNOWN_KINDS,
+  REVIEWER_KINDS,
 } from "./core/types.ts";
 
 const CONTRACTS = join(import.meta.dirname, "..", "..", "contracts");
@@ -266,10 +267,17 @@ describe("the implementer kind in the contracts the Dispatcher speaks (#746)", (
     );
   });
 
-  // #746-T03
-  it("serves the kinds it knows today and not the new one: a later change adds it", () => {
-    expect([...KNOWN_KINDS]).toStrictEqual(["diff", "dynamic"]);
+  // #759-T01
+  it("serves every kind of the contract, each with the engine of the contract, and the reviewer's kinds are the two review kinds", () => {
+    expect([...KNOWN_KINDS].sort()).toStrictEqual(
+      [...(runnerApi.$defs.ReviewKind?.enum ?? [])].sort(),
+    );
+    expect([...KNOWN_KINDS]).toStrictEqual([...CONTRACT_REVIEW_KINDS]);
+    expect(Object.keys(ENGINE_BY_KIND).sort()).toStrictEqual(
+      [...KNOWN_KINDS].sort(),
+    );
     expect(ENGINE_BY_KIND.implementer).toBe("implementer");
+    expect([...REVIEWER_KINDS]).toStrictEqual(["diff", "dynamic"]);
   });
 
   // #746-T01

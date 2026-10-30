@@ -25,6 +25,7 @@ import {
   type Launcher,
   type Logger,
   type ReviewKind,
+  type ReviewerKind,
 } from "../core/types.ts";
 import { systemClock } from "../core/clock.ts";
 import type { WorkerContainerOverrides } from "../contracts/worker-container.ts";
@@ -81,7 +82,7 @@ const VM_HEADROOM_MB = 256;
  */
 export const SANDBOX_KIND_DEFAULTS: Readonly<
   Record<
-    ReviewKind,
+    ReviewerKind,
     { vcpus: number; memory: { limit: string; reservation: string } }
   >
 > = {
@@ -140,6 +141,11 @@ function megabytes(size: string): number {
 
 /** The VM size and the container memory of a launch: the kind's defaults, then the configuration over them. */
 function planOf(spec: LaunchSpec): Plan {
+  // The Implementer needs a container profile of its own (a work volume where programs may run, more memory and
+  // processes: P15, #760). Until it exists no VM is made for the kind, and the hardened spec of Diff and Dynamic is
+  // never used for it.
+  if (spec.kind === "implementer")
+    throw new LaunchError("implementer_profile_unavailable");
   const defaults = SANDBOX_KIND_DEFAULTS[spec.kind];
   const config: LaunchConfig = spec.config;
 
@@ -177,14 +183,14 @@ function planOf(spec: LaunchSpec): Plan {
  * that leaves the VM no room. Run at start so that a wrong value fails the deployment, not the first job.
  */
 export function validateKindConfig(
-  kind: ReviewKind,
+  kind: ReviewerKind,
   config: LaunchConfig,
 ): void {
   planForKind(kind, config);
 }
 
 /** The VM size and container memory a Worker kind gets (what a launch of that kind uses; the canary of #331 too). */
-export function planForKind(kind: ReviewKind, config: LaunchConfig): Plan {
+export function planForKind(kind: ReviewerKind, config: LaunchConfig): Plan {
   return planOf({
     appId: "validation",
     appUrl: "https://app.invalid",
@@ -201,6 +207,18 @@ function slug(value: string, length: number): string {
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .slice(0, length);
+}
+
+/**
+ * The name of a job VM: `cr-<kind>-<job id>-<suffix>`. The kind is whole, so that the stop route and the reaper
+ * (reaper/vm-shape.ts, stop/job-stopper.ts) recognise the VM of every kind by the same name.
+ */
+export function jobVmName(
+  kind: ReviewKind,
+  jobId: string,
+  suffix: string,
+): string {
+  return `cr-${slug(kind, 16)}-${slug(jobId, 36)}-${suffix}`;
 }
 
 function randomSuffix(): string {
@@ -352,7 +370,11 @@ export function createSandboxLauncher(
 
     async launch(spec, signal) {
       const plan = planOf(spec);
-      const requested = `cr-${slug(spec.kind, 8)}-${slug(spec.jobId, 36)}-${(options.newSuffix ?? randomSuffix)()}`;
+      const requested = jobVmName(
+        spec.kind,
+        spec.jobId,
+        (options.newSuffix ?? randomSuffix)(),
+      );
 
       const vm = await createVm(plan, spec, requested, signal);
       const createdAt = (options.now ?? (() => new Date()))();
