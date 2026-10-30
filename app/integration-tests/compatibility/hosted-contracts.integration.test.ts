@@ -416,9 +416,10 @@ describe("the hardened container spec", () => {
     ["no work volume", "workVolume"],
     ["no pids limit", "pids"],
   ])("refuses a profile with %s", (_name, key) => {
-    const { [key]: _removed, ...rest } = spec("ImplementerContainerSpec");
+    const profile = spec("ImplementerContainerSpec");
+    delete profile[key];
 
-    expectInvalid(container, "ImplementerContainerSpec", rest);
+    expectInvalid(container, "ImplementerContainerSpec", profile);
   });
 
   // #760-T01
