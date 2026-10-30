@@ -21,7 +21,11 @@ const SCOPE = {
 } as const;
 
 async function setup(
-  options: { defaultBranch?: string; branches?: string[] } = {},
+  options: {
+    defaultBranch?: string;
+    branches?: string[];
+    requestTimeoutMs?: number;
+  } = {},
 ) {
   const harness = await startGithubAppHarness();
   const { fake, clock, env } = harness;
@@ -50,6 +54,9 @@ async function setup(
   const client = createGithubAppClient({
     config: loadGithubAppConfig(env),
     now: clock.now,
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
   });
   return { fake, client, repository, base };
 }
@@ -195,6 +202,29 @@ describe("one branch", () => {
     expect(
       await client.getBranch("4242", SCOPE, "acme/widgets", "main"),
     ).toEqual({ sha: base });
+  });
+
+  // #750-T03
+  it("sends the name as one percent encoded path segment, also one with # or %", async () => {
+    const { fake, client, base } = await setup({
+      branches: ["feature/x", "a#b", "50%"],
+    });
+
+    for (const name of ["feature/x", "a#b", "50%"])
+      expect(
+        await client.getBranch("4242", SCOPE, "acme/widgets", name),
+      ).toEqual({ sha: base });
+
+    expect(
+      fake
+        .requests()
+        .filter((r) => r.path.startsWith("/repos/acme/widgets/branches/"))
+        .map((r) => r.path),
+    ).toEqual([
+      "/repos/acme/widgets/branches/feature%2Fx",
+      "/repos/acme/widgets/branches/a%23b",
+      "/repos/acme/widgets/branches/50%25",
+    ]);
   });
 
   // #750-T03
@@ -349,7 +379,17 @@ describe("what the client refuses and how a failure shows", () => {
   it("rejects a repository name and a branch name that cannot be a path", async () => {
     const { fake, client } = await setup();
 
-    for (const name of ["", "a\nb", "x".repeat(300)])
+    // `.` and `..` would be dot segments of the path; a lone surrogate cannot be percent encoded.
+    for (const name of [
+      "",
+      "a\nb",
+      "x".repeat(300),
+      ".",
+      "..",
+      "a\ud800b",
+      "\udc00",
+      "tail\ud83d",
+    ])
       expect(
         (await failureOf(client.getBranch("4242", SCOPE, "acme/widgets", name)))
           .code,
@@ -361,29 +401,93 @@ describe("what the client refuses and how a failure shows", () => {
   });
 
   // #750-T04
-  it("aborts the request in flight when the signal fires", async () => {
-    const { fake, client } = await setup();
-    fake.fail({ pathIncludes: "/branches", hang: true });
-    const controller = new AbortController();
+  it.each([404, 422, 500])(
+    "rejects getBranch when the token request is answered %s, and never gives null",
+    async (status) => {
+      const { fake, client } = await setup();
+      fake.fail({ pathIncludes: "/access_tokens", status });
 
-    const pending = failureOf(
-      client.listBranches("4242", SCOPE, "acme/widgets", controller.signal),
-    );
-    const deadline = Date.now() + 5000;
-    while (
-      !fake.requests().some((r) => r.path.endsWith("/branches")) &&
-      Date.now() < deadline
-    )
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    controller.abort();
+      const error = await failureOf(
+        client.getBranch("4242", SCOPE, "acme/widgets", "main"),
+      );
 
-    expect((await pending).code).toBe("GITHUB_APP_UNAVAILABLE");
-    const abortedDeadline = Date.now() + 5000;
-    while (fake.abortedRequests().length < 1 && Date.now() < abortedDeadline)
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fake.abortedRequests().map((r) => r.path)).toContain(
+      expect(error.duringTokenRequest).toBe(true);
+      expect(error.status).toBe(status);
+      expect(
+        fake.requests().filter((r) => r.path.includes("/branches")),
+      ).toEqual([]);
+    },
+  );
+
+  // #750-T04
+  it.each([
+    [
+      "getRepositoryFacts",
+      "/repos/acme/widgets",
+      (c: Client, signal: AbortSignal) =>
+        c.getRepositoryFacts("4242", SCOPE, "acme/widgets", signal),
+    ],
+    [
+      "listBranches (default branch)",
+      "/repos/acme/widgets",
+      (c: Client, signal: AbortSignal) =>
+        c.listBranches("4242", SCOPE, "acme/widgets", signal),
+    ],
+    [
+      "listBranches (page)",
       "/repos/acme/widgets/branches",
-    );
+      (c: Client, signal: AbortSignal) =>
+        c.listBranches("4242", SCOPE, "acme/widgets", signal),
+    ],
+    [
+      "getBranch",
+      "/repos/acme/widgets/branches/main",
+      (c: Client, signal: AbortSignal) =>
+        c.getBranch("4242", SCOPE, "acme/widgets", "main", signal),
+    ],
+  ])(
+    "%s ends the request in flight when the caller's signal fires, long before the client's own timeout",
+    async (_name, hungPath, run) => {
+      // The client's own timeout is a minute away: only the caller's signal can end the request in time.
+      const { fake, client } = await setup({ requestTimeoutMs: 60_000 });
+      fake.fail({ pathIncludes: hungPath, hang: true, times: 1 });
+      const controller = new AbortController();
+
+      const startedAt = Date.now();
+      const pending = failureOf(run(client, controller.signal));
+      const deadline = Date.now() + 5000;
+      while (
+        !fake.requests().some((r) => r.path.startsWith(hungPath)) &&
+        Date.now() < deadline
+      )
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      controller.abort();
+
+      const ended = await Promise.race([
+        pending,
+        new Promise<"still waiting">((resolve) =>
+          setTimeout(() => resolve("still waiting"), 5000),
+        ),
+      ]);
+      expect(ended).not.toBe("still waiting");
+      expect((ended as GithubAppError).code).toBe("GITHUB_APP_UNAVAILABLE");
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+      const abortedDeadline = Date.now() + 5000;
+      while (fake.abortedRequests().length < 1 && Date.now() < abortedDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(fake.abortedRequests().map((r) => r.path)).toContain(hungPath);
+    },
+  );
+
+  // #750-T04
+  it("ends a request nobody aborts at the client's own timeout", async () => {
+    const { fake, client } = await setup({ requestTimeoutMs: 200 });
+    fake.fail({ pathIncludes: "/branches/", hang: true });
+
+    expect(
+      (await failureOf(client.getBranch("4242", SCOPE, "acme/widgets", "main")))
+        .code,
+    ).toBe("GITHUB_APP_UNAVAILABLE");
   });
 
   // #750-T07

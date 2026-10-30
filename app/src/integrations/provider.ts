@@ -224,6 +224,10 @@ export interface IntegrationProvider {
    * One branch by name, `feature/x` included (#750): its head commit, or null when the repository has no such
    * branch. This is the `branch_exists` check before anything is enqueued. Same token, errors and abort rules as
    * `getRepositoryFacts`.
+   *
+   * Null can also mean that the repository path in `repo` is stale (the repository was renamed or moved, so
+   * GitHub answers 404 for the branch as well): a caller must call `getRepositoryFacts` first, which rejects when the
+   * repository path no longer resolves, and trust a null only after that.
    */
   getBranch(
     integration: Integration,

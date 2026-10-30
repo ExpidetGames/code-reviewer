@@ -493,9 +493,24 @@ function repoPath(repoFullName: string): string {
   return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
 }
 
-/** A branch name is text without control characters; Git allows no more than 255 bytes in a ref component. */
+/** A name with a half of a surrogate pair cannot be percent encoded (`encodeURIComponent` throws a URIError). */
+const UNPAIRED_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * A branch name is text without control characters or lone surrogates; Git allows no more than 255 bytes in a
+ * ref component. `.` and `..` are no branches either: in a path they are dot segments and would address a
+ * different endpoint.
+ */
 function checkBranchName(name: string): void {
-  if (name === "" || name.length > 255 || /[\u0000-\u001f\u007f]/.test(name))
+  if (
+    name === "" ||
+    name === "." ||
+    name === ".." ||
+    name.length > 255 ||
+    /[\u0000-\u001f\u007f]/.test(name) ||
+    UNPAIRED_SURROGATE.test(name)
+  )
     throw new GithubAppError(
       "GITHUB_APP_REQUEST_FAILED",
       "The branch name is not usable.",
