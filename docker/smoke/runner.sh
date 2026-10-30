@@ -14,7 +14,8 @@
 # fake App (Node) and `worker-reap` is on the PATH; the image carries no Dispatcher bundle. The toolchain of the
 # Implementer's agent (#761) is proven here too: git 2.53 or newer, Node.js, pnpm, Python, uv, a compiler, jq and
 # unzip at the pinned versions, the guard hook root-owned with no hooksPath baked in, the guard matrix passing as
-# the engine user in the production layout, and the size of the image against the budget of the shared image.
+# the engine user in the production layout, and the size of the image against the budget of the shared image. A real
+# Dynamic review runs in the image with the production flags against fakes of GitHub, the App and the model.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -527,6 +528,14 @@ assert_probe pr-agent root_filesystem_writable \
 step "worker-once with the production flags runs one job against the fake App"
 python3 -B "$here/worker_once_fake_app.py" "$image" "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" ||
   fail "worker-once with the production flags did not run the job as expected"
+
+# #761 (review of #777): the canary and the steps above call `POST /probe` or run a stand-in job process; this one runs a
+# real Dynamic review in the image with the production flags: the Worker claims it, prepares the pull request from a
+# real Git repository over smart HTTP, starts the pinned OpenCode as its engine user behind the network rules, and publishes the review. The
+# fakes share the Worker's loopback (the runner takes plain http for loopback only), see dynamic_job_fakes.py.
+step "worker-once with the production flags runs a real Dynamic review: engine, preparation and publication"
+python3 -B "$here/dynamic_job_fakes.py" "$image" "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" ||
+  fail "a Dynamic review did not run in the image"
 
 step "the startup of the Worker leaves the verdict in a root-only file on the /run tmpfs"
 start_worker smoke-worker-engines-file "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
