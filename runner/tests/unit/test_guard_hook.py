@@ -93,7 +93,7 @@ def run_hook(
         )
     launcher = Path(repo["conf"]).parent / "launcher" / command
     launcher.parent.mkdir(exist_ok=True)
-    launcher.write_text(f'cd "$1" && bash "$2" "$3"\nexit $?\n', encoding="utf-8")
+    launcher.write_text('cd "$1" && bash "$2" "$3"\nexit $?\n', encoding="utf-8")
     return subprocess.run(
         ["git", command, where, str(HOOK), state],
         executable="/bin/bash",
@@ -259,8 +259,8 @@ def test_another_repository_is_none_of_the_guards_business(
     assert spooled(repo) == []
 
 
-# #761-T04 (review of #777, finding 1): git passes GIT_DIR while it makes a repository (init, clone), and
-# at the time of init the repository is not valid yet; the work repository is not looked up through it.
+# #761-T04 (review of #777, finding 1): git passes GIT_DIR while it makes a repository,
+# and at the time of init that repository is not valid yet.
 def test_a_repository_that_git_is_creating_is_none_of_the_guards_business(
     repo: dict[str, str], tmp_path: Path
 ) -> None:
@@ -285,7 +285,7 @@ def test_a_repository_that_git_is_creating_is_none_of_the_guards_business(
     )
 
 
-# #761-T04: the work repository's own linked worktrees share its refs, so they stay guarded; a repository
+# #761-T04: linked worktrees of the work repository share its refs and stay guarded; a repository
 # nested in its work tree is another repository.
 def test_a_worktree_of_the_work_repository_stays_guarded_and_a_nested_repository_does_not(
     repo: dict[str, str], tmp_path: Path
@@ -315,8 +315,8 @@ def test_a_symlink_to_the_work_repository_is_the_same_repository(
     assert result.returncode != 0
 
 
-# #761-T03: a configuration without REPO (the format of the first version) guards every repository, as
-# before; one that names something that is no repository fails closed.
+# #761-T03: a configuration without REPO (the first format) guards every repository, as before;
+# one that names something that is no repository fails closed.
 def test_without_a_named_repository_every_repository_is_guarded_and_a_wrong_one_fails_closed(
     repo: dict[str, str], tmp_path: Path
 ) -> None:
@@ -341,8 +341,8 @@ def packed(repo: dict[str, str], ref: str, oid: str) -> None:
     )
 
 
-# #761-T04 (review of #777, finding 2): gc, pack-refs and maintenance prune loose refs, which git reports
-# as deletions although the refs stay.
+# #761-T04 (review of #777, finding 2): gc, pack-refs and maintenance prune loose refs, which git
+# reports as deletions although the refs stay.
 def test_packing_and_pruning_refs_is_allowed_and_deleting_the_branch_is_not(
     repo: dict[str, str],
 ) -> None:
@@ -366,7 +366,7 @@ def test_packing_and_pruning_refs_is_allowed_and_deleting_the_branch_is_not(
         assert refused.returncode != 0 and "deleting work" in refused.stderr
 
 
-# #761-T04 (review of #777, finding 2): packing writes each ref at the id it has, a creation for the hook.
+# #761-T04 (review of #777, finding 2): packing writes each ref at the id it has (a creation).
 def test_packing_writes_the_refs_at_the_id_they_have_and_nothing_else(repo: dict[str, str]) -> None:
     git(Path(repo["path"]), "branch", "main")
     same = [f"{ZERO} {repo['tip']} refs/heads/main", f"{ZERO} {repo['tip']} refs/heads/work"]
