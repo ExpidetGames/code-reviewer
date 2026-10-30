@@ -447,7 +447,7 @@ every secret: at least 32 characters, no white space or control characters.
 | `DATABASE_URL` | yes | **yes** | The **app role's** Postgres URL (`postgres://` or `postgresql://`). **A direct or session-mode connection, never a transaction pooler** (section 2). |
 | `DATABASE_POOL_MAX` | optional | no | Connections per function instance, 1 to 20, default 3. Every instance has its own pool: keep it small. |
 | `PRODUCT_ID` | optional | no | Which product this deployment is: `code-review-com` (default) or `factory`. Unknown values stop the start (`DEPLOY_CONFIG_INVALID`, naming the variable). `/api/health` reports it. It also decides the brand the app speaks under: its name in pages and mails, the title, the name of the check run and of the GitHub App (the codename `Factory` until the brand is chosen). It is read when the server renders or builds, so each Vercel project, with its own variables, has its own. |
-| `PRODUCT_CAPABILITIES` | optional | no | Comma list that narrows what the product has: `review`, `dynamic-review` (needs `review`), `billing`. Unset: the product's default (code-review.com: all three, so the live deployment sets nothing; `factory`: `review,dynamic-review`). A capability that is not in the set has no route, no navigation entry, no API and no background work: its paths answer as paths that do not exist. A value the product does not allow stops the start. Read at build and at start, so change it with a new deployment. `/api/health` answers `{"status":"ok","product":...,"capabilities":[...]}`. Details: `app/src/capabilities/README.md`. |
+| `PRODUCT_CAPABILITIES` | optional | no | Comma list that narrows what the product has: `review`, `dynamic-review` (needs `review`), `billing`, `implementer` (needs `dynamic-review`; `factory` only, see section 5.8). Unset: the product's default (code-review.com: `review`, `dynamic-review` and `billing`, so the live deployment sets nothing; `factory`: `review,dynamic-review`, so an unset value never turns `implementer` on). A capability that is not in the set has no route, no navigation entry, no API and no background work: its paths answer as paths that do not exist. A value the product does not allow stops the start (`implementer` on code-review.com included). Read at build and at start, so change it with a new deployment. `/api/health` answers `{"status":"ok","product":...,"capabilities":[...]}`. Details: `app/src/capabilities/README.md`. |
 | `RUNNER_TOKEN` | yes | **yes** | The **dispatcher credential**: what the Dispatcher claims jobs with. At least 32 characters. **Same value as the Dispatcher's `RUNNER_TOKEN`.** There is one token, no overlap while rotating (section 5.2). |
 | `CRON_SECRET` | yes | **yes** | Vercel sends it as `Authorization: Bearer ...` to both cron routes. At least 32 characters. Without it every cron call is refused (`401`): the safety net of section 5.7 does not run (stuck jobs, lapsed leases of a quiet system, `dispatch_unavailable`, notices that failed). Vercel adds the header by itself once the variable exists. |
 | `RUNNER_DISPATCH` | yes, **in step 5** | no | `webhook`. Leave it unset (`poll`) until step 5: in poll mode nothing wakes a Dispatcher. |
@@ -1164,6 +1164,15 @@ section 3.1, with its own values, and these are the ones that differ or are mand
 | `RUNNER_DISPATCH_MAX_RUNNING` | `2`: the `maxRunning` of the App's entry in `DISPATCHER_APPS` |
 | `RUNNER_WEBHOOK_BYPASS_TOKEN` | Only if the Dispatcher is protected: `${prod.ci.VERCEL_DISPATCHER_AUTOMATION_BYPASS_SECRET}` |
 | `BETTER_AUTH_URL` | Its `vercel.app` address |
+
+**The capability set of the factory.** The product `factory` allows `implementer`, the capability of the Software Factory's
+Implementer; code-review.com refuses it and the start stops by name. It needs `dynamic-review` (and so `review`): a list with
+`implementer` and without `dynamic-review` stops the start too. The product's default stays `review,dynamic-review`, so
+an unset `PRODUCT_CAPABILITIES` never turns it on; the rollout of the Implementer sets the value explicitly, and the staged
+App then reports `dynamic-review,implementer,review` (sorted). `health-factory` compares the set exactly with
+`dynamic-review,review`, so a project whose `PRODUCT_CAPABILITIES` names `implementer` is not promoted until the expectation
+of that job is changed with it; nothing live changes in the meantime. The capability alone adds no page, no navigation entry
+and no job: they come with later changes of the Implementer.
 
 The keys of `/ci` for the lane are in the table of section 2.1. The Dispatcher learns about the App from `/dispatcher`,
 with references so that a value lives once:

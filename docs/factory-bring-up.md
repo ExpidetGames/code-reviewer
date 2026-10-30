@@ -22,7 +22,7 @@ credential, which is why step 3 ends with a run that has the switch still off.
    Put the database URLs, the project id, the bypass secret and the App's address into their keys too. The App's own keys
    are not only the secrets: `PRODUCT_ID` (`factory`, **mandatory**; without it the project starts as code-review.com; the build copies it into
    `NEXT_PUBLIC_PRODUCT_ID` for the crash page, so that one is not set by hand, and a mismatch is logged at start),
-   `PRODUCT_CAPABILITIES` (`review,dynamic-review`, billing off), `RUNNER_DISPATCH` (`webhook`), `RUNNER_WEBHOOK_URL` (the
+   `PRODUCT_CAPABILITIES` (`review,dynamic-review`, billing off; `implementer` is allowed on this product but stays off until the rollout of the Implementer sets it, and then needs `dynamic-review`), `RUNNER_DISPATCH` (`webhook`), `RUNNER_WEBHOOK_URL` (the
    Dispatcher's `/dispatch` address), `RUNNER_WEBHOOK_KEY_ID` (`factory-k1`), `RUNNER_DISPATCH_MAX_RUNNING` (`2`) and, if the
    Dispatcher is protected, `RUNNER_WEBHOOK_BYPASS_TOKEN`. In `/dispatcher` put `DISPATCHER_APPS` (its `keyId` and
    `maxRunning` are the key id and the cap above) and the references to the App's token, its signing secret and the operator
