@@ -38,11 +38,12 @@ def _shell_value(text: str, name: str) -> str:
     ],
 )
 def test_the_guard_configuration_survives_the_shell_with_any_branch_name(branch: str) -> None:
-    text = guard_conf_text(branch=branch, start=SHA, spool="/run/spool file")
+    text = guard_conf_text(branch=branch, start=SHA, spool="/run/spool file", repo="/work/re po")
 
     assert _shell_value(text, "BRANCH") == branch
     assert _shell_value(text, "START") == SHA
     assert _shell_value(text, "SPOOL") == "/run/spool file"
+    assert _shell_value(text, "REPO") == "/work/re po"
     assert not text.startswith("#!")
 
 

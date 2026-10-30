@@ -456,3 +456,105 @@ def test_no_file_of_the_workspace_has_the_token_and_the_mirror_is_private(rig: R
     for name in ("guard.conf", "system.gitconfig"):
         mode = stat.S_IMODE((rig.base / "run" / name).stat().st_mode)
         assert mode & 0o022 == 0, f"{name} must not be writable by anyone else"
+
+
+# #762-T02
+def test_the_guard_acts_only_in_the_agents_repository(rig: Rig) -> None:
+    workspace = rig.prepared()
+    assert f"REPO={workspace.repo}\n" in workspace.guard_conf_path.read_text()
+    fixture = rig.base / "fixture"
+    environment = workspace.agent_environment()
+
+    def elsewhere(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [workspace.git, *args],
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    # What a test suite of the repository does: a fixture with its own history and branches.
+    assert elsewhere("init", "-q", "-b", "main", str(fixture), cwd=rig.base).returncode == 0
+    committed = elsewhere("commit", "-q", "--allow-empty", "-m", "fixture", cwd=fixture)
+    assert committed.returncode == 0, committed.stderr
+    switched = elsewhere("checkout", "-q", "-b", "other", cwd=fixture)
+    assert switched.returncode == 0, switched.stderr
+    cloned = elsewhere("clone", "-q", str(fixture), str(rig.base / "second"), cwd=rig.base)
+    assert cloned.returncode == 0, cloned.stderr
+    # and the agent's own repository is still guarded
+    denied = agent_git(workspace, "checkout", "-q", "-b", "other")
+    assert denied.returncode != 0
+    assert "code-reviewer-guard" in denied.stderr
+
+
+# #762-T02
+@pytest.mark.parametrize("which", ["work", "run"])
+def test_a_directory_that_is_a_link_is_refused_and_not_changed(rig: Rig, which: str) -> None:
+    target = rig.base / "elsewhere"
+    target.mkdir(mode=0o700)
+    link = rig.base / which
+    link.symlink_to(target)
+
+    with pytest.raises(JobError) as refused:
+        rig.workspace().clone_mirror()
+
+    assert refused.value.code is ErrorCode.SETUP_FAILED
+    assert stat.S_IMODE(target.stat().st_mode) == 0o700, "the link was followed by a chmod"
+    assert list(target.iterdir()) == []
+
+
+# #762-T02
+@pytest.mark.parametrize("which", ["work", "run"])
+@pytest.mark.parametrize("mode", [0o775, 0o757])
+def test_a_directory_that_others_can_write_is_refused(rig: Rig, which: str, mode: int) -> None:
+    directory = rig.base / which
+    directory.mkdir()
+    directory.chmod(mode)
+
+    with pytest.raises(JobError) as refused:
+        rig.workspace().clone_mirror()
+
+    assert refused.value.code is ErrorCode.SETUP_FAILED
+    assert stat.S_IMODE(directory.stat().st_mode) == mode
+
+
+# #762-T02
+def test_a_directory_that_is_a_file_is_refused(rig: Rig) -> None:
+    (rig.base / "run").write_text("")
+
+    with pytest.raises(JobError) as refused:
+        rig.workspace().clone_mirror()
+
+    assert refused.value.code is ErrorCode.SETUP_FAILED
+
+
+# #762-T02
+def test_a_run_directory_swapped_for_a_link_before_the_guard_is_written_is_refused(
+    rig: Rig,
+) -> None:
+    workspace = rig.workspace()
+    workspace.clone_mirror()
+    workspace.create_agent_repository()
+    target = rig.base / "elsewhere"
+    target.mkdir(mode=0o700)
+    (rig.base / "run").rmdir()
+    (rig.base / "run").symlink_to(target)
+
+    with pytest.raises(JobError) as refused:
+        workspace.install_guard()
+
+    assert refused.value.code is ErrorCode.SETUP_FAILED
+    assert list(target.iterdir()) == []
+
+
+# #762-T02
+def test_a_plain_directory_of_the_runner_is_accepted_and_made_enterable(rig: Rig) -> None:
+    directory = rig.base / "work"
+    directory.mkdir()
+    directory.chmod(0o700)
+
+    rig.workspace().clone_mirror()
+
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o755

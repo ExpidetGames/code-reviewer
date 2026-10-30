@@ -8,6 +8,7 @@ config of the agent's repository is never executed with root's rights, and the e
 neither the token nor the mirror. Needs git 2.53 or newer with the HTTP transport (CI's)."""
 
 import os
+import secrets
 import shutil
 import stat
 import subprocess
@@ -22,9 +23,12 @@ from code_reviewer_runner.implementer.git_workspace import (
     AgentUser,
     GitIdentity,
     GitWorkspace,
+    PushOutcome,
     WorkspaceLayout,
     WorkspaceSpec,
 )
+from code_reviewer_runner.job import JobError
+from code_reviewer_runner.result import ErrorCode
 from git_support import (
     TOKEN,
     HttpOrigin,
@@ -231,3 +235,71 @@ def test_the_engine_user_can_read_neither_the_token_nor_the_mirror(base: Path) -
         str(workspace.spool_path),
     )
     assert appended.returncode == 0, appended.stderr
+
+
+# #762-T09
+def test_the_upload_pack_of_the_runner_runs_as_the_engine_user_and_reads_nothing_of_roots(
+    base: Path,
+) -> None:
+    real = guard_git()
+    uids = base / "uids"
+    uids.write_text("")
+    uids.chmod(0o666)
+    programs = base / "bin"
+    programs.mkdir(mode=0o755)
+    wrapper = programs / "git"
+    wrapper.write_text(
+        f'#!/bin/sh\nif [ "$1" = upload-pack ]; then id -u >> {uids}; fi\nexec {real} "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    workspace = _workspace(base, Origin(base, real).url, ("file",), str(wrapper))
+    workspace.prepare(self_test=False)
+    # What the agent can point git at: a file only root can read, as its repository's `packed-refs`.
+    line = "SECRET-LINE-" + secrets.token_hex(8)
+    secret = base / "root-only"
+    secret.write_text(line + "\n")
+    secret.chmod(0o600)
+    packed = workspace.repo / ".git" / "packed-refs"
+    packed.unlink(missing_ok=True)
+    packed.symlink_to(secret)
+    # The trap works: an upload-pack of root's tells what is in the file.
+    control = subprocess.run(
+        [real, "-c", f"safe.directory={workspace.repo}", "upload-pack", "--advertise-refs", "."],
+        cwd=workspace.repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": os.environ["PATH"], "HOME": "/", "GIT_CONFIG_NOSYSTEM": "1"},
+    )
+    assert line in control.stderr, "a root upload-pack should show the line (the premise)"
+    uids.write_text("")
+
+    assert workspace.agent_tip() is None
+    with pytest.raises(JobError) as failed:
+        workspace.push()
+
+    assert line not in str(failed.value) and line not in failed.value.detail
+    assert set(uids.read_text().split()) == {str(ENGINE_UID)}, "an upload-pack ran as someone else"
+    # and an honest turn is read by the same user
+    packed.unlink()
+    (workspace.repo / "new.txt").write_text("n\n")
+    assert workspace.commit_all() is not None
+    uids.write_text("")
+
+    assert workspace.agent_tip() is not None
+    assert workspace.push().outcome is PushOutcome.PUSHED
+    assert set(uids.read_text().split()) == {str(ENGINE_UID)}
+
+
+# #762-T02
+def test_a_work_directory_that_belongs_to_the_engine_user_is_refused(base: Path) -> None:
+    git = guard_git()
+    workspace = _workspace(base, Origin(base, git).url, ("file",), git)
+    (base / "work").mkdir()
+    os.chown(base / "work", ENGINE_UID, ENGINE_GID)
+
+    with pytest.raises(JobError) as refused:
+        workspace.clone_mirror()
+
+    assert refused.value.code is ErrorCode.SETUP_FAILED
+    assert not (base / "work" / "mirror.git").exists()

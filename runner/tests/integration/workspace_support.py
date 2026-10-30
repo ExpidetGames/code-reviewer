@@ -48,12 +48,19 @@ class Rig:
         schemes: tuple[str, ...] = ("file",),
         git: str | None = None,
         token: str = TOKEN,
+        timeout: float = 600.0,
     ) -> GitWorkspace:
         spec = WorkspaceSpec(
             clone_url=url or self.origin.url, token=token, base_branch=base_branch, branch=branch
         )
         return GitWorkspace(
-            spec, self.layout, _agent(), IDENTITY, git=git or self.git, schemes=schemes
+            spec,
+            self.layout,
+            _agent(),
+            IDENTITY,
+            git=git or self.git,
+            schemes=schemes,
+            timeout=timeout,
         )
 
     def prepared(self, base_branch: str = "main", branch: str = BRANCH) -> GitWorkspace:

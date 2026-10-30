@@ -10,8 +10,10 @@ git with the agent's repository as working directory or git directory: that woul
 """
 
 import base64
+import contextlib
 import os
 import re
+import signal
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -28,9 +30,13 @@ TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
 MIN_GIT_VERSION: tuple[int, ...] = (2, 53)
 # Characters of git's own output that may travel in an error detail.
 DETAIL_CHARS = 600
+# What of the output of a command on the agent's data may travel: only the guard's own denials.
+AGENT_DETAIL_CHARS = 300
+GUARD_DENIAL = "code-reviewer-guard: "
 DEFAULT_TIMEOUT = 600.0
 
 _VERSION = re.compile(r"git version (\d+(?:\.\d+)*)")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 def parse_git_version(text: str) -> tuple[int, ...] | None:
@@ -102,10 +108,23 @@ class GitProcess:
         }
 
     def detail(self, text: str) -> str:
-        """Git's output made safe to log: the token and the header are gone, and it is short."""
-        cleaned = self._redactor.redact(text).strip()
+        """The output of git on the runner's own data (the mirror, the provider) made safe to log:
+        the token and the header are gone, control characters are gone, and it is short."""
+        cleaned = _CONTROL.sub("?", self._redactor.redact(text)).strip()
         lines = [line for line in cleaned.splitlines() if line.strip()]
         return " | ".join(lines)[-DETAIL_CHARS:]
+
+    def agent_detail(self, text: str) -> str:
+        """The output of a git command that worked on what the agent controls (its repository, its
+        refs, its config): none of it travels, because the agent decides what git prints
+        (`fatal: unexpected line in ./packed-refs: <that line>`). Only a denial of the guard hook
+        does, a fixed text, cleaned and short. An empty string says that nothing could be kept."""
+        kept = [
+            _CONTROL.sub("?", line).strip()
+            for line in self._redactor.redact(text).splitlines()
+            if line.startswith(GUARD_DENIAL)
+        ]
+        return " | ".join(kept)[:AGENT_DETAIL_CHARS]
 
     def run(
         self,
@@ -119,20 +138,28 @@ class GitProcess:
         """Run git. The result is never raised on: the caller knows what a failure means. A process
         that cannot start or runs past the timeout is a failure with return code 255."""
         try:
-            done = subprocess.run(
+            child = subprocess.Popen(
                 [self.git, *args],
                 cwd=cwd,
                 env=dict(env),
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 errors="replace",
-                timeout=timeout,
-                check=False,
+                # A group of its own, so that a timeout takes git's children (upload-pack, the
+                # transport helper) down with it instead of leaving them behind.
+                start_new_session=True,
                 **(spawn or {}),
             )
-        except subprocess.TimeoutExpired:
-            return Outcome(255, "", f"git {args[0] if args else ''} timed out")
         except OSError as error:
             return Outcome(255, "", f"git cannot run: {error.strerror or 'error'}")
-        return Outcome(done.returncode, done.stdout, done.stderr)
+        try:
+            stdout, stderr = child.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(child.pid, signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                child.communicate(timeout=10)
+            return Outcome(255, "", f"git {args[0] if args else ''} timed out")
+        return Outcome(child.returncode, stdout, stderr)

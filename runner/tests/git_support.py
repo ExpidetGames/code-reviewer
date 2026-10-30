@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -289,6 +290,17 @@ def processes_mentioning(*needles: str) -> list[str]:
             continue
         if any(needle in command for needle in needles):
             found.append(command)
+    return found
+
+
+def still_running(*needles: str, wait: float = 5.0) -> list[str]:
+    """`processes_mentioning`, given a moment: a killed process is listed until the kernel has
+    taken it down and its parent (or init) has collected it."""
+    deadline = time.monotonic() + wait
+    found = processes_mentioning(*needles)
+    while found and time.monotonic() < deadline:
+        time.sleep(0.1)
+        found = processes_mentioning(*needles)
     return found
 
 

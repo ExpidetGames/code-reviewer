@@ -5,11 +5,19 @@ written, how the spool is read, how a git version is judged and what a workspace
 built with."""
 
 import re
+import shlex
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from code_reviewer_runner.implementer.git_process import MIN_GIT_VERSION, parse_git_version
+from code_reviewer_runner.implementer.git_process import (
+    MIN_GIT_VERSION,
+    GitProcess,
+    Outcome,
+    parse_git_version,
+)
 from code_reviewer_runner.implementer.git_workspace import (
     AgentUser,
     GitIdentity,
@@ -140,3 +148,85 @@ def test_an_https_address_is_accepted(tmp_path: Path) -> None:
 
     assert workspace.mirror == tmp_path / "work" / "mirror.git"
     assert workspace.repo == tmp_path / "work" / "repo"
+
+
+def _recording_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Every git the workspace would run, recorded and failed (no process is started)."""
+    calls: list[list[str]] = []
+
+    def run(
+        self: GitProcess,
+        args: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        cwd: Path | str = "/",
+        spawn: Mapping[str, Any] | None = None,
+        timeout: float = 0.0,
+    ) -> Outcome:
+        calls.append(list(args))
+        return Outcome(1, "", "")
+
+    monkeypatch.setattr(GitProcess, "run", run)
+    return calls
+
+
+# #762-T09
+def test_the_agent_branch_is_read_by_an_upload_pack_that_runs_as_the_agents_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _recording_git(monkeypatch)
+    workspace = _workspace(tmp_path)
+
+    workspace.agent_tip()
+    with pytest.raises(JobError):
+        workspace.push()
+
+    reads = [call for call in calls if "ls-remote" in call or "fetch" in call]
+    assert len(reads) == 2, "the tip is listed once and fetched once"
+    for call in reads:
+        (option,) = [argument for argument in call if argument.startswith("--upload-pack=")]
+        command = shlex.split(option.removeprefix("--upload-pack="))
+        assert command[0].endswith("setpriv")
+        assert "--reuid=10101" in command and "--regid=10101" in command
+        assert "--clear-groups" in command and "--no-new-privs" in command
+        assert command[-1] == "upload-pack" and command[-2].endswith("git")
+
+
+# #762-T09
+def test_the_fetch_of_the_agent_branch_checks_its_objects_and_takes_no_tags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _recording_git(monkeypatch)
+    workspace = _workspace(tmp_path)
+
+    with pytest.raises(JobError):
+        workspace.push()
+
+    (fetch,) = [call for call in calls if "fetch" in call]
+    assert "fetch.fsckObjects=true" in fetch
+    assert "--no-tags" in fetch
+
+
+# #762-T09
+def test_git_output_on_the_agents_repository_is_dropped_except_for_a_guard_denial() -> None:
+    process = GitProcess("git", "/usr/bin", Path("/"), "ghs_token")
+    secret = "fatal: unexpected line in ./packed-refs: SECRET-LINE\n"
+
+    assert process.agent_detail(secret) == ""
+    assert (
+        process.agent_detail(secret + "code-reviewer-guard: HEAD may only follow implementer/x\n")
+        == "code-reviewer-guard: HEAD may only follow implementer/x"
+    )
+    assert len(process.agent_detail("code-reviewer-guard: " + "x" * 1000)) <= 300
+    assert "ghs_token" not in process.agent_detail("code-reviewer-guard: ghs_token")
+
+
+# #762-T09
+def test_control_characters_and_the_token_are_cleaned_from_the_detail_of_the_runners_git() -> None:
+    process = GitProcess("git", "/usr/bin", Path("/"), "ghs_token")
+
+    cleaned = process.detail("fatal: \x1b[31mred\x00 ghs_token\n\n   \nsecond line")
+
+    assert "\x1b" not in cleaned and "\x00" not in cleaned
+    assert "ghs_token" not in cleaned
+    assert cleaned.endswith("second line")

@@ -3,11 +3,13 @@
 """The files that switch the branch guard on for one turn (#762) and the spool the guard writes to.
 
 The hook (`runner/guard/reference-transaction`, installed read-only and root-owned in the image by
-#761) reads its configuration from a file: `BRANCH`, `START` and `SPOOL`, sourced by bash. It is
-written here, quoted, so that a branch name can never be more than a value. A second file, named by
-`GIT_CONFIG_SYSTEM`, is the system git config of the agent's git: the hook directory as
-`core.hooksPath` and the repository as `safe.directory`. Both live under /run (the root file system
-is read-only) and only root can change them.
+#761) reads its configuration from a file: `BRANCH`, `START`, `SPOOL` and `REPO`, sourced by bash.
+It is written here, quoted, so that a branch name can never be more than a value. `REPO` is the
+agent's repository: `core.hooksPath` comes through the system config, so the hook runs for every
+repository of the job (a fixture's `git init`, a clone, a git dependency), and without `REPO` it
+would guard all of them. A second file, named by `GIT_CONFIG_SYSTEM`, is the system git config of
+the agent's git: the hook directory as `core.hooksPath` and the repository as `safe.directory`.
+Both live under /run (the root file system is read-only) and only root can change them.
 
 The spool is a hint, never evidence: the agent's user appends `<time> <sha>` for every tip update,
 and may write anything else. The runner verifies every push anyway, so a forged line costs one
@@ -29,9 +31,12 @@ MAX_SPOOL_BYTES = 1024 * 1024
 _ENTRY = re.compile(r"(\d+(?:\.\d+)?) ([0-9a-f]{40})")
 
 
-def guard_conf_text(*, branch: str, start: str, spool: str) -> str:
+def guard_conf_text(*, branch: str, start: str, spool: str, repo: str) -> str:
     """The configuration of the hook. Sourced by bash, so every value is single-quoted."""
-    return f"BRANCH={shlex.quote(branch)}\nSTART={shlex.quote(start)}\nSPOOL={shlex.quote(spool)}\n"
+    return (
+        f"BRANCH={shlex.quote(branch)}\nSTART={shlex.quote(start)}\n"
+        f"SPOOL={shlex.quote(spool)}\nREPO={shlex.quote(repo)}\n"
+    )
 
 
 def _git_quoted(value: str) -> str:
