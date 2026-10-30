@@ -102,7 +102,7 @@ async function seed(
   db: Kysely<Database>,
   workspaceId: string,
   tag: string,
-  options: { earlierFailedJob?: boolean } = {},
+  options: { earlierFailedJob?: boolean; implementerTask?: boolean } = {},
 ) {
   const repos = reposOf(db, workspaceId);
   const integration = await repos.integrations.create({
@@ -337,23 +337,46 @@ async function seed(
   // workspace's rows are there to be read, re-armed and marked.
   await repos.notifications.markSent("empty", "due");
   if (tag === "b") await repos.notifications.markSent("low", "none");
-  // The Implementer's session and turn (#751): a task on the seeded job's repository, so the other workspace has a session, a
-  // turn and a job to reach for.
-  const started = await repos.implementer.createSessionWithTurn(
-    {
-      repositoryId: repository.id,
-      baseBranch: "main",
-      branch: `implementer/${tag}`,
-      instruction: `Instruction ${tag}`,
-      modelChoice: { entryId: `entry-${tag}` },
-      costLimitCents: 100,
-      createdBy: `user-${tag}`,
-    },
-    async () => enqueued.job.id,
-  );
+  // The Implementer's session and turn (#751): a task on the seeded repository with a job of its own (the negative slot as the
+  // pull request number), so the other workspace has a session, a turn and a job to reach for. Only B gets one: its job would
+  // show up in A's job and run lists, which the cases of those lists count.
+  const started =
+    options.implementerTask !== true
+      ? undefined
+      : await repos.implementer.createSessionWithTurn(
+          {
+            repositoryId: repository.id,
+            baseBranch: "main",
+            branch: `implementer/${tag}`,
+            instruction: `Instruction ${tag}`,
+            modelChoice: { entryId: `entry-${tag}` },
+            costLimitCents: 100,
+            createdBy: `user-${tag}`,
+          },
+          async (trx, { slot }) => {
+            const turnJob = await createJobsRepository(
+              trx,
+              workspaceId,
+            ).enqueue({
+              repositoryId: repository.id,
+              prNumber: -slot,
+              prUrl: `https://github.test/acme/${tag}/tree/implementer/${tag}`,
+              headSha: SHA,
+              reviewKind: "diff",
+              command: "review",
+              args: "",
+              triggerKind: "manual",
+              actorLogin: "octocat",
+              deliveryId: `implementer-${tag}`,
+              commentId: null,
+              runAfter: null,
+            });
+            if (turnJob.status !== "created") throw new Error("seeding failed");
+            return turnJob.job.id;
+          },
+        );
   return {
-    session: started.session,
-    turn: started.turn,
+    implementer: started,
     topUpIntentId: topUpIntent.id,
     unpagedIntentId: unpagedIntent.id,
     workspaceId,
@@ -520,6 +543,13 @@ type Case = {
   /** Checks the answer: it is "not found" in the way that method says so, or holds only A's data. */
   expectAnswer: (answer: unknown, a: Seeded, b: Seeded) => void;
 };
+
+/** The session and turn of the workspace that was seeded with a task. */
+function taskOf(seeded: Seeded) {
+  if (seeded.implementer === undefined)
+    throw new Error("this workspace was seeded without a task");
+  return seeded.implementer;
+}
 
 const notFound = (code: string) => (answer: unknown) =>
   expect(answer).toMatchObject({ rejected: expect.objectContaining({ code }) });
@@ -1603,12 +1633,12 @@ const CASES: Case[] = [
   // implementer sessions (#751-T02): B's session, turn and branch are not A's to read, extend or change
   {
     name: "implementer.getSession",
-    run: (a, b) => a.implementer.getSession(b.session.id),
+    run: (a, b) => a.implementer.getSession(taskOf(b).session.id),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
     name: "implementer.getTurnByJob",
-    run: (a, b) => a.implementer.getTurnByJob(b.turn.jobId),
+    run: (a, b) => a.implementer.getTurnByJob(taskOf(b).turn.jobId),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
@@ -1619,7 +1649,7 @@ const CASES: Case[] = [
   {
     name: "implementer.recordTurnResult",
     run: (a, b) =>
-      a.implementer.recordTurnResult(b.session.id, {
+      a.implementer.recordTurnResult(taskOf(b).session.id, {
         headCommit: "e".repeat(40),
         opencode: { sessionId: "hijacked", version: "1.0.0" },
         summary: "hijacked",
@@ -1672,7 +1702,10 @@ async function twoWorkspaces() {
   const idA = await defaultWorkspaceId(db);
   const idB = await addWorkspace(db, "other");
   const a = await seed(db, idA, "a");
-  const b = await seed(db, idB, "b", { earlierFailedJob: true });
+  const b = await seed(db, idB, "b", {
+    earlierFailedJob: true,
+    implementerTask: true,
+  });
   return { db, a, b, reposA: reposOf(db, idA), reposB: reposOf(db, idB) };
 }
 
@@ -1946,7 +1979,7 @@ describe("two workspaces", () => {
     expect(await reposA.jobs.list()).toEqual([
       expect.objectContaining({ id: a.job.id, workspaceId: a.workspaceId }),
     ]);
-    // B also holds its earlier failed job (seeded for the attempted-heads case) and a cancelled one.
+    // B also holds its earlier failed job (seeded for the attempted-heads case), a cancelled one and the job of its Implementer turn.
     expect(await reposB.jobs.list()).toEqual([
       expect.objectContaining({
         id: "cancelled-b",
@@ -1954,6 +1987,10 @@ describe("two workspaces", () => {
       }),
       expect.objectContaining({ id: "failed-b", workspaceId: b.workspaceId }),
       expect.objectContaining({ id: b.job.id, workspaceId: b.workspaceId }),
+      expect.objectContaining({
+        id: taskOf(b).turn.jobId,
+        workspaceId: b.workspaceId,
+      }),
     ]);
   });
 });

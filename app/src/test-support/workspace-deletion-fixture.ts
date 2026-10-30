@@ -98,7 +98,8 @@ export async function seedWorkspaceForDeletion(
     return enqueued.job;
   };
   const queued = await enqueue(7, `delivery-${tag}`);
-  const finished = await enqueue(8, `delivery-finished-${tag}`);
+  // The finished job is also the job of the Implementer turn below, so it carries the negative slot (-1: the first session).
+  const finished = await enqueue(-1, `delivery-finished-${tag}`);
   const usage = createUsageRecordsRepository(db, workspaceId);
   await usage.reserve(queued.id, "own");
   await db
@@ -117,7 +118,7 @@ export async function seedWorkspaceForDeletion(
       updated_at: "2026-10-10T23:51:01.000Z",
     })
     .execute();
-  // #751-T08: a session of the Implementer and its turn, whose job is one of the workspace's own.
+  // #751-T08: a session of the Implementer (slot 1) and its turn, whose job is one of the workspace's own.
   await createImplementerRepository(db, workspaceId).createSessionWithTurn(
     {
       repositoryId: repository.id,
