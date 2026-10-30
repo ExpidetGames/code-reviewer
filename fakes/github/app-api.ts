@@ -16,6 +16,7 @@
 // log, the base URL and the failure injection; the sign in part (`oauth.ts`) sits next to it.
 import { createPublicKey, randomBytes, verify } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFixtureBranches } from "./git-branches.ts";
 import { basicToken, serveUploadPack } from "./git-http.ts";
 import { readBody } from "./http.ts";
 import {
@@ -29,6 +30,7 @@ import {
   type FakePullRequestReview,
 } from "./checks-api.ts";
 import {
+  BASE_SHA,
   createReviewApi,
   type FakeChangedFile,
   type FakeComment,
@@ -407,11 +409,44 @@ export function createAppPart(
     return installations.has(issued.installationId) ? issued : undefined;
   }
 
+  /** The repository with the default branch of its Git fixture, when it has one (`git-branches.ts`). */
+  function followingFixture(repo: FakeRepository): FakeRepository {
+    const directory = gitRepositories.get(repo.fullName);
+    if (directory === undefined) return repo;
+    const defaultBranch = readFixtureBranches(directory).defaultBranch;
+    return defaultBranch === null ? repo : { ...repo, defaultBranch };
+  }
+
   function reposVisibleTo(token: IssuedToken): FakeRepository[] {
     const all = repositories.get(token.installationId) ?? [];
-    if (token.repositoryIds === null) return all;
+    if (token.repositoryIds === null) return all.map(followingFixture);
     const allowed = token.repositoryIds;
-    return all.filter((repo) => allowed.includes(repo.id));
+    return all
+      .filter((repo) => allowed.includes(repo.id))
+      .map(followingFixture);
+  }
+
+  /**
+   * The branches of a repository: those of its Git fixture, or, where the test registered none, the default
+   * branch and the branches the pull requests of the repository name (the head at the head commit of the pull
+   * request, every other at `BASE_SHA`).
+   */
+  function branchesOf(
+    repo: FakeRepository,
+    prs: FakePullRequest[],
+  ): { name: string; sha: string }[] {
+    const directory = gitRepositories.get(repo.fullName);
+    if (directory !== undefined) return readFixtureBranches(directory).branches;
+    const byName = new Map<string, string>([
+      [repo.defaultBranch ?? "main", BASE_SHA],
+    ]);
+    for (const pr of prs) {
+      if (!byName.has(pr.baseRef)) byName.set(pr.baseRef, BASE_SHA);
+      byName.set(pr.headRef, pr.headSha);
+    }
+    return [...byName]
+      .map(([name, sha]) => ({ name, sha }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }
 
   /** Does the token hold at least this level of the permission? */
@@ -707,7 +742,9 @@ export function createAppPart(
           : {
               repositories: known
                 .filter((repo) => reach.includes(repo.id))
-                .map((repo) => repositoryJson(repo, webBase())),
+                .map((repo) =>
+                  repositoryJson(followingFixture(repo), webBase()),
+                ),
             }),
         ...tokenAnswerPatch,
       });
@@ -802,6 +839,7 @@ export function createAppPart(
         query: url.searchParams,
         repository,
         pullRequests: prs,
+        branches: () => branchesOf(repository, prs),
         body: () => readBody(request),
         mayDo: (names, level) =>
           names.some((name) => mayDo(issued, name, level)),

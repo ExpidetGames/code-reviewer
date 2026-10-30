@@ -33,6 +33,12 @@ export const COMMENT_READ_TOKEN_PERMISSIONS: InstallationPermissions = {
   metadata: "read",
 };
 
+/** What the token of the branch reads (#750) may do: read the contents of one repository and the metadata. */
+export const BRANCH_READ_TOKEN_PERMISSIONS: InstallationPermissions = {
+  contents: "read",
+  metadata: "read",
+};
+
 /** The repository ids a job token is limited to: exactly one, and a real GitHub id. */
 export function jobTokenRepositoryIds(repoExternalId: string): number[] | null {
   if (!/^[1-9]\d*$/.test(repoExternalId)) return null;

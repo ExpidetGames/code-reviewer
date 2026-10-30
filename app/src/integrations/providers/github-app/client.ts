@@ -141,6 +141,39 @@ export type GithubAppClient = {
     repoFullName: string,
     signal?: AbortSignal,
   ): Promise<PullRequestRef[]>;
+  /**
+   * The default branch of a repository (#750), read with a token of its own limited to `scope` (minted for this
+   * call and switched off after it, like the other scoped reads). Aborts like `getPullRequest`.
+   */
+  getRepositoryFacts(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    signal?: AbortSignal,
+  ): Promise<{ defaultBranch: string }>;
+  /**
+   * The first `BRANCH_LIST_LIMIT` branch names of a repository, the default branch first and the others by name
+   * (#750), and whether there are more. Reads one page of that size and, when it is full, a second to see whether
+   * anything follows; same token and abort rules as `getRepositoryFacts`.
+   */
+  listBranches(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    signal?: AbortSignal,
+  ): Promise<{ names: string[]; truncated: boolean }>;
+  /**
+   * One branch (#750): its head commit, or null when the repository has no branch of that name (a 404 of the
+   * branch itself; a 404 of the token request is an installation that is gone and rejects). The name is any
+   * branch name, `feature/x` included; same token and abort rules as `getRepositoryFacts`.
+   */
+  getBranch(
+    installationId: string,
+    scope: JobTokenScope,
+    repoFullName: string,
+    name: string,
+    signal?: AbortSignal,
+  ): Promise<{ sha: string } | null>;
   /** The repository permission of a user; "none" for a user GitHub does not know. */
   getCollaboratorPermission(
     installationId: string,
@@ -278,6 +311,8 @@ export type GithubAppClientOptions = {
 };
 
 const PAGE_SIZE = 100;
+/** How many branch names `listBranches` returns at most. */
+export const BRANCH_LIST_LIMIT = 100;
 /** A hard stop so a misbehaving server cannot loop us forever; reaching it is an error, not a cut. */
 const MAX_PAGES = 100;
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
@@ -456,6 +491,30 @@ function repoPath(repoFullName: string): string {
       "The repository name is not in the form owner/name.",
     );
   return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}
+
+/** A name with a half of a surrogate pair cannot be percent encoded (`encodeURIComponent` throws a URIError). */
+const UNPAIRED_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * A branch name is text without control characters or lone surrogates; Git allows no more than 255 bytes in a
+ * ref component. `.` and `..` are no branches either: in a path they are dot segments and would address a
+ * different endpoint.
+ */
+function checkBranchName(name: string): void {
+  if (
+    name === "" ||
+    name === "." ||
+    name === ".." ||
+    name.length > 255 ||
+    /[\u0000-\u001f\u007f]/.test(name) ||
+    UNPAIRED_SURROGATE.test(name)
+  )
+    throw new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "The branch name is not usable.",
+    );
 }
 
 function checkPullRequestNumber(prNumber: number): void {
@@ -719,6 +778,22 @@ export function createGithubAppClient(
     }
   }
 
+  /** `default_branch` of `GET /repos/{owner}/{repo}`. */
+  async function readDefaultBranch(
+    token: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const json = await request(token, "GET", path, undefined, signal);
+    if (
+      !isRecord(json) ||
+      typeof json.default_branch !== "string" ||
+      json.default_branch === ""
+    )
+      throw shapeError("GET /repos/{owner}/{repo}");
+    return json.default_branch;
+  }
+
   /** Read calls: a token with everything the app is granted on the whole installation. */
   async function mint(
     installationId: string,
@@ -972,6 +1047,91 @@ export function createGithubAppClient(
             },
             signal,
           ),
+        signal,
+      );
+    },
+
+    async getRepositoryFacts(installationId, scope, repoFullName, signal) {
+      checkInstallationId(installationId);
+      const path = repoPath(repoFullName);
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => ({
+          defaultBranch: await readDefaultBranch(token, path, signal),
+        }),
+        signal,
+      );
+    },
+
+    async listBranches(installationId, scope, repoFullName, signal) {
+      checkInstallationId(installationId);
+      const path = repoPath(repoFullName);
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          const defaultBranch = await readDefaultBranch(token, path, signal);
+          const page = async (number: number): Promise<string[]> => {
+            const json = await request(
+              token,
+              "GET",
+              `${path}/branches?per_page=${BRANCH_LIST_LIMIT}&page=${number}`,
+              undefined,
+              signal,
+            );
+            if (!Array.isArray(json))
+              throw shapeError("GET /repos/{owner}/{repo}/branches");
+            return json.map((item: unknown) => {
+              if (!isRecord(item) || typeof item.name !== "string")
+                throw shapeError("GET /repos/{owner}/{repo}/branches");
+              return item.name;
+            });
+          };
+          const first = await page(1);
+          // A full page may be all there is: only a second page tells.
+          const more =
+            first.length === BRANCH_LIST_LIMIT && (await page(2)).length > 0;
+          const all = [
+            defaultBranch,
+            ...first.filter((name) => name !== defaultBranch),
+          ];
+          return {
+            names: all.slice(0, BRANCH_LIST_LIMIT),
+            truncated: more || all.length > BRANCH_LIST_LIMIT,
+          };
+        },
+        signal,
+      );
+    },
+
+    async getBranch(installationId, scope, repoFullName, name, signal) {
+      checkInstallationId(installationId);
+      checkBranchName(name);
+      const path = `${repoPath(repoFullName)}/branches/${encodeURIComponent(name)}`;
+      return withScopedToken(
+        installationId,
+        scope,
+        async (token) => {
+          try {
+            const json = await request(token, "GET", path, undefined, signal);
+            const commit = isRecord(json) ? json.commit : undefined;
+            if (
+              !isRecord(commit) ||
+              typeof commit.sha !== "string" ||
+              commit.sha === ""
+            )
+              throw shapeError("GET /repos/{owner}/{repo}/branches/{branch}");
+            return { sha: commit.sha };
+          } catch (error) {
+            if (
+              error instanceof GithubAppError &&
+              error.code === "GITHUB_APP_NOT_FOUND"
+            )
+              return null;
+            throw error;
+          }
+        },
         signal,
       );
     },

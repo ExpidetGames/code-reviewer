@@ -198,6 +198,44 @@ export interface IntegrationProvider {
     signal?: AbortSignal,
   ): Promise<PullRequestRef>;
 
+  /**
+   * The facts about a repository that the pickers need (#750): its default branch, which is always preselected.
+   * Reads with a token limited to this repository and to reading its contents (never the credentials of a job).
+   * Rejects like `getPullRequest` with an `IntegrationError`; a repository that is gone or refused is
+   * `INTEGRATION_ACCESS_*`. The message never holds a token.
+   */
+  getRepositoryFacts(
+    integration: Integration,
+    repo: RepoRef,
+    signal?: AbortSignal,
+  ): Promise<{ defaultBranch: string }>;
+
+  /**
+   * The branch names of a repository for the base branch picker (#750): at most the first 100, the default branch
+   * first, and whether there are more. Same token, errors and abort rules as `getRepositoryFacts`.
+   */
+  listBranches(
+    integration: Integration,
+    repo: RepoRef,
+    signal?: AbortSignal,
+  ): Promise<{ names: string[]; truncated: boolean }>;
+
+  /**
+   * One branch by name, `feature/x` included (#750): its head commit, or null when the repository has no such
+   * branch. This is the `branch_exists` check before anything is enqueued. Same token, errors and abort rules as
+   * `getRepositoryFacts`.
+   *
+   * Null can also mean that the repository path in `repo` is stale (the repository was renamed or moved, so
+   * GitHub answers 404 for the branch as well): a caller must call `getRepositoryFacts` first, which rejects when the
+   * repository path no longer resolves, and trust a null only after that.
+   */
+  getBranch(
+    integration: Integration,
+    repo: RepoRef,
+    name: string,
+    signal?: AbortSignal,
+  ): Promise<{ sha: string } | null>;
+
   /** The open pull requests of a repository (drafts included, marked as such). Aborts like `getPullRequest`. */
   listOpenPullRequests(
     integration: Integration,

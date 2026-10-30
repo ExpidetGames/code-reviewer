@@ -88,7 +88,8 @@ installation token with the permission GitHub asks for (`pull_requests`, `issues
 
 | Endpoint                                                                                  | Behavior                                                                                                                                                                                                      |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /repos/:o/:r`, `.../languages`, `.../branches/:b`                                    | The repository, a language list, a branch.                                                                                                                                                                    |
+| `GET /repos/:o/:r`, `.../languages`                                                       | The repository (`default_branch` follows the Git fixture, see below), a language list.                                                                                                                        |
+| `GET .../branches?per_page=&page=`, `.../branches/:b`                                     | The branches (see below) and one branch with its commit; `:b` may be percent encoded (`feature%2Fx`). Both need `contents: read`.                                                                             |
 | `GET/PATCH /repos/:o/:r/pulls/:n`                                                         | The pull request (head, base, changed files); `PATCH` changes title and body.                                                                                                                                 |
 | `GET .../pulls/:n/files`, `.../pulls/:n/commits`, `.../commits/:sha`, `.../compare/:spec` | The diff (`patch`, `additions`, `deletions`) and the commit of the pull request. A `FakePullRequest` carries `files` (`filename`, `baseContent`, `headContent`, `patch`); a small Python change when omitted. |
 | `GET .../contents/:path?ref=`                                                             | The file at the head of the pull request (by sha or branch) or at the base (default branch); 404 for anything else, like `AGENTS.md`.                                                                         |
@@ -96,6 +97,15 @@ installation token with the permission GitHub asks for (`pull_requests`, `issues
 | `GET /rate_limit`, `POST /graphql`                                                        | An answer that lets PR-Agent go on (no review threads).                                                                                                                                                       |
 | `GET /__fake/comments?repository=owner/name&number=7`                                     | Control endpoint: the comments below a pull request (`id`, `body`, `login`, `htmlUrl`, `revision`).                                                                                                           |
 | `GET /__fake/installation-tokens`                                                         | Control endpoint: every installation token issued so far, to search outputs for them.                                                                                                                         |
+
+Branches (#750): where a test registered a Git repository (`addGitRepository`, `git-fixture.ts`), the branches are its
+`refs/heads/*`, read on every call (a branch a test creates afterwards is there at once; the sha is the commit it points
+to), and the default branch is the one `createGitRepository(dir, { defaultBranch })` made it with (`main` unless said
+otherwise; stored as `init.defaultBranch` in the repository), in the repository endpoints, in the installation
+repository listings and in the token answer alike. Where no Git repository is registered, a repository has its default
+branch (at `BASE_SHA`) and the branches its pull requests name (the head at the head commit, the base at `BASE_SHA`).
+Any other name is a 404 (`Branch not found`). The list is ordered by name and paged like GitHub (`per_page` up to 100,
+default 30, and `page`); the GitHub App client puts the default branch first.
 
 Links (`html_url`) point to `https://github.test` unless the fake is started with `selfLinks`
 (`GITHUB_FAKE_SELF_LINKS=true` as its own process): then they point to the fake itself, which is what
