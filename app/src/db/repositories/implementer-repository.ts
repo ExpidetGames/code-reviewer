@@ -93,8 +93,9 @@ export type ImplementerRepository = {
    * Starts a session with its first turn in one transaction: locks the repository row (as the enqueue of a review does, so
    * two tasks for one repository take turns), takes the next slot, writes the session, calls `createJob`, writes the turn.
    * Rejects with `IMPLEMENTER_REPOSITORY_NOT_FOUND` (not this workspace's repository), `IMPLEMENTER_BRANCH_TAKEN` (the
-   * repository has a session on this branch already; the callback is not called) or `IMPLEMENTER_JOB_NOT_FOUND` (the callback
-   * returned a job of another workspace); nothing is written then. The caller takes the instance gate lock first, as the
+   * repository has a session on this branch already; the callback is not called), `IMPLEMENTER_JOB_NOT_FOUND` (the callback
+   * returned a job of another workspace) or `IMPLEMENTER_JOB_MISMATCH` (a job of another repository, or with a pull request
+   * number other than `-slot`); nothing is written then. The caller takes the instance gate lock first, as the
    * enqueue of a review does, when it needs one.
    */
   createSessionWithTurn(
@@ -114,7 +115,9 @@ export type ImplementerRepository = {
   >;
   /**
    * Records what a turn produced and sets the session `idle`. Returns the session, or undefined when it is not this
-   * workspace's. A `null` field leaves the stored value as it is.
+   * workspace's. A `null` field leaves the stored value as it is. The status of a turn is its job's, but the status of the
+   * session is only this call: whoever sees the job of a turn end WITHOUT a result report (failed, cancelled, timed out) must
+   * call it with null fields, otherwise the session stays `running` for good.
    */
   recordTurnResult(
     sessionId: string,
@@ -249,7 +252,7 @@ export function createImplementerRepository(
         const jobId = await createJob(trx, { slot, sessionId: inserted.id });
         const job = await trx
           .selectFrom("jobs")
-          .select("id")
+          .select(["repository_id", "pr_number"])
           .where("workspace_id", "=", workspaceId)
           .where("id", "=", jobId)
           .executeTakeFirst();
@@ -257,6 +260,12 @@ export function createImplementerRepository(
           throw new ImplementerStoreError(
             "IMPLEMENTER_JOB_NOT_FOUND",
             "The job of the turn is not a job of this workspace.",
+          );
+        // The one running job per pull request index only means one running turn per session when the job carries `-slot`.
+        if (job.repository_id !== task.repositoryId || job.pr_number !== -slot)
+          throw new ImplementerStoreError(
+            "IMPLEMENTER_JOB_MISMATCH",
+            "The job of the turn is of another repository or does not carry the negative slot as its pull request number.",
           );
 
         const turn = await trx

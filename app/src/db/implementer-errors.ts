@@ -8,6 +8,8 @@ export const IMPLEMENTER_STORE_ERROR_CODES = [
   "IMPLEMENTER_REPOSITORY_NOT_FOUND",
   /** The job the queue made for the turn is not a job of this workspace: nothing was written. */
   "IMPLEMENTER_JOB_NOT_FOUND",
+  /** The job is of this workspace but not the turn's: another repository, or a pull request number other than `-slot`. */
+  "IMPLEMENTER_JOB_MISMATCH",
   /** The stored model choice of a turn is not one of the two shapes (damaged or written by something else). */
   "IMPLEMENTER_MODEL_CHOICE_UNREADABLE",
   /** A model choice handed in to be stored is not one of the two shapes. */

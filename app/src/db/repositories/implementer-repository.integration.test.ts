@@ -2,9 +2,12 @@
 
 // Sessions and turns of the Implementer (#751) against a real Postgres: what the repository keeps true (slots, one session
 // per branch, one turn per job, nothing across workspaces) and what the database itself refuses when something bypasses it.
-import { sql } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
+import type { Database } from "../schema.ts";
 import { ImplementerStoreError } from "../implementer-errors.ts";
+import { createProjectsRepository } from "./projects-repository.ts";
+import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createJobsRepository } from "./jobs-repository.ts";
 import { createImplementerRepository } from "./implementer-repository.ts";
 import {
@@ -34,6 +37,37 @@ async function setup(options: { poolMax?: number } = {}) {
   const a = await seedImplementerRepository(db, idA, "a");
   const b = await seedImplementerRepository(db, idB, "b");
   return { db, url, idA, idB, a, b };
+}
+
+/** A second active repository of the first workspace's installation (the seed helper makes one per workspace). */
+async function addSecondRepository(db: Kysely<Database>, workspaceId: string) {
+  const integration = await db
+    .selectFrom("integrations")
+    .select("id")
+    .where("workspace_id", "=", workspaceId)
+    .executeTakeFirstOrThrow();
+  const repositories = createRepositoriesRepository(db, workspaceId);
+  const url = "https://github.test/acme/second";
+  await repositories.reconcile(integration.id, [
+    ...(await repositories.list()).map((repository) => ({
+      integrationId: integration.id,
+      externalId: repository.externalId,
+      fullName: repository.fullName,
+      url: repository.url,
+    })),
+    {
+      integrationId: integration.id,
+      externalId: "repo-second",
+      fullName: "acme/second",
+      url,
+    },
+  ]);
+  const repository = (await repositories.list()).find(
+    (candidate) => candidate.fullName === "acme/second",
+  );
+  if (repository === undefined) throw new Error("seeding failed");
+  await createProjectsRepository(db, workspaceId).activate(repository.id);
+  return { repositoryId: repository.id, repoUrl: url };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -211,6 +245,72 @@ describe("starting a task", () => {
         a.repositoryId,
       ),
     ).toEqual([]);
+  });
+
+  // #751-T05
+  it("refuses a job of another repository of the workspace, or one whose pull request number is not -slot, and writes nothing", async () => {
+    const { db, idA, a } = await setup();
+    const second = await addSecondRepository(db, idA);
+    const refused: Array<
+      [string, (trx: Kysely<Database>, slot: number) => Promise<string>]
+    > = [
+      [
+        "another repository",
+        (trx, slot) =>
+          enqueueTurnJob(trx, idA, {
+            repositoryId: second.repositoryId,
+            slot,
+            branch: "implementer/abc123",
+            repoUrl: second.repoUrl,
+          }),
+      ],
+      [
+        "a positive pull request number",
+        (trx, slot) =>
+          enqueueTurnJob(trx, idA, {
+            repositoryId: a.repositoryId,
+            slot: -slot,
+            branch: "implementer/abc123",
+            repoUrl: a.repoUrl,
+          }),
+      ],
+      [
+        "the slot of another session",
+        (trx, slot) =>
+          enqueueTurnJob(trx, idA, {
+            repositoryId: a.repositoryId,
+            slot: slot + 1,
+            branch: "implementer/abc123",
+            repoUrl: a.repoUrl,
+          }),
+      ],
+    ];
+
+    const codes: Record<string, unknown> = {};
+    for (const [label, makeJob] of refused) {
+      const error = await rejection(
+        createImplementerRepository(db, idA).createSessionWithTurn(
+          taskOf(a),
+          (trx, { slot }) => makeJob(trx, slot),
+        ),
+      );
+      codes[label] = (error as ImplementerStoreError).code;
+    }
+    expect(codes).toEqual({
+      "another repository": "IMPLEMENTER_JOB_MISMATCH",
+      "a positive pull request number": "IMPLEMENTER_JOB_MISMATCH",
+      "the slot of another session": "IMPLEMENTER_JOB_MISMATCH",
+    });
+
+    expect(
+      await createImplementerRepository(db, idA).listForRepository(
+        a.repositoryId,
+      ),
+    ).toEqual([]);
+    const { rows } = await sql<{
+      jobs: number;
+    }>`select count(*)::int as jobs from jobs`.execute(db);
+    expect(rows).toEqual([{ jobs: 0 }]);
   });
 });
 

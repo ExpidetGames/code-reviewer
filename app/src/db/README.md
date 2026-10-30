@@ -549,11 +549,14 @@ workspace_id)`, a turn its session and its job by `(session_id, workspace_id)` a
   (the queue makes the jobs row there, in the same transaction, with `-slot`) and writes the turn. A branch that is taken is answered with
   `IMPLEMENTER_BRANCH_TAKEN` by `on conflict do nothing`, not by a violation, so a transaction of the caller is not aborted by it. The caller takes the instance
   gate lock before this, as the enqueue does.
+- **The session is set `idle` only by `recordTurnResult`.** A turn whose job ends without any result report (failed, cancelled, timed out) must call it with
+  null fields (`{headCommit: null, opencode: null, summary: null}`: nothing stored changes, the status becomes `idle`), otherwise the session stays `running` forever.
 - `created_by` is a user reference: the account merge moves it to the admin (`github-signin/merge.ts`, `USER_REFERENCES`). The erasure of a workspace deletes turns
   and sessions before jobs and repositories.
 - **Live database.** The migration is expand only. The unique index on `jobs` is a plain `create unique index` (the migrator's transaction cannot take
   `CONCURRENTLY`) and blocks writes to `jobs` while it builds and while it waits for a writer that has not ended. So the migration sets `lock_timeout` to 5 s for its
-  own statements and puts the earlier value back: if a long writer holds `jobs`, the migration gives up with `MIGRATION_FAILED`, the whole batch is rolled back and the
+  own statements and puts the earlier value back. Both tables are created before anything touches `jobs` (the index, then the turns' link to `jobs` as an `alter table`),
+  because a lock lives until the batch commits: waiting for a writer on `users`, `repositories` or `workspaces` must not hold `jobs` (the queue) meanwhile. If a long writer holds `jobs`, the migration gives up with `MIGRATION_FAILED`, the whole batch is rolled back and the
   deployment can be run again (`create-implementer-tables.integration.test.ts` holds a writer open and checks exactly that).
 
 ### A database that ran the removed billing migrations

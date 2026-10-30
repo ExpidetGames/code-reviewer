@@ -13,6 +13,7 @@ import {
   connectPostgres,
   createEmptyTestDatabase,
 } from "../../test-support/test-database.ts";
+import { addUser } from "../../test-support/workspace-deletion-fixture.ts";
 import { withoutColumnsAddedLater } from "../../test-support/columns-added-later.ts";
 
 const SPLIT = "20261030140000_create_implementer_sessions_and_turns";
@@ -62,6 +63,34 @@ async function seedPreviousRelease(db: Kysely<Database>) {
       status, run_after, attempts, created_at, updated_at)
     values ('j-1', 'w-1', 'r-1', 7, 'https://github.test/acme/x/pull/7', ${"a".repeat(40)}, 'review', '', 'webhook', 'octocat',
       'queued', ${T}, 0, ${T}, ${T})`.execute(db);
+}
+
+/** A write that leaves a lock on one of the tables the new tables point at. */
+const WRITE_TO: Record<string, (trx: Kysely<Database>) => Promise<unknown>> = {
+  users: (trx) =>
+    sql`update users set name = 'renamed' where id = 'u-1'`.execute(trx),
+  repositories: (trx) =>
+    sql`update repositories set updated_at = ${T} where id = 'r-1'`.execute(
+      trx,
+    ),
+  workspaces: (trx) =>
+    sql`update workspaces set name = 'renamed' where id = 'w-1'`.execute(trx),
+};
+
+/** Waits until a statement of the migration waits for a lock (seen from another connection). */
+async function waitUntilBlocked(observer: Kysely<Database>): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const { rows } = await sql<{
+      blocked: number;
+    }>`select count(*)::int as blocked from pg_stat_activity
+        where datname = current_database() and wait_event_type = 'Lock' and pid <> pg_backend_pid()`.execute(
+      observer,
+    );
+    if ((rows[0]?.blocked ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("the migration never waited for the writer");
 }
 
 describe("the implementer migration", () => {
@@ -126,12 +155,33 @@ describe("the implementer migration", () => {
   });
 
   // #751-T01
-  it("keeps the lock timeout it sets to itself: a later migration of the batch and the session do not inherit it", async () => {
+  it("keeps the lock timeout it sets to itself: a later migration of the same batch and the session do not inherit it", async () => {
     const { db, config } = await createEmptyTestDatabase({ poolMax: 1 });
     expect(config.poolMax).toBe(1);
+    // `set local` ends at commit anyway, so only a migration that runs in the same transaction can see a missing restore.
+    const seenByLaterMigration: string[] = [];
+    const withProbe: MigrationProvider = {
+      async getMigrations() {
+        return {
+          ...(await migrationProvider.getMigrations()),
+          "99999999999999_probe_lock_timeout": {
+            async up(trx) {
+              const { rows } = await sql<{
+                value: string;
+              }>`select current_setting('lock_timeout') as value`.execute(trx);
+              seenByLaterMigration.push(rows[0]?.value ?? "");
+            },
+          },
+        };
+      },
+    };
 
-    await migrateToLatest(db, migrationProvider);
+    const { executed } = await migrateToLatest(db, withProbe);
 
+    expect(
+      executed.indexOf("99999999999999_probe_lock_timeout"),
+    ).toBeGreaterThan(executed.indexOf(SPLIT));
+    expect(seenByLaterMigration).toEqual(["0"]);
     const { rows } = await sql<{
       lock_timeout: string;
     }>`show lock_timeout`.execute(db);
@@ -180,4 +230,64 @@ describe("the implementer migration", () => {
     );
     await db.destroy();
   }, 40_000);
+  // #751-T01
+  it.each(["users", "repositories", "workspaces"])(
+    "does not make a jobs write wait while the migration waits for a writer on %s",
+    async (table) => {
+      const { db, url } = await createEmptyTestDatabase();
+      await migrateToLatest(db, beforeThisMigration);
+      await seedPreviousRelease(db);
+      await addUser(db, "u-1");
+      const writer = connectPostgres(url, 1).db;
+      const queue = connectPostgres(url, 1).db;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started: () => void = () => undefined;
+      const writing = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      // A transaction that has written a row of the table and does not end: the foreign key of a new table has to wait for it.
+      const writerDone = writer.transaction().execute(async (trx) => {
+        await WRITE_TO[table]!(trx);
+        started();
+        await held;
+      });
+      await writing;
+
+      const migrating = migrateToLatest(db, migrationProvider);
+      // Reaching the wait is what the test is about: the migration is blocked on a lock now.
+      await waitUntilBlocked(queue);
+      const startedAt = Date.now();
+      // The queue's own write, with a bound far below the migration's: it must not be stuck behind the migration.
+      const write = await queue
+        .transaction()
+        .execute(async (trx) => {
+          await sql`set local lock_timeout = '1500ms'`.execute(trx);
+          await sql`update jobs set updated_at = ${T} where id = 'j-1'`.execute(
+            trx,
+          );
+          return { waitedMs: Date.now() - startedAt };
+        })
+        .catch((error: unknown) => ({ failed: String(error) }));
+      // Let go of the writer in any case, so a failure here is fast and the migration ends.
+      release();
+      await writerDone;
+      const migration = await migrating.then(
+        (result) => result,
+        () => "MIGRATION_FAILED",
+      );
+
+      expect(write).toEqual({ waitedMs: expect.any(Number) });
+      expect((write as { waitedMs: number }).waitedMs).toBeLessThan(1_000);
+      expect(migration).toMatchObject({
+        executed: expect.arrayContaining([SPLIT]),
+      });
+      await queue.destroy();
+      await writer.destroy();
+      await db.destroy();
+    },
+    40_000,
+  );
 });
