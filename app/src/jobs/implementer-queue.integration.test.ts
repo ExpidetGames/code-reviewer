@@ -81,6 +81,8 @@ async function start(
     };
   };
   async function turn(overrides: Partial<EnqueueImplementerTurnInput> = {}) {
+    // Jobs are claimed oldest first by their creation time; the clock is the test's, so every enqueue gets its own millisecond.
+    fixture.clock.advance(1);
     const result = await queue.enqueueImplementerTurn(input(overrides));
     if (result.status !== "created")
       throw new Error(`expected a new turn, got ${result.status}`);
@@ -159,7 +161,7 @@ describe("enqueueing a turn of the Implementer", () => {
       triggerKind: "manual",
       actorLogin: "octocat",
       prNumber: -1,
-      prUrl: "https://github.test/acme/widgets/tree/implementer/abc123",
+      prUrl: "https://github.test/acme/gadgets/tree/implementer/abc123",
       headSha: sha("c"),
       command: "review",
       args: "",
@@ -395,6 +397,7 @@ describe("claiming a turn", () => {
   it("leaves Diff and Dynamic jobs to their own runners, and the implementer engine takes nothing but turns", async () => {
     const t = await start({ dynamicReview: true });
     const diff = await t.fixture.enqueueNew({ prNumber: 1 });
+    t.fixture.clock.advance(1);
     const dynamic = await t.fixture.enqueueNew({
       prNumber: 2,
       reviewKind: "dynamic",

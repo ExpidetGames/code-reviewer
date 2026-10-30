@@ -120,14 +120,14 @@ A turn of the Implementer (part of #745, the Software Factory deployment) travel
 the job in one transaction. The `jobs` table is shaped like a pull request review, so **`implementer/job-shape.ts` is the one place
 that writes the pull request columns** of a turn:
 
-| Column | Value |
-|---|---|
-| `review_kind` / `trigger_kind` / `actor_login` | `implementer` / `manual` / the person |
-| `pr_number` | `-slot` of the session: never a GitHub pull request, and the unique index "one running job per repository and pull request" becomes "one running turn per session" (two sessions of a repository run in parallel) |
-| `pr_url` | `<repository url>/tree/<branch>` |
-| `head_sha` | the tip of the base branch when the task was accepted |
-| `command` / `args` | `review` / empty |
-| `delivery_id` | `implementer:<workspace id>:<clientRequestId>`: the workspace is part of it because the unique index spans every workspace |
+| Column                                         | Value                                                                                                                                                                                                             |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review_kind` / `trigger_kind` / `actor_login` | `implementer` / `manual` / the person                                                                                                                                                                             |
+| `pr_number`                                    | `-slot` of the session: never a GitHub pull request, and the unique index "one running job per repository and pull request" becomes "one running turn per session" (two sessions of a repository run in parallel) |
+| `pr_url`                                       | `<repository url>/tree/<branch>`                                                                                                                                                                                  |
+| `head_sha`                                     | the tip of the base branch when the task was accepted                                                                                                                                                             |
+| `command` / `args`                             | `review` / empty                                                                                                                                                                                                  |
+| `delivery_id`                                  | `implementer:<workspace id>:<clientRequestId>`: the workspace is part of it because the unique index spans every workspace                                                                                        |
 
 What differs from a review, and why a consumer that assumes a pull request is gated by the kind:
 

@@ -45,6 +45,11 @@ async function seedPreviousRelease(db: Kysely<Database>) {
       status, run_after, attempts, created_at, updated_at)
     values ('j-1', 'w-1', 'r-1', 7, 'https://github.test/acme/x/pull/7', ${"a".repeat(40)}, 'review', '', 'webhook', 'octocat',
       'queued', ${T}, 0, ${T}, ${T})`.execute(db);
+  await sql`insert into jobs (id, workspace_id, repository_id, pr_number, pr_url, head_sha, command, args, trigger_kind, actor_login,
+      status, run_after, attempts, created_at, updated_at)
+    values ('j-2', 'w-1', 'r-1', 8, 'https://github.test/acme/x/pull/8', ${"b".repeat(40)}, 'review', '', 'webhook', 'octocat',
+      'queued', ${T}, 0, ${T}, ${T}), ('j-3', 'w-1', 'r-1', 9, 'https://github.test/acme/x/pull/9', ${"c".repeat(40)}, 'review', '', 'webhook', 'octocat',
+      'queued', ${T}, 0, ${T}, ${T})`.execute(db);
   await sql`insert into usage_records (id, workspace_id, job_id, review_kind, key_mode, state, reserved_at)
     values ('u-1', 'w-1', 'j-1', 'diff', 'managed', 'reserved', ${T})`.execute(
     db,
@@ -75,7 +80,7 @@ async function rowsOf(db: Kysely<Database>, table: string) {
 
 const insertRecord = (db: Kysely<Database>, kind: string) =>
   sql`insert into usage_records (id, workspace_id, job_id, review_kind, key_mode, state, reserved_at)
-    values (${`u-${kind}`}, 'w-1', 'j-1', ${kind}, 'own', 'void', ${T})`.execute(
+    values (${`u-${kind}`}, 'w-1', ${`j-${kind === "implementer" ? 2 : 3}`}, ${kind}, 'own', 'void', ${T})`.execute(
     db,
   );
 

@@ -458,6 +458,9 @@ export function createRunnerJobsRepository(
       .where(runningWhere(scope))
       .executeTakeFirst();
 
+    // #752: a turn that failed here has no report to come; its session is idle again.
+    if (disabled + Number(failed.numUpdatedRows) > 0)
+      await idleSessionsOfEndedTurns(executor, timestamp);
     return {
       failed: disabled + Number(failed.numUpdatedRows),
       requeued: Number(requeued.numUpdatedRows),
@@ -726,6 +729,7 @@ export function createRunnerJobsRepository(
       .where("id", "=", jobId)
       .where("status", "=", "running")
       .execute();
+    await idleSessionsOfEndedTurns(executor, formatTimestamp(current));
   }
 
   /**
@@ -770,6 +774,7 @@ export function createRunnerJobsRepository(
         "review_kind",
       ])
       .execute();
+    await idleSessionsOfEndedTurns(executor, formatTimestamp(current));
     return rows;
   }
 
