@@ -689,6 +689,27 @@ describe("the end of a turn without a report", () => {
     },
   );
 
+  // #752-T07: a turn that ends with a failure report and no `recordTurnResult` (the runner failed before it had a result).
+  it("sets the session idle when the runner reports a failure, which records no turn result", async () => {
+    const t = await start();
+    const { job, session } = await t.turn();
+    const claimed = await t.fixture.queue.claimNext("r", IMPLEMENTER);
+    expect(await t.sessionOf(session.id)).toMatchObject({ status: "running" });
+
+    const completed = await t.fixture.queue.complete(
+      job.id,
+      claimed!.leaseToken,
+      { ok: false, errorCode: "checkout_incomplete" },
+    );
+
+    expect(completed.status).toBe("completed");
+    expect(await t.fixture.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "checkout_incomplete",
+    });
+    expect(await t.sessionOf(session.id)).toMatchObject({ status: "idle" });
+  });
+
   // #752-T07
   it("keeps the session running while its turn runs, and leaves a turn that reported to the report", async () => {
     const t = await start();

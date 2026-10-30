@@ -892,12 +892,9 @@ describe("the refusal for the monthly limit and the hidden brake (#499)", () => 
 });
 
 describe("the refusal of a turn of the Implementer", () => {
-  // #752-T09
-  it("posts no comment on any pull request and creates no notice row, whatever the repository's pull requests are", async () => {
-    const h = await start();
-    await limit(h, SUSPENDED);
+  async function enqueueTurn(h: Awaited<ReturnType<typeof start>>) {
     await addUser(h.db, "user-1");
-    const result = await h.queue.enqueueImplementerTurn({
+    return h.queue.enqueueImplementerTurn({
       repositoryId: h.repositoryId,
       baseBranch: "main",
       baseSha: sha("b"),
@@ -909,6 +906,26 @@ describe("the refusal of a turn of the Implementer", () => {
       actorLogin: "octocat",
       clientRequestId: "req-1",
     });
+  }
+
+  /** What a refused turn must leave: no comment on any pull request number, no notice row, no token for GitHub. */
+  async function expectNoNotice(h: Awaited<ReturnType<typeof start>>) {
+    for (const number of [-1, -2, -3, 0, 1, 7, 8, 9, 10])
+      expect(comments(h, number)).toEqual([]);
+    expect(
+      await h.db.selectFrom("refusal_notices").selectAll().execute(),
+    ).toEqual([]);
+    expect(h.github.fake.tokenRequests()).toEqual([]);
+    // Without the gate the service would look the placeholder number up on GitHub and log that it cannot read it.
+    expect(h.notices.lines).toEqual([]);
+  }
+
+  // #752-T09
+  it("posts no comment on any pull request and creates no notice row for a suspended workspace", async () => {
+    const h = await start();
+    await limit(h, SUSPENDED);
+    const result = await enqueueTurn(h);
+    if (result.status !== "created") throw new Error("expected a new turn");
 
     expect(await h.queue.claimNext("runner", ["implementer"])).toBeNull();
     await h.notices.settled();
@@ -923,11 +940,31 @@ describe("the refusal of a turn of the Implementer", () => {
         reviewKind: "implementer",
       }),
     ]);
-    for (const number of [1, 7, 8, 9, 10])
-      expect(comments(h, number)).toEqual([]);
-    expect(
-      await h.db.selectFrom("refusal_notices").selectAll().execute(),
-    ).toEqual([]);
-    expect(h.github.fake.tokenRequests()).toEqual([]);
+    await expectNoNotice(h);
+  });
+
+  // #752-T09: a refusal for the balance carries a head key as its period, so only the gate of the kind keeps it off GitHub.
+  it("posts no comment and creates no notice row for a turn refused for the balance", async () => {
+    const h = await start();
+    await setBillingSwitch(h.db, true);
+    const result = await enqueueTurn(h);
+    if (result.status !== "created") throw new Error("expected a new turn");
+
+    expect(await h.queue.claimNext("runner", ["implementer"])).toBeNull();
+    await h.notices.settled();
+
+    expect(await h.queue.get(result.job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "insufficient_balance",
+    });
+    expect(h.notices.refusals).toEqual([
+      expect.objectContaining({
+        jobId: result.job.id,
+        reviewKind: "implementer",
+        errorCode: "insufficient_balance",
+        periodStart: expect.stringMatching(/^head:/),
+      }),
+    ]);
+    await expectNoNotice(h);
   });
 });
