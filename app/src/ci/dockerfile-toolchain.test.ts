@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { packageManagerRuns } from "./dockerfile-package-managers";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const dockerfile = readFileSync(`${repoRoot}runner/Dockerfile`, "utf8");
@@ -170,9 +171,7 @@ describe("the rest of the toolchain in the Worker image", () => {
   // #761-T02
   it("fetches no package with a package manager or from the internet at build time besides the pins", () => {
     expect(dockerfile).not.toMatch(/\b(curl|wget|bun)\b/);
-    expect(dockerfile).not.toMatch(
-      /\b(npm|npx|pnpm|corepack)\s+(install|i|add|ci|exec|dlx|view|pack|enable|prepare)\b/,
-    );
+    expect(packageManagerRuns(dockerfile)).toEqual([]);
     expect(dockerfile).not.toMatch(/releases\/latest|@latest/);
   });
 });
