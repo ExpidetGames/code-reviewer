@@ -14,8 +14,16 @@ import type {
 import { GithubAppError } from "./errors.ts";
 import type { PullRequestRef } from "../../types.ts";
 
+/** An installation the way a test writes it: the permissions it holds (#749) are empty unless it says. */
+export type FakeRemoteInstallation = Omit<RemoteInstallation, "permissions"> &
+  Partial<Pick<RemoteInstallation, "permissions">>;
+
+const withPermissions = (
+  installation: FakeRemoteInstallation,
+): RemoteInstallation => ({ permissions: {}, ...installation });
+
 export type FakeGithubAppClientData = {
-  installations?: RemoteInstallation[];
+  installations?: FakeRemoteInstallation[];
   repositories?: Record<string, RemoteRepository[]>;
   /** Pull requests by "owner/name". */
   pullRequests?: Record<string, PullRequestRef[]>;
@@ -96,14 +104,14 @@ export function fakeGithubAppClient(
     },
     async listInstallations() {
       record("listInstallations");
-      return data.installations ?? [];
+      return (data.installations ?? []).map(withPermissions);
     },
     async getInstallation(installationId) {
       record("getInstallation", installationId);
-      return (
-        (data.installations ?? []).find((item) => item.id === installationId) ??
-        null
+      const found = (data.installations ?? []).find(
+        (item) => item.id === installationId,
       );
+      return found === undefined ? null : withPermissions(found);
     },
     async listInstallationRepositories(installationId) {
       record("listInstallationRepositories", installationId);

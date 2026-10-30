@@ -20,6 +20,11 @@ export type RemoteInstallation = {
   accountId: number;
   accountType: string;
   suspended: boolean;
+  /**
+   * The permissions the installation holds, by API name (`GET /app/installations/:id`): what its owner accepted, which
+   * can be less than the App asks for. Empty when GitHub did not say (#749).
+   */
+  permissions: Readonly<Record<string, string>>;
 };
 
 export type RemoteRepository = {
@@ -318,7 +323,18 @@ function toInstallation(
     accountId: account.id,
     accountType: account.type,
     suspended: typeof value.suspended_at === "string",
+    permissions: toPermissions(value.permissions),
   };
+}
+
+/** The `permissions` object of GitHub (name to level); anything that is not text is left out, a missing object is empty. */
+function toPermissions(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
 }
 
 function toRepository(value: unknown, call: string): RemoteRepository {

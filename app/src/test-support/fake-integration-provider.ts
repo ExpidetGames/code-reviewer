@@ -48,6 +48,10 @@ export type FakeIntegrationProviderOptions = {
   access?: Partial<GitAccess>;
   /** Makes `jobAccess` fail with this error (platform down, installation removed, ...). */
   jobAccessFailure?: Error;
+  /** Makes `implementerAccess` fail with this error (#749), for example `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED`. */
+  implementerAccessFailure?: Error;
+  /** Whether the connections have accepted the permission to write contents (#749). Default: yes. */
+  contentsWrite?: boolean;
   /** The pull requests every repository has. Defaults to an open #7 and a draft #8. */
   pullRequests?: PullRequestRef[];
 };
@@ -309,6 +313,26 @@ export function fakeIntegrationProvider(
         expiresAt: "2026-10-10T13:00:00.000Z",
         ...options.access,
       });
+    },
+
+    async implementerAccess(integration, repo) {
+      record("implementerAccess", integration, repo);
+      if (options.implementerAccessFailure)
+        throw options.implementerAccessFailure;
+      return createGitAccess({
+        provider: "github",
+        baseUrl: "https://fake.test/api",
+        token: `fake-write-token-for-${repo.fullName}`,
+        authType: "token",
+        botLogin: "fake-reviewer[bot]",
+        expiresAt: "2026-10-10T13:00:00.000Z",
+        ...options.access,
+      });
+    },
+
+    async installationPermissions(integration) {
+      record("installationPermissions", integration);
+      return { contentsWrite: options.contentsWrite ?? true };
     },
 
     async getPullRequest(integration, repo, prNumber, signal) {
