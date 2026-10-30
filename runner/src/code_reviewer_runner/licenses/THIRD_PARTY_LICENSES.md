@@ -236,7 +236,7 @@ used unmodified and as separate programs that the agent starts as commands; none
   exception on the entry itself (`exception`): git is a separate program of the image that the agent runs
   as a command, built unmodified and linked into none of our code, and the image is never handed to a third
   party (code-review.com is a hosted service). The complete source is the pinned tarball, and the license
-  text travels with the image in `/licenses/git-COPYING`. Parts of the source tree carry other open source
+  text travels with the image in `/usr/local/share/doc/git/COPYING`. Parts of the source tree carry other open source
   licenses (for example `xdiff` under LGPL-2.1-or-later); they belong to the same unmodified release and
   are covered by the same review.
 

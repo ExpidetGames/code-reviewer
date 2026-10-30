@@ -176,7 +176,7 @@ COPY --from=toolchain-fetch --chown=0:0 /toolchain/node /opt/node
 COPY --from=toolchain-fetch --chown=0:0 /toolchain/pnpm /opt/pnpm
 COPY --from=uv --chown=0:0 /uv /uvx /usr/local/bin/
 # The release licenses travel with the image: node's and pnpm's are in their trees, git's is copied.
-COPY --from=toolchain-fetch --chown=0:0 /toolchain/git/COPYING /licenses/git-COPYING
+COPY --from=toolchain-fetch --chown=0:0 /toolchain/git/COPYING /usr/local/share/doc/git/COPYING
 RUN ln -s /opt/node/bin/node /usr/local/bin/node \
     && ln -s /opt/node/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /opt/node/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \

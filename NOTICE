@@ -58,7 +58,7 @@ require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
   Licensed under the GNU General Public License, version 2 (GPL-2.0-only).
   The Worker image carries git 2.53.0 (source commit 67ad42147a7acc2af6074753ebd03d904476118f), built
   unmodified from the upstream source release, as the version control of the Implementer's agent. The
-  license text is in /licenses/git-COPYING of the image; the source is the pinned release tarball.
+  license text is in /usr/local/share/doc/git/COPYING of the image; the source is the pinned release tarball.
 
   Node.js (https://github.com/nodejs/node)
   Copyright Node.js contributors. All rights reserved.

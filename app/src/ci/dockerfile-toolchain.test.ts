@@ -161,9 +161,9 @@ describe("the rest of the toolchain in the Worker image", () => {
   });
 
   // #761-T02: the licenses of what was added travel with the image.
-  it("ships the license text of git next to the project's", () => {
+  it("ships the license text of git in its own doc directory, leaving /licenses to the project's three files", () => {
     expect(sandbox()).toContain(
-      "COPY --from=toolchain-fetch --chown=0:0 /toolchain/git/COPYING /licenses/git-COPYING",
+      "COPY --from=toolchain-fetch --chown=0:0 /toolchain/git/COPYING /usr/local/share/doc/git/COPYING",
     );
   });
 
