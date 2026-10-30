@@ -127,9 +127,8 @@ export function mountProbeRoute(app: Hono, options: ProbeRouteOptions): void {
       return refuse(c);
     }
     const result = await run();
-    const ok = (await required()).every((engine) =>
-      result.engines.includes(engine),
-    );
+    const needed = await required();
+    const ok = needed.every((engine) => result.engines.includes(engine));
     logger.info("probe_requested", { status: result.status, ok });
     c.header("cache-control", "no-store");
     const imageDigest = IMAGE_ID.test(options.imageDigest ?? "")
@@ -139,7 +138,14 @@ export function mountProbeRoute(app: Hono, options: ProbeRouteOptions): void {
       ? { snapshotId: options.snapshotId }
       : {};
     return c.json(
-      { version: 1, ok, ...result, ...imageDigest, ...snapshotId },
+      {
+        version: 1,
+        ok,
+        ...result,
+        required: needed,
+        ...imageDigest,
+        ...snapshotId,
+      },
       ok ? 200 : 503,
     );
   });

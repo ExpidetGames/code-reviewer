@@ -167,6 +167,45 @@ describe("the deploy canary", () => {
     );
   });
 
+  // #759-T20
+  it("says which engine the route required and the report lacks when it blocks", async () => {
+    const { fetch } = deployment(() =>
+      respond(
+        {
+          ...REPORT,
+          ok: false,
+          engines: ["pr-agent"],
+          required: ["pr-agent", "opencode", "implementer"],
+        },
+        503,
+      ),
+    );
+    const { run, lines } = options(fetch, { requiredEngines: ["pr-agent"] });
+
+    expect(await run()).toBe(1);
+    expect(lines.join("\n")).toContain("missing=opencode,implementer");
+  });
+
+  // #759-T20
+  it("prints only engines it knows from the required list of the answer", async () => {
+    const { fetch } = deployment(() =>
+      respond(
+        {
+          ...REPORT,
+          ok: false,
+          required: ["implementer", "dummy-token-1234567890"],
+        },
+        503,
+      ),
+    );
+    const { run, lines } = options(fetch);
+
+    expect(await run()).toBe(1);
+    const output = lines.join("\n");
+    expect(output).toContain("missing=implementer");
+    expect(output).not.toContain("dummy-token-1234567890");
+  });
+
   // #331-T05
   it("blocks the release on a refused credential without saying more than the status", async () => {
     const { fetch } = deployment(() =>

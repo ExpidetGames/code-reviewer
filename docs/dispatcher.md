@@ -36,8 +36,12 @@ unlaunched (`kind_not_allowed`). A job of the kind lives 3600 s by default (`DIS
 yet: it needs the container profile of the Implementer (#760), until then a dispatch for the kind is `not_capable`.
 The deploy canary (`POST /probe`) follows the same rule: it requires the engines of Diff and Dynamic whatever else is
 configured, and requires `implementer` only when the Launcher advertises it, so the release that introduces the kind does not
-fail its own canary and a missing reviewer engine still does. Once #760 makes the Launcher advertise the engine, the canary
-requires the report to name it (the probe has to prove it by then).
+fail its own canary and a missing reviewer engine still does. Once #760 makes the Launcher advertise the engine, the route
+requires the report to name it, and no report can today: `KNOWN_ENGINES` (`dispatcher/src/probe/verdict.ts`), the `ProbeEngine`
+enum and the two `maxItems: 2` of `contracts/probe-verdict.v1.json`, and `runner/src/code_reviewer_runner/verdict.py` accept
+`pr-agent` and `opencode` only. The PR that adds `implementer` to the Sandbox launcher's capabilities has to extend all of them
+and the probe of the canary VM, else `POST /probe` answers `503` on every deploy. The answer lists the engines it required
+(`required`), and the canary prints the missing ones (`missing=`).
 
 "Runner" is retired as a concept: the former runner process conflated the Dispatcher
 (claim, cap) and the Worker host (heartbeat, supervise, deliver). Its identifiers (`RUNNER_*` variables, image and

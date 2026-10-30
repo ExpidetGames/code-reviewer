@@ -147,6 +147,7 @@ describe("POST /probe", () => {
       ok: true,
       engines: ["pr-agent", "opencode"],
       reasons: [],
+      required: ["pr-agent", "opencode"],
       checkedAt: "2026-10-15T12:00:00.000Z",
     });
     expect(validReport()(report)).toBe(true);
@@ -341,9 +342,29 @@ describe("the engines of a Dispatcher that serves the implementer kind", () => {
     const accepted = await post(proven.app, operator);
 
     expect(refused.status).toBe(503);
-    expect(await refused.json()).toMatchObject({ ok: false });
+    expect(await refused.json()).toMatchObject({
+      ok: false,
+      required: ["pr-agent", "opencode", "implementer"],
+    });
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toMatchObject({ ok: true });
+  });
+
+  // #759-T20
+  it("requires the engines of the reviewer kinds even when the Launcher does not advertise them, with `implementer` in the settings", async () => {
+    // Only the engines of `diff` and `dynamic` are required unconditionally: what the Launcher advertises decides about the others.
+    const { app } = buildFromEnvironment({}, ["pr-agent"], {
+      ...PASSED,
+      engines: ["pr-agent"],
+    });
+
+    const response = await post(app, operator);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      required: ["pr-agent", "opencode"],
+    });
   });
 
   // #759-T20
