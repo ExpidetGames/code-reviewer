@@ -29,6 +29,7 @@ import {
 import { systemClock } from "./clock.ts";
 import {
   ENGINE_BY_KIND,
+  isServedKind,
   type AppSettings,
   type Clock,
   type CoreSettings,
@@ -41,6 +42,7 @@ import {
   LaunchError,
   type LiveVmCounter,
   type Logger,
+  type ReviewKind,
 } from "./types.ts";
 
 const DEFAULT_RETRY_BUSY_SECONDS = 30;
@@ -123,6 +125,9 @@ type LiveSnapshot = {
   /** `vmsCreated` of every app when the listing was asked for: what was created after it is not in `counts`. */
   created: ReadonlyMap<string, number>;
 };
+
+/** A claimed job of a kind this Dispatcher serves (#746): the only jobs that reach a Launcher. */
+type ServedJob = ClaimedJob & { reviewKind: ReviewKind };
 
 export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
   const { settings, launcher, logger } = deps;
@@ -287,7 +292,8 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
     // The first wall of the job kinds (#730): a kind the app may not submit is never claimed.
     if (
       hint.reviewKind !== undefined &&
-      !state.settings.kinds.includes(hint.reviewKind)
+      (!isServedKind(hint.reviewKind) ||
+        !state.settings.kinds.includes(hint.reviewKind))
     ) {
       logger.warn("kind_not_allowed", {
         app: appId,
@@ -387,10 +393,14 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       // The second wall (#730): a job of a kind the app may not have, or of a kind whose engine this Dispatcher does not
       // serve (a misconfigured or compromised app answers a claim for Diff engines with a Dynamic job), is given back
       // unlaunched, so no VM is created for it.
-      const kindAllowed = state.settings.kinds.includes(claimed.job.reviewKind);
+      // #746: a kind the contract knows and this Dispatcher does not serve (`implementer`) is a kind it may not have.
+      const claimedKind = claimed.job.reviewKind;
+      const kindAllowed =
+        isServedKind(claimedKind) && state.settings.kinds.includes(claimedKind);
       if (
+        !isServedKind(claimedKind) ||
         !kindAllowed ||
-        !claimEngines.includes(ENGINE_BY_KIND[claimed.job.reviewKind])
+        !claimEngines.includes(ENGINE_BY_KIND[claimedKind])
       ) {
         logger.error("kind_not_allowed", {
           app: appId,
@@ -404,14 +414,20 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
       }
       // The slot is given back when the launch phase ends, by the background work.
       handedOver = true;
-      return { outcome: "started", background: runLaunch(state, claimed.job) };
+      return {
+        outcome: "started",
+        background: runLaunch(state, {
+          ...claimed.job,
+          reviewKind: claimedKind,
+        }),
+      };
     } finally {
       if (!handedOver) state.launching -= 1;
     }
   }
 
   /** The launch phase of one claimed job. Never rejects. The credential lives in this scope only. */
-  async function runLaunch(state: AppState, job: ClaimedJob): Promise<void> {
+  async function runLaunch(state: AppState, job: ServedJob): Promise<void> {
     const app = state.client;
     const appId = state.settings.id;
     const startedAt = now();
@@ -532,7 +548,7 @@ export function createDispatcherCore(deps: CoreDependencies): DispatcherCore {
 
   async function launchWith(
     state: AppState,
-    job: ClaimedJob,
+    job: ServedJob,
     guard: Abort,
     onVmCreated: (vm: CreatedVm) => void,
   ): Promise<void> {

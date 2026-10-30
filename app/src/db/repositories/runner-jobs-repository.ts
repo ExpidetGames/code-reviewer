@@ -761,6 +761,9 @@ export function createRunnerJobsRepository(
               : {}),
           };
           const reviewKinds = reviewKindsForEngines(engines);
+          // #746: a caller whose engines run no kind this queue holds (the Implementer's engine, until its jobs are queued, #752)
+          // gets nothing, and the statement is not built with an empty list of kinds.
+          if (reviewKinds.length === 0) return null;
           // #498: read at most once per claim, and only when a job passes the admission; a claim that finds no job reads nothing.
           let billing: ClaimBilling | undefined;
           const startCreditTried = new Set<string>();

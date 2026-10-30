@@ -27,11 +27,13 @@ other way round, so a change to the format has to change the file and both sides
 - **App** (`app/integration-tests/compatibility/runner-api-contract.integration.test.ts`, with Ajv):
   the real answers of the routes are valid against the file; the hand-written checks on what a runner
   sends give the same verdict as the file for a set of good and bad bodies; the lists the app keeps
-  in TypeScript (`app/src/runner-api/contract.ts`: error codes, commands) equal the lists in the file.
+  in TypeScript (`app/src/runner-api/contract.ts`: error codes, commands, review kinds) equal the lists in the file; the
+  implementer kind is checked without a database in `app/src/runner-api/implementer-contract.test.ts` (#746).
 - **Runner** (`runner/tests/contract/test_runner_api_contract.py`, with `jsonschema`): the examples are
   valid, and the rules the runner relies on hold (the job input is closed, because the runner refuses
   unknown fields; the only command is `review`; a previous release's review payload — the legacy `args`
-  and the removed tools' env families — is still accepted; the error code rules of a result).
+  and the removed tools' env families — is still accepted; the error code rules of a result). The implementer kind has its
+  own file, `test_implementer_contract.py` (#746).
 
 ## The job model entry contract
 
@@ -148,6 +150,43 @@ this shape before it sends it and leaves out one that does not fit, keeping the 
 the verdict (a log line names the field, never a value; a runner that sends the result of its own accord is never refused
 for it). The Runs detail of a workspace and the
 admin portal's run view show it (`app/src/runs/README.md`, `app/src/admin/README.md`).
+
+### The Implementer kind (#746, epic #745)
+
+The contract-first step of the Implementer, the first vertical slice of the Software Factory: files and typed copies change,
+behaviour does not. A **session** is one branch of one repository with a saved OpenCode session and a summary; a **turn** is
+one instruction, and one turn is one `jobs` row of the kind `implementer`. It exists in the factory deployment only
+(capability `implementer`); code-review.com neither queues nor serves it.
+
+- `ReviewKind` and `Engine` gain `implementer` (`dispatch-webhook.v1.json` follows through its `$ref`, so the signed
+  wake-up call may name the kind; `dispatch-signing-vectors.json` is unchanged). `ClaimRequest.engines` may hold three engines.
+  A project never selects the kind: `PROJECT_REVIEW_KINDS` of the app stays `diff` and `dynamic`.
+- `RunnerJobInput` depends on its kind. A Diff or Dynamic job requires `prUrl` and `command` (as before) and may not carry
+  `implementer`; an implementer job requires the closed object `implementer` and may not carry `prUrl`, `command`, `args`,
+  `base` or `dynamic`. `git`, `llm` and `env` are required for every kind. `implementer` holds `repo {fullName, cloneUrl}`,
+  `baseBranch`, `branch`, `instruction` (at most 20 000 characters, literal data), `limits {timeLimitSeconds}`, and `cost`,
+  `modelEntry` and the optional `capabilities` of the native Dynamic job, unchanged (`DynamicCostPolicy`,
+  `DynamicModelEntry`). `git.token` is a token that may write the contents of exactly `repo`. The Diff and Dynamic documents
+  (`examples/ClaimResponse.json`, `fakes/fixtures/*.json`) are untouched and stay valid.
+- `RunnerResult.implementer` (optional, closed): `baseCommit`, `headCommit` or null, `pushed` (never true without a head
+  commit), `commits` (at most 200), `filesChanged` (at most 500), `summary` (at most 8 192 characters, plain text) and
+  `opencode {sessionId, version}` or null. Checks, open questions and an export of the work are additive later.
+- New stable error codes: `branch_exists`, `base_branch_not_found`, `clone_failed`, `setup_failed`, `agent_gave_up`,
+  `push_rejected`, `branch_violation`, `time_limit_reached`, `git_write_not_granted`, `implementer_engine_unavailable` and
+  `implementer_config_invalid`. `cost_limit_reached` (#666) already existed and is the cost limit of a turn too. The app
+  has one sentence for each in `app/src/runs/error-copy.ts`.
+- The names of the environment variables the Worker container of an implementer job gets (`KnownImplementerEnvironmentName`,
+  `ImplementerNetworkMode`): `RUNNER_IMPLEMENTER_WORK_DIR` (always `/work`), `RUNNER_IMPLEMENTER_EGRESS_PORT` (the loopback port
+  of the registries proxy) and `RUNNER_IMPLEMENTER_NETWORK` (`registries` or `none`). The Dispatcher sets them; the container
+  profile (`worker-container.v1.json`) is not changed here.
+- Examples: `examples/implementer/RunnerJobInput.json`, `RunnerResult.json` and `SplitClaimResponse.json`.
+
+**Nothing serves the kind yet, and a value of it never falls through to another path.** The app's claim refuses a job of
+the kind with `implementer_engine_unavailable` before a guard, a key or a credential is looked at (`runner-api/kind-guard.ts`);
+a claim that names only the engine `implementer` gets 204. The Dispatcher keeps `implementer` out of `KNOWN_KINDS`, so a
+wake-up call or a claimed job of the kind is `not_capable` (a claimed one is given back unlaunched). The runner validates an
+implementer job strictly (`parse_implementer_input`) and `parse_job` then refuses it with `implementer_engine_unavailable`;
+it never returns a Diff or Dynamic job for it. Later changes replace these refusals by the behaviour.
 
 ### A superseded run (#396, #397)
 

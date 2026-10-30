@@ -494,6 +494,67 @@ describe("the core with several apps", () => {
     expect(logger.text()).not.toContain("crj_");
   });
 
+  // #746-T07
+  it("answers `not_capable` for a wake-up of the implementer kind and makes no claim and no call", async () => {
+    const jobId = "00000000-0000-4000-8000-0000000000e1";
+    const { core, launcher } = build();
+
+    const result = await core.handle({
+      appId: "factory",
+      jobId,
+      reviewKind: "implementer",
+    });
+
+    // No engine of this Dispatcher runs the kind (P14 adds it): it is never mapped onto another engine.
+    expect(result).toStrictEqual({ outcome: "not_capable" });
+    expect(factory.requests()).toHaveLength(0);
+    expect(reviewer.requests()).toHaveLength(0);
+    expect(launcher.launches).toHaveLength(0);
+  });
+
+  // #746-T07
+  it("releases a claimed job of the implementer kind unlaunched, whatever kinds the app has", async () => {
+    const jobId = "00000000-0000-4000-8000-0000000000e2";
+    factory.enqueue({ id: jobId });
+    factory.script("claim", [
+      {
+        status: 200,
+        body: {
+          version: 1,
+          job: {
+            id: jobId,
+            credential: `crj_${"A".repeat(43)}`,
+            reviewKind: "implementer",
+            leaseExpiresAt: "2026-10-10T12:02:00.000Z",
+            heartbeatIntervalSeconds: 30,
+          },
+        },
+      },
+    ]);
+    const { core, launcher, logger } = build();
+
+    const done = core.handle({ appId: "factory", jobId, reviewKind: "diff" });
+    const result = await (async () => {
+      let value: HandleResult | undefined;
+      void done.then((answer) => {
+        value = answer;
+      });
+      for (let step = 0; step < 100 && value === undefined; step += 1) {
+        await clock.advance(1000);
+        await settle();
+      }
+      return done;
+    })();
+
+    expect(result).toStrictEqual({ outcome: "not_capable" });
+    expect(launcher.launches).toHaveLength(0);
+    expect(seen(factory, "release").length).toBeGreaterThan(0);
+    expect(
+      logger.lines.some((line) => line.startsWith("error kind_not_allowed")),
+    ).toBe(true);
+    expect(logger.text()).not.toContain("crj_");
+  });
+
   // #730-T10
   it("gives back the slot of a job it refused", async () => {
     const jobId = "00000000-0000-4000-8000-0000000000d2";
