@@ -91,7 +91,7 @@ RUN python /fetch/scripts/fetch_toolchain.py --component pnpm --dest /toolchain/
 # to that, so the Worker's self-test refuses to run a turn on it. The release is built here, once, from the
 # pinned source: no Perl, Python, Tcl, gettext, expat or OpenSSL (nothing the agent needs; `git add -p` is the
 # one loss), against the GnuTLS flavour of libcurl, and with NO_OPENSSL: git is GPL-2.0-only and OpenSSL 3
-# (Apache-2.0) is not compatible with it, so no program of git may reach OpenSSL, neither its own `git-imap-send`
+# (Apache-2.0) is not compatible with it, so no program of git may link it, neither its own `git-imap-send`
 # nor libcurl's TLS in `git-remote-https` (Debian's own git takes libcurl3-gnutls for the same reason); the system
 # config is in /etc (the Worker points GIT_CONFIG_SYSTEM at a file under /run per job, and the image bakes none in),
 # builtins as symlinks so the copy into the final image keeps one binary.

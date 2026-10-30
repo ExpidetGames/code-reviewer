@@ -238,7 +238,9 @@ used unmodified and as separate programs that the agent starts as commands; none
   party (code-review.com is a hosted service). The complete source is the pinned tarball, and the license
   text travels with the image in `/usr/local/share/doc/git/COPYING`. It is built with `NO_OPENSSL=1` against the GnuTLS flavour of
   libcurl (`libcurl3-gnutls`, LGPL-2.1-or-later, as Debian's own git does), so no program of git, not `git-imap-send`
-  and not the https helper, reaches OpenSSL 3, whose Apache-2.0 license is incompatible with GPL-2.0-only. Parts of the source tree carry other open source
+  and not the https helper, links OpenSSL 3 (Apache-2.0, incompatible with GPL-2.0-only), and the TLS of https is GnuTLS.
+  `libssh2`, which that libcurl loads for scp and sftp (as in Debian's own git), is a separate system library
+  that links OpenSSL itself; git does not use it. Parts of the source tree carry other open source
   licenses (for example `xdiff` under LGPL-2.1-or-later); they belong to the same unmodified release and
   are covered by the same review.
 
