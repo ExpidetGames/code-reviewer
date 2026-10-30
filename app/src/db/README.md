@@ -559,6 +559,13 @@ workspace_id)`, a turn its session and its job by `(session_id, workspace_id)` a
   because a lock lives until the batch commits: waiting for a writer on `users`, `repositories` or `workspaces` must not hold `jobs` (the queue) meanwhile. If a long writer holds `jobs`, the migration gives up with `MIGRATION_FAILED`, the whole batch is rolled back and the
   deployment can be run again (`create-implementer-tables.integration.test.ts` holds a writer open and checks exactly that).
 
+`20261030190000_widen_review_kind_checks_for_implementer` (#752) takes the kind `implementer` into the checks on `usage_records.review_kind` and
+`billing_journal_entries.review_kind` (a turn of the Implementer has a usage record and journal entries of its own kind). It changes nothing else, on the live
+database too: the old check is dropped and the wider one added under the same name in one transaction (no moment without a check; `drop constraint if exists`, so it
+can be run again). Both take an exclusive lock on a leaf table (nothing references them, `jobs` is untouched) until the batch commits, so `lock_timeout` is 5 s and
+`statement_timeout` 30 s for its statements, put back afterwards; a long writer makes it give up with `MIGRATION_FAILED` and the deployment can be run again
+(`widen-review-kind-checks-for-implementer.integration.test.ts`).
+
 ### A database that ran the removed billing migrations
 
 Three migrations of an earlier billing design existed on `development` for a few days and are deleted (#491):
