@@ -4,6 +4,7 @@
 // call these methods and see normalized types only. See README.md in this folder.
 import type { ConfigValidationResult } from "./config-schema.ts";
 import type {
+  ConnectionPermissions,
   DiscoveredConnection,
   GitAccess,
   Integration,
@@ -185,6 +186,26 @@ export interface IntegrationProvider {
 
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;
+
+  /**
+   * Credentials for one Implementer turn on one repository (#749): like `jobAccess`, a fresh token limited to exactly
+   * this repository, but with the right to write its contents (push a branch) and nothing else. Never used by a review
+   * job. Rejects with an `IntegrationError` like `jobAccess`; `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED` says the
+   * connection has not accepted the write permission yet (not retryable).
+   */
+  implementerAccess(
+    integration: Integration,
+    repo: RepoRef,
+  ): Promise<GitAccess>;
+
+  /**
+   * What the connection has accepted on the platform (#749), so that a page can say "write access not granted" before a
+   * task is accepted. Reads the connection, mints no token. Rejects like `jobAccess` (a removed connection is
+   * `INTEGRATION_ACCESS_CONNECTION_GONE`).
+   */
+  installationPermissions(
+    integration: Integration,
+  ): Promise<ConnectionPermissions>;
 
   /**
    * One pull request of a repository, for example to start a review by hand. When `signal` fires, the
