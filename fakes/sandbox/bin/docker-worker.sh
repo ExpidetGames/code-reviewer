@@ -90,6 +90,14 @@ case "${1:-}" in
         --interactive | --rm | --read-only) shift ;;
         --name) name="$2"; shift 2 ;;
         --env) worker_env+=("$2"); shift 2 ;;
+        # The work volume of the Implementer's profile (#760) and nothing else: a bind or any other mount is refused.
+        --mount)
+          case "${2:-}" in
+            type=volume,source=code-reviewer-work-*,target=/work) shift 2 ;;
+            *)
+              echo "docker-worker: unknown mount ${2:-}" >&2
+              exit 125 ;;
+          esac ;;
         --user | --cap-drop | --cap-add | --security-opt | --tmpfs | --memory | --memory-reservation | \
           --memory-swap | --pids-limit | --stop-timeout | --network | --sysctl)
           shift 2 ;;

@@ -178,7 +178,7 @@ one instruction, and one turn is one `jobs` row of the kind `implementer`. It ex
 - The names of the environment variables the Worker container of an implementer job gets (`KnownImplementerEnvironmentName`,
   `ImplementerNetworkMode`): `RUNNER_IMPLEMENTER_WORK_DIR` (always `/work`), `RUNNER_IMPLEMENTER_EGRESS_PORT` (the loopback port
   of the registries proxy) and `RUNNER_IMPLEMENTER_NETWORK` (`registries` or `none`). The Dispatcher sets them; the container
-  profile (`worker-container.v1.json`) is not changed here.
+  profile that carries them is `ImplementerContainerSpec` of `worker-container.v1.json` (#760).
 - Examples: `examples/implementer/RunnerJobInput.json`, `RunnerResult.json` and `SplitClaimResponse.json`.
 
 **Nothing serves the kind yet, and a value of it never falls through to another path.** The app's claim refuses a job of
@@ -234,6 +234,11 @@ echoed) and `POST /probe`'s answers are checked against `ProbeReport` in `dispat
 - **Dispatcher** (`dispatcher/`, #327; `dispatcher/src/contracts.test.ts`, `src/triggers/signature.test.ts`):
   validates the same examples with Ajv, checks that its closed webhook body and its reading of the split claim
   answer agree with the schemas, and runs every signing vector against its own receiver and the reference verifier.
+- **The Implementer's container profile** (#760). `ImplementerContainerSpec` (`examples/worker-container/ImplementerContainerSpec.json`,
+  `IMPLEMENTER_CONTAINER_SPEC` in the Dispatcher) is `WorkerContainerSpec` with exactly four fields changed: `workVolume` (new:
+  `/work`, `rw,nosuid,nodev`, a Docker named volume created per job), `memory` (`3g`/`2560m`), `pids.limit` (2048) and
+  `allowedEnvironment` plus the three `RUNNER_IMPLEMENTER_*` names. The floor is the same for every profile, and a bind or
+  an arbitrary volume still has no key. The Sandbox launcher chooses the profile by the job kind.
 - **The hardened container spec and its renderer** (#325). `examples/worker-container/WorkerContainerSpec.json`
   is the spec, the one definition of the container. The Dispatcher ships the same values as
   `dispatcher/src/launchers/container-spec.ts` (a test pins it to the example) and renders them to

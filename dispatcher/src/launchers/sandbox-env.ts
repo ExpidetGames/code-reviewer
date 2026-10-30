@@ -201,9 +201,14 @@ export function sandboxFromEnvironment(
         settings.core.launchDeadlineSeconds
       )
         throw new ConfigError("SANDBOX_HANDOVER_SECONDS", "invalid");
-      for (const kind of ["diff", "dynamic"] as const) {
+      // The Implementer's configuration is read only by a deployment that serves the kind (#760): a typo in it must not
+      // take the Diff jobs of a deployment that has no such app down.
+      const kinds = settings.core.engines.includes("implementer")
+        ? (["diff", "dynamic", "implementer"] as const)
+        : (["diff", "dynamic"] as const);
+      for (const kind of kinds) {
         try {
-          validateKindConfig(kind, settings.core.workerConfig[kind]);
+          validateKindConfig(kind, settings.core.workerConfig[kind] ?? {});
         } catch {
           throw new ConfigError("DISPATCHER_WORKER_CONFIG", "invalid");
         }

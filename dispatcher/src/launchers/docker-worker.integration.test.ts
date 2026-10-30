@@ -22,6 +22,7 @@ import { LocalSandboxService } from "../../../fakes/sandbox/local.ts";
 import { waitFor } from "../test-support/harness.ts";
 import { renderDockerRunArguments } from "./container.ts";
 import {
+  IMPLEMENTER_CONTAINER_SPEC,
   SANDBOX_LAUNCHER_ADDITIONS,
   WORKER_CONTAINER_SPEC,
 } from "./container-spec.ts";
@@ -147,6 +148,68 @@ describe("the docker stand-in of the hosted lane", () => {
         "worker-once",
       ]),
     );
+  });
+
+  // #760-T06
+  it("understands the flags of the implementer profile and still refuses a mount or a volume it does not know", async () => {
+    await program('printf "%s" "$1" >"' + directory + '/mode"');
+    const vm = await vmWith();
+    const rendered = renderDockerRunArguments(IMPLEMENTER_CONTAINER_SPEC, {
+      image: IMAGE_ID,
+      name: NAME,
+      workVolume: "code-reviewer-work-job-1",
+      command: ["worker-once"],
+      additions: SANDBOX_LAUNCHER_ADDITIONS,
+    });
+
+    const accepted = await vm.exec({
+      label: "w",
+      cmd: "docker",
+      args: rendered,
+    });
+    const volume = await vm.exec({
+      label: "v",
+      cmd: "docker",
+      args: [
+        ...rendered.slice(0, -2),
+        "--volume",
+        "/:/host",
+        IMAGE_ID,
+        "worker-once",
+      ],
+    });
+    const bound = await vm.exec({
+      label: "b",
+      cmd: "docker",
+      args: [
+        ...rendered.slice(0, -2),
+        "-v",
+        "/:/host",
+        IMAGE_ID,
+        "worker-once",
+      ],
+    });
+
+    expect(accepted.exitCode).toBe(0);
+    expect(rendered).toContain("--mount");
+    expect(await readFile(join(directory, "mode"), "utf8")).toBe("worker-once");
+    expect(volume.exitCode).toBe(125);
+    expect(volume.stderr).toContain("unknown flag --volume");
+    expect(bound.exitCode).toBe(125);
+    expect(bound.stderr).toContain("unknown flag -v");
+    const bind = await vm.exec({
+      label: "m",
+      cmd: "docker",
+      args: [
+        ...rendered.slice(0, -2),
+        "--mount",
+        "type=bind,source=/,target=/host",
+        IMAGE_ID,
+        "worker-once",
+      ],
+    });
+    expect(bind.exitCode).toBe(125);
+    expect(bind.stderr).toContain("unknown mount type=bind");
   });
 
   // #332-T09

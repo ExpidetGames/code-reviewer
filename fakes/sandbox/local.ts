@@ -7,7 +7,8 @@
 // Dispatcher (fakes/ is shared by every project).
 //
 // What local mode is not: a VM. There is no snapshot (the image is whatever the local daemon has), no cgroup fix
-// and no daemon start (`vm-prepare.sh` succeeds without doing anything), no `sudo`, and no kernel of its own. What
+// and no daemon start (`vm-prepare.sh` succeeds without doing anything), no `sudo`, no mounts (the work volume's
+// `mkdir` and `mount` succeed without doing anything) and no kernel of its own. What
 // it proves is the container spec end to end and that nothing of one job is left for the next: the directory of a
 // stopped "VM" is removed and every container it started is force-removed.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -65,6 +66,10 @@ type LocalVmState = {
 };
 
 const PREPARE = "/usr/local/sbin/vm-prepare.sh";
+// The steps of the Implementer's work volume that change the VM itself (#760): a directory and a mount. Local mode has
+// no VM of its own (like the cgroup fix and the daemon start, they succeed without doing anything); the `docker volume
+// create` that follows them is a docker command and goes to the daemon, or the stand-in, like any other.
+const HOST_STEPS: ReadonlySet<string> = new Set(["mkdir", "mount"]);
 
 function abortError(): Error {
   return new DOMException("The operation was aborted.", "AbortError");
@@ -224,7 +229,7 @@ export class LocalSandboxService {
           (resolve, reject) => {
             if (state.stopped) return reject(new Error("The VM is stopped."));
             if (signal?.aborted) return reject(abortError());
-            if (request.cmd === PREPARE)
+            if (request.cmd === PREPARE || HOST_STEPS.has(request.cmd))
               return resolve({ exitCode: 0, stdout: "", stderr: "" });
             const command = this.command(request);
             if (command === undefined)

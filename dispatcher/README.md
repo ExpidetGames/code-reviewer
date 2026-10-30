@@ -261,6 +261,14 @@ could become a flag, with the stable codes of `CONTAINER_ERROR_CODES`.
   `SANDBOX_LAUNCHER_ADDITIONS` for every Worker kind, because the Sandbox kernel only supports the nft `ip` family
   and the Dynamic-Worker then needs IPv6 off from the container spec. The shared spec does not have them
   (a full-mode host behaves as before); the default is no additions.
+- **The Implementer's profile (#760).** `IMPLEMENTER_CONTAINER_SPEC` (`ImplementerContainerSpec` of the contract) is the
+  default spec with a `workVolume` (`/work`, `rw,nosuid,nodev`, a named volume), `3g`/`2560m` memory, 2048 pids and the three
+  `RUNNER_IMPLEMENTER_*` names. A spec with a `workVolume` key is checked as the profile (exact values, the floor shared),
+  every other as the default one; `RenderOptions.workVolume` names the volume (required by the profile, refused by the
+  default) and renders `--mount type=volume,source=<name>,target=/work`. `workVolumeCommands` returns the root steps that make
+  the volume in the VM (`mkdir`, a bind mount remounted with the volume's options, `docker volume create` over it), which
+  `SandboxDockerHost.createWorkVolume` runs; the Launcher picks the profile by the job kind. Diff and Dynamic render
+  byte-identical flags to before (the golden files).
 - The entry mode of the image (`worker-once`, `probe`) is a placeholder until the image has its entry modes (#324); the
   names are those #324 proposes, and nothing else changes when it fixes them.
 - `seccomp.ts` derives, from Docker's default profile, a profile that denies chosen socket families (AF_VSOCK);
@@ -345,7 +353,11 @@ first real run). Only the code is logged, never the platform's text.
 configuration both kinds get 1 vCPU / 2 GB and a container limit of `1536m` (reservation `1280m`), which leaves room
 for `dockerd` and the OS; a limit that leaves the VM less than 256 MiB is refused. The spike suggests 2 vCPU / 4 GB for
 the Dynamic-Worker; its real peak is not measured yet, so that is a configuration change, not a code change. A wrong
-value fails the deployment at start (`DISPATCHER_WORKER_CONFIG`), not the first job.
+value fails the deployment at start (`DISPATCHER_WORKER_CONFIG`), not the first job. The Implementer (#760) defaults to
+2 vCPU / 4 GB and a container limit of `3g` (reservation `2560m`); `DISPATCHER_WORKER_CONFIG.implementer` overrides each value,
+and a deployment that serves the kind refuses at start a limit the VM cannot hold (a deployment that does not serve it does
+not read the entry). Its container is the profile `IMPLEMENTER_CONTAINER_SPEC` (next section), and its launch makes the work
+volume in the VM between the image check and `docker run`.
 
 **Capabilities.** The Launcher advertises `pr-agent` and `opencode`; the engines the deployment serves are its
 `DISPATCHER_ENGINES` (#479). No probe stands between a Dynamic job and its claim: the hardening of the container is

@@ -21,7 +21,10 @@ import {
   SANDBOX_HANDOVER_SECONDS,
   SANDBOX_IMAGE_REFERENCE,
   SANDBOX_REGION,
+  SANDBOX_KIND_DEFAULTS,
   minimumVmTimeoutMargin,
+  planForKind,
+  validateKindConfig,
   VM_TIMEOUT_MARGIN_SECONDS,
   createSandboxLauncher,
   type SandboxLauncherOptions,
@@ -703,14 +706,291 @@ describe("the Sandbox-Launcher", () => {
     ).toStrictEqual(["pr-agent"]);
   });
 
-  // #759 (additional): the container profile of the Implementer is P15 (#760); until then no VM is made for the kind
-  it("refuses a job of the implementer kind before it creates a VM: the hardened spec of Diff and Dynamic cannot host it", async () => {
+  // #760-T05
+  it("makes the work volume of an implementer job after the host is prepared and before docker run, all on the job's VM", async () => {
     const result = await launch(build(), spec({ kind: "implementer" }));
 
-    const error = failure(result);
-    expect(error.code).toBe("implementer_profile_unavailable");
-    expect(error.retryable).toBe(false);
-    expect(service.creates).toStrictEqual([]);
+    expect(result).toStrictEqual({ ok: true });
+    const name = service.creates[0]?.name ?? "";
+    expect(service.events).toStrictEqual([
+      `create:${name}`,
+      "exec:vm-prepare",
+      "exec:image-id",
+      "exec:work-volume-dir",
+      "exec:work-volume-mount",
+      "exec:work-volume-options",
+      "exec:work-volume-create",
+      "start:docker-run",
+      `stdin:${name}`,
+    ]);
+    // Everything happens in the one VM and as root; the volume is the VM's, so it goes with the VM.
+    for (const call of service.execs) expect(call.vm).toBe(name);
+    for (const call of service.execs.filter((c) =>
+      c.label.startsWith("work-volume"),
+    ))
+      expect(call.sudo).toBe(true);
+    const volume = `code-reviewer-work-${JOB_ID}`;
+    const directory = `/var/lib/code-reviewer-work/${volume}`;
+    expect(
+      service.execs.find((call) => call.label === "work-volume-options"),
+    ).toMatchObject({
+      cmd: "mount",
+      args: ["-o", "remount,bind,rw,nosuid,nodev", directory],
+    });
+    expect(
+      service.execs.find((call) => call.label === "work-volume-create")?.args,
+    ).toContain(volume);
+    expect(service.creates[0]?.tags.kind).toBe("implementer");
+    expect(service.stops).toStrictEqual([]);
+  });
+
+  // #760-T02
+  it("starts an implementer job in the implementer profile: 2 vCPU, a 3 GB container, 2048 processes, the work volume and the three names", async () => {
+    await launch(build(), spec({ kind: "implementer" }));
+
+    const args = dockerRun()?.args ?? [];
+    expect(service.creates[0]?.vcpus).toBe(2);
+    expect(valuesOf(args, "--memory")).toStrictEqual(["3g"]);
+    expect(valuesOf(args, "--memory-reservation")).toStrictEqual(["2560m"]);
+    expect(valuesOf(args, "--memory-swap")).toStrictEqual(["3g"]);
+    expect(valuesOf(args, "--pids-limit")).toStrictEqual(["2048"]);
+    expect(valuesOf(args, "--mount")).toStrictEqual([
+      `type=volume,source=code-reviewer-work-${JOB_ID},target=/work`,
+    ]);
+    expect(args).toContain("--read-only");
+    // The Sandbox additions apply to every kind.
+    expect(valuesOf(args, "--sysctl")).toHaveLength(2);
+    expect(valuesOf(args, "--env")).toStrictEqual([
+      "HOME=/home/runner",
+      "RUNNER_DIFF_JOB_USER=10001:10001",
+      "RUNNER_IMPLEMENTER_EGRESS_PORT=10182",
+      "RUNNER_IMPLEMENTER_NETWORK=registries",
+      "RUNNER_IMPLEMENTER_WORK_DIR=/work",
+      "RUNNER_JOB_TIMEOUT_SECONDS=1200",
+    ]);
+  });
+
+  // #760-T03
+  it("does not give a Diff or a Dynamic job a work volume, a mount or the names of the Implementer", async () => {
+    const launcher = build({
+      dynamicEnvironment: { RUNNER_DYNAMIC_MAX_COST_USD: "2.5" },
+    });
+
+    await launch(launcher, spec({ kind: "diff" }));
+    await launch(
+      launcher,
+      spec({ kind: "dynamic", jobId: "00000000-0000-4000-8000-000000000002" }),
+    );
+
+    expect(service.execs.map((call) => call.label)).toStrictEqual([
+      "vm-prepare",
+      "image-id",
+      "vm-prepare",
+      "image-id",
+    ]);
+    for (const call of service.starts) {
+      expect(call.args).not.toContain("--mount");
+      expect(valuesOf(call.args, "--pids-limit")).toStrictEqual(["512"]);
+      expect(
+        valuesOf(call.args, "--env").filter((entry) =>
+          entry.startsWith("RUNNER_IMPLEMENTER"),
+        ),
+      ).toStrictEqual([]);
+    }
+  });
+
+  // #760-T02
+  it("does not hand the operator's Dynamic configuration to an implementer job: its cost ceiling is not Dynamic's", async () => {
+    await launch(
+      build({ dynamicEnvironment: { RUNNER_DYNAMIC_MAX_COST_USD: "2.5" } }),
+      spec({ kind: "implementer" }),
+    );
+
+    expect(
+      valuesOf(dockerRun()?.args ?? [], "--env").filter((entry) =>
+        entry.startsWith("RUNNER_DYNAMIC"),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  // #760-T04
+  it("takes the VM size and the container memory of an implementer job from its configuration, value by value", async () => {
+    await launch(
+      build(),
+      spec({
+        kind: "implementer",
+        config: {
+          launcher: { vcpus: 4 },
+          container: { memory: { limit: "6g", reservation: "5g" } },
+        },
+      }),
+    );
+    await launch(
+      build(),
+      spec({
+        kind: "implementer",
+        jobId: "00000000-0000-4000-8000-000000000002",
+        config: { container: { memory: { limit: "3500m" } } },
+      }),
+    );
+
+    expect(service.creates.map((created) => created.vcpus)).toStrictEqual([
+      4, 2,
+    ]);
+    expect(valuesOf(service.starts[0]?.args ?? [], "--memory")).toStrictEqual([
+      "6g",
+    ]);
+    // The limit alone: the default reservation stays, and the swap follows the limit.
+    expect(valuesOf(service.starts[1]?.args ?? [], "--memory")).toStrictEqual([
+      "3500m",
+    ]);
+    expect(
+      valuesOf(service.starts[1]?.args ?? [], "--memory-swap"),
+    ).toStrictEqual(["3500m"]);
+    expect(
+      valuesOf(service.starts[1]?.args ?? [], "--memory-reservation"),
+    ).toStrictEqual(["2560m"]);
+  });
+
+  // #760-T04
+  it.each<[string, LaunchSpec["config"]]>([
+    [
+      "a container memory the VM cannot give",
+      { container: { memory: { limit: "4g", reservation: "3g" } } },
+    ],
+    [
+      "a container memory above a larger VM's",
+      { launcher: { vcpus: 4 }, container: { memory: { limit: "8g" } } },
+    ],
+    ["a VM size the platform does not have", { launcher: { vcpus: 3 } }],
+    ["an option it does not know", { launcher: { disk: 128 } }],
+    [
+      "a reservation above the limit",
+      { container: { memory: { limit: "1g", reservation: "3g" } } },
+    ],
+  ])(
+    "refuses %s for an implementer job before it creates anything",
+    async (_what, config) => {
+      const error = failure(
+        await launch(build(), spec({ kind: "implementer", config })),
+      );
+
+      expect(error.code).toBe("sandbox_config_invalid");
+      expect(error.retryable).toBe(false);
+      expect(service.creates).toStrictEqual([]);
+      expect(() => validateKindConfig("implementer", config)).toThrow(
+        LaunchError,
+      );
+    },
+  );
+
+  // #760-T04
+  it("accepts the default configuration of the implementer kind", () => {
+    expect(() => validateKindConfig("implementer", {})).not.toThrow();
+    expect(planForKind("implementer", {})).toMatchObject({
+      vcpus: 2,
+      overrides: { memory: { limit: "3g", reservation: "2560m" } },
+    });
+    expect(SANDBOX_KIND_DEFAULTS.implementer).toStrictEqual({
+      vcpus: 2,
+      memory: { limit: "3g", reservation: "2560m" },
+    });
+  });
+
+  // #760-T05
+  it("stops the VM when a step of the work volume fails, and runs no container: the volume goes with the VM", async () => {
+    service.onExec("work-volume-create", {
+      exitCode: 1,
+      stderr: "volume create refused",
+    });
+
+    const error = failure(await launch(build(), spec({ kind: "implementer" })));
+
+    expect(error.code).toBe("work_volume_failed");
+    expect(error.retryable).toBe(true);
+    const name = service.creates[0]?.name;
+    expect(service.stops).toStrictEqual([name]);
+    expect(service.running()).toStrictEqual([]);
+    expect(service.starts).toHaveLength(0);
+    expect(service.execs.map((call) => call.label)).toStrictEqual([
+      "vm-prepare",
+      "image-id",
+      "work-volume-dir",
+      "work-volume-mount",
+      "work-volume-options",
+      "work-volume-create",
+    ]);
+    // Nothing of the platform's text reaches the error or the log.
+    expect(logger.text()).not.toContain("volume create refused");
+  });
+
+  // #760-T05
+  it.each(["work-volume-dir", "work-volume-mount", "work-volume-options"])(
+    "stops the VM and makes no later step when %s fails",
+    async (label) => {
+      service.onExec(label, { exitCode: 32 });
+
+      const error = failure(
+        await launch(build(), spec({ kind: "implementer" })),
+      );
+
+      expect(error.code).toBe("work_volume_failed");
+      expect(service.stops).toStrictEqual([service.creates[0]?.name]);
+      expect(
+        service.execs.some((call) => call.label === "work-volume-create"),
+      ).toBe(false);
+      expect(service.starts).toHaveLength(0);
+    },
+  );
+
+  // #760-T05
+  it("stops the VM, and with it the volume, when the Worker ends early after the volume was made", async () => {
+    const launcher = build();
+    const ended = launcher
+      .launch(spec({ kind: "implementer" }), new AbortController().signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await settle();
+
+    service.exitProcess(service.creates[0]?.name ?? "", 2);
+    const error = (await ended) as LaunchError;
+
+    expect(error.code).toBe("worker_exited_early");
+    expect(service.stops).toStrictEqual([service.creates[0]?.name]);
+    // The one volume was created in the VM that was stopped; no step removes or re-creates one anywhere else.
+    expect(
+      service.execs.filter((call) => call.args.includes("create")),
+    ).toHaveLength(1);
+    expect(
+      service.execs.every((call) => call.vm === service.creates[0]?.name),
+    ).toBe(true);
+    expect(service.running()).toStrictEqual([]);
+  });
+
+  // #760-T05
+  it("aborts a launch during the work volume steps with launch_aborted and stops the VM", async () => {
+    const stop = new AbortController();
+    service.onExec("work-volume-mount", () => {
+      stop.abort();
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+
+    const error = failure(
+      await launch(build(), spec({ kind: "implementer" }), stop.signal),
+    );
+
+    expect(error.code).toBe("launch_aborted");
+    expect(service.stops).toStrictEqual([service.creates[0]?.name]);
+    expect(service.starts).toHaveLength(0);
+  });
+
+  // #760 (additional): P22 (#767) and the canary come later; the engine is advertised by the runner's self-check (P20)
+  it("does not advertise the implementer engine: the deploy canary cannot prove it yet, and an advertised engine is required of every production deploy", async () => {
+    expect(
+      await build().capabilities(new AbortController().signal),
+    ).not.toContain("implementer");
   });
 
   // #329 (additional): the Launcher and the golden snapshot pipeline (#330) name the same things

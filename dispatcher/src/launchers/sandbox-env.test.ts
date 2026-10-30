@@ -284,6 +284,55 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
     ).not.toThrow();
   });
 
+  // #760-T04
+  it("refuses an implementer container the VM cannot hold at start when an app has the kind, and accepts a sized one", () => {
+    const sandbox = sandboxFromEnvironment(configured(), never);
+    const registry = {
+      DISPATCHER_APPS: JSON.stringify([
+        {
+          id: "factory",
+          url: "https://factory.example.test",
+          kinds: ["implementer"],
+          keyId: "factory-k1",
+          maxRunning: 1,
+        },
+      ]),
+      DISPATCHER_APP_FACTORY_TOKEN: "factory-dispatcher-token-for-tests-0001",
+      DISPATCHER_APP_FACTORY_SIGNING_SECRET:
+        "factory-signing-secret-for-tests-000001",
+      DISPATCHER_OPERATOR_TOKEN: "operator-token-for-the-tests-0000000001",
+    };
+    const launcherWith = (implementer: unknown, served = true) =>
+      sandbox.launcher({
+        settings: loadSettings({
+          ...BASE,
+          ...(served ? registry : {}),
+          DISPATCHER_WORKER_CONFIG: JSON.stringify({ implementer }),
+        }),
+        logger: recordingLogger(),
+        background: () => undefined,
+      });
+
+    expect(() =>
+      launcherWith({ container: { memory: { limit: "8g" } } }),
+    ).toThrowError(/DISPATCHER_WORKER_CONFIG/);
+    expect(() => launcherWith({ launcher: { vcpus: 3 } })).toThrowError(
+      /DISPATCHER_WORKER_CONFIG/,
+    );
+    expect(() =>
+      launcherWith({
+        launcher: { vcpus: 4 },
+        container: { memory: { limit: "6g", reservation: "5g" } },
+        timeoutSeconds: 7200,
+      }),
+    ).not.toThrow();
+    expect(() => launcherWith({})).not.toThrow();
+    // A deployment that serves no implementer job does not read (and refuse) its configuration.
+    expect(() =>
+      launcherWith({ container: { memory: { limit: "8g" } } }, false),
+    ).not.toThrow();
+  });
+
   // #364-T18
   it("has no reaper when no snapshot is configured, so there is no route and no platform call", () => {
     expect(sandboxFromEnvironment({}, never).reaper).toBeUndefined();
@@ -371,7 +420,7 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
   });
 
   // #759 (additional)
-  it("does not advertise the implementer engine yet: its container profile is P15 (#760), so a dispatch for the kind is `not_capable`", async () => {
+  it("does not advertise the implementer engine yet although it can launch the kind (#760): no real probe reports it, so a dispatch for the kind is `not_capable`", async () => {
     const sandbox = sandboxFromEnvironment(configured(), never);
     const settings = loadSettings({
       ...BASE,

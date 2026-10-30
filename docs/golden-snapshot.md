@@ -174,6 +174,12 @@ disk":
 | `token`       | the shapes of GitHub, OpenRouter, Anthropic, AWS and Slack tokens, the per-job credential, `_authToken=`, `RUNNER_TOKEN=`-style assignments |
 | `job_data`    | any entry in Docker's `containers` or `volumes` directory, except the two artifacts `dockerd` creates in `volumes` at every start           |
 
+The work volume of the Implementer (#760) is not part of any snapshot: it is made in the job's VM, after the VM started from
+the snapshot, by the Sandbox launcher (a directory below `/var/lib/code-reviewer-work`, a mount on it and a Docker volume
+bound to it, see `docs/dispatcher.md`). The snapshot, `vm-prepare.sh` and the scan below are unchanged by it, and a builder VM
+never has such a volume, so the `volumes` rule keeps finding every entry there as `job_data`. The VM's disk is the platform's
+(64 GB); the work volume is the room of a checkout, its dependencies and a build, and goes away with the VM.
+
 The two Docker exemptions are narrow: `volumes/metadata.db` **as a regular file** and `volumes/backingFsBlockDev` **as a
 block device**. A file, a directory or a link of that name, or a `metadata.db` in `containers`, is job data.
 
