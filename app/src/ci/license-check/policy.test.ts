@@ -107,6 +107,13 @@ describe("license-policy.json", () => {
       }
     });
 
+    // #202-T06, #761-T07: the pins of all five parts pass the audit.
+    it("passes the audit of the real pins, documents and snapshot", () => {
+      expect(binaries.violations.map(describeBinaryViolation)).toEqual([]);
+      expect(binaries.binaries).toBe(5);
+      expect(binaries.installed.length).toBeGreaterThan(100);
+    });
+
     // #761-T07: git is GPL-2.0, which is not on the allow list; it is a separate program of the image,
     // built from the unmodified release, and the policy says so in the entry itself.
     it("accepts git's GPL license only through a documented exception, and marks it as built from source", () => {

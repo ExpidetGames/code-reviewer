@@ -9,7 +9,7 @@ import {
   describeBinaryViolation,
   type BinaryViolation,
 } from "./binaries.ts";
-import type { Policy } from "./policy.ts";
+import type { BinaryEntry, Policy } from "./policy.ts";
 
 const COMMIT = "733b2c627e5aec39cb33cc22373bdce33053ef2c";
 const HEX_A = "a".repeat(64);
@@ -229,6 +229,13 @@ describe("auditBinaries", () => {
         },
       ],
     };
+    const without = (
+      entry: BinaryEntry,
+      key: "exception" | "build",
+    ): BinaryEntry =>
+      Object.fromEntries(
+        Object.entries(entry).filter(([name]) => name !== key),
+      ) as BinaryEntry;
     const gitPin = (overrides: Json = {}): Json => ({
       name: "git",
       repository: "https://github.com/git/git",
@@ -267,8 +274,8 @@ describe("auditBinaries", () => {
     it("fails on the license without the exception", () => {
       const withoutException: Policy = {
         ...gitPolicy,
-        binaries: gitPolicy.binaries.map(
-          ({ exception: _exception, ...entry }) => entry,
+        binaries: gitPolicy.binaries.map((entry) =>
+          without(entry, "exception"),
         ),
       };
 
@@ -290,9 +297,7 @@ describe("auditBinaries", () => {
     it("still needs the executable digest of a release that is not built from source", () => {
       const prebuilt: Policy = {
         ...gitPolicy,
-        binaries: gitPolicy.binaries.map(
-          ({ build: _build, ...entry }) => entry,
-        ),
+        binaries: gitPolicy.binaries.map((entry) => without(entry, "build")),
       };
 
       expect(codes(auditGit({}, prebuilt).violations)).toEqual([
