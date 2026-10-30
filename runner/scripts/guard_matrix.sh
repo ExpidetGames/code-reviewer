@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-Proprietary
 
-# The matrix of the Implementer's accident guard (#761): about thirty git actions an agent may run, in a
+# The matrix of the Implementer's accident guard (#761): about forty git actions an agent may run, in a
 # throwaway repository with the `reference-transaction` hook of runner/guard/ installed the way the Worker
 # installs it (core.hooksPath in a GIT_CONFIG_SYSTEM file, the guard configuration in a file). The image
 # smoke test runs it as the engine user inside the image, and the Worker runs it as that user before every
@@ -36,6 +36,14 @@ ACTIONS=(
   "allow|keep|stash and stash pop|a_stash"
   "allow|quiet|fetch (updates refs/remotes)|a_fetch"
   "allow|quiet|restore a file|a_restore"
+  "allow|quiet|gc|a_gc"
+  "allow|quiet|gc --auto|a_gc_auto"
+  "allow|quiet|pack-refs --all --prune|a_pack_refs"
+  "allow|quiet|maintenance run|a_maintenance"
+  "allow|quiet|git init of a fixture repository|a_init"
+  "allow|quiet|clone of a repository with a tag|a_clone_tag"
+  "allow|quiet|init, fetch and checkout FETCH_HEAD in another repository|a_fetch_checkout"
+  "allow|quiet|a nested repository: init, commit, branch, tag|a_nested_repo"
   "block|head|commit --amend|b_amend"
   "block|head|reset --soft HEAD~1|b_reset_soft"
   "block|head|reset --hard HEAD~1|b_reset_hard"
@@ -56,6 +64,8 @@ ACTIONS=(
   "block|head|update-ref of another branch|b_update_ref_other"
   "block|head|update-ref of the branch back to the start|b_update_ref_back"
   "block|free|branch -D of the branch|b_branch_delete"
+  "block|free|branch -D of the branch after pack-refs|b_branch_delete_packed"
+  "block|head|update-ref -d of the branch|b_update_ref_delete"
   "block|head|branch -m (rename)|b_branch_rename"
   "block|head|worktree add|b_worktree_add"
 )
@@ -103,7 +113,8 @@ raw clone -q "$origin" "$work/seed" 2>/dev/null || refuse "git clone failed"
   echo a >a.txt
   raw add -A
   raw commit -qm base
-  raw push -q origin HEAD:main
+  raw tag v0
+  raw push -q origin HEAD:main v0
 ) || refuse "cannot seed the repository"
 raw clone -q -b main "$origin" "$repo" || refuse "git clone failed"
 cd "$repo" || refuse "cannot enter the repository"
@@ -124,13 +135,13 @@ tip=$(raw rev-parse HEAD)
   raw push -q origin HEAD:main
 ) || refuse "cannot move main"
 raw fetch -q origin
-printf 'BRANCH=work\nSTART=%s\nSPOOL=%s\n' "$start" "$spool" >"$CODE_REVIEWER_GUARD_CONF"
+printf 'BRANCH=work\nSTART=%s\nSPOOL=%s\nREPO=%s\n' "$start" "$spool" "$repo" >"$CODE_REVIEWER_GUARD_CONF"
 
 reset_state() {
   raw rebase --abort 2>/dev/null
   raw cherry-pick --abort 2>/dev/null
   raw merge --abort 2>/dev/null
-  rm -rf "$work/wt"
+  rm -rf "$work/wt" "$work/fixture" "$work/clone-tag" "$work/fetched" "$repo/nested"
   raw worktree prune
   raw checkout -qf work 2>/dev/null
   raw update-ref refs/heads/work "$tip"
@@ -159,6 +170,25 @@ a_cherry_pick() { side_commit s3 m3 && git cherry-pick "$(raw rev-parse s3)"; }
 a_stash() { echo z >>f1 && git stash -q && git stash pop -q; }
 a_fetch() { git fetch -q origin; }
 a_restore() { echo z >>f1 && git restore f1; }
+a_gc() { git gc -q; }
+# Two packs and a pack limit of one make `gc --auto` do its work, which git does by itself after a few commands.
+a_gc_auto() {
+  raw repack -qad && side_commit s9 m9 && raw repack -qd &&
+    git -c gc.autoPackLimit=1 -c gc.autoDetach=false gc --auto
+}
+a_pack_refs() { git pack-refs --all --prune; }
+a_maintenance() { git maintenance run; }
+# What a build or a test does in the job: other repositories, with the hook active through the system config.
+a_init() { git init -q -b main "$work/fixture" && git -C "$work/fixture" commit -q --allow-empty -m fixture; }
+a_clone_tag() { git clone -q "$origin" "$work/clone-tag" && git -C "$work/clone-tag" rev-parse -q --verify refs/tags/v0 >/dev/null; }
+a_fetch_checkout() {
+  git init -q -b main "$work/fetched" && git -C "$work/fetched" fetch -q "$origin" main &&
+    git -C "$work/fetched" checkout -q FETCH_HEAD
+}
+a_nested_repo() {
+  git init -q -b main nested && git -C nested commit -q --allow-empty -m n && git -C nested branch side &&
+    git -C nested tag t1 && git -C nested checkout -q side && git -C nested gc -q
+}
 b_amend() { git commit --amend -qm amended; }
 b_reset_soft() { git reset -q --soft HEAD~1; }
 b_reset_hard() { git reset -q --hard HEAD~1; }
@@ -179,6 +209,8 @@ b_tag() { git tag v1; }
 b_update_ref_other() { git update-ref refs/heads/x HEAD; }
 b_update_ref_back() { git update-ref refs/heads/work "$start"; }
 b_branch_delete() { raw checkout -q --detach && git branch -D work; }
+b_branch_delete_packed() { raw pack-refs --all --prune && raw checkout -q --detach && git branch -D work; }
+b_update_ref_delete() { git update-ref -d refs/heads/work; }
 b_branch_rename() { git branch -m work renamed; }
 b_worktree_add() { git worktree add -q -b wt "$work/wt"; }
 
@@ -197,6 +229,8 @@ for spec in "${ACTIONS[@]}"; do
   problem=""
   if [ "$kind" = allow ]; then
     [ "$rc" -eq 0 ] || problem="exit status $rc"
+    # `git gc` and `maintenance` end with status 0 when a part of them ("failed to run pack-refs") was refused.
+    case "$out" in *code-reviewer-guard:*) problem="${problem:+$problem, }the guard refused a part of it" ;; esac
     case "$effect" in
       signal)
         { [ "$tip1" != "$tip0" ] && [ "$signals" -ge 1 ]; } || problem="${problem:+$problem, }the branch did not move or the spool got no line"
