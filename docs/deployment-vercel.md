@@ -1170,8 +1170,9 @@ Implementer; code-review.com refuses it and the start stops by name. It needs `d
 `implementer` and without `dynamic-review` stops the start too. The product's default stays `review,dynamic-review`, so
 an unset `PRODUCT_CAPABILITIES` never turns it on; the rollout of the Implementer sets the value explicitly, and the staged
 App then reports `dynamic-review,implementer,review` (sorted). `health-factory` compares the set exactly with
-`dynamic-review,review`, so a project whose `PRODUCT_CAPABILITIES` names `implementer` is not promoted until the expectation
-of that job is changed with it; nothing live changes in the meantime. The capability alone adds no page, no navigation entry
+the repository variable `FACTORY_EXPECTED_CAPABILITIES` (`dynamic-review,review` while it is unset), so a project whose
+`PRODUCT_CAPABILITIES` names `implementer` is not promoted until that variable is changed with it (below); nothing live
+changes in the meantime. The capability alone adds no page, no navigation entry
 and no job: they come with later changes of the Implementer.
 
 The keys of `/ci` for the lane are in the table of section 2.1. The Dispatcher learns about the App from `/dispatcher`,
