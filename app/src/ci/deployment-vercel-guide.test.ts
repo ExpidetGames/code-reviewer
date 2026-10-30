@@ -1362,6 +1362,41 @@ describe("the second App in the guide (#732)", () => {
     expect(deploy).not.toContain("operator_token");
   });
 
+  // #748-T06
+  it("documents the variable that sets the expected capability set, the order of the rollout and what a lone change does", () => {
+    const text = flat(second);
+    const name = "FACTORY_EXPECTED_CAPABILITIES";
+    expect(text).toContain(`\`${name}\``);
+    expect(text).toContain("`dynamic-review,review` while it is unset");
+    expect(text).toContain("**sorted alphabetically**");
+    expect(text).toContain("`dynamic-review,implementer,review`");
+    // The order: the code first, then the setting and the variable together.
+    expect(text).toContain(
+      "Release the code that allows the capability to `main`",
+    );
+    expect(text).toContain("Only then, together:");
+    expect(text).toContain(
+      "`PRODUCT_CAPABILITIES` in Infisical `prod` `/app-factory`",
+    );
+    // The failure mode of a change of one of the two.
+    expect(text).toContain("**If only one of the two is changed**");
+    expect(text).toContain("`PRODUCT_MISMATCH`");
+    expect(text).toContain("nothing live changes");
+    expect(text).toContain("is not promoted");
+    expect(text).toContain(
+      "A variable with a malformed value fails the same job earlier",
+    );
+    // The variable is listed where the repository variables are, and in the owner's checklist.
+    expect(
+      section("### 2.1 Setup of the deployment pipeline (once)"),
+    ).toContain(name);
+    expect(flat(bringUp)).toContain(name);
+    expect(flat(bringUp)).toContain("`PRODUCT_MISMATCH`");
+    expect(flat(bringUp)).toContain("**together**");
+    // The workflow reads the very name the guide documents.
+    expect(deploy).toContain(`vars.${name}`);
+  });
+
   // #732-T09
   it("keeps the owner's checklist to four mandatory steps and lists the rest as optional or deferred", () => {
     const mandatory = bringUp
