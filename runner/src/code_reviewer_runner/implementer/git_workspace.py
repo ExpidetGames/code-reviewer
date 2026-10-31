@@ -67,6 +67,16 @@ from .guard_files import (
     system_gitconfig_text,
     write_file,
 )
+from .history import (
+    READ_COMMITS,
+    CappedBytes,
+    CappedLines,
+    CommitInfo,
+    FileChange,
+    StopReading,
+    parse_commits,
+    parse_name_status,
+)
 
 LEFTOVER_MESSAGE = "Implementer: uncommitted changes of the turn"
 # The most often a batch of commits is pushed while the agent works (the final push is not held
@@ -486,6 +496,48 @@ class GitWorkspace:
             raise RepositoryUnusable("the new commit cannot be read: " + self._agent_detail(head))
         return head.stdout.strip()
 
+    def commits_since_start(self) -> list[CommitInfo]:
+        """The commits of the agent's branch after the start commit, oldest first, bounded as the
+        result is (`history.parse_commits`). Read as the agent's user from its repository, as a
+        stream: a subject of any size costs no memory. Raises `RepositoryUnusable` when git
+        fails."""
+        reader = CappedLines()
+        done = self._agent_stream(
+            [
+                "log",
+                "--no-show-signature",
+                "-n",
+                str(READ_COMMITS),
+                "--format=%H %s",
+                f"{self.start_commit}..refs/heads/{self.spec.branch}",
+            ],
+            reader.feed,
+        )
+        if done.returncode != 0:
+            raise RepositoryUnusable("git log failed: " + self._agent_detail(done))
+        return parse_commits(bytes(reader.data))
+
+    def changed_files(self) -> list[FileChange]:
+        """The files that differ between the start commit and the agent's branch
+        (`git diff --name-status` as the agent's user), bounded as the result is."""
+        reader = CappedBytes()
+        done = self._agent_stream(
+            [
+                "diff",
+                "--name-status",
+                "-z",
+                "-M",
+                "--no-ext-diff",
+                "--no-textconv",
+                self.start_commit,
+                f"refs/heads/{self.spec.branch}",
+            ],
+            reader.feed,
+        )
+        if done.returncode != 0:
+            raise RepositoryUnusable("git diff failed: " + self._agent_detail(done))
+        return parse_name_status(bytes(reader.data))
+
     def agent_tip(self) -> str | None:
         """The tip of the agent's branch, read the safe way (`ls-remote` against a `git upload-pack`
         run as the agent's user). None when it cannot be read within `TIP_TIMEOUT`; the push does
@@ -819,6 +871,21 @@ class GitWorkspace:
             spawn=spawn_options(self.agent.uid, self.agent.gid),
             timeout=self._timeout,
         )
+
+    def _agent_stream(self, args: list[str], consume: Callable[[bytes], None]) -> Outcome:
+        """`_as_agent` for output that is read as a stream and only partly kept. A reader that has
+        what it keeps (`StopReading`) ends git, and the command counts as answered."""
+        try:
+            return self._process.stream(
+                args,
+                env=self.agent_environment(),
+                cwd=self.repo,
+                spawn=spawn_options(self.agent.uid, self.agent.gid),
+                consume=consume,
+                timeout=self._timeout,
+            )
+        except StopReading:
+            return Outcome(0, "", "")
 
     def _mirror_tip(self, ref: str) -> str | None:
         done = self._mirror(["rev-parse", "-q", "--verify", ref])

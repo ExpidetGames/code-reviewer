@@ -198,6 +198,7 @@ class GitProcess:
         env: Mapping[str, str],
         consume: Callable[[bytes], None],
         cwd: Path | str = "/",
+        spawn: Mapping[str, Any] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> Outcome:
         """Run git and hand its standard output to `consume` in chunks, keeping none of it (#764):
@@ -214,6 +215,7 @@ class GitProcess:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
+                **(spawn or {}),
             )
         except OSError as error:
             return Outcome(255, "", f"git cannot run: {error.strerror or 'error'}", unanswered=True)
