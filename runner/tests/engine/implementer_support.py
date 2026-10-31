@@ -3,13 +3,14 @@
 """A whole Implementer turn (#764) against the real, pinned OpenCode. Not a test file.
 
 `ImplementerSession` runs unchanged: the production ledger and passthrough proxy (the key swapping
-last hop is a loopback double), the generated engine configuration and environment, the push loop and
-the git workspace of #762 over a bare repository on the file system standing in for GitHub. The only
-scripted part is the model: the strict generic fake of `fakes/wire` plays one tool call or one text
-per request. Nothing here talks beyond loopback, and the tests run as an ordinary user (the user
-separation is proven by the privileged lane).
+last hop is a loopback double), the generated engine configuration and environment, the push loop
+and the git workspace of #762 over a bare repository on the file system standing in for GitHub.
+The only scripted part is the model: the strict generic fake of `fakes/wire` plays one tool call or
+one text per request. Nothing here talks beyond loopback, and the tests run as an ordinary user
+(the user separation is proven by the privileged lane).
 """
 
+import contextlib
 import json
 import os
 import signal
@@ -20,20 +21,15 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integration"))
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from fakes.wire.formats import Family, Turn, UsageFault
 from fakes.wire.upstream import Refusal, ScriptedUpstream
 from native_full_job import ENTRIES, MANAGED
 from opencode_native import BASE_PATH, REAL_KEY
 from opencode_support import opencode_binary, ripgrep_binary
-from passthrough_loopback import LoopbackUpstream
 from plain_final_support import OUTPUT_LIMIT, Reaction, Scene
-from workspace_support import BRANCH, Rig
 
 from code_reviewer_runner.dynamic_review.adapter import _http_request  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
@@ -43,7 +39,10 @@ from code_reviewer_runner.implementer.session import ImplementerSession, Session
 from code_reviewer_runner.implementer.turn_result import TurnResult
 from code_reviewer_runner.job import ImplementerInput, parse_implementer_input
 from git_support import TOKEN, Origin, guard_git
+from passthrough_loopback import LoopbackUpstream
+from workspace_support import BRANCH, Rig
 
+ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE = ROOT / "contracts" / "examples" / "implementer" / "RunnerJobInput.json"
 INSTRUCTION = "Add a greeting file and commit it."
 
@@ -100,6 +99,12 @@ class Turned:
     processes: list[subprocess.Popen[bytes]] = field(default_factory=lambda: [])
     config_texts: list[str] = field(default_factory=lambda: [])
 
+    def carries_tools(self, body: object) -> bool:
+        """Whether a recorded request offered tools (the engine title request offers none)."""
+        if not isinstance(body, dict):
+            return False
+        return bool(cast("dict[str, Any]", body).get("tools"))
+
     @property
     def requests(self) -> list[dict[str, Any]]:
         """The bodies of the model calls that offered tools: the ones the script answered."""
@@ -115,10 +120,8 @@ class Turned:
 
     def kill_engine(self) -> None:
         for process in self.processes:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
 
 
 @contextmanager
@@ -177,7 +180,7 @@ def implementer_turn(
         environment: dict[str, str] = dict(options["env"])
         spawned.append(environment)
         config_texts.append(Path(environment["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
-        process = subprocess.Popen(argv, **options)
+        process = cast("subprocess.Popen[bytes]", subprocess.Popen(argv, **options))
         processes.append(process)
         return process
 
@@ -223,11 +226,7 @@ def implementer_turn(
         )
         turned.result = session.run()
         yield turned
-        for process in processes:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        turned.kill_engine()
 
 
 # -- the turns a script is made of ---------------------------------------------------------------
@@ -253,6 +252,7 @@ __all__ = [
     "BRANCH",
     "INSTRUCTION",
     "Reaction",
+    "Scene",
     "Turned",
     "bash",
     "commit",

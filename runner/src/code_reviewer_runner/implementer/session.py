@@ -99,6 +99,19 @@ COST_LIMIT_DETAIL = "the cost limit is used up"
 TOKEN_CAP_DETAIL = "the token cap is used up"
 
 
+def agent_limits(deadline: float, max_cost: Decimal, stop_reason: str) -> DynamicLimits:
+    """The envelope of the ledger of one turn: the Dynamic one with the clock and cost limit of the
+    turn and the bounds a coding agent needs (see the constants above)."""
+    return DynamicLimits(
+        deadline_seconds=deadline,
+        max_cost_usd=max_cost,
+        cost_stop_reason=stop_reason,
+        max_tool_result_bytes=MAX_TOOL_RESULT_BYTES,
+        max_returned_bytes=MAX_RETURNED_BYTES,
+        max_request_bytes=MAX_AGENT_REQUEST_BYTES,
+    )
+
+
 @dataclass(frozen=True)
 class SessionSeams:
     """What the tests of the session replace; production leaves the defaults."""
@@ -179,19 +192,22 @@ def classify(error: BaseException) -> tuple[ErrorCode, str]:
             if error.detail in (COST_LIMIT_DETAIL, TOKEN_CAP_DETAIL):
                 return ErrorCode.COST_LIMIT_REACHED, "the cost limit of the turn was reached"
             return ErrorCode.RUNNER_ERROR, error.detail
-        if error.code is ErrorCode.DYNAMIC_CONFIG_INVALID:
-            return ErrorCode.IMPLEMENTER_CONFIG_INVALID, error.detail
-        return error.code, error.detail
-    if isinstance(error, EngineError):
-        # The engine is part of the runner for the app: its failure is the runner's.
-        if error.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE:
-            return ErrorCode.RUNNER_ERROR, error.detail
-        return error.code, error.detail
+        return _implementer_code(error.code), error.detail
+    if isinstance(error, EngineError | JobError):
+        return _implementer_code(error.code), error.detail
     if isinstance(error, IsolationError):
         return ErrorCode.SETUP_FAILED, error.detail
-    if isinstance(error, JobError):
-        return error.code, error.detail
     return ErrorCode.RUNNER_ERROR, "the turn could not be run"
+
+
+def _implementer_code(code: ErrorCode) -> ErrorCode:
+    """The Dynamic codes the shared parts raise, in the Implementer's words: the engine is part of
+    the runner for the app, and a model entry the proxy cannot serve is a config of the turn."""
+    if code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE:
+        return ErrorCode.RUNNER_ERROR
+    if code is ErrorCode.DYNAMIC_CONFIG_INVALID:
+        return ErrorCode.IMPLEMENTER_CONFIG_INVALID
+    return code
 
 
 class ImplementerSession:
@@ -237,19 +253,6 @@ class ImplementerSession:
         grace = min(GRACE_SECONDS, limit / 3)
         return limit - grace - (self._clock() - self._started)
 
-    def _limits(self, deadline: float) -> Callable[[Decimal, str], DynamicLimits]:
-        def make(max_cost: Decimal, stop_reason: str) -> DynamicLimits:
-            return DynamicLimits(
-                deadline_seconds=deadline,
-                max_cost_usd=max_cost,
-                cost_stop_reason=stop_reason,
-                max_tool_result_bytes=MAX_TOOL_RESULT_BYTES,
-                max_returned_bytes=MAX_RETURNED_BYTES,
-                max_request_bytes=MAX_AGENT_REQUEST_BYTES,
-            )
-
-        return make
-
     # -- the turn -------------------------------------------------------------
 
     def run(self) -> TurnResult:
@@ -292,7 +295,7 @@ class ImplementerSession:
             environment=self.environment,
             upstream_for=self.seams.upstream_for,
             clock=self._clock,
-            limits=self._limits(deadline),
+            limits=lambda max_cost, reason: agent_limits(deadline, max_cost, reason),
         )
 
     def _serve(self, native: NativeJob) -> PassthroughServer:
