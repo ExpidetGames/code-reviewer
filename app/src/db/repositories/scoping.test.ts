@@ -142,6 +142,7 @@ const INSTANCE_LEVEL = [
   "billing-webhook-events-repository.ts",
   "catalog-repository.ts",
   "claim-admission.ts",
+  "implementer-sessions-sweep.ts",
   "installation-link-request-directory-repository.ts",
   "instance-setting-types.ts",
   "instance-settings-repository.ts",

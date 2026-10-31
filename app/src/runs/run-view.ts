@@ -16,7 +16,7 @@ import {
 } from "../runner-api/contract.ts";
 import type { JobStatus } from "../db/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
-import type { ProjectReviewKind } from "../job-kind/job-kind.ts";
+import type { JobKind } from "../job-kind/job-kind.ts";
 import {
   describeCheckoutReason,
   describeErrorCode,
@@ -39,7 +39,7 @@ export type RunRowView = {
   prUrl: string | null;
   command: StoredReviewCommand;
   /** The review kind the run was queued for (#200): Diff Review or Dynamic Review. */
-  reviewKind: ProjectReviewKind;
+  reviewKind: JobKind;
   triggerKind: JobTriggerKind;
   /** "Automatic", "Comment by octocat" or "Started by octocat". */
   trigger: string;

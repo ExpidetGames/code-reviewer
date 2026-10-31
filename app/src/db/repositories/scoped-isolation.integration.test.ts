@@ -823,6 +823,29 @@ const CASES: Case[] = [
       }),
   },
   {
+    // #752-T05: a turn of the Implementer cannot be queued on a repository of another workspace; nothing is written
+    name: "jobs.enqueueImplementerTurn",
+    run: (a, b) =>
+      settle(() =>
+        a.jobs.enqueueImplementerTurn({
+          repositoryId: b.repository.id,
+          baseBranch: "main",
+          baseSha: SHA,
+          branch: "implementer/foreign",
+          instruction: "Do it.",
+          modelChoice: { entryId: "entry-1" },
+          costLimitCents: null,
+          createdBy: b.userId,
+          actorLogin: "octocat",
+          clientRequestId: "foreign-request",
+        }),
+      ),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({
+        rejected: expect.objectContaining({ code: "JOB_REPOSITORY_UNKNOWN" }),
+      }),
+  },
+  {
     name: "jobs.cancelWaitingForRepository",
     run: (a, b) => a.jobs.cancelWaitingForRepository(b.repository.id),
     expectAnswer: (answer) => expect(answer).toBe(0),

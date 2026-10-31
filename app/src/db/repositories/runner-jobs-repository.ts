@@ -21,6 +21,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ExpressionBuilder, Kysely } from "kysely";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
+  IMPLEMENTER_MAX_ATTEMPTS,
   type JobQueueLimits,
 } from "../job-limits.ts";
 import {
@@ -29,7 +30,7 @@ import {
   type RunnerEngine,
 } from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../job-status.ts";
-import type { ProjectReviewKind } from "../../job-kind/job-kind.ts";
+import { jobKindOf } from "../../job-kind/job-kind.ts";
 import {
   newLeaseToken,
   newWorkerCredential,
@@ -68,6 +69,7 @@ import { headNoticeKey } from "../refusal-notice-key.ts";
 import { claimOldestDueJob } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { idleSessionsOfEndedTurns } from "./implementer-sessions-sweep.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 import {
   ensureStartCreditWhileOn,
@@ -296,6 +298,17 @@ function runningWhere(scope: RunningScope) {
     ]);
 }
 
+/**
+ * The codes with which `expire` ends a claimed job without any word from its runner: the lease ran out, the runtime passed the
+ * hard limit, the command was removed. A job that ended with one of them is no proof that a runner worked (#752), unlike a job the
+ * runner finished or failed itself.
+ */
+const REAPER_ERROR_CODES = [
+  "lease_expired",
+  "timeout",
+  "command_removed",
+] as const satisfies readonly JobErrorCode[];
+
 /** A start credit a claim granted: logged after the claim committed (#507). */
 type GrantedStartCredit = { workspaceId: string; amountMicroUsd: number };
 
@@ -307,6 +320,32 @@ export function createRunnerJobsRepository(
   const newToken = options.newToken ?? newLeaseToken;
   const newCredential = options.newCredential ?? newWorkerCredential;
   const limits = { ...DEFAULT_JOB_QUEUE_LIMITS, ...options.limits };
+  /**
+   * Whether a running job was claimed longer ago than its hard limit allows (#752): a turn of the Implementer has its own,
+   * longer one (`implementerMaxRuntimeMs`), every other kind keeps `maxRuntimeMs`.
+   */
+  const pastHardLimit =
+    (current: Date) => (eb: ExpressionBuilder<Database, "jobs">) =>
+      eb.or([
+        eb.and([
+          eb("review_kind", "<>", "implementer"),
+          eb(
+            "claimed_at",
+            "<=",
+            formatTimestamp(new Date(current.getTime() - limits.maxRuntimeMs)),
+          ),
+        ]),
+        eb.and([
+          eb("review_kind", "=", "implementer"),
+          eb(
+            "claimed_at",
+            "<=",
+            formatTimestamp(
+              new Date(current.getTime() - limits.implementerMaxRuntimeMs),
+            ),
+          ),
+        ]),
+      ]);
   // The transaction guard already holds the exclusive gate lock; read without taking another lock
   // after job rows. This keeps every transition on the documented gate-before-rows order.
   async function dynamicReviewAllowed(
@@ -401,7 +440,17 @@ export function createRunnerJobsRepository(
         updated_at: timestamp,
       }))
       .where(runningWhere(scope))
-      .where("attempts", ">=", limits.maxAttempts - 1)
+      // #752: a turn of the Implementer is never run twice, so its first lost attempt is the last: it fails here instead of
+      // waiting again (a second run would meet the branch the first one pushed).
+      .where((eb) =>
+        eb.or([
+          eb("attempts", ">=", limits.maxAttempts - 1),
+          eb.and([
+            eb("review_kind", "=", "implementer"),
+            eb("attempts", ">=", IMPLEMENTER_MAX_ATTEMPTS - 1),
+          ]),
+        ]),
+      )
       .executeTakeFirst();
 
     const requeued = await executor
@@ -420,6 +469,9 @@ export function createRunnerJobsRepository(
       .where(runningWhere(scope))
       .executeTakeFirst();
 
+    // #752: a turn that failed here has no report to come; its session is idle again.
+    if (disabled + Number(failed.numUpdatedRows) > 0)
+      await idleSessionsOfEndedTurns(executor, timestamp);
     return {
       failed: disabled + Number(failed.numUpdatedRows),
       requeued: Number(requeued.numUpdatedRows),
@@ -475,9 +527,6 @@ export function createRunnerJobsRepository(
     current: Date,
   ): Promise<number> {
     const timestamp = formatTimestamp(current);
-    const startedBefore = formatTimestamp(
-      new Date(current.getTime() - limits.maxRuntimeMs),
-    );
     const result = await executor
       .updateTable("jobs")
       .set({
@@ -488,16 +537,24 @@ export function createRunnerJobsRepository(
         updated_at: timestamp,
       })
       .where(runningWhere(scope))
-      .where("claimed_at", "<=", startedBefore)
+      .where(pastHardLimit(current))
       .executeTakeFirst();
     return Number(result.numUpdatedRows);
   }
 
   /**
-   * #195 (finding 1): a Dynamic job no capable runner claims within the deadline would wait forever,
+   * #195 (finding 1): a Dynamic job no capable runner claims within the deadline would wait forever (#752: so would a turn of
+   * the Implementer, which only a runner with its own engine claims),
    * because eligibility excludes it and expiry only handles running jobs. It is cancelled (not failed
    * for a review reason), with the stable code `no_capable_runner`, without an attempt and without a
    * credential. The deadline is operator-owned (`noCapableRunnerMs`).
+   *
+   * #752 review: the code says there is no capable runner, so a busy one must not trigger it. A job of the same kind that is
+   * running, or that a runner claimed and ended itself within the deadline, shows the pool of that engine is alive; the queue then keeps the
+   * job until the absolute limit (`noCapableRunnerAbsoluteMs`). Every job of this database counts, whatever its workspace: the runner
+   * pool is shared. What is no sign of a runner: a job that ended without a claim (`claimed_at` is null, such as one cancelled here), a
+   * job the reaper ended (`REAPER_ERROR_CODES`), and a `running` row whose lease or runtime is spent, which is why `expire` runs this pass
+   * after `loseAttempt` and `failTimedOut`. An operator's deadline longer than the absolute limit wins: the job goes at the deadline.
    */
   async function cancelStrandedDynamic(
     executor: Kysely<Database>,
@@ -506,6 +563,9 @@ export function createRunnerJobsRepository(
     const timestamp = formatTimestamp(current);
     const strandedBefore = formatTimestamp(
       new Date(current.getTime() - limits.noCapableRunnerMs),
+    );
+    const absoluteBefore = formatTimestamp(
+      new Date(current.getTime() - limits.noCapableRunnerAbsoluteMs),
     );
     const result = await executor
       .updateTable("jobs")
@@ -516,11 +576,44 @@ export function createRunnerJobsRepository(
         updated_at: timestamp,
       })
       .where("status", "=", "queued")
-      .where("review_kind", "=", "dynamic")
+      .where("review_kind", "in", ["dynamic", "implementer"])
       // A claimed job follows the lease/attempt policy, never this initial capability deadline.
       .where("attempts", "=", 0)
       .where("created_at", "<=", strandedBefore)
       .where("run_after", "<=", strandedBefore)
+      .where((eb) =>
+        eb.or([
+          eb.and([
+            eb("created_at", "<=", absoluteBefore),
+            eb("run_after", "<=", absoluteBefore),
+          ]),
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom("jobs as served")
+                .select("served.id")
+                .whereRef("served.review_kind", "=", "jobs.review_kind")
+                .where((served) =>
+                  served.or([
+                    // Running: the passes of `expire` ran before, so a lapsed lease or a spent runtime is not `running` any more.
+                    served("served.status", "=", "running"),
+                    // Ended after a claim, through the runner: a job the reaper ended says nothing about a runner.
+                    served.and([
+                      served("served.claimed_at", "is not", null),
+                      served("served.finished_at", ">", strandedBefore),
+                      served.or([
+                        served("served.error_code", "is", null),
+                        served("served.error_code", "not in", [
+                          ...REAPER_ERROR_CODES,
+                        ]),
+                      ]),
+                    ]),
+                  ]),
+                ),
+            ),
+          ),
+        ]),
+      )
       .executeTakeFirst();
     return Number(result.numUpdatedRows);
   }
@@ -534,9 +627,6 @@ export function createRunnerJobsRepository(
     current: Date,
   ): Promise<string[]> {
     const timestamp = formatTimestamp(current);
-    const startedBefore = formatTimestamp(
-      new Date(current.getTime() - limits.maxRuntimeMs),
-    );
     const rows = await executor
       .selectFrom("jobs")
       .select("id")
@@ -544,7 +634,7 @@ export function createRunnerJobsRepository(
       .where((eb) =>
         eb.or([
           eb("lease_expires_at", "<=", timestamp),
-          eb("claimed_at", "<=", startedBefore),
+          pastHardLimit(current)(eb),
         ]),
       )
       .execute();
@@ -585,8 +675,6 @@ export function createRunnerJobsRepository(
     // migration (a race); a running one was claimed before the upgrade. They are cancelled here so
     // they can neither starve review jobs nor be requeued.
     await cancelRemovedCommands(executor, timestamp);
-    // A Dynamic job no runner can run must not wait forever (#195).
-    const noCapableRunner = await cancelStrandedDynamic(executor, current);
     const lost = await loseAttempt(
       executor,
       { leaseExpiredBefore: timestamp },
@@ -596,6 +684,9 @@ export function createRunnerJobsRepository(
     // A job whose runner keeps the lease alive but never finishes. Lost leases come first: a job
     // whose runner vanished long ago is retried, not failed for taking long.
     const timedOut = await failTimedOut(executor, {}, current);
+    // A Dynamic job no runner can run must not wait forever (#195). After the two passes above on purpose (#752): a row whose
+    // lease lapsed or whose runtime ran out is not `running` any more, so it is no sign of a live runner here.
+    const noCapableRunner = await cancelStrandedDynamic(executor, current);
     unknownCost.push(...(await closeRecordsOfEndedJobs(executor, timestamp)));
     // Only the jobs that are over: one that went back to the queue gets a new claim, and its VM must not be stopped.
     if (expiring.length > 0)
@@ -693,6 +784,7 @@ export function createRunnerJobsRepository(
       .where("id", "=", jobId)
       .where("status", "=", "running")
       .execute();
+    await idleSessionsOfEndedTurns(executor, formatTimestamp(current));
   }
 
   /**
@@ -712,6 +804,7 @@ export function createRunnerJobsRepository(
       repository_id: string;
       pr_number: number;
       trigger_kind: string;
+      review_kind: string;
     }>
   > {
     const rows = await executor
@@ -728,8 +821,15 @@ export function createRunnerJobsRepository(
           ]),
         ]),
       )
-      .returning(["id", "repository_id", "pr_number", "trigger_kind"])
+      .returning([
+        "id",
+        "repository_id",
+        "pr_number",
+        "trigger_kind",
+        "review_kind",
+      ])
       .execute();
+    await idleSessionsOfEndedTurns(executor, formatTimestamp(current));
     return rows;
   }
 
@@ -827,6 +927,7 @@ export function createRunnerJobsRepository(
                     repositoryId: job.repository_id,
                     prNumber: job.pr_number,
                     triggerKind: job.trigger_kind,
+                    reviewKind: jobKindOf(job.review_kind),
                     errorCode: admission.errorCode,
                     ...detail,
                   });
@@ -847,6 +948,7 @@ export function createRunnerJobsRepository(
                 repositoryId: row.repository_id,
                 prNumber: row.pr_number,
                 triggerKind: row.trigger_kind,
+                reviewKind: jobKindOf(row.review_kind),
                 errorCode: admission.errorCode,
                 ...detail,
               });
@@ -896,6 +998,7 @@ export function createRunnerJobsRepository(
                   repositoryId: row.repository_id,
                   prNumber: row.pr_number,
                   triggerKind: row.trigger_kind,
+                  reviewKind: jobKindOf(row.review_kind),
                   errorCode: ended.error_code ?? capped.code,
                   ...(noticeKey === undefined
                     ? {}
@@ -938,7 +1041,7 @@ export function createRunnerJobsRepository(
                       rates: billing.rates,
                       job: {
                         workspaceId: row.workspace_id,
-                        reviewKind: row.review_kind as ProjectReviewKind,
+                        reviewKind: jobKindOf(row.review_kind),
                       },
                       keyMode,
                       now: () => current,
@@ -969,6 +1072,7 @@ export function createRunnerJobsRepository(
                 repositoryId: row.repository_id,
                 prNumber: row.pr_number,
                 triggerKind: row.trigger_kind,
+                reviewKind: jobKindOf(row.review_kind),
                 errorCode: held.code,
                 ...(noticeKey === undefined ? {} : { periodStart: noticeKey }),
               });
@@ -1122,6 +1226,9 @@ export function createRunnerJobsRepository(
             .executeTakeFirst();
           if (finished !== undefined) {
             endedClaims.push(jobId);
+            // #752: the turn is over; a report that records its result sets the session idle with the result, this only makes
+            // sure it is idle when the job ended with a failure that carried none.
+            await idleSessionsOfEndedTurns(trx, timestamp);
             // Settled from what the runner reported, in the same transaction as the job's end.
             const settlement = settlementOfOutcome(outcome);
             const settled = await createUsageRecordsRepository(
