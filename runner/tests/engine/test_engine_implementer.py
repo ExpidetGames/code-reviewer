@@ -42,6 +42,7 @@ from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
 from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
 from code_reviewer_runner.implementer.egress_config import EgressSettings, start_egress
 from code_reviewer_runner.implementer.egress_proxy import EgressProxy
+from code_reviewer_runner.implementer.git_process import Outcome
 from code_reviewer_runner.implementer.git_workspace import LEFTOVER_MESSAGE
 from code_reviewer_runner.implementer.prompts import LEFTOVER_PROMPT, instructions_text
 from code_reviewer_runner.result import ErrorCode
@@ -922,3 +923,43 @@ def test_prompt_caching_holds_for_every_family_the_requests_extend_each_other_an
         assert result.usage.ai_calls == len(turned.upstream.records)
         assert result.usage.prompt_tokens == prompt
         assert result.usage.cost_usd == pytest.approx(float(total), rel=1e-9)
+
+
+# #764-R4
+def test_a_push_the_provider_cannot_take_for_now_does_not_cost_the_commits_after_it(
+    tmp_path: Path,
+) -> None:
+    refused: list[int] = []
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "one.txt"),
+            commit("Add one"),
+            bash("sleep 2"),  # the loop looks at the branch meanwhile, and the provider says 503
+            write_file(repo, "two.txt"),
+            commit("Add two"),
+            says("done"),
+        ]
+
+    def react(turned: Turned, scene: Scene, body: dict[str, Any]) -> None:
+        if scene.calls != 1:
+            return
+        real = turned.workspace._mirror  # pyright: ignore[reportPrivateUsage]
+
+        def mirror(args: list[str], **options: Any) -> Outcome:
+            if "push" in args and not refused:
+                refused.append(1)
+                return Outcome(
+                    128, "", "fatal: unable to access 'https://x/r.git/': returned error: 503"
+                )
+            return real(args, **options)
+
+        turned.workspace._mirror = mirror  # type: ignore[method-assign]  # pyright: ignore[reportPrivateUsage]
+
+    with implementer_turn(tmp_path, script, react=react) as turned:
+        result = turned.result
+
+        assert refused, "the provider refused once, for now"
+        assert result.ok, (result.error_code, result.error_detail, result.notes)
+        assert [c.subject for c in result.commits] == ["Add one", "Add two"]
+        assert result.pushed and turned.origin_tip() == result.head_commit
