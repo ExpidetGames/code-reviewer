@@ -6,6 +6,7 @@ mirror. The check is the guarantee; the guard hook is only the fast path (the te
 the hook show it)."""
 
 import http.server
+import itertools
 import os
 import secrets
 import subprocess
@@ -26,6 +27,7 @@ from code_reviewer_runner.implementer.git_workspace import (
     PushLoop,
     PushOutcome,
     PushUnverified,
+    RepositoryUnusable,
 )
 from code_reviewer_runner.job import JobError
 from code_reviewer_runner.result import ErrorCode
@@ -47,6 +49,11 @@ def bypass(workspace: GitWorkspace, *args: str) -> None:
     """What a hostile agent can do: `-c core.hooksPath=/dev/null` takes the guard away."""
     done = agent_git(workspace, *NO_HOOKS, *args)
     assert done.returncode == 0, done.stderr
+
+
+def write_ref(workspace: GitWorkspace, sha: str) -> None:
+    """A hand-written ref file: `update-ref` refuses a non-commit on a branch, a file does not."""
+    (workspace.repo / ".git" / "refs" / "heads" / BRANCH).write_text(sha + "\n")
 
 
 class Clock:
@@ -610,7 +617,8 @@ def test_the_loop_tries_again_after_a_look_that_failed_and_the_final_push_says_s
     monkeypatch.setattr(git_workspace, "TIP_TIMEOUT", 2.0)
     workspace = rig.workspace(timeout=3)
     workspace.prepare(self_test=False)
-    loop = PushLoop(workspace, interval=0.0, clock=Clock())
+    clock = Clock()
+    loop = PushLoop(workspace, interval=0.0, clock=clock)
     tip = commit(workspace, "a.txt")
     head = workspace.repo / ".git" / "HEAD"
     saved = head.read_text()
@@ -618,11 +626,13 @@ def test_the_loop_tries_again_after_a_look_that_failed_and_the_final_push_says_s
     os.mkfifo(head)
 
     assert loop.tick() is None
-    with pytest.raises(PushUnverified):
+    with pytest.raises(RepositoryUnusable) as ended:
         loop.finish()
+    assert ended.value.code is ErrorCode.BRANCH_VIOLATION, "a charged class, not runner_error"
 
     head.unlink()
     head.write_text(saved)
+    clock.now += 1000.0  # the back-off is over
     result = loop.tick()
     assert result is not None and result.head == tip
     assert rig.origin.tip(BRANCH) == tip
@@ -643,6 +653,102 @@ def test_reading_the_tip_of_a_repository_with_a_fifo_as_head_ends_quickly_and_le
     assert workspace.agent_tip() is None
 
     assert still_running("upload-pack", str(workspace.repo)) == []
+
+
+# #762-T15
+def test_the_loop_waits_longer_each_time_a_look_fails_and_starts_over_after_a_good_one(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    clock = Clock()
+    loop = PushLoop(workspace, interval=0.0, clock=clock)
+    commit(workspace, "a.txt")
+    real_push = workspace.push
+    calls: list[float] = []
+    failing = [True]
+
+    def push() -> object:
+        calls.append(clock.now)
+        if failing[0]:
+            raise PushUnverified("the agent's branch could not be fetched")
+        return real_push()
+
+    monkeypatch.setattr(workspace, "push", push)
+
+    assert loop.tick() is None
+    assert loop.tick() is None, "no second look in the same moment"
+    assert len(calls) == 1
+    first_wait = None
+    for step in range(1, 600):
+        clock.now = 1000.0 + step
+        loop.tick()
+        if len(calls) == 2:
+            first_wait = float(step)
+            break
+    assert first_wait is not None and first_wait >= 5.0, "a failed look is not repeated at once"
+    second_start = clock.now
+    second_wait = None
+    for step in range(1, 1200):
+        clock.now = second_start + step
+        loop.tick()
+        if len(calls) == 3:
+            second_wait = float(step)
+            break
+    assert second_wait is not None and second_wait > first_wait, "the wait grows"
+    failing[0] = False
+    clock.now += 100000
+    result = loop.tick()
+    assert result is not None and result.outcome is PushOutcome.PUSHED
+    assert len(calls) == 4
+
+
+# #762-T15
+def test_the_wait_between_failed_looks_has_a_ceiling(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    clock = Clock()
+    loop = PushLoop(workspace, interval=0.0, clock=clock, retry_backoff=10.0, max_backoff=60.0)
+    commit(workspace, "a.txt")
+    calls: list[float] = []
+
+    def push() -> object:
+        calls.append(clock.now)
+        raise PushUnverified("the agent's branch could not be fetched")
+
+    monkeypatch.setattr(workspace, "push", push)
+
+    for _ in range(8):
+        loop.tick()
+        clock.now += 61.0
+
+    assert len(calls) == 8, "after the ceiling, a look is made every 60 s at most"
+    assert [b - a for a, b in itertools.pairwise(calls)][-1] == 61.0
+
+
+# #762-T15
+def test_the_final_push_ignores_the_wait_and_unverified_ends_the_turn_as_a_charged_class(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    clock = Clock()
+    loop = PushLoop(workspace, interval=0.0, clock=clock)
+    commit(workspace, "a.txt")
+    calls: list[int] = []
+
+    def push() -> object:
+        calls.append(1)
+        raise PushUnverified("the agent's branch could not be fetched")
+
+    monkeypatch.setattr(workspace, "push", push)
+    assert loop.tick() is None  # a wait starts
+
+    with pytest.raises(RepositoryUnusable) as ended:
+        loop.finish()
+
+    assert len(calls) == 2, "the final push looks at once, whatever the wait"
+    assert ended.value.code is ErrorCode.BRANCH_VIOLATION
+    assert not isinstance(ended.value, PushUnverified)
 
 
 # -- what the agent can make git print ---------------------------------------------------------
@@ -909,3 +1015,200 @@ def test_a_redirect_of_the_provider_is_not_followed_and_the_token_does_not_go_wi
     assert failed.value.code is ErrorCode.CLONE_FAILED
     assert seen == [], "git followed the redirect and sent its request, with the token, elsewhere"
     assert TOKEN not in str(failed.value)
+
+
+# -- the headers of a commit, read as they are stored ----------------------------------------
+
+
+def raw_commit(workspace: GitWorkspace, headers: list[str], message: str = "forged\n") -> str:
+    """A commit object with exactly these `author`/`committer` header lines (a hand-built object,
+    what `git hash-object` takes from a hostile agent), on top of the current tip."""
+    parent = raw("rev-parse", "HEAD", cwd=workspace.repo, git=workspace.git)
+    tree = raw("rev-parse", "HEAD^{tree}", cwd=workspace.repo, git=workspace.git)
+    body = f"tree {tree}\nparent {parent}\n" + "".join(f"{line}\n" for line in headers)
+    done = subprocess.run(
+        [workspace.git, "hash-object", "--literally", "-t", "commit", "-w", "--stdin"],
+        cwd=workspace.repo,
+        input=body + "\n" + message,
+        env={"PATH": os.environ["PATH"], "HOME": str(workspace.repo), "GIT_CONFIG_NOSYSTEM": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+SYSTEM = f"{IDENTITY.name} <{IDENTITY.email}> 1700000000 +0000"
+ALICE = "Alice Human <alice@example.com> 1700000000 +0000"
+DUPLICATES: dict[str, list[str]] = {
+    "a second committer after the system one": [
+        f"author {SYSTEM}",
+        f"committer {ALICE}",
+        f"committer {SYSTEM}",
+    ],
+    "a second committer before the system one": [
+        f"author {SYSTEM}",
+        f"committer {SYSTEM}",
+        f"committer {ALICE}",
+    ],
+    "a second author": [f"author {ALICE}", f"author {SYSTEM}", f"committer {SYSTEM}"],
+    "no committer": [f"author {SYSTEM}"],
+    "a committer line that is not a plain identity": [
+        f"author {SYSTEM}",
+        f"committer {IDENTITY.name} <{IDENTITY.email}> <{ALICE}",
+    ],
+}
+
+
+# #762-T16
+@pytest.mark.parametrize("name", sorted(DUPLICATES))
+def test_a_commit_without_exactly_one_author_and_one_committer_is_refused(
+    rig: Rig, name: str
+) -> None:
+    workspace = rig.prepared()
+    good = commit(workspace, "a.txt")
+    workspace.push()
+    forged = raw_commit(workspace, DUPLICATES[name])
+    bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", forged)
+    commit(workspace, "c.txt")  # an honest commit on top does not hide it
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert "alice" not in str(refused.value).lower()
+    assert rig.origin.tip(BRANCH) == good
+    assert workspace.pushed_tip == good
+
+
+# #762-T16
+def test_a_commit_with_one_author_and_one_committer_of_the_system_passes_the_header_check(
+    rig: Rig,
+) -> None:
+    workspace = rig.prepared()
+    plain = raw_commit(workspace, [f"author {SYSTEM}", f"committer {SYSTEM}"])
+    bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", plain)
+
+    assert workspace.push().head == plain
+    assert rig.origin.tip(BRANCH) == plain
+
+
+# #762-T16
+def test_lines_of_the_message_that_look_like_headers_do_not_count(rig: Rig) -> None:
+    workspace = rig.prepared()
+    plain = raw_commit(
+        workspace,
+        [f"author {SYSTEM}", f"committer {SYSTEM}"],
+        message=f"committer {ALICE}\nauthor {ALICE}\n",
+    )
+    bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", plain)
+
+    assert workspace.push().head == plain
+
+
+# -- a refusal is decided by git's own result, not by what its output says ------------------
+
+FAKE_REFUSALS = (
+    "(non-fast-forward)",
+    "non-commit object",
+    "fsck error",
+    "couldn't find remote ref",
+)
+
+
+# #762-T09
+@pytest.mark.parametrize("text", FAKE_REFUSALS)
+def test_a_line_in_packed_refs_that_imitates_a_refusal_does_not_end_the_turn(
+    rig: Rig, text: str
+) -> None:
+    workspace = rig.prepared()
+    tip = commit(workspace, "a.txt")
+    packed = workspace.repo / ".git" / "packed-refs"
+    packed.write_text(f"# pack-refs with: peeled\nnot a ref line {text}\n")
+
+    with pytest.raises(PushUnverified) as unverified:
+        workspace.push()
+
+    assert unverified.value.code is ErrorCode.RUNNER_ERROR
+    assert text not in str(unverified.value)
+    packed.unlink()
+    assert workspace.push().head == tip, "the turn went on: nothing was refused"
+    assert rig.origin.tip(BRANCH) == tip
+
+
+# #762-T06
+def test_a_branch_pointing_at_a_tree_is_refused_by_what_it_points_at(rig: Rig) -> None:
+    workspace = rig.prepared()
+    good = commit(workspace, "a.txt")
+    workspace.push()
+    tree = raw("rev-parse", "HEAD^{tree}", cwd=workspace.repo, git=rig.git)
+    write_ref(workspace, tree)
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert rig.origin.tip(BRANCH) == good
+    assert mirror_has(workspace, f"refs/heads/{BRANCH}")
+    assert raw("rev-parse", f"refs/heads/{BRANCH}", cwd=workspace.mirror, git=rig.git) == good
+
+
+# #762-T06
+def test_a_branch_pointing_at_an_annotated_tag_is_refused(rig: Rig) -> None:
+    workspace = rig.prepared()
+    good = commit(workspace, "a.txt")
+    workspace.push()
+    done = as_agent(
+        workspace, "-c", "core.hooksPath=/dev/null", "tag", "-a", "-m", "t", "tagged", good
+    )
+    assert done.returncode == 0, done.stderr
+    tag = raw("rev-parse", "refs/tags/tagged", cwd=workspace.repo, git=rig.git)
+    write_ref(workspace, tag)
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert rig.origin.tip(BRANCH) == good
+
+
+# #762-T06
+def test_a_rewrite_leaves_the_tip_of_the_mirror_where_it_was(
+    rig: Rig,
+) -> None:
+    workspace = rig.prepared()
+    good = commit(workspace, "a.txt")
+    workspace.push()
+    bypass(workspace, "commit", "--amend", "-qm", "rewritten")
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert raw("rev-parse", f"refs/heads/{BRANCH}", cwd=workspace.mirror, git=rig.git) == good
+
+
+# -- the mirror never collects garbage in the background ----------------------------------------
+
+
+# #762-T15
+def test_no_background_gc_or_maintenance_is_started_in_the_mirror(rig: Rig) -> None:
+    workspace = rig.prepared()
+    marker = rig.base / "gc-ran"
+    hook = workspace.mirror / "hooks" / "pre-auto-gc"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\n: > {marker}\nexit 1\n")
+    hook.chmod(0o755)
+    for key, value in (
+        ("gc.auto", "1"),
+        ("gc.autoPackLimit", "1"),
+        ("fetch.unpackLimit", "1"),
+        ("maintenance.auto", "true"),
+    ):
+        raw("config", key, value, cwd=workspace.mirror, git=rig.git)
+    for number in range(3):
+        commit(workspace, f"f{number}.txt")
+        workspace.push()
+
+    assert not marker.exists(), "a push started git gc --auto in the mirror"

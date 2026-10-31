@@ -182,7 +182,12 @@ def test_the_agent_branch_is_read_by_an_upload_pack_that_runs_as_the_agents_user
         workspace.push()
 
     reads = [call for call in calls if "ls-remote" in call or "fetch" in call]
-    assert len(reads) == 2, "the tip is listed once and fetched once"
+    # The tip is listed, the branch fetched, and the failed fetch is explained by listing it again.
+    assert [call[0] if call[0] == "ls-remote" else "fetch" for call in reads] == [
+        "ls-remote",
+        "fetch",
+        "ls-remote",
+    ]
     for call in reads:
         (option,) = [argument for argument in call if argument.startswith("--upload-pack=")]
         command = shlex.split(option.removeprefix("--upload-pack="))
@@ -208,17 +213,54 @@ def test_the_fetch_of_the_agent_branch_checks_its_objects_and_takes_no_tags(
 
 
 # #762-T09
-def test_git_output_on_the_agents_repository_is_dropped_except_for_a_guard_denial() -> None:
+def test_git_output_on_the_agents_repository_is_dropped_and_a_denial_becomes_a_fixed_text() -> None:
     process = GitProcess("git", "/usr/bin", Path("/"), "ghs_token")
     secret = "fatal: unexpected line in ./packed-refs: SECRET-LINE\n"
 
     assert process.agent_detail(secret) == ""
     assert (
         process.agent_detail(secret + "code-reviewer-guard: HEAD may only follow implementer/x\n")
-        == "code-reviewer-guard: HEAD may only follow implementer/x"
+        == "HEAD may only follow the agent's branch"
     )
-    assert len(process.agent_detail("code-reviewer-guard: " + "x" * 1000)) <= 300
-    assert "ghs_token" not in process.agent_detail("code-reviewer-guard: ghs_token")
+
+
+# #762-T09
+@pytest.mark.parametrize(
+    ("line", "fixed"),
+    [
+        ("the guard configuration is missing", "the guard configuration is not usable"),
+        ("the guard configuration is incomplete", "the guard configuration is not usable"),
+        (
+            "the guard configuration names a repository that is not one",
+            "the guard configuration is not usable",
+        ),
+        ("deleting implementer/x is not allowed", "deleting a ref is not allowed"),
+        ("deleting refs/tags/SECRET is not allowed", "deleting a ref is not allowed"),
+        ("implementer/x may only move forward", "the branch may only move forward"),
+        ("the tip must contain the start commit", "the tip must contain the start commit"),
+        ("HEAD may only point at implementer/x", "HEAD may only follow the agent's branch"),
+        ("HEAD may only follow implementer/x", "HEAD may only follow the agent's branch"),
+        ("updating refs/heads/SECRET is not allowed", "only the agent's branch may be updated"),
+    ],
+)
+def test_every_denial_of_the_hook_maps_to_a_text_the_agent_cannot_choose(
+    line: str, fixed: str
+) -> None:
+    process = GitProcess("git", "/usr/bin", Path("/"), "ghs_token")
+
+    assert process.agent_detail(f"code-reviewer-guard: {line}\n") == fixed
+
+
+# #762-T09
+def test_a_line_that_claims_to_be_a_denial_but_is_no_known_one_says_nothing_of_its_own() -> None:
+    process = GitProcess("git", "/usr/bin", Path("/"), "ghs_token")
+
+    detail = process.agent_detail(
+        "code-reviewer-guard: " + "x" * 1000 + "\ncode-reviewer-guard: ghs_token\n"
+    )
+
+    assert detail == "the guard refused the change"
+    assert "ghs_token" not in detail and "x" * 20 not in detail
 
 
 # #762-T09
@@ -230,3 +272,22 @@ def test_control_characters_and_the_token_are_cleaned_from_the_detail_of_the_run
     assert "\x1b" not in cleaned and "\x00" not in cleaned
     assert "ghs_token" not in cleaned
     assert cleaned.endswith("second line")
+
+
+# #762-T15
+def test_every_git_on_the_mirror_switches_auto_gc_and_auto_maintenance_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _recording_git(monkeypatch)
+    workspace = _workspace(tmp_path)
+
+    workspace.agent_tip()
+    with pytest.raises(JobError):
+        workspace.push()
+
+    on_the_mirror = [call for call in calls if "--git-dir" in call]
+    assert on_the_mirror, "the push runs git on the mirror"
+    for call in on_the_mirror:
+        pairs = [(call[i], call[i + 1]) for i in range(len(call) - 1)]
+        assert ("-c", "gc.auto=0") in pairs, call
+        assert ("-c", "maintenance.auto=false") in pairs, call

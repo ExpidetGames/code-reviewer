@@ -26,7 +26,11 @@ from workspace_support import (
     spool_lines,
 )
 
-from code_reviewer_runner.implementer.git_workspace import LEFTOVER_MESSAGE, GitWorkspace
+from code_reviewer_runner.implementer.git_workspace import (
+    LEFTOVER_MESSAGE,
+    GitWorkspace,
+    RepositoryUnusable,
+)
 from code_reviewer_runner.job import JobError
 from code_reviewer_runner.result import ErrorCode
 from git_support import (
@@ -440,10 +444,63 @@ def test_commit_all_goes_through_the_guard(rig: Rig) -> None:
     # A guard that denies everything: its configuration is gone.
     (rig.base / "run" / "guard.conf").unlink()
 
-    with pytest.raises(JobError) as refused:
+    with pytest.raises(RepositoryUnusable) as refused:
         workspace.commit_all()
 
-    assert refused.value.code is ErrorCode.SETUP_FAILED
+    # The agent ran and spent the model budget: not a free class (`setup_failed`).
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert "the guard configuration is not usable" in refused.value.detail
+
+
+# #762-T08
+def test_a_local_hooks_path_of_the_agent_does_not_run_or_speak_in_the_leftover_commit(
+    rig: Rig,
+) -> None:
+    workspace = rig.prepared()
+    hooks = rig.base / "agent-hooks"
+    hooks.mkdir()
+    marker = rig.base / "hook-ran"
+    script = hooks / "pre-commit"
+    script.write_text(
+        f"#!/bin/sh\n: > {marker}\necho 'code-reviewer-guard: SECRET-FROM-THE-AGENT' >&2\nexit 1\n"
+    )
+    script.chmod(0o755)
+    raw("config", "core.hooksPath", str(hooks), cwd=workspace.repo, git=rig.git)
+    (workspace.repo / "new.txt").write_text("n\n")
+
+    sha = workspace.commit_all()
+
+    assert sha is not None and sha == raw("rev-parse", "HEAD", cwd=workspace.repo, git=rig.git)
+    assert not marker.exists(), "the agent's own pre-commit ran in a call of the runner"
+    assert spool_lines(workspace)[-1].endswith(sha), "the guard of the image still ran"
+
+
+# #762-T09
+def test_text_the_agent_chose_does_not_reach_the_error_of_a_denied_leftover_commit(
+    rig: Rig,
+) -> None:
+    workspace = rig.prepared()
+    name = "SECRET-BRANCH-" + "x" * 20
+    done = agent_git(workspace, "-c", "core.hooksPath=/dev/null", "checkout", "-q", "-b", name)
+    assert done.returncode == 0, done.stderr
+    (workspace.repo / "new.txt").write_text("n\n")
+
+    with pytest.raises(RepositoryUnusable) as refused:
+        workspace.commit_all()
+
+    assert name not in refused.value.detail and name not in str(refused.value)
+    assert "only the agent's branch may be updated" in refused.value.detail
+
+
+# #762-T08
+def test_a_status_that_fails_after_the_agent_ran_is_a_charged_class(rig: Rig) -> None:
+    workspace = rig.prepared()
+    (workspace.repo / ".git" / "HEAD").write_text("garbage\n")
+
+    with pytest.raises(RepositoryUnusable) as refused:
+        workspace.dirty()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
 
 
 # #762-T10

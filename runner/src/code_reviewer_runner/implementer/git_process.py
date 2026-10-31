@@ -30,9 +30,23 @@ TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
 MIN_GIT_VERSION: tuple[int, ...] = (2, 53)
 # Characters of git's own output that may travel in an error detail.
 DETAIL_CHARS = 600
-# What of the output of a command on the agent's data may travel: only the guard's own denials.
-AGENT_DETAIL_CHARS = 300
 GUARD_DENIAL = "code-reviewer-guard: "
+# What the hook (`runner/guard/reference-transaction`) says when it denies a change, mapped to a
+# text of ours. The hook's own words carry the agent's choices (`updating <ref> is not allowed`),
+# and a line that starts like a denial can be printed by anything the agent configured, so nothing
+# of the line travels: only one of these fixed texts.
+_DENIALS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"the guard configuration .+"), "the guard configuration is not usable"),
+    (re.compile(r"deleting .+ is not allowed"), "deleting a ref is not allowed"),
+    (re.compile(r".+ may only move forward"), "the branch may only move forward"),
+    (re.compile(r"the tip must contain the start commit"), "the tip must contain the start commit"),
+    (
+        re.compile(r"HEAD may only (?:point at|follow) .+"),
+        "HEAD may only follow the agent's branch",
+    ),
+    (re.compile(r"updating .+ is not allowed"), "only the agent's branch may be updated"),
+)
+UNKNOWN_DENIAL = "the guard refused the change"
 DEFAULT_TIMEOUT = 600.0
 
 _VERSION = re.compile(r"git version (\d+(?:\.\d+)*)")
@@ -84,6 +98,9 @@ class Outcome:
     returncode: int
     stdout: str
     stderr: str
+    # The process was killed at the timeout or never started: git said nothing about the data, so
+    # nothing may be concluded from the return code.
+    unanswered: bool = False
 
 
 class GitProcess:
@@ -117,14 +134,21 @@ class GitProcess:
     def agent_detail(self, text: str) -> str:
         """The output of a git command that worked on what the agent controls (its repository, its
         refs, its config): none of it travels, because the agent decides what git prints
-        (`fatal: unexpected line in ./packed-refs: <that line>`). Only a denial of the guard hook
-        does, a fixed text, cleaned and short. An empty string says that nothing could be kept."""
-        kept = [
-            _CONTROL.sub("?", line).strip()
-            for line in self._redactor.redact(text).splitlines()
-            if line.startswith(GUARD_DENIAL)
-        ]
-        return " | ".join(kept)[:AGENT_DETAIL_CHARS]
+        (`fatal: unexpected line in ./packed-refs: <that line>`), and it can print a line that
+        looks like the guard's. A denial of the guard hook becomes one of a few fixed texts of ours
+        (`_DENIALS`); a line that claims to be one and is none says `UNKNOWN_DENIAL`. An empty
+        string says that nothing was a denial."""
+        kept: list[str] = []
+        for line in text.splitlines():
+            if not line.startswith(GUARD_DENIAL):
+                continue
+            said = line[len(GUARD_DENIAL) :].strip()
+            fixed = next(
+                (to for pattern, to in _DENIALS if pattern.fullmatch(said)), UNKNOWN_DENIAL
+            )
+            if fixed not in kept:
+                kept.append(fixed)
+        return " | ".join(kept)
 
     def run(
         self,
@@ -153,7 +177,7 @@ class GitProcess:
                 **(spawn or {}),
             )
         except OSError as error:
-            return Outcome(255, "", f"git cannot run: {error.strerror or 'error'}")
+            return Outcome(255, "", f"git cannot run: {error.strerror or 'error'}", unanswered=True)
         try:
             stdout, stderr = child.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -161,5 +185,5 @@ class GitProcess:
                 os.killpg(child.pid, signal.SIGKILL)
             with contextlib.suppress(subprocess.TimeoutExpired):
                 child.communicate(timeout=10)
-            return Outcome(255, "", f"git {args[0] if args else ''} timed out")
+            return Outcome(255, "", f"git {args[0] if args else ''} timed out", unanswered=True)
         return Outcome(child.returncode, stdout, stderr)
