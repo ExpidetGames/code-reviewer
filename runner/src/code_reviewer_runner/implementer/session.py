@@ -258,6 +258,17 @@ def _implementer_code(code: ErrorCode) -> ErrorCode:
     return code
 
 
+def _not_kept(names: list[str]) -> str:
+    """The sentence at the end of the summary when the agent touched the names the engine loads."""
+    if not names:
+        return ""
+    return (
+        f"[Not made: the agent created or changed {', '.join(names)}. These files are not "
+        "available to the Implementer and cannot be changed in a run, so nothing of that change "
+        "was kept.]"
+    )
+
+
 class ImplementerSession:
     """One turn. Build it with a prepared workspace; `run()` never raises for a failed turn (the
     result holds the code) and ends every process it started."""
@@ -498,7 +509,8 @@ class ImplementerSession:
         elif error is None and not pushed:
             error = (ErrorCode.PUSH_REJECTED, "the work could not be pushed")
         usage = self._usage()
-        summary = clip_summary(self._summary, self._secrets())
+        touched = self._touched_engine_inputs()
+        summary = clip_summary(self._summary, self._secrets(), tail=_not_kept(touched))
         return TurnResult(
             error_code=None if error is None else error[0],
             error_detail=None if error is None else error[1],
@@ -513,6 +525,14 @@ class ImplementerSession:
             usage=usage,
             notes=tuple(self._notes),
         )
+
+    def _touched_engine_inputs(self) -> list[str]:
+        """The names the engine loads that the agent created or changed: none of it is kept, and
+        the person is told (a loss they do not hear about is a silent one)."""
+        present = self.workspace.engine_inputs_present()
+        if present:
+            self._note("not kept, outside the sparse checkout: " + ", ".join(present))
+        return present
 
     def _usage(self) -> Usage:
         if self._native is None:

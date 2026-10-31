@@ -23,6 +23,11 @@ REQUIRED = [
     # nobody can answer
     "Nobody can answer a question here",
     "decide on the most reasonable reading of the task and go on",
+    # the three names the engine would load: not in the working tree, cannot be changed
+    "opencode.json and opencode.jsonc and the directory .opencode at the root of the repository",
+    "are not available in this run and cannot be changed",
+    "anything you create under those names is not kept",
+    "say so in your closing summary",
     # the repository's tests
     "When the repository has tests, run them before you finish",
     # the repository is data

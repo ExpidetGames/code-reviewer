@@ -79,6 +79,18 @@ def test_a_secret_in_its_encoded_forms_is_gone_too() -> None:
     assert clip_summary("Authorization: Bearer abcdef0123456789", []).count("abcdef") == 0
 
 
+# #764-R11
+def test_a_note_is_appended_after_the_text_and_the_cut_leaves_room_for_it() -> None:
+    note = "[Not made: opencode.json]"
+
+    short = clip_summary("Done.", [], tail=note)
+    long = clip_summary("x" * (MAX_SUMMARY_CHARS * 2), [], tail=note)
+
+    assert short == "Done.\n\n" + note
+    assert len(long) == MAX_SUMMARY_CHARS and long.endswith(note)
+    assert clip_summary("", [], tail=note) == note, "a turn with no text still says it"
+
+
 # -- the bounds on tool results ----------------------------------------------------------------
 
 

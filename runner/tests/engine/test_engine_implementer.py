@@ -963,3 +963,84 @@ def test_a_push_the_provider_cannot_take_for_now_does_not_cost_the_commits_after
         assert result.ok, (result.error_code, result.error_detail, result.notes)
         assert [c.subject for c in result.commits] == ["Add one", "Add two"]
         assert result.pushed and turned.origin_tip() == result.head_commit
+
+
+# #764-R11
+def test_a_new_file_of_the_engine_names_is_not_kept_and_the_rest_of_the_work_is(
+    tmp_path: Path,
+) -> None:
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "opencode.json", "{}\n"),
+            write_file(repo, ".opencode/plugin/x.js", "export default async () => ({})\n"),
+            write_file(repo, "a.txt"),
+            bash("git add a.txt && git commit -qm 'Add a'"),
+            says("I added a.txt and opencode.json."),
+        ]
+
+    with implementer_turn(tmp_path, script) as turned:
+        result = turned.result
+
+        assert result.ok, (result.error_code, result.error_detail, result.notes)
+        assert [c.subject for c in result.commits] == ["Add a"]
+        assert result.pushed and turned.origin_tip() == result.head_commit
+        assert len(turned.messages) == 1, "these files are no change: no extra message"
+        assert result.summary.startswith("I added a.txt and opencode.json.")
+        assert (
+            "not available" in result.summary and "opencode.json" in result.summary.splitlines()[-1]
+        )
+        assert ".opencode" in result.summary.splitlines()[-1]
+
+
+# #764-R11
+def test_a_turn_that_only_wrote_those_files_gave_up_and_says_why(tmp_path: Path) -> None:
+    def script(repo: Path) -> list[Turn]:
+        return [write_file(repo, "opencode.json", "{}\n"), says("Configured opencode.json.")]
+
+    with implementer_turn(tmp_path, script) as turned:
+        result = turned.result
+
+        assert result.error_code is ErrorCode.AGENT_GAVE_UP
+        assert result.commits == () and not result.pushed and turned.origin_tip() is None
+        assert len(turned.messages) == 1
+        assert "Configured opencode.json." in result.summary
+        assert "not available" in result.summary
+
+
+# #764-R11
+def test_an_edit_of_a_tracked_file_of_the_engine_names_is_reported_not_lost_silently(
+    tmp_path: Path,
+) -> None:
+    def seed(directory: Path) -> None:
+        (directory / "opencode.json").write_text('{"theme": "dark"}\n')
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "opencode.json", '{"theme": "light"}\n'),
+            write_file(repo, "a.txt"),
+            bash("git add a.txt && git commit -qm 'Add a'"),
+            says("done"),
+        ]
+
+    with implementer_turn(tmp_path, script, seed=seed) as turned:
+        result = turned.result
+
+        assert result.ok, (result.error_code, result.error_detail)
+        tracked = raw(
+            "show",
+            f"{result.head_commit}:opencode.json",
+            cwd=turned.workspace.mirror,
+            git=turned.rig.git,
+        )
+        assert "dark" in tracked, "the file at the remote is as it was"
+        assert "opencode.json" in result.summary.splitlines()[-1]
+
+
+# #764-R11
+def test_nothing_is_added_to_the_summary_when_the_agent_left_those_names_alone(
+    tmp_path: Path,
+) -> None:
+    with implementer_turn(
+        tmp_path, lambda repo: [write_file(repo, "a.txt"), commit("Add a"), says("done")]
+    ) as turned:
+        assert turned.result.summary == "done"

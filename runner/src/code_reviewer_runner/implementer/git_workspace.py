@@ -86,6 +86,11 @@ LEFTOVER_MESSAGE = "Implementer: uncommitted changes of the turn"
 # configurable may come from the repository (owner rule), so the agent's working tree is a sparse
 # checkout without them: they stay in every commit and are never on disk.
 ENGINE_INPUTS = (".opencode", "opencode.json", "opencode.jsonc")
+# Pathspecs that leave exactly those names out of a command of the leftover handling: git refuses to
+# add a path outside the sparse definition (exit 1), and a change of a tracked one is invisible to
+# it. They are not the agent's to change in this run, so they never count as a change and never
+# block the commit of the rest.
+_NOT_THE_AGENTS = tuple(f":(exclude,top){name}" for name in ENGINE_INPUTS)
 # The most often a batch of commits is pushed while the agent works (the final push is not held
 # back).
 PUSH_INTERVAL_SECONDS = 120.0
@@ -506,7 +511,15 @@ class GitWorkspace:
                 raise StopReading
 
         done = self._agent_stream(
-            ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            [
+                "--no-optional-locks",
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--",
+                *_NOT_THE_AGENTS,
+            ],
             first,
         )
         if seen:
@@ -529,7 +542,7 @@ class GitWorkspace:
             for setting in (f"core.hooksPath={self.layout.guard_dir}", *_LEFTOVER_COMMIT_OPTIONS)
             for arg in ("-c", setting)
         ]
-        added = self._as_agent([*options, "add", "-A"])
+        added = self._as_agent([*options, "add", "-A", "--", *_NOT_THE_AGENTS])
         if added.returncode != 0:
             raise RepositoryUnusable("git add failed: " + self._agent_detail(added))
         staged = self._as_agent([*options, "diff", "--cached", "--quiet"])
@@ -544,6 +557,12 @@ class GitWorkspace:
         if head.returncode != 0 or not head.stdout.strip():
             raise RepositoryUnusable("the new commit cannot be read: " + self._agent_detail(head))
         return head.stdout.strip()
+
+    def engine_inputs_present(self) -> list[str]:
+        """Which of the names the engine loads (`ENGINE_INPUTS`) exist in the agent's working tree:
+        the agent created or changed them, and none of it is kept. A look at the names with `lstat`
+        (nothing is followed or opened), which is safe in a directory the agent owns."""
+        return [name for name in ENGINE_INPUTS if os.path.lexists(self.repo / name)]
 
     def commits_since_start(self) -> list[CommitInfo]:
         """The commits of the agent's branch after the start commit, oldest first, bounded as the

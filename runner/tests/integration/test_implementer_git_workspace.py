@@ -683,3 +683,74 @@ def test_a_name_that_is_a_link_or_a_file_instead_of_a_directory_is_left_out_too(
 
     assert not (workspace.repo / ".opencode").exists()
     assert not (workspace.repo / ".opencode").is_symlink()
+
+
+# -- the three names the engine loads are not the agent's to change (#764, second review) ---------
+
+
+def commit_all_changes(workspace: GitWorkspace) -> str | None:
+    return workspace.commit_all("Add the work")
+
+
+def tree_of(rig: Rig, workspace: GitWorkspace) -> list[str]:
+    head = raw("rev-parse", "HEAD", cwd=workspace.repo, git=rig.git)
+    return raw("ls-tree", "-r", "--name-only", head, cwd=workspace.repo, git=rig.git).splitlines()
+
+
+# #764-R11
+@pytest.mark.parametrize("name", ["opencode.json", "opencode.jsonc", ".opencode/plugin/x.js"])
+def test_a_new_file_the_engine_loads_is_no_change_and_blocks_no_commit(rig: Rig, name: str) -> None:
+    workspace = rig.prepared()
+    (workspace.repo / name).parent.mkdir(parents=True, exist_ok=True)
+    (workspace.repo / name).write_text("{}\n")
+
+    assert workspace.dirty() is False, "these names never count as a change"
+    assert commit_all_changes(workspace) is None, "and there is nothing to commit"
+    assert workspace.engine_inputs_present() == [name.split("/")[0]]
+
+
+# #764-R11
+def test_the_rest_of_the_work_is_committed_whatever_is_beside_it(rig: Rig) -> None:
+    seed_hostile(rig)  # a tracked opencode.json, opencode.jsonc and .opencode/plugin/evil.js
+    workspace = rig.prepared()
+    (workspace.repo / "opencode.json").write_text('{"changed": true}\n')  # an edit of a tracked one
+    (workspace.repo / ".opencode").mkdir()
+    (workspace.repo / ".opencode" / "new.md").write_text("new\n")
+    (workspace.repo / "src" / "keep.txt").write_text("the real work\n")
+    (workspace.repo / "docs").mkdir()
+    (workspace.repo / "docs" / "opencode.json").write_text("{}\n")  # nested: an ordinary file
+    assert workspace.dirty() is True
+
+    sha = commit_all_changes(workspace)
+
+    assert sha is not None
+    changed = {change.path for change in workspace.changed_files()}
+    assert changed == {"src/keep.txt", "docs/opencode.json"}
+    tree = tree_of(rig, workspace)
+    assert "opencode.json" in tree and ".opencode/plugin/evil.js" in tree, "the tracked ones stay"
+    assert ".opencode/new.md" not in tree
+    head_json = raw("show", "HEAD:opencode.json", cwd=workspace.repo, git=rig.git)
+    assert "changed" not in head_json, "an edit of a tracked one is not in the commit"
+    assert workspace.engine_inputs_present() == [".opencode", "opencode.json"]
+    assert workspace.dirty() is False, "after the commit only the ignored names are left"
+
+
+# #764-R11
+def test_an_edit_of_a_tracked_file_the_engine_loads_alone_is_no_change(rig: Rig) -> None:
+    seed_hostile(rig)
+    workspace = rig.prepared()
+    (workspace.repo / "opencode.json").write_text('{"changed": true}\n')
+
+    assert workspace.dirty() is False
+    assert commit_all_changes(workspace) is None
+    assert workspace.engine_inputs_present() == ["opencode.json"]
+
+
+# #764-R11
+def test_nothing_is_reported_when_the_agent_did_not_touch_them(rig: Rig) -> None:
+    seed_hostile(rig)
+    workspace = rig.prepared()
+    (workspace.repo / "a.txt").write_text("x\n")
+
+    assert workspace.engine_inputs_present() == []
+    assert commit_all_changes(workspace) is not None

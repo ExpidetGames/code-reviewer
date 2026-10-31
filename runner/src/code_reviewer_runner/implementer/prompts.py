@@ -36,6 +36,12 @@ for you, and a commit that rewrites history is refused.
 
 When the repository has tests, run them before you finish.
 
+The files opencode.json and opencode.jsonc and the directory .opencode at the root of the \
+repository are not available in this run and cannot be changed: they are not in your working \
+tree, and anything you create under those names is not kept (git add -A refuses while such a path \
+exists, so do not create one). If the task needs a change there, leave it and say so in your \
+closing summary.
+
 """
 
 _REGISTRIES = """\

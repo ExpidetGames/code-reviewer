@@ -20,13 +20,17 @@ MAX_SUMMARY_CHARS = 8192
 _CUT_MARK = "\n[...]"
 
 
-def clip_summary(text: str, secrets: Iterable[str]) -> str:
+def clip_summary(text: str, secrets: Iterable[str], *, tail: str = "") -> str:
     """The agent's closing text as the summary: the job's secrets are gone first (a secret cut in
-    half would no longer match), then the text is cut at `MAX_SUMMARY_CHARS`."""
+    half would no longer match), then the text is cut so that it and `tail` fit `MAX_SUMMARY_CHARS`.
+    `tail` is the runner's own note (what of the agent's work was not kept); it is never cut and
+    follows the text after a blank line."""
     clean = Redactor(secrets).redact(text).strip()
-    if len(clean) <= MAX_SUMMARY_CHARS:
-        return clean
-    return clean[: MAX_SUMMARY_CHARS - len(_CUT_MARK)] + _CUT_MARK
+    suffix = f"\n\n{tail}" if tail and clean else tail
+    room = MAX_SUMMARY_CHARS - len(suffix)
+    if len(clean) > room:
+        clean = clean[: room - len(_CUT_MARK)] + _CUT_MARK
+    return clean + suffix
 
 
 @dataclass(frozen=True)
