@@ -615,3 +615,71 @@ def test_a_plain_directory_of_the_runner_is_accepted_and_made_enterable(rig: Rig
     rig.workspace().clone_mirror()
 
     assert stat.S_IMODE(directory.stat().st_mode) == 0o755
+
+
+# -- what the engine would load from the working tree is not on disk (#764) ----------------------
+
+HOSTILE = {
+    ".opencode/plugin/evil.js": "export default async () => ({})\n",
+    "opencode.json": '{"plugin": ["./evil.js"]}\n',
+    "opencode.jsonc": "{}\n",
+    "src/keep.txt": "kept\n",
+}
+
+
+def seed_hostile(rig: Rig) -> None:
+    seed = rig.origin.seed
+    for name, text in HOSTILE.items():
+        (seed / name).parent.mkdir(parents=True, exist_ok=True)
+        (seed / name).write_text(text)
+    raw("add", "-A", cwd=seed, git=rig.git)
+    raw("commit", "-qm", "hostile", cwd=seed, git=rig.git)
+    raw("push", "-q", "origin", "main", cwd=seed, git=rig.git)
+
+
+# #764-R6
+def test_the_files_the_engine_loads_from_its_directory_are_not_in_the_working_tree(
+    rig: Rig,
+) -> None:
+    seed_hostile(rig)
+
+    workspace = rig.prepared()
+
+    assert not (workspace.repo / ".opencode").exists()
+    assert not (workspace.repo / "opencode.json").exists()
+    assert not (workspace.repo / "opencode.jsonc").exists()
+    assert (workspace.repo / "src" / "keep.txt").read_text() == "kept\n"
+    assert workspace.dirty() is False, "a missing file of the sparse checkout is not a change"
+
+
+# #764-R6
+def test_a_commit_of_the_agent_keeps_them_in_the_tree_and_the_push_does_not_delete_them(
+    rig: Rig,
+) -> None:
+    seed_hostile(rig)
+    workspace = rig.prepared()
+    (workspace.repo / "new.txt").write_text("x\n")
+    assert agent_git(workspace, "add", "-A").returncode == 0
+    assert agent_git(workspace, "commit", "-qm", "new").returncode == 0
+
+    result = workspace.push()
+
+    tree = raw("ls-tree", "-r", "--name-only", result.head or "", cwd=workspace.mirror, git=rig.git)
+    assert set(HOSTILE) | {"new.txt", "README.md", "src/app.py"} <= set(tree.splitlines())
+    assert [change.path for change in workspace.changed_files()] == ["new.txt"]
+
+
+# #764-R6
+def test_a_name_that_is_a_link_or_a_file_instead_of_a_directory_is_left_out_too(
+    rig: Rig,
+) -> None:
+    seed = rig.origin.seed
+    (seed / ".opencode").symlink_to("/etc")
+    raw("add", "-A", cwd=seed, git=rig.git)
+    raw("commit", "-qm", "link", cwd=seed, git=rig.git)
+    raw("push", "-q", "origin", "main", cwd=seed, git=rig.git)
+
+    workspace = rig.prepared()
+
+    assert not (workspace.repo / ".opencode").exists()
+    assert not (workspace.repo / ".opencode").is_symlink()

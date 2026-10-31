@@ -79,6 +79,13 @@ from .history import (
 )
 
 LEFTOVER_MESSAGE = "Implementer: uncommitted changes of the turn"
+# The files of a repository that the pinned engine loads from its working directory whatever the
+# flags say (#764): its v2 configuration service reads `.opencode/` (plugins, tools, commands,
+# agents, `opencode.json`) and `opencode.json(c)` at the root of the project unconditionally, and
+# `OPENCODE_DISABLE_PROJECT_CONFIG` only guards the older service. Nothing executable or
+# configurable may come from the repository (owner rule), so the agent's working tree is a sparse
+# checkout without them: they stay in every commit and are never on disk.
+ENGINE_INPUTS = (".opencode", "opencode.json", "opencode.jsonc")
 # The most often a batch of commits is pushed while the agent works (the final push is not held
 # back).
 PUSH_INTERVAL_SECONDS = 120.0
@@ -430,6 +437,7 @@ class GitWorkspace:
                 "--single-branch",
                 f"--branch={base}",
                 "--template=",
+                "--no-checkout",
                 f"file://{self.mirror}",
                 str(self.repo),
             ],
@@ -446,6 +454,8 @@ class GitWorkspace:
             ["config", "user.name", self.identity.name],
             ["config", "user.email", self.identity.email],
             ["config", "commit.gpgsign", "false"],
+            # What the engine would load from the working tree stays out of it (see `ENGINE_INPUTS`).
+            ["sparse-checkout", "set", "--no-cone", "/*", *(f"!/{name}" for name in ENGINE_INPUTS)],
             ["checkout", "-q", "-b", self.spec.branch],
         )
         environment = {**self.agent_environment(), "GIT_CONFIG_SYSTEM": "/dev/null"}

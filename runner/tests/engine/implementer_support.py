@@ -39,7 +39,7 @@ from code_reviewer_runner.implementer.git_workspace import GitWorkspace
 from code_reviewer_runner.implementer.session import ImplementerSession, SessionSeams
 from code_reviewer_runner.implementer.turn_result import TurnResult
 from code_reviewer_runner.job import ImplementerInput, parse_implementer_input
-from git_support import TOKEN, Origin, guard_git
+from git_support import TOKEN, Origin, guard_git, raw
 from passthrough_loopback import LoopbackUpstream
 from workspace_support import BRANCH, Rig
 
@@ -169,7 +169,7 @@ def implementer_turn(
     context: int = 1_000_000,
     output: int = OUTPUT_LIMIT,
     command: Sequence[str] | None = None,
-    repo_setup: Callable[[Path], None] | None = None,
+    seed: Callable[[Path], None] | None = None,
     egress: EgressSettings | None = None,
     start_egress: Callable[[EgressSettings], EgressProxy | None] | None = None,
 ) -> Generator[Turned]:
@@ -179,10 +179,14 @@ def implementer_turn(
     a test advances the clock (`scene.clock_offset`) or kills the engine there."""
     git = guard_git()
     rig = Rig(scratch, git, Origin(scratch, git))
+    if seed is not None:
+        # What the repository holds before the turn: committed to the base branch of the origin.
+        seed(rig.origin.seed)
+        raw("add", "-A", cwd=rig.origin.seed, git=git)
+        raw("commit", "-qm", "seed", cwd=rig.origin.seed, git=git)
+        raw("push", "-q", "origin", "main", cwd=rig.origin.seed, git=git)
     workspace = rig.prepared()
     scene = Scene()
-    if repo_setup is not None:
-        repo_setup(workspace.repo)
     entry = ENTRIES[family] if entry is None else entry
     job = implementer_job(
         family,
@@ -224,6 +228,9 @@ def implementer_turn(
         environment: dict[str, str] = dict(options["env"])
         spawned.append(environment)
         config_texts.append(Path(environment["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
+        # The engine's log is kept next to the test's files: a failing test is read from it.
+        log = (scratch / "engine-log.txt").open("ab")
+        options.update(stdout=log, stderr=subprocess.STDOUT)
         process = cast("subprocess.Popen[bytes]", subprocess.Popen(argv, **options))
         processes.append(process)
         return process
