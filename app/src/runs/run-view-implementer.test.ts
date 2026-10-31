@@ -403,13 +403,16 @@ describe("the detail of an implementer run", () => {
 
     expect(run?.instruction.preview).toBe("ok red evil");
     expect(run?.summary).toBe("ok red evil\nsecond line");
-    expect(run?.commits.shown[0]?.subject).toBe("ok red evil not a second subject");
+    expect(run?.commits.shown[0]?.subject).toBe(
+      "ok red evil not a second subject",
+    );
     expect(run?.files.shown[0]?.path).toBe("src/ok red evil.ts");
   });
 
   // #758-T04
   it("keeps HTML and markdown links in the text as they are: the page renders text", () => {
-    const hostile = '<img src=x onerror="alert(1)"> [click](javascript:alert(1))';
+    const hostile =
+      '<img src=x onerror="alert(1)"> [click](javascript:alert(1))';
     const run = view(
       turn({
         result: resultWith({
@@ -612,7 +615,14 @@ describe("the links of an implementer run", () => {
 
   // #758-T06
   it("gives no link for a branch name that would leave the tree path, and none for a sha that is not one", () => {
-    for (const branch of ["../../evil", "a/../../b", "a//b", "./x", "", "a/."]) {
+    for (const branch of [
+      "../../evil",
+      "a/../../b",
+      "a//b",
+      "./x",
+      "",
+      "a/.",
+    ]) {
       expect(
         githubBranchUrl("https://github.com/acme/widgets", branch),
         branch,
@@ -621,7 +631,9 @@ describe("the links of an implementer run", () => {
     expect(
       githubCommitUrl("https://github.com/acme/widgets", "../evil"),
     ).toBeNull();
-    expect(githubCommitUrl("https://github.com/acme/widgets", "abc")).toBeNull();
+    expect(
+      githubCommitUrl("https://github.com/acme/widgets", "abc"),
+    ).toBeNull();
     expect(
       githubCommitUrl("https://github.com/acme/widgets", SHA_B.toUpperCase()),
     ).toBe(`https://github.com/acme/widgets/commit/${SHA_B.toUpperCase()}`);

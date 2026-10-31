@@ -384,9 +384,7 @@ describe("the sentences for the codes of a task", () => {
       expect(text, code).not.toContain(code);
       expect(text, code).not.toBe(UNKNOWN_ERROR_COPY);
     }
-    expect(
-      TURN_CODES.filter((code) => !ALL_CODES.includes(code)),
-    ).toEqual([]);
+    expect(TURN_CODES.filter((code) => !ALL_CODES.includes(code))).toEqual([]);
   });
 
   // #758-T10

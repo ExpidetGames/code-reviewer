@@ -293,7 +293,9 @@ export function githubCommitUrl(
   sha: string,
 ): string | null {
   const base = githubRepositoryBase(repositoryUrl);
-  return base === null || !COMMIT_SHA.test(sha) ? null : `${base}/commit/${sha}`;
+  return base === null || !COMMIT_SHA.test(sha)
+    ? null
+    : `${base}/commit/${sha}`;
 }
 
 const COMMIT_SHA = /^[0-9a-fA-F]{40}$/;
@@ -426,23 +428,19 @@ function implementerDetailView(
           redact(cleanLog(head(source.instruction, MAX_INSTRUCTION_CHARS * 4))),
           MAX_INSTRUCTION_CHARS,
         );
-  const commits = stored.commits.map(
-    (commit): ImplementerCommitView => ({
-      shortSha: commit.sha.slice(0, SHORT_SHA_CHARS),
-      subject: agentText(
-        head(commit.subject, MAX_SUBJECT_CHARS * 4),
-        MAX_SUBJECT_CHARS,
-        true,
-      ),
-      url: stored.pushed ? githubCommitUrl(repositoryUrl, commit.sha) : null,
-    }),
-  );
-  const files = stored.files.map(
-    (file): ImplementerFileView => ({
-      path: agentText(head(file.path, MAX_PATH_CHARS * 4), MAX_PATH_CHARS, true),
-      status: file.status,
-    }),
-  );
+  const commits = stored.commits.map((commit): ImplementerCommitView => ({
+    shortSha: commit.sha.slice(0, SHORT_SHA_CHARS),
+    subject: agentText(
+      head(commit.subject, MAX_SUBJECT_CHARS * 4),
+      MAX_SUBJECT_CHARS,
+      true,
+    ),
+    url: stored.pushed ? githubCommitUrl(repositoryUrl, commit.sha) : null,
+  }));
+  const files = stored.files.map((file): ImplementerFileView => ({
+    path: agentText(head(file.path, MAX_PATH_CHARS * 4), MAX_PATH_CHARS, true),
+    status: file.status,
+  }));
   const summary =
     stored.summary === null
       ? ""
@@ -454,7 +452,8 @@ function implementerDetailView(
   const pushedHead =
     stored.pushed && stored.headCommit !== null ? stored.headCommit : null;
   const failed = job.status === "failed" || job.status === "cancelled";
-  const pushedWork = stored.pushed && (commits.length > 0 || pushedHead !== null);
+  const pushedWork =
+    stored.pushed && (commits.length > 0 || pushedHead !== null);
   return {
     ...row,
     baseBranch:
