@@ -31,6 +31,11 @@ export const IMPLEMENTER_ERROR_CODES = [
    * name as a file or as a folder, not both: `foo` and `foo/bar`). Found in the first 100 branches the platform lists. 409.
    */
   "IMPLEMENTER_BRANCH_CONFLICT",
+  /**
+   * The client request id made a task before, and this body is not that task's (another instruction, branch, base branch,
+   * repository, model or cost limit). Nothing is written; the answer carries the `runId` of the task the id made. 409.
+   */
+  "IMPLEMENTER_REQUEST_REUSED",
   /** The model is not one the claim would run (`reason` says why). 422. */
   "IMPLEMENTER_MODEL_NOT_ALLOWED",
   /** The cost limit is above the operator's maximum per turn; the answer carries `maximumCents`. 422. */
@@ -55,6 +60,7 @@ export const IMPLEMENTER_ERROR_STATUS: Record<
   IMPLEMENTER_BASE_BRANCH_NOT_FOUND: 404,
   IMPLEMENTER_BRANCH_EXISTS: 409,
   IMPLEMENTER_BRANCH_CONFLICT: 409,
+  IMPLEMENTER_REQUEST_REUSED: 409,
   IMPLEMENTER_MODEL_NOT_ALLOWED: 422,
   EXCEEDS_OPERATOR_MAXIMUM: 422,
   IMPLEMENTER_GITHUB_UNAVAILABLE: 503,
@@ -98,10 +104,32 @@ export const MODEL_REFUSAL_REASONS = [
 ] as const;
 export type ModelRefusalReason = (typeof MODEL_REFUSAL_REASONS)[number];
 
+/**
+ * Why a repository cannot be sent a task although it is listed. The form says a different true thing for each: only the first is
+ * cured by approving the new permission.
+ */
+export const UNWRITABLE_REASONS = [
+  /** The installation has not accepted contents write (#749). */
+  "write_not_granted",
+  /** The installation was removed on the platform. */
+  "connection_gone",
+  /** The installation is suspended on the platform. */
+  "connection_suspended",
+  /** The platform rejected the app's own authentication. */
+  "app_auth_failed",
+  /** The platform refuses the app access to the installation. */
+  "scope_refused",
+  /** The platform does not let the app reach the repository. */
+  "repository_not_accessible",
+] as const;
+export type UnwritableReason = (typeof UNWRITABLE_REASONS)[number];
+
 export type ImplementerErrorDetails = {
   issues?: readonly ImplementerIssue[];
   reason?: ModelRefusalReason;
   maximumCents?: number;
+  /** On `IMPLEMENTER_REQUEST_REUSED`: the run of the task the request id made. */
+  runId?: string;
 };
 
 export class ImplementerError extends Error {
@@ -109,6 +137,7 @@ export class ImplementerError extends Error {
   readonly issues: readonly ImplementerIssue[];
   readonly reason: ModelRefusalReason | undefined;
   readonly maximumCents: number | undefined;
+  readonly runId: string | undefined;
   /** The message names the code's meaning only, never a value from the request or from the platform. */
   readonly safeMessage = true as const;
 
@@ -123,5 +152,6 @@ export class ImplementerError extends Error {
     this.issues = details.issues ?? [];
     this.reason = details.reason;
     this.maximumCents = details.maximumCents;
+    this.runId = details.runId;
   }
 }

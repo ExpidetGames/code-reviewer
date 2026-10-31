@@ -18,18 +18,22 @@ import {
 } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { Integration, RepoRef } from "../integrations/types.ts";
+import type { ModelChoice } from "../db/implementer-model-choice.ts";
 import { JobQueueError } from "../jobs/errors.ts";
+import type { EnqueueImplementerTurnResult } from "../jobs/job-types.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
 import { branchConflict } from "./branch-name.ts";
-import { ImplementerError } from "./errors.ts";
+import { ImplementerError, type UnwritableReason } from "./errors.ts";
 import type { ImplementerModels, ModelOptions } from "./models.ts";
-import { validateStartInput } from "./start-input.ts";
+import { validateStartInput, type StartInput } from "./start-input.ts";
 
 export type RepositoryChoice = {
   id: string;
   fullName: string;
   /** Whether the installation has accepted the permission to write contents; false: the form says so and offers no task. */
   writeGranted: boolean;
+  /** Why not, when `writeGranted` is false: the permission is missing, or the platform refuses the app for another reason. */
+  unwritable: UnwritableReason | null;
 };
 
 export type BranchChoices = {
@@ -104,25 +108,67 @@ const BRANCH_CONFLICT = () =>
     "A branch name cannot be a folder of another branch (foo and foo/bar), and a branch of this repository already has such a name. Choose a new branch name.",
   );
 
-/** The codes of an access failure that mean the app has no (more) access to the connection or the repository. */
-const NO_ACCESS_CODES: readonly IntegrationErrorCode[] = [
-  "INTEGRATION_ACCESS_CONNECTION_GONE",
-  "INTEGRATION_ACCESS_CONNECTION_SUSPENDED",
-  "INTEGRATION_ACCESS_APP_AUTH_FAILED",
-  "INTEGRATION_ACCESS_SCOPE_REFUSED",
-  "INTEGRATION_REPOSITORY_NOT_ACCESSIBLE",
-];
+/**
+ * The codes of an access failure that mean the app has no (more) access to the connection or the repository, each with the
+ * reason the form gives for it.
+ */
+const NO_ACCESS_REASONS: Partial<
+  Record<IntegrationErrorCode, UnwritableReason>
+> = {
+  INTEGRATION_ACCESS_CONNECTION_GONE: "connection_gone",
+  INTEGRATION_ACCESS_CONNECTION_SUSPENDED: "connection_suspended",
+  INTEGRATION_ACCESS_APP_AUTH_FAILED: "app_auth_failed",
+  INTEGRATION_ACCESS_SCOPE_REFUSED: "scope_refused",
+  INTEGRATION_REPOSITORY_NOT_ACCESSIBLE: "repository_not_accessible",
+};
+
+function noAccessReason(error: unknown): UnwritableReason | undefined {
+  return error instanceof IntegrationError
+    ? NO_ACCESS_REASONS[error.code]
+    : undefined;
+}
 
 function isNoAccess(error: unknown): boolean {
-  return (
-    error instanceof IntegrationError && NO_ACCESS_CODES.includes(error.code)
-  );
+  return noAccessReason(error) !== undefined;
 }
 
 /** What went wrong while asking the platform, as an error of this module. */
 function platformFailure(error: unknown): ImplementerError {
   if (error instanceof ImplementerError) return error;
   return isNoAccess(error) ? NOT_INSTALLED() : UNAVAILABLE();
+}
+
+/** Whether a stored model choice is the one of the body: the same entry, or the same provider and model. */
+function sameModel(stored: ModelChoice, asked: ModelChoice): boolean {
+  if ("entryId" in stored || "entryId" in asked)
+    return (
+      "entryId" in stored &&
+      "entryId" in asked &&
+      stored.entryId === asked.entryId
+    );
+  return stored.provider === asked.provider && stored.model === asked.model;
+}
+
+/** The answer for a request id that made a task before: that task when the body is the same, else the conflict. */
+function repeatOf(
+  earlier: EnqueueImplementerTurnResult,
+  task: StartInput,
+): StartedTask {
+  const { session, turn } = earlier;
+  const same =
+    session.repositoryId === task.repositoryId &&
+    session.baseBranch === task.baseBranch &&
+    session.branch === task.branch &&
+    turn.instruction === task.instruction &&
+    turn.costLimitCents === task.costLimitCents &&
+    sameModel(turn.modelChoice, task.model);
+  if (!same)
+    throw new ImplementerError(
+      "IMPLEMENTER_REQUEST_REUSED",
+      "This request id made another task.",
+      { runId: earlier.job.id },
+    );
+  return { runId: earlier.job.id, sessionId: session.id, created: false };
 }
 
 export function createImplementerService(
@@ -173,32 +219,39 @@ export function createImplementerService(
         .filter((repository) => integrations.has(repository.integrationId))
         .sort((a, b) => a.fullName.localeCompare(b.fullName));
       // One question to the platform for each installation, however many repositories it has.
-      const granted = new Map<string, Promise<boolean>>();
-      const writeGranted = (integration: Integration): Promise<boolean> => {
-        const known = granted.get(integration.id);
+      const unwritable = new Map<string, Promise<UnwritableReason | null>>();
+      const unwritableReason = (
+        integration: Integration,
+      ): Promise<UnwritableReason | null> => {
+        const known = unwritable.get(integration.id);
         if (known !== undefined) return known;
         const asked = deps.registry
           .resolve(integration.type)
           .installationPermissions(integration)
           .then(
-            (permissions) => permissions.contentsWrite,
+            (permissions) =>
+              permissions.contentsWrite ? null : ("write_not_granted" as const),
             (error: unknown) => {
-              // An installation that is gone or refused has no write access; any other failure is the platform's.
-              if (isNoAccess(error)) return false;
+              // An installation that is gone or refused has no write access, for the reason the platform gave; any other
+              // failure is the platform's.
+              const reason = noAccessReason(error);
+              if (reason !== undefined) return reason;
               throw platformFailure(error);
             },
           );
-        granted.set(integration.id, asked);
+        unwritable.set(integration.id, asked);
         return asked;
       };
       const choices: RepositoryChoice[] = [];
       for (const repository of repositories) {
         const integration = integrations.get(repository.integrationId);
         if (integration === undefined) continue;
+        const reason = await unwritableReason(integration);
         choices.push({
           id: repository.id,
           fullName: repository.fullName,
-          writeGranted: await writeGranted(integration),
+          writeGranted: reason === null,
+          unwritable: reason,
         });
       }
       return { repositories: choices };
@@ -236,16 +289,13 @@ export function createImplementerService(
 
       // A request that was accepted before is answered with what it made, before anything else is asked: a retry after a lost
       // answer, a reconnect, the second tab. Minutes later the agent may have pushed the branch, and the branch check below
-      // would call the person's own task "the branch exists" and have them start a second, paid one.
+      // would call the person's own task "the branch exists" and have them start a second, paid one. Only the same task is
+      // handed back: an id that made another task (the form edited after a lost answer, a client that reuses ids) is a
+      // conflict that names the first task, never a silent 200 with a task the person did not ask for.
       const earlier = await deps.queue.findImplementerTurn(
         task.clientRequestId,
       );
-      if (earlier !== undefined)
-        return {
-          runId: earlier.job.id,
-          sessionId: earlier.session.id,
-          created: false,
-        };
+      if (earlier !== undefined) return repeatOf(earlier, task);
 
       const { integration, repo } = await resolveRepository(task.repositoryId);
       const provider = deps.registry.resolve(integration.type);
@@ -338,13 +388,14 @@ export function createImplementerService(
           );
         throw error;
       }
+      if (result.status === "existing") return repeatOf(result, task);
       log(
         `[implementer] task ${result.status} job=${result.job.id} session=${result.session.id} repo=${repo.fullName} by=${user.githubLogin}`,
       );
       return {
         runId: result.job.id,
         sessionId: result.session.id,
-        created: result.status === "created",
+        created: true,
       };
     },
   };

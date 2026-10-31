@@ -87,3 +87,8 @@ export function implementerServiceFor(workspaceId: string): ImplementerService {
     operatorCostLimitCents: operatorCostLimitCentsFrom(db),
   });
 }
+
+/** The operator's maximum cost per task in whole US cents: the page shows it as the bound of the cost limit field (#756). */
+export function operatorMaximumCents(): Promise<number> {
+  return operatorCostLimitCentsFrom(getDatabase())();
+}

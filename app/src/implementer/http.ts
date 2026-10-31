@@ -7,7 +7,7 @@
 // Order: the user first (nothing is read or looked at before the caller is known), then where the request comes from, then, for
 // the start, its content type and its body, then the service. Every answer is `Cache-Control: no-store`. Every refusal is `{
 // "error": <code> }` with a stable code from `errors.ts`; an unusable body adds `"issues": [{ "field", "code" }]`, a model that
-// is not allowed its `reason`, a cost limit above the maximum `maximumCents`. A new task answers 201 with `{ runId, sessionId }`,
+// is not allowed its `reason`, a cost limit above the maximum `maximumCents`, a request id that made another task its `runId`. A new task answers 201 with `{ runId, sessionId }`,
 // the same request again 200 with the same ids.
 import { actorName, type SessionUser } from "../auth/access-policy.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
@@ -45,6 +45,7 @@ function refusal(error: ImplementerError): Response {
       ...(error.maximumCents === undefined
         ? {}
         : { maximumCents: error.maximumCents }),
+      ...(error.runId === undefined ? {} : { runId: error.runId }),
     },
     { status: IMPLEMENTER_ERROR_STATUS[error.code], headers: NO_STORE },
   );

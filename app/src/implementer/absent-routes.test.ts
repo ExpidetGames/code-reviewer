@@ -77,6 +77,11 @@ describe("the routes of the Implementer form without the capability", () => {
     );
   });
 
+  // #756-T09
+  it("has the page of the form in the table, so the loops below cover it", () => {
+    expect(implementerRoutes).toContain("/w/[workspace]/implementer");
+  });
+
   // #755-T10
   it.each(WITHOUT)(
     "are marked as missing by the proxy for %s, for a member and for a visitor, for every method",
@@ -98,14 +103,18 @@ describe("the routes of the Implementer form without the capability", () => {
                 headers: { "content-type": "application/json" },
               }),
             );
-            // A signed out visitor gets what any path gets (the sign in redirect, or 401 for data); a member gets the mark.
+            // A signed out visitor gets what any path gets (the sign in redirect for a page, 401 for data); a member gets the mark.
             if (lookup.kind === "user")
               expect(isMarkedAsMissing(response), `${method} ${path}`).toBe(
                 true,
               );
             else
               expect(
-                isMarkedAsMissing(response) || response.status === 401,
+                isMarkedAsMissing(response) ||
+                  response.status === 401 ||
+                  (response.status === 307 &&
+                    new URL(response.headers.get("location") ?? "", BASE)
+                      .pathname === "/login"),
                 `${method} ${path}`,
               ).toBe(true);
           }

@@ -89,6 +89,8 @@ test.describe("a deployment with the capabilities review and dynamic-review", ()
       `/api/w/${slug}/implementer/repositories/x/branches`,
       `/api/w/${slug}/implementer/models`,
       `/api/w/${slug}/implementer/tasks`,
+      // The page of the form (#756-T09).
+      `/w/${slug}/implementer`,
     ];
     for (const [label, method, headers] of READS) {
       const expected = await observe(page, MISSING, { method, headers });

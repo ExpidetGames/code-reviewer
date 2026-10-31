@@ -177,7 +177,7 @@ export const ROUTE_CLASSES: readonly RouteEntry[] = [
   { route: "/api/workers/v1/jobs/[id]/heartbeat", class: "dynamic-review" },
   { route: "/api/workers/v1/jobs/[id]/result", class: "dynamic-review" },
 
-  // Implementer: the routes behind the form that sends a task to the agent (#755; factory only). The page comes with #756.
+  // Implementer: the routes behind the form that sends a task to the agent (#755; factory only), and the page that uses them (#756).
   { route: "/api/w/[workspace]/implementer/models", class: "implementer" },
   {
     route: "/api/w/[workspace]/implementer/repositories",
@@ -189,6 +189,8 @@ export const ROUTE_CLASSES: readonly RouteEntry[] = [
     class: "implementer",
   },
   { route: "/api/w/[workspace]/implementer/tasks", class: "implementer" },
+  // The page of the form (#756).
+  { route: "/w/[workspace]/implementer", class: "implementer" },
 
   // Billing: payments, balance, rates and everything that only exists while a workspace pays.
   { route: "/api/billing/webhook", class: "billing" },

@@ -37,7 +37,12 @@ describe("the repositories of the form", () => {
 
     expect(await service.listRepositories()).toEqual({
       repositories: [
-        { id: repository.id, fullName: "acme/widgets", writeGranted: true },
+        {
+          id: repository.id,
+          fullName: "acme/widgets",
+          writeGranted: true,
+          unwritable: null,
+        },
       ],
     });
   });
@@ -49,12 +54,22 @@ describe("the repositories of the form", () => {
     });
 
     expect((await service.listRepositories()).repositories).toEqual([
-      { id: repository.id, fullName: "acme/widgets", writeGranted: false },
+      {
+        id: repository.id,
+        fullName: "acme/widgets",
+        writeGranted: false,
+        unwritable: "write_not_granted",
+      },
     ]);
 
     h.fake.setInstallationPermissions(4242, WITH_WRITE);
     expect((await service.listRepositories()).repositories).toEqual([
-      { id: repository.id, fullName: "acme/widgets", writeGranted: true },
+      {
+        id: repository.id,
+        fullName: "acme/widgets",
+        writeGranted: true,
+        unwritable: null,
+      },
     ]);
   });
 
@@ -141,7 +156,11 @@ describe("the repositories of the form", () => {
     h.fake.fail({ pathIncludes: "/app/installations/4242", status: 404 });
 
     expect((await service.listRepositories()).repositories).toMatchObject([
-      { fullName: "acme/widgets", writeGranted: false },
+      {
+        fullName: "acme/widgets",
+        writeGranted: false,
+        unwritable: "connection_gone",
+      },
     ]);
   });
 
@@ -333,6 +352,31 @@ describe("starting a task", () => {
     expect(again).toEqual({ ...first, created: false });
     expect(await counts()).toEqual(before);
   });
+
+  // #756 (review of #793)
+  it.each([
+    ["the instruction", { instruction: "Something else." }],
+    ["the branch", { branch: "implementer/other1" }],
+    ["the model", { model: { entryId: "entry-2" } }],
+    ["the cost limit", { costLimitCents: 100 }],
+  ])(
+    "refuses a repeated client request id with another %s as another task, names the first run, and writes nothing",
+    async (_name, change) => {
+      const { service, body, counts } = await startImplementerHarness();
+      const first = await service.startTask(USER, body());
+      const before = await counts();
+
+      const error = await failureOf(
+        service.startTask(USER, body(change as Record<string, unknown>)),
+      );
+
+      expect(error).toMatchObject({
+        code: "IMPLEMENTER_REQUEST_REUSED",
+        runId: first.runId,
+      });
+      expect(await counts()).toEqual(before);
+    },
+  );
 
   // #755-T03
   it("takes the instruction as written and the model as chosen", async () => {

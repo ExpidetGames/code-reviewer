@@ -126,6 +126,8 @@ describe("the route classification", () => {
         "implementer",
       "/api/w/[workspace]/implementer/models": "implementer",
       "/api/w/[workspace]/implementer/tasks": "implementer",
+      // #756-T09: the page of the form belongs to the capability too.
+      "/w/[workspace]/implementer": "implementer",
     };
     for (const [route, expectedClass] of Object.entries(expected))
       expect(classOfRoute(route), route).toBe(expectedClass);
@@ -146,6 +148,8 @@ describe("the Implementer routes", () => {
         "/api/w/[workspace]/implementer/repositories",
         "/api/w/[workspace]/implementer/repositories/[repositoryId]/branches",
         "/api/w/[workspace]/implementer/tasks",
+        // #756-T09
+        "/w/[workspace]/implementer",
       ]),
     );
     expect(
