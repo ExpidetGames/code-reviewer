@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 import { createImplementerRepository } from "../db/repositories/implementer-repository.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { sha } from "../test-support/jobs.ts";
+import { RUNNER_MAX_BODY_BYTES } from "./contract.ts";
 import {
+  TEST_RUNNER_TOKEN,
   goodResult,
   startRunnerApiHarness,
 } from "../test-support/runner-api-harness.ts";
@@ -336,7 +338,11 @@ describe("the report of a turn whose lease is lost", () => {
       implementer: block(),
     });
     const other = await h.complete(turn.job.id, turn.leaseToken, {
-      implementer: block({ headCommit: sha("d"), summary: "Another." }),
+      implementer: block({
+        headCommit: sha("d"),
+        commits: [{ sha: sha("d"), subject: "Another" }],
+        summary: "Another.",
+      }),
     });
 
     expect(await repeated.json()).toMatchObject({ alreadyCompleted: true });
@@ -456,5 +462,251 @@ describe("what is stored of a turn", () => {
       status: "idle",
       headCommit: HEAD,
     });
+  });
+});
+
+describe("text a database cannot hold (#754)", () => {
+  // The review of #788: Postgres refuses a NUL in a text column, `recordTurnResult` threw, the answer was 500 for every retry
+  // and the job later ended free with the model used and the push unrecorded.
+  it("records the work of a report whose summary and OpenCode ids hold a NUL", async () => {
+    const { h, running, sessionOf } = await start();
+    const turn = await running();
+
+    const answer = await h.complete(turn.job.id, turn.leaseToken, {
+      implementer: block({
+        summary: "Added\u0000 a health endpoint.",
+        commits: [{ sha: HEAD, subject: "Add\u0000 it" }],
+        filesChanged: [{ path: "src/\u0000health.ts", status: "added" }],
+        opencode: { sessionId: "ses\u0000_1", version: "1.\u000019.0" },
+      }),
+    });
+
+    expect(answer.status).toBe(200);
+    expect(await sessionOf(turn.sessionId)).toMatchObject({
+      status: "idle",
+      headCommit: HEAD,
+      summary: "Added a health endpoint.",
+      opencodeSessionId: "ses_1",
+      opencodeVersion: "1.19.0",
+    });
+    expect(await h.queue.get(turn.job.id)).toMatchObject({
+      status: "succeeded",
+    });
+  });
+});
+
+describe("a turn given back by a runner that is shut down (#754)", () => {
+  /** The claim of a Dispatcher: a per-job credential, as the Worker reports with. */
+  async function runningWithCredential(
+    h: Awaited<ReturnType<typeof start>>["h"],
+  ) {
+    h.clock.advance(1);
+    const enqueued = await h.queue.enqueueImplementerTurn({
+      repositoryId: h.repositoryId,
+      baseBranch: "main",
+      baseSha: sha("a"),
+      branch: "implementer/shutdown",
+      instruction: "Add a health endpoint.",
+      modelChoice: { entryId: "entry-1" },
+      costLimitCents: null,
+      createdBy: "user-1",
+      actorLogin: "octocat",
+      clientRequestId: "request-shutdown",
+    });
+    const claimed = await h.queue.claimNext("runner-a", IMPLEMENTER, {
+      workerCredential: true,
+    });
+    if (claimed === null || claimed.credential === undefined)
+      throw new Error("the turn was not claimed");
+    return {
+      job: enqueued.job,
+      credential: claimed.credential,
+      leaseToken: claimed.leaseToken,
+    };
+  }
+
+  // The lead's decision on the review of #788: a SIGTERM during a redeploy must not discard a push.
+  it("keeps the head the runner pushed before it was shut down, on the runner API", async () => {
+    const { h, running, sessionOf } = await start();
+    const turn = await running();
+
+    const answer = await h.complete(turn.job.id, turn.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      errorMessage: "shut down",
+      implementer: block({ summary: "Stopped half way." }),
+    });
+
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toMatchObject({ job: { status: "failed" } });
+    expect(await h.queue.get(turn.job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "runner_shutdown",
+    });
+    expect(await sessionOf(turn.sessionId)).toMatchObject({
+      status: "idle",
+      headCommit: HEAD,
+      summary: "Stopped half way.",
+      opencodeSessionId: "ses_1",
+    });
+  });
+
+  it("keeps an earlier head when the runner pushed nothing new, and a shutdown without a block still idles the session", async () => {
+    const { h, running, sessions, sessionOf } = await start();
+    const first = await running();
+    await sessions.recordTurnResult(first.sessionId, {
+      headCommit: sha("c"),
+      opencode: null,
+      summary: null,
+    });
+
+    await h.complete(first.job.id, first.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      errorMessage: "shut down",
+      implementer: block({ pushed: false, summary: "Nothing pushed." }),
+    });
+    const second = await running();
+    await h.complete(second.job.id, second.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      errorMessage: "shut down",
+    });
+
+    expect(await sessionOf(first.sessionId)).toMatchObject({
+      status: "idle",
+      headCommit: sha("c"),
+      summary: "Nothing pushed.",
+    });
+    expect(await sessionOf(second.sessionId)).toMatchObject({
+      status: "idle",
+      headCommit: null,
+    });
+  });
+
+  it("keeps the head on the Worker API too, and records nothing for a launch that failed", async () => {
+    const { h, sessionOf, sessions } = await start();
+    const shutdown = await runningWithCredential(h);
+    const turn = await sessions.getTurnByJob(shutdown.job.id);
+
+    const answer = await h.worker.result(shutdown.job.id, shutdown.credential, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      errorMessage: "shut down",
+      implementer: block(),
+    });
+
+    expect(answer.status).toBe(200);
+    expect(await sessionOf(turn!.session.id)).toMatchObject({
+      status: "idle",
+      headCommit: HEAD,
+    });
+  });
+
+  it("records nothing of a block that came with a failed launch", async () => {
+    const { h, sessionOf, sessions } = await start();
+    const launch = await runningWithCredential(h);
+    const turn = await sessions.getTurnByJob(launch.job.id);
+
+    const answer = await h.worker.result(launch.job.id, launch.credential, {
+      ok: false,
+      errorCode: "launch_failed",
+      errorMessage: "the VM did not start",
+      implementer: block(),
+    });
+
+    expect(answer.status).toBe(200);
+    expect(await h.queue.get(launch.job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "launch_failed",
+    });
+    expect(await sessionOf(turn!.session.id)).toMatchObject({
+      status: "idle",
+      headCommit: null,
+      summary: null,
+    });
+  });
+});
+
+describe("the size of a report (#754)", () => {
+  /** A body at every limit of `ImplementerResult`, written as the runner writes JSON (`ensure_ascii`): each code point escaped. */
+  function worstCaseBody(leaseToken: string): string {
+    const ascii = (text: string) =>
+      [...text]
+        .map((char) => {
+          const code = char.codePointAt(0)!;
+          if (code < 0x80) return char;
+          return code > 0xffff
+            ? `\\u${(0xd800 + ((code - 0x10000) >> 10)).toString(16)}\\u${(0xdc00 + ((code - 0x10000) & 0x3ff)).toString(16)}`
+            : `\\u${code.toString(16).padStart(4, "0")}`;
+        })
+        .join("");
+    const astral = (length: number) => "\u{1F600}".repeat(length);
+    const commits = Array.from({ length: 200 }, (_, index) => ({
+      sha: index === 199 ? HEAD : sha("d"),
+      subject: astral(500),
+    }));
+    const filesChanged = Array.from({ length: 500 }, (_, index) => ({
+      path: `${astral(4090)}${String(index).padStart(6, "0")}`,
+      status: "modified" as const,
+    }));
+    const result = {
+      ok: true,
+      durationMs: 1,
+      errorCode: null,
+      logTail: astral(8192),
+      errorMessage: null,
+      implementer: block({
+        commits,
+        filesChanged,
+        summary: astral(8192),
+      }),
+    };
+    // JSON.stringify keeps astral characters as they are; the runner writes them as two escapes of 6 bytes.
+    return ascii(JSON.stringify({ leaseToken, result }));
+  }
+
+  it("accepts a report at every limit, though it is far over the 64 KiB of the other kinds", async () => {
+    const { h, running, sessionOf } = await start();
+    const turn = await running();
+    const body = worstCaseBody(turn.leaseToken);
+    expect(Buffer.byteLength(body)).toBeGreaterThan(
+      RUNNER_MAX_BODY_BYTES * 100,
+    );
+
+    const answer = await h.api.complete(
+      new Request(
+        `https://app.test/api/runners/v1/jobs/${turn.job.id}/complete`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${TEST_RUNNER_TOKEN}`,
+            "x-runner-id": "runner-a",
+            "content-type": "application/json",
+          },
+          body,
+        },
+      ),
+      turn.job.id,
+    );
+
+    expect(answer.status).toBe(200);
+    expect(await sessionOf(turn.sessionId)).toMatchObject({
+      status: "idle",
+      headCommit: HEAD,
+    });
+  });
+
+  it("still refuses more than 64 KiB for a Diff job", async () => {
+    const { h } = await start();
+    const diff = await h.enqueueNew();
+    const claimed = await h.queue.claimNext("runner-a", ["pr-agent"]);
+
+    const answer = await h.complete(diff.id, claimed!.leaseToken, {
+      logTail: "x".repeat(70 * 1024),
+    });
+
+    expect(answer.status).toBe(413);
+    expect(await h.queue.get(diff.id)).toMatchObject({ status: "running" });
   });
 });

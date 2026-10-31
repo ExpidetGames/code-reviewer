@@ -1095,4 +1095,93 @@ describe("the implementer block of a result (#754)", () => {
 
     expect(parsed.ok).toBe(true);
   });
+
+  // #754: a control character is no text: Postgres refuses a NUL in a text column, so the report would never be processed.
+  it("strips control characters from the text and the free-form ids, and keeps tabs and line breaks", () => {
+    const parsed = parseCompleteRequest(
+      bodyWith({
+        ...block(),
+        summary: "Added\u0000 a\u001b health\tendpoint.\nDone\u007f.",
+        commits: [{ sha: SHA_B, subject: "Add\u0000 it" }],
+        filesChanged: [{ path: "src/\u0000health.ts", status: "added" }],
+        opencode: { sessionId: "ses\u0000_1", version: "1.\u000019.0" },
+      }),
+    );
+
+    expect(parsed.ok && parsed.value.result.implementer).toMatchObject({
+      summary: "Added a health\tendpoint.\nDone.",
+      commits: [{ subject: "Add it" }],
+      filesChanged: [{ path: "src/health.ts" }],
+      opencode: { sessionId: "ses_1", version: "1.19.0" },
+    });
+  });
+
+  // #754: what is left of an id or a path after the strip has to be something.
+  it.each([
+    [
+      "an OpenCode session id of NUL only",
+      { opencode: { sessionId: "\u0000", version: "1" } },
+      "result.implementer.opencode.sessionId",
+    ],
+    [
+      "a version of NUL only",
+      { opencode: { sessionId: "s", version: "\u0000\u0000" } },
+      "result.implementer.opencode.version",
+    ],
+    [
+      "a path of NUL only",
+      { filesChanged: [{ path: "\u0000", status: "added" }] },
+      "result.implementer.filesChanged[0].path",
+    ],
+  ])("refuses %s", (_name, change, field) => {
+    expect(
+      fieldsOf(parseCompleteRequest(bodyWith({ ...block(), ...change }))).map(
+        (entry) => entry.field,
+      ),
+    ).toContain(field);
+  });
+
+  // #754: the invariants the contract states in words: `pushed` never without a head, and the head is the last commit.
+  it.each([
+    [
+      "pushed without a head commit",
+      { headCommit: null, pushed: true, commits: [], filesChanged: [] },
+      "result.implementer.pushed",
+    ],
+    [
+      "a head commit that is not the last commit listed",
+      { headCommit: SHA_A },
+      "result.implementer.headCommit",
+    ],
+    [
+      "commits listed and no head commit",
+      { headCommit: null, pushed: false },
+      "result.implementer.headCommit",
+    ],
+  ])("refuses %s", (_name, change, field) => {
+    expect(
+      fieldsOf(parseCompleteRequest(bodyWith({ ...block(), ...change }))).map(
+        (entry) => entry.field,
+      ),
+    ).toContain(field);
+  });
+
+  // #754
+  it("accepts a head commit with no commits listed, and a head that was committed and not pushed", () => {
+    expect(parseCompleteRequest(bodyWith({ ...block(), commits: [] })).ok).toBe(
+      true,
+    );
+    expect(
+      parseCompleteRequest(bodyWith({ ...block(), pushed: false })).ok,
+    ).toBe(true);
+  });
+
+  // #754: the contract has no null for the block (only absent); the parser follows it.
+  it("refuses a block that is null", () => {
+    expect(
+      fieldsOf(parseCompleteRequest(bodyWith(null))).map(
+        (entry) => entry.field,
+      ),
+    ).toContain("result.implementer");
+  });
 });

@@ -239,4 +239,40 @@ describe("the implementer block of a result (#754)", () => {
 
     expect("implementer" in redactResult(bare, [LLM_KEY])).toBe(false);
   });
+
+  // #754: a zero-width character inside a secret keeps a plain match from finding it.
+  it("finds a secret that zero-width characters split, in every text of the block", () => {
+    const split = (text: string) =>
+      [...text].join("\u200b").replace(/\u200b$/, "");
+    const withSplit: RunnerResult = {
+      ...result,
+      implementer: {
+        ...block,
+        summary: `key ${split(LLM_KEY)} and token ${split(GHS)}`,
+        commits: [{ sha: "b".repeat(40), subject: `Use ${split(LLM_KEY)}` }],
+        filesChanged: [
+          { path: `src/${split(LLM_KEY)}.ts`, status: "added" as const },
+        ],
+      },
+    };
+
+    const stored = JSON.stringify(
+      redactResult(withSplit, [LLM_KEY]).implementer,
+    );
+
+    expect(stored).not.toContain(LLM_KEY.slice(4, 14));
+    expect(stored).not.toContain(GHS.slice(4, 14));
+    expect(stored).toContain(REDACTED);
+  });
+
+  // #754: only text that held a secret is rewritten; a ZWJ emoji or a soft hyphen elsewhere stays as it was.
+  it("leaves text without a secret exactly as it was, zero-width characters included", () => {
+    const plain = "family 👨\u200d👩\u200d👧 and co\u00adoperate";
+    const kept = redactResult(
+      { ...result, implementer: { ...block, summary: plain } },
+      [LLM_KEY],
+    );
+
+    expect(kept.implementer?.summary).toBe(plain);
+  });
 });

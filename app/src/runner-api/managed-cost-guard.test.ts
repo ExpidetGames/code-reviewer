@@ -134,6 +134,22 @@ describe("a managed Implementer turn without a known cost (#754)", () => {
     ).toMatchObject({ ok: false, errorCode: "dynamic_accounting_failed" });
   });
 
+  // #754: a managed turn that reports no usage at all would settle with no cost while the operator pays the model.
+  it("is not a success when it reports no usage at all, which Dynamic's pinned behaviour still allows", () => {
+    const bare = resultOf({ usage: null });
+
+    expect(
+      withoutUnaccountedManagedSuccess(bare, MANAGED_IMPLEMENTER),
+    ).toMatchObject({ ok: false, errorCode: "dynamic_accounting_failed" });
+    expect(withoutUnaccountedManagedSuccess(bare, MANAGED_DYNAMIC)).toBe(bare);
+    expect(
+      withoutUnaccountedManagedSuccess(bare, {
+        ...MANAGED_IMPLEMENTER,
+        managed: false,
+      }),
+    ).toBe(bare);
+  });
+
   // #754-T05
   it("leaves a turn on the customer's own key, a failure and a known cost alone", () => {
     const own = resultOf();

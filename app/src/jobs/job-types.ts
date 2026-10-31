@@ -155,6 +155,13 @@ export type EnqueueResult =
     }
   | { status: "existing"; job: Job; reason: EnqueueExistingReason };
 
+/**
+ * What else a release can say. `result` (#754): the checked and cleaned result a runner reported when it was shut down; if the
+ * job is a turn of the Implementer and this release ends it (its one attempt is used), the work it reports (the pushed head, the
+ * summary, the saved agent session) is recorded on its session in the same transaction. Without it nothing is recorded.
+ */
+export type ReleaseOptions = { retryAt?: Date; result?: unknown };
+
 /** What a runner reports when it is done with a job. */
 export type JobOutcome =
   | { ok: true; result: JsonValue }

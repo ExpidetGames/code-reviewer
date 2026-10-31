@@ -283,10 +283,13 @@ export async function finishJob(
   // A runner that is shut down gives the job back: it waits again (one attempt counted, the same cap
   // as a lapsed lease) instead of failing for good with every redeploy. The result is not stored.
   if (stored.errorCode !== null && releaseCodes.includes(stored.errorCode)) {
+    // #754: a runner shut down by a redeploy may have pushed before it was; a turn of the Implementer keeps what it reports. A
+    // launch that failed ran no agent and records nothing, whatever the body says.
     const released = await deps.queue.release(
       jobId,
       leaseToken,
       stored.errorCode,
+      stored.errorCode === RUNNER_SHUTDOWN_CODE ? { result: stored } : {},
     );
     if (released.status === "not_holder") {
       deps.logger.info(

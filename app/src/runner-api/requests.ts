@@ -93,6 +93,15 @@ function isRecord(value: unknown): value is Record_ {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// C0 controls other than tab, line feed and carriage return, and DEL. A NUL is refused by a Postgres text column, and none of
+// these is text a person reads in a summary, a commit subject, a path or an id.
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
+/** The text without its control characters (tab, line feed and carriage return stay). */
+export function withoutControlCharacters(text: string): string {
+  return text.replace(CONTROL_CHARACTERS, "");
+}
+
 /** Collects the refusals of one body while its fields are checked. */
 class Checker {
   readonly fields: FieldError[] = [];
@@ -104,19 +113,24 @@ class Checker {
     return undefined;
   }
 
+  /**
+   * `stripControls`: control characters are taken out of the text (see `withoutControlCharacters`). The maximum is judged on what
+   * was sent, like the contract does, the minimum on what is left.
+   */
   string(
     source: Record_,
     key: string,
     field: string,
-    options: { min?: number; max: number },
+    options: { min?: number; max: number; stripControls?: boolean },
   ): string | undefined {
     const value = source[key];
     if (value === undefined) return this.fail(field, "required");
     if (typeof value !== "string") return this.fail(field, "invalid");
-    const length = lengthOf(value);
-    if (length > options.max) return this.fail(field, "too_long");
-    if (length < (options.min ?? 0)) return this.fail(field, "invalid");
-    return value;
+    if (lengthOf(value) > options.max) return this.fail(field, "too_long");
+    const text =
+      options.stripControls === true ? withoutControlCharacters(value) : value;
+    if (lengthOf(text) < (options.min ?? 0)) return this.fail(field, "invalid");
+    return text;
   }
 
   /** A string that may be null or left out; `fallback` is what a missing value becomes. */
@@ -600,6 +614,7 @@ function parseImplementerCommits(
     const sha = commitSha(check, entry, "sha", `${where}.sha`);
     const subject = check.string(entry, "subject", `${where}.subject`, {
       max: MAX_COMMIT_SUBJECT_CHARS,
+      stripControls: true,
     });
     if (sha !== undefined && subject !== undefined)
       commits.push({ sha, subject });
@@ -629,6 +644,7 @@ function parseImplementerFiles(
     const path = check.string(entry, "path", `${where}.path`, {
       min: 1,
       max: MAX_FILE_PATH_CHARS,
+      stripControls: true,
     });
     const status = entry.status;
     const statusOk =
@@ -662,10 +678,12 @@ function parseImplementerOpencode(
   const sessionId = check.string(value, "sessionId", `${field}.sessionId`, {
     min: 1,
     max: MAX_OPENCODE_SESSION_ID_CHARS,
+    stripControls: true,
   });
   const version = check.string(value, "version", `${field}.version`, {
     min: 1,
     max: MAX_OPENCODE_VERSION_CHARS,
+    stripControls: true,
   });
   if (
     check.fields.length > before ||
@@ -678,8 +696,10 @@ function parseImplementerOpencode(
 
 /**
  * The implementer block of a result (#754, `ImplementerResult` in the contract): closed, every field required, the bounds of the
- * schema. Null or absent is "no block" (a failure before the runner had a repository, and every job that is not a turn). Whether
- * the job may or must carry one is decided with the job (`implementer-report.ts`).
+ * schema. Absent is "no block" (a failure before the runner had a repository, and every job that is not a turn); `null` is not
+ * a block and is refused, as the contract has no null for it. Whether the job may or must carry one is decided with the job
+ * (`implementer-report.ts`). The text fields lose their control characters (a NUL cannot be stored); the invariants the contract
+ * states in words are checked: `pushed` never without a head commit, and the head commit is the last commit when commits are listed.
  */
 function parseImplementerResult(
   check: Checker,
@@ -732,12 +752,19 @@ function parseImplementerResult(
   );
   const summary = check.string(value, "summary", `${prefix}summary`, {
     max: IMPLEMENTER_RESULT_LIMITS.summaryChars,
+    stripControls: true,
   });
   const opencode = parseImplementerOpencode(
     check,
     value.opencode,
     `${prefix}opencode`,
   );
+  if (typeof pushed === "boolean" && headCommit !== undefined) {
+    if (pushed && headCommit === null) check.fail(`${prefix}pushed`, "invalid");
+    const last = commits?.at(-1);
+    if (last !== undefined && last.sha !== headCommit)
+      check.fail(`${prefix}headCommit`, "invalid");
+  }
   if (
     check.fields.length > before ||
     baseCommit === undefined ||

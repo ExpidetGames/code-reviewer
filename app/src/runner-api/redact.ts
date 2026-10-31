@@ -51,6 +51,22 @@ export function redactText(text: string, secrets: readonly string[]): string {
   return cleaned;
 }
 
+// Format characters (zero-width space and joiners, soft hyphen, bidirectional marks, the byte order mark): invisible, and they let a
+// secret be written in a way a plain match does not see.
+const FORMAT_CHARACTERS = /\p{Cf}/gu;
+
+/**
+ * Text of the implementer block, cleaned (#754). The secrets are looked for in the text without its format characters, so a
+ * secret split by zero-width characters is found too; a text that held none is returned as it was sent (an emoji sequence keeps
+ * its joiners). What this does not catch: a secret written in any other disguise (reversed, spelled in pieces, with look-alike
+ * letters, in an encoding other than the ones `redactText` knows).
+ */
+function redactBlockText(text: string, secrets: readonly string[]): string {
+  const visible = text.replace(FORMAT_CHARACTERS, "");
+  const cleaned = redactText(visible, secrets);
+  return cleaned === visible ? text : cleaned;
+}
+
 /**
  * The text of an implementer block that a person or an agent wrote: the summary, the subjects of the commits and the paths of the
  * files (#754). The shas, the statuses, the flag and the saved agent session are not text of that kind and stay as they are.
@@ -61,14 +77,14 @@ function redactImplementer(
 ): ImplementerResult {
   return {
     ...block,
-    summary: redactText(block.summary, secrets),
+    summary: redactBlockText(block.summary, secrets),
     commits: block.commits.map((commit) => ({
       ...commit,
-      subject: redactText(commit.subject, secrets),
+      subject: redactBlockText(commit.subject, secrets),
     })),
     filesChanged: block.filesChanged.map((file) => ({
       ...file,
-      path: redactText(file.path, secrets),
+      path: redactBlockText(file.path, secrets),
     })),
   };
 }

@@ -4,9 +4,9 @@
 // with an unknown price"). On the managed key we pay, so the price is known before the job starts (the claim carries the
 // confirmed book) and the runner ends the run with `dynamic_accounting_failed` when a call's cost cannot be read. A result
 // that still claims a success with a null cost is not trusted: it is stored as that failure, which billing treats as our fault
-// (free), instead of a success the customer would be charged minutes for while nobody can say what it cost us. A result that
+// (free), instead of a success the customer would be charged minutes for while nobody can say what it cost us. A Dynamic result that
 // reports no usage at all is left as it is: that is how an older runner and a usage that was dropped as malformed arrive, and
-// it settles with an unknown cost as it always did. Pure.
+// it settles with an unknown cost as it always did; a turn of the Implementer is held to the rule without that leniency. Pure.
 import type { RunnerResult } from "./contract.ts";
 
 /** The kinds whose runs go through the native passthrough proxy and its cost ledger; a Diff Review never did. */
@@ -32,7 +32,11 @@ export function withoutUnaccountedManagedSuccess(
   )
     return result;
   if (result.errorCode !== null) return result;
-  if (result.usage === null || result.usage.costUsd !== null) return result;
+  // A turn of the Implementer that reports no usage at all is not trusted either (#754): it would settle with no cost while the
+  // operator pays the model. Dynamic keeps its pinned behaviour (older runners and dropped usages arrive that way).
+  const noUsageAllowed = job.reviewKind !== "implementer";
+  if (result.usage === null ? noUsageAllowed : result.usage.costUsd !== null)
+    return result;
   return {
     ...result,
     ok: false,
