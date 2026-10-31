@@ -101,7 +101,7 @@ export type EnqueueJobInput = {
 
 /**
  * What is known when a task of the Implementer is accepted (#752). The pull request columns of the job are not input: they are
- * made from the slot, the branch and `baseSha` by `implementer/job-shape.ts`, the one place that writes them.
+ * made from the slot, the branch and `baseSha` by `db/implementer-job-shape.ts`, the one place that writes them.
  */
 export type EnqueueImplementerTurnInput = {
   repositoryId: string;

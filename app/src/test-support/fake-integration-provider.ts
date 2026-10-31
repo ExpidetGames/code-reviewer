@@ -52,7 +52,7 @@ export type FakeIntegrationProviderOptions = {
   implementerAccessFailure?: Error;
   /** Whether `revokeImplementerAccess` says the token is off (#753). Default: yes. */
   revokeSucceeds?: boolean;
-  /** Whether the connections have accepted the permission to write contents (#749). Default: yes. */
+  /** Whether the connections have accepted the permission to write contents (#749). Default: no, so a test that forgets to set it does not pass as if write were granted. */
   contentsWrite?: boolean;
   /** The pull requests every repository has. Defaults to an open #7 and a draft #8. */
   pullRequests?: PullRequestRef[];
@@ -345,7 +345,7 @@ export function fakeIntegrationProvider(
 
     async installationPermissions(integration) {
       record("installationPermissions", integration);
-      return { contentsWrite: options.contentsWrite ?? true };
+      return { contentsWrite: options.contentsWrite ?? false };
     },
 
     async getPullRequest(integration, repo, prNumber, signal) {

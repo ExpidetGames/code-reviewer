@@ -150,9 +150,9 @@ export type ImplementerTurnInputCheck =
   | { ok: false; fieldErrors: JobFieldError[] };
 
 /** A request id as a client sends it: printable ASCII without a space, so it is safe inside the job's delivery id and logs. */
-const CLIENT_REQUEST_ID = /^[\x21-\x7e]{1,200}$/;
+export const CLIENT_REQUEST_ID = /^[\x21-\x7e]{1,200}$/;
 /** A branch name: no control character and no space (git refuses both), and bounded. */
-const BRANCH_NAME = /^[^\s\x00-\x1f\x7f]{1,255}$/;
+export const BRANCH_NAME = /^[^\s\x00-\x1f\x7f]{1,255}$/;
 
 /**
  * Checks what `enqueueImplementerTurn` is given before anything is written (#752). The model choice is checked where it is

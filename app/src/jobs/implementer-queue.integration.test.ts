@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Proprietary
 
 // A turn of the Implementer travels through the one job queue (#752, part of #745): one `jobs` row of the kind `implementer`
-// with placeholders where a pull request would be (`implementer/job-shape.ts`), claimed only by a runner with the engine
+// with placeholders where a pull request would be (`db/implementer-job-shape.ts`), claimed only by a runner with the engine
 // `implementer`, never retried, held to its own time limit, and invisible to everything that acts on pull requests. A project
 // never selects the kind (T06 is in `job-kind.test.ts`).
 import { describe, expect, it } from "vitest";
