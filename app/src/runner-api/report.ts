@@ -29,6 +29,7 @@ import {
   type Parsed,
 } from "./requests.ts";
 import { errorResponse, jsonResponse } from "./responses.ts";
+import type { WriteTokenRevoker } from "./write-token.ts";
 
 export type ReportDeps = {
   queue: Pick<RunnerQueue, "get" | "heartbeat" | "complete" | "release">;
@@ -57,6 +58,11 @@ export type ReportDeps = {
    * were waiting for the slot, after the response; it never throws and never delays the answer.
    */
   jobEnded?: (event: JobEndedEvent) => void;
+  /**
+   * #753: the turn is over, whether its result was stored or the job was given back: switches off the write tokens of a turn of the
+   * Implementer (the review of #776). Never rejects; does nothing for another kind. Left out, nothing is switched off here.
+   */
+  revokeWriteTokens?: WriteTokenRevoker;
   /** #395: an authenticated call touched the database (a heartbeat, a result): the running server may do repair work. */
   activity?: () => void;
 };
@@ -274,6 +280,7 @@ export async function finishJob(
       `[runner-api] complete ${who} job=${jobId} given back: ${stored.errorCode} (${released.status})`,
     );
     deps.jobEnded?.(endOf(released.job, released.status === "requeued"));
+    await deps.revokeWriteTokens?.(released.job);
     return jsonResponse(200, {
       version: RUNNER_API_VERSION,
       job: {
@@ -311,6 +318,8 @@ export async function finishJob(
       );
       if (result.status === "completed")
         deps.jobEnded?.(endOf(result.job, false));
+      // Also a repeated report: a token a first call could not switch off is tried again, and none is revoked twice.
+      await deps.revokeWriteTokens?.(result.job);
       deps.activity?.();
       return jsonResponse(200, {
         version: RUNNER_API_VERSION,

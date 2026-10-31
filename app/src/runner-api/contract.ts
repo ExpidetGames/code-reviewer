@@ -454,7 +454,7 @@ export type ImplementerJobOptions = {
 
 /**
  * #746: the job an implementer runner reads on stdin. It has no pull request: `prUrl`, `command`, `base` and `dynamic` are
- * absent, and `git.token` may write the contents of exactly `implementer.repo`. The claim does not build it yet (#753).
+ * absent, and `git.token` may write the contents of exactly `implementer.repo`. The claim builds it (#753).
  */
 export type ImplementerJobInput = Omit<
   RunnerJobInput,
@@ -462,7 +462,15 @@ export type ImplementerJobInput = Omit<
 > & {
   reviewKind: "implementer";
   implementer: ImplementerJobOptions;
+  // Absent, and said so, so that code that handles either input can read these without narrowing first (#753).
+  prUrl?: undefined;
+  command?: undefined;
+  dynamic?: undefined;
+  base?: undefined;
 };
+
+/** #753: the input of a job as a claim or a Worker's fetch hands it out: a review's, or a turn's. */
+export type AnyJobInput = RunnerJobInput | ImplementerJobInput;
 
 export type ClaimResponse = {
   version: typeof RUNNER_API_VERSION;
@@ -472,7 +480,7 @@ export type ClaimResponse = {
     leaseExpiresAt: string;
     heartbeatIntervalSeconds: number;
     tokenExpiresAt: string | null;
-    input: RunnerJobInput;
+    input: AnyJobInput;
   };
 };
 
@@ -500,7 +508,7 @@ export type WorkerJobDetailsResponse = {
     leaseExpiresAt: string;
     heartbeatIntervalSeconds: number;
     tokenExpiresAt: string | null;
-    input: RunnerJobInput;
+    input: AnyJobInput;
   };
 };
 

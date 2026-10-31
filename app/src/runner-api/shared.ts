@@ -14,6 +14,7 @@ import { builtInProjectDynamicSettings } from "../review-settings/settings.ts";
 import { managedModelsOf } from "./managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
+import { createImplementerRepository } from "../db/repositories/implementer-repository.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
@@ -42,6 +43,7 @@ import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
 import { createReviewSettingsJobOptionsSource } from "./review-settings-job-options.ts";
 import { consoleRunnerApiLogger, describeError } from "./logger.ts";
 import { createKnownSecrets } from "./known-secrets.ts";
+import { createWriteTokenRevoker } from "./write-token.ts";
 import { errorResponse } from "./responses.ts";
 import { configuredRunnerToken } from "./token-auth.ts";
 
@@ -74,14 +76,17 @@ function sharedDeps(): WorkerApiDeps {
   });
   const llm = getWorkspaceLlm();
   const nativeCost = getNativeCost();
+  const claimedKeys = getClaimedKeys();
+  const repositories = (workspaceId: string) =>
+    createRepositoriesRepository(db, workspaceId);
+  const integrations = (workspaceId: string) =>
+    createIntegrationsRepository(db, workspaceId);
   return {
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
     queue: getRunnerQueue(),
-    repositories: (workspaceId) =>
-      createRepositoriesRepository(db, workspaceId),
-    integrations: (workspaceId) =>
-      createIntegrationsRepository(db, workspaceId),
+    repositories,
+    integrations,
     // #199: the exact head of the last successful Dynamic review of the job's pull request; the
     // lookup is scoped to the job's own workspace.
     previousReviewedSha: (job) =>
@@ -114,6 +119,11 @@ function sharedDeps(): WorkerApiDeps {
     // The standing of the job's workspace, asked by the Worker's fetch before it hands out a key (#276), and its model access.
     entitlementsFor: (workspaceId) => readEntitlements(db, workspaceId),
     // Whose key the job runs on: what its claim decided, in its usage record (#496); scoped to the job's own workspace.
+    // #753: the turn an implementer job runs, from the job's own workspace.
+    implementerTurn: (job) =>
+      createImplementerRepository(getDatabase(), job.workspaceId).getTurnByJob(
+        job.id,
+      ),
     claimedKeyMode: async (job) =>
       (await createUsageRecordsRepository(db, job.workspaceId).get(job.id))
         ?.keyMode,
@@ -147,7 +157,15 @@ function sharedDeps(): WorkerApiDeps {
     nativeCost,
     // #588: a selection of a catalog provider made before pins existed is pinned by its first claim, in the job's own workspace.
     providerPins: createProviderPins(reviewSettingsServiceFor),
-    claimedKeys: getClaimedKeys(),
+    claimedKeys,
+    // #753: the write token of a turn of the Implementer ends with the turn (and with a fetch that failed after it was made).
+    revokeWriteTokens: createWriteTokenRevoker({
+      repositories,
+      integrations,
+      registry: integrationRegistry,
+      claimedKeys,
+      logger: consoleRunnerApiLogger,
+    }),
     // #395: what happens between two sweeps. Both run after the response and do nothing in poll mode.
     jobEnded,
     activity: () => touched(),

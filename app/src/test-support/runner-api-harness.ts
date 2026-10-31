@@ -10,6 +10,11 @@ import { operatorCostLimitCentsFrom } from "../review-settings/operator-cost-lim
 import { managedModelsOf } from "../runner-api/managed-models.ts";
 import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
+import { createImplementerRepository } from "../db/repositories/implementer-repository.ts";
+import { createCapabilitySet } from "../capabilities/capability.ts";
+import { createJobQueue } from "../jobs/job-queue.ts";
+import type { EnqueueImplementerTurnInput } from "../jobs/job-types.ts";
+import { addUser } from "./workspace-deletion-fixture.ts";
 import { createJobVmRunsRepository } from "../db/repositories/job-vm-runs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
@@ -46,6 +51,7 @@ import {
   type JobOptionsSource,
 } from "../runner-api/job-options.ts";
 import { createClaimedKeys } from "../runner-api/claimed-keys.ts";
+import { createWriteTokenRevoker } from "../runner-api/write-token.ts";
 import { createProjectClaimGuard } from "../runner-api/project-claim-guard.ts";
 import { createKnownSecrets } from "../runner-api/known-secrets.ts";
 import { knownContextWindowFrom } from "../runner-api/known-context-window.ts";
@@ -164,6 +170,12 @@ export async function startRunnerApiHarness(
      */
     defaultEntry?: boolean;
     /**
+     * #753: the deployment is a factory with the Implementer: the registry's capabilities hold `implementer`, the fake App asks
+     * for contents write and the installation has accepted it (`h.enqueueTurn` makes a turn). Default: a code-review.com
+     * deployment, which can never make the write token.
+     */
+    implementer?: boolean;
+    /**
      * #281: wires the notice of a refused review like the running server does (`h.notices`). With
      * `deliver: "manual"` the refusals are only collected (`h.notices.refusals`) and the test hands them on.
      */
@@ -253,7 +265,24 @@ export async function startRunnerApiHarness(
     ...options.env,
   };
 
+  if (options.implementer === true) {
+    const write = {
+      metadata: "read",
+      contents: "write",
+      pull_requests: "write",
+      issues: "write",
+      checks: "write",
+    } as const;
+    github.fake.setAppPermissions(write);
+    github.fake.setInstallationPermissions(4242, write);
+  }
   const registry = createDefaultIntegrationRegistry({
+    capabilities: () =>
+      createCapabilitySet(
+        options.implementer === true
+          ? ["review", "dynamic-review", "implementer"]
+          : ["review", "dynamic-review"],
+      ),
     loadConfig: () => loadGithubAppConfig(github.env),
     githubClient: {
       now: github.clock.now,
@@ -451,6 +480,10 @@ export async function startRunnerApiHarness(
       }),
       entitlementsFor: (workspaceId) =>
         readEntitlements(fixture.db, workspaceId, fixture.clock.now),
+      implementerTurn: (job) =>
+        createImplementerRepository(fixture.db, job.workspaceId).getTurnByJob(
+          job.id,
+        ),
       claimedKeyMode: async (job) =>
         (
           await createUsageRecordsRepository(
@@ -469,6 +502,23 @@ export async function startRunnerApiHarness(
       providerPins:
         options.providerPins ?? createProviderPins(() => reviewSettings),
       claimedKeys,
+      revokeWriteTokens: createWriteTokenRevoker({
+        repositories: (workspaceId) =>
+          createRepositoriesRepository(
+            fixture.db,
+            workspaceId,
+            fixture.clock.now,
+          ),
+        integrations: (workspaceId) =>
+          createIntegrationsRepository(
+            fixture.db,
+            workspaceId,
+            fixture.clock.now,
+          ),
+        registry,
+        claimedKeys,
+        logger,
+      }),
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
       logger,
@@ -816,6 +866,42 @@ export async function startRunnerApiHarness(
     };
   }
 
+  /** #753: the queue of a factory deployment, for the turns of the Implementer (the harness queue refuses the kind). */
+  const turnQueue = createJobQueue(fixture.db, fixture.workspaceId, {
+    now: fixture.clock.now,
+    kindAllowed: (kind) =>
+      createCapabilitySet([
+        "review",
+        "dynamic-review",
+        "implementer",
+      ]).allowsReviewKind(kind),
+  });
+  let turnCounter = 0;
+  /** #753: a turn of the Implementer on the harness repository, as the submit will make it (a queued job of the kind). */
+  async function enqueueTurn(
+    overrides: Partial<EnqueueImplementerTurnInput> = {},
+  ) {
+    if (turnCounter === 0) await addUser(fixture.db, "turn-user");
+    turnCounter += 1;
+    fixture.clock.advance(1);
+    const result = await turnQueue.enqueueImplementerTurn({
+      repositoryId: fixture.repositoryId,
+      baseBranch: "main",
+      baseSha: sha("b"),
+      branch: `implementer/t${String(turnCounter)}`,
+      instruction: "Add a health endpoint.",
+      modelChoice: { entryId: "entry-1" },
+      costLimitCents: null,
+      createdBy: "turn-user",
+      actorLogin: "octocat",
+      clientRequestId: `request-${String(turnCounter)}`,
+      ...overrides,
+    });
+    if (result.status !== "created")
+      throw new Error(`expected a new turn, got ${result.status}`);
+    return result;
+  }
+
   /** Claims the next job and returns the parsed answer. */
   async function claimed(request?: RequestOptions) {
     const response = await claim(request);
@@ -900,6 +986,7 @@ export async function startRunnerApiHarness(
       comments: (repoFullName: string, prNumber: number) =>
         github.fake.pullRequestComments(repoFullName, prNumber),
     },
+    enqueueTurn,
     claim,
     claimed,
     release,

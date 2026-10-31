@@ -42,7 +42,8 @@ interface IntegrationProvider {
   parseEvent(i: Integration, req: Request): Promise<IntegrationEvent>;
   canTrigger(i: Integration, t: ReviewTrigger): Promise<boolean>;
   jobAccess(i: Integration, repo: RepoRef): Promise<GitAccess>;
-  implementerAccess(i: Integration, repo: RepoRef): Promise<GitAccess>; // #749, push access for the Implementer
+  implementerAccess(i: Integration, repo: RepoRef): Promise<GitAccess>; // #749, push access for the Implementer (#753: behind the capability)
+  revokeImplementerAccess(i: Integration, token: string): Promise<void>; // #753, switches that token off; best effort, never rejects
   installationPermissions(i: Integration): Promise<{ contentsWrite: boolean }>; // #749
   postPullRequestNotice?(
     i: Integration,
@@ -246,6 +247,11 @@ How the interface is met:
   capability `implementer`; a review job never calls it and keeps `JOB_TOKEN_PERMISSIONS`. A 422 that says
   the installation has not accepted the permission (the App was raised to Contents: write, the owner of the
   installation has not approved it) is `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED`, not retryable.
+  The method checks the capability itself (#753): the provider is given the deployment's capability set
+  (`capabilities`, asked on every call, closed when absent) and a deployment without `implementer` is refused with
+  `INTEGRATION_CAPABILITY_ABSENT` before any request, whatever the App was set to by hand; the manifest is a second wall.
+  `revokeImplementerAccess(integration, token)` switches a token off (`DELETE /installation/token`); it is best effort,
+  never rejects and is not behind the capability, because a cleanup is never refused.
   `installationPermissions` reads `GET /app/installations/:id` (the permissions the installation holds, not the
   App) and answers `{ contentsWrite }` without minting a token, so a page can say "write access not granted"
   before a task is accepted.
@@ -275,6 +281,7 @@ How the interface is met:
 | `INTEGRATION_ACCESS_CONNECTION_SUSPENDED`   | 403 (not a rate limit): installation suspended                                                                              | no          |
 | `INTEGRATION_ACCESS_SCOPE_REFUSED`          | 422, or a repository reference that is not usable: the repository is not in the installation, or the app lacks a permission | no          |
 | `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED` | `implementerAccess` only: 422 because the installation has not accepted `contents: write` (#749)                            | no          |
+| `INTEGRATION_CAPABILITY_ABSENT`                  | `implementerAccess` only: the deployment does not have the capability `implementer`; nothing was asked of the platform (#753)                                  | no          |
 | `INTEGRATION_ACCESS_APP_AUTH_FAILED`        | 401: the App JWT was refused (key or app id)                                                                                | no          |
 | `INTEGRATION_ACCESS_RATE_LIMITED`           | 429, or 403 with a rate limit header; `retryAfterSeconds` when given                                                        | yes         |
 | `INTEGRATION_ACCESS_UNAVAILABLE`            | 5xx, a network failure or a timeout                                                                                         | yes         |

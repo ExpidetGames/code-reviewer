@@ -76,6 +76,8 @@ export async function handleFetch(
     await deps.queue.noteSupersede(job.id, leaseToken);
 
   const claimed = { job, leaseToken };
+  // The write token of a turn of the Implementer, once it is made: switched off if the input cannot be handed to the Worker (#753).
+  let writeToken: string | null = null;
   try {
     // The claim admitted the job; the workspace may have been suspended since, or its entitlements may have become
     // unreadable. No key and no token are made then: the job ends with the code of the claim. Quotas were
@@ -124,12 +126,16 @@ export async function handleFetch(
       });
     }
 
+    writeToken = outcome.writeToken;
     // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
     // and the Worker does not have the key.
     await deps.claimedKeys.remember(job.id, outcome.input.llm.apiKey);
     if (outcome.entryModel !== null)
       await deps.claimedKeys.rememberModel(job.id, outcome.entryModel);
     await deps.claimedKeys.rememberNative(job.id, outcome.native);
+    // The token is remembered (sealed) before it leaves, so the end of the turn can switch it off (#753).
+    if (outcome.writeToken !== null)
+      await deps.claimedKeys.rememberGitToken(job.id, outcome.writeToken);
     const current = await deps.queue.get(job.id);
     if (current?.leaseExpiresAt == null)
       throw new Error(`Job ${job.id} has no lease expiry at fetch.`);
@@ -150,6 +156,7 @@ export async function handleFetch(
     deps.logger.error(
       `[worker-api] fetch job=${job.id} failed: ${describeError(error)}`,
     );
+    if (writeToken !== null) await deps.revokeWriteTokens(job, [writeToken]);
     await giveBack(deps, claimed, "claim_failed");
     return errorResponse(500, "RUNNER_INTERNAL_ERROR");
   }

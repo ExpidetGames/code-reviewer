@@ -75,7 +75,7 @@ export type RunnerQueue = {
     jobId: string,
     leaseToken: string,
     reason: string,
-    options?: { retryAt?: Date },
+    options?: { retryAt?: Date; beforeStart?: boolean },
   ): Promise<ReleaseResult>;
   /**
    * Cancels a claimed job (the project of its repository is off): running -> cancelled with
