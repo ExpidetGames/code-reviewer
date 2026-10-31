@@ -121,7 +121,7 @@ is either cancelled with the others or reads the new kind. The hook is `createJo
 A turn of the Implementer (part of #745, the Software Factory deployment) travels through this queue as a job of the kind
 `implementer`, so claim, lease, heartbeat, release, stop, dispatch, usage records and entitlements are the ones of every job.
 `createJobQueue(...).enqueueImplementerTurn` makes the session, its first turn (`src/db/repositories/implementer-repository.ts`) and
-the job in one transaction. The `jobs` table is shaped like a pull request review, so **`implementer/job-shape.ts` is the one place
+the job in one transaction. The `jobs` table is shaped like a pull request review, so **`db/implementer-job-shape.ts` is the one place
 that writes the pull request columns** of a turn:
 
 | Column                                         | Value                                                                                                                                                                                                             |
@@ -147,12 +147,11 @@ What differs from a review, and why a consumer that assumes a pull request is ga
   70 minutes (`implementerMaxRuntimeMs`, the Dispatcher's 60 plus 10), the other kinds keep 25.
 - **The session.** A job that ends without a report of its run (lease, give-up, never dispatched, no capable runner, refused claim,
   cancelled by its holder) sets the session `idle` (`idleSessionsOfEndedTurns`, called from the sweep that closes usage records and
-  from `complete`), otherwise it would stay `running` for good. A report records the result with `recordTurnResult` (#754).
+  from `complete`), otherwise it would stay `running` for good. A report records the result with `recordTurnResult` in the transaction of `complete` (#754, `runner-api/README.md`).
 - **Pull request consumers.** `cancelWaiting` (project deactivated, review kind changed, pull request closed, draft) never touches the
   kind. `previousReviewedSha` and `attemptedShas` answer nothing for it. The check run reconciler and its sweep skip it (it would
   otherwise fill the sweep's batch for good). A claim refused for the entitlements fails the turn with the code and tells the refusal
-  hook its kind; the notice on a pull request is not made for it. The claim of the runner API refuses the kind until its input is
-  built (#753).
+  hook its kind; the notice on a pull request is not made for it. The claim of the runner API builds its input from the turn's record (#753).
 - **Usage and billing.** The record is reserved at claim with the kind `implementer` (billing off and on). For the plan's run limits,
   the rate of a minute and the model catalog it counts and costs as `dynamic` (`projectKindOf`), the engine it runs on; the journal
   entry keeps its own kind. The checks on `usage_records.review_kind` and `billing_journal_entries.review_kind` take the value

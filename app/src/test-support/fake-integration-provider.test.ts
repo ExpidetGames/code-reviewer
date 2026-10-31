@@ -376,6 +376,18 @@ describe("the fake integration provider", () => {
     ).not.toBeNull();
   });
 
+  // #755 (review of #776)
+  it("does not grant the write permission unless a test says so", async () => {
+    expect(
+      await fakeIntegrationProvider().installationPermissions(integration),
+    ).toEqual({ contentsWrite: false });
+    expect(
+      await fakeIntegrationProvider({
+        contentsWrite: true,
+      }).installationPermissions(integration),
+    ).toEqual({ contentsWrite: true });
+  });
+
   it("records the calls it receives", async () => {
     const provider = fakeIntegrationProvider();
 

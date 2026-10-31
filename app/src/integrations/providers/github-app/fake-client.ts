@@ -32,6 +32,8 @@ export type FakeGithubAppClientData = {
   token?: { token: string; expiresAt: string };
   /** Makes `mintInstallationToken` reject with this error. */
   mintFailure?: Error;
+  /** Makes `revokeInstallationToken` reject with this error (the real one never rejects; for a test of a caller that must not trust that). */
+  revokeFailure?: Error;
   /** Makes `listOpenPullRequests` reject with this error. */
   listPullRequestsFailure?: Error;
   /** Makes `createIssueComment` reject with this error. */
@@ -342,6 +344,11 @@ export function fakeGithubAppClient(
         message,
       );
       if (data.reviewFailure) throw data.reviewFailure;
+    },
+    async revokeInstallationToken(token) {
+      record("revokeInstallationToken", token);
+      if (data.revokeFailure) throw data.revokeFailure;
+      return true;
     },
     async mintInstallationToken(installationId, scope) {
       record("mintInstallationToken", installationId, scope);

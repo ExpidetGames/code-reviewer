@@ -175,6 +175,11 @@ const PROTECTED_DATA_ROUTES = [
   "/api/w/[workspace]/github/connect",
   "/api/w/[workspace]/github/installations",
   "/api/w/[workspace]/github/installations/choose",
+  // The routes behind the Implementer form (#755).
+  "/api/w/[workspace]/implementer/models",
+  "/api/w/[workspace]/implementer/repositories",
+  "/api/w/[workspace]/implementer/repositories/[repositoryId]/branches",
+  "/api/w/[workspace]/implementer/tasks",
   "/api/w/[workspace]/integrations/[integrationId]",
   "/api/w/[workspace]/integrations/sync",
   "/api/w/[workspace]/invitations",

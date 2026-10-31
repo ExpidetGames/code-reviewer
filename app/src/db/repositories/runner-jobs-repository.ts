@@ -45,6 +45,7 @@ import type {
   Job,
   JobErrorCode,
   JobOutcome,
+  ReleaseOptions,
   ReleaseResult,
 } from "../../jobs/job-types.ts";
 import { encodeJson, formatTimestamp } from "../codecs.ts";
@@ -69,6 +70,8 @@ import { headNoticeKey } from "../refusal-notice-key.ts";
 import { claimOldestDueJob } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { turnResultOf } from "../implementer-turn-result.ts";
+import { createImplementerRepository } from "./implementer-repository.ts";
 import { idleSessionsOfEndedTurns } from "./implementer-sessions-sweep.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 import {
@@ -81,6 +84,23 @@ import {
   settlementOfSupersededOutcome,
   type UnknownCostSettlement,
 } from "../../usage/usage-records.ts";
+
+/**
+ * Gives the session of a turn what its report says (#754) and sets it idle: the pushed head, the summary and the saved agent
+ * session of the implementer block of `result`; a result without a block records nothing but the end. The caller is the
+ * transaction that ends the job.
+ */
+async function recordTurnOfJob(
+  trx: Kysely<Database>,
+  job: { id: string; workspace_id: string },
+  result: unknown,
+  now: () => Date,
+): Promise<void> {
+  const sessions = createImplementerRepository(trx, job.workspace_id, now);
+  const turn = await sessions.getTurnByJob(job.id);
+  if (turn !== undefined)
+    await sessions.recordTurnResult(turn.session.id, turnResultOf(result));
+}
 
 /** What `expireStaleJobs` did. */
 export type ExpiryReport = {
@@ -206,13 +226,15 @@ export type RunnerJobsRepository = {
   /**
    * Gives a claimed job back. It counts as a lost attempt, exactly like a lapsed lease: the job is
    * waiting again (at `retryAt`, default now), or failed with `reason` if it was the last allowed
-   * attempt.
+   * attempt. A turn of the Implementer is never run twice, so its first lost attempt is its last, unless the caller says
+   * `beforeStart`: the input of the job never reached a Worker (the claim could not build it), nothing ran and nothing was
+   * pushed, so the job waits again like any other and only the general cap applies (#753).
    */
   release(
     jobId: string,
     leaseToken: string,
     reason: string,
-    options?: { retryAt?: Date },
+    options?: ReleaseOptions,
   ): Promise<ReleaseResult>;
   /**
    * A job by its id, whatever its workspace: the runner API answers "no such job" before it looks at
@@ -411,6 +433,8 @@ export function createRunnerJobsRepository(
     errorCode: string,
     timestamp: string,
     runAfter?: string,
+    /** #753: the input of the job never reached a Worker; the rule that a turn is never run twice does not apply. */
+    beforeStart = false,
   ): Promise<{ failed: number; requeued: number }> {
     let disabled = 0;
     if (!(await dynamicReviewAllowed(executor))) {
@@ -445,10 +469,14 @@ export function createRunnerJobsRepository(
       .where((eb) =>
         eb.or([
           eb("attempts", ">=", limits.maxAttempts - 1),
-          eb.and([
-            eb("review_kind", "=", "implementer"),
-            eb("attempts", ">=", IMPLEMENTER_MAX_ATTEMPTS - 1),
-          ]),
+          ...(beforeStart
+            ? []
+            : [
+                eb.and([
+                  eb("review_kind", "=", "implementer"),
+                  eb("attempts", ">=", IMPLEMENTER_MAX_ATTEMPTS - 1),
+                ]),
+              ]),
         ]),
       )
       .executeTakeFirst();
@@ -1226,8 +1254,13 @@ export function createRunnerJobsRepository(
             .executeTakeFirst();
           if (finished !== undefined) {
             endedClaims.push(jobId);
-            // #752: the turn is over; a report that records its result sets the session idle with the result, this only makes
-            // sure it is idle when the job ended with a failure that carried none.
+            // #754: the report of a turn gives its session the result (the pushed head, the summary, the saved agent session)
+            // and sets it idle, in this transaction; a failure without a block records nothing but the end. Only the call that
+            // ended the job gets here: a report that comes late for a settled job, or with a lost lease, changes nothing.
+            if (finished.review_kind === "implementer")
+              await recordTurnOfJob(trx, finished, result, now);
+            // #752: the sessions of the other turns that ended without a report of their run are idle by now; this only makes
+            // sure of it.
             await idleSessionsOfEndedTurns(trx, timestamp);
             // Settled from what the runner reported, in the same transaction as the job's end.
             const settlement = settlementOfOutcome(outcome);
@@ -1366,6 +1399,7 @@ export function createRunnerJobsRepository(
             releaseOptions.retryAt === undefined
               ? undefined
               : formatTimestamp(releaseOptions.retryAt),
+            releaseOptions.beforeStart === true,
           );
           if (lost.failed === 0 && lost.requeued === 0)
             return { status: "not_holder" };
@@ -1376,6 +1410,14 @@ export function createRunnerJobsRepository(
             .selectAll()
             .where("id", "=", jobId)
             .executeTakeFirstOrThrow();
+          // #754: a turn whose runner was shut down after it pushed keeps what the runner reported; a turn that goes back to the
+          // queue (never the Implementer's: one attempt) has not ended and records nothing.
+          if (
+            lost.failed > 0 &&
+            row.review_kind === "implementer" &&
+            releaseOptions.result !== undefined
+          )
+            await recordTurnOfJob(trx, row, releaseOptions.result, now);
           return lost.failed > 0
             ? { status: "failed", job: toJob(row) }
             : { status: "requeued", job: toJob(row) };

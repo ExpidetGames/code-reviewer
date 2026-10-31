@@ -101,7 +101,7 @@ export type EnqueueJobInput = {
 
 /**
  * What is known when a task of the Implementer is accepted (#752). The pull request columns of the job are not input: they are
- * made from the slot, the branch and `baseSha` by `implementer/job-shape.ts`, the one place that writes them.
+ * made from the slot, the branch and `baseSha` by `db/implementer-job-shape.ts`, the one place that writes them.
  */
 export type EnqueueImplementerTurnInput = {
   repositoryId: string;
@@ -154,6 +154,22 @@ export type EnqueueResult =
       supersededJobIds: string[];
     }
   | { status: "existing"; job: Job; reason: EnqueueExistingReason };
+
+/**
+ * What else a release can say. `result` (#754): the checked and cleaned result a runner reported when it was shut down; if the
+ * job is a turn of the Implementer and this release ends it (its one attempt is used), the work it reports (the pushed head, the
+ * summary, the saved agent session) is recorded on its session in the same transaction. Without it nothing is recorded.
+ */
+export type ReleaseOptions = {
+  retryAt?: Date;
+  result?: unknown;
+  /**
+   * #753: the input of the job never reached a Worker (the claim could not build it): nothing ran and nothing was pushed, so a
+   * turn of the Implementer waits again like any job instead of failing on its first lost attempt. Only the claim says so, and
+   * only while no input was handed out (`claim.ts`, `giveBack`).
+   */
+  beforeStart?: boolean;
+};
 
 /** What a runner reports when it is done with a job. */
 export type JobOutcome =
