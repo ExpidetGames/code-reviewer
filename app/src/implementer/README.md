@@ -38,19 +38,20 @@ comes from (`Sec-Fetch-Site` / `Origin`), the body of the POST for `application/
 clientRequestId }`: `201 { runId, sessionId }`, `200` with the same ids for a client request id that was accepted before (nothing
   is written then). `model` is `{ entryId }` (operator's key) or `{ provider, model }` (own key).
 
-| Status    | Code                                                                  | When                                                                                                            |
-| --------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 400       | `IMPLEMENTER_REQUEST_INVALID` (+ `issues`)                            | The body or the repository id is not usable; an issue is `{ field, code }`, a branch names the rule it breaks   |
-| 403       | `IMPLEMENTER_CROSS_SITE_REQUEST`                                      | The request is from another site                                                                                |
-| 404       | `IMPLEMENTER_REPOSITORY_NOT_FOUND`                                    | No such repository in this workspace (another workspace's looks the same), or the platform no longer lists it   |
-| 404       | `IMPLEMENTER_BASE_BRANCH_NOT_FOUND`                                   | The repository has no branch with the base branch's name                                                        |
-| 409       | `IMPLEMENTER_APP_NOT_INSTALLED`                                       | The integration is disabled, or GitHub answers 401, 403 or 404 for the installation or the repository           |
-| 409       | `IMPLEMENTER_WRITE_NOT_GRANTED`                                       | The installation has not accepted contents write (#749); nothing else is asked of GitHub                        |
-| 409       | `IMPLEMENTER_BRANCH_EXISTS`                                           | The new branch exists on GitHub, or a session of the repository holds the name: **a new branch name is needed** |
-| 413 / 415 | `IMPLEMENTER_BODY_TOO_LARGE` / `IMPLEMENTER_CONTENT_TYPE_UNSUPPORTED` | A body over 64 KB; a body that is not `application/json`                                                        |
-| 422       | `IMPLEMENTER_MODEL_NOT_ALLOWED` (+ `reason`)                          | The model is not one the claim would run (reasons in `errors.ts`)                                               |
-| 422       | `EXCEEDS_OPERATOR_MAXIMUM` (+ `maximumCents`)                         | The cost limit is above the operator's maximum per turn                                                         |
-| 503       | `IMPLEMENTER_GITHUB_UNAVAILABLE`                                      | GitHub failed, timed out, was rate limited or answered with something unusable; nothing was written             |
+| Status    | Code                                                                  | When                                                                                                               |
+| --------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 400       | `IMPLEMENTER_REQUEST_INVALID` (+ `issues`)                            | The body or the repository id is not usable; an issue is `{ field, code }`, a branch names the rule it breaks      |
+| 403       | `IMPLEMENTER_CROSS_SITE_REQUEST`                                      | The request is from another site                                                                                   |
+| 404       | `IMPLEMENTER_REPOSITORY_NOT_FOUND`                                    | No such repository in this workspace (another workspace's looks the same), or the platform no longer lists it      |
+| 404       | `IMPLEMENTER_BASE_BRANCH_NOT_FOUND`                                   | The repository has no branch with the base branch's name                                                           |
+| 409       | `IMPLEMENTER_APP_NOT_INSTALLED`                                       | The integration is disabled, or GitHub answers 401, 403 or 404 for the installation or the repository              |
+| 409       | `IMPLEMENTER_WRITE_NOT_GRANTED`                                       | The installation has not accepted contents write (#749); nothing else is asked of GitHub                           |
+| 409       | `IMPLEMENTER_BRANCH_CONFLICT`                                         | The new name is a folder of a listed branch or the other way round (`foo`, `foo/bar`): a new branch name is needed |
+| 409       | `IMPLEMENTER_BRANCH_EXISTS`                                           | The new branch exists on GitHub, or a session of the repository holds the name: **a new branch name is needed**    |
+| 413 / 415 | `IMPLEMENTER_BODY_TOO_LARGE` / `IMPLEMENTER_CONTENT_TYPE_UNSUPPORTED` | A body over 64 KB; a body that is not `application/json`                                                           |
+| 422       | `IMPLEMENTER_MODEL_NOT_ALLOWED` (+ `reason`)                          | The model is not one the claim would run (reasons in `errors.ts`)                                                  |
+| 422       | `EXCEEDS_OPERATOR_MAXIMUM` (+ `maximumCents`)                         | The cost limit is above the operator's maximum per turn                                                            |
+| 503       | `IMPLEMENTER_GITHUB_UNAVAILABLE`                                      | GitHub failed, timed out, was rate limited or answered with something unusable; nothing was written                |
 
 A request without a session is answered `401` and one from a person outside the workspace `404 not_found` by `withWorkspace`,
 before any of this runs.
@@ -59,13 +60,20 @@ before any of this runs.
 
 In this order, each step ends the request on failure, and **nothing is written before the last one**:
 
+0. **a request that was accepted before is answered first** (`queue.findImplementerTurn`, by the job's `delivery_id`
+   `implementer:<workspace id>:<client request id>`): `200` with the ids of that task, nothing asked of GitHub, nothing written.
+   A reconnect or a retry minutes later, after the agent has pushed the branch, gets the first task back and not "the branch
+   exists", so nobody starts a second, paid task by choosing a new name;
 1. the body is valid (`start-input.ts`; the new branch by `branch-name.ts`, which refuses a name equal to the base branch);
 2. the repository is this workspace's (`repositories` is created for the workspace, every read filters by it), active, and its
    integration is active;
 3. the installation holds `contents: write` (`installationPermissions`);
 4. `getRepositoryFacts` — **always before `getBranch`**: `getBranch` answers `null` for a repository path that went stale, so a
    `null` is believed only after the path resolved;
-5. `getBranch(base)` must exist (its sha becomes the job's `head_sha`), `getBranch(new)` must not;
+5. `getBranch(base)` must exist (its sha becomes the job's `head_sha`), `getBranch(new)` must not, and the new name must not be
+   a folder of a listed branch or the other way round (`foo` and `foo/bar`; `IMPLEMENTER_BRANCH_CONFLICT`, from
+   `listBranches`). **What this cannot see:** a conflicting branch beyond the first 100 the platform lists, and the name of a
+   task whose branch is not on GitHub yet. Git finds those at the push (`push_rejected`);
 6. the model is allowed (`models.check`, the rule of the picker);
 7. a cost limit is at most the operator's maximum (`review_max_cost_cents`); none asked for is stored as none, and the maximum
    applies at the claim;
@@ -73,13 +81,16 @@ In this order, each step ends the request on failure, and **nothing is written b
    race on the branch name hits the unique index of the sessions and is `IMPLEMENTER_BRANCH_EXISTS`; two submits with one new
    branch give exactly one `201`.
 
-A turn that fails before it starts keeps its branch name (accepted for this slice, #785), so the retry with the same name is
-`IMPLEMENTER_BRANCH_EXISTS` too; the message says a new branch name is needed, and the form shows it. A retry of the _same_
-request after the agent has pushed the branch is answered `409` as well, because the GitHub check comes before the queue's
-idempotency; this is safe, and a lookup of the client request id before the GitHub reads is a follow-up.
+A turn that fails before it starts keeps its branch name (accepted for this slice, #785), so the retry with the same name and a
+new request id is `IMPLEMENTER_BRANCH_EXISTS`; the message says a new branch name is needed, and the form shows it.
 
-The branch name is checked against git's rules at submit and the branch in the job's `pr_url` is percent-encoded part by part
-(`#`, `%` and `+` stay in the path); `?`, `..` and the other characters git refuses never get that far.
+The branch name is checked against git's rules at submit: at most 200 characters, **each part between slashes at most 240 UTF-8
+bytes** (a file name holds 255 bytes and git also makes `<name>.lock`; `ä` is two bytes, so 150 times `ä` is under 200
+characters and cannot be created), no white space of any kind (`\s`, the class of the queue's `BRANCH_NAME`: NBSP, U+2028,
+U+FEFF too, so a name the form accepts is never refused by the queue without an issue), and git's own rules. The branch in the
+job's `pr_url` is percent-encoded part by part (`#`, `%` and `+` stay in the path); `?`, `..` and the other characters git
+refuses never get that far. An id with a NUL byte (in the body or as `%00` in the address) is an unknown id (`404`), not a
+database error; a model name with a control character is refused as invalid.
 
 ## The models
 
@@ -98,7 +109,7 @@ OpenCode, so the native path is mandatory (an entry from the catalog and a cost 
 
 ## Tests
 
-Unit: `branch-name.test.ts` (more than 30 names, a subset cross-checked against the real `git check-ref-format`), `start-input.test.ts`,
+Unit: `branch-name.test.ts` (more than 30 names, a subset cross-checked against the real `git check-ref-format`, and every accepted name created with a real `git checkout -b`), `start-input.test.ts`,
 `models.test.ts`, `absent-routes.test.ts` (the proxy marks every route missing without the capability). Integration:
 `service.integration.test.ts` (real Postgres, the real GitHub App provider and client against the fake GitHub, the real queue),
 `http.integration.test.ts` (the handlers), `integration-tests/http/implementer-route-files.integration.test.ts` (the real route
