@@ -15,7 +15,9 @@ from typing import Any, cast
 import pytest
 from fake_llm import real_anthropic_usage
 from fakes.llm.anthropic_cache import PromptCache
-from fakes.wire.formats import Turn
+from fakes.wire import formats
+from fakes.wire.formats import Turn, Usage
+from fakes.wire.formats import usage_for as real_usage_for
 from implementer_support import (
     BRANCH,
     Scene,
@@ -32,8 +34,9 @@ from opencode_native import REAL_KEY
 from opencode_support import ripgrep_binary
 
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
+from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
 from code_reviewer_runner.implementer.git_workspace import LEFTOVER_MESSAGE
-from code_reviewer_runner.implementer.prompts import LEFTOVER_PROMPT, SYSTEM_PROMPT
+from code_reviewer_runner.implementer.prompts import LEFTOVER_PROMPT, instructions_text
 from code_reviewer_runner.result import ErrorCode
 from git_support import TOKEN, raw
 from passthrough_expect import usage_expected
@@ -275,7 +278,13 @@ def test_the_instruction_is_the_user_message_and_nowhere_in_the_system_part(
         assert "SENTINEL_INSTRUCTION_7" not in system
         assert "SENTINEL_INSTRUCTION_7" in json.dumps(request["messages"])
         assert "SENTINEL_INSTRUCTION_7" not in turned.config_texts[0]
-        assert SYSTEM_PROMPT.splitlines()[0] in system, "the runner's prompt is the system part"
+        # The runner's file reached the model from an absolute path, with the project config off,
+        # on top of the engine's own prompt for the model, which is kept.
+        assert "Rules of this workplace" in system
+        assert "only commit when explicitly requested" in system
+        assert "Nobody can answer a question here" in system
+        assert "There is no network access at all" in system, "the statement of the container"
+        assert len(system) > 3 * len(instructions_text(ImplementerNetwork.REGISTRIES))
 
 
 def marked_blocks(body: dict[str, Any]) -> int:
@@ -523,3 +532,67 @@ def test_the_agent_can_work_outside_the_repository(tmp_path: Path) -> None:
         assert not (outside / "f.txt").exists()
         for text in results:
             assert "external_directory" not in text and "rule" not in text.lower()
+
+
+def stated_usage(call: int) -> Usage:
+    """What the patched fake states for call `call`: the third answer of the model fills the
+    window (7 500 of 8 000 tokens), every other one is small."""
+    if call == 3:
+        return Usage(
+            input=7_500, output=30, cache_read=0, cache_write_5m=0, cache_write_1h=0, reasoning=0
+        )
+    return real_usage_for(call)
+
+
+# #764-R2
+def test_a_filled_window_compacts_and_the_turn_goes_on_with_the_cost_right(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(formats, "usage_for", stated_usage)
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "a.txt"),
+            commit("Add a"),
+            bash("true"),  # the answer to this call fills the window
+            write_file(repo, "b.txt"),
+            commit("Add b"),
+            says("both are done"),
+        ]
+
+    with implementer_turn(tmp_path, script, context=8_000, output=1_024) as turned:
+        result = turned.result
+
+        assert result.ok, (result.error_code, result.error_detail, result.notes)
+        assert [c.subject for c in result.commits] == ["Add a", "Add b"]
+        assert result.pushed and turned.origin_tip() == result.head_commit
+        records = turned.upstream.records
+        bare = [r for r in records if not turned.carries_tools(r.body)]
+        assert len(bare) == 1, "the compaction request, which offers no tools"
+        assert "Here is the conversation so far" in json.dumps(bare[0].body)
+        # The conversation after the compaction starts from the summary, not from the history.
+        before, after = turned.requests[2], turned.requests[3]
+        assert len(after["messages"]) < len(before["messages"])
+        assert "A title" in json.dumps(after["messages"]), "the summary the model wrote is there"
+        # The compaction call is a model call of the turn: counted, priced, in the result.
+        total = Fraction(0)
+        tool_calls = 0
+        for position, record in enumerate(records, start=1):
+            has_tools = turned.carries_tools(record.body)
+            tool_calls += 1 if has_tools else 0
+            stated = stated_usage(tool_calls if has_tools else 100 + position)
+            cost = expected_cost(
+                BOOK,
+                prompt=stated.input
+                + stated.cache_read
+                + stated.cache_write_5m
+                + stated.cache_write_1h,
+                completion=stated.output,
+                read=stated.cache_read,
+                write_5m=stated.cache_write_5m,
+                write_1h=stated.cache_write_1h,
+            )
+            assert cost is not None
+            total += cost
+        assert result.usage.ai_calls == len(records)
+        assert result.usage.cost_usd == pytest.approx(float(total), rel=1e-9)

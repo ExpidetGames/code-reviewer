@@ -57,6 +57,7 @@ def implementer_job(
     instruction: str = INSTRUCTION,
     entry: dict[str, Any] | None = None,
     context: int = 1_000_000,
+    output: int = OUTPUT_LIMIT,
 ) -> ImplementerInput:
     """The contract's example job with the provider, model and cost policy of the test."""
     document: dict[str, Any] = json.loads(EXAMPLE.read_text(encoding="utf-8"))
@@ -74,7 +75,7 @@ def implementer_job(
         upstreamBaseUrl=entry["upstreamBaseUrl"],
         modelId=entry["model"],
     )
-    model_entry["model"]["limit"] = {"context": context, "output": OUTPUT_LIMIT}
+    model_entry["model"]["limit"] = {"context": context, "output": output}
     model_entry["model"]["reasoning"] = False
     model_entry["model"].pop("interleaved", None)
     document["git"]["token"] = TOKEN
@@ -166,6 +167,7 @@ def implementer_turn(
     tick: float = 0.3,
     entry: dict[str, Any] | None = None,
     context: int = 1_000_000,
+    output: int = OUTPUT_LIMIT,
     command: Sequence[str] | None = None,
     repo_setup: Callable[[Path], None] | None = None,
     egress: EgressSettings | None = None,
@@ -190,6 +192,7 @@ def implementer_turn(
         instruction=instruction,
         entry=entry,
         context=context,
+        output=output,
     )
     ripgrep = ripgrep_binary()
     assert ripgrep is not None, "the engine tests need an rg on the PATH (OPENCODE_TEST_PATH)"
