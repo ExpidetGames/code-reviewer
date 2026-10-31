@@ -50,6 +50,8 @@ export type FakeIntegrationProviderOptions = {
   jobAccessFailure?: Error;
   /** Makes `implementerAccess` fail with this error (#749), for example `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED`. */
   implementerAccessFailure?: Error;
+  /** Whether `revokeImplementerAccess` says the token is off (#753). Default: yes. */
+  revokeSucceeds?: boolean;
   /** Whether the connections have accepted the permission to write contents (#749). Default: no, so a test that forgets to set it does not pass as if write were granted. */
   contentsWrite?: boolean;
   /** The pull requests every repository has. Defaults to an open #7 and a draft #8. */
@@ -334,6 +336,11 @@ export function fakeIntegrationProvider(
         expiresAt: "2026-10-10T13:00:00.000Z",
         ...options.access,
       });
+    },
+
+    async revokeImplementerAccess(integration, token) {
+      record("revokeImplementerAccess", integration, token);
+      return options.revokeSucceeds ?? true;
     },
 
     async installationPermissions(integration) {

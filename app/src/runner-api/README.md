@@ -213,7 +213,7 @@ id (for which a refused job answers `204`, like any job that cannot be claimed).
    and the operator's maximum per review (#689, the admin portal, the instance setting `review_max_cost_cents`, read at
    each job through `ClaimDeps.operatorCostLimitCents`) go to a caller that names `operator_cost_limit` as two values; a caller
    that names `cost_limit` alone gets the smaller of the two in `llm.maxCostUsd`; a caller that names neither gets neither, and
-   the claim logs `carries no cost limit` (a Dynamic Review is then held only to the runner's `RUNNER_DYNAMIC_MAX_COST_USD`, a Diff Review to none); a caller that names `operator_cost_limit` alone gets the smaller of the two in `llm.operatorMaxCostUsd`. **On the operator's
+   the claim logs `carries no cost limit` (a Dynamic Review is then held only to the runner's `RUNNER_DYNAMIC_MAX_COST_USD`, a Diff Review to none; a turn of the Implementer is not given that: the runner has no limit of its own for it, so the job ends `implementer_engine_unavailable`); a caller that names `operator_cost_limit` alone gets the smaller of the two in `llm.operatorMaxCostUsd`. **On the operator's
    key** the model of the job is the entry's, never the workspace's; the capabilities of #279 are read for it, from the
    selection's provider. The entry's model is remembered with the key,
    so the result a runner reports is stripped of it (`usage.model` becomes `null`, the model ids of every entry of every
@@ -282,11 +282,53 @@ The claim only hands out a job whose review kind one of those engines can run (`
 empty list is `400 RUNNER_REQUEST_INVALID`, and a body over 64 KiB is `413`, both before any job is
 claimed and any credential is created. The token check comes first.
 
-**#746:** the contract names a third engine, `implementer`, and a third kind of job, `implementer` (the Implementer of the factory
-deployment, `contracts/README.md`, "The Implementer kind"). Neither is served yet. A claim that names the engine gets no job of any
-kind from it (a claim that names only that engine is `204`), and a claimed job of the kind is refused by `kind-guard.ts` with
-`implementer_engine_unavailable` before the guard, the key or a credential is looked at, so no later branch on `dynamic` can build it
-as a Diff job. The claim of the kind replaces this refusal (#753).
+**#746, #753:** the contract names a third engine, `implementer`, and a third kind of job, `implementer` (the Implementer of the factory
+deployment, `contracts/README.md`, "The Implementer kind"). A claim that names the engine is handed a turn; a claim that does not never
+gets one (the atomic claim filters by engine), and a claimed turn for a caller without the engine is refused by `kind-guard.ts` with
+`implementer_engine_unavailable` before the guard, the key or a credential is looked at, so it is never built as a Diff job.
+
+## The claim of a turn (#753)
+
+A turn is a job of the kind `implementer` with a record in `implementer_turns` (the instruction, the model it was started with, its cost
+limit) and `implementer_sessions` (the branch, the base branch). The claim and the Worker's fetch take the road of every job (`checkJob`,
+then `buildJobInput`) with these differences:
+
+| Step          | A review job                                                  | A turn                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Options       | the review settings of the project                            | the turn's record: `{entryId}` (operator's key) or `{provider, model}` (own key), the cost limit of the turn. A choice that does not fit the key mode the claim decided ends the job (`managed_model_unavailable` / `llm_model_unavailable`); it is never moved to another model                                                                                                                                                                      |
+| Model         | `selectModel` for the kind                                    | `selectModel` for the Dynamic kind (`projectKindOf`): the entry must serve `dynamic`; the model must be native (entry and cost policy), else `implementer_config_invalid`. A catalog provider on the workspace's own key is held to the address the workspace's projects pinned for it (`ClaimDeps.pinnedAddresses`): one pin, exactly that address; several different pins, none (`provider_address_changed`); no pin, the catalog's trusted address |
+| Platform read | the pull request (`pr_not_found`, `pull_request_closed`)      | none: no pull request is read. The repository and its connection must be active (`git_connection_disabled`) and the installation must hold `contents: write` (`installationPermissions`, else `git_write_not_granted`, ended for good)                                                                                                                                                                                                                |
+| Token         | `jobAccess` (`contents: read`)                                | `implementerAccess` (`contents: write`, `metadata: read`, one repository). Behind the capability: a deployment without `implementer` gets `INTEGRATION_CAPABILITY_ABSENT`, mapped to `implementer_engine_unavailable`, before GitHub is asked                                                                                                                                                                                                         |
+| Input         | `prUrl`, `command`, `git`, `llm`, `env` (+ `dynamic`, `base`) | `reviewKind: implementer`, `implementer {repo {fullName, cloneUrl}, baseBranch, branch, instruction, limits {timeLimitSeconds: 3600}, cost, modelEntry}`, `git`, `llm` (`maxTokens`, the cost limit by `jobCostLimit` as for Dynamic), `env: {}`                                                                                                                                                                                                      |
+
+`cloneUrl` is the repository's own address with `.git`, and must satisfy the rule of the runner's workspace (https, a host, no credential,
+query or fragment); an address that does not ends the job `implementer_config_invalid` before any credential exists.
+
+A turn needs a runner that names `cost_limit` or `operator_cost_limit` (and `dynamic_cost_policy`): the cost limit is the brake of a turn and
+the runner has no limit of its own for this kind, so a caller that names neither ends the job `implementer_engine_unavailable`, as for an
+engine that cannot run the kind, before any credential exists.
+
+A failure that may pass (GitHub down while the installation is read or the token is made) gives the job back with `Retry-After`.
+A turn is never run twice (`maxAttempts` 1), so it is put back in the queue only while **no input was ever handed to a Worker**: the
+write tokens are remembered before an input leaves, so a turn whose ledger is empty has handed out none (`noInputHandedOut`, asked
+before the call builds anything), and its release carries `beforeStart`. After a first fetch delivered an input, a later failing fetch
+ends the turn like any lost attempt of it, because the Worker of the first fetch may be running.
+
+**The write token ends with the turn.** The token lives up to an hour and nothing may keep it alive after its job
+(`write-token.ts`). `implementerAccess`'s counterpart is `revokeImplementerAccess` (`DELETE /installation/token`, not behind the
+capability, never throws). It answers whether the token is off: `true` for a 2xx or a 401 (switched off before, or expired), `false` for
+a server error, a rate limit, a refusal, no answer in 3 s or no connection. Each token the claim hands out is remembered sealed with the
+time it expires next to the keys of the job (`job_claimed_keys`, `gitTokens`, rows changed under `FOR UPDATE`) before it leaves, and is
+forgotten **only after the platform said it is off, or once it has expired on its own**. A token that could not be switched off stays and is
+tried again. It is switched off:
+
+- when the fetch or claim fails after the token was made and before the input reached a Worker (`revokeUndelivered`: exactly that token,
+  with the value in hand, even if the ledger cannot be written; it is also what a failure after the mint inside `buildJobInput` does);
+- when the turn is over, however it ended: the stored result (success or failure, also a repeated report), a Worker or a Dispatcher giving
+  the job back, and every end of a claim of the queue (`onClaimsEnded`: the reaper, a stop, the hard timeout, a cancel), after the
+  response (`revokeAllOf`, `revokeEnded`);
+- by the retry: the maintenance between requests (`opportunistic.ts`) and the sweep (step `write_tokens`) look at the turns that ended
+  lately and still hold a token, until the token expires. Both exist only in a deployment with the capability `implementer`.
 
 The body may also name `features` (#279): `["dynamic_capabilities"]` says the runner reads
 `dynamic.capabilities`. Unknown names are ignored; a list that is not a list of plain names is

@@ -4,6 +4,7 @@
 // Everything GitHub specific stays in this folder; the rest of the app sees normalized types only.
 // See ../../README.md.
 import { createHash } from "node:crypto";
+import type { CapabilitySet } from "../../../capabilities/capability.ts";
 import {
   validateConfigAgainstSchema,
   type ConfigSchema,
@@ -63,6 +64,12 @@ export type GithubAppProviderOptions = {
   client?: GithubAppClient;
   /** Passed to the default client (a different fetch, clock or timeout). */
   clientOptions?: Omit<GithubAppClientOptions, "config">;
+  /**
+   * The capabilities of the deployment (#753), asked on every call. The token of the Implementer is made only where
+   * `allowsReviewKind("implementer")` holds; left out, none is: the default is closed, so a provider wired without it, or a
+   * deployment of another product (code-review.com) whose App was set to write by hand, can never mint a write token.
+   */
+  capabilities?: () => CapabilitySet;
 };
 
 function toDiscovered(installation: RemoteInstallation): DiscoveredConnection {
@@ -258,6 +265,13 @@ export function createGithubAppProvider(
     },
 
     async implementerAccess(integration, repo) {
+      // The gate of this method itself (#753), before the settings or GitHub are touched: the manifest is a second wall,
+      // not the first. Asked on every call.
+      if (options.capabilities?.().allowsReviewKind("implementer") !== true)
+        throw new IntegrationError(
+          "INTEGRATION_CAPABILITY_ABSENT",
+          "This deployment does not offer the Implementer.",
+        );
       // Like `jobAccess`: a fresh token for exactly this repository on every call, never cached or shared. The
       // permission is the Implementer's (contents write, metadata read); a 422 because the installation has not
       // accepted it is its own stable code, and nothing broader is tried instead.
@@ -285,6 +299,16 @@ export function createGithubAppProvider(
         });
       } catch (error) {
         throw toImplementerAccessError(error);
+      }
+    },
+
+    async revokeImplementerAccess(_integration, token) {
+      // Never rejects (see the provider interface): a failure to read the settings or to reach GitHub is "not off", and the caller
+      // keeps the token to try again.
+      try {
+        return await (await getClient()).revokeInstallationToken(token);
+      } catch {
+        return false;
       }
     },
 

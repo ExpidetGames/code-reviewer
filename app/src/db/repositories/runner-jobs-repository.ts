@@ -226,7 +226,9 @@ export type RunnerJobsRepository = {
   /**
    * Gives a claimed job back. It counts as a lost attempt, exactly like a lapsed lease: the job is
    * waiting again (at `retryAt`, default now), or failed with `reason` if it was the last allowed
-   * attempt.
+   * attempt. A turn of the Implementer is never run twice, so its first lost attempt is its last, unless the caller says
+   * `beforeStart`: the input of the job never reached a Worker (the claim could not build it), nothing ran and nothing was
+   * pushed, so the job waits again like any other and only the general cap applies (#753).
    */
   release(
     jobId: string,
@@ -431,6 +433,8 @@ export function createRunnerJobsRepository(
     errorCode: string,
     timestamp: string,
     runAfter?: string,
+    /** #753: the input of the job never reached a Worker; the rule that a turn is never run twice does not apply. */
+    beforeStart = false,
   ): Promise<{ failed: number; requeued: number }> {
     let disabled = 0;
     if (!(await dynamicReviewAllowed(executor))) {
@@ -465,10 +469,14 @@ export function createRunnerJobsRepository(
       .where((eb) =>
         eb.or([
           eb("attempts", ">=", limits.maxAttempts - 1),
-          eb.and([
-            eb("review_kind", "=", "implementer"),
-            eb("attempts", ">=", IMPLEMENTER_MAX_ATTEMPTS - 1),
-          ]),
+          ...(beforeStart
+            ? []
+            : [
+                eb.and([
+                  eb("review_kind", "=", "implementer"),
+                  eb("attempts", ">=", IMPLEMENTER_MAX_ATTEMPTS - 1),
+                ]),
+              ]),
         ]),
       )
       .executeTakeFirst();
@@ -1391,6 +1399,7 @@ export function createRunnerJobsRepository(
             releaseOptions.retryAt === undefined
               ? undefined
               : formatTimestamp(releaseOptions.retryAt),
+            releaseOptions.beforeStart === true,
           );
           if (lost.failed === 0 && lost.requeued === 0)
             return { status: "not_holder" };
