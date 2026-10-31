@@ -6,6 +6,8 @@ results, and the codes a turn can end with."""
 import time
 from collections.abc import Callable
 from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,7 +19,9 @@ from code_reviewer_runner.dynamic_review.budget import (
     UnitCosts,
 )
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
 from code_reviewer_runner.dynamic_review.tool_part_audit import ToolPartAudit
+from code_reviewer_runner.implementer.egress_config import EgressSettings
 from code_reviewer_runner.implementer.git_workspace import PushOutcome, PushResult
 from code_reviewer_runner.implementer.session import (
     COST_LIMIT_DETAIL,
@@ -25,16 +29,24 @@ from code_reviewer_runner.implementer.session import (
     GRACE_SECONDS,
     MAX_RETURNED_BYTES,
     TOKEN_CAP_DETAIL,
+    ImplementerSession,
     PushTicker,
     agent_limits,
     classify,
     deadline_seconds,
 )
 from code_reviewer_runner.implementer.turn_result import MAX_SUMMARY_CHARS, clip_summary
-from code_reviewer_runner.job import JobError
+from code_reviewer_runner.job import JobError, parse_implementer_input
 from code_reviewer_runner.redaction import REDACTED
 from code_reviewer_runner.result import ErrorCode
 
+EXAMPLE = (
+    Path(__file__).resolve().parents[3]
+    / "contracts"
+    / "examples"
+    / "implementer"
+    / "RunnerJobInput.json"
+)
 PRICES = UnitCosts(input_usd_per_mtok=Decimal(3), output_usd_per_mtok=Decimal(15))
 TOKEN = "ghs_dummy-installation-token-0123456789"
 KEY = "sk-or-v1-" + "dummykey0123456789abcdef"  # built, so the secret scan sees no key
@@ -400,3 +412,66 @@ def test_a_failure_of_the_provider_does_not_hide_a_bound_or_a_refusal_of_ours() 
 
     assert classify(bound, provider_error=ErrorCode.LLM_UNAVAILABLE)[0] is ErrorCode.RUNNER_ERROR
     assert classify(refused, provider_error=ErrorCode.LLM_UNAVAILABLE)[0] is ErrorCode.PUSH_REJECTED
+
+
+# -- the session reads the ledger and the proxy, not the reservations (#764-R12) -------------------
+
+
+class FakeProxy:
+    def __init__(self, failed: ErrorCode | None) -> None:
+        self.last_upstream_error = failed
+
+
+def session_that_ended(ledger: BudgetLedger, failed: ErrorCode | None) -> ImplementerSession:
+    """A session as far as `_stopped_by` needs it: the ledger and the proxy of its native job."""
+    job = parse_implementer_input(EXAMPLE.read_text(encoding="utf-8"))
+    session = ImplementerSession(
+        job,
+        workspace=None,  # type: ignore[arg-type]  # not read by _stopped_by
+        command=["opencode"],
+        egress=EgressSettings(ImplementerNetwork.NONE, None),
+        environment={},
+    )
+    session._native = SimpleNamespace(  # type: ignore[assignment]  # pyright: ignore[reportPrivateUsage]
+        ledger=ledger, run=SimpleNamespace(proxy=FakeProxy(failed))
+    )
+    return session
+
+
+def ended_with(session: ImplementerSession, error: BaseException) -> ErrorCode | None:
+    session._stopped_by(error)  # pyright: ignore[reportPrivateUsage]
+    return session._error[0] if session._error else None  # pyright: ignore[reportPrivateUsage]
+
+
+# #764-R12
+def test_reservations_that_cost_nothing_do_not_make_a_killed_engine_a_charged_give_up() -> None:
+    ledger = make_ledger()
+    for _ in range(4):
+        ledger.settle_unbilled(reservation_of(ledger))
+
+    code = ended_with(session_that_ended(ledger, None), ENGINE_GAVE_UP)
+
+    assert code is ErrorCode.RUNNER_ERROR
+
+
+# #764-R12
+def test_a_billed_call_makes_the_same_end_a_charged_give_up() -> None:
+    ledger = make_ledger()
+    ledger.settle_call(
+        reservation_of(ledger), prompt_tokens=100, completion_tokens=10, cost=Decimal("0.001")
+    )
+
+    code = ended_with(session_that_ended(ledger, None), ENGINE_GAVE_UP)
+
+    assert code is ErrorCode.AGENT_GAVE_UP
+
+
+# #764-R12
+@pytest.mark.parametrize("failure", PROVIDER_FAILURES)
+def test_the_session_names_the_outage_the_proxy_kept(failure: ErrorCode) -> None:
+    ledger = make_ledger()
+    ledger.settle_call(
+        reservation_of(ledger), prompt_tokens=100, completion_tokens=10, cost=Decimal("0.001")
+    )
+
+    assert ended_with(session_that_ended(ledger, failure), ENGINE_GAVE_UP) is failure
