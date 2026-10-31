@@ -16,6 +16,7 @@ import type { WorkspaceId } from "../db/workspace-scope.ts";
 import { errorCode, FOREIGN_KEY_VIOLATION } from "../db/errors.ts";
 import { JobQueueError } from "./errors.ts";
 import {
+  CLIENT_REQUEST_ID,
   validateEnqueueInput,
   validateImplementerTurnInput,
 } from "./job-input.ts";
@@ -51,7 +52,7 @@ export type JobQueue = {
   enqueue(input: EnqueueJobInput): Promise<EnqueueResult>;
   /**
    * #752: accepts a task of the Implementer: the session, its first turn and the turn's job (a job of the kind `implementer`,
-   * `trigger_kind` manual, the pull request columns made by `implementer/job-shape.ts`) in one transaction. The job is queued for
+   * `trigger_kind` manual, the pull request columns made by `db/implementer-job-shape.ts`) in one transaction. The job is queued for
    * a runner with the engine `implementer`, never retried, and not touched by anything that acts on pull requests (README,
    * "The implementer kind"). The same `clientRequestId` gives the turn it made back (`status: "existing"`) and writes nothing.
    *
@@ -62,6 +63,13 @@ export type JobQueue = {
   enqueueImplementerTurn(
     input: EnqueueImplementerTurnInput,
   ): Promise<EnqueueImplementerTurnResult>;
+  /**
+   * The turn a client request id made earlier, or undefined; reads only (#791). A request id that is no valid id (not 1 to 200
+   * printable ASCII characters) has made no turn.
+   */
+  findImplementerTurn(
+    clientRequestId: string,
+  ): Promise<EnqueueImplementerTurnResult | undefined>;
   /** Cancels all waiting jobs of a repository (project deactivated); running jobs finish. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /**
@@ -159,6 +167,10 @@ export function createJobQueue(
         }
       return result;
     },
+    findImplementerTurn: (clientRequestId) =>
+      CLIENT_REQUEST_ID.test(clientRequestId)
+        ? jobs.findImplementerTurn(clientRequestId)
+        : Promise.resolve(undefined),
     cancelWaitingForRepository: (repositoryId) =>
       jobs.cancelWaitingForRepository(repositoryId),
     cancelWaitingForReviewKindChange: (repositoryId) =>
