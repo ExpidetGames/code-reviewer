@@ -15,7 +15,7 @@ Dispatcher's code, configuration and Launchers are in [`dispatcher/README.md`](.
 | **Launcher** | How a Worker is started: the **Sandbox-Launcher** (a fresh VM from a golden snapshot that hosts Docker; the Worker runs there as our hardened container). |
 | **Worker** | The isolated process tree that executes exactly one job: the **Diff-Worker** (PR-Agent) or the **Dynamic-Worker** (OpenCode engine). It knows only the App URL, the job id and the per-job credential. |
 | **Worker contract** | What the Worker may do with the per-job credential and nothing more: fetch job details, heartbeat, deliver the result. Identical whoever started the Worker. |
-| **Hardened container spec** | One definition of the container flags: user, capabilities, `no-new-privileges`, read-only root, tmpfs, memory and pids limits, no volumes, devices or host namespaces (`contracts/worker-container.v1.json`). |
+| **Hardened container spec** | One definition of the container flags: user, capabilities, `no-new-privileges`, read-only root, tmpfs, memory and pids limits, no volumes, devices or host namespaces (`contracts/worker-container.v1.json`). The Implementer has a profile of it with one work volume (below). |
 | **Golden snapshot** | A snapshot of a VM with Docker installed and the Worker image pre-pulled. Every job gets a fresh clone; a snapshot never contains job data ([`golden-snapshot.md`](golden-snapshot.md)). |
 
 **More than one App (#730).** One Dispatcher can serve several Apps. The key that signs a call names the app (a key belongs to
@@ -39,15 +39,40 @@ plus 10 minutes of grace) carry the default 3600. An operator who sets another `
 shorter value leaves a turn that the Dispatcher stopped `running` in the app until 70 minutes have passed, and a longer one
 has the app fail the turn with `timeout` at 70 minutes while its Worker still runs (and the hold too small); `billing-hold-pin.test.ts`
 pins the two constants to the default only. Change the constants with the setting. The Sandbox launcher does not advertise the engine
-yet: it needs the container profile of the Implementer (#760), until then a dispatch for the kind is `not_capable`.
+yet, although it can launch the kind since #760 (the container profile below): advertising it is for the day a real probe can report it, so a dispatch
+for the kind is `not_capable` until then.
 The deploy canary (`POST /probe`) follows the same rule: it requires the engines of Diff and Dynamic whatever else is
 configured, and requires `implementer` only when the Launcher advertises it, so the release that introduces the kind does not
-fail its own canary and a missing reviewer engine still does. Once #760 makes the Launcher advertise the engine, the route
+fail its own canary and a missing reviewer engine still does. Once a change makes the Launcher advertise the engine, the route
 requires the report to name it, and no report can today: `KNOWN_ENGINES` (`dispatcher/src/probe/verdict.ts`), the `ProbeEngine`
 enum and the two `maxItems: 2` of `contracts/probe-verdict.v1.json`, and `runner/src/code_reviewer_runner/verdict.py` accept
 `pr-agent` and `opencode` only. The PR that adds `implementer` to the Sandbox launcher's capabilities has to extend all of them
 and the probe of the canary VM, else `POST /probe` answers `503` on every deploy. The answer lists the engines it required
 (`required`), and the canary prints the missing ones (`missing=`).
+
+**The container profile of the Implementer (#760).** The hardened container of Diff and Dynamic cannot host an agent that
+installs a repository's dependencies and runs its tests (read-only root, `noexec` 512 MB `/tmp`, 2 GB, 512 processes, no
+volume). The Sandbox launcher picks the container spec by the job kind: Diff and Dynamic keep `WorkerContainerSpec`
+unchanged; `implementer` gets `ImplementerContainerSpec` (`contracts/worker-container.v1.json`), which is the same spec with
+exactly four fields changed: one **work volume** at `/work`, **memory** 3 GB (reservation 2.5 GB, no swap; the VM has 4 GB),
+**2048 processes** and the three **environment names** `RUNNER_IMPLEMENTER_WORK_DIR` (`/work`), `RUNNER_IMPLEMENTER_NETWORK`
+(`registries`) and `RUNNER_IMPLEMENTER_EGRESS_PORT` (`10182`). The floor is the same: root filesystem read-only, every tmpfs
+`noexec`, no privileged, no host bind, device or namespace, no Docker socket, `no-new-privileges`, the same capabilities. The
+work volume is the only writable path that may run a program; a bind or any other volume has no key in the schema.
+Docker cannot give a named volume mount options, so before `docker run` the launcher makes the volume in the job's VM as
+root, in five steps (`work-volume-dir`, `-mount`, `-options`, `-check`, `-create`): a directory below
+`/var/lib/code-reviewer-work`, a mount of its own on it with `rw,nosuid,nodev` (no `noexec`), a read of `/proc/self/mountinfo`
+that must show exactly those options on that mount (a platform that ignored them would run the agent on a mount that honours
+the setuid bit, and nothing else would show it), and a Docker named volume `code-reviewer-work-<job id>` bound to it. The tools
+are `mkdir`, `mount` and `cat` of the base image (Ubuntu: `mount` is a required package), so the snapshot needs nothing added.
+Each step has 10 s; the five add 50 s to the lifetime of an implementer VM (`WORK_VOLUME_STEPS_SECONDS`), and
+`LAUNCH_STEPS_SECONDS` for Diff and Dynamic is unchanged. The mount and the volume belong to the VM, which is stopped after every failure and by the App's stop call; nothing is
+removed separately and nothing outlives the job. A failed, hung or unverified step stops the VM (`work_volume_failed`, retryable). The VM is
+2 vCPU / 4 GB by default (`SANDBOX_KIND_DEFAULTS.implementer`); `DISPATCHER_WORKER_CONFIG.implementer` overrides the vCPUs and
+the container memory value by value, and a limit the VM cannot hold beside the OS is refused as `sandbox_config_invalid` at
+every launch of the kind. At start a deployment that serves the kind only logs `worker_config_invalid` for such a value and
+starts: the factory never blocks the release of code-review.com, and Diff and Dynamic do not read the entry. The operator's Dynamic variables (`RUNNER_DYNAMIC_*`) are not
+given to an implementer container. The platform gives a VM a 64 GB disk, which is the room of the work volume.
 
 "Runner" is retired as a concept: the former runner process conflated the Dispatcher
 (claim, cap) and the Worker host (heartbeat, supervise, deliver). Its identifiers (`RUNNER_*` variables, image and
