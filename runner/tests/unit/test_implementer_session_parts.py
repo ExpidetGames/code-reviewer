@@ -10,7 +10,12 @@ from decimal import Decimal
 import pytest
 
 from code_reviewer_runner.dynamic_review.adapter import EngineError
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError, UnitCosts
+from code_reviewer_runner.dynamic_review.budget import (
+    BudgetLedger,
+    LimitError,
+    Reservation,
+    UnitCosts,
+)
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.tool_part_audit import ToolPartAudit
 from code_reviewer_runner.implementer.git_workspace import PushOutcome, PushResult
@@ -316,3 +321,82 @@ def test_a_refusal_stops_the_turn_and_no_push_is_made_that_could_only_be_refused
 
     assert stopped.value.code is code and again.value.code is code
     assert loop.finished == 0
+
+
+# -- the model was used, or only reserved (#764, second review) ----------------------------------
+
+
+def reservation_of(ledger: BudgetLedger) -> Reservation:
+    return ledger.reserve_call("x" * 400)
+
+
+# #764-R12
+def test_a_reserved_call_is_not_a_use_of_the_model() -> None:
+    ledger = make_ledger()
+
+    reservation_of(ledger)
+
+    assert ledger.model_calls == 1 and ledger.model_used is False
+
+
+# #764-R12
+def test_a_call_the_provider_turned_away_or_that_never_left_costs_nothing_and_is_no_use() -> None:
+    ledger = make_ledger()
+    for _ in range(3):
+        ledger.settle_unbilled(reservation_of(ledger))
+
+    assert ledger.model_calls == 3 and ledger.model_used is False
+
+
+# #764-R12
+def test_a_call_whose_usage_was_read_is_a_use() -> None:
+    ledger = make_ledger()
+
+    ledger.settle_call(
+        reservation_of(ledger), prompt_tokens=100, completion_tokens=10, cost=Decimal("0.001")
+    )
+
+    assert ledger.model_used is True
+
+
+# #764-R12
+def test_a_call_that_was_sent_and_whose_usage_was_never_seen_may_have_been_billed() -> None:
+    ledger = make_ledger()
+
+    ledger.settle_unknown(reservation_of(ledger))
+
+    assert ledger.model_used is True
+
+
+PROVIDER_FAILURES = [ErrorCode.LLM_UNAVAILABLE, ErrorCode.LLM_TIMEOUT]
+ENGINE_GAVE_UP = EngineError(
+    ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine ended its turn with an error (error=APIError)"
+)
+
+
+# #764-R12
+@pytest.mark.parametrize("failure", PROVIDER_FAILURES)
+@pytest.mark.parametrize("used_model", [False, True])
+def test_an_engine_that_gave_up_after_the_provider_failed_is_an_outage_whatever_was_billed(
+    failure: ErrorCode, used_model: bool
+) -> None:
+    code, _ = classify(ENGINE_GAVE_UP, used_model=used_model, provider_error=failure)
+
+    assert code is failure
+
+
+# #764-R12
+def test_a_killed_engine_is_charged_only_after_the_model_was_used() -> None:
+    killed = EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "engine_exited: gone")
+
+    assert classify(killed, used_model=False)[0] is ErrorCode.RUNNER_ERROR
+    assert classify(killed, used_model=True)[0] is ErrorCode.AGENT_GAVE_UP
+
+
+# #764-R12
+def test_a_failure_of_the_provider_does_not_hide_a_bound_or_a_refusal_of_ours() -> None:
+    bound = LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cumulative content bound is used up")
+    refused = JobError(ErrorCode.PUSH_REJECTED, "the provider did not take the push")
+
+    assert classify(bound, provider_error=ErrorCode.LLM_UNAVAILABLE)[0] is ErrorCode.RUNNER_ERROR
+    assert classify(refused, provider_error=ErrorCode.LLM_UNAVAILABLE)[0] is ErrorCode.PUSH_REJECTED

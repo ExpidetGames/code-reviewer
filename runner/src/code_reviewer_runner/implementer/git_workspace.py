@@ -117,11 +117,14 @@ MAX_BACKOFF_SECONDS = PUSH_INTERVAL_SECONDS
 # An answer of the provider that is a no and not a hiccup: a client error other than "request
 # timeout" and "too many requests" (credentials, permission, a missing repository, a validation).
 _HTTP_ERROR = re.compile(r"returned error: (\d{3})")
-# git asks for credentials after a 401 and, with prompts off, reports that instead of the status.
-_CREDENTIALS_REFUSED = re.compile(
-    r"could not read (?:Username|Password)|Authentication failed|Permission denied", re.IGNORECASE
-)
 _RETRYABLE_CLIENT_ERRORS = frozenset({408, 425, 429})
+# git asks for credentials after a 401 and, with prompts off, reports that instead of the status.
+# Only the words of git about the remote's answer: a local "Permission denied" (a lock, the
+# mirror's own files) is not the provider refusing anything, and is not matched.
+_CREDENTIALS_REFUSED = re.compile(r"could not read (?:Username|Password)|Authentication failed")
+# A `! [remote rejected] (reason)` line of the porcelain whose reason says the provider itself
+# failed (GitHub's "internal error" and "failed to update ref"): a hiccup, not a no.
+_HICCUP = re.compile(r"\[remote rejected\]\s*\((?:internal error|failed to update ref)\)", re.I)
 _COMMIT_HEADER = re.compile(r"commit [0-9a-f]{40}")
 _COMMITTER = re.compile(r"committer (?P<name>[^<>\n]*) <(?P<email>[^<>\n]*)> \d+ [+-]\d{4}")
 
@@ -824,7 +827,8 @@ class GitWorkspace:
         if pushed.returncode != 0:
             refused = [line for line in pushed.stdout.splitlines() if line.startswith("!")]
             detail = self._detail(pushed)
-            if not refused and not _is_http_refusal(detail):
+            hiccups = bool(refused) and all(_HICCUP.search(line) for line in refused)
+            if hiccups or (not refused and not _is_http_refusal(detail)):
                 raise PushTransient("the provider did not take the push for now: " + detail)
             first = self._pushed is None
             if any("[rejected]" in line for line in refused) and first:

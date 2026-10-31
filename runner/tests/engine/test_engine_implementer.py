@@ -1044,3 +1044,43 @@ def test_nothing_is_added_to_the_summary_when_the_agent_left_those_names_alone(
         tmp_path, lambda repo: [write_file(repo, "a.txt"), commit("Add a"), says("done")]
     ) as turned:
         assert turned.result.summary == "done"
+
+
+# #764-R12
+def test_a_provider_that_cannot_be_reached_is_an_outage_and_free(tmp_path: Path) -> None:
+    with implementer_turn(
+        tmp_path, lambda repo: [says("never asked")], unreachable=True, time_limit=600
+    ) as turned:
+        result = turned.result
+
+        assert result.error_code is ErrorCode.LLM_UNAVAILABLE, (result.error_detail, result.notes)
+        assert result.usage.ai_calls > 0, "calls were tried"
+        assert result.usage.total_tokens == 0 and result.usage.cost_usd == 0.0
+        assert turned.session.ledger is not None and not turned.session.ledger.model_used
+        assert result.commits == () and not result.pushed
+
+
+# #764-R12
+def test_a_provider_that_fails_after_the_work_began_is_an_outage_and_the_work_is_kept(
+    tmp_path: Path,
+) -> None:
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "a.txt"),
+            commit("Add a"),
+            write_file(repo, "b.txt"),  # never asked: the provider is down from here on
+            says("unreached"),
+        ]
+
+    def react(turned: Turned, scene: Scene, body: dict[str, Any]) -> None:
+        if scene.calls == 2:
+            turned.upstream.fail_next(*[503] * 60)
+
+    with implementer_turn(tmp_path, script, react=react, time_limit=600) as turned:
+        result = turned.result
+
+        assert result.error_code is ErrorCode.LLM_UNAVAILABLE, (result.error_detail, result.notes)
+        assert [c.subject for c in result.commits] == ["Add a"]
+        assert result.pushed and turned.origin_tip() == result.head_commit
+        assert result.usage.cost_usd is not None and result.usage.cost_usd > 0
+        assert turned.session.ledger is not None and turned.session.ledger.model_used

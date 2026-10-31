@@ -1353,16 +1353,22 @@ TRANSIENT_TEXTS = {
 
 
 def fail_pushes(
-    workspace: GitWorkspace, monkeypatch: pytest.MonkeyPatch, text: str, times: int = 1
+    workspace: GitWorkspace,
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    times: int = 1,
+    *,
+    stdout: str = "",
 ) -> list[int]:
-    """The next `times` pushes of the mirror to the provider fail with this report of git."""
+    """The next `times` pushes of the mirror to the provider fail with this report of git (`text`
+    on standard error, `stdout` the porcelain lines of the refs)."""
     real = workspace._mirror  # pyright: ignore[reportPrivateUsage]
     failed: list[int] = []
 
     def mirror(args: list[str], **options: Any) -> Outcome:
         if "push" in args and len(failed) < times:
             failed.append(1)
-            return Outcome(128, "", text)
+            return Outcome(1 if stdout else 128, stdout, text)
         return real(args, **options)
 
     monkeypatch.setattr(workspace, "_mirror", mirror)
@@ -1491,3 +1497,104 @@ def test_dirty_is_false_for_a_clean_tree_and_true_for_one_change(rig: Rig) -> No
     (workspace.repo / "new.txt").write_text("x\n")
 
     assert workspace.dirty() is True
+
+
+# #764-R13
+@pytest.mark.parametrize(
+    "text",
+    [
+        "error: cannot open '/work/mirror.git/FETCH_HEAD': Permission denied",
+        "fatal: could not create work tree dir '/work/x': Permission denied",
+    ],
+)
+def test_a_local_permission_error_is_not_a_refusal_of_the_provider(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    workspace = rig.prepared()
+    commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, text)
+
+    with pytest.raises(PushTransient):
+        workspace.push()
+
+
+# #764-R13
+def test_what_the_remote_says_about_permissions_is_still_a_refusal(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    commit(workspace, "a.txt")
+    fail_pushes(
+        workspace,
+        monkeypatch,
+        "remote: Permission to acme/widgets.git denied to bot.\n"
+        "fatal: unable to access 'https://x/r.git/': The requested URL returned error: 403",
+    )
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.PUSH_REJECTED and not isinstance(
+        refused.value, PushUnverified
+    )
+
+
+REF = "refs/heads/implementer/a1b2c3"
+
+
+def rejected(reason: str, *, kind: str = "remote rejected") -> str:
+    return f"!\t{REF}:{REF}\t[{kind}] ({reason})\nDone\n"
+
+
+# #764-R13
+@pytest.mark.parametrize("reason", ["internal error", "failed to update ref", "Internal Error"])
+def test_a_remote_rejection_that_says_the_provider_failed_is_tried_again(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    workspace = rig.prepared()
+    tip = commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, "error: failed to push some refs", stdout=rejected(reason))
+
+    with pytest.raises(PushTransient):
+        workspace.push()
+
+    assert workspace.push().head == tip, "the next try goes through"
+
+
+# #764-R13
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "pre-receive hook declined",
+        "protected branch hook declined",
+        "refusing to allow a GitHub App to create or update workflow `.github/workflows/x.yml`",
+        "cannot lock ref",
+    ],
+)
+def test_a_remote_rejection_with_a_real_reason_is_a_refusal(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    workspace = rig.prepared()
+    commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, "error: failed to push some refs", stdout=rejected(reason))
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.PUSH_REJECTED
+    assert not isinstance(refused.value, PushUnverified)
+
+
+# #764-R13
+def test_one_hard_line_among_hiccups_makes_the_push_a_refusal(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    commit(workspace, "a.txt")
+    both = rejected("internal error") + rejected("pre-receive hook declined")
+    fail_pushes(workspace, monkeypatch, "error: failed to push some refs", stdout=both)
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.PUSH_REJECTED

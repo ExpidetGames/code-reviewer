@@ -197,6 +197,8 @@ def implementer_turn(
     seed: Callable[[Path], None] | None = None,
     egress: EgressSettings | None = None,
     start_egress: Callable[[EgressSettings], EgressProxy | None] | None = None,
+    faults: Callable[[ScriptedUpstream], None] | None = None,
+    unreachable: bool = False,
 ) -> Generator[Turned]:
     """Run one whole turn to its result against a model that follows `script(repo)`.
 
@@ -271,8 +273,13 @@ def implementer_turn(
             )
         )
         upstream.usage_fault = usage_fault
+        if faults is not None:
+            faults(upstream)
         scene.upstream = upstream
-        hop = LoopbackUpstream(upstream.url + BASE_PATH[family])
+        # `unreachable`: the provider's address refuses connections (nothing listens there).
+        hop = LoopbackUpstream(
+            ("http://127.0.0.1:9" if unreachable else upstream.url) + BASE_PATH[family]
+        )
         session = ImplementerSession(
             job,
             workspace=workspace,

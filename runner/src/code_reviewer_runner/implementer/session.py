@@ -218,18 +218,41 @@ class PushTicker:
         self._thread.join(timeout=5.0)
 
 
-def classify(error: BaseException, *, used_model: bool = False) -> tuple[ErrorCode, str]:
+def classify(
+    error: BaseException,
+    *,
+    used_model: bool = False,
+    provider_error: ErrorCode | None = None,
+) -> tuple[ErrorCode, str]:
     """The stable code of what ended a turn and a sentence of ours for it. Never the text of an
     exception that could carry a value.
 
-    `used_model` is whether a model call was made. The code `runner_error` is free for the user; a
-    turn whose engine died or whose bound ended it after the model was used has cost money and is
-    `agent_gave_up`, the charged code for a turn that ended without a result the agent stands
-    behind. Before any model call it stays `runner_error`."""
+    `used_model` is whether the model was really used: a call that was billed, or may have been
+    (`BudgetLedger.model_used`), not a call that was merely reserved. `provider_error` is the code
+    the proxy kept for the last call the provider failed (`llm_unavailable`, `llm_timeout`, ...).
+
+    When the engine gives up, the cause is looked for first at the provider: an engine that ended
+    its turn with an error while the last call to the model failed ended it because of the
+    outage, and the outage is the code (it is not the engine's fault, nor the agent's). Otherwise
+    the death of the engine and a bound of the audit are the runner's own failures: `runner_error`,
+    free, before the model was used, and the charged `agent_gave_up` after it (the turn cost
+    money)."""
     code, detail = _classified(error)
-    if code is ErrorCode.RUNNER_ERROR and used_model:
-        return ErrorCode.AGENT_GAVE_UP, detail
+    if code is ErrorCode.RUNNER_ERROR:
+        if provider_error is not None and _the_engine_gave_up(error):
+            return provider_error, "the model provider was not available for the turn"
+        if used_model:
+            return ErrorCode.AGENT_GAVE_UP, detail
     return code, detail
+
+
+def _the_engine_gave_up(error: BaseException) -> bool:
+    """Whether the end was the engine's own (it died, its stream ended, it ended its turn with an
+    error), and not a bound of ours or a refusal of the git layer."""
+    return isinstance(error, EngineError | LimitError) and error.code in (
+        ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+        ErrorCode.RUNNER_ERROR,
+    )
 
 
 def _classified(error: BaseException) -> tuple[ErrorCode, str]:
@@ -463,8 +486,10 @@ class ImplementerSession:
         return agent.ledger.remaining_seconds() >= MIN_EXTRA_TURN_SECONDS
 
     def _stopped_by(self, error: BaseException) -> None:
-        used = self._native is not None and self._native.ledger.model_calls > 0
-        code, detail = classify(error, used_model=used)
+        native = self._native
+        used = native is not None and native.ledger.model_used
+        failed = None if native is None else native.run.proxy.last_upstream_error
+        code, detail = classify(error, used_model=used, provider_error=failed)
         if self._error is None:
             self._error = (code, detail)
         self._note(f"the turn ended: {code.value}")
