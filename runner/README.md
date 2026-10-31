@@ -1187,6 +1187,43 @@ The tests need git 2.53 or newer first on `PATH` and the guard files of the imag
 without them they fail with the reason and never skip. The user separation (uids, what the engine user can read) is proven by
 `tests/privileged/test_implementer_git_users.py`.
 
+### Two bounds of the push (#764)
+
+Both came out of the third review of #782 and are fixed where the push loop is wired:
+
+- **The back-off is measured from the end of a failed look**, not from before it: a fetch that hangs for 30 s and then fails used to
+  retry at once, because the clock had been read before the attempt. `PushLoop.tick` reads it again after the failure (and after a
+  good push for the interval). Tests drive a clock that advances during `push()`.
+- **A commit message is never read as a whole.** The check of the committers streams `log -z --format=raw` through
+  `commit_headers.CommitHeaderReader`, which keeps the header block of the entry it is in and drops the message as it goes by, so the
+  runner's memory is bounded by `MAX_HEADER_BYTES` (256 KiB, a larger header block is a `branch_violation`) whatever the messages hold
+  (a 100 MB message cost about 234 MB on every push before). The same goes for the lists of the result (`history.py`): subjects and
+  lines are capped as they are read.
+
+## The Implementer's agent session (#764)
+
+`implementer/session.py` runs one turn; `agent.py` is its engine, `config.py` and `prompts.py` what the runner tells the engine. It
+has the skeleton of the Dynamic Review's adapter (the engine user and its network rules, a private home, `opencode serve` on the
+slot's loopback port, the HTTP client and event stream, the loopback model proxy with the job's capability and the ledger) and reuses
+those parts (`native_job.build_native`, `adapter.EngineClient`, `ToolPartAudit`); nothing is review-shaped.
+
+| Piece | What it is |
+|---|---|
+| Configuration | Written by the runner, never read from the repository (`config.build_engine_config`). Permissions are default-deny, then `read`, `grep`, `glob`, `list`, `edit`, `write`, `bash` and `todowrite` are allowed; `webfetch`, `websearch`, `task` and `question` are denied by name and everything else by the wildcard. Plugins, MCP, LSP, formatter, watcher, snapshot, share, updates, compaction, model fetching, instruction files and skills are off or empty. The provider is the job's loopback proxy with the capability and the one chosen model (`checked_native_provider`, as for a native Dynamic job). |
+| Environment | `implementer_environment`: the Dynamic engine's flags, the private home, a `PATH` that leads with the verified ripgrep, the git identity and guard variables of the workspace (`GIT_CONFIG_SYSTEM` of #762), and the egress proxy variables of #763; built from names, never inherited. No credential of any kind. The agent's cwd is `/work/repo`. |
+| Prompt | Two fixed texts (`prompts.py`), no template: the system prompt of the agent and the one extra message (`LEFTOVER_PROMPT`). The instruction is the user message and nowhere else; nothing of the repository is interpolated. Nothing steers the approach. |
+| Turn | The instruction is sent; the call blocks beside a watch that ends the turn at once when the ledger records a refusal, the clock runs out, the push loop meets a refusal of the provider or the engine dies. When the turn ends and the tree is dirty, **one** more message in the same session; what is dirty after that is committed by the system as the engine user without a model call. |
+| End | Whatever ended the turn, the engine and every process of its user are ended first (sweep), then the leftover commit, then the final push (`PushLoop.finish`), then the result. |
+| Limits | The cost limit is the ledger's: the proxy refuses the next call and the turn ends `cost_limit_reached` (an own key's token cap is the same code). The clock is the job's `timeLimitSeconds` less 3 minutes (a third for a short limit): `time_limit_reached`. In both cases the committed and the leftover work is pushed first and the result reports it. There is no step limit. |
+| Codes | `agent_gave_up` (no commit, clean tree; the closing text is the summary), `cost_limit_reached`, `time_limit_reached`, the codes of the git layer (`branch_violation`, `push_rejected`, `branch_exists`, `setup_failed`), `implementer_config_invalid` for a model entry the proxy cannot serve, and `runner_error` for a crash of the engine or an audit that broke (the wire has no `internal_error`). |
+| Result | `TurnResult.implementer_block()` is the contract's `ImplementerResult`: the commits and changed files (read as the engine user, bounded by `history.py`), the closing text as the summary (secrets redacted, 8 192 characters), the OpenCode session id and the pinned version. The usage is the ledger's, with the call trace as for Dynamic (numbers and the names `read`, `grep`, `glob`; the contract has no name yet for `write` and `bash`, which count as `other`). |
+| Prompt caching | Whatever the stock engine and the passthrough proxy do for Dynamic; nothing here sets, removes or rewrites a cache marker. `test_engine_implementer.py` replays the requests the provider got through the cache rules of the fakes. |
+
+The ledger is the Dynamic one (`BudgetLedger`, `DynamicLimits`); its bounds on tool results are 64 KiB each (the engine cuts what it
+hands the model near 50 KB) and 256 MiB in all, a sanity bound and no brake on the work. The tests: `tests/unit/test_implementer_config.py`
+and `test_implementer_session_parts.py`, `tests/integration/test_implementer_history.py`, and `tests/engine/test_engine_implementer.py`
+(the real pinned OpenCode against a scripted model; the shard `opencode`).
+
 ## Engine tests
 
 `tests/engine/` runs the real, pinned PR-Agent through `code-reviewer-run-job` (one process per job)

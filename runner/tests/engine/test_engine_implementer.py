@@ -17,6 +17,7 @@ from fake_llm import real_anthropic_usage
 from fakes.llm.anthropic_cache import PromptCache
 from fakes.wire.formats import Turn
 from implementer_support import (
+    BRANCH,
     Scene,
     Turned,
     bash,
@@ -25,6 +26,7 @@ from implementer_support import (
     says,
     write_file,
 )
+from jsonschema import Draft202012Validator
 from native_full_job import BOOK
 from opencode_native import REAL_KEY
 from opencode_support import ripgrep_binary
@@ -37,6 +39,7 @@ from git_support import TOKEN, raw
 from passthrough_expect import usage_expected
 from usage_calc import expected_cost
 
+CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 CLOSING = "I added hello.txt and committed it."
 
 
@@ -345,3 +348,96 @@ def test_prompt_caching_stays_on_the_marks_reach_the_provider_and_the_ledger_cou
         assert result.usage.ai_calls == len(turned.upstream.records)
         assert result.usage.prompt_tokens == prompt
         assert result.usage.cost_usd == pytest.approx(float(total), rel=1e-9)
+
+
+SCHEMA = json.loads((CONTRACTS / "runner-api.v1.json").read_text(encoding="utf-8"))
+
+
+def accepts(definition: str, document: object) -> bool:
+    validator = Draft202012Validator(
+        {"$schema": SCHEMA["$schema"], "$ref": f"#/$defs/{definition}", "$defs": SCHEMA["$defs"]}
+    )
+    return bool(validator.is_valid(document))  # pyright: ignore[reportUnknownMemberType]
+
+
+# #764-T10
+def test_usage_and_call_trace_are_recorded_for_the_kind_and_valid_against_the_contract(
+    tmp_path: Path,
+) -> None:
+    with implementer_turn(
+        tmp_path, lambda repo: [write_file(repo, "a.txt"), commit("Add a"), says("done")]
+    ) as turned:
+        result = turned.result
+        usage = result.usage.to_json()
+        trace = usage["callTrace"]
+
+        assert result.ok, (result.error_code, result.error_detail)
+        assert accepts("RunnerUsage", usage)
+        assert accepts("RunnerCallTrace", trace)
+        assert usage["aiCalls"] == len(turned.upstream.records) >= 3
+        assert usage["costUsd"] is not None and usage["costUsd"] > 0
+        # The trace names the tools of the review (`read`, `grep`, `glob`); the contract has no
+        # name for `write` and `bash` yet, so they are counted as `other` (a follow-up).
+        names = [call["name"] for call in trace["toolCalls"]]
+        assert names == ["other", "other"], "the tools the agent called, as names only"
+        assert trace["modelCalls"], "every model call is in the trace"
+        assert accepts("ImplementerResult", result.implementer_block())
+        assert "hello" not in json.dumps(trace) and "a.txt" not in json.dumps(trace)
+
+
+# #764-T03
+def test_the_branch_is_pushed_while_the_agent_still_works_and_a_later_commit_follows(
+    tmp_path: Path,
+) -> None:
+    seen: list[str | None] = []
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "one.txt"),
+            commit("Add one"),
+            bash("true"),  # the model is asked again after the commit: the push has happened
+            write_file(repo, "two.txt"),
+            commit("Add two"),
+            says("done"),
+        ]
+
+    def react(turned: Turned, scene: Scene, body: dict[str, Any]) -> None:
+        if scene.calls == 3:
+            scene.wait_until(lambda: turned.origin_tip() is not None)
+            seen.append(turned.origin_tip())
+
+    with implementer_turn(tmp_path, script, react=react) as turned:
+        result = turned.result
+
+        assert result.ok, (result.error_code, result.error_detail, result.notes)
+        assert len(seen) == 1 and seen[0] is not None, (
+            "the first commit reached the remote mid-turn"
+        )
+        assert seen[0] != result.head_commit
+        assert [c.subject for c in result.commits] == ["Add one", "Add two"]
+        assert turned.origin_tip() == result.head_commit
+
+
+# #764-T07
+def test_a_branch_that_appeared_on_the_remote_meanwhile_ends_the_turn_as_branch_exists(
+    tmp_path: Path,
+) -> None:
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "one.txt"),
+            commit("Add one"),
+            *[bash("sleep 1") for _ in range(30)],
+            says("done"),
+        ]
+
+    def react(turned: Turned, scene: Scene, body: dict[str, Any]) -> None:
+        if scene.calls == 1:
+            turned.rig.origin.commit_on(BRANCH, "someone-else.txt")
+
+    with implementer_turn(tmp_path, script, react=react) as turned:
+        result = turned.result
+
+        assert result.error_code is ErrorCode.BRANCH_EXISTS, (result.error_detail, result.notes)
+        assert not result.pushed
+        assert [c.subject for c in result.commits] == ["Add one"], "what the agent did is reported"
+        assert len(turned.requests) < 30, "the turn ended as soon as the push was refused"
