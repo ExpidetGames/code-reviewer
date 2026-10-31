@@ -12,6 +12,7 @@ import { createGitRepository } from "../../../fakes/github/git-fixture.ts";
 import { addWorkspace } from "../test-support/workspaces.ts";
 import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { seedImplementerRepository } from "../test-support/implementer.ts";
+import { createTestQueue } from "../test-support/jobs.ts";
 import {
   ALLOW_ALL,
   BASE_SHA,
@@ -665,6 +666,32 @@ describe("starting a task", () => {
       ),
     ).toMatchObject({ code: "IMPLEMENTER_BRANCH_EXISTS" });
     expect(await counts()).toEqual({ jobs: 1, sessions: 1, turns: 1 });
+  });
+
+  // #791
+  it("takes a client request id of another workspace for no repeat: the task is made here, and the other's is not handed out", async () => {
+    const { h, service, body, counts } = await startImplementerHarness();
+    const other = await addWorkspace(h.db, "other");
+    const seeded = await seedImplementerRepository(h.db, other, "elsewhere");
+    const foreign = await createTestQueue(h.db, other).enqueueImplementerTurn({
+      repositoryId: seeded.repositoryId,
+      baseBranch: "main",
+      baseSha: BASE_SHA,
+      branch: "implementer/abc123",
+      instruction: "Foreign task.",
+      modelChoice: { entryId: "entry-1" },
+      costLimitCents: null,
+      createdBy: seeded.userId,
+      actorLogin: "mallory",
+      clientRequestId: "request-1",
+    });
+
+    const started = await service.startTask(USER, body());
+
+    expect(started.created).toBe(true);
+    expect(started.runId).not.toBe(foreign.job.id);
+    expect(started.sessionId).not.toBe(foreign.session.id);
+    expect((await counts()).jobs).toBe(2);
   });
 
   // #791
