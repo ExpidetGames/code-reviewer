@@ -388,11 +388,13 @@ describe("starting a task", () => {
       .slice(before)
       .map((request) => request.path)
       .filter((path) => /^\/repos\/acme\/widgets(\/branches\/.*)?$/.test(path));
-    expect(paths).toEqual([
+    // Then the list of branches, for a name that cannot live beside one of them (#791).
+    expect(paths.slice(0, 3)).toEqual([
       "/repos/acme/widgets",
       "/repos/acme/widgets/branches/main",
       "/repos/acme/widgets/branches/implementer%2Fabc123",
     ]);
+    expect(paths.length).toBeGreaterThan(3);
   });
 
   // #755-T04

@@ -749,7 +749,7 @@ export function createJobsRepository(
             error.code === "IMPLEMENTER_BRANCH_TAKEN") ||
           errorCode(error) === UNIQUE_VIOLATION
         ) {
-          const raced = await existingTurn();
+          const raced = await findImplementerTurn(input.clientRequestId);
           if (raced !== undefined) return raced;
         }
         throw error;
