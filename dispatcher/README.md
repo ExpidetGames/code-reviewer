@@ -425,7 +425,7 @@ memory only to serve a forced probe within `DISPATCHER_PROBE_REUSE_SECONDS` (bel
 **What a wake-up call sees.** The same for both kinds: the core applies `DISPATCHER_ENGINES`, the cap and the claim. A Dynamic
 job on a Dispatcher that is not configured for `opencode` is answered `200 ignored` with `not_capable` (the App stops
 sending it, revives the dispatch ten minutes later, and a Dynamic job that nobody can run ends `no_capable_runner` after 30
-minutes, `app/src/dispatch/README.md`). A `503`/`429` the App sees now comes from a busy or failing Dispatcher or platform,
+minutes without a working runner, 3 hours at the latest, `app/src/dispatch/README.md`). A `503`/`429` the App sees now comes from a busy or failing Dispatcher or platform,
 never from a probe; the App repeats it inside the request and wakes it again from the repair work
 (`app/src/dispatch/README.md`, "Between two sweeps").
 

@@ -31,6 +31,17 @@ const beforeThisMigration: MigrationProvider = {
   },
 };
 
+/** The migrations up to and including this one: a later migration may add an index of its own to `jobs`. */
+const throughThisMigration: MigrationProvider = {
+  async getMigrations() {
+    return Object.fromEntries(
+      Object.entries(await migrationProvider.getMigrations()).filter(
+        ([name]) => name <= SPLIT,
+      ),
+    );
+  },
+};
+
 async function rowsOfEveryOldTable(
   db: Kysely<Database>,
 ): Promise<Record<string, unknown[]>> {
@@ -144,7 +155,7 @@ describe("the implementer migration", () => {
       ).rows.map((row) => row.name);
     const before = await indexesOfJobs();
 
-    await migrateToLatest(db, migrationProvider);
+    await migrateToLatest(db, throughThisMigration);
 
     const after = await indexesOfJobs();
     expect(after.filter((name) => !before.includes(name))).toEqual([

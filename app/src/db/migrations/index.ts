@@ -78,6 +78,7 @@ import { migration as addWorkspaceDeletedAt } from "./20261023150000_add_workspa
 import { migration as addJobsSupersededByIndex } from "./20261023160000_add_jobs_superseded_by_index.ts";
 import { migration as addUsersPosthogIdentity } from "./20261025140000_add_users_posthog_identity.ts";
 import { migration as createImplementerSessionsAndTurns } from "./20261030140000_create_implementer_sessions_and_turns.ts";
+import { migration as widenReviewKindChecksForImplementer } from "./20261030190000_widen_review_kind_checks_for_implementer.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -169,6 +170,8 @@ const migrations: Record<string, Migration> = {
   "20261025140000_add_users_posthog_identity": addUsersPosthogIdentity,
   "20261030140000_create_implementer_sessions_and_turns":
     createImplementerSessionsAndTurns,
+  "20261030190000_widen_review_kind_checks_for_implementer":
+    widenReviewKindChecksForImplementer,
 };
 
 export const migrationProvider: MigrationProvider = {

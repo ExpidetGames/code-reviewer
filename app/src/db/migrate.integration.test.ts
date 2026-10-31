@@ -122,6 +122,7 @@ describe("the migrations of both epics", () => {
       "20261023160000_add_jobs_superseded_by_index",
       "20261025140000_add_users_posthog_identity",
       "20261030140000_create_implementer_sessions_and_turns",
+      "20261030190000_widen_review_kind_checks_for_implementer",
     ]);
   });
 

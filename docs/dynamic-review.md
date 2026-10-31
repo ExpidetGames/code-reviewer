@@ -66,7 +66,9 @@ publishes as one persistent summary comment. The decisions are in epic
    jobs only.
 3. A Dynamic job that no capable runner claims waits, without an attempt being counted, and is
    **cancelled with `no_capable_runner`** after `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS` (app setting,
-   default 30 minutes). It is visible in Runs; it never waits forever and never falls back to Diff.
+   default 30 minutes), counted from the last time a runner ran a Dynamic job: while one runs, or finished one itself within that time, the
+   job keeps waiting, and it is cancelled at 3 hours at the latest whatever the runners do. A job the app ended because a runner stopped
+   (`lease_expired`, `timeout`) is no sign of a working runner. It is visible in Runs; it never waits forever and never falls back to Diff.
 4. The runner prepares the export (#196), starts one engine per job behind its own model proxy (the
    workspace key never reaches the engine), enforces the hard limits below and removes the job's
    temporary files and process group. Only after the engine has ended successfully, its findings

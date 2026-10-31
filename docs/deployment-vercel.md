@@ -971,7 +971,7 @@ A run's error code is shown on the Runs pages with a fixed sentence. Four belong
 | Runs page | `worker_exited` | Runs from before #487 only. The Dispatcher used to give a job back with this code when it saw the Worker's container end with an error. It no longer watches the container after the hand-over: a Worker that dies is found by its lease and the run ends `lease_expired` after three lost attempts. |
 | Runs page | `dynamic_engine_unavailable` | A **Dynamic** job was dispatched and a Worker started, but the Worker refused it: its own startup self-check did not prove the container's isolation, so it serves Diff jobs only. No model was called and nothing was written to the pull request. The Worker's log says `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only (<reason>)` and `job ... refused: the Dynamic engine is not advertised`. Since the Dispatcher runs no probe on a dispatch (section 8), this is the signal that the live deployment's container cannot be hardened: run the canary against it (section 4, step 3; Actions, *Dispatcher canary*), read the stable reason (`dynamic-review.md`, "The startup self-check"), fix it and redeploy through the pipeline so that a canary passes before it goes live. Diff jobs are not affected. |
 
-Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes: `DISPATCHER_ENGINES` has no
+Others you will meet: `no_capable_runner` (a Dynamic job nobody could run for 30 minutes, or for 3 hours while a runner was busy with other Dynamic jobs: `DISPATCHER_ENGINES` has no
 `opencode`, or no Dispatcher is configured for it), `dynamic_review_disabled` (the gate is off), `lease_expired` (the Worker
 stopped reporting), `quota_exhausted`, `workspace_suspended` and `entitlements_invalid` (the workspace's limits, set
 through the operator API), `managed_model_unavailable` (the workspace is `managed` and its project selects no usable catalog entry for the kind
@@ -992,7 +992,7 @@ URL.
 - **No Launcher:** unset `SANDBOX_SNAPSHOT_ID` and `SANDBOX_IMAGE_DIGEST` and redeploy: the Dispatcher claims nothing. (A
   deployment of the pipeline carries its own pair and builds one when none is configured, so this is for a hand deployment.)
   Waiting jobs are not lost: Diff jobs fail with `dispatch_unavailable` after the give-up time, Dynamic ones with
-  `no_capable_runner` after 30 minutes.
+  `no_capable_runner` after 30 minutes (3 hours at the latest while a runner is busy with other Dynamic jobs).
 - **No more wake-ups:** `RUNNER_DISPATCH=poll` in the App. Jobs stay queued; nobody claims them.
 
 ### 5.5 Stopping VMs that outlived their job (the reaper)

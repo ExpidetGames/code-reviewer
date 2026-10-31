@@ -32,7 +32,13 @@ code-review.com cannot start an agent job even if its app is misconfigured. The 
 apply: a wake-up call for the kind from another app is `200 ignored` with `not_capable` and no claim, the claim asks for the
 `implementer` engine only for an app whose kinds name it, and a claimed job of the kind for another app is released
 unlaunched (`kind_not_allowed`). A job of the kind lives 3600 s by default (`DISPATCHER_WORKER_CONFIG.implementer.timeoutSeconds`,
-60 to 21600) where Diff and Dynamic keep `DISPATCHER_JOB_TIMEOUT_SECONDS`. The Sandbox launcher does not advertise the engine
+60 to 21600) where Diff and Dynamic keep `DISPATCHER_JOB_TIMEOUT_SECONDS`. **The app cannot read that setting** (#752): the
+hold it takes for a turn (`IMPLEMENTER_JOB_TIMEOUT_SECONDS` in `app/src/billing/hold.ts`) and the hard timeout at which the
+queue fails a running turn with `timeout` (`DEFAULT_IMPLEMENTER_MAX_RUNTIME_MS` in `app/src/db/job-limits.ts`, the default
+plus 10 minutes of grace) carry the default 3600. An operator who sets another `timeoutSeconds` gets a wrong hard timeout: a
+shorter value leaves a turn that the Dispatcher stopped `running` in the app until 70 minutes have passed, and a longer one
+has the app fail the turn with `timeout` at 70 minutes while its Worker still runs (and the hold too small); `billing-hold-pin.test.ts`
+pins the two constants to the default only. Change the constants with the setting. The Sandbox launcher does not advertise the engine
 yet, although it can launch the kind since #760 (the container profile below): advertising it is for the day a real probe can report it, so a dispatch
 for the kind is `not_capable` until then.
 The deploy canary (`POST /probe`) follows the same rule: it requires the engines of Diff and Dynamic whatever else is
