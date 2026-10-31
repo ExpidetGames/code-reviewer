@@ -17,7 +17,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +34,7 @@ from plain_final_support import OUTPUT_LIMIT, Reaction, Scene
 from code_reviewer_runner.dynamic_review.adapter import _http_request  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
 from code_reviewer_runner.implementer.egress_config import EgressSettings
+from code_reviewer_runner.implementer.egress_proxy import EgressProxy
 from code_reviewer_runner.implementer.git_workspace import GitWorkspace
 from code_reviewer_runner.implementer.session import ImplementerSession, SessionSeams
 from code_reviewer_runner.implementer.turn_result import TurnResult
@@ -54,10 +55,12 @@ def implementer_job(
     time_limit: int = 3600,
     max_cost_usd: float | None = None,
     instruction: str = INSTRUCTION,
+    entry: dict[str, Any] | None = None,
+    context: int = 1_000_000,
 ) -> ImplementerInput:
     """The contract's example job with the provider, model and cost policy of the test."""
     document: dict[str, Any] = json.loads(EXAMPLE.read_text(encoding="utf-8"))
-    entry = ENTRIES[family]
+    entry = ENTRIES[family] if entry is None else entry
     spec = document["implementer"]
     spec["instruction"] = instruction
     spec["limits"]["timeLimitSeconds"] = time_limit
@@ -71,7 +74,7 @@ def implementer_job(
         upstreamBaseUrl=entry["upstreamBaseUrl"],
         modelId=entry["model"],
     )
-    model_entry["model"]["limit"] = {"context": 1_000_000, "output": OUTPUT_LIMIT}
+    model_entry["model"]["limit"] = {"context": context, "output": OUTPUT_LIMIT}
     model_entry["model"]["reasoning"] = False
     model_entry["model"].pop("interleaved", None)
     document["git"]["token"] = TOKEN
@@ -90,6 +93,7 @@ class Turned:
     rig: Rig
     workspace: GitWorkspace
     scene: Scene
+    session: ImplementerSession
     # Set when the turn has ended (a `react` runs before that and must not read it).
     result: TurnResult = field(init=False)
     # The messages the runner sent the engine: (session id, text of the one text part).
@@ -115,6 +119,28 @@ class Turned:
                 bodies.append(dict(body))  # pyright: ignore[reportUnknownArgumentType]
         return bodies
 
+    def tool_results(self, request: dict[str, Any]) -> list[str]:
+        """The texts of the tool results a Messages request carries, in order."""
+        found: list[str] = []
+        for message in request["messages"]:
+            content: Any = message["content"]
+            if not isinstance(content, list):
+                continue
+            for block in cast("list[dict[str, Any]]", content):
+                if block.get("type") != "tool_result":
+                    continue
+                inner: Any = block.get("content")
+                if isinstance(inner, list):
+                    found.append(
+                        "".join(
+                            str(part.get("text", ""))
+                            for part in cast("list[dict[str, Any]]", inner)
+                        )
+                    )
+                else:
+                    found.append(str(inner))
+        return found
+
     def origin_tip(self) -> str | None:
         return self.rig.origin.tip(BRANCH)
 
@@ -138,6 +164,12 @@ def implementer_turn(
     usage_fault: UsageFault | None = None,
     instruction: str = INSTRUCTION,
     tick: float = 0.3,
+    entry: dict[str, Any] | None = None,
+    context: int = 1_000_000,
+    command: Sequence[str] | None = None,
+    repo_setup: Callable[[Path], None] | None = None,
+    egress: EgressSettings | None = None,
+    start_egress: Callable[[EgressSettings], EgressProxy | None] | None = None,
 ) -> Generator[Turned]:
     """Run one whole turn to its result against a model that follows `script(repo)`.
 
@@ -147,8 +179,17 @@ def implementer_turn(
     rig = Rig(scratch, git, Origin(scratch, git))
     workspace = rig.prepared()
     scene = Scene()
+    if repo_setup is not None:
+        repo_setup(workspace.repo)
+    entry = ENTRIES[family] if entry is None else entry
     job = implementer_job(
-        family, cost, time_limit=time_limit, max_cost_usd=max_cost_usd, instruction=instruction
+        family,
+        cost,
+        time_limit=time_limit,
+        max_cost_usd=max_cost_usd,
+        instruction=instruction,
+        entry=entry,
+        context=context,
     )
     ripgrep = ripgrep_binary()
     assert ripgrep is not None, "the engine tests need an rg on the PATH (OPENCODE_TEST_PATH)"
@@ -189,7 +230,7 @@ def implementer_turn(
             ScriptedUpstream(
                 family,
                 script(workspace.repo),
-                ENTRIES[family]["model"],
+                entry["model"],
                 real_key=REAL_KEY,
                 judge=judge,
             )
@@ -200,8 +241,8 @@ def implementer_turn(
         session = ImplementerSession(
             job,
             workspace=workspace,
-            command=[str(opencode_binary())],
-            egress=EgressSettings(ImplementerNetwork.NONE, None),
+            command=list(command) if command is not None else [str(opencode_binary())],
+            egress=egress or EgressSettings(ImplementerNetwork.NONE, None),
             environment={"RUNNER_DYNAMIC_MAX_COST_USD": limit},
             ripgrep=ripgrep,
             seams=SessionSeams(
@@ -210,6 +251,7 @@ def implementer_turn(
                 transport=transport,
                 tick_seconds=tick,
                 startup_seconds=60.0,
+                start_egress=start_egress,
                 scratch_dir=str(scratch / "engine"),
                 clock=lambda: time.monotonic() + scene.clock_offset,
             ),
@@ -219,6 +261,7 @@ def implementer_turn(
             rig=rig,
             workspace=workspace,
             scene=scene,
+            session=session,
             messages=messages,
             spawned=spawned,
             processes=processes,

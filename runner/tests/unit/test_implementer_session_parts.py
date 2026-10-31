@@ -13,14 +13,17 @@ from code_reviewer_runner.dynamic_review.adapter import EngineError
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError, UnitCosts
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.tool_part_audit import ToolPartAudit
+from code_reviewer_runner.implementer.git_workspace import PushOutcome, PushResult
 from code_reviewer_runner.implementer.session import (
     COST_LIMIT_DETAIL,
     DEADLINE_DETAIL,
+    GRACE_SECONDS,
     MAX_RETURNED_BYTES,
-    MAX_TOOL_RESULT_BYTES,
     TOKEN_CAP_DETAIL,
+    PushTicker,
     agent_limits,
     classify,
+    deadline_seconds,
 )
 from code_reviewer_runner.implementer.turn_result import MAX_SUMMARY_CHARS, clip_summary
 from code_reviewer_runner.job import JobError
@@ -94,34 +97,55 @@ def tool_event(identity: str, output: str, name: str = "bash") -> dict[str, obje
     }
 
 
-# #764-T11
-def test_a_bash_result_over_64_kib_ends_the_turn_and_one_at_the_bound_does_not() -> None:
+# #764-R1
+def test_a_result_over_64_kib_does_not_end_the_turn() -> None:
     ledger = make_ledger()
     audit = ToolPartAudit(ledger, "ses_1", export_root="/work/repo")
 
-    audit.feed(tool_event("call_1", "o" * MAX_TOOL_RESULT_BYTES))
-    with pytest.raises(LimitError) as refused:
-        audit.feed(tool_event("call_2", "o" * (MAX_TOOL_RESULT_BYTES + 1)))
+    audit.feed(tool_event("call_1", "o" * 204_000, "grep"))
+    audit.feed(tool_event("call_2", "é" * 300_000))  # about 600 KB of multibyte text
 
-    assert MAX_TOOL_RESULT_BYTES == 64 * 1024
-    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert classify(refused.value)[0] is ErrorCode.RUNNER_ERROR, "a bound, not a limit of the job"
+    assert ledger.returned_bytes == 204_000 + 600_000
 
 
 # #764-T11
-def test_the_cumulative_bound_of_the_results_applies_to_bash_output_too() -> None:
+def test_the_cumulative_bound_of_the_results_still_ends_the_turn() -> None:
     ledger = make_ledger()
-    audit = ToolPartAudit(ledger, "ses_1", export_root="/work/repo")
-    full = "o" * MAX_TOOL_RESULT_BYTES
-    calls = MAX_RETURNED_BYTES // MAX_TOOL_RESULT_BYTES
+    chunk = MAX_RETURNED_BYTES // 4
 
-    for number in range(calls):
-        audit.feed(tool_event(f"call_{number}", full))
+    for _ in range(4):
+        ledger.add_result_bytes(chunk)
     with pytest.raises(LimitError) as refused:
-        audit.feed(tool_event("call_last", "x"))
+        ledger.add_result_bytes(1)
 
     assert refused.value.detail == "the cumulative content bound is used up"
     assert classify(refused.value)[0] is ErrorCode.RUNNER_ERROR
+
+
+# #764-T11
+def test_a_single_result_cannot_pass_the_cumulative_bound_either() -> None:
+    ledger = make_ledger()
+
+    with pytest.raises(LimitError):
+        ledger.add_result_bytes(MAX_RETURNED_BYTES + 1)
+
+
+# #764-R10
+@pytest.mark.parametrize(
+    ("limit", "elapsed", "left"),
+    [
+        (3600, 0.0, 3420.0),  # the last three minutes are kept back
+        (3600, 100.0, 3320.0),  # and what the job spent before the turn
+        (60, 0.0, 40.0),  # a short limit keeps a third
+        (14_400, 0.0, 14_220.0),
+        (120, 30.0, 50.0),
+    ],
+)
+def test_the_clock_of_the_turn_keeps_the_grace_back(
+    limit: int, elapsed: float, left: float
+) -> None:
+    assert deadline_seconds(limit, elapsed) == pytest.approx(left)
+    assert GRACE_SECONDS == 180.0
 
 
 # -- the codes ----------------------------------------------------------------------------------
@@ -157,15 +181,6 @@ def test_the_token_cap_of_an_own_key_is_the_cost_limit() -> None:
     ("error", "code"),
     [
         (
-            LimitError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine's event stream ended"),
-            ErrorCode.RUNNER_ERROR,
-        ),
-        (
-            EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "engine_exited: gone"),
-            ErrorCode.RUNNER_ERROR,
-        ),
-        (LimitError(ErrorCode.DYNAMIC_CONFIG_INVALID, "no"), ErrorCode.IMPLEMENTER_CONFIG_INVALID),
-        (
             LimitError(ErrorCode.LLM_AUTH, "the model provider refused the request"),
             ErrorCode.LLM_AUTH,
         ),
@@ -173,17 +188,40 @@ def test_the_token_cap_of_an_own_key_is_the_cost_limit() -> None:
             LimitError(ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a cost"),
             ErrorCode.DYNAMIC_ACCOUNTING_FAILED,
         ),
+        (LimitError(ErrorCode.DYNAMIC_CONFIG_INVALID, "no"), ErrorCode.IMPLEMENTER_CONFIG_INVALID),
         (JobError(ErrorCode.BRANCH_VIOLATION, "rewritten"), ErrorCode.BRANCH_VIOLATION),
         (JobError(ErrorCode.PUSH_REJECTED, "refused"), ErrorCode.PUSH_REJECTED),
         (
             IsolationError("the engine ports are not the ones the network rules allow"),
             ErrorCode.SETUP_FAILED,
         ),
-        (OSError("disk"), ErrorCode.RUNNER_ERROR),
     ],
 )
-def test_what_ends_a_turn_has_a_stable_code(error: BaseException, code: ErrorCode) -> None:
-    assert classify(error)[0] is code
+@pytest.mark.parametrize("used_model", [False, True])
+def test_what_ends_a_turn_has_a_stable_code_whether_or_not_the_model_was_used(
+    error: BaseException, code: ErrorCode, used_model: bool
+) -> None:
+    assert classify(error, used_model=used_model)[0] is code
+
+
+# The engine's death and a bound of the audit are the runner's own failures. They are free before
+# the first model call, and the charged `agent_gave_up` once the model was called (#764-R3).
+ENGINE_AND_BOUNDS: list[BaseException] = [
+    LimitError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine's event stream ended"),
+    EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "engine_exited: gone"),
+    LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cumulative content bound is used up"),
+    EngineError(ErrorCode.RUNNER_ERROR, "the engine returned no session id"),
+    OSError("disk"),
+]
+
+
+# #764-R3
+@pytest.mark.parametrize("error", ENGINE_AND_BOUNDS)
+def test_an_engine_death_or_a_bound_is_free_before_the_model_and_charged_after(
+    error: BaseException,
+) -> None:
+    assert classify(error, used_model=False)[0] is ErrorCode.RUNNER_ERROR
+    assert classify(error, used_model=True)[0] is ErrorCode.AGENT_GAVE_UP
 
 
 # #764-T12
@@ -191,3 +229,78 @@ def test_the_sentence_of_a_classified_error_never_carries_the_text_of_an_unknown
     None
 ):
     assert classify(RuntimeError("secret-from-the-repo"))[1] == "the turn could not be run"
+
+
+# -- the push ticker -----------------------------------------------------------------------------
+
+
+class FakeLoop:
+    """A push loop whose tick fails the way a test says; `finish` records that it ran."""
+
+    def __init__(self, tick_error: BaseException | None = None) -> None:
+        self.tick_error = tick_error
+        self.ticks = 0
+        self.finished = 0
+
+    def tick(self) -> None:
+        self.ticks += 1
+        if self.tick_error is not None:
+            raise self.tick_error
+
+    def finish(self) -> PushResult:
+        self.finished += 1
+        return PushResult(PushOutcome.PUSHED, "a" * 40)
+
+
+def run_ticker(loop: FakeLoop) -> PushTicker:
+    ticker = PushTicker(loop, 0.01)  # type: ignore[arg-type]  # a double with the loop's two methods
+    ticker.start()
+    deadline = time.monotonic() + 5
+    while loop.ticks == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return ticker
+
+
+# #764-R4
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("the loop broke"),
+        JobError(ErrorCode.RUNNER_ERROR, "something else"),
+        JobError(ErrorCode.SETUP_FAILED, "something else"),
+    ],
+)
+def test_a_failure_of_the_loop_that_is_no_refusal_does_not_cost_the_final_push(
+    error: BaseException,
+) -> None:
+    loop = FakeLoop(error)
+    ticker = run_ticker(loop)
+
+    ticker.check()  # no stored error: the turn goes on
+    result = ticker.finish()
+    ticker.close()
+
+    assert loop.finished == 1 and result.outcome is PushOutcome.PUSHED
+
+
+# #764-R4
+@pytest.mark.parametrize(
+    "code", [ErrorCode.PUSH_REJECTED, ErrorCode.BRANCH_EXISTS, ErrorCode.BRANCH_VIOLATION]
+)
+def test_a_refusal_stops_the_turn_and_no_push_is_made_that_could_only_be_refused_again(
+    code: ErrorCode,
+) -> None:
+    loop = FakeLoop(JobError(code, "no"))
+    ticker = run_ticker(loop)
+    deadline = time.monotonic() + 5
+    while ticker.error is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    with pytest.raises(JobError) as stopped:
+        ticker.check()
+    with pytest.raises(JobError) as again:
+        ticker.finish()
+    ticker.close()
+
+    assert stopped.value.code is code and again.value.code is code
+    assert loop.finished == 0

@@ -187,7 +187,7 @@ def tool_names_of(body: dict[str, Any]) -> set[str]:
 
 
 # #764-T12
-def test_an_engine_killed_in_the_middle_of_a_turn_is_a_runner_error_and_the_partial_work_is_pushed(
+def test_an_engine_killed_in_the_middle_of_a_turn_is_charged_and_the_partial_work_is_pushed(
     tmp_path: Path,
 ) -> None:
     def script(repo: Path) -> list[Turn]:
@@ -206,7 +206,9 @@ def test_an_engine_killed_in_the_middle_of_a_turn_is_a_runner_error_and_the_part
     with implementer_turn(tmp_path, script, react=react) as turned:
         result = turned.result
 
-        assert result.error_code is ErrorCode.RUNNER_ERROR, (result.error_detail, result.notes)
+        # The model was called, so the turn is charged: `agent_gave_up`, not the free runner_error.
+        assert result.error_code is ErrorCode.AGENT_GAVE_UP, (result.error_detail, result.notes)
+        assert result.usage.ai_calls > 0
         assert "Add one" in [c.subject for c in result.commits]
         assert result.pushed and turned.origin_tip() == result.head_commit
         for process in turned.processes:
@@ -441,3 +443,83 @@ def test_a_branch_that_appeared_on_the_remote_meanwhile_ends_the_turn_as_branch_
         assert not result.pushed
         assert [c.subject for c in result.commits] == ["Add one"], "what the agent did is reported"
         assert len(turned.requests) < 30, "the turn ended as soon as the push was refused"
+
+
+# #764-R3
+def test_an_engine_that_cannot_start_before_any_model_call_is_the_free_runner_error(
+    tmp_path: Path,
+) -> None:
+    with implementer_turn(
+        tmp_path, lambda repo: [says("never asked")], command=["/bin/false"]
+    ) as t:
+        assert t.result.error_code is ErrorCode.RUNNER_ERROR, t.result.notes
+        assert t.result.usage.ai_calls == 0
+        assert t.result.opencode_session_id is None
+
+
+# #764-R3
+def test_kill_the_engine_after_a_commit_is_charged_but_keeps_what_was_pushed(
+    tmp_path: Path,
+) -> None:
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "a.txt"),
+            commit("Add a"),
+            bash("kill -9 $PPID"),
+            says("unreached"),
+        ]
+
+    with implementer_turn(tmp_path, script) as turned:
+        result = turned.result
+
+        assert result.error_code is ErrorCode.AGENT_GAVE_UP, (result.error_detail, result.notes)
+        assert result.pushed and turned.origin_tip() == result.head_commit
+        assert result.usage.cost_usd is not None and result.usage.cost_usd > 0
+
+
+# #764-R1
+def test_a_grep_with_a_large_result_does_not_end_the_turn(tmp_path: Path) -> None:
+    make = "for i in $(seq 1 300); do printf 'needle %01990d\\n' 0 > f$i.txt; done"
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            bash(f"cd {repo} && {make}"),
+            Turn(tool="grep", args={"pattern": "needle", "path": str(repo)}),
+            commit("Add the files"),
+            says("done"),
+        ]
+
+    with implementer_turn(tmp_path, script) as turned:
+        result = turned.result
+
+        assert result.ok, (result.error_code, result.error_detail, result.notes)
+        biggest = max(len(text.encode()) for text in turned.tool_results(turned.requests[-1]))
+        assert biggest > 64 * 1024, "the premise: the engine hands the model more than 64 KiB"
+        assert len(result.commits) == 1 and result.pushed
+
+
+# #764-R8
+def test_the_agent_can_work_outside_the_repository(tmp_path: Path) -> None:
+    outside = tmp_path / "outside dir"
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            bash(
+                f"mkdir -p '{outside}' && echo hello > '{outside}/f.txt' && cat '{outside}/f.txt'"
+            ),
+            Turn(tool="write", args={"filePath": str(outside / "w.txt"), "content": "w\n"}),
+            Turn(tool="read", args={"filePath": str(outside / "w.txt")}),
+            bash(f"cd '{outside}' && rm f.txt && ls"),
+            says("done"),
+        ]
+
+    with implementer_turn(tmp_path, script) as turned:
+        results = turned.tool_results(turned.requests[-1])
+
+        assert len(results) == 4
+        assert results[0].strip() == "hello", results[0]
+        assert (outside / "w.txt").read_text() == "w\n"
+        assert "w\n" in results[2]
+        assert not (outside / "f.txt").exists()
+        for text in results:
+            assert "external_directory" not in text and "rule" not in text.lower()

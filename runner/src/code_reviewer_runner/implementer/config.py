@@ -26,7 +26,6 @@ from code_reviewer_runner.dynamic_review.config import (
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
 
 from .egress_config import EgressSettings, apply_egress_environment
-from .prompts import SYSTEM_PROMPT
 
 # The one agent the run may use; the request names it and may name no other.
 IMPLEMENTER_AGENT = "implementer"
@@ -40,6 +39,10 @@ ALLOWED_TOOLS: tuple[str, ...] = (
     "write",
     "bash",
     "todowrite",
+    # Paths outside the repository: `bash` reaches them anyway, and a refusal only adds friction
+    # (`mkdir`, `cat`, `cd`, `rm` outside /work/repo were refused, with the rules shown to the
+    # model).
+    "external_directory",
 )
 # Denied by name as well as by the wildcard, so a reader of the file sees the decision.
 DENIED_TOOLS: tuple[str, ...] = ("webfetch", "websearch", "task", "question")
@@ -60,6 +63,7 @@ def build_engine_config(
     family: WireFamily,
     proxy_url: str,
     capability: str,
+    instructions_path: str,
 ) -> dict[str, Any]:
     """The whole engine configuration of one turn, as data the runner writes itself.
 
@@ -71,6 +75,8 @@ def build_engine_config(
     parameters of this function.
     """
     checked_native_provider(provider, model_reference, family, proxy_url, capability)
+    if not instructions_path.startswith("/"):
+        raise ValueError("the instruction file must be an absolute path the runner wrote")
     return {
         "permission": permission_block(),
         "agent": {
@@ -78,13 +84,15 @@ def build_engine_config(
                 "description": "Implementer: carries out one task in the repository",
                 "mode": "primary",
                 "model": model_reference,
-                "prompt": SYSTEM_PROMPT,
+                # No `prompt`: the agent keeps the stock prompt of the engine for its model; the
+                # runner's addition is the instruction file below.
             }
         },
         "provider": dict(provider),
         "enabled_providers": list(provider),
-        # No instruction file of the repository, no skill of the repository.
-        "instructions": [],
+        # The one instruction file: the runner's own (`prompts.instructions_text`), written into the
+        # engine user's trusted directory. No instruction file or skill of the repository.
+        "instructions": [instructions_path],
         "skills": {"paths": []},
         "plugin": [],
         "mcp": {},
@@ -93,10 +101,14 @@ def build_engine_config(
         "snapshot": False,
         "share": "disabled",
         "autoupdate": False,
-        "compaction": {"auto": False, "prune": False},
+        # Compaction is on, as the stock engine has it: a long task fills the window, and the
+        # engine summarises and goes on. (Dynamic turns it off because its return tool is lost
+        # after one; the Implementer has no such tool.)
+        "compaction": {"auto": True, "prune": True},
     }
 
 
+_COMPACTION_FLAGS = ("OPENCODE_DISABLE_AUTOCOMPACT", "OPENCODE_DISABLE_PRUNE")
 # What the engine takes from the workspace's environment: git's guard, the identity and the config
 # that points git at the guard. PATH and HOME are composed here, and nothing else passes.
 _WORKSPACE_NAMES = (
@@ -134,6 +146,9 @@ def implementer_environment(
         node_bin=None,
         tools_dir=None,
     )
+    # Compaction and pruning are the engine's own (see `build_engine_config`).
+    for name in _COMPACTION_FLAGS:
+        environment.pop(name, None)
     # A variable of the review engine that names the proxy and that nothing here reads.
     environment.pop("REVIEW_PROXY_URL", None)
     path = workspace.get("PATH", "/usr/local/bin:/usr/bin:/bin")

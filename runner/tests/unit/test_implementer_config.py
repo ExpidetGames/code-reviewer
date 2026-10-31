@@ -25,13 +25,13 @@ from code_reviewer_runner.implementer.config import (
     implementer_environment,
 )
 from code_reviewer_runner.implementer.egress_config import EgressSettings
-from code_reviewer_runner.implementer.prompts import SYSTEM_PROMPT
 from code_reviewer_runner.job import parse_implementer_input
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE = ROOT / "contracts" / "examples" / "implementer" / "RunnerJobInput.json"
 PROXY_URL = "http://127.0.0.1:41000"
 CAPABILITY = "c" * 43
+INSTRUCTIONS = "/run/engine/implementer-instructions.md"
 
 
 def make_config(**overrides: Any) -> dict[str, Any]:
@@ -45,6 +45,7 @@ def make_config(**overrides: Any) -> dict[str, Any]:
         "family": family,
         "proxy_url": PROXY_URL,
         "capability": CAPABILITY,
+        "instructions_path": INSTRUCTIONS,
     }
     options.update(overrides)
     return build_engine_config(**options)
@@ -60,6 +61,7 @@ GOLDEN_PERMISSIONS = {
     "write": "allow",
     "bash": "allow",
     "todowrite": "allow",
+    "external_directory": "allow",
     "webfetch": "deny",
     "websearch": "deny",
     "task": "deny",
@@ -78,7 +80,7 @@ def test_the_generated_config_is_the_golden_one() -> None:
                 "description": "Implementer: carries out one task in the repository",
                 "mode": "primary",
                 "model": "openrouter/deepseek/deepseek-v4.1-flash",
-                "prompt": SYSTEM_PROMPT,
+                # no "prompt": the agent keeps the stock prompt of the engine
             }
         },
         "provider": {
@@ -93,7 +95,7 @@ def test_the_generated_config_is_the_golden_one() -> None:
             }
         },
         "enabled_providers": ["openrouter"],
-        "instructions": [],
+        "instructions": [INSTRUCTIONS],
         "skills": {"paths": []},
         "plugin": [],
         "mcp": {},
@@ -102,7 +104,7 @@ def test_the_generated_config_is_the_golden_one() -> None:
         "snapshot": False,
         "share": "disabled",
         "autoupdate": False,
-        "compaction": {"auto": False, "prune": False},
+        "compaction": {"auto": True, "prune": True},
     }
 
 
@@ -112,10 +114,20 @@ def test_default_deny_comes_first_and_every_other_tool_is_denied_by_the_wildcard
 
     assert next(iter(permission)) == "*" and permission["*"] == "deny"
     allowed = {name for name, value in permission.items() if value == "allow"}
-    assert allowed == {"read", "grep", "glob", "list", "edit", "write", "bash", "todowrite"}
+    assert allowed == {
+        "read",
+        "grep",
+        "glob",
+        "list",
+        "edit",
+        "write",
+        "bash",
+        "todowrite",
+        "external_directory",
+    }
     for name in ("webfetch", "websearch", "task", "question"):
         assert permission[name] == "deny"
-    for name in ("skill", "external_directory", "lsp", "codesearch", "StructuredOutput"):
+    for name in ("skill", "lsp", "codesearch", "StructuredOutput"):
         assert name not in permission, "left to the wildcard"
 
 
@@ -126,8 +138,14 @@ def test_nothing_that_discovers_or_installs_is_on_and_no_key_is_in_the_config() 
     assert config["plugin"] == [] and config["mcp"] == {}
     assert config["lsp"] is False and config["formatter"] is False
     assert config["snapshot"] is False and config["share"] == "disabled"
-    assert config["autoupdate"] is False and config["instructions"] == []
-    assert config["compaction"] == {"auto": False, "prune": False}
+    assert config["autoupdate"] is False
+    assert config["instructions"] == [INSTRUCTIONS], (
+        "the runner's file and nothing of the repository"
+    )
+    assert config["compaction"] == {"auto": True, "prune": True}, (
+        "the engine compacts a full window"
+    )
+    assert "prompt" not in config["agent"][IMPLEMENTER_AGENT], "the stock prompt stays"
     assert config["skills"] == {"paths": []}, "repository skills are never loaded"
     assert len(config["provider"]) == 1 and len(config["agent"]) == 1
     assert next(iter(config["provider"].values()))["options"]["apiKey"] == CAPABILITY
@@ -174,8 +192,6 @@ EXPECTED_NAMES = {
     "OPENCODE_DISABLE_DEFAULT_PLUGINS",
     "OPENCODE_DISABLE_MODELS_FETCH",
     "OPENCODE_DISABLE_AUTOUPDATE",
-    "OPENCODE_DISABLE_AUTOCOMPACT",
-    "OPENCODE_DISABLE_PRUNE",
     "OPENCODE_DISABLE_LSP_DOWNLOAD",
     "OPENCODE_DISABLE_FFF",
     "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER",
@@ -221,6 +237,20 @@ def make_environment(network: ImplementerNetwork = ImplementerNetwork.REGISTRIES
         tools_dir="/opt/tools",
         egress=settings,
     )
+
+
+# #764-R2
+def test_the_engine_environment_does_not_switch_compaction_off() -> None:
+    environment = make_environment()
+
+    assert "OPENCODE_DISABLE_AUTOCOMPACT" not in environment
+    assert "OPENCODE_DISABLE_PRUNE" not in environment
+
+
+# #764-R7
+def test_the_instruction_file_must_be_an_absolute_path_the_runner_wrote() -> None:
+    with pytest.raises(ValueError):
+        make_config(instructions_path="implementer.md")
 
 
 # #764-T02

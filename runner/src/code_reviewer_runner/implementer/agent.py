@@ -96,7 +96,8 @@ class ImplementerAgent:
         ledger: BudgetLedger,
         command: Sequence[str],
         directory: str,
-        config: Mapping[str, Any],
+        make_config: Callable[[str], Mapping[str, Any]],
+        instructions: tuple[str, str],
         environment: Mapping[str, str],
         model: str,
         provider_id: str,
@@ -116,8 +117,14 @@ class ImplementerAgent:
         self.directory = directory
         self.model = model
         self.session_id: str | None = None
+        # The configuration the engine was given (set by `start`).
+        self.config: dict[str, Any] = {}
         self.launch = launch
-        self._config = dict(config)
+        # The configuration as a function of the path of the instruction file, which is only known
+        # where the file is written (the engine user's directory, or the scratch directory).
+        self._make_config = make_config
+        # (file name, text): the runner's addition to the stock prompt, written next to the config.
+        self._instructions = instructions
         self._environment = dict(environment)
         self._provider_id = provider_id
         self._proxy_url = proxy_url
@@ -152,16 +159,24 @@ class ImplementerAgent:
         session. Raises `EngineError`, `LimitError` or `IsolationError`; the caller calls
         `stop()`."""
         self.ledger.check_deadline()
+        name, text = self._instructions
         if self.launch is not None:
-            config_path = self.launch.write_config(self._config)
+            written = self.launch.write_file(name, text)
+            config = dict(self._make_config(str(written)))
+            config_path = self.launch.write_config(config)
         else:
             self._scratch.mkdir(parents=True, exist_ok=True)
             os.chmod(self._scratch, 0o700)
+            written = self._scratch / name
+            written.write_text(text, encoding="utf-8")
+            os.chmod(written, 0o600)
+            config = dict(self._make_config(str(written)))
             config_path = self._scratch / "opencode.json"
             # The config carries the job's proxy capability: owner-only.
             descriptor = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                stream.write(json.dumps(self._config))
+                stream.write(json.dumps(config))
+        self.config = config
         environment = dict(self._environment)
         # The one file the engine reads its configuration from; `OPENCODE_CONFIG_DIR` is never set
         # (it makes the engine install a plugin package from the registry).

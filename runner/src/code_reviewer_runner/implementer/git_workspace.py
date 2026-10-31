@@ -102,6 +102,14 @@ _LEFTOVER_COMMIT_OPTIONS = ("commit.gpgsign=false",)
 # this long before the next look, doubling to the ceiling.
 RETRY_BACKOFF_SECONDS = 10.0
 MAX_BACKOFF_SECONDS = PUSH_INTERVAL_SECONDS
+# An answer of the provider that is a no and not a hiccup: a client error other than "request
+# timeout" and "too many requests" (credentials, permission, a missing repository, a validation).
+_HTTP_ERROR = re.compile(r"returned error: (\d{3})")
+# git asks for credentials after a 401 and, with prompts off, reports that instead of the status.
+_CREDENTIALS_REFUSED = re.compile(
+    r"could not read (?:Username|Password)|Authentication failed|Permission denied", re.IGNORECASE
+)
+_RETRYABLE_CLIENT_ERRORS = frozenset({408, 425, 429})
 _COMMIT_HEADER = re.compile(r"commit [0-9a-f]{40}")
 _COMMITTER = re.compile(r"committer (?P<name>[^<>\n]*) <(?P<email>[^<>\n]*)> \d+ [+-]\d{4}")
 
@@ -153,6 +161,13 @@ class PushUnverified(JobError):
         super().__init__(ErrorCode.RUNNER_ERROR, detail)
 
 
+class PushTransient(PushUnverified):
+    """The provider did not take the push and said nothing that is a refusal (a 5xx, a reset, a
+    timeout, no route). Nothing is known against the agent or the branch: the loop tries again
+    after its back-off, and the final push still runs once. Only the final push turns it into
+    `push_rejected` (`PushLoop.finish`)."""
+
+
 class RepositoryUnusable(JobError):
     """The agent ran, and its repository could then not be committed or verified: the leftover
     commit failed, the status cannot be read, or the last look at its branch failed. The model
@@ -185,6 +200,18 @@ class PushResult:
     outcome: PushOutcome
     # The tip the provider has after this call (None: nothing was ever pushed).
     head: str | None
+
+
+def _is_http_refusal(detail: str) -> bool:
+    """Whether git's report of a failed push to the provider names an HTTP client error that is not
+    worth retrying. The text is the provider's side of the push on the runner's own mirror."""
+    if _CREDENTIALS_REFUSED.search(detail):
+        return True
+    found = _HTTP_ERROR.search(detail)
+    if found is None:
+        return False
+    status = int(found.group(1))
+    return 400 <= status < 500 and status not in _RETRYABLE_CLIENT_ERRORS
 
 
 def _invalid(detail: str) -> JobError:
@@ -458,13 +485,25 @@ class GitWorkspace:
     # -- the leftover API (as the agent's user) ---------------------------------------------------
 
     def dirty(self) -> bool:
-        """Whether the working tree has changes, untracked files included. Runs as the agent."""
-        done = self._as_agent(
-            ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
+        """Whether the working tree has changes, untracked files included. Runs as the agent. Only
+        the first byte of what `git status` prints is looked at: the output is the agent's (a tree
+        with a million untracked files prints megabytes) and the answer is whether it has any."""
+        seen: list[bool] = []
+
+        def first(chunk: bytes) -> None:
+            if chunk:
+                seen.append(True)
+                raise StopReading
+
+        done = self._agent_stream(
+            ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            first,
         )
+        if seen:
+            return True
         if done.returncode != 0:
             raise RepositoryUnusable("git status failed: " + self._agent_detail(done))
-        return bool(done.stdout)
+        return False
 
     def commit_all(self, message: str = LEFTOVER_MESSAGE) -> str | None:
         """Commit everything with the fixed message, as the agent's user, through the guard. Returns
@@ -756,6 +795,8 @@ class GitWorkspace:
         if pushed.returncode != 0:
             refused = [line for line in pushed.stdout.splitlines() if line.startswith("!")]
             detail = self._detail(pushed)
+            if not refused and not _is_http_refusal(detail):
+                raise PushTransient("the provider did not take the push for now: " + detail)
             first = self._pushed is None
             if any("[rejected]" in line for line in refused) and first:
                 raise fail(
@@ -1004,6 +1045,11 @@ class PushLoop:
         the turn: `RepositoryUnusable`, a charged class."""
         try:
             result = self._workspace.push()
+        except PushTransient as transient:
+            raise JobError(
+                ErrorCode.PUSH_REJECTED,
+                "the provider did not take the final push: " + transient.detail,
+            ) from None
         except PushUnverified as unverified:
             raise RepositoryUnusable(
                 "the agent's branch could not be verified: " + unverified.detail

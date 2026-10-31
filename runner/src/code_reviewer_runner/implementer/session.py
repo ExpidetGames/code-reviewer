@@ -57,12 +57,14 @@ from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily, spec_of
 from code_reviewer_runner.dynamic_review.passthrough.server import PassthroughServer
 from code_reviewer_runner.dynamic_review.passthrough.upstream import HttpsUpstream
+from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
 from code_reviewer_runner.job import ImplementerInput, JobError
 from code_reviewer_runner.result import ErrorCode, Usage
 
 from .agent import AgentTurn, ImplementerAgent
 from .config import build_engine_config, implementer_environment
-from .egress_config import EgressSettings
+from .egress_config import EgressSettings, start_egress
+from .egress_proxy import EgressProxy
 from .git_workspace import (
     GitWorkspace,
     PushLoop,
@@ -70,7 +72,7 @@ from .git_workspace import (
     RepositoryUnusable,
 )
 from .history import CommitInfo, FileChange
-from .prompts import LEFTOVER_PROMPT
+from .prompts import LEFTOVER_PROMPT, instructions_text
 from .turn_result import TurnResult, clip_summary
 
 _log = logging.getLogger(__name__)
@@ -83,20 +85,32 @@ GRACE_SECONDS = 180.0
 TICK_SECONDS = 2.0
 # The extra message for a dirty tree is only worth sending when this much of the clock is left.
 MIN_EXTRA_TURN_SECONDS = 20.0
-# What the ledger holds a tool result to. The engine cuts what it hands the model near 50 KB, so the
-# per-result bound is a backstop; the cumulative one is a sanity bound and no brake on the work (the
-# cost limit is the only brake): a long session reads many results.
-MAX_TOOL_RESULT_BYTES = 64 * 1024
+# What the ledger holds the results of tools to. There is no bound on a single result: the owner's
+# rule is that the cost limit is the only brake, and a normal `grep` or `bash` result is larger than
+# the 64 KiB a review is held to (a grep over 300 files answers 200 KB; the engine's own cut does
+# not apply to it). The cumulative bound is a sanity bound above what any turn the cost limit allows
+# can read; a single result cannot pass it either.
 MAX_RETURNED_BYTES = 256 * 1024 * 1024
+MAX_TOOL_RESULT_BYTES = MAX_RETURNED_BYTES
 # A conversation of a coding agent is larger than a review's: the model's window bounds a request
 # (`BudgetLedger.reserve_call`), this byte bound is only a backstop above it.
 MAX_AGENT_REQUEST_BYTES = 8 * MAX_REQUEST_BYTES
+
+# The name of the instruction file the runner writes for the engine.
+INSTRUCTIONS_FILE = "implementer-instructions.md"
 
 # The words of the ledger's refusals (`budget.py`). A test pins them against the ledger, so a
 # change of its wording makes that test red instead of silently changing a code.
 DEADLINE_DETAIL = "the whole-job deadline was reached"
 COST_LIMIT_DETAIL = "the cost limit is used up"
 TOKEN_CAP_DETAIL = "the token cap is used up"
+
+
+def deadline_seconds(time_limit: int, elapsed: float) -> float:
+    """The seconds the agent may work, counted from now: the job's time limit less what is spent
+    since the job began and less the grace kept for the leftover commit and the final push (three
+    minutes; a third of a short limit)."""
+    return float(time_limit) - min(GRACE_SECONDS, time_limit / 3) - elapsed
 
 
 def agent_limits(deadline: float, max_cost: Decimal, stop_reason: str) -> DynamicLimits:
@@ -124,14 +138,28 @@ class SessionSeams:
     startup_seconds: float | None = None
     scratch_dir: str | None = None
     clock: Callable[[], float] = time.monotonic
+    # Starts the egress proxy of a registries container (default `egress_config.start_egress`).
+    start_egress: Callable[[EgressSettings], EgressProxy | None] | None = None
+
+
+# What stops a turn when the push loop meets it: the provider or the branch refuses for good.
+# Anything else the loop raises (a transient failure the loop did not take for one, a bug) is
+# logged,
+# waited out, and the final push still runs.
+_REFUSALS = frozenset(
+    {ErrorCode.BRANCH_VIOLATION, ErrorCode.PUSH_REJECTED, ErrorCode.BRANCH_EXISTS}
+)
+_UNEXPECTED_PAUSE_SECONDS = 30.0
 
 
 class PushTicker:
     """Ticks the push loop on a thread of its own and keeps the first error that ends the turn.
 
-    A `PushUnverified` is the loop's own business (it looks again after a back-off); anything else
-    that `tick` raises is a refusal of the provider or of the branch (`push_rejected`,
-    `branch_exists`, `branch_violation`) and the turn ends: `check()` raises it in the watch.
+    A `PushUnverified` (a look that failed, a push the provider could not take for now) is the
+    loop's own business: it looks again after a back-off. A refusal of the provider or of the branch
+    (`push_rejected`, `branch_exists`, `branch_violation`) ends the turn: `check()` raises it in the
+    watch and `finish()` raises it instead of a push that could only be refused again. Anything else
+    is not a reason to give up the commits: it is logged and the final push runs once.
     """
 
     def __init__(self, loop: PushLoop, interval: float) -> None:
@@ -140,6 +168,7 @@ class PushTicker:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._error: JobError | None = None
+        self._pause_until = 0.0
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -150,15 +179,21 @@ class PushTicker:
             with self._lock:
                 if self._stop.is_set() or self._error is not None:
                     return
+                if time.monotonic() < self._pause_until:
+                    continue
                 try:
                     self._loop.tick()
                 except JobError as error:
-                    self._error = error
-                    return
+                    if error.code in _REFUSALS:
+                        self._error = error
+                        return
+                    self._unexpected()
                 except Exception:
-                    _log.exception("the push loop failed")
-                    self._error = JobError(ErrorCode.RUNNER_ERROR, "the push loop failed")
-                    return
+                    self._unexpected()
+
+    def _unexpected(self) -> None:
+        _log.exception("the push loop failed; the final push still runs")
+        self._pause_until = time.monotonic() + _UNEXPECTED_PAUSE_SECONDS
 
     @property
     def error(self) -> JobError | None:
@@ -170,7 +205,7 @@ class PushTicker:
 
     def finish(self) -> PushResult:
         """Stop ticking and make the last push, whatever the back-off. Waits for a tick in
-        flight."""
+        flight. A refusal the loop met is raised instead: the push would only be refused again."""
         self._stop.set()
         with self._lock:
             if self._error is not None:
@@ -182,9 +217,21 @@ class PushTicker:
         self._thread.join(timeout=5.0)
 
 
-def classify(error: BaseException) -> tuple[ErrorCode, str]:
+def classify(error: BaseException, *, used_model: bool = False) -> tuple[ErrorCode, str]:
     """The stable code of what ended a turn and a sentence of ours for it. Never the text of an
-    exception that could carry a value."""
+    exception that could carry a value.
+
+    `used_model` is whether a model call was made. The code `runner_error` is free for the user; a
+    turn whose engine died or whose bound ended it after the model was used has cost money and is
+    `agent_gave_up`, the charged code for a turn that ended without a result the agent stands
+    behind. Before any model call it stays `runner_error`."""
+    code, detail = _classified(error)
+    if code is ErrorCode.RUNNER_ERROR and used_model:
+        return ErrorCode.AGENT_GAVE_UP, detail
+    return code, detail
+
+
+def _classified(error: BaseException) -> tuple[ErrorCode, str]:
     if isinstance(error, LimitError):
         if error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED:
             if error.detail == DEADLINE_DETAIL:
@@ -249,9 +296,9 @@ class ImplementerSession:
     def _deadline_seconds(self) -> float:
         """The seconds the agent may work from now: the job's time limit less what is spent since
         the job began and less the grace kept for the end."""
-        limit = float(self.job.implementer.limits.time_limit_seconds)
-        grace = min(GRACE_SECONDS, limit / 3)
-        return limit - grace - (self._clock() - self._started)
+        return deadline_seconds(
+            self.job.implementer.limits.time_limit_seconds, self._clock() - self._started
+        )
 
     # -- the turn -------------------------------------------------------------
 
@@ -259,9 +306,11 @@ class ImplementerSession:
         agent: ImplementerAgent | None = None
         server: PassthroughServer | None = None
         ticker: PushTicker | None = None
+        egress: EgressProxy | None = None
         try:
             native = self._native_job()
             self._native = native
+            egress = self._start_egress()
             server = self._serve(native)
             agent = self._agent(native, server.url)
             agent.start()
@@ -282,6 +331,8 @@ class ImplementerSession:
                 ticker.close()
             if server is not None:
                 server.stop(drain_seconds=0.0)
+            if egress is not None:
+                egress.stop()
         return self._result()
 
     def _native_job(self) -> NativeJob:
@@ -298,6 +349,22 @@ class ImplementerSession:
             limits=lambda max_cost, reason: agent_limits(deadline, max_cost, reason),
         )
 
+    def _start_egress(self) -> EgressProxy | None:
+        """The allowlist proxy of a registries container (#763), listening before the engine's
+        network is proven (the probe of `EngineLaunch.confine` reaches it). `none` starts
+        nothing."""
+        if self.egress.network is ImplementerNetwork.NONE:
+            return None
+        if self.launch is not None:
+            self.launch.egress_port = self.egress.port
+        starter = self.seams.start_egress or start_egress
+        try:
+            return starter(self.egress)
+        except OSError:
+            raise JobError(
+                ErrorCode.SETUP_FAILED, "the egress proxy port of the slot is not free"
+            ) from None
+
     def _serve(self, native: NativeJob) -> PassthroughServer:
         port = self.launch.proxy_port if self.launch is not None else 0
         try:
@@ -310,17 +377,22 @@ class ImplementerSession:
     def _agent(self, native: NativeJob, proxy_url: str) -> ImplementerAgent:
         entry = native.entry
         family = WireFamily(entry.family)
-        config = build_engine_config(
-            provider=native_provider_config(
-                entry,
-                base_url=spec_of(family).proxy_base_url(proxy_url),
-                api_key=native.capability,
-            ),
-            model_reference=native_model_reference(entry),
-            family=family,
-            proxy_url=proxy_url,
-            capability=native.capability,
+        provider = native_provider_config(
+            entry,
+            base_url=spec_of(family).proxy_base_url(proxy_url),
+            api_key=native.capability,
         )
+
+        def make_config(instructions_path: str) -> dict[str, Any]:
+            return build_engine_config(
+                provider=provider,
+                model_reference=native_model_reference(entry),
+                family=family,
+                proxy_url=proxy_url,
+                capability=native.capability,
+                instructions_path=instructions_path,
+            )
+
         home = str(self.workspace.layout.agent_home)
         if self.launch is not None and self.launch.home != home:
             raise JobError(
@@ -346,7 +418,8 @@ class ImplementerSession:
             ledger=native.ledger,
             command=self.command,
             directory=str(self.workspace.repo),
-            config=config,
+            make_config=make_config,
+            instructions=(INSTRUCTIONS_FILE, instructions_text(self.egress.network)),
             environment=environment,
             model=entry.model_id,
             provider_id=entry.provider_id,
@@ -373,7 +446,8 @@ class ImplementerSession:
         return agent.ledger.remaining_seconds() >= MIN_EXTRA_TURN_SECONDS
 
     def _stopped_by(self, error: BaseException) -> None:
-        code, detail = classify(error)
+        used = self._native is not None and self._native.ledger.model_calls > 0
+        code, detail = classify(error, used_model=used)
         if self._error is None:
             self._error = (code, detail)
         self._note(f"the turn ended: {code.value}")

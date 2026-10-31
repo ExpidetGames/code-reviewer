@@ -13,14 +13,17 @@ import subprocess
 import threading
 import tracemalloc
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from code_reviewer_runner.implementer import git_workspace
+from code_reviewer_runner.implementer.git_process import Outcome
 from code_reviewer_runner.implementer.git_workspace import (
     GitWorkspace,
     PushLoop,
     PushOutcome,
+    PushTransient,
     PushUnverified,
     RepositoryUnusable,
 )
@@ -1335,3 +1338,156 @@ def test_a_header_block_that_is_absurdly_large_is_refused(rig: Rig) -> None:
 
     assert refused.value.code is ErrorCode.BRANCH_VIOLATION
     assert raw("rev-parse", f"refs/heads/{BRANCH}", cwd=workspace.mirror, git=rig.git) == good
+
+
+# -- a push the provider cannot take for now is not a refusal (#764) ----------------------------
+
+TRANSIENT_TEXTS = {
+    "a 502": "fatal: unable to access 'https://x/r.git/': The requested URL returned error: 502",
+    "a 503": "fatal: unable to access 'https://x/r.git/': The requested URL returned error: 503",
+    "a 429": "fatal: unable to access 'https://x/r.git/': The requested URL returned error: 429",
+    "a reset": "fatal: unable to access 'https://x/r.git/': Recv failure: Connection reset by peer",
+    "no route": "fatal: unable to access 'https://x/r.git/': Could not resolve host: x",
+    "a hang up": "send-pack: unexpected disconnect while reading sideband packet",
+}
+
+
+def fail_pushes(
+    workspace: GitWorkspace, monkeypatch: pytest.MonkeyPatch, text: str, times: int = 1
+) -> list[int]:
+    """The next `times` pushes of the mirror to the provider fail with this report of git."""
+    real = workspace._mirror  # pyright: ignore[reportPrivateUsage]
+    failed: list[int] = []
+
+    def mirror(args: list[str], **options: Any) -> Outcome:
+        if "push" in args and len(failed) < times:
+            failed.append(1)
+            return Outcome(128, "", text)
+        return real(args, **options)
+
+    monkeypatch.setattr(workspace, "_mirror", mirror)
+    return failed
+
+
+# #764-R4
+@pytest.mark.parametrize("name", sorted(TRANSIENT_TEXTS))
+def test_a_push_that_failed_without_a_refusal_is_tried_again_and_then_works(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    workspace = rig.prepared()
+    tip = commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, TRANSIENT_TEXTS[name])
+
+    with pytest.raises(PushTransient) as failed:
+        workspace.push()
+
+    assert isinstance(failed.value, PushUnverified), "the loop backs off on it"
+    assert failed.value.code is ErrorCode.RUNNER_ERROR, "not a refusal, not charged as one"
+    assert rig.origin.tip(BRANCH) is None
+    assert workspace.push().head == tip
+    assert rig.origin.tip(BRANCH) == tip
+
+
+# #764-R4
+@pytest.mark.parametrize(
+    "text",
+    [
+        "fatal: unable to access 'https://x/r.git/': The requested URL returned error: 403",
+        "fatal: unable to access 'https://x/r.git/': The requested URL returned error: 401",
+        "remote: Repository not found.\nfatal: ... The requested URL returned error: 404",
+    ],
+)
+def test_a_client_error_of_the_provider_is_a_refusal(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    workspace = rig.prepared()
+    commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, text)
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.PUSH_REJECTED
+    assert not isinstance(refused.value, PushUnverified)
+
+
+# #764-R4
+def test_the_loop_backs_off_on_a_transient_failure_and_pushes_when_it_is_over(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    clock = Clock()
+    loop = PushLoop(workspace, interval=0.0, clock=clock, retry_backoff=10.0)
+    tip = commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, TRANSIENT_TEXTS["a 503"])
+
+    assert loop.tick() is None
+    assert rig.origin.tip(BRANCH) is None
+    clock.now += 5
+    assert loop.tick() is None, "inside the wait"
+    clock.now += 6
+    result = loop.tick()
+
+    assert result is not None and result.head == tip and rig.origin.tip(BRANCH) == tip
+
+
+# #764-R4
+def test_the_final_push_after_a_transient_failure_takes_what_the_loop_could_not(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    loop = PushLoop(workspace, interval=0.0, clock=Clock())
+    commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, TRANSIENT_TEXTS["a 502"])
+    assert loop.tick() is None
+    second = commit(workspace, "b.txt")
+
+    result = loop.finish()
+
+    assert result.head == second and rig.origin.tip(BRANCH) == second
+
+
+# #764-R4
+def test_a_final_push_the_provider_never_takes_is_push_rejected_not_a_branch_violation(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    loop = PushLoop(workspace, interval=0.0, clock=Clock())
+    commit(workspace, "a.txt")
+    fail_pushes(workspace, monkeypatch, TRANSIENT_TEXTS["a 503"], times=5)
+
+    with pytest.raises(JobError) as ended:
+        loop.finish()
+
+    assert ended.value.code is ErrorCode.PUSH_REJECTED
+    assert not isinstance(ended.value, RepositoryUnusable)
+
+
+# -- the status of the tree is not read as a whole (#764) ---------------------------------------
+
+
+# #764-R9
+def test_dirty_stops_at_the_first_line_of_a_status_that_would_be_large(rig: Rig) -> None:
+    workspace = rig.prepared()
+    for number in range(20_000):
+        (workspace.repo / f"u{number}-{'x' * 150}").write_bytes(b"")
+
+    tracemalloc.start()
+    try:
+        answer = workspace.dirty()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert answer is True
+    assert peak < 512 * 1024, f"dirty() held {peak} bytes of the status"
+
+
+# #764-R9
+def test_dirty_is_false_for_a_clean_tree_and_true_for_one_change(rig: Rig) -> None:
+    workspace = rig.prepared()
+    assert workspace.dirty() is False
+
+    (workspace.repo / "new.txt").write_text("x\n")
+
+    assert workspace.dirty() is True
