@@ -668,6 +668,23 @@ export const IMPLEMENTER_RESULT_LIMITS = {
   summaryChars: 8192,
 } as const;
 
+/**
+ * The most a complete or result body of a turn of the Implementer can be and still be within `IMPLEMENTER_RESULT_LIMITS` (#754).
+ * The runner writes JSON with every non-ASCII character escaped (`ensure_ascii`), which makes a code point outside the Basic
+ * Multilingual Plane 12 bytes (two escapes), so every counted character is taken as 12 bytes: the commits (a sha and a subject of
+ * 500), the files (a path of 4096), the summary, and the log tail and error message of any result (8192 and 2000, the limits of
+ * `requests.ts`). The structure around them is counted generously, and the usage with its call trace keeps the 64 KiB every kind
+ * has. Only the app's reading of this kind changes: the limit for Diff and Dynamic is `RUNNER_MAX_BODY_BYTES` as before. A
+ * platform may limit a request body below this before the app sees it.
+ */
+export const IMPLEMENTER_MAX_BODY_BYTES =
+  RUNNER_MAX_BODY_BYTES +
+  12 *
+    (IMPLEMENTER_RESULT_LIMITS.commits * (500 + 48) +
+      IMPLEMENTER_RESULT_LIMITS.filesChanged * (4096 + 32) +
+      IMPLEMENTER_RESULT_LIMITS.summaryChars +
+      (8192 + 2000));
+
 /** #746: `ImplementerResult` in the contract: facts the runner measured in the repository, and a plain-text summary. */
 export type ImplementerResult = {
   baseCommit: string;

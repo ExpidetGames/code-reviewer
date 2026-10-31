@@ -47,10 +47,55 @@ are the same as for a single workspace.
 ## A managed Dynamic result without a cost (#553)
 
 `finishJob` (`report.ts`, shared by the runner API's `complete` and the Worker API's `result`) stores a Dynamic result of a job on
-the operator's key that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
+the operator's key (and, since #754, of a turn of the Implementer) that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
 (`managed-cost-guard.ts`): a managed run never settles with an unknown cost, and the code is free for the customer. A failure keeps
 the runner's code. On the workspace's own key a null cost is a success whose usage record settles with an unknown cost (minutes
 only in billing).
+
+## The result of a turn of the Implementer (#754)
+
+A turn is a job of the kind `implementer` and finishes through the same `finishJob` as every job. Its result carries the closed
+block `result.implementer` (`ImplementerResult` in the contract; `parseResult` in `requests.ts` reads it with the bounds of the
+schema and the compatibility test requires the same verdict as the contract file; the app is stricter in two ways it must be: the
+invariants the contract states in words, `pushed` never without a `headCommit` and `headCommit` the last of the commits when any are
+listed, and control characters, which are taken out of the text and ids because a NUL cannot be stored). A `null` block is refused,
+as the contract has no null for it. The block is held to the kind of the job
+(`implementer-report.ts`): a job of another kind that sends one is refused (`400 RUNNER_REQUEST_INVALID`, field
+`result.implementer`), and so is a **successful** turn without one. A failed turn may have none (the runner failed before it had a
+repository). A refused report completes nothing and changes nothing.
+
+What happens to a block that is accepted:
+
+- `redactResult` removes from the summary, the commit subjects and the file paths: the exact secrets the app knows (the LLM key of
+  the workspace and of the claim, the runner token, and the Worker credential on the Worker API; as they are and URL-encoded,
+  JSON-escaped and in base64) and everything shaped like a credential (GitHub tokens, `sk-` keys, `crj_` credentials, `Bearer`
+  lines). A secret split by zero-width or other format characters (U+200B and the like) is found too: the text is searched
+  without them, and rewritten only when something was found. What it does not catch is a secret in any other disguise (reversed,
+  spelled in pieces, look-alike letters, another encoding); the git token of a job is not known to the app, so it is caught by its
+  shape (`ghs_...`) only. On the operator's key the model ids and the provider are taken out of the summary and the
+  subjects too (`withoutManagedModel`); the paths are the repository's and stay.
+- The queue's `complete` (`runner-jobs-repository.ts`), in the transaction that ends the job, gives the session its result with
+  `recordTurnResult` (`db/implementer-turn-result.ts`): `head_commit` is the head the runner reports as pushed (`pushed: true`; the app takes the runner's word, it
+  does not read the remote), plus the summary and the saved OpenCode session, and the session is `idle`. A failed turn keeps its block, so a turn that stopped
+  at its cost limit after it pushed is a failed job with visible work. A failure without a block records nothing but the end (the
+  session still becomes `idle`, its fields unchanged).
+- A runner shut down by a redeploy reports `runner_shutdown`; the job is given back (a turn has one attempt, so it fails) and its
+  report is not stored, but the work it reports is recorded on the session in the same transaction (`release` with `result`), so a
+  push made before the SIGTERM keeps `head_commit`. A `launch_failed` ran no agent and records nothing.
+- A report of a turn may be larger than any other: `IMPLEMENTER_MAX_BODY_BYTES` (`contract.ts`, about 26 MB) covers every limit of
+  `ImplementerResult` with each character taken as the 12 bytes the runner's escaped JSON needs for a character outside the Basic
+  Multilingual Plane. The limit is read for the job of the report (runner API `complete`, Worker API `result`); Diff and Dynamic keep
+  64 KiB (`RUNNER_MAX_BODY_BYTES`), and so does any report for a job that is not there. A platform may limit a request body lower
+  before the app sees it.
+- Only the call that ended the job does this. A report with a lost lease (`409`) or one for a job that is settled already (late,
+  repeated, or with another result) changes nothing in the session. A job that ends without any report (lease expired, never
+  dispatched, no capable runner) sets the session `idle` through `idleSessionsOfEndedTurns` (#752).
+- Usage and cost are settled as for Dynamic (`settlementOfOutcome`; the call trace is stored the same way), and a managed native turn
+  that succeeds with an unknown cost, or with no usage at all, is stored as `dynamic_accounting_failed` (`managed-cost-guard.ts`; a
+  Dynamic result without usage keeps its old treatment). The members never read the
+  cost of a run on the operator's key: the Runs views take it out (`run-view.ts`), the stored usage keeps it for the settlement.
+- Billing classes of the Implementer's codes are in `billing/outcome.ts`: `agent_gave_up`, `push_rejected`, `branch_violation` and
+  `time_limit_reached` are charged (the agent ran), the codes that end a turn before it are free.
 
 ## Authentication
 
