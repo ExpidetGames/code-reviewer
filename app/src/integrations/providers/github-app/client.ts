@@ -296,6 +296,12 @@ export type GithubAppClient = {
     installationId: string,
     scope: JobTokenScope,
   ): Promise<InstallationToken>;
+  /**
+   * Switches an installation token off (`DELETE /installation/token`, #753). Best effort: it never rejects, because it
+   * runs where the caller already has a failure to report or a job that is over; a token that is gone, a refusal or a
+   * platform that is down leave the token to expire at its time. The answer is never read.
+   */
+  revokeInstallationToken(token: string): Promise<void>;
 };
 
 export type GithubAppClientOptions = {
@@ -1439,6 +1445,8 @@ export function createGithubAppClient(
         signal,
       );
     },
+
+    revokeInstallationToken,
 
     async mintInstallationToken(installationId, scope) {
       if (scope.repositoryIds.length === 0)

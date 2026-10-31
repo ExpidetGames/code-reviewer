@@ -336,6 +336,10 @@ export function fakeIntegrationProvider(
       });
     },
 
+    async revokeImplementerAccess(integration, token) {
+      record("revokeImplementerAccess", integration, token);
+    },
+
     async installationPermissions(integration) {
       record("installationPermissions", integration);
       return { contentsWrite: options.contentsWrite ?? true };
