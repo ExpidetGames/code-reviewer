@@ -29,7 +29,6 @@ export type StartInputCheck =
   { ok: true; value: StartInput } | { ok: false; issues: ImplementerIssue[] };
 
 // Control characters other than tab, line feed and carriage return; a lone surrogate half is not text at all.
-// eslint-disable-next-line no-control-regex -- the control characters are exactly what is looked for
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const LONE_SURROGATE =
   /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;

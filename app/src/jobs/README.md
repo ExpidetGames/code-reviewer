@@ -121,7 +121,7 @@ is either cancelled with the others or reads the new kind. The hook is `createJo
 A turn of the Implementer (part of #745, the Software Factory deployment) travels through this queue as a job of the kind
 `implementer`, so claim, lease, heartbeat, release, stop, dispatch, usage records and entitlements are the ones of every job.
 `createJobQueue(...).enqueueImplementerTurn` makes the session, its first turn (`src/db/repositories/implementer-repository.ts`) and
-the job in one transaction. The `jobs` table is shaped like a pull request review, so **`implementer/job-shape.ts` is the one place
+the job in one transaction. The `jobs` table is shaped like a pull request review, so **`db/implementer-job-shape.ts` is the one place
 that writes the pull request columns** of a turn:
 
 | Column                                         | Value                                                                                                                                                                                                             |

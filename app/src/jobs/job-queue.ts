@@ -51,7 +51,7 @@ export type JobQueue = {
   enqueue(input: EnqueueJobInput): Promise<EnqueueResult>;
   /**
    * #752: accepts a task of the Implementer: the session, its first turn and the turn's job (a job of the kind `implementer`,
-   * `trigger_kind` manual, the pull request columns made by `implementer/job-shape.ts`) in one transaction. The job is queued for
+   * `trigger_kind` manual, the pull request columns made by `db/implementer-job-shape.ts`) in one transaction. The job is queued for
    * a runner with the engine `implementer`, never retried, and not touched by anything that acts on pull requests (README,
    * "The implementer kind"). The same `clientRequestId` gives the turn it made back (`status: "existing"`) and writes nothing.
    *

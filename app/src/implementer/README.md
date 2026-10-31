@@ -10,16 +10,16 @@ exist (`src/capabilities/routes.ts`, class `implementer`, one entry per route fi
 and each route file asks again (`requireImplementerCapability()` in `shared.ts`, Next.js's own `notFound()`) before the session
 or the database is looked at, so code-review.com hands out nothing.
 
-| File                  | Role                                                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `service.ts`          | `createImplementerService`: `listRepositories()`, `listBranches(id)`, `listModels()`, `startTask(user, body)`; every rule is here |
-| `models.ts`           | `createImplementerModels`: the options of the model picker and the check at submit, one rule for both                             |
-| `start-input.ts`      | `validateStartInput`: the body, field by field, with `INSTRUCTION_MAX_LENGTH` (20,000)                                            |
-| `branch-name.ts`      | `checkBranchName`: the rules of `git check-ref-format --branch` plus 200 characters and "not the base branch"; one code per rule  |
-| `errors.ts`           | `ImplementerError` with the stable codes, their HTTP status, the field `issues` and the model refusal `reason`s                   |
-| `http.ts`             | The handlers behind the four routes: user first, then the origin, content type and body, then the service                         |
-| `shared.ts`           | The wiring of the running server (`implementerServiceFor(workspaceId)`) and the second wall `requireImplementerCapability()`      |
-| `job-shape.ts` (#752) | The one place that writes the pull request columns of a turn's job; the branch in `pr_url` is percent-encoded per part (#755)     |
+| File                                    | Role                                                                                                                                                                                                                                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `service.ts`                            | `createImplementerService`: `listRepositories()`, `listBranches(id)`, `listModels()`, `startTask(user, body)`; every rule is here                                                                                                                                                        |
+| `models.ts`                             | `createImplementerModels`: the options of the model picker and the check at submit, one rule for both                                                                                                                                                                                    |
+| `start-input.ts`                        | `validateStartInput`: the body, field by field, with `INSTRUCTION_MAX_LENGTH` (20,000)                                                                                                                                                                                                   |
+| `branch-name.ts`                        | `checkBranchName`: the rules of `git check-ref-format --branch` plus 200 characters and "not the base branch"; one code per rule                                                                                                                                                         |
+| `errors.ts`                             | `ImplementerError` with the stable codes, their HTTP status, the field `issues` and the model refusal `reason`s                                                                                                                                                                          |
+| `http.ts`                               | The handlers behind the four routes: user first, then the origin, content type and body, then the service                                                                                                                                                                                |
+| `shared.ts`                             | The wiring of the running server (`implementerServiceFor(workspaceId)`) and the second wall `requireImplementerCapability()`                                                                                                                                                             |
+| `../db/implementer-job-shape.ts` (#752) | The one place that writes the pull request columns of a turn's job; the branch in `pr_url` is percent-encoded per part (#755). It lives in `db/` because the database layer imports it, and `implementer/` imports the database layer: the import cycle check (#715) allows no new cycle |
 
 ## Routes
 

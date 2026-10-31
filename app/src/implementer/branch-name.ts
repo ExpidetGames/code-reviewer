@@ -41,7 +41,6 @@ export type BranchNameCheck =
   { ok: true; value: string } | { ok: false; issue: BranchNameIssue };
 
 // Space, ASCII control characters (git: below 0x20, and DEL), and the characters git refuses in a ref name.
-// eslint-disable-next-line no-control-regex -- the control characters are exactly what is looked for
 const FORBIDDEN = /[\u0000- \u007f~^:?*[\\]/;
 
 /** The first rule `name` breaks, or the name itself. `base` is the branch the task starts from. */

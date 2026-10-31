@@ -25,7 +25,7 @@ import { JOB_KINDS, type JobKind } from "../../job-kind/job-kind.ts";
 import {
   implementerDeliveryId,
   implementerJobShape,
-} from "../../implementer/job-shape.ts";
+} from "../implementer-job-shape.ts";
 import { JobQueueError } from "../../jobs/errors.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import { ImplementerStoreError } from "../implementer-errors.ts";
@@ -121,7 +121,7 @@ export type JobsRepository = {
   enqueue(input: ValidEnqueueInput): Promise<EnqueueResult>;
   /**
    * #752: accepts a task of the Implementer: in one transaction the session, its first turn and the turn's job (a row of the
-   * kind `implementer`, placeholders from `implementer/job-shape.ts`). Refuses with `JOB_KIND_UNAVAILABLE`, writing nothing,
+   * kind `implementer`, placeholders from `db/implementer-job-shape.ts`). Refuses with `JOB_KIND_UNAVAILABLE`, writing nothing,
    * when the deployment has no capability for the kind. Does not consult the Dynamic gate. A request id seen before gives the
    * turn it made, whatever else the request says. Rejects with `JOB_REPOSITORY_UNKNOWN`, or an `ImplementerStoreError`
    * (`IMPLEMENTER_BRANCH_TAKEN` and the others of the storage), writing nothing.

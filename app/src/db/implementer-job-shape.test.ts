@@ -2,7 +2,7 @@
 
 // The one place that writes the pull request columns of a turn's job (#752).
 import { describe, expect, it } from "vitest";
-import { implementerJobShape } from "./job-shape.ts";
+import { implementerJobShape } from "./implementer-job-shape.ts";
 
 const input = {
   workspaceId: "w-1",
