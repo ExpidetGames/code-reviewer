@@ -445,6 +445,7 @@ function implementerOptionsOf(
  * its environment, never in the address; an address that is not of that shape is refused here (null) instead of by the runner.
  */
 export function cloneUrlOf(repositoryUrl: string): string | null {
+  if (/\s/.test(repositoryUrl)) return null;
   let parsed: URL;
   try {
     parsed = new URL(repositoryUrl);

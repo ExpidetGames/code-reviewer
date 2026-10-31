@@ -181,12 +181,13 @@ one instruction, and one turn is one `jobs` row of the kind `implementer`. It ex
   profile that carries them is `ImplementerContainerSpec` of `worker-container.v1.json` (#760).
 - Examples: `examples/implementer/RunnerJobInput.json`, `RunnerResult.json` and `SplitClaimResponse.json`.
 
-**Nothing serves the kind yet, and a value of it never falls through to another path.** The app's claim refuses a job of
-the kind with `implementer_engine_unavailable` before a guard, a key or a credential is looked at (`runner-api/kind-guard.ts`);
-a claim that names only the engine `implementer` gets 204. The Dispatcher keeps `implementer` out of `KNOWN_KINDS`, so a
-wake-up call or a claimed job of the kind is `not_capable` (a claimed one is given back unlaunched). The runner validates an
-implementer job strictly (`parse_implementer_input`) and `parse_job` then refuses it with `implementer_engine_unavailable`;
-it never returns a Diff or Dynamic job for it. Later changes replace these refusals by the behaviour.
+**A value of the kind never falls through to another path.** The app's claim builds the input of a turn (#753, `runner-api/README.md`,
+"The claim of a turn") for a caller that advertised the engine `implementer`, and refuses it for one that did not with
+`implementer_engine_unavailable` before a guard, a key or a credential is looked at (`runner-api/kind-guard.ts`). The Dispatcher keeps
+`implementer` out of `KNOWN_KINDS`, so a wake-up call or a claimed job of the kind is `not_capable` (a claimed one is given back
+unlaunched). The runner validates an implementer job strictly (`parse_implementer_input`) and `parse_job` then refuses it with
+`implementer_engine_unavailable`; it never returns a Diff or Dynamic job for it. Later changes replace the refusals of the Dispatcher
+and the runner by the behaviour.
 
 ### A superseded run (#396, #397)
 

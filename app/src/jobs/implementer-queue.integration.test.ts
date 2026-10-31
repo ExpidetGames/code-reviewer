@@ -689,6 +689,47 @@ describe("the end of a turn without a report", () => {
     },
   );
 
+  // #753-T06: the input never reached a Worker, so nothing ran and nothing was pushed.
+  it("requeues an implementer job given back before its input left, with the general cap, and still fails it at the cap", async () => {
+    const t = await start();
+    const { job, session } = await t.turn();
+
+    const first = await t.fixture.queue.claimNext("r", IMPLEMENTER);
+    const released = await t.fixture.queue.release(
+      job.id,
+      first!.leaseToken,
+      "git_access_unavailable",
+      { beforeStart: true },
+    );
+
+    expect(released).toMatchObject({
+      status: "requeued",
+      job: { status: "queued", attempts: 1 },
+    });
+    expect(await t.sessionOf(session.id)).toMatchObject({ status: "running" });
+
+    // The general cap of attempts still ends it: it is not retried for ever.
+    let last = released;
+    for (
+      let attempt = 0;
+      attempt < 5 && last.status === "requeued";
+      attempt += 1
+    ) {
+      const again = await t.fixture.queue.claimNext("r", IMPLEMENTER);
+      last = await t.fixture.queue.release(
+        job.id,
+        again!.leaseToken,
+        "git_access_unavailable",
+        { beforeStart: true },
+      );
+    }
+    expect(last).toMatchObject({
+      status: "failed",
+      job: { errorCode: "git_access_unavailable" },
+    });
+    expect(await t.sessionOf(session.id)).toMatchObject({ status: "idle" });
+  });
+
   // #752-T07: a turn that ends with a failure report and no `recordTurnResult` (the runner failed before it had a result).
   it("sets the session idle when the runner reports a failure, which records no turn result", async () => {
     const t = await start();

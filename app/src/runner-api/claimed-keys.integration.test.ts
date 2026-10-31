@@ -245,3 +245,51 @@ describe("the native marker remembered for a job (#578)", () => {
     expect(await keys.wasNative(other.id)).toBe(false);
   });
 });
+
+describe("the write tokens remembered for a job", () => {
+  // #753
+  it("returns every token remembered and forgets them, so an end that is repeated revokes nothing twice", async () => {
+    const { job, keys } = await start();
+    await keys.rememberGitToken(job.id, "ghs_first_0001");
+    await keys.rememberGitToken(job.id, "ghs_second_0002");
+    await keys.rememberGitToken(job.id, "ghs_second_0002");
+
+    expect(await keys.takeGitTokens(job.id)).toEqual([
+      "ghs_first_0001",
+      "ghs_second_0002",
+    ]);
+    expect(await keys.takeGitTokens(job.id)).toEqual([]);
+  });
+
+  // #753
+  it("keeps the keys, the models and the native flag next to them", async () => {
+    const { job, keys } = await start();
+    await keys.remember(job.id, "plain-key-one-0001");
+    await keys.rememberNative(job.id, true);
+
+    await keys.rememberGitToken(job.id, "ghs_first_0001");
+    await keys.takeGitTokens(job.id);
+
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-one-0001"]);
+    expect(await keys.wasNative(job.id)).toBe(true);
+  });
+
+  // #753
+  it("reads a row of the earlier format, and of a release that knew no tokens, as having none", async () => {
+    const { job, keys } = await start();
+    await keys.remember(job.id, "plain-key-one-0001");
+
+    expect(await keys.takeGitTokens(job.id)).toEqual([]);
+    expect(await keys.keysOf(job.id)).toEqual(["plain-key-one-0001"]);
+  });
+
+  // #753
+  it("holds the token only sealed", async () => {
+    const { job, keys, db } = await start();
+    await keys.rememberGitToken(job.id, "ghs_first_0001");
+
+    const rows = await db.selectFrom("job_claimed_keys").selectAll().execute();
+
+    expect(JSON.stringify(rows)).not.toContain("ghs_first_0001");
+  });
+});

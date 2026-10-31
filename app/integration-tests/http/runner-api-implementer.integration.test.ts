@@ -720,6 +720,40 @@ describe("the write token ends with the turn", () => {
   });
 
   // review of #776, point 1
+  it("is switched off when a Dispatcher releases the turn because the Worker's container ended without a result", async () => {
+    const h = await start();
+    await h.turn();
+    const { jobId, credential } = await fetched(h);
+    const made = writeTokens(h);
+
+    const response = await h.release(jobId, {
+      credential,
+      reason: "worker_exited",
+    });
+
+    expect(response.status).toBe(200);
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+  });
+
+  // review of #776, point 1
+  it("is switched off when a runner that fetched the turn with the claim reports its result", async () => {
+    const h = await start();
+    await h.turn();
+    const claimed = await h.claimed({
+      engines: ["implementer"],
+      features: FEATURES,
+      llmProviders: BOTH,
+    });
+    const made = writeTokens(h);
+    expect(made).toEqual([claimed.job.input.git.token]);
+    expect(h.fake.revokedInstallationTokens()).toEqual([]);
+
+    await h.complete(claimed.job.id, claimed.job.leaseToken);
+
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+  });
+
+  // review of #776, point 1
   it("never stores the token in the clear", async () => {
     const h = await start();
     await h.turn();

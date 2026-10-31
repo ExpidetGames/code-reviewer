@@ -275,17 +275,17 @@ How the interface is met:
 `jobAccess` rejects with an `IntegrationError`; callers (the runner API's claim) branch on `code` and
 `retryable`, never on GitHub's codes. The original `GithubAppError` is its `cause`.
 
-| Code                                        | GitHub said                                                                                                                 | `retryable` |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `INTEGRATION_ACCESS_CONNECTION_GONE`        | 404 on the token call: installation deleted                                                                                 | no          |
-| `INTEGRATION_ACCESS_CONNECTION_SUSPENDED`   | 403 (not a rate limit): installation suspended                                                                              | no          |
-| `INTEGRATION_ACCESS_SCOPE_REFUSED`          | 422, or a repository reference that is not usable: the repository is not in the installation, or the app lacks a permission | no          |
-| `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED` | `implementerAccess` only: 422 because the installation has not accepted `contents: write` (#749)                            | no          |
-| `INTEGRATION_CAPABILITY_ABSENT`                  | `implementerAccess` only: the deployment does not have the capability `implementer`; nothing was asked of the platform (#753)                                  | no          |
-| `INTEGRATION_ACCESS_APP_AUTH_FAILED`        | 401: the App JWT was refused (key or app id)                                                                                | no          |
-| `INTEGRATION_ACCESS_RATE_LIMITED`           | 429, or 403 with a rate limit header; `retryAfterSeconds` when given                                                        | yes         |
-| `INTEGRATION_ACCESS_UNAVAILABLE`            | 5xx, a network failure or a timeout                                                                                         | yes         |
-| `INTEGRATION_ACCESS_FAILED`                 | anything else (settings missing, an unexpected answer, a token broader than asked for)                                      | no          |
+| Code                                        | GitHub said                                                                                                                   | `retryable` |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `INTEGRATION_ACCESS_CONNECTION_GONE`        | 404 on the token call: installation deleted                                                                                   | no          |
+| `INTEGRATION_ACCESS_CONNECTION_SUSPENDED`   | 403 (not a rate limit): installation suspended                                                                                | no          |
+| `INTEGRATION_ACCESS_SCOPE_REFUSED`          | 422, or a repository reference that is not usable: the repository is not in the installation, or the app lacks a permission   | no          |
+| `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED` | `implementerAccess` only: 422 because the installation has not accepted `contents: write` (#749)                              | no          |
+| `INTEGRATION_CAPABILITY_ABSENT`             | `implementerAccess` only: the deployment does not have the capability `implementer`; nothing was asked of the platform (#753) | no          |
+| `INTEGRATION_ACCESS_APP_AUTH_FAILED`        | 401: the App JWT was refused (key or app id)                                                                                  | no          |
+| `INTEGRATION_ACCESS_RATE_LIMITED`           | 429, or 403 with a rate limit header; `retryAfterSeconds` when given                                                          | yes         |
+| `INTEGRATION_ACCESS_UNAVAILABLE`            | 5xx, a network failure or a timeout                                                                                           | yes         |
+| `INTEGRATION_ACCESS_FAILED`                 | anything else (settings missing, an unexpected answer, a token broader than asked for)                                        | no          |
 
 `retryAfterSeconds` is never negative and is `null` when the platform did not say (always for a network
 failure or timeout): the caller then uses its own default. Messages name the call and the status only,
