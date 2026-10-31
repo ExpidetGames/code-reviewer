@@ -30,7 +30,7 @@ const VM_PREPARE_TIMEOUT_MS = 60_000;
 const IMAGE_CHECK_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_MS = 15_000;
 /** Each step of the work volume is a `mkdir`, a `mount` or one `docker volume create`: a second or so, never half a minute. */
-const WORK_VOLUME_STEP_TIMEOUT_MS = 10_000;
+export const WORK_VOLUME_STEP_TIMEOUT_MS = 10_000;
 
 export type SandboxDockerHostOptions = {
   vm: SandboxVm;
@@ -148,17 +148,40 @@ export class SandboxDockerHost implements ContainerHost {
 
   /**
    * Makes the work volume of the Implementer's profile in this VM, step by step (`workVolumeCommands`), and stops at the
-   * first step that fails. The volume and its mount are the VM's: stopping the VM, which the Launcher does after any
-   * failure, removes them; nothing is removed here. The text of a failed step is not logged, only which step and its
-   * exit status.
+   * first step that fails: a non-zero exit status, a step that takes longer than `WORK_VOLUME_STEP_TIMEOUT_MS` (the
+   * Launcher's own clock, so that a platform that ignores the signal cannot hang the launch), or a step whose output
+   * does not pass its check (the mount options read back from the kernel). The volume and its mount are the VM's:
+   * stopping the VM, which the Launcher does after any failure, removes them; nothing is removed here. The log names
+   * the step and why, never the text of the step.
    */
   async createWorkVolume(
     commands: readonly HostCommand[],
     signal: AbortSignal,
   ): Promise<void> {
-    const { vm } = this.#options;
+    const { vm, clock } = this.#options;
+    const failed = (command: HostCommand, why: string, exitCode?: number) => {
+      this.#options.logger.warn("work_volume_failed", {
+        ...this.#options.logFields,
+        sandbox: vm.name,
+        step: command.label,
+        why,
+        ...(exitCode === undefined ? {} : { exitCode }),
+      });
+      return new LaunchError("work_volume_failed", { retryable: true });
+    };
     for (const command of commands) {
-      const done = await vm.exec(
+      const step = new AbortController();
+      const forward = () => step.abort();
+      signal.addEventListener("abort", forward, { once: true });
+      const deadline = new AbortController();
+      const expired = new Promise<"timeout">((resolve) => {
+        void clock
+          .sleep(WORK_VOLUME_STEP_TIMEOUT_MS, deadline.signal)
+          .then(() => {
+            if (!deadline.signal.aborted) resolve("timeout");
+          });
+      });
+      const running = vm.exec(
         {
           label: command.label,
           cmd: command.cmd,
@@ -166,16 +189,22 @@ export class SandboxDockerHost implements ContainerHost {
           sudo: command.sudo,
           timeoutMs: WORK_VOLUME_STEP_TIMEOUT_MS,
         },
-        signal,
+        step.signal,
       );
-      if (done.exitCode === 0) continue;
-      this.#options.logger.warn("work_volume_failed", {
-        ...this.#options.logFields,
-        sandbox: vm.name,
-        step: command.label,
-        exitCode: done.exitCode,
-      });
-      throw new LaunchError("work_volume_failed", { retryable: true });
+      running.catch(() => undefined);
+      let done: Awaited<typeof running> | "timeout";
+      try {
+        done = await Promise.race([running, expired]);
+      } finally {
+        deadline.abort();
+        signal.removeEventListener("abort", forward);
+        // A step that is still running (it timed out) is told to stop; the VM is stopped by the Launcher next.
+        step.abort();
+      }
+      if (done === "timeout") throw failed(command, "timeout");
+      if (done.exitCode !== 0) throw failed(command, "exit", done.exitCode);
+      if (command.check !== undefined && !command.check(done.stdout))
+        throw failed(command, "check");
     }
   }
 

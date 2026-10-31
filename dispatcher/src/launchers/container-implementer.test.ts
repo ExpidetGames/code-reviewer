@@ -325,6 +325,7 @@ describe("the commands that make the work volume", () => {
       "work-volume-dir",
       "work-volume-mount",
       "work-volume-options",
+      "work-volume-check",
       "work-volume-create",
     ]);
     expect(
@@ -333,6 +334,7 @@ describe("the commands that make the work volume", () => {
       ["mkdir", "-p", "--", directory],
       ["mount", "--bind", directory, directory],
       ["mount", "-o", "remount,bind,rw,nosuid,nodev", directory],
+      ["cat", "/proc/self/mountinfo"],
       [
         "docker",
         "volume",
@@ -352,6 +354,64 @@ describe("the commands that make the work volume", () => {
     // Programs may run on the volume: no noexec anywhere, and no shell.
     expect(JSON.stringify(commands)).not.toContain("noexec");
     expect(commands.map((command) => command.cmd)).not.toContain("sh");
+  });
+
+  // #760-T09
+  describe("the check of the mount options between the remount and the volume", () => {
+    const directory = `${ROOT}/${VOLUME}`;
+    const check = () => {
+      const found = workVolumeCommands(IMPLEMENTER_CONTAINER_SPEC, {
+        name: VOLUME,
+        root: ROOT,
+      }).find((command) => command.label === "work-volume-check");
+      if (found?.check === undefined) throw new Error("the step has no check");
+      return found.check;
+    };
+    const line = (options: string, mountPoint = directory) =>
+      `101 22 8:1 ${directory} ${mountPoint} ${options} shared:1 - ext4 /dev/sda1 rw,nosuid,nodev`;
+    const root = "22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw";
+
+    it("accepts the mount the remount made: read-write, nosuid, nodev", () => {
+      expect(check()(`${root}\n${line("rw,nosuid,nodev,relatime")}\n`)).toBe(
+        true,
+      );
+    });
+
+    it.each([
+      ["no nosuid", "rw,nodev,relatime"],
+      ["no nodev", "rw,nosuid,relatime"],
+      ["noexec", "rw,nosuid,nodev,noexec,relatime"],
+      ["a read-only mount", "ro,nosuid,nodev,relatime"],
+      ["none of them", "rw,relatime"],
+    ])("refuses a mount with %s", (_what, options) => {
+      expect(check()(`${root}\n${line(options)}\n`)).toBe(false);
+    });
+
+    it("reads the options of the mount, not the options of the superblock behind it", () => {
+      // The last field of a line is the superblock's (`rw,nosuid,nodev` here): it must not stand in for the mount's.
+      expect(check()(`${root}\n${line("rw,relatime")}\n`)).toBe(false);
+    });
+
+    it("refuses an output with no mount at the directory, an empty one, and a mount of another path", () => {
+      expect(check()("")).toBe(false);
+      expect(check()(`${root}\n`)).toBe(false);
+      expect(
+        check()(`${root}\n${line("rw,nosuid,nodev", `${directory}-other`)}\n`),
+      ).toBe(false);
+    });
+
+    it("judges the last mount at the directory: what a later mount hides is not the volume", () => {
+      expect(
+        check()(
+          `${line("rw,nosuid,nodev,relatime")}\n${line("rw,relatime")}\n`,
+        ),
+      ).toBe(false);
+      expect(
+        check()(
+          `${line("rw,relatime")}\n${line("rw,nosuid,nodev,relatime")}\n`,
+        ),
+      ).toBe(true);
+    });
   });
 
   // #760-T02

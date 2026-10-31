@@ -78,9 +78,15 @@ describe("the Implementer's container profile on a real daemon", () => {
     for (const command of workVolumeCommands(IMPLEMENTER_CONTAINER_SPEC, {
       name: volume,
       root,
-    }))
-      if (command.cmd === "docker") run(command.cmd, command.args);
-      else run("sudo", ["-n", command.cmd, ...command.args]);
+    })) {
+      const printed =
+        command.cmd === "docker"
+          ? run(command.cmd, command.args)
+          : run("sudo", ["-n", command.cmd, ...command.args]);
+      // The Launcher's own check of the mount options, on a real kernel's mountinfo.
+      if (command.check !== undefined)
+        expect(command.check(printed), command.label).toBe(true);
+    }
 
     const rendered = renderDockerRunArguments(IMPLEMENTER_CONTAINER_SPEC, {
       image: IMAGE ?? "",

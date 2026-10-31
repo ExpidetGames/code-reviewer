@@ -8,13 +8,14 @@
 //
 // What local mode is not: a VM. There is no snapshot (the image is whatever the local daemon has), no cgroup fix
 // and no daemon start (`vm-prepare.sh` succeeds without doing anything), no `sudo`, no mounts (the work volume's
-// `mkdir` and `mount` succeed without doing anything) and no kernel of its own. What
+// `mkdir` and `mount` succeed without doing anything, and a read of the mountinfo shows what they asked for) and no kernel of its own. What
 // it proves is the container spec end to end and that nothing of one job is left for the next: the directory of a
 // stopped "VM" is removed and every container it started is force-removed.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mountinfoAfter } from "./mountinfo.ts";
 
 export type LocalExecRequest = {
   label: string;
@@ -62,6 +63,8 @@ type LocalVmState = {
   dir: string;
   children: Set<ChildProcess>;
   containers: Set<string>;
+  /** The host steps (`mkdir`, `mount`) the VM was asked for: what its mountinfo shows. */
+  hostSteps: Array<{ cmd: string; args: readonly string[] }>;
   stopped: boolean;
 };
 
@@ -70,6 +73,7 @@ const PREPARE = "/usr/local/sbin/vm-prepare.sh";
 // no VM of its own (like the cgroup fix and the daemon start, they succeed without doing anything); the `docker volume
 // create` that follows them is a docker command and goes to the daemon, or the stand-in, like any other.
 const HOST_STEPS: ReadonlySet<string> = new Set(["mkdir", "mount"]);
+const MOUNTINFO = "/proc/self/mountinfo";
 
 function abortError(): Error {
   return new DOMException("The operation was aborted.", "AbortError");
@@ -108,6 +112,7 @@ export class LocalSandboxService {
       dir,
       children: new Set(),
       containers: new Set(),
+      hostSteps: [],
       stopped: false,
     };
     this.vms.set(options.name, state);
@@ -229,8 +234,18 @@ export class LocalSandboxService {
           (resolve, reject) => {
             if (state.stopped) return reject(new Error("The VM is stopped."));
             if (signal?.aborted) return reject(abortError());
-            if (request.cmd === PREPARE || HOST_STEPS.has(request.cmd))
+            if (request.cmd === PREPARE)
               return resolve({ exitCode: 0, stdout: "", stderr: "" });
+            if (HOST_STEPS.has(request.cmd)) {
+              state.hostSteps.push({ cmd: request.cmd, args: request.args });
+              return resolve({ exitCode: 0, stdout: "", stderr: "" });
+            }
+            if (request.cmd === "cat" && request.args[0] === MOUNTINFO)
+              return resolve({
+                exitCode: 0,
+                stdout: mountinfoAfter(state.hostSteps),
+                stderr: "",
+              });
             const command = this.command(request);
             if (command === undefined)
               return resolve({

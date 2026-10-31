@@ -22,6 +22,7 @@ import {
   SANDBOX_IMAGE_REFERENCE,
   SANDBOX_REGION,
   SANDBOX_KIND_DEFAULTS,
+  WORK_VOLUME_STEPS_SECONDS,
   minimumVmTimeoutMargin,
   planForKind,
   validateKindConfig,
@@ -719,6 +720,7 @@ describe("the Sandbox-Launcher", () => {
       "exec:work-volume-dir",
       "exec:work-volume-mount",
       "exec:work-volume-options",
+      "exec:work-volume-check",
       "exec:work-volume-create",
       "start:docker-run",
       `stdin:${name}`,
@@ -918,6 +920,7 @@ describe("the Sandbox-Launcher", () => {
       "work-volume-dir",
       "work-volume-mount",
       "work-volume-options",
+      "work-volume-check",
       "work-volume-create",
     ]);
     // Nothing of the platform's text reaches the error or the log.
@@ -925,23 +928,136 @@ describe("the Sandbox-Launcher", () => {
   });
 
   // #760-T05
-  it.each(["work-volume-dir", "work-volume-mount", "work-volume-options"])(
-    "stops the VM and makes no later step when %s fails",
-    async (label) => {
-      service.onExec(label, { exitCode: 32 });
+  it.each([
+    "work-volume-dir",
+    "work-volume-mount",
+    "work-volume-options",
+    "work-volume-check",
+  ])("stops the VM and makes no later step when %s fails", async (label) => {
+    service.onExec(label, { exitCode: 32 });
+
+    const error = failure(await launch(build(), spec({ kind: "implementer" })));
+
+    expect(error.code).toBe("work_volume_failed");
+    expect(service.stops).toStrictEqual([service.creates[0]?.name]);
+    expect(
+      service.execs.some((call) => call.label === "work-volume-create"),
+    ).toBe(false);
+    expect(service.starts).toHaveLength(0);
+  });
+
+  // #760-T09: nothing checked the options before; a platform that ignores them would run the agent on a mount that honours setuid
+  it.each([
+    ["nosuid", "rw,nodev,relatime"],
+    ["nodev", "rw,nosuid,relatime"],
+    ["rw", "ro,nosuid,nodev,relatime"],
+    ["no noexec", "rw,nosuid,nodev,noexec,relatime"],
+  ])(
+    "fails the launch with work_volume_failed when the mount lacks %s, before the volume is made",
+    async (_what, options) => {
+      service.onExec("work-volume-check", (call) => {
+        const directory = service.execs.find(
+          (other) => other.label === "work-volume-dir" && other.vm === call.vm,
+        )?.args[2];
+        return {
+          stdout: `22 1 8:1 / / rw shared:1 - ext4 /dev/sda1 rw\n101 22 8:1 ${directory} ${directory} ${options} shared:1 - ext4 /dev/sda1 rw\n`,
+        };
+      });
 
       const error = failure(
         await launch(build(), spec({ kind: "implementer" })),
       );
 
       expect(error.code).toBe("work_volume_failed");
+      expect(error.retryable).toBe(true);
       expect(service.stops).toStrictEqual([service.creates[0]?.name]);
       expect(
         service.execs.some((call) => call.label === "work-volume-create"),
       ).toBe(false);
       expect(service.starts).toHaveLength(0);
+      // The log names the step, never the mountinfo.
+      expect(logger.text()).toContain('"step":"work-volume-check"');
+      expect(logger.text()).not.toContain("/dev/sda1");
     },
   );
+
+  // #760-T09
+  it("fails the launch when the mountinfo cannot be read", async () => {
+    service.onExec("work-volume-check", { exitCode: 1, stderr: "cat: no" });
+
+    const error = failure(await launch(build(), spec({ kind: "implementer" })));
+
+    expect(error.code).toBe("work_volume_failed");
+    expect(service.starts).toHaveLength(0);
+  });
+
+  // #760-T10: the constant 10 s was never exercised; a hung step has to end the launch, not wait for the VM's timeout
+  it("ends a hung step of the work volume after 10 seconds, not before, with work_volume_failed and the VM stopped", async () => {
+    service.hangOn("work-volume-mount");
+    const launcher = build();
+    const ended = launcher
+      .launch(spec({ kind: "implementer" }), new AbortController().signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await settle();
+
+    await clock.advance(9_999);
+    expect(service.stops).toStrictEqual([]);
+    await clock.advance(1);
+    const error = (await ended) as LaunchError;
+
+    expect(error).toBeInstanceOf(LaunchError);
+    expect(error.code).toBe("work_volume_failed");
+    expect(error.retryable).toBe(true);
+    expect(service.stops).toStrictEqual([service.creates[0]?.name]);
+    expect(service.starts).toHaveLength(0);
+    expect(logger.text()).toContain('"step":"work-volume-mount"');
+  });
+
+  // #760-T10
+  it("gives every step of the work volume its own 10 seconds and passes the same limit to the platform", async () => {
+    await launch(build(), spec({ kind: "implementer" }));
+
+    const steps = service.execs.filter((call) =>
+      call.label.startsWith("work-volume"),
+    );
+    expect(steps).toHaveLength(5);
+    for (const call of steps) expect(call.timeoutMs).toBe(10_000);
+  });
+
+  // #760-T10: the steps are part of the implementer's launch, which the VM's own timeout has to cover
+  it("lets an implementer VM live as long as its job, the margin and the steps of the work volume; Diff and Dynamic are unchanged", async () => {
+    const reported: Array<{ timeoutSeconds: number }> = [];
+    await launch(
+      build(),
+      spec({
+        kind: "implementer",
+        timeoutSeconds: 3600,
+        onVmCreated: (vm) => reported.push(vm),
+      }),
+    );
+    await launch(
+      build(),
+      spec({
+        kind: "diff",
+        jobId: "00000000-0000-4000-8000-000000000002",
+        onVmCreated: (vm) => reported.push(vm),
+      }),
+    );
+
+    expect(WORK_VOLUME_STEPS_SECONDS).toBe(50);
+    const [implementer, diff] = service.creates;
+    expect(implementer?.timeoutMs).toBe(
+      (3600 + VM_TIMEOUT_MARGIN_SECONDS + WORK_VOLUME_STEPS_SECONDS) * 1000,
+    );
+    expect(diff?.timeoutMs).toBe((1200 + VM_TIMEOUT_MARGIN_SECONDS) * 1000);
+    expect(reported.map((vm) => vm.timeoutSeconds)).toStrictEqual([
+      3600 + VM_TIMEOUT_MARGIN_SECONDS + WORK_VOLUME_STEPS_SECONDS,
+      1200 + VM_TIMEOUT_MARGIN_SECONDS,
+    ]);
+  });
 
   // #760-T05
   it("stops the VM, and with it the volume, when the Worker ends early after the volume was made", async () => {

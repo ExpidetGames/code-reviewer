@@ -54,13 +54,18 @@ exactly four fields changed: one **work volume** at `/work`, **memory** 3 GB (re
 `noexec`, no privileged, no host bind, device or namespace, no Docker socket, `no-new-privileges`, the same capabilities. The
 work volume is the only writable path that may run a program; a bind or any other volume has no key in the schema.
 Docker cannot give a named volume mount options, so before `docker run` the launcher makes the volume in the job's VM as
-root, in four steps (`work-volume-dir`, `-mount`, `-options`, `-create`): a directory below `/var/lib/code-reviewer-work`, a
-mount of its own on it with `rw,nosuid,nodev` (no `noexec`), and a Docker named volume `code-reviewer-work-<job id>` bound to
-it. The mount and the volume belong to the VM, which is stopped after every failure and by the App's stop call; nothing is
-removed separately and nothing outlives the job. A failed step stops the VM (`work_volume_failed`, retryable). The VM is
+root, in five steps (`work-volume-dir`, `-mount`, `-options`, `-check`, `-create`): a directory below
+`/var/lib/code-reviewer-work`, a mount of its own on it with `rw,nosuid,nodev` (no `noexec`), a read of `/proc/self/mountinfo`
+that must show exactly those options on that mount (a platform that ignored them would run the agent on a mount that honours
+the setuid bit, and nothing else would show it), and a Docker named volume `code-reviewer-work-<job id>` bound to it. The tools
+are `mkdir`, `mount` and `cat` of the base image (Ubuntu: `mount` is a required package), so the snapshot needs nothing added.
+Each step has 10 s; the five add 50 s to the lifetime of an implementer VM (`WORK_VOLUME_STEPS_SECONDS`), and
+`LAUNCH_STEPS_SECONDS` for Diff and Dynamic is unchanged. The mount and the volume belong to the VM, which is stopped after every failure and by the App's stop call; nothing is
+removed separately and nothing outlives the job. A failed, hung or unverified step stops the VM (`work_volume_failed`, retryable). The VM is
 2 vCPU / 4 GB by default (`SANDBOX_KIND_DEFAULTS.implementer`); `DISPATCHER_WORKER_CONFIG.implementer` overrides the vCPUs and
-the container memory value by value, and a limit the VM cannot hold beside the OS is refused as `sandbox_config_invalid` (at
-start for a deployment that serves the kind, and at launch). The operator's Dynamic variables (`RUNNER_DYNAMIC_*`) are not
+the container memory value by value, and a limit the VM cannot hold beside the OS is refused as `sandbox_config_invalid` at
+every launch of the kind. At start a deployment that serves the kind only logs `worker_config_invalid` for such a value and
+starts: the factory never blocks the release of code-review.com, and Diff and Dynamic do not read the entry. The operator's Dynamic variables (`RUNNER_DYNAMIC_*`) are not
 given to an implementer container. The platform gives a VM a 64 GB disk, which is the room of the work volume.
 
 "Runner" is retired as a concept: the former runner process conflated the Dispatcher

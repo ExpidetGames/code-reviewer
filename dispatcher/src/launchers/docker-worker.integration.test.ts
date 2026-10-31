@@ -210,6 +210,59 @@ describe("the docker stand-in of the hosted lane", () => {
     });
     expect(bind.exitCode).toBe(125);
     expect(bind.stderr).toContain("unknown mount type=bind");
+
+    // The stand-in matches the one mount the renderer makes, not a family of them: a comma or an equals sign in the
+    // name would add an option, and `*` of a glob would let it through.
+    const withoutMount = rendered
+      .slice(0, -2)
+      .filter(
+        (arg, index, all) => arg !== "--mount" && all[index - 1] !== "--mount",
+      );
+    const allowed = await vm.exec({
+      label: "m",
+      cmd: "docker",
+      args: [
+        ...withoutMount,
+        "--mount",
+        "type=volume,source=code-reviewer-work-a.b_c-1,target=/work",
+        IMAGE_ID,
+        "worker-once",
+      ],
+    });
+    expect(allowed.exitCode).toBe(0);
+    // One mount only: a second one, also a good one, is refused.
+    const twice = await vm.exec({
+      label: "m",
+      cmd: "docker",
+      args: [
+        ...rendered.slice(0, -2),
+        "--mount",
+        "type=volume,source=code-reviewer-work-a,target=/work",
+        IMAGE_ID,
+        "worker-once",
+      ],
+    });
+    expect(twice.exitCode).toBe(125);
+    for (const mount of [
+      "type=volume,source=code-reviewer-work-a,readonly=false,target=/work",
+      "type=volume,source=code-reviewer-work-a,bind-propagation=rshared,target=/work",
+      "type=volume,source=code-reviewer-work-a,volume-opt=o=suid,target=/work",
+      "type=volume,source=code-reviewer-work-a,target=/,target=/work",
+      "type=volume,source=code-reviewer-work-a=b,target=/work",
+      "type=volume,source=code-reviewer-work-,target=/work",
+      "type=volume,source=code-reviewer-work-a,target=/work,readonly",
+      "type=volume,source=other,target=/work",
+      "type=volume,source=code-reviewer-work-a b,target=/work",
+      "type=volume,source=code-reviewer-work-a,target=/work\n",
+    ]) {
+      const refused = await vm.exec({
+        label: "m",
+        cmd: "docker",
+        args: [...withoutMount, "--mount", mount, IMAGE_ID, "worker-once"],
+      });
+      expect(refused.exitCode, mount).toBe(125);
+      expect(refused.stderr, mount).toContain("unknown mount");
+    }
   });
 
   // #332-T09

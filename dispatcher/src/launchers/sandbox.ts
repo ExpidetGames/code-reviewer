@@ -33,6 +33,7 @@ import {
   ContainerLauncher,
   ContainerSpecError,
   WORK_VOLUME_PATH,
+  WORK_VOLUME_STEP_COUNT,
   applyOverrides,
   workVolumeCommands,
   workVolumeName,
@@ -42,7 +43,10 @@ import {
   SANDBOX_LAUNCHER_ADDITIONS,
   WORKER_CONTAINER_SPEC,
 } from "./container-spec.ts";
-import { SandboxDockerHost } from "./sandbox-host.ts";
+import {
+  SandboxDockerHost,
+  WORK_VOLUME_STEP_TIMEOUT_MS,
+} from "./sandbox-host.ts";
 import {
   SandboxServiceError,
   type SandboxFailureKind,
@@ -69,6 +73,14 @@ export function minimumVmTimeoutMargin(handoverSeconds: number): number {
     handoverSeconds + LAUNCH_STEPS_SECONDS,
   );
 }
+/**
+ * What the steps of the Implementer's work volume may take at most: each has `WORK_VOLUME_STEP_TIMEOUT_MS`. They come on top
+ * of `LAUNCH_STEPS_SECONDS` for that kind alone, so that the launch of Diff and Dynamic, and the checks of a deployment that
+ * serves only them, stay as they were: the VM of an implementer job lives that much longer (`vmLifetimeSeconds`), and the
+ * launch deadline of the core has room for it (a test pins that).
+ */
+export const WORK_VOLUME_STEPS_SECONDS =
+  (WORK_VOLUME_STEP_COUNT * WORK_VOLUME_STEP_TIMEOUT_MS) / 1000;
 /** How long the container must run for the Worker to count as having taken over (sandbox-host.ts). */
 export const SANDBOX_HANDOVER_SECONDS = 20;
 /** The tag the golden snapshot pipeline (#330) gives the Worker image in the snapshot. */
@@ -324,6 +336,15 @@ export function createSandboxLauncher(
       `vmTimeoutMarginSeconds must be at least ${minimumVmTimeoutMargin(handoverSeconds)}`,
     );
 
+  /** How long the VM of a job may live if nobody stops it: the job, the margin, and for the Implementer the steps of its work volume. */
+  function vmLifetimeSeconds(spec: LaunchSpec): number {
+    return (
+      spec.timeoutSeconds +
+      vmTimeoutMarginSeconds +
+      (spec.kind === "implementer" ? WORK_VOLUME_STEPS_SECONDS : 0)
+    );
+  }
+
   async function stopQuietly(name: string, jobId: string): Promise<void> {
     try {
       await service.stop(name);
@@ -346,7 +367,7 @@ export function createSandboxLauncher(
           snapshotId: options.snapshotId,
           region: SANDBOX_REGION,
           vcpus: plan.vcpus,
-          timeoutMs: (spec.timeoutSeconds + vmTimeoutMarginSeconds) * 1000,
+          timeoutMs: vmLifetimeSeconds(spec) * 1000,
           // `tenant` names the app that claimed the job (#730): a stop or a reap for one app never touches a VM of another.
           tags: {
             app: "code-reviewer",
@@ -426,7 +447,7 @@ export function createSandboxLauncher(
         spec.onVmCreated?.({
           name,
           startedAt: createdAt,
-          timeoutSeconds: spec.timeoutSeconds + vmTimeoutMarginSeconds,
+          timeoutSeconds: vmLifetimeSeconds(spec),
         });
       } catch {
         // Only that it failed.

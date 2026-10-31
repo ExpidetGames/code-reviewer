@@ -201,16 +201,30 @@ export function sandboxFromEnvironment(
         settings.core.launchDeadlineSeconds
       )
         throw new ConfigError("SANDBOX_HANDOVER_SECONDS", "invalid");
-      // The Implementer's configuration is read only by a deployment that serves the kind (#760): a typo in it must not
-      // take the Diff jobs of a deployment that has no such app down.
-      const kinds = settings.core.engines.includes("implementer")
-        ? (["diff", "dynamic", "implementer"] as const)
-        : (["diff", "dynamic"] as const);
-      for (const kind of kinds) {
+      for (const kind of ["diff", "dynamic"] as const) {
         try {
-          validateKindConfig(kind, settings.core.workerConfig[kind] ?? {});
+          validateKindConfig(kind, settings.core.workerConfig[kind]);
         } catch {
           throw new ConfigError("DISPATCHER_WORKER_CONFIG", "invalid");
+        }
+      }
+      // The Implementer's configuration is read only by a deployment that serves the kind (#760), and a wrong value in it
+      // is logged, never thrown: the factory never blocks the release of code-review.com (deploy-production.yml), and a
+      // Dispatcher that does not start fails the canary of the reviewer's release. Each launch of the kind is refused
+      // with `sandbox_config_invalid` by the same check (`planOf`) until the value is corrected; Diff and Dynamic are
+      // untouched by it.
+      if (settings.core.engines.includes("implementer")) {
+        try {
+          validateKindConfig(
+            "implementer",
+            settings.core.workerConfig.implementer ?? {},
+          );
+        } catch {
+          logger.error("worker_config_invalid", {
+            kind: "implementer",
+            variable: "DISPATCHER_WORKER_CONFIG",
+            note: "launches of this kind are refused until it is corrected",
+          });
         }
       }
       // Only a deployment that serves Dynamic jobs reads (and refuses) the Dynamic configuration: a typo in a variable

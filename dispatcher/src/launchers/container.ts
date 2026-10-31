@@ -580,12 +580,45 @@ export interface HostCommand {
   cmd: string;
   args: readonly string[];
   sudo: true;
+  /**
+   * For a step that only looks: whether what it printed is what the Launcher needs. The step fails when this says no,
+   * as it does for a non-zero exit status.
+   */
+  check?: (stdout: string) => boolean;
+}
+
+/** How many steps `workVolumeCommands` has: the Launcher budgets time for each (`WORK_VOLUME_STEPS_SECONDS`). */
+export const WORK_VOLUME_STEP_COUNT = 5;
+
+/**
+ * Whether `mountinfo` (the text of `/proc/self/mountinfo`) shows a mount at `directory` that has all of `options` and no
+ * `noexec`. The options read are the mount's own (the sixth field of a line), never the filesystem's behind it (the
+ * last), and the last mount at the directory counts: it is the one that hides the others.
+ */
+export function mountHasOptions(
+  mountinfo: string,
+  directory: string,
+  options: readonly string[],
+): boolean {
+  let found: string[] | undefined;
+  for (const line of mountinfo.split("\n")) {
+    const fields = line.split(" ");
+    if (fields[4] === directory && fields[5] !== undefined)
+      found = fields[5].split(",");
+  }
+  return (
+    found !== undefined &&
+    options.every((option) => found.includes(option)) &&
+    !found.includes("noexec")
+  );
 }
 
 /**
  * The steps that make the work volume of a job in its VM, in order (#760). Docker cannot give a named volume mount
  * options, so the volume is a bind of a directory of the VM's disk that is a mount of its own with the profile's
- * options (read-write, `nosuid`, `nodev`, and no `noexec`: the agent runs the repository's programs here). A mount
+ * options (read-write, `nosuid`, `nodev`, and no `noexec`: the agent runs the repository's programs here). The options
+ * are read back from the kernel before the volume is made, because a platform that ignored them would run the agent on a
+ * mount that honours the setuid bit and nothing else would show it. A mount
  * made in the VM lives and dies with the VM, and so does the volume: no step leaves anything behind. `root` is a
  * plain absolute directory of the VM; the volume gets a directory below it named like itself.
  */
@@ -622,6 +655,11 @@ export function workVolumeCommands(
       `remount,bind,${spec.workVolume.options.join(",")}`,
       directory,
     ),
+    {
+      ...step("work-volume-check", "cat", "/proc/self/mountinfo"),
+      check: (mountinfo) =>
+        mountHasOptions(mountinfo, directory, spec.workVolume.options),
+    },
     step(
       "work-volume-create",
       "docker",
