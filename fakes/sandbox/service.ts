@@ -11,6 +11,8 @@
 // `requestText()`, so a test can prove that a secret never left the process any other way than on that pipe.
 // The golden snapshot pipeline's double is `fakes/vercel-sandbox/`; the two do not share state. See README.md.
 
+import { mountinfoAfter } from "./mountinfo.ts";
+
 export type FakeCreateOptions = {
   name: string;
   snapshotId: string;
@@ -110,6 +112,7 @@ export class FakeSandboxService {
   readonly vms = new Map<string, FakeVmRecord>();
   private readonly processes: FakeProcessRecord[] = [];
   private readonly rules: Rule[] = [];
+  private readonly holds: Array<string | RegExp> = [];
   private createError: Error | undefined;
   private createGate: Deferred<void> | undefined;
   private stopError: Error | undefined;
@@ -141,6 +144,11 @@ export class FakeSandboxService {
       handler,
       remaining: options.times ?? Infinity,
     });
+  }
+
+  /** The commands with this label (or whose command line matches) never answer by themselves: they end only when their signal aborts, like a platform call that hangs. */
+  hangOn(match: string | RegExp): void {
+    this.holds.push(match);
   }
 
   /** The next `create` throws this error (a `SandboxServiceError` of the Dispatcher, brought by the test). */
@@ -389,7 +397,18 @@ export class FakeSandboxService {
           ? rule.handler(call)
           : rule.handler;
     if (rule !== undefined) rule.remaining -= 1;
-    return { exitCode: 0, stdout: "", stderr: "", ...given };
+    // The mounts of the VM as the commands made them (#760): what a read of its mountinfo would show, unless scripted.
+    const mounts =
+      rule === undefined &&
+      call.cmd === "cat" &&
+      call.args[0] === "/proc/self/mountinfo"
+        ? {
+            stdout: mountinfoAfter(
+              this.execs.filter((other) => other.vm === call.vm),
+            ),
+          }
+        : {};
+    return { exitCode: 0, stdout: "", stderr: "", ...mounts, ...given };
   }
 
   private requireRunning(record: FakeVmRecord): void {
@@ -406,6 +425,17 @@ export class FakeSandboxService {
         this.events.push(`exec:${request.label}`);
         const call: FakeExecCall = { ...request, vm: record.name };
         this.execs.push(structuredClone(call));
+        const line = `${call.cmd} ${call.args.join(" ")}`;
+        if (
+          this.holds.some((hold) =>
+            typeof hold === "string" ? hold === call.label : hold.test(line),
+          )
+        )
+          return new Promise<FakeExecResult>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(abortError()), {
+              once: true,
+            });
+          });
         return Promise.resolve(this.answer(call));
       },
       start: (request: FakeExecRequest) => {

@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 import { ConfigError } from "../config.ts";
 import { noLauncher } from "./none.ts";
 import { sandboxFromEnvironment } from "./sandbox-env.ts";
+import {
+  LAUNCH_STEPS_SECONDS,
+  SANDBOX_HANDOVER_SECONDS,
+  WORK_VOLUME_STEPS_SECONDS,
+} from "./sandbox.ts";
 import { recordingLogger } from "../test-support/harness.ts";
 import { GoldenRecordSchema } from "../snapshot/record.ts";
 import { loadSettings } from "../config.ts";
@@ -284,6 +289,146 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
     ).not.toThrow();
   });
 
+  // #760-T04
+  describe("an implementer configuration in DISPATCHER_WORKER_CONFIG", () => {
+    const registry = {
+      DISPATCHER_APPS: JSON.stringify([
+        {
+          id: "factory",
+          url: "https://factory.example.test",
+          kinds: ["implementer"],
+          keyId: "factory-k1",
+          maxRunning: 1,
+        },
+      ]),
+      DISPATCHER_APP_FACTORY_TOKEN: "factory-dispatcher-token-for-tests-0001",
+      DISPATCHER_APP_FACTORY_SIGNING_SECRET:
+        "factory-signing-secret-for-tests-000001",
+      DISPATCHER_OPERATOR_TOKEN: "operator-token-for-the-tests-0000000001",
+    };
+    /** A platform that is never reached for good: it counts the loads, and a load that happens is a launch that got past its configuration. */
+    function counting() {
+      const loads = { count: 0 };
+      const load: () => Promise<SandboxSdk> = () => {
+        loads.count += 1;
+        return Promise.reject(new Error("not loaded"));
+      };
+      return { loads, load };
+    }
+    function launcherWith(
+      worker: Record<string, unknown>,
+      options: { served?: boolean; load?: () => Promise<SandboxSdk> } = {},
+    ) {
+      const logger = recordingLogger();
+      const launcher = sandboxFromEnvironment(
+        configured(),
+        options.load ?? never,
+      ).launcher({
+        settings: loadSettings({
+          ...BASE,
+          ...(options.served === false ? {} : registry),
+          DISPATCHER_WORKER_CONFIG: JSON.stringify(worker),
+        }),
+        logger,
+        background: () => undefined,
+      });
+      return { launcher, logger };
+    }
+    const launchSpec = (
+      kind: "diff" | "dynamic" | "implementer",
+      config: Record<string, unknown> = {},
+    ) => ({
+      appId: kind === "implementer" ? "factory" : "reviewer",
+      appUrl: "https://app.example.invalid",
+      jobId: "00000000-0000-4000-8000-000000000001",
+      credential: "crj_dummy-credential-0123456789-abcdefghijklmnopq",
+      kind,
+      timeoutSeconds: 1200,
+      config,
+    });
+
+    // The factory never blocks the release of code-review.com (deploy-production.yml): a value only the Implementer
+    // reads cannot stop the Dispatcher from starting, or the canary would fail the reviewer's release.
+    it.each([
+      [
+        "a container memory the VM cannot give",
+        { container: { memory: { limit: "8g" } } },
+      ],
+      ["a VM size the platform does not have", { launcher: { vcpus: 3 } }],
+    ])(
+      "does not stop the Dispatcher from starting for %s: it logs an error",
+      (_what, implementer) => {
+        const { launcher, logger } = launcherWith({ implementer });
+
+        expect(launcher).toBeDefined();
+        expect(
+          logger.lines.filter((line) =>
+            line.startsWith("error worker_config_invalid "),
+          ),
+        ).toHaveLength(1);
+        expect(logger.text()).toContain('"kind":"implementer"');
+      },
+    );
+
+    it("leaves Diff and Dynamic working while an implementer launch is refused before it reaches the platform", async () => {
+      const implementer = { container: { memory: { limit: "8g" } } };
+      const signal = new AbortController().signal;
+      // The SDK is loaded once per launcher, by the first call that reaches the platform: one launcher per kind.
+      const reached = async (kind: "diff" | "dynamic" | "implementer") => {
+        const { loads, load } = counting();
+        const { launcher } = launcherWith({ implementer }, { load });
+        const error = await launcher
+          .launch(
+            launchSpec(kind, kind === "implementer" ? implementer : {}),
+            signal,
+          )
+          .catch((thrown: unknown) => thrown);
+        return { loads: loads.count, code: (error as { code?: string }).code };
+      };
+
+      expect(await reached("implementer")).toStrictEqual({
+        loads: 0,
+        code: "sandbox_config_invalid",
+      });
+      // Diff and Dynamic are not touched by the bad value: their launches get as far as the platform.
+      expect((await reached("diff")).loads).toBe(1);
+      expect((await reached("dynamic")).loads).toBe(1);
+    });
+
+    it("still refuses a bad Diff or Dynamic value at start, and accepts a sized implementer", () => {
+      expect(() =>
+        launcherWith({ dynamic: { launcher: { vcpus: 3 } }, implementer: {} }),
+      ).toThrowError(/DISPATCHER_WORKER_CONFIG/);
+      const sized = launcherWith({
+        implementer: {
+          launcher: { vcpus: 4 },
+          container: { memory: { limit: "6g", reservation: "5g" } },
+          timeoutSeconds: 7200,
+        },
+      });
+      expect(sized.logger.lines).toStrictEqual([]);
+      expect(launcherWith({ implementer: {} }).logger.lines).toStrictEqual([]);
+    });
+
+    it("does not read the entry of a deployment that serves no implementer job", () => {
+      const { logger } = launcherWith(
+        { implementer: { container: { memory: { limit: "8g" } } } },
+        { served: false },
+      );
+
+      expect(logger.lines).toStrictEqual([]);
+    });
+  });
+
+  // #760-T10
+  it("fits the steps of an implementer launch in the launch deadline of the core, with the Worker's hand-over", () => {
+    expect(
+      SANDBOX_HANDOVER_SECONDS +
+        LAUNCH_STEPS_SECONDS +
+        WORK_VOLUME_STEPS_SECONDS,
+    ).toBeLessThanOrEqual(loadSettings(BASE).core.launchDeadlineSeconds);
+  });
+
   // #364-T18
   it("has no reaper when no snapshot is configured, so there is no route and no platform call", () => {
     expect(sandboxFromEnvironment({}, never).reaper).toBeUndefined();
@@ -371,7 +516,7 @@ describe("the Sandbox-Launcher's configuration from the environment", () => {
   });
 
   // #759 (additional)
-  it("does not advertise the implementer engine yet: its container profile is P15 (#760), so a dispatch for the kind is `not_capable`", async () => {
+  it("does not advertise the implementer engine yet although it can launch the kind (#760): no real probe reports it, so a dispatch for the kind is `not_capable`", async () => {
     const sandbox = sandboxFromEnvironment(configured(), never);
     const settings = loadSettings({
       ...BASE,
