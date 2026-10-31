@@ -19,6 +19,7 @@ import type { ManagedAvailabilityJson } from "../../src/model-prices/availabilit
 import type { PriceBookJson } from "../../src/model-prices/price-book.ts";
 import type { JobModelEntry } from "../../src/models-dev/job-entry.ts";
 import { createNativeCostService } from "../../src/native-cost/service.ts";
+import { sha } from "../../src/test-support/jobs.ts";
 import { createContractValidator } from "../../src/test-support/runner-contract.ts";
 import {
   goodResult,
@@ -100,6 +101,18 @@ const REVIEW_TOKEN_PERMISSIONS = {
   metadata: "read",
 };
 const contract = createContractValidator();
+// What a Worker reports of a turn that succeeded: the implementer block is required for it (#754).
+const TURN_BLOCK = {
+  baseCommit: sha("b"),
+  headCommit: sha("c"),
+  pushed: true,
+  commits: [{ sha: sha("c"), subject: "Add a retry with backoff" }],
+  filesChanged: [{ path: "src/retry.ts", status: "added" as const }],
+  summary: "Added a retry with backoff.",
+  opencode: { sessionId: "ses_0001", version: "1.19.0" },
+};
+const turnResult = (overrides: Parameters<typeof goodResult>[0] = {}) =>
+  goodResult({ implementer: TURN_BLOCK, ...overrides });
 
 function entitlements(keyMode: "own" | "managed"): EntitlementsData {
   return {
@@ -139,6 +152,22 @@ async function start(
     nativeEntry?: boolean;
     /** The claim guard lets every job run (the connection is checked by the claim itself, as in a race with its removal). */
     openGuard?: boolean;
+    /** Wraps what the API remembers about a job, for a test that makes one call of the ledger fail. */
+    wrapClaimedKeys?: Parameters<
+      typeof startRunnerApiHarness
+    >[0] extends infer O
+      ? O extends { wrapClaimedKeys?: infer W }
+        ? W
+        : never
+      : never;
+    /** A reader of the model metadata (the harness reads none by default). */
+    modelCapabilities?: Parameters<
+      typeof startRunnerApiHarness
+    >[0] extends infer O
+      ? O extends { modelCapabilities?: infer M }
+        ? M
+        : never
+      : never;
     /** Wraps the job queue the API uses, for a test that makes one call of it fail. */
     wrapQueue?: Parameters<typeof startRunnerApiHarness>[0] extends infer O
       ? O extends { wrapQueue?: infer W }
@@ -160,6 +189,12 @@ async function start(
     ...(options.wrapQueue === undefined
       ? {}
       : { wrapQueue: options.wrapQueue }),
+    ...(options.wrapClaimedKeys === undefined
+      ? {}
+      : { wrapClaimedKeys: options.wrapClaimedKeys }),
+    ...(options.modelCapabilities === undefined
+      ? {}
+      : { modelCapabilities: options.modelCapabilities }),
     env: { LLM_MODEL: "vendor/instance-model", LLM_MAX_TOKENS: "64000" },
     onKeyLoad: () => {
       keyLoads.count += 1;
@@ -573,16 +608,44 @@ describe("the cost limit of a turn", () => {
     });
   });
 
-  // #753-T05
-  it("goes on, with the runner's own limit and a line in the log, for a runner that names neither cost feature", async () => {
+  // #753-T05, #790: the cost limit is the brake of a turn and the runner has no limit of its own for this kind.
+  it.each([["neither cost feature", "dynamic_cost_policy"]])(
+    "ends the turn for a runner that names %s, as for an engine that cannot run the kind, before any credential exists",
+    async (_name, features) => {
+      const h = await start();
+      const { jobId } = await h.turn({ costLimitCents: 150 });
+      const split = await h.claimedSplit(DISPATCHER);
+
+      const response = await h.worker.details(
+        split.job.id,
+        split.job.credential,
+        features,
+        undefined,
+        BOTH.join(","),
+      );
+
+      expect(response.status).toBe(409);
+      expect(await h.queue.get(jobId)).toMatchObject({
+        status: "failed",
+        errorCode: "implementer_engine_unavailable",
+      });
+      expect(h.fake.issuedInstallationTokens()).toEqual([]);
+      expect(h.logLines().join("\n")).not.toContain("carries no cost limit");
+    },
+  );
+
+  // #790: one cost feature is enough, and each is handed what it reads.
+  it.each([
+    // The smaller of the turn's 1.50 and the operator's maximum (1.00 by default), folded into the one value it reads.
+    ["cost_limit", { maxCostUsd: 1 }],
+    ["operator_cost_limit", { operatorMaxCostUsd: 1 }],
+  ])("serves a runner that names only %s", async (feature, expected) => {
     const h = await start();
     await h.turn({ costLimitCents: 150 });
 
-    const { input } = await fetched(h, "dynamic_cost_policy");
+    const { input } = await fetched(h, `dynamic_cost_policy,${feature}`);
 
-    expect(input.llm).not.toHaveProperty("maxCostUsd");
-    expect(input.llm).not.toHaveProperty("operatorMaxCostUsd");
-    expect(h.logLines().join("\n")).toContain("carries no cost limit");
+    expect(input.llm).toMatchObject(expected);
   });
 
   // #753-T05
@@ -660,7 +723,7 @@ describe("the write token ends with the turn", () => {
   // review of #776, point 1
   it("is switched off when the Worker reports the result, success or failure, every token the fetches made", async () => {
     for (const result of [
-      goodResult(),
+      turnResult(),
       goodResult({
         ok: false,
         errorCode: "push_rejected",
@@ -754,7 +817,7 @@ describe("the write token ends with the turn", () => {
     expect(made).toEqual([claimed.job.input.git.token]);
     expect(h.fake.revokedInstallationTokens()).toEqual([]);
 
-    await h.complete(claimed.job.id, claimed.job.leaseToken);
+    await h.complete(claimed.job.id, claimed.job.leaseToken, turnResult());
 
     expect(h.fake.revokedInstallationTokens()).toEqual(made);
   });
@@ -802,5 +865,367 @@ describe("a deployment without the capability", () => {
     });
     expect(h.fake.issuedInstallationTokens()).toEqual([]);
     expect(h.fake.tokenRequests()).toEqual([]);
+  });
+});
+
+describe("the managed cost guard and a turn (#754)", () => {
+  // #790: confirms that #754 holds the managed turn to the rule of a managed Dynamic run, through the whole road.
+  it.each([
+    [
+      "a success that reports no cost",
+      { usage: { ...goodResult().usage!, costUsd: null } },
+    ],
+    ["a success that reports no usage at all", { usage: null }],
+  ])(
+    "stores %s of a managed native turn as dynamic_accounting_failed",
+    async (_name, report) => {
+      const h = await start({ keyMode: "managed" });
+      await h.turn();
+      const { jobId, credential } = await fetched(h);
+
+      const response = await h.worker.result(
+        jobId,
+        credential,
+        turnResult(report),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await h.queue.get(jobId)).toMatchObject({
+        status: "failed",
+        errorCode: "dynamic_accounting_failed",
+      });
+    },
+  );
+
+  // #790: and a report that does name a cost settles as a success.
+  it("settles a managed native turn that reports its cost", async () => {
+    const h = await start({ keyMode: "managed" });
+    await h.turn();
+    const { jobId, credential } = await fetched(h);
+
+    await h.worker.result(jobId, credential, turnResult());
+
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "succeeded" });
+  });
+});
+
+/** The Worker's fetch of the turn the Dispatcher claimed, by its credential. */
+function fetchAgain(
+  h: Started,
+  split: { job: { id: string; credential: string } },
+) {
+  return h.worker.details(
+    split.job.id,
+    split.job.credential,
+    WORKER_FEATURES,
+    undefined,
+    BOTH.join(","),
+  );
+}
+
+/** Whether GitHub still honours a token (it does until it is switched off or expires). */
+async function stillWorks(h: Started, token: string): Promise<boolean> {
+  const response = await fetch(`${h.fake.baseUrl}/installation/repositories`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  return response.status === 200;
+}
+
+describe("a write token that could not be switched off (#790)", () => {
+  // review of #790, point 1
+  it("stays in the ledger, is said so in the log, and is switched off at the next try", async () => {
+    const h = await start();
+    await h.turn();
+    const { jobId, credential } = await fetched(h);
+    const [token] = writeTokens(h);
+    // Both the report and the end of the claim try to switch the token off; GitHub is down for both.
+    h.fake.fail({ pathIncludes: "/installation/token", status: 503 });
+
+    const response = await h.worker.result(jobId, credential, turnResult());
+    await h.writeTokensSettled();
+
+    expect(response.status).toBe(200);
+    expect(h.fake.revokedInstallationTokens()).toEqual([]);
+    expect(await stillWorks(h, token!)).toBe(true);
+    expect(
+      (await h.claimedKeys.gitTokensOf(jobId)).map((t) => t.token),
+    ).toEqual([token]);
+    const written = h.logLines().join("\n");
+    expect(written).toContain("not switched off yet");
+    expect(written).not.toMatch(/\d write token\(s\) switched off/);
+    expect(written).not.toContain(token!);
+
+    h.fake.clearFailures();
+    await h.writeTokens.retryPending();
+
+    expect(h.fake.revokedInstallationTokens()).toEqual([token]);
+    expect(await h.claimedKeys.gitTokensOf(jobId)).toEqual([]);
+    expect(await stillWorks(h, token!)).toBe(false);
+  });
+
+  // review of #790, point 1 and 4: "retrying what failed until the token's expiry passes, and then forget it".
+  it("is tried again until it expires on its own, and forgotten then", async () => {
+    const h = await start();
+    await h.turn();
+    const { jobId, credential } = await fetched(h);
+    const [token] = writeTokens(h);
+    h.fake.fail({ pathIncludes: "/installation/token", status: 503 });
+    await h.worker.result(jobId, credential, turnResult());
+    await h.writeTokensSettled();
+
+    // Within the hour the token is kept and tried each time.
+    for (const minutes of [5, 20]) {
+      h.clock.advance(minutes * 60_000);
+      h.githubClock.advance(minutes * 60_000);
+      await h.writeTokens.retryPending();
+      expect(
+        (await h.claimedKeys.gitTokensOf(jobId)).map((t) => t.token),
+      ).toEqual([token]);
+    }
+    expect(h.fake.revokedInstallationTokens()).toEqual([]);
+
+    // Past its expiry it is no danger any more: forgotten, and GitHub is not asked again.
+    h.clock.advance(40 * 60_000);
+    h.githubClock.advance(40 * 60_000);
+    const asked = h.fake.requests().length;
+    await h.writeTokens.retryPending();
+
+    expect(await h.claimedKeys.gitTokensOf(jobId)).toEqual([]);
+    expect(h.fake.requests()).toHaveLength(asked);
+  });
+
+  // review of #790, point 1: a token the fetch could not hand over is held to the same rule.
+  it("is kept when the revoke of a token that never reached the Worker fails, and switched off later", async () => {
+    let failGet = false;
+    const h = await start({
+      wrapQueue: (queue) => ({
+        ...queue,
+        get: (id: string) =>
+          failGet
+            ? Promise.reject(new Error("the queue is down"))
+            : queue.get(id),
+      }),
+    });
+    const { jobId } = await h.turn();
+    const split = await h.claimedSplit(DISPATCHER);
+    failGet = true;
+    h.fake.fail({ pathIncludes: "/installation/token", status: 503, times: 1 });
+
+    expect((await fetchAgain(h, split)).status).toBe(500);
+    failGet = false;
+
+    const [token] = writeTokens(h);
+    expect(h.fake.revokedInstallationTokens()).toEqual([]);
+    expect(
+      (await h.claimedKeys.gitTokensOf(jobId)).map((t) => t.token),
+    ).toEqual([token]);
+    // The turn is still waiting (nothing was handed to a Worker), and a later try switches the token off.
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "queued" });
+    await h.writeTokens.revokeAllOf({
+      id: jobId,
+      reviewKind: "implementer",
+      workspaceId: h.workspaceId,
+      repositoryId: h.repositoryId,
+    });
+    expect(h.fake.revokedInstallationTokens()).toEqual([token]);
+  });
+});
+
+describe("a turn that ends without a report (#790)", () => {
+  // review of #790, point 4
+  it("has its write tokens switched off when the reaper ends it", async () => {
+    const h = await start();
+    const { jobId } = await h.turn();
+    await fetched(h);
+    const made = writeTokens(h);
+    expect(h.fake.revokedInstallationTokens()).toEqual([]);
+
+    h.clock.advance(10 * 60_000);
+    await h.queue.expireStaleJobs();
+    await h.writeTokensSettled();
+
+    expect(await h.queue.get(jobId)).toMatchObject({
+      status: "failed",
+      errorCode: "lease_expired",
+    });
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+    expect(await h.claimedKeys.gitTokensOf(jobId)).toEqual([]);
+  });
+
+  // review of #790, point 4
+  it("has its write tokens switched off when the claim is cancelled (a stop)", async () => {
+    const h = await start();
+    const { jobId } = await h.turn();
+    await fetched(h);
+    const made = writeTokens(h);
+
+    const cancelled = await h.queue.cancelClaimed(
+      jobId,
+      await h.tokenOf(jobId),
+      "project_deactivated",
+    );
+    await h.writeTokensSettled();
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+  });
+
+  // review of #790, point 4
+  it("has its write tokens switched off when the hard time limit ends it", async () => {
+    const h = await start();
+    await h.turn();
+    const { jobId, credential } = await fetched(h);
+    const made = writeTokens(h);
+
+    // The Worker keeps its lease alive, so only the limit of the kind can end the turn.
+    for (let minute = 0; minute < 75; minute += 1) {
+      h.clock.advance(60_000);
+      await h.worker.heartbeat(jobId, credential);
+    }
+    await h.queue.expireStaleJobs();
+    await h.writeTokensSettled();
+
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "failed" });
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+  });
+
+  // review of #790, point 4: a requeued turn is not ended, so its tokens are not touched.
+  it("leaves the tokens alone while the turn is still waiting", async () => {
+    const h = await start();
+    const { jobId } = await h.turn();
+    const split = await h.claimedSplit(DISPATCHER);
+    h.fake.fail({ pathIncludes: "/access_tokens", status: 503, times: 1 });
+    await fetchAgain(h, split);
+
+    await h.writeTokensSettled();
+
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "queued" });
+    expect(h.fake.revokedInstallationTokens()).toEqual([]);
+  });
+});
+
+describe("a turn given back after an input was handed out (#790)", () => {
+  // review of #790, point 5: `beforeStart` held by convention only.
+  it("is not requeued when a second fetch fails after the Worker already got an input, and its tokens end with the turn", async () => {
+    let failGet = false;
+    const h = await start({
+      wrapQueue: (queue) => ({
+        ...queue,
+        get: (id: string) =>
+          failGet
+            ? Promise.reject(new Error("the queue is down"))
+            : queue.get(id),
+      }),
+    });
+    const { jobId } = await h.turn();
+    const split = await h.claimedSplit(DISPATCHER);
+    expect((await fetchAgain(h, split)).status).toBe(200);
+    const [delivered] = writeTokens(h);
+    failGet = true;
+
+    expect((await fetchAgain(h, split)).status).toBe(500);
+    failGet = false;
+    await h.writeTokensSettled();
+
+    // The Worker of the first fetch may be running: the turn is not put back in the queue under it.
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "failed" });
+    const made = writeTokens(h);
+    expect(made).toHaveLength(2);
+    // The failed fetch's own token is off at once; the delivered one is off because the turn is over, not because of the fetch.
+    expect([...h.fake.revokedInstallationTokens()].sort()).toEqual(
+      [...made].sort(),
+    );
+    expect(made).toContain(delivered);
+  });
+
+  // review of #790, point 5: with nothing handed out the turn waits again.
+  it("is requeued when the first fetch fails after its token was made", async () => {
+    let failGet = false;
+    const h = await start({
+      wrapQueue: (queue) => ({
+        ...queue,
+        get: (id: string) =>
+          failGet
+            ? Promise.reject(new Error("the queue is down"))
+            : queue.get(id),
+      }),
+    });
+    const { jobId } = await h.turn();
+    const split = await h.claimedSplit(DISPATCHER);
+    failGet = true;
+
+    expect((await fetchAgain(h, split)).status).toBe(500);
+    failGet = false;
+
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "queued" });
+    expect(h.fake.revokedInstallationTokens()).toEqual(writeTokens(h));
+  });
+});
+
+describe("the write token on every failure path of the claim and the build (#790)", () => {
+  // review of #790, point 7: the `catch` of the claim of a runner.
+  it("is switched off when the claim of a runner fails after the input was built", async () => {
+    const h = await start({
+      wrapClaimedKeys: (keys) => ({
+        ...keys,
+        rememberNative: () => Promise.reject(new Error("the ledger is down")),
+      }),
+    });
+    const { jobId } = await h.turn();
+
+    const response = await h.claim({
+      engines: ["implementer"],
+      features: FEATURES,
+      llmProviders: BOTH,
+    });
+
+    expect(response.status).toBe(500);
+    const made = writeTokens(h);
+    expect(made).toHaveLength(1);
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "queued" });
+  });
+
+  // review of #790, point 7: the build fails after the token was made, before the input exists.
+  it("is switched off when the input cannot be built after the token was made", async () => {
+    const h = await start({
+      modelCapabilities: {
+        // A native model reads no metadata; the window of a managed one is asked for last, after the token exists.
+        check: () => Promise.reject(new Error("not asked")),
+        lastKnownContextLength: () => {
+          throw new Error("the window cannot be read");
+        },
+      },
+    });
+    const { jobId } = await h.turn();
+    const split = await h.claimedSplit(DISPATCHER);
+
+    const response = await fetchAgain(h, split);
+
+    expect(response.status).toBe(500);
+    const made = writeTokens(h);
+    expect(made).toHaveLength(1);
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "queued" });
+  });
+
+  // review of #790, point 7: the token in hand is switched off whatever the ledger says.
+  it("is switched off when the ledger cannot remember it either", async () => {
+    const h = await start({
+      wrapClaimedKeys: (keys) => ({
+        ...keys,
+        rememberGitToken: () => Promise.reject(new Error("the ledger is down")),
+      }),
+    });
+    const { jobId } = await h.turn();
+    const split = await h.claimedSplit(DISPATCHER);
+
+    const response = await fetchAgain(h, split);
+
+    expect(response.status).toBe(500);
+    const made = writeTokens(h);
+    expect(made).toHaveLength(1);
+    expect(h.fake.revokedInstallationTokens()).toEqual(made);
+    expect(await h.queue.get(jobId)).toMatchObject({ status: "queued" });
   });
 });

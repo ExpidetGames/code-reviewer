@@ -202,14 +202,15 @@ export interface IntegrationProvider {
 
   /**
    * Switches off a token `implementerAccess` handed out (#753), so a write token does not outlive its job: called when the
-   * token never reached a Worker, and when the turn is over. Best effort and idempotent: it never rejects (a token that is
-   * gone, a refusal or a platform that is down leave the token to expire at its time) and it is not behind the capability,
-   * because a cleanup is never refused. `token` is the value `implementerAccess` returned.
+   * token never reached a Worker, and when the turn is over. Idempotent, never rejects, and not behind the capability, because
+   * a cleanup is never refused. Answers whether the token is off: `true` when the platform switched it off or says it is not
+   * valid any more; `false` when that is not known (an error, a rate limit, no answer in time), and the caller keeps the token and
+   * tries again until it expires. `token` is the value `implementerAccess` returned.
    */
   revokeImplementerAccess(
     integration: Integration,
     token: string,
-  ): Promise<void>;
+  ): Promise<boolean>;
 
   /**
    * What the connection has accepted on the platform (#749), so that a page can say "write access not granted" before a

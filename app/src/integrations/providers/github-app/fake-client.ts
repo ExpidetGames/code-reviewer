@@ -348,6 +348,7 @@ export function fakeGithubAppClient(
     async revokeInstallationToken(token) {
       record("revokeInstallationToken", token);
       if (data.revokeFailure) throw data.revokeFailure;
+      return true;
     },
     async mintInstallationToken(installationId, scope) {
       record("mintInstallationToken", installationId, scope);

@@ -379,19 +379,82 @@ describe("revoking the Implementer's token", () => {
     expect(response.status).toBe(401);
   });
 
-  // #753 (review of #776)
-  it("never throws: a token that is already gone, or GitHub being down, does not fail the caller", async () => {
+  // #753 (review of #776, round 2, point 1): the answer says whether the token is off, so a caller keeps what is not.
+  it("says it succeeded when GitHub switched the token off, and when the token was already invalid", async () => {
     const { fake, provider } = await setup();
     const access = await provider.implementerAccess(integration, widgets);
 
-    await provider.revokeImplementerAccess(integration, access.token);
-    await expect(
-      provider.revokeImplementerAccess(integration, access.token),
-    ).resolves.toBeUndefined();
-    await expect(
-      provider.revokeImplementerAccess(integration, "not-a-token"),
-    ).resolves.toBeUndefined();
-    expect(fake.revokedInstallationTokens().length).toBeGreaterThanOrEqual(1);
+    expect(
+      await provider.revokeImplementerAccess(integration, access.token),
+    ).toBe(true);
+    // Switched off before (or expired): GitHub answers 401, and the token is not usable, which is what was asked.
+    expect(
+      await provider.revokeImplementerAccess(integration, access.token),
+    ).toBe(true);
+    expect(
+      await provider.revokeImplementerAccess(integration, "not-a-token"),
+    ).toBe(true);
+    expect(fake.revokedInstallationTokens()).toEqual([access.token]);
+  });
+
+  // #753 (review of #776, round 2, point 1)
+  it.each([
+    ["a server error", { status: 503 }],
+    ["a rate limit", { status: 429 }],
+    ["a refusal", { status: 403 }],
+  ])(
+    "says it failed, and the token still works, when GitHub answers %s",
+    async (_name, failure) => {
+      const { fake, provider } = await setup();
+      const access = await provider.implementerAccess(integration, widgets);
+      fake.fail({ pathIncludes: "/installation/token", times: 1, ...failure });
+
+      expect(
+        await provider.revokeImplementerAccess(integration, access.token),
+      ).toBe(false);
+
+      expect(fake.revokedInstallationTokens()).toEqual([]);
+      const response = await fetch(
+        `${fake.baseUrl}/installation/repositories`,
+        { headers: { authorization: `Bearer ${access.token}` } },
+      );
+      expect(response.status).toBe(200);
+      // And it can be tried again.
+      expect(
+        await provider.revokeImplementerAccess(integration, access.token),
+      ).toBe(true);
+    },
+  );
+
+  // #753 (review of #776, round 2, point 1)
+  it("says it failed, and never throws, when GitHub cannot be reached or answers too late", async () => {
+    const harness = await startGithubAppHarness();
+    const provider = createGithubAppProvider({
+      config: () => loadGithubAppConfig(harness.env),
+      clientOptions: { now: harness.clock.now, revokeTimeoutMs: 200 },
+      capabilities: () => FACTORY,
+    });
+    harness.fake.fail({
+      pathIncludes: "/installation/token",
+      times: 1,
+      hang: true,
+    });
+
+    expect(await provider.revokeImplementerAccess(integration, "ghs_x")).toBe(
+      false,
+    );
+    const unreachable = createGithubAppProvider({
+      config: () =>
+        loadGithubAppConfig({
+          ...harness.env,
+          GITHUB_API_BASE_URL: "http://127.0.0.1:1",
+        }),
+      clientOptions: { now: harness.clock.now, revokeTimeoutMs: 200 },
+      capabilities: () => FACTORY,
+    });
+    expect(
+      await unreachable.revokeImplementerAccess(integration, "ghs_x"),
+    ).toBe(false);
   });
 
   // #753 (review of #776)

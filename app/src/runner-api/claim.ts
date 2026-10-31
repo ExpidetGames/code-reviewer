@@ -91,7 +91,9 @@ import type { RunnerEngine } from "../jobs/runner-capabilities.ts";
 import type { JobOptions, JobOptionsSource } from "./job-options.ts";
 import { describeError, type RunnerApiLogger } from "./logger.ts";
 import { refusalForKind } from "./kind-guard.ts";
-import type { WriteTokenRevoker } from "./write-token.ts";
+import { DEFAULT_TOKEN_LIFETIME_MS } from "./write-token.ts";
+import type { UndeliveredTokenRevoker } from "./write-token.ts";
+import type { GitTokenEntry } from "./claimed-keys.ts";
 import { keyModeForJob } from "../llm/resolve.ts";
 import type { ModelChoice } from "../db/implementer-model-choice.ts";
 import { callerLlmProviders } from "./requests.ts";
@@ -251,13 +253,22 @@ export type ClaimDeps = {
    */
   claimedKeys: Pick<
     ClaimedKeys,
-    "remember" | "rememberModel" | "rememberNative" | "rememberGitToken"
+    | "remember"
+    | "rememberModel"
+    | "rememberNative"
+    | "rememberGitToken"
+    | "hasGitTokens"
   >;
   /**
-   * #753: switches off the write tokens of a turn of the Implementer (the review of #776): the token a failed fetch made, and
-   * the ones the claim remembered when the turn is over. Never rejects; does nothing for another kind.
+   * #753: switches off a write token of a turn of the Implementer that was made and never handed to a Worker (the fetch failed
+   * after it). Only that token: the ones an earlier fetch handed over are in use. Never rejects; does nothing for another kind.
    */
-  revokeWriteTokens: WriteTokenRevoker;
+  revokeUndelivered: UndeliveredTokenRevoker;
+  /**
+   * #790: the addresses the projects of a workspace pinned for a catalog provider (`createPinnedAddressReader`). A turn has no
+   * project of its own, so a workspace's key goes only to an address its projects pinned, as for a Dynamic review.
+   */
+  pinnedAddresses: (workspaceId: string, slug: string) => Promise<string[]>;
   /**
    * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
    * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
@@ -299,7 +310,7 @@ type Prepared =
       entryModel: string | null;
       native: boolean;
       /** #753: the write token of a turn, which the claim remembers before the input leaves and switches off if it cannot. */
-      writeToken: string | null;
+      writeToken: GitTokenEntry | null;
     }
   /** #320: the claim of a Dispatcher: the credential and no input. */
   | { kind: "split"; response: SplitClaimResponse }
@@ -346,9 +357,9 @@ export type Built = {
   native: boolean;
   /**
    * #753: the write token of a turn of the Implementer (the same value as `input.git.token`), or null. The caller remembers it
-   * before the input leaves and switches it off when the input does not (`revokeWriteTokens`).
+   * before the input leaves and switches it off when the input does not (`revokeUndelivered`).
    */
-  writeToken: string | null;
+  writeToken: GitTokenEntry | null;
 };
 
 function refuse(errorCode: string, detail?: string): Refusal {
@@ -699,10 +710,25 @@ async function costOf(
   // refused like an unavailable one: on the operator's key, which we pay, as `managed_model_unavailable` (free); on the
   // workspace's own key as a model Dynamic Review cannot use. No key exists yet in either case.
   const catalog = selection.keyMode === "own" && selection.catalog === true;
-  const entry = await native.entryFor(
-    ref,
-    catalog ? selection.pinnedAddress : undefined,
-  );
+  // A Dynamic job holds to the address its project pinned. A turn has no project of its own (#753, #790), so it holds to what the
+  // workspace's projects pinned for the provider: no pin, the catalog's trusted address; one pin, exactly that address (a catalog
+  // that moved since refuses the job below, `provider_address_changed`, and the key goes nowhere); several different pins, no
+  // address can be the one all of them selected, so the key is not sent anywhere either.
+  let pinned = catalog ? selection.pinnedAddress : undefined;
+  if (catalog && job.reviewKind === "implementer") {
+    const pins = await deps.pinnedAddresses(
+      job.workspaceId,
+      selection.provider,
+    );
+    if (pins.length > 1)
+      return {
+        kind: "refused",
+        errorCode: entryRefusalCode(selection, "provider_address_changed"),
+        detail: `${whose(selection)}kind=${selection.kind} reason=entry_provider_address_changed`,
+      };
+    pinned = pins[0];
+  }
+  const entry = await native.entryFor(ref, pinned);
   if (!entry.ok) {
     if (entry.code === "check_failed")
       return { kind: "retry", reason: "price_check_failed" };
@@ -1107,6 +1133,10 @@ export async function buildJobInput(
     operatorCents: await deps.operatorCostLimitCents(),
     features,
   });
+  // #790: the cost limit is the brake of a turn, and the runner has no limit of its own for this kind, so a caller that names
+  // neither feature cannot run one: it ends here, as for an engine that cannot run the kind, before any credential exists.
+  if (implementer !== null && costLimit.enforced === "none")
+    return refuse("implementer_engine_unavailable");
   if (costLimit.enforced === "none")
     deps.logger.info(
       `[runner-api] job=${job.id} carries no cost limit: the runner names neither claim feature cost_limit nor operator_cost_limit, so a Dynamic Review is held only to the runner's own RUNNER_DYNAMIC_MAX_COST_USD and a Diff Review to none`,
@@ -1201,7 +1231,7 @@ export async function buildJobInput(
         ? await deps.attemptedShas(job)
         : { shas: [], truncated: false };
   } catch (error) {
-    await deps.revokeWriteTokens(job, [git.token]);
+    await deps.revokeUndelivered(job, writeTokenOf(git));
     throw error;
   }
 
@@ -1294,7 +1324,7 @@ export async function buildJobInput(
     tokenExpiresAt: git.expiresAt,
     entryModel: managed ? selection.model : null,
     native: modelEntry !== null,
-    writeToken: implementer === null ? null : git.token,
+    writeToken: implementer === null ? null : writeTokenOf(git),
   };
 }
 
@@ -1423,18 +1453,49 @@ export async function cancelJob(
   return "cancelled";
 }
 
+/** The token of a turn with the time it expires; a platform that says none gets the lifetime GitHub gives. */
+function writeTokenOf(git: GitAccess, now: Date = new Date()): GitTokenEntry {
+  return {
+    token: git.token,
+    expiresAt:
+      git.expiresAt ??
+      new Date(now.getTime() + DEFAULT_TOKEN_LIFETIME_MS).toISOString(),
+  };
+}
+
+/**
+ * #753: whether no input of this turn was ever handed to a Worker. Every write token is remembered before an input leaves, so a
+ * job whose ledger is empty has handed out none; one that has a token has a Worker that may run and push. Only for a turn;
+ * a failed lookup says no (the safe answer: the job is not requeued).
+ */
+export async function noInputHandedOut(
+  deps: Pick<ClaimDeps, "claimedKeys">,
+  job: Pick<Job, "id" | "reviewKind">,
+): Promise<boolean> {
+  if (job.reviewKind !== "implementer") return false;
+  try {
+    return !(await deps.claimedKeys.hasGitTokens(job.id));
+  } catch {
+    return false;
+  }
+}
+
 /** Gives the job back after an unexpected failure, so it is not stuck under a lease nobody uses. */
 export async function giveBack(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
   reason: string,
   retryAt?: Date,
+  /**
+   * #753: no input of this job ever reached a Worker (`noInputHandedOut`, asked before the call was built), so a turn of the
+   * Implementer ran nothing and pushed nothing and waits again like any other job instead of failing on its first lost attempt.
+   * A turn whose Worker already has an input is never requeued: its Worker may be running.
+   */
+  beforeStart = false,
 ): Promise<void> {
-  // Whatever happened, the input of the job did not reach a Worker: a turn of the Implementer ran nothing and pushed nothing, so
-  // it waits again like any other job instead of failing on its first lost attempt (#753).
   const release = {
     ...(retryAt === undefined ? {} : { retryAt }),
-    ...(claimed.job.reviewKind === "implementer" ? { beforeStart: true } : {}),
+    ...(beforeStart ? { beforeStart: true } : {}),
   };
   try {
     await deps.queue.release(
@@ -1487,7 +1548,8 @@ export async function handleClaim(
 
     // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
     // nobody uses (it would only run out after two minutes). The write token of a turn that was made is switched off then (#753).
-    let writeToken: string | null = null;
+    let writeToken: GitTokenEntry | null = null;
+    const beforeStart = await noInputHandedOut(deps, claimed.job);
     try {
       const prepared = await prepare(
         deps,
@@ -1521,6 +1583,7 @@ export async function handleClaim(
           claimed,
           prepared.reason,
           new Date(deps.now().getTime() + prepared.retryAfterSeconds * 1000),
+          beforeStart,
         );
         deps.logger.info(
           `[runner-api] ${origin.label} job=${claimed.job.id} given back: ${prepared.reason}`,
@@ -1554,7 +1617,8 @@ export async function handleClaim(
       if (prepared.writeToken !== null)
         await deps.claimedKeys.rememberGitToken(
           claimed.job.id,
-          prepared.writeToken,
+          prepared.writeToken.token,
+          prepared.writeToken.expiresAt,
         );
       deps.logger.info(
         `[runner-api] ${origin.label} job=${claimed.job.id} command=${claimed.job.command}`,
@@ -1565,8 +1629,8 @@ export async function handleClaim(
         `[runner-api] ${origin.label} job=${claimed.job.id} failed: ${describeError(error)}`,
       );
       if (writeToken !== null)
-        await deps.revokeWriteTokens(claimed.job, [writeToken]);
-      await giveBack(deps, claimed, "claim_failed");
+        await deps.revokeUndelivered(claimed.job, writeToken);
+      await giveBack(deps, claimed, "claim_failed", undefined, beforeStart);
       return errorResponse(500, "RUNNER_INTERNAL_ERROR");
     }
   }

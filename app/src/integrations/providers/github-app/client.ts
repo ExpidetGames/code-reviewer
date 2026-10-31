@@ -297,11 +297,13 @@ export type GithubAppClient = {
     scope: JobTokenScope,
   ): Promise<InstallationToken>;
   /**
-   * Switches an installation token off (`DELETE /installation/token`, #753). Best effort: it never rejects, because it
-   * runs where the caller already has a failure to report or a job that is over; a token that is gone, a refusal or a
-   * platform that is down leave the token to expire at its time. The answer is never read.
+   * Switches an installation token off (`DELETE /installation/token`, #753). Never rejects, because it runs where the caller
+   * already has a failure to report or a job that is over. Answers whether the token is off: `true` when GitHub switched it off
+   * (2xx) or says it is not valid any more (401: revoked before, or expired); `false` for anything else (a server error, a rate
+   * limit, a refusal, no answer in time, no connection), when the token may still work and the caller keeps it to try again.
+   * The body of the answer is never read, so nothing of it can reach a message.
    */
-  revokeInstallationToken(token: string): Promise<void>;
+  revokeInstallationToken(token: string): Promise<boolean>;
 };
 
 export type GithubAppClientOptions = {
@@ -775,11 +777,10 @@ export function createGithubAppClient(
   }
 
   /**
-   * Best effort `DELETE /installation/token` for a token that must not be used. Its failure is
-   * ignored (the original failure is what the caller needs to hear about) and the answer is never
-   * read, so nothing of it can reach a message.
+   * `DELETE /installation/token` for a token that must not be used. Never rejects; answers whether the token is off (see the
+   * client type). The mint paths ignore the answer (the original failure is what their caller needs to hear about).
    */
-  async function revokeInstallationToken(token: string): Promise<void> {
+  async function revokeInstallationToken(token: string): Promise<boolean> {
     try {
       const response = await doFetch(
         `${config.apiBaseUrl}/installation/token`,
@@ -795,8 +796,9 @@ export function createGithubAppClient(
         },
       );
       await response.body?.cancel().catch(() => undefined);
+      return response.ok || response.status === 401;
     } catch {
-      // Ignored on purpose, see above.
+      return false;
     }
   }
 

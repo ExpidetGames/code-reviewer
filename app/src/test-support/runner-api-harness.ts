@@ -50,8 +50,13 @@ import {
   emptyJobOptionsSource,
   type JobOptionsSource,
 } from "../runner-api/job-options.ts";
-import { createClaimedKeys } from "../runner-api/claimed-keys.ts";
-import { createWriteTokenRevoker } from "../runner-api/write-token.ts";
+import {
+  createClaimedKeys,
+  type ClaimedKeys,
+} from "../runner-api/claimed-keys.ts";
+import { createWriteTokens } from "../runner-api/write-token.ts";
+import { createJobClaimedKeysRepository } from "../db/repositories/job-claimed-keys-repository.ts";
+import { createPinnedAddressReader } from "../review-settings/pinned-addresses.ts";
 import { createProjectClaimGuard } from "../runner-api/project-claim-guard.ts";
 import { createKnownSecrets } from "../runner-api/known-secrets.ts";
 import { knownContextWindowFrom } from "../runner-api/known-context-window.ts";
@@ -175,6 +180,10 @@ export async function startRunnerApiHarness(
      * deployment, which can never make the write token.
      */
     implementer?: boolean;
+    /** #753: wraps what the API remembers about a job, for a test that makes one call fail (for example the write token ledger). */
+    wrapClaimedKeys?: (keys: ClaimedKeys) => ClaimedKeys;
+    /** #790: the addresses the workspace's projects pinned for a catalog provider. Default: read from the projects, as on the server. */
+    pinnedAddresses?: ClaimDeps["pinnedAddresses"];
     /**
      * #281: wires the notice of a refused review like the running server does (`h.notices`). With
      * `deliver: "manual"` the refusals are only collected (`h.notices.refusals`) and the test hands them on.
@@ -198,7 +207,12 @@ export async function startRunnerApiHarness(
   const refusals: NoticeRefusal[] = [];
   const noticeWork: Promise<void>[] = [];
   let noticeService: RefusalNoticeService | undefined;
+  // #790: what the running server does when the claim of a job ended, for a turn of the Implementer: its write tokens are switched off
+  // (after the response there; `h.writeTokensSettled()` waits for it here).
+  const endedWork: Promise<void>[] = [];
+  let onEnded: ((jobIds: readonly string[]) => void) | undefined;
   const fixture = await createJobQueueFixture({
+    onClaimsEnded: (jobIds) => onEnded?.(jobIds),
     ...(noticeOptions === undefined
       ? {}
       : {
@@ -396,11 +410,36 @@ export async function startRunnerApiHarness(
       now: fixture.clock.now,
       providers,
     });
-    const claimedKeys = createClaimedKeys({
+    const plainClaimedKeys = createClaimedKeys({
       db: fixture.db,
       appSecret: () => TEST_APP_SECRET,
       now: fixture.clock.now,
     });
+    const claimedKeys =
+      options.wrapClaimedKeys?.(plainClaimedKeys) ?? plainClaimedKeys;
+    const writeTokens = createWriteTokens({
+      repositories: (workspaceId) =>
+        createRepositoriesRepository(
+          fixture.db,
+          workspaceId,
+          fixture.clock.now,
+        ),
+      integrations: (workspaceId) =>
+        createIntegrationsRepository(
+          fixture.db,
+          workspaceId,
+          fixture.clock.now,
+        ),
+      registry,
+      claimedKeys,
+      rows: createJobClaimedKeysRepository(fixture.db, fixture.clock.now),
+      logger,
+      // The tokens expire on the clock of GitHub's fake.
+      now: () => new Date(github.clock.now()),
+    });
+    onEnded = (jobIds) => {
+      endedWork.push(writeTokens.revokeEnded(jobIds));
+    };
     const apiDeps: WorkerApiDeps = {
       queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
       repositories: (workspaceId) =>
@@ -502,23 +541,18 @@ export async function startRunnerApiHarness(
       providerPins:
         options.providerPins ?? createProviderPins(() => reviewSettings),
       claimedKeys,
-      revokeWriteTokens: createWriteTokenRevoker({
-        repositories: (workspaceId) =>
-          createRepositoriesRepository(
-            fixture.db,
-            workspaceId,
-            fixture.clock.now,
-          ),
-        integrations: (workspaceId) =>
-          createIntegrationsRepository(
-            fixture.db,
-            workspaceId,
-            fixture.clock.now,
-          ),
-        registry,
-        claimedKeys,
-        logger,
-      }),
+      revokeWriteTokens: writeTokens.revokeAllOf,
+      revokeUndelivered: writeTokens.revokeUndelivered,
+      pinnedAddresses:
+        options.pinnedAddresses ??
+        ((workspaceId, slug) =>
+          createPinnedAddressReader(
+            createProjectsRepository(
+              fixture.db,
+              workspaceId,
+              fixture.clock.now,
+            ),
+          )(slug)),
       ...(options.hooks ?? {}),
       now: fixture.clock.now,
       logger,
@@ -541,9 +575,9 @@ export async function startRunnerApiHarness(
     });
     // #320: the Worker API over the same collaborators (it has no dispatcher credential).
     const workerApi = createWorkerApi(apiDeps);
-    return { api, workerApi, llm, claimedKeys };
+    return { api, workerApi, llm, claimedKeys, writeTokens };
   }
-  const { api, workerApi, llm, claimedKeys } = buildApi();
+  const { api, workerApi, llm, claimedKeys, writeTokens } = buildApi();
   /** Saves (or, with null, removes) the LLM key of the workspace of the jobs, for a provider (default: the first one). */
   async function setLlmKey(
     key: string | null,
@@ -987,6 +1021,12 @@ export async function startRunnerApiHarness(
         github.fake.pullRequestComments(repoFullName, prNumber),
     },
     enqueueTurn,
+    /** #790: the write token service of the first app instance (the sweep's `retryPending`, the end of a turn). */
+    writeTokens,
+    /** #790: waits for the write tokens that the ends of claims (the reaper, a stop) switched off after their response. */
+    writeTokensSettled: async () => {
+      await Promise.all(endedWork.splice(0));
+    },
     claim,
     claimed,
     release,

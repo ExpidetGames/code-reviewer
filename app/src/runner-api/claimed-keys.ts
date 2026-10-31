@@ -24,10 +24,11 @@
 // #578: and whether the claim handed the job a **native** model entry (`native` in the same sealed text), so that the report
 // holds a native run to the rules of one (a managed success reports its cost) however the switch of the native path stands by then.
 //
-// #753: and the **write tokens** a turn of the Implementer was handed (`gitTokens` in the same sealed text), so that the app can
-// switch them off at the platform when the turn is over, whichever app instance serves the end (`takeGitTokens`: it returns
-// the tokens and forgets them, so a repeated end revokes nothing twice). They are tokens of an hour at most; the row holds
-// them for as long as the turn runs and no longer. An app instance of the previous release ignores the field.
+// #753: and the **write tokens** a turn of the Implementer was handed (`gitTokens` in the same sealed text, each with the time it
+// expires), so that the app can switch them off at the platform when the turn is over, however it ends and whichever app instance
+// serves the end. A token is forgotten (`forgetGitTokens`) only after the platform said it is off, or once it has expired on its own:
+// one that could not be switched off stays, and is tried again (`write-token.ts`) until then. An app instance of the previous
+// release ignores the field.
 //
 // The value is never logged and never leaves this module except as the lists `keysOf`, `modelsOf` and `takeGitTokens`
 // return to the code that masks a result or ends a token. A row that cannot be read (another `APP_SECRET`, a changed row) is skipped: masking is best
@@ -68,20 +69,48 @@ export type ClaimedKeys = {
   /** Whether the claim handed the job a native model entry (false if unknown or unreadable). */
   wasNative(jobId: string): Promise<boolean>;
   /**
-   * Remembers a write token handed to the Worker of an implementer job (#753), next to those handed out for it before (at
-   * most `CLAIMED_KEYS_PER_JOB`; the oldest is forgotten past that).
+   * Remembers a write token handed to the Worker of an implementer job (#753) with the time it expires (ISO 8601), next to those
+   * handed out for it before. None is ever dropped to make room: a token that is not remembered is never switched off.
    */
-  rememberGitToken(jobId: string, token: string): Promise<void>;
-  /** The write tokens remembered for the job, which are forgotten at the same time (empty if none, unknown or unreadable). */
-  takeGitTokens(jobId: string): Promise<string[]>;
+  rememberGitToken(
+    jobId: string,
+    token: string,
+    expiresAt: string,
+  ): Promise<void>;
+  /** The write tokens remembered for the job, oldest first (empty if none, unknown or unreadable). */
+  gitTokensOf(jobId: string): Promise<GitTokenEntry[]>;
+  /** Whether any write token is remembered for the job, expired or not: whether an input was ever handed out. */
+  hasGitTokens(jobId: string): Promise<boolean>;
+  /** Forgets these write tokens (they are off, or expired) and keeps every other one, including one remembered meanwhile. */
+  forgetGitTokens(jobId: string, tokens: readonly string[]): Promise<void>;
 };
+
+/** A write token and when it expires on its own (ISO 8601). */
+export type GitTokenEntry = { token: string; expiresAt: string };
 
 type Sealed = {
   keys: string[];
   models: string[];
   native: boolean;
-  gitTokens: string[];
+  gitTokens: GitTokenEntry[];
 };
+
+function emptySealed(): Sealed {
+  return { keys: [], models: [], native: false, gitTokens: [] };
+}
+
+function gitTokenEntries(value: unknown): GitTokenEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries: GitTokenEntry[] = [];
+  for (const entry of value as unknown[]) {
+    if (typeof entry !== "object" || entry === null) return undefined;
+    const { token, expiresAt } = entry as Record<string, unknown>;
+    if (typeof token !== "string" || typeof expiresAt !== "string")
+      return undefined;
+    entries.push({ token, expiresAt });
+  }
+  return entries;
+}
 
 function strings(value: unknown): string[] | undefined {
   return Array.isArray(value) &&
@@ -100,7 +129,7 @@ function contentOf(text: string): Sealed {
         const models = "models" in parsed ? strings(parsed.models) : undefined;
         const native = "native" in parsed && parsed.native === true;
         const gitTokens =
-          "gitTokens" in parsed ? strings(parsed.gitTokens) : undefined;
+          "gitTokens" in parsed ? gitTokenEntries(parsed.gitTokens) : undefined;
         return {
           keys,
           models: models ?? [],
@@ -130,13 +159,10 @@ export function createClaimedKeys({
     rowId: jobId,
     field: FIELD,
   });
-  async function read(
-    rows: ReturnType<typeof createJobClaimedKeysRepository>,
+  function open(
     jobId: string,
-  ): Promise<Sealed> {
-    const row = await rows.get(jobId);
-    if (row === undefined)
-      return { keys: [], models: [], native: false, gitTokens: [] };
+    row: { keyVersion: number; nonce: string; ciphertext: string },
+  ): Sealed {
     try {
       return contentOf(
         decryptSecret(appSecret(), location(jobId), {
@@ -146,20 +172,45 @@ export function createClaimedKeys({
         }),
       );
     } catch {
-      return { keys: [], models: [], native: false, gitTokens: [] };
+      return emptySealed();
     }
   }
-  /** Changes what is remembered and writes all of it, in one transaction, so two fetches do not drop each other's. */
+  async function read(
+    rows: ReturnType<typeof createJobClaimedKeysRepository>,
+    jobId: string,
+  ): Promise<Sealed> {
+    const row = await rows.get(jobId);
+    return row === undefined ? emptySealed() : open(jobId, row);
+  }
+  /**
+   * Changes what is remembered and writes all of it, in one transaction that holds the row of the job locked from the read to the
+   * write: two instances changing it at the same time take turns and neither drops the other's change (#753; at READ COMMITTED
+   * the plain read-modify-write lost one of two concurrent changes). A job without a row gets an empty one first, so there is a
+   * row to lock.
+   */
   async function update(
     jobId: string,
     change: (known: Sealed) => Sealed,
   ): Promise<void> {
+    const empty = encryptSecret(
+      appSecret(),
+      location(jobId),
+      JSON.stringify({ keys: [], models: [], native: false, gitTokens: [] }),
+    );
     await db.transaction().execute(async (trx) => {
       const rows = createJobClaimedKeysRepository(trx, now);
+      await rows.putIfAbsent({
+        jobId,
+        ciphertext: empty.ciphertext,
+        nonce: empty.nonce,
+        keyVersion: empty.keyVersion,
+      });
+      const locked = await rows.getForUpdate(jobId);
+      const known = locked === undefined ? emptySealed() : open(jobId, locked);
       const sealed = encryptSecret(
         appSecret(),
         location(jobId),
-        JSON.stringify(change(await read(rows, jobId))),
+        JSON.stringify(change(known)),
       );
       await rows.put({
         jobId,
@@ -170,11 +221,7 @@ export function createClaimedKeys({
     });
   }
   /** Adds a value to one of the lists: the newest `CLAIMED_KEYS_PER_JOB` are kept, a value already there takes no place. */
-  const add = (
-    jobId: string,
-    list: "keys" | "models" | "gitTokens",
-    value: string,
-  ) =>
+  const add = (jobId: string, list: "keys" | "models", value: string) =>
     update(jobId, (known) => ({
       ...known,
       [list]: known[list].includes(value)
@@ -192,14 +239,24 @@ export function createClaimedKeys({
       update(jobId, (known) => ({ ...known, native })),
     wasNative: async (jobId) =>
       (await read(createJobClaimedKeysRepository(db, now), jobId)).native,
-    rememberGitToken: (jobId, token) => add(jobId, "gitTokens", token),
-    async takeGitTokens(jobId) {
-      let taken: string[] = [];
-      await update(jobId, (known) => {
-        taken = known.gitTokens;
-        return { ...known, gitTokens: [] };
-      });
-      return taken;
-    },
+    rememberGitToken: (jobId, token, expiresAt) =>
+      update(jobId, (known) => ({
+        ...known,
+        gitTokens: known.gitTokens.some((entry) => entry.token === token)
+          ? known.gitTokens
+          : [...known.gitTokens, { token, expiresAt }],
+      })),
+    gitTokensOf: async (jobId) =>
+      (await read(createJobClaimedKeysRepository(db, now), jobId)).gitTokens,
+    hasGitTokens: async (jobId) =>
+      (await read(createJobClaimedKeysRepository(db, now), jobId)).gitTokens
+        .length > 0,
+    forgetGitTokens: (jobId, tokens) =>
+      update(jobId, (known) => ({
+        ...known,
+        gitTokens: known.gitTokens.filter(
+          (entry) => !tokens.includes(entry.token),
+        ),
+      })),
   };
 }

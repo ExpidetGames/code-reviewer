@@ -303,11 +303,12 @@ export function createGithubAppProvider(
     },
 
     async revokeImplementerAccess(_integration, token) {
-      // Never rejects (see the provider interface): a failure to read the settings or to reach GitHub leaves the token to expire.
+      // Never rejects (see the provider interface): a failure to read the settings or to reach GitHub is "not off", and the caller
+      // keeps the token to try again.
       try {
-        await (await getClient()).revokeInstallationToken(token);
+        return await (await getClient()).revokeInstallationToken(token);
       } catch {
-        // Ignored on purpose.
+        return false;
       }
     },
 

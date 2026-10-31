@@ -11,7 +11,13 @@ import {
   notifyingJobQueue,
   notifyingRunnerQueue,
 } from "../check-runs/notifying-queues.ts";
-import { dispatchHook, stopEndedClaims } from "../dispatch/shared.ts";
+import {
+  dispatchHook,
+  runAfterResponse,
+  stopEndedClaims,
+} from "../dispatch/shared.ts";
+import { getCapabilities } from "../capabilities/shared.ts";
+import { getWriteTokens } from "../runner-api/claimed-keys-shared.ts";
 import { deliverBalanceMails, recordWallClocks } from "../billing/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "../db/job-limits.ts";
@@ -60,6 +66,20 @@ export function getRunnerQueue(): RunnerQueue {
   return notifyingRunnerQueue(createRunnerQueueOfTheServer(), checkNotifier);
 }
 
+/**
+ * #790: after the response, switches off the write tokens of the turns of the Implementer among the jobs whose claim ended. Nothing
+ * happens in a deployment without the capability. Never throws.
+ */
+function revokeTokensOfEndedClaims(jobIds: readonly string[]): void {
+  if (jobIds.length === 0) return;
+  try {
+    if (!getCapabilities().has("implementer")) return;
+    runAfterResponse(() => getWriteTokens().revokeEnded(jobIds));
+  } catch {
+    console.error("[runner-api] WRITE_TOKEN_REVOKE_FAILED");
+  }
+}
+
 function createRunnerQueueOfTheServer(): RunnerQueue {
   const checkOfRefusal = notifyingRunnerQueue.onRefused(checkNotifier);
   return createRunnerQueue(getDatabase(), {
@@ -93,6 +113,8 @@ function createRunnerQueueOfTheServer(): RunnerQueue {
     // #493: and, where billing is on, the wall clock of a job that ran on a runner is recorded (no VM to measure).
     onClaimsEnded: (jobIds) => {
       stopEndedClaims(jobIds);
+      // #790: the write tokens of an ended turn of the Implementer, however it ended (a result, the reaper, a stop, the timeout).
+      revokeTokensOfEndedClaims(jobIds);
       recordWallClocks(jobIds);
       // #506: the settlement of these jobs may have taken a balance below the threshold; the mail goes out after the response.
       deliverBalanceMails();

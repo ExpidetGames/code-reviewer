@@ -20,6 +20,7 @@ import {
   checkJob,
   endJob,
   giveBack,
+  noInputHandedOut,
   type ClaimDeps,
   type Origin,
 } from "./claim.ts";
@@ -41,6 +42,7 @@ import {
   workerUnauthorized,
 } from "./responses.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
+import type { GitTokenEntry } from "./claimed-keys.ts";
 
 const ORIGIN: Origin = { label: "fetch worker", stage: "fetch" };
 
@@ -77,7 +79,9 @@ export async function handleFetch(
 
   const claimed = { job, leaseToken };
   // The write token of a turn of the Implementer, once it is made: switched off if the input cannot be handed to the Worker (#753).
-  let writeToken: string | null = null;
+  let writeToken: GitTokenEntry | null = null;
+  // Asked before anything is made: whether an earlier fetch of this turn handed an input to a Worker (#753).
+  const beforeStart = await noInputHandedOut(deps, job);
   try {
     // The claim admitted the job; the workspace may have been suspended since, or its entitlements may have become
     // unreadable. No key and no token are made then: the job ends with the code of the claim. Quotas were
@@ -117,6 +121,7 @@ export async function handleFetch(
         claimed,
         outcome.reason,
         new Date(deps.now().getTime() + outcome.retryAfterSeconds * 1000),
+        beforeStart,
       );
       deps.logger.info(
         `[worker-api] fetch job=${job.id} given back: ${outcome.reason}`,
@@ -135,7 +140,11 @@ export async function handleFetch(
     await deps.claimedKeys.rememberNative(job.id, outcome.native);
     // The token is remembered (sealed) before it leaves, so the end of the turn can switch it off (#753).
     if (outcome.writeToken !== null)
-      await deps.claimedKeys.rememberGitToken(job.id, outcome.writeToken);
+      await deps.claimedKeys.rememberGitToken(
+        job.id,
+        outcome.writeToken.token,
+        outcome.writeToken.expiresAt,
+      );
     const current = await deps.queue.get(job.id);
     if (current?.leaseExpiresAt == null)
       throw new Error(`Job ${job.id} has no lease expiry at fetch.`);
@@ -156,8 +165,8 @@ export async function handleFetch(
     deps.logger.error(
       `[worker-api] fetch job=${job.id} failed: ${describeError(error)}`,
     );
-    if (writeToken !== null) await deps.revokeWriteTokens(job, [writeToken]);
-    await giveBack(deps, claimed, "claim_failed");
+    if (writeToken !== null) await deps.revokeUndelivered(job, writeToken);
+    await giveBack(deps, claimed, "claim_failed", undefined, beforeStart);
     return errorResponse(500, "RUNNER_INTERNAL_ERROR");
   }
 }
