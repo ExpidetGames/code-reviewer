@@ -353,7 +353,7 @@ def test_prompt_caching_stays_on_the_marks_reach_the_provider_and_the_ledger_cou
 SCHEMA = json.loads((CONTRACTS / "runner-api.v1.json").read_text(encoding="utf-8"))
 
 
-def accepts(definition: str, document: object) -> bool:
+def accepts(definition: str, document: Any) -> bool:
     validator = Draft202012Validator(
         {"$schema": SCHEMA["$schema"], "$ref": f"#/$defs/{definition}", "$defs": SCHEMA["$defs"]}
     )
