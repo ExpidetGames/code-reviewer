@@ -39,6 +39,12 @@ export const AI_COST_FAILURE_CODES = [
   "dynamic_policy_violation",
   "llm_bad_request",
   "llm_context_length_exceeded",
+  // #754: the Implementer, after its agent ran: it gave up, the repository refused the branch, the work left the branch or the
+  // repository could not be committed or verified afterwards, the turn ran out of time. The model was used in each.
+  "agent_gave_up",
+  "push_rejected",
+  "branch_violation",
+  "time_limit_reached",
 ] as const;
 
 /** The codes a claim ends or hands back a job with (`CLAIM_FAILURE_CODES` and `CLAIM_RELEASE_REASONS`, #553); a test compares. */
@@ -181,8 +187,10 @@ export const ERROR_CODE_CLASSES = {
   checkout_incomplete: "charged",
   // Replaced by a newer push; it reported what it used. In full.
   superseded: "charged",
-  // The Implementer (#746). Provisional classes until its completion is built (#754): what ended before the agent ran is free, and
-  // what ended after the model was used is classed by whether it was (`AI_COST_FAILURE_CLASS`). `cost_limit_reached` is above.
+  // The Implementer (#746, classes settled in #754): what ended before the agent ran is free (no model call was made); what ended
+  // after it ran is charged like any run that used the model (`AI_COST_FAILURE_CODES`), none of it is clearly our fault: the
+  // agent gave up, the repository refused its branch, the work left the branch (or the repository could not be committed or
+  // verified afterwards: `RepositoryUnusable` reports `branch_violation`), the turn was out of time. `cost_limit_reached` is above.
   branch_exists: "free",
   base_branch_not_found: "free",
   clone_failed: "free",
