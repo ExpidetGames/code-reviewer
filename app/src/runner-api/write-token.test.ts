@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import { endedClaimsReaction } from "./write-token.ts";
 
 function setup(options: { allowed?: boolean; failWith?: Error } = {}) {
-  const revokeEnded = vi.fn(async (_jobIds: readonly string[]) => undefined);
+  const revokeEnded = vi.fn<(jobIds: readonly string[]) => Promise<void>>(
+    async () => undefined,
+  );
   const error = vi.fn();
   const scheduled: (() => Promise<void>)[] = [];
   const react = endedClaimsReaction({
@@ -65,7 +67,7 @@ describe("the write tokens of ended claims", () => {
     );
 
     expect(source).toMatch(
-      /onClaimsEnded:\s*\(jobIds\)\s*=>\s*\{[^}]*revokeTokensOfEndedClaims\(jobIds\);/s,
+      /onClaimsEnded:\s*\(jobIds\)\s*=>\s*\{[^}]*revokeTokensOfEndedClaims\(jobIds\);/,
     );
   });
 });
