@@ -705,7 +705,14 @@ export function toRunDetailView(
     job.errorCode === null
       ? null
       : describeRunError(product, job.reviewKind, job.errorCode, stoppedEarly);
-  const row = toRunRowView(product, job, project, now, implementer);
+  // The row's own `implementer` (the list's variant) is replaced below by the detail's, which holds all of it.
+  const row: Omit<RunRowView, "implementer"> = toRunRowView(
+    product,
+    job,
+    project,
+    now,
+    implementer,
+  );
   return {
     ...row,
     problem:
