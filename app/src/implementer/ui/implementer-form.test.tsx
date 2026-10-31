@@ -6,6 +6,7 @@
 // preselected, the name of the new branch, the model picker for both key modes, and the submit: once per form load, with the
 // sentence of every refusal.
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -29,6 +30,8 @@ import {
   describeBranchIssue,
   describeImplementerFailure,
   describeModelRefusal,
+  describeUnwritable,
+  describeUnwritableNote,
 } from "./messages.ts";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
@@ -57,9 +60,14 @@ const refused = (
 });
 
 const REPOSITORIES: RepositoryChoice[] = [
-  { id: "r1", fullName: "acme/widgets", writeGranted: true },
-  { id: "r2", fullName: "acme/legacy", writeGranted: false },
-  { id: "r3", fullName: "acme/gadgets", writeGranted: true },
+  { id: "r1", fullName: "acme/widgets", writeGranted: true, unwritable: null },
+  {
+    id: "r2",
+    fullName: "acme/legacy",
+    writeGranted: false,
+    unwritable: "write_not_granted",
+  },
+  { id: "r3", fullName: "acme/gadgets", writeGranted: true, unwritable: null },
 ];
 const BRANCHES: Record<string, BranchChoices> = {
   r1: {
@@ -237,7 +245,12 @@ describe("the repository select", () => {
         Promise.resolve(
           ok({
             repositories: [
-              { id: "r2", fullName: "acme/legacy", writeGranted: false },
+              {
+                id: "r2",
+                fullName: "acme/legacy",
+                writeGranted: false,
+                unwritable: "write_not_granted",
+              },
             ],
           }),
         ),
@@ -787,29 +800,29 @@ describe("sending the task", () => {
   });
 
   // #756-T06
-  it.each([
-    ["IMPLEMENTER_BASE_BRANCH_NOT_FOUND", "Base branch"],
-    ["IMPLEMENTER_BRANCH_CONFLICT", "New branch name"],
-  ])("marks the field a %s refusal belongs to", async (code, label) => {
-    const user = userEvent.setup();
-    renderForm(
-      fakeApi({
-        startTask: vi.fn(() => Promise.resolve(refused(409, code))),
-      }),
-    );
-    await fillIn(user);
+  it.each([["IMPLEMENTER_BRANCH_CONFLICT", "New branch name"]])(
+    "marks the field a %s refusal belongs to",
+    async (code, label) => {
+      const user = userEvent.setup();
+      renderForm(
+        fakeApi({
+          startTask: vi.fn(() => Promise.resolve(refused(409, code))),
+        }),
+      );
+      await fillIn(user);
 
-    await user.click(startButton());
+      await user.click(startButton());
 
-    await waitFor(() =>
-      expect(control(label).getAttribute("aria-invalid")).toBe("true"),
-    );
-    expect(
-      document.getElementById(
-        control(label).getAttribute("aria-describedby") ?? "",
-      )?.textContent,
-    ).toBe(describeImplementerFailure(factory, { code }));
-  });
+      await waitFor(() =>
+        expect(control(label).getAttribute("aria-invalid")).toBe("true"),
+      );
+      expect(
+        document.getElementById(
+          control(label).getAttribute("aria-describedby") ?? "",
+        )?.textContent,
+      ).toBe(describeImplementerFailure(factory, { code }));
+    },
+  );
 
   // #756-T06
   it("shows the write permission refusal as a sentence on the form, with what to do", async () => {
@@ -1003,6 +1016,482 @@ describe("the cost limit field", () => {
         control(/^Cost limit/).getAttribute("aria-describedby") ?? "",
       )?.textContent,
     ).toContain("$3.00");
+  });
+});
+
+describe("a retry after a lost answer (review of #793)", () => {
+  // #756-T06
+  it("sends a new client request id when the body was edited, and keeps it for an unchanged retry", async () => {
+    const user = userEvent.setup();
+    const startTask = vi
+      .fn()
+      .mockResolvedValueOnce(refused(null as never, "NETWORK_ERROR"))
+      .mockResolvedValueOnce(refused(null as never, "NETWORK_ERROR"))
+      .mockResolvedValueOnce(refused(null as never, "NETWORK_ERROR"))
+      .mockResolvedValue(ok({ runId: "run-2", sessionId: "session-2" }));
+    renderForm(fakeApi({ startTask }));
+    await fillIn(user);
+
+    await user.click(startButton());
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(1));
+    setTask("Add a health endpoint and a readiness endpoint");
+    await waitFor(() =>
+      expect(startButton()).toHaveProperty("disabled", false),
+    );
+    await user.click(startButton());
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(startButton()).toHaveProperty("disabled", false),
+    );
+    await user.click(startButton());
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(3));
+
+    const ids = startTask.mock.calls.map(
+      (call) => (call[0] as StartTaskRequest).clientRequestId,
+    );
+    expect(ids[1]).not.toBe(ids[0]);
+    expect(ids[2]).toBe(ids[1]);
+  });
+
+  // #756-T06
+  it.each([
+    [
+      "the branch",
+      () =>
+        fireEvent.change(control("New branch name"), {
+          target: { value: "feature/other" },
+        }),
+    ],
+    [
+      "the cost limit",
+      () =>
+        fireEvent.change(control(/^Cost limit/), { target: { value: "3" } }),
+    ],
+  ])(
+    "sends a new client request id when %s was edited",
+    async (_name, edit) => {
+      const user = userEvent.setup();
+      const startTask = vi
+        .fn()
+        .mockResolvedValueOnce(refused(null as never, "NETWORK_ERROR"))
+        .mockResolvedValue(ok({ runId: "run-2", sessionId: "session-2" }));
+      renderForm(fakeApi({ startTask }));
+      await fillIn(user);
+      await user.click(startButton());
+      await waitFor(() => expect(startTask).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(startButton()).toHaveProperty("disabled", false),
+      );
+
+      edit();
+      await user.click(startButton());
+
+      await waitFor(() => expect(startTask).toHaveBeenCalledTimes(2));
+      expect(startTask.mock.calls[1]?.[0].clientRequestId).not.toBe(
+        startTask.mock.calls[0]?.[0].clientRequestId,
+      );
+    },
+  );
+
+  // #756-T06
+  it("does not take an edit that never reached the server for a new attempt: a refused form keeps its id", async () => {
+    const user = userEvent.setup();
+    const startTask = vi
+      .fn()
+      .mockResolvedValueOnce(refused(null as never, "NETWORK_ERROR"))
+      .mockResolvedValue(ok({ runId: "run-2", sessionId: "session-2" }));
+    renderForm(fakeApi({ startTask }));
+    await fillIn(user);
+    await user.click(startButton());
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(startButton()).toHaveProperty("disabled", false),
+    );
+
+    // An edit that the form refuses before sending, taken back again: the body is the one of the first attempt.
+    fireEvent.change(control("New branch name"), { target: { value: "a..b" } });
+    await user.click(startButton());
+    expect(startTask).toHaveBeenCalledTimes(1);
+    const first = startTask.mock.calls[0]?.[0] as StartTaskRequest;
+    fireEvent.change(control("New branch name"), {
+      target: { value: first.branch },
+    });
+    await user.click(startButton());
+
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(2));
+    expect(startTask.mock.calls[1]?.[0].clientRequestId).toBe(
+      first.clientRequestId,
+    );
+  });
+
+  // #756-T06
+  it("says a task with this form was already started and links to it when the server names another task for the id", async () => {
+    const user = userEvent.setup();
+    renderForm(
+      fakeApi({
+        startTask: vi.fn(() =>
+          Promise.resolve(
+            refused(409, "IMPLEMENTER_REQUEST_REUSED", {
+              details: { runId: "run 9/x" },
+            }),
+          ),
+        ),
+      }),
+    );
+    await fillIn(user);
+
+    await user.click(startButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      describeImplementerFailure(factory, {
+        code: "IMPLEMENTER_REQUEST_REUSED",
+      }),
+    );
+    expect(alert.textContent).toMatch(/already started/i);
+    expect(
+      screen.getByRole("link", { name: "Open that task" }).getAttribute("href"),
+    ).toBe("/w/acme/runs/run%209%2Fx");
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+});
+
+describe("a base branch beyond the first page of branches (review of #793)", () => {
+  const truncated = (): Pick<FakeApi, "branches"> => ({
+    branches: vi.fn(() =>
+      Promise.resolve(
+        ok({
+          defaultBranch: "main",
+          branches: ["main", "develop"],
+          truncated: true,
+        }),
+      ),
+    ),
+  });
+
+  // #756-T03
+  it("offers a field to type the name when the list is cut short, and says how", async () => {
+    const user = userEvent.setup();
+    renderForm(fakeApi(truncated()));
+    await chooseRepository(user, "acme/widgets");
+
+    expect(control("Another base branch")).toBeTruthy();
+    expect(screen.getByText(/type the name of the branch below/i)).toBeTruthy();
+  });
+
+  // #756-T03
+  it("has no such field while the list is complete", async () => {
+    const user = userEvent.setup();
+    renderForm(fakeApi());
+    await chooseRepository(user, "acme/widgets");
+
+    expect(screen.queryByLabelText("Another base branch")).toBeNull();
+  });
+
+  // #756-T03
+  it("sends the typed name instead of the picked one, and the picked one again when the field is emptied", async () => {
+    const user = userEvent.setup();
+    const startTask = vi
+      .fn()
+      .mockResolvedValueOnce(refused(null as never, "NETWORK_ERROR"))
+      .mockResolvedValue(ok({ runId: "run-1", sessionId: "session-1" }));
+    renderForm(fakeApi({ ...truncated(), startTask }));
+    await fillIn(user);
+
+    fireEvent.change(control("Another base branch"), {
+      target: { value: "release/9" },
+    });
+    await user.click(startButton());
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(1));
+    expect(startTask.mock.calls[0]?.[0].baseBranch).toBe("release/9");
+    await waitFor(() =>
+      expect(startButton()).toHaveProperty("disabled", false),
+    );
+
+    fireEvent.change(control("Another base branch"), {
+      target: { value: " " },
+    });
+    await user.click(startButton());
+    await waitFor(() => expect(startTask).toHaveBeenCalledTimes(2));
+    expect(startTask.mock.calls[1]?.[0].baseBranch).toBe("main");
+  });
+
+  // #756-T03
+  it("checks the new branch against the typed base branch", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi(truncated());
+    renderForm(api);
+    await fillIn(user);
+
+    fireEvent.change(control("Another base branch"), {
+      target: { value: "release/9" },
+    });
+    fireEvent.change(control("New branch name"), {
+      target: { value: "release/9" },
+    });
+    await user.click(startButton());
+
+    expect(
+      document.getElementById(
+        control("New branch name").getAttribute("aria-describedby") ?? "",
+      )?.textContent,
+    ).toBe(describeBranchIssue("same_as_base"));
+    expect(api.startTask).not.toHaveBeenCalled();
+  });
+
+  // #756-T06
+  it("marks the typed field, not the list, when the server has no such branch, and loads nothing again", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi({
+      ...truncated(),
+      startTask: vi.fn(() =>
+        Promise.resolve(refused(404, "IMPLEMENTER_BASE_BRANCH_NOT_FOUND")),
+      ),
+    });
+    renderForm(api);
+    await fillIn(user);
+    fireEvent.change(control("Another base branch"), {
+      target: { value: "nope" },
+    });
+
+    await user.click(startButton());
+
+    await waitFor(() =>
+      expect(control("Another base branch").getAttribute("aria-invalid")).toBe(
+        "true",
+      ),
+    );
+    expect(
+      document.getElementById(
+        control("Another base branch").getAttribute("aria-describedby") ?? "",
+      )?.textContent,
+    ).toBe(
+      describeImplementerFailure(factory, {
+        code: "IMPLEMENTER_BASE_BRANCH_NOT_FOUND",
+      }),
+    );
+    expect(control("Base branch").getAttribute("aria-invalid")).not.toBe(
+      "true",
+    );
+  });
+});
+
+describe("a base branch that is gone (review of #793)", () => {
+  // #756-T06
+  it("loads the branches again, drops the pick, and tells the person in a sentence instead of marking the stale field", async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    const branches = vi.fn(() => {
+      calls += 1;
+      return Promise.resolve(
+        ok({
+          defaultBranch: "main",
+          branches: calls === 1 ? ["main", "develop"] : ["main"],
+          truncated: false,
+        }),
+      );
+    });
+    const api = fakeApi({
+      branches,
+      startTask: vi.fn(() =>
+        Promise.resolve(refused(404, "IMPLEMENTER_BASE_BRANCH_NOT_FOUND")),
+      ),
+    });
+    renderForm(api);
+    await chooseRepository(user, "acme/widgets");
+    await chooseOption(user, control("Base branch"), "develop");
+    setTask("Add a health endpoint");
+    await chooseOption(user, control("Provider"), "DeepSeek");
+    await chooseOption(user, control("Model"), "DeepSeek Chat");
+
+    await user.click(startButton());
+
+    await waitFor(() => expect(branches).toHaveBeenCalledTimes(2));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      describeImplementerFailure(factory, {
+        code: "IMPLEMENTER_BASE_BRANCH_NOT_FOUND",
+      }),
+    );
+    await waitFor(() =>
+      expect(control("Base branch").textContent).toContain("main"),
+    );
+    expect(control("Base branch").getAttribute("aria-invalid")).not.toBe(
+      "true",
+    );
+  });
+});
+
+describe("a repository the app cannot write to, for the reason that is true (review of #793)", () => {
+  const withReasons = (
+    reasons: Array<[string, RepositoryChoice["unwritable"]]>,
+  ) =>
+    fakeApi({
+      repositories: vi.fn(() =>
+        Promise.resolve(
+          ok({
+            repositories: reasons.map(([fullName, unwritable], index) => ({
+              id: `x${index}`,
+              fullName,
+              writeGranted: false,
+              unwritable,
+            })),
+          }),
+        ),
+      ),
+    });
+
+  // #756-T02
+  it("notes each repository with its own reason, and asks for the new permission only where that is the reason", async () => {
+    const user = userEvent.setup();
+    renderForm(
+      fakeApi({
+        repositories: vi.fn(() =>
+          Promise.resolve(
+            ok({
+              repositories: [
+                ...REPOSITORIES,
+                {
+                  id: "r4",
+                  fullName: "acme/gone",
+                  writeGranted: false,
+                  unwritable: "connection_gone" as const,
+                },
+                {
+                  id: "r5",
+                  fullName: "acme/paused",
+                  writeGranted: false,
+                  unwritable: "connection_suspended" as const,
+                },
+              ],
+            }),
+          ),
+        ),
+      }),
+    );
+    await ready();
+
+    await user.click(control("Repository"));
+    const text = (await screen.findAllByRole("option")).map(
+      (option) => option.textContent,
+    );
+    expect(text).toContain("acme/legacy (approve the new GitHub permission)");
+    expect(text).toContain(
+      `acme/gone (${describeUnwritableNote("connection_gone")})`,
+    );
+    expect(text).toContain(
+      `acme/paused (${describeUnwritableNote("connection_suspended")})`,
+    );
+    expect(describeUnwritableNote("connection_gone")).not.toMatch(/approve/i);
+  });
+
+  // #756-T02
+  it("says the one true thing when every repository is blocked for the same reason", async () => {
+    renderForm(withReasons([["acme/gone", "connection_gone"]]));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      describeUnwritable(factory, "connection_gone"),
+    );
+    expect(alert.textContent).not.toMatch(/approve the new/i);
+  });
+
+  // #756-T02
+  it("says each true thing, once, when the reasons differ", async () => {
+    renderForm(
+      withReasons([
+        ["acme/gone", "connection_gone"],
+        ["acme/legacy", "write_not_granted"],
+        ["acme/other", "write_not_granted"],
+      ]),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      [
+        describeUnwritable(factory, "write_not_granted"),
+        describeUnwritable(factory, "connection_gone"),
+      ].join(" "),
+    );
+  });
+});
+
+describe("after a success (review of #793)", () => {
+  const sent = async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderForm(api);
+    await fillIn(user);
+    await user.click(startButton());
+    await waitFor(() => expect(navigation.push).toHaveBeenCalled());
+    return { user, api };
+  };
+  const pageshow = (persisted: boolean) => {
+    const event = new Event("pageshow");
+    Object.defineProperty(event, "persisted", { value: persisted });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+  };
+
+  // #756-T06
+  it("shows the link to the run at once, beside the sending state", async () => {
+    await sent();
+
+    const link = screen.getByRole("link", { name: "Open the run" });
+    expect(link.getAttribute("href")).toBe("/w/acme/runs/run-1");
+    expect(screen.getByRole("status").textContent).toMatch(/started/i);
+  });
+
+  // #756-T06
+  it("leaves the sending state when the page comes back from the back/forward cache, and keeps the link", async () => {
+    const { user, api } = await sent();
+    const first = api.startTask.mock.calls[0]?.[0] as StartTaskRequest;
+    expect(
+      screen.getByRole("button", { name: /Sending the task/ }),
+    ).toBeTruthy();
+
+    pageshow(true);
+
+    expect(startButton()).toHaveProperty("disabled", false);
+    expect(control("Task")).toHaveProperty("disabled", false);
+    expect(screen.getByRole("link", { name: "Open the run" })).toBeTruthy();
+    // Sent again unchanged it is the same task: same id.
+    await user.click(startButton());
+    await waitFor(() => expect(api.startTask).toHaveBeenCalledTimes(2));
+    expect(api.startTask.mock.calls[1]?.[0].clientRequestId).toBe(
+      first.clientRequestId,
+    );
+  });
+
+  // #756-T06
+  it("ignores the pageshow of an ordinary load", async () => {
+    await sent();
+
+    pageshow(false);
+
+    expect(
+      screen.getByRole("button", { name: /Sending the task/ }),
+    ).toBeTruthy();
+  });
+});
+
+describe("one send at a time (review of #793)", () => {
+  // #756-T06
+  it("starts one task when two submits arrive before the form has re-rendered", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi({
+      startTask: vi.fn(() => new Promise<never>(() => {})),
+    });
+    renderForm(api);
+    await fillIn(user);
+    const form = control("Task").closest("form") as HTMLFormElement;
+
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+
+    expect(api.startTask).toHaveBeenCalledTimes(1);
   });
 });
 

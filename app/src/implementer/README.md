@@ -27,10 +27,12 @@ All four are for every member (`start_implementer_task`, minimum role `member`; 
 it), run through `withWorkspace(...)` after the proxy, and answer `Cache-Control: no-store`. Every request is checked for where it
 comes from (`Sec-Fetch-Site` / `Origin`), the body of the POST for `application/json` and 64 KB. Every refusal is `{ "error": <code> }`.
 
-- `GET /api/w/:workspace/implementer/repositories`: `{ repositories: [{ id, fullName, writeGranted }] }`, the active
+- `GET /api/w/:workspace/implementer/repositories`: `{ repositories: [{ id, fullName, writeGranted, unwritable }] }`, the active
   repositories of the workspace whose integration is active (a project is not needed), by name. `writeGranted` is what the
   installation has accepted (`IntegrationProvider.installationPermissions`, asked once per installation); an installation the
-  platform has removed or refuses reads as `false`, any other failure is `503`.
+  platform has removed or refuses reads as `false`, any other failure is `503`. `unwritable` is `null` where `writeGranted` is true,
+  else the reason: `write_not_granted` (the permission is missing), `connection_gone`, `connection_suspended`, `app_auth_failed`,
+  `scope_refused` or `repository_not_accessible`; the form says a different true thing for each (#756).
 - `GET /api/w/:workspace/implementer/repositories/:repositoryId/branches`: `{ defaultBranch, branches, truncated }`, the default
   branch first, at most 100 names (`getRepositoryFacts` and `listBranches`).
 - `GET /api/w/:workspace/implementer/models`: the options of the picker (below).
@@ -38,20 +40,21 @@ comes from (`Sec-Fetch-Site` / `Origin`), the body of the POST for `application/
 clientRequestId }`: `201 { runId, sessionId }`, `200` with the same ids for a client request id that was accepted before (nothing
   is written then). `model` is `{ entryId }` (operator's key) or `{ provider, model }` (own key).
 
-| Status    | Code                                                                  | When                                                                                                               |
-| --------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 400       | `IMPLEMENTER_REQUEST_INVALID` (+ `issues`)                            | The body or the repository id is not usable; an issue is `{ field, code }`, a branch names the rule it breaks      |
-| 403       | `IMPLEMENTER_CROSS_SITE_REQUEST`                                      | The request is from another site                                                                                   |
-| 404       | `IMPLEMENTER_REPOSITORY_NOT_FOUND`                                    | No such repository in this workspace (another workspace's looks the same), or the platform no longer lists it      |
-| 404       | `IMPLEMENTER_BASE_BRANCH_NOT_FOUND`                                   | The repository has no branch with the base branch's name                                                           |
-| 409       | `IMPLEMENTER_APP_NOT_INSTALLED`                                       | The integration is disabled, or GitHub answers 401, 403 or 404 for the installation or the repository              |
-| 409       | `IMPLEMENTER_WRITE_NOT_GRANTED`                                       | The installation has not accepted contents write (#749); nothing else is asked of GitHub                           |
-| 409       | `IMPLEMENTER_BRANCH_CONFLICT`                                         | The new name is a folder of a listed branch or the other way round (`foo`, `foo/bar`): a new branch name is needed |
-| 409       | `IMPLEMENTER_BRANCH_EXISTS`                                           | The new branch exists on GitHub, or a session of the repository holds the name: **a new branch name is needed**    |
-| 413 / 415 | `IMPLEMENTER_BODY_TOO_LARGE` / `IMPLEMENTER_CONTENT_TYPE_UNSUPPORTED` | A body over 64 KB; a body that is not `application/json`                                                           |
-| 422       | `IMPLEMENTER_MODEL_NOT_ALLOWED` (+ `reason`)                          | The model is not one the claim would run (reasons in `errors.ts`)                                                  |
-| 422       | `EXCEEDS_OPERATOR_MAXIMUM` (+ `maximumCents`)                         | The cost limit is above the operator's maximum per turn                                                            |
-| 503       | `IMPLEMENTER_GITHUB_UNAVAILABLE`                                      | GitHub failed, timed out, was rate limited or answered with something unusable; nothing was written                |
+| Status    | Code                                                                  | When                                                                                                                                                                                                 |
+| --------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400       | `IMPLEMENTER_REQUEST_INVALID` (+ `issues`)                            | The body or the repository id is not usable; an issue is `{ field, code }`, a branch names the rule it breaks                                                                                        |
+| 403       | `IMPLEMENTER_CROSS_SITE_REQUEST`                                      | The request is from another site                                                                                                                                                                     |
+| 404       | `IMPLEMENTER_REPOSITORY_NOT_FOUND`                                    | No such repository in this workspace (another workspace's looks the same), or the platform no longer lists it                                                                                        |
+| 404       | `IMPLEMENTER_BASE_BRANCH_NOT_FOUND`                                   | The repository has no branch with the base branch's name                                                                                                                                             |
+| 409       | `IMPLEMENTER_APP_NOT_INSTALLED`                                       | The integration is disabled, or GitHub answers 401, 403 or 404 for the installation or the repository                                                                                                |
+| 409       | `IMPLEMENTER_WRITE_NOT_GRANTED`                                       | The installation has not accepted contents write (#749); nothing else is asked of GitHub                                                                                                             |
+| 409       | `IMPLEMENTER_BRANCH_CONFLICT`                                         | The new name is a folder of a listed branch or the other way round (`foo`, `foo/bar`): a new branch name is needed                                                                                   |
+| 409       | `IMPLEMENTER_REQUEST_REUSED` (+ `runId`)                              | The client request id made a task before and this body is not that task (another instruction, branch, base branch, repository, model or cost limit): nothing is written, `runId` is the first task's |
+| 409       | `IMPLEMENTER_BRANCH_EXISTS`                                           | The new branch exists on GitHub, or a session of the repository holds the name: **a new branch name is needed**                                                                                      |
+| 413 / 415 | `IMPLEMENTER_BODY_TOO_LARGE` / `IMPLEMENTER_CONTENT_TYPE_UNSUPPORTED` | A body over 64 KB; a body that is not `application/json`                                                                                                                                             |
+| 422       | `IMPLEMENTER_MODEL_NOT_ALLOWED` (+ `reason`)                          | The model is not one the claim would run (reasons in `errors.ts`)                                                                                                                                    |
+| 422       | `EXCEEDS_OPERATOR_MAXIMUM` (+ `maximumCents`)                         | The cost limit is above the operator's maximum per turn                                                                                                                                              |
+| 503       | `IMPLEMENTER_GITHUB_UNAVAILABLE`                                      | GitHub failed, timed out, was rate limited or answered with something unusable; nothing was written                                                                                                  |
 
 A request without a session is answered `401` and one from a person outside the workspace `404 not_found` by `withWorkspace`,
 before any of this runs.
@@ -63,7 +66,10 @@ In this order, each step ends the request on failure, and **nothing is written b
 0. **a request that was accepted before is answered first** (`queue.findImplementerTurn`, by the job's `delivery_id`
    `implementer:<workspace id>:<client request id>`): `200` with the ids of that task, nothing asked of GitHub, nothing written.
    A reconnect or a retry minutes later, after the agent has pushed the branch, gets the first task back and not "the branch
-   exists", so nobody starts a second, paid task by choosing a new name;
+   exists", so nobody starts a second, paid task by choosing a new name. **Only the same task is handed back**: the stored
+   repository, base branch, branch, instruction, model choice and cost limit are compared with the body, and an id that made a
+   different task is `409 IMPLEMENTER_REQUEST_REUSED` with the `runId` of the first one, never a silent `200` for a task the
+   person did not ask for (#756);
 1. the body is valid (`start-input.ts`; the new branch by `branch-name.ts`, which refuses a name equal to the base branch);
 2. the repository is this workspace's (`repositories` is created for the workspace, every read filters by it), active, and its
    integration is active;
@@ -130,17 +136,28 @@ the routes above, so the page reads no secret and no token.
 | `ui/model-picker.tsx`     | The model picker with the select of the settings form: provider then model on the own key, one entry (by the operator's name) on the operator's key, the empty states              |
 | `ui/api.ts`               | The four calls to the routes (`requestJson`), with a stand-in for tests                                                                                                            |
 | `ui/messages.ts`          | A sentence for every stable code (`IMPLEMENTER_ERROR_CODES`), every rule of the branch name and every refusal reason of a model; `messages.test.ts` fails for a missing one        |
-| `ui/cost-limit.ts`        | Dollars as typed to whole cents, refused above the operator's maximum before anything is sent                                                                                      |
+| `ui/cost-limit.ts`        | Dollars as typed to whole cents, refused above the lower of the operator's maximum and $100 before anything is sent                                                                |
 | `ui/branch-suggestion.ts` | `implementer/` and six random lowercase letters or digits, made in the browser (a prerendered name would be the same for everybody)                                                |
 | `ui/use-request.ts`       | Loads one thing from a route; an answer for another repository than the one shown is dropped                                                                                       |
 
-- **A repository without write permission** is listed, disabled, with the note "approve the new GitHub permission". If **no** repository has write
-  permission the form says so plainly (an owner of the GitHub account or organisation approves the new permission on GitHub, then reload) and
-  cannot be sent. Without a linked repository the page links to Connections; without a model it links to the LLM access settings.
+- **A repository that cannot be written to** is listed, disabled, with a note for the reason that is true (`unwritable`): "approve the new GitHub
+  permission" only where the permission is what is missing; a removed or suspended installation, a failed sign-in of the app, a refused scope
+  and an unreachable repository each have their own note and sentence (`describeUnwritable`). If **no** repository can be written to, the form
+  says why, once for each reason, and cannot be sent. Without a linked repository the page links to Connections; without a model it links to
+  the LLM access settings.
+- **A base branch beyond the first 100.** When the route says `truncated`, a field "Another base branch" appears under the list; a name typed
+  there is the base branch (emptied, the list's choice applies). The server refuses a missing base with `404`, which marks the typed field. A
+  base branch that disappeared from the list marks nothing: the list is loaded again, the pick is dropped (the default applies) and a
+  sentence says so.
+- **The cost limit** shown and checked is the lower of the operator's maximum and the route's own bound ($100); the sentence names it.
 - **The branch name** is checked as the server checks it (`checkBranchName`, `validateStartInput`): on leaving the field and at the submit, with one
   sentence per rule. `IMPLEMENTER_BRANCH_EXISTS` and `IMPLEMENTER_BRANCH_CONFLICT` mark the field and say that **a new branch name is needed**.
-- **A retried submit starts one task.** The client request id is made once per load of the form, at the first send, and every later send of
-  that form (after `503`, a lost answer or an edit) carries the same id; the server answers `200` with the first task's ids. The button is
-  disabled while the request is pending, and a second Enter is ignored. Any success (`201` or `200`) goes to `/w/<slug>/runs/<runId>`.
+- **A retried submit starts one task.** The client request id belongs to the body: a send of the same body again (after `503` or a lost
+  answer) carries the same id and the server answers `200` with the first task's ids; a body that was edited since is another task and gets
+  a new id (a body that went back to an earlier one gets that one's id again). If the server still names another task for the id
+  (`IMPLEMENTER_REQUEST_REUSED`), the form says a task with this form was already started and links to it. The button is disabled while the
+  request is pending, and a second Enter, even one in the same tick, is ignored. Any success (`201` or `200`) goes to
+  `/w/<slug>/runs/<runId>`; the link to the run is shown at once, and a page that comes back from the back/forward cache (`pageshow`,
+  `persisted`) leaves the sending state.
 - No text from GitHub or from a response is shown: every refusal is a fixed sentence for its code, and a code the page does not know gets the
   generic sentence.

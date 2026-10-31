@@ -252,7 +252,12 @@ describe("the Implementer route files", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       repositories: [
-        { id: repository.id, fullName: "acme/widgets", writeGranted: true },
+        {
+          id: repository.id,
+          fullName: "acme/widgets",
+          writeGranted: true,
+          unwritable: null,
+        },
       ],
     });
   });

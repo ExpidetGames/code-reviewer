@@ -64,7 +64,12 @@ describe("the lists of the form over HTTP", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       repositories: [
-        { id: repository.id, fullName: "acme/widgets", writeGranted: true },
+        {
+          id: repository.id,
+          fullName: "acme/widgets",
+          writeGranted: true,
+          unwritable: null,
+        },
       ],
     });
   });
@@ -76,7 +81,7 @@ describe("the lists of the form over HTTP", () => {
     const response = await get("repositories");
 
     expect(await response.json()).toMatchObject({
-      repositories: [{ writeGranted: false }],
+      repositories: [{ writeGranted: false, unwritable: "write_not_granted" }],
     });
   });
 
@@ -273,6 +278,20 @@ describe("starting a task over HTTP", () => {
       error: "IMPLEMENTER_BRANCH_EXISTS",
     });
     expect(await counts()).toEqual({ jobs: 1, sessions: 1, turns: 1 });
+  });
+
+  // #756 (review of #793)
+  it("answers 409 IMPLEMENTER_REQUEST_REUSED with the run of the first task for an id that made another task", async () => {
+    const { post, body } = await setup();
+    const first = (await (await post(body())).json()) as { runId: string };
+
+    const response = await post(body({ instruction: "Another task." }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "IMPLEMENTER_REQUEST_REUSED",
+      runId: first.runId,
+    });
   });
 
   // #755-T04

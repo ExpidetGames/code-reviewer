@@ -6,8 +6,10 @@
 // model and an optional cost limit. It talks to the four routes of #755 only (`api.ts`), reads no secret and no token, and shows no
 // text of GitHub: every refusal is a fixed sentence for its code (`messages.ts`).
 //
-// One form load is one task: the client request id is made once, at the first send, and every later send of this form (after a
-// failed or a lost answer) carries the same id, so a retry that reaches the server twice starts one task.
+// One body is one task: the client request id belongs to what is sent. A send of the same body again (after a failed or a lost
+// answer) carries the same id, so a retry that reaches the server twice starts one task; a body that was edited since is another
+// task and gets a new id (the server would answer the id of the first task with a conflict, never with the first task as if it
+// were the edited one).
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -28,7 +30,7 @@ import {
 } from "../../review-settings/ui/model-select.tsx";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { checkBranchName } from "../branch-name.ts";
-import type { ImplementerIssue } from "../errors.ts";
+import { UNWRITABLE_REASONS, type ImplementerIssue } from "../errors.ts";
 import { INSTRUCTION_MAX_LENGTH, validateStartInput } from "../start-input.ts";
 import {
   browserImplementerApi,
@@ -41,6 +43,8 @@ import { FormField } from "./form-field.tsx";
 import {
   describeFieldIssue,
   describeImplementerFailure,
+  describeUnwritable,
+  describeUnwritableNote,
   FORM_COPY,
 } from "./messages.ts";
 import {
@@ -54,6 +58,8 @@ import { useRequest } from "./use-request.ts";
 type FieldKey =
   "repository" | "baseBranch" | "branch" | "instruction" | "model" | "cost";
 type Errors = Partial<Record<FieldKey, string>>;
+/** A sentence on the form that is no field's; for a request id that made another task it brings the link to that task. */
+type Problem = { sentence: string; runId?: string };
 
 const FIELD_OF_ISSUE: Record<ImplementerIssue["field"], FieldKey | null> = {
   repositoryId: "repository",
@@ -136,11 +142,16 @@ export function ImplementerForm({
   });
   const [cost, setCost] = useState("");
   const [errors, setErrors] = useState<Errors>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [pending, setPending] = useState(false);
+  // The run of a task that was accepted: its link stays on the form, whether or not the page changes.
+  const [started, setStarted] = useState<string | null>(null);
+  // A base branch typed when the list of branches is cut short.
+  const [baseTyped, setBaseTyped] = useState("");
   // Set at once on a send (a state update comes too late for a second Enter) and kept after a success until the page is left.
   const sending = useRef(false);
-  const requestId = useRef<string | null>(null);
+  // The client request id of each body that was sent, by its content: the same body again is the same task.
+  const requestIds = useRef(new Map<string, string>());
   const [focusRequest, setFocusRequest] = useState(0);
 
   const [repositories, reloadRepositories] = useRequest(
@@ -155,6 +166,17 @@ export function ImplementerForm({
     loadBranches,
   );
 
+  // The page comes back from the back/forward cache with the form as it was left, in its sending state: the person may be here to
+  // correct something or to send again.
+  useEffect(() => {
+    function onPageShow(event: PageTransitionEvent) {
+      if (!event.persisted) return;
+      sending.current = false;
+      setPending(false);
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
   // After a refused send the first field with a message gets the focus.
   useEffect(() => {
     if (focusRequest === 0) return;
@@ -169,12 +191,15 @@ export function ImplementerForm({
     (repository) => repository.writeGranted,
   );
   const branchList = branches.state === "ready" ? branches.data : undefined;
-  const baseBranch =
+  const pickedBase =
     branchList === undefined
       ? ""
       : basePick !== "" && branchList.branches.includes(basePick)
         ? basePick
         : branchList.defaultBranch;
+  // A name typed beside the list counts once the list is cut short: it names a branch the list does not show.
+  const typedBase = branchList?.truncated === true ? baseTyped.trim() : "";
+  const baseBranch = typedBase !== "" ? typedBase : pickedBase;
   const modelOptions = models.state === "ready" ? models.data : undefined;
   const choice = modelChoiceOf(modelOptions, modelPick);
 
@@ -184,17 +209,19 @@ export function ImplementerForm({
       for (const key of keys) delete next[key];
       return next;
     });
-    setFormError(null);
+    setProblem(null);
   }
 
   function chooseRepository(id: string) {
     setRepositoryId(id);
     setBasePick("");
+    setBaseTyped("");
     clear("repository", "baseBranch", "branch");
   }
 
   /** What is wrong with the form as it stands, with the sentences of the server's own codes; the request when nothing is. */
-  function check(): { request: StartTaskRequest } | { errors: Errors } {
+  function check():
+    { body: Omit<StartTaskRequest, "clientRequestId"> } | { errors: Errors } {
     const found: Errors = {};
     const costLimit = parseCostLimit(cost, operatorMaximumCents);
     if (!costLimit.ok)
@@ -205,7 +232,6 @@ export function ImplementerForm({
               code: "EXCEEDS_OPERATOR_MAXIMUM",
               maximumCents: costLimit.maximumCents,
             });
-    requestId.current ??= newClientRequestId();
     const body = {
       repositoryId,
       baseBranch,
@@ -215,9 +241,9 @@ export function ImplementerForm({
       ...(costLimit.ok && costLimit.cents !== null
         ? { costLimitCents: costLimit.cents }
         : {}),
-      clientRequestId: requestId.current,
     };
-    const checked = validateStartInput(body);
+    // Any valid id will do for the check; the id of the send is made when the body is sent.
+    const checked = validateStartInput({ ...body, clientRequestId: "check" });
     if (!checked.ok)
       for (const issue of checked.issues) {
         const key = FIELD_OF_ISSUE[issue.field];
@@ -227,8 +253,11 @@ export function ImplementerForm({
         found[key] ??= describeFieldIssue(issue.field, issue.code);
       }
     if (Object.keys(found).length > 0) return { errors: found };
-    return { request: body as StartTaskRequest };
+    return { body: body as Omit<StartTaskRequest, "clientRequestId"> };
   }
+
+  const runPath = (runId: string) =>
+    workspacePath(workspaceSlug, `/runs/${encodeURIComponent(runId)}`);
 
   function checkBranch() {
     const result = checkBranchName(branch, baseBranch);
@@ -246,23 +275,25 @@ export function ImplementerForm({
     const checked = check();
     if ("errors" in checked) {
       setErrors(checked.errors);
-      setFormError(null);
+      setProblem(null);
       setFocusRequest((count) => count + 1);
       return;
     }
     sending.current = true;
     setPending(true);
     setErrors({});
-    setFormError(null);
-    const result = await api.startTask(checked.request);
+    setProblem(null);
+    // The same body is the same task, so it keeps its id; an edited body is another task.
+    const fingerprint = JSON.stringify(checked.body);
+    const clientRequestId =
+      requestIds.current.get(fingerprint) ?? newClientRequestId();
+    requestIds.current.set(fingerprint, clientRequestId);
+    const result = await api.startTask({ ...checked.body, clientRequestId });
     if (result.ok) {
-      // Stay "sending" until the page changes: a second click on the way must not start a second task.
-      router.push(
-        workspacePath(
-          workspaceSlug,
-          `/runs/${encodeURIComponent(result.data.runId)}`,
-        ),
-      );
+      // Stay "sending" until the page changes (a second click on the way must not start a second task), and show the way to the
+      // run in case the page does not change.
+      setStarted(result.data.runId);
+      router.push(runPath(result.data.runId));
       return;
     }
     sending.current = false;
@@ -275,7 +306,20 @@ export function ImplementerForm({
     };
     const sentence = describeImplementerFailure(product, failure);
     const field = FIELD_OF_FAILURE[result.code];
-    if (
+    const lostBase =
+      result.code === "IMPLEMENTER_BASE_BRANCH_NOT_FOUND" && typedBase === "";
+    if (lostBase) {
+      // The list the person chose from is out of date: load it again, drop the pick (the default applies), and say so. A mark on
+      // the field would stay on after the new list has a valid base.
+      setBasePick("");
+      setProblem({ sentence });
+      reloadBranches();
+    } else if (
+      result.code === "IMPLEMENTER_REQUEST_REUSED" &&
+      typeof result.details?.runId === "string"
+    ) {
+      setProblem({ sentence, runId: result.details.runId });
+    } else if (
       result.code === "IMPLEMENTER_REQUEST_INVALID" &&
       result.issues.length > 0
     ) {
@@ -291,17 +335,23 @@ export function ImplementerForm({
           );
       }
       setErrors(found);
-      setFormError(rest ? sentence : null);
+      setProblem(rest ? { sentence } : null);
     } else if (field !== undefined) {
       setErrors({ [field]: sentence });
     } else {
-      setFormError(sentence);
+      setProblem({ sentence });
     }
-    // The base branch is gone: the list is out of date.
-    if (result.code === "IMPLEMENTER_BASE_BRANCH_NOT_FOUND") reloadBranches();
     setFocusRequest((count) => count + 1);
   }
 
+  // Why the repositories cannot be written to, each reason once, in the order of the list of reasons.
+  const blockedReasons = UNWRITABLE_REASONS.filter((reason) =>
+    repositoryList.some(
+      (repository) =>
+        !repository.writeGranted &&
+        (repository.unwritable ?? "write_not_granted") === reason,
+    ),
+  );
   const noWriteAnywhere =
     repositories.state === "ready" &&
     repositoryList.length > 0 &&
@@ -344,7 +394,13 @@ export function ImplementerForm({
     label: repository.fullName,
     ...(repository.writeGranted
       ? {}
-      : { note: FORM_COPY.writeNote, disabled: true }),
+      : {
+          // A server that does not name the reason (during a deployment) can only mean the permission.
+          note: describeUnwritableNote(
+            repository.unwritable ?? "write_not_granted",
+          ),
+          disabled: true,
+        }),
   }));
   const branchOptions: ModelOption[] = (branchList?.branches ?? []).map(
     (name) => ({
@@ -365,9 +421,9 @@ export function ImplementerForm({
     >
       {noWriteAnywhere ? (
         <Alert variant="warning">
-          {describeImplementerFailure(product, {
-            code: "IMPLEMENTER_WRITE_NOT_GRANTED",
-          })}
+          {blockedReasons
+            .map((reason) => describeUnwritable(product, reason))
+            .join(" ")}
         </Alert>
       ) : null}
       <fieldset disabled={pending} className="flex flex-col gap-6">
@@ -389,13 +445,14 @@ export function ImplementerForm({
           <ModelSelect
             name="baseBranch"
             label={FORM_COPY.baseBranch}
-            value={baseBranch}
+            value={pickedBase}
             options={branchOptions}
             onChange={(name) => {
               setBasePick(name);
+              setBaseTyped("");
               clear("baseBranch");
             }}
-            error={errors.baseBranch}
+            error={typedBase === "" ? errors.baseBranch : undefined}
             disabled={branchList === undefined}
             placeholder={
               branches.state === "loading"
@@ -413,9 +470,31 @@ export function ImplementerForm({
             />
           ) : null}
           {branchList?.truncated === true ? (
-            <p className="text-sm text-muted-foreground">
-              {FORM_COPY.branchesTruncated}
-            </p>
+            <>
+              <p className="text-sm text-muted-foreground">
+                {FORM_COPY.branchesTruncated}
+              </p>
+              <FormField
+                name="baseBranchOther"
+                label={FORM_COPY.otherBase}
+                hint={FORM_COPY.otherBaseHint}
+                error={typedBase === "" ? undefined : errors.baseBranch}
+              >
+                {(control) => (
+                  <Input
+                    {...control}
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={baseTyped}
+                    onChange={(event) => {
+                      setBaseTyped(event.target.value);
+                      clear("baseBranch");
+                    }}
+                  />
+                )}
+              </FormField>
+            </>
           ) : null}
         </div>
         <FormField
@@ -511,8 +590,29 @@ export function ImplementerForm({
           )}
         </FormField>
       </fieldset>
-      {formError !== null ? (
-        <Alert variant="destructive">{formError}</Alert>
+      {started !== null ? (
+        <Alert variant="success" role="status">
+          {FORM_COPY.started}{" "}
+          <Link
+            href={runPath(started)}
+            className="font-semibold underline underline-offset-4"
+          >
+            {FORM_COPY.openRun}
+          </Link>
+        </Alert>
+      ) : null}
+      {problem !== null ? (
+        <div className="flex flex-col items-start gap-3">
+          <Alert variant="destructive">{problem.sentence}</Alert>
+          {problem.runId === undefined ? null : (
+            <Link
+              href={runPath(problem.runId)}
+              className="font-semibold underline underline-offset-4"
+            >
+              {FORM_COPY.openThatTask}
+            </Link>
+          )}
+        </div>
       ) : null}
       <div>
         <Button

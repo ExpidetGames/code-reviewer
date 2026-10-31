@@ -6,12 +6,18 @@ import { describe, expect, it } from "vitest";
 import { identityFor } from "../../product-identity/identities.ts";
 import { TRANSPORT_ERROR_CODES } from "../../ui/json-request.ts";
 import { BRANCH_NAME_ISSUES } from "../branch-name.ts";
-import { IMPLEMENTER_ERROR_CODES, MODEL_REFUSAL_REASONS } from "../errors.ts";
+import {
+  IMPLEMENTER_ERROR_CODES,
+  MODEL_REFUSAL_REASONS,
+  UNWRITABLE_REASONS,
+} from "../errors.ts";
 import {
   describeBranchIssue,
   describeFieldIssue,
   describeImplementerFailure,
   describeModelRefusal,
+  describeUnwritable,
+  describeUnwritableNote,
   MODEL_REFUSAL_COPY_REASONS,
 } from "./messages.ts";
 
@@ -129,5 +135,54 @@ describe("the sentences of the Implementer page", () => {
         reason: "not-a-reason",
       }),
     ).toMatch(/model/i);
+  });
+});
+
+describe("the reasons a repository cannot be sent a task (review of #793)", () => {
+  // #756-T08
+  it("has a sentence and a note of its own for every reason, and each says what is true", () => {
+    const sentences = new Set<string>();
+    const notes = new Set<string>();
+    for (const reason of UNWRITABLE_REASONS) {
+      const sentence = describeUnwritable(factory, reason);
+      expect(sentence, reason).toMatch(/\w+ \w+ /);
+      expect(sentence.endsWith("."), reason).toBe(true);
+      sentences.add(sentence);
+      notes.add(describeUnwritableNote(reason));
+    }
+    expect(sentences.size).toBe(UNWRITABLE_REASONS.length);
+    expect(notes.size).toBe(UNWRITABLE_REASONS.length);
+  });
+
+  // #756-T08
+  it("asks for the new permission only where the permission is what is missing", () => {
+    expect(describeUnwritableNote("write_not_granted")).toBe(
+      "approve the new GitHub permission",
+    );
+    for (const reason of UNWRITABLE_REASONS) {
+      if (reason === "write_not_granted") continue;
+      expect(describeUnwritableNote(reason), reason).not.toMatch(/approve/i);
+      expect(describeUnwritable(factory, reason), reason).not.toMatch(
+        /approve the new/i,
+      );
+    }
+    expect(describeUnwritable(factory, "write_not_granted")).toBe(
+      describeImplementerFailure(factory, {
+        code: "IMPLEMENTER_WRITE_NOT_GRANTED",
+      }),
+    );
+    expect(describeUnwritable(factory, "connection_gone")).toMatch(/removed/i);
+    expect(describeUnwritable(factory, "connection_suspended")).toMatch(
+      /suspended/i,
+    );
+  });
+
+  // #756-T08
+  it("says a task with this form was already started when the request id was used for another task", () => {
+    expect(
+      describeImplementerFailure(factory, {
+        code: "IMPLEMENTER_REQUEST_REUSED",
+      }),
+    ).toMatch(/already started/i);
   });
 });

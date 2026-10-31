@@ -3,7 +3,11 @@
 // The cost limit field of the Implementer form (#756): dollars as a person types them, whole cents as the route takes them, and
 // a value above the operator's maximum is refused before anything is sent.
 import { describe, expect, it } from "vitest";
-import { costLimitPlaceholder, parseCostLimit } from "./cost-limit.ts";
+import {
+  costLimitPlaceholder,
+  effectiveMaximumCents,
+  parseCostLimit,
+} from "./cost-limit.ts";
 
 describe("the cost limit of a task", () => {
   // #756-T10
@@ -42,10 +46,24 @@ describe("the cost limit of a task", () => {
     });
     expect(parseCostLimit("5.00", 500)).toEqual({ ok: true, cents: 500 });
     expect(parseCostLimit("100", 10_000)).toEqual({ ok: true, cents: 10_000 });
-    expect(parseCostLimit("100.01", 20_000)).toMatchObject({
+  });
+
+  // #756-T10 (review of #793)
+  it("shows and checks the lower of the operator's maximum and the route's $100, and names that maximum", () => {
+    expect(effectiveMaximumCents(20_000)).toBe(10_000);
+    expect(effectiveMaximumCents(500)).toBe(500);
+    expect(parseCostLimit("150", 20_000)).toEqual({
       ok: false,
-      code: "invalid",
+      code: "above_maximum",
+      maximumCents: 10_000,
     });
+    expect(parseCostLimit("100.01", 20_000)).toEqual({
+      ok: false,
+      code: "above_maximum",
+      maximumCents: 10_000,
+    });
+    expect(parseCostLimit("100", 20_000)).toEqual({ ok: true, cents: 10_000 });
+    expect(costLimitPlaceholder(20_000)).toBe("Max $100.00");
   });
 
   // #756-T10

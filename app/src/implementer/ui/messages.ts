@@ -21,19 +21,21 @@ import {
   type ImplementerErrorCode,
   type ImplementerIssue,
   type ModelRefusalReason,
+  type UnwritableReason,
 } from "../errors.ts";
 
 /** The words of the labels, hints and empty states of the form. */
 export const FORM_COPY = {
   repository: "Repository",
   repositoryPlaceholder: "Choose a repository",
-  /** The note of a repository the installation may not write to: the reason it cannot be chosen. */
-  writeNote: "approve the new GitHub permission",
   baseBranch: "Base branch",
   baseBranchPlaceholder: "Choose a base branch",
   defaultMark: "default",
   branchesTruncated:
-    "The repository has more branches than are listed here. Only the first ones are shown.",
+    "The repository has more branches than are listed here. To start from one that is not listed, type the name of the branch below.",
+  otherBase: "Another base branch",
+  otherBaseHint:
+    "Leave empty to use the branch chosen above. The name must be a branch that exists on GitHub.",
   newBranch: "New branch name",
   newBranchHint:
     "The branch the agent pushes to. It must not exist yet. You can change the suggested name.",
@@ -49,6 +51,9 @@ export const FORM_COPY = {
   start: "Start task",
   starting: "Sending the task",
   tryAgain: "Try again",
+  started: "The task was started.",
+  openRun: "Open the run",
+  openThatTask: "Open that task",
   loading: "Loading",
   noRepositoryBefore: "No repository is linked yet. Link one under",
   noRepositoryLink: "Connections",
@@ -59,6 +64,20 @@ export const FORM_COPY = {
   deprecatedNote: "deprecated",
   alphaNote: "alpha",
 } as const;
+
+const UNWRITABLE_NOTES: Record<UnwritableReason, string> = {
+  write_not_granted: "approve the new GitHub permission",
+  connection_gone: "the GitHub App was removed",
+  connection_suspended: "the GitHub App is suspended",
+  app_auth_failed: "GitHub rejected the GitHub App",
+  scope_refused: "GitHub refuses the GitHub App access",
+  repository_not_accessible: "the GitHub App cannot reach it",
+};
+
+/** The short note beside a repository that is listed but cannot be chosen: the reason, in a few words. */
+export function describeUnwritableNote(reason: UnwritableReason): string {
+  return UNWRITABLE_NOTES[reason];
+}
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -197,6 +216,30 @@ export type ImplementerFailure = {
   maximumCents?: unknown;
 };
 
+const writeNotGranted = (product: ProductIdentity) =>
+  `The GitHub App has no permission to write to your repositories yet, so no task can start. Ask an owner of the GitHub account or organisation to open the installation of ${product.name} on GitHub and approve the new permission (contents: read and write). Then reload this page.`;
+
+/** The sentence for why no task can start in a repository, for the reason that is true. */
+export function describeUnwritable(
+  product: ProductIdentity,
+  reason: UnwritableReason,
+): string {
+  switch (reason) {
+    case "write_not_granted":
+      return writeNotGranted(product);
+    case "connection_gone":
+      return `The ${product.name} GitHub App was removed from this GitHub account or organisation, so no task can start. Install it again under Connections, then reload this page.`;
+    case "connection_suspended":
+      return `The ${product.name} GitHub App is suspended on GitHub, so no task can start. An owner of the GitHub account or organisation has to unsuspend it in the installation settings on GitHub. Then reload this page.`;
+    case "app_auth_failed":
+      return `GitHub rejected the sign-in of the ${product.name} GitHub App, so no task can start. Try again in a moment. If it stays, the operator has to check the credentials of the GitHub App.`;
+    case "scope_refused":
+      return `GitHub refuses the ${product.name} GitHub App access to this installation, so no task can start. Check the permissions and the repository access of the installation on GitHub, then reload this page.`;
+    case "repository_not_accessible":
+      return `The ${product.name} GitHub App cannot reach this repository on GitHub, so no task can start. Check that the installation still includes it, then reload this page.`;
+  }
+}
+
 const failureCopy = (
   product: ProductIdentity,
   failure: ImplementerFailure,
@@ -209,13 +252,15 @@ const failureCopy = (
   IMPLEMENTER_REPOSITORY_NOT_FOUND:
     "This repository is not available in this workspace any more. Reload the page and choose another.",
   IMPLEMENTER_APP_NOT_INSTALLED: `${product.name} can no longer reach this repository on GitHub. Check that the GitHub App is still installed for it, then reload the page.`,
-  IMPLEMENTER_WRITE_NOT_GRANTED: `The GitHub App has no permission to write to your repositories yet, so no task can start. Ask an owner of the GitHub account or organisation to open the installation of ${product.name} on GitHub and approve the new permission (contents: read and write). Then reload this page.`,
+  IMPLEMENTER_WRITE_NOT_GRANTED: writeNotGranted(product),
   IMPLEMENTER_BASE_BRANCH_NOT_FOUND:
     "The base branch does not exist on GitHub any more. Choose another base branch.",
   IMPLEMENTER_BRANCH_EXISTS:
     "A branch or an earlier task of this repository already uses this branch name. A new branch name is needed: change the name and send the task again.",
   IMPLEMENTER_BRANCH_CONFLICT:
     "This name clashes with a branch of the repository: a branch name cannot be a folder of another (foo and foo/bar). A new branch name is needed.",
+  IMPLEMENTER_REQUEST_REUSED:
+    "A task with this form was already started, and what you sent now is not that task. Open the task that was started, or reload the page to send a new one.",
   IMPLEMENTER_MODEL_NOT_ALLOWED: hasReason(failure.reason)
     ? MODEL_REFUSAL_COPY[failure.reason]
     : MODEL_REFUSED_GENERIC,
