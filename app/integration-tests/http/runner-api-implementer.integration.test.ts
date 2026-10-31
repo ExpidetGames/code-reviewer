@@ -19,7 +19,6 @@ import type { ManagedAvailabilityJson } from "../../src/model-prices/availabilit
 import type { PriceBookJson } from "../../src/model-prices/price-book.ts";
 import type { JobModelEntry } from "../../src/models-dev/job-entry.ts";
 import { createNativeCostService } from "../../src/native-cost/service.ts";
-import { JOB_TOKEN_PERMISSIONS } from "../../src/integrations/providers/github-app/job-access.ts";
 import { createContractValidator } from "../../src/test-support/runner-contract.ts";
 import {
   goodResult,
@@ -93,6 +92,13 @@ const READ_ONLY = {
   issues: "write",
   checks: "write",
 } as const;
+// What the token of a review job may do (the provider's own constant is not importable here): it never writes contents.
+const REVIEW_TOKEN_PERMISSIONS = {
+  pull_requests: "write",
+  issues: "write",
+  contents: "read",
+  metadata: "read",
+};
 const contract = createContractValidator();
 
 function entitlements(keyMode: "own" | "managed"): EntitlementsData {
@@ -329,7 +335,7 @@ describe("the Worker's fetch of a turn", () => {
         .tokenRequests()
         .filter((request) => request.permissions?.pull_requests === "write"),
     ).toEqual([
-      expect.objectContaining({ permissions: JOB_TOKEN_PERMISSIONS }),
+      expect.objectContaining({ permissions: REVIEW_TOKEN_PERMISSIONS }),
     ]);
   });
 

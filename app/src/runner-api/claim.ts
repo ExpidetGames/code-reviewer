@@ -85,7 +85,6 @@ import {
   type ClaimResponse,
   type DynamicModelCapabilities,
   type DynamicReviewOptions,
-  type RunnerJobInput,
   type SplitClaimResponse,
 } from "./contract.ts";
 import type { RunnerEngine } from "../jobs/runner-capabilities.ts";
