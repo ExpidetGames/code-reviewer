@@ -3,11 +3,10 @@
 """What the Implementer's result says about the branch (#764): the commits since the start commit
 and the files that differ, read as the agent's user from its repository, bounded and sanitised."""
 
-from workspace_support import Rig, agent_git
-
 from code_reviewer_runner.implementer.git_workspace import GitWorkspace
 from code_reviewer_runner.implementer.history import ChangeKind, CommitInfo, FileChange
 from git_support import raw
+from workspace_support import Rig, agent_git
 
 
 def commit_file(workspace: GitWorkspace, name: str, content: str, message: str) -> str:

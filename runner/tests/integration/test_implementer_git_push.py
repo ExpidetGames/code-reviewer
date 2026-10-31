@@ -15,12 +15,6 @@ import tracemalloc
 from pathlib import Path
 
 import pytest
-from workspace_support import (
-    BRANCH,
-    IDENTITY,
-    Rig,
-    agent_git,
-)
 
 from code_reviewer_runner.implementer import git_workspace
 from code_reviewer_runner.implementer.git_workspace import (
@@ -33,6 +27,12 @@ from code_reviewer_runner.implementer.git_workspace import (
 from code_reviewer_runner.job import JobError
 from code_reviewer_runner.result import ErrorCode
 from git_support import TOKEN, HttpOrigin, raw, still_running
+from workspace_support import (
+    BRANCH,
+    IDENTITY,
+    Rig,
+    agent_git,
+)
 
 NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
 

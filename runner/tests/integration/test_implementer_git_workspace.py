@@ -17,14 +17,6 @@ import threading
 from pathlib import Path
 
 import pytest
-from workspace_support import (
-    BRANCH,
-    IDENTITY,
-    Rig,
-    agent_git,
-    reset_to,
-    spool_lines,
-)
 
 from code_reviewer_runner.implementer.git_workspace import (
     LEFTOVER_MESSAGE,
@@ -40,6 +32,14 @@ from git_support import (
     files_mentioning,
     processes_mentioning,
     raw,
+)
+from workspace_support import (
+    BRANCH,
+    IDENTITY,
+    Rig,
+    agent_git,
+    reset_to,
+    spool_lines,
 )
 
 

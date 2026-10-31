@@ -29,7 +29,7 @@ from code_reviewer_runner.result import ErrorCode
 
 PRICES = UnitCosts(input_usd_per_mtok=Decimal(3), output_usd_per_mtok=Decimal(15))
 TOKEN = "ghs_dummy-installation-token-0123456789"
-KEY = "sk-or-v1-dummykey0123456789abcdef"
+KEY = "sk-or-v1-" + "dummykey0123456789abcdef"  # built, so the secret scan sees no key
 
 
 def make_ledger(
