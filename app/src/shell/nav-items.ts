@@ -3,7 +3,7 @@
 // The places of the signed in app, grouped the way the sidebar shows them. One list feeds the
 // navigation, so the labels, the links and the active state cannot drift apart. The places belong to
 // a workspace: their addresses are below `/w/<slug>` (src/workspaces/paths.ts), and the navigation
-// shows them while the page is in a workspace. The groups are daily work (Projects, Runs), then a
+// shows them while the page is in a workspace. The groups are daily work (Projects, Implementer, Runs), then a
 // separator, then the workspace administration (Connections, Members, Settings); #168 says Members
 // stays a top-level item. The first place is the QA area, which the product names (`qaAreaName`, #757): its address is
 // `/projects` in every product.
@@ -31,6 +31,7 @@ const NAV_GROUPS: readonly { items: readonly NavPlace[] }[] = [
         label: (product) => product.qaAreaName,
         capability: "review",
       },
+      { path: "/implementer", label: "Implementer", capability: "implementer" },
       { path: "/runs", label: "Runs", capability: "review" },
     ],
   },

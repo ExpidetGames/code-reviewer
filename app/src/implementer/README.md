@@ -2,7 +2,7 @@
 
 Part of the Implementer of the factory deployment (epic #745, `plans/implementer-slice.md`). This folder is the server side of
 "send off a task": which repositories, branches and models a person can pick, and the validated submit that writes a session, a
-turn and a queued job. The page that uses it comes with #756. It follows the pattern of `manual-reviews`.
+turn and a queued job. The page that uses it is `/w/<slug>/implementer` (#756, below). It follows the pattern of `manual-reviews`.
 
 The routes exist only in a deployment with the capability `implementer` (the product `factory`, switched on by
 `PRODUCT_CAPABILITIES`). Everywhere else every route below is **absent**: the access proxy answers it as a path that does not
@@ -115,3 +115,32 @@ Unit: `branch-name.test.ts` (more than 30 names, a subset cross-checked against 
 `http.integration.test.ts` (the handlers), `integration-tests/http/implementer-route-files.integration.test.ts` (the real route
 files with the running server's wiring, also in the deployments without the capability). Byte-for-byte equality of the 404 with a
 path that does not exist runs in the hosted lane (`e2e/hosted/capabilities.e2e.ts`).
+
+## The page (#756)
+
+`src/app/(app)/w/[workspace]/implementer/page.tsx` and `ui/`. The page is in the sidebar between the QA area and Runs (`shell/nav-items.ts`,
+capability `implementer`) and, like the routes, is **absent** outside the capability: `routes.ts` classifies it `implementer`, the proxy answers
+it as a path that does not exist, and the page asks again (`requireImplementerCapability()`) before it looks at the session. The server hands
+the form the workspace and the operator's maximum cost per task and nothing else; the form loads the repositories, branches and models through
+the routes above, so the page reads no secret and no token.
+
+| File                      | Role                                                                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ui/implementer-form.tsx` | The form: repository, base branch (the default one preselected and marked), new branch, task (20,000 characters, counter), model, optional cost limit; the submit and its refusals |
+| `ui/model-picker.tsx`     | The model picker with the select of the settings form: provider then model on the own key, one entry (by the operator's name) on the operator's key, the empty states              |
+| `ui/api.ts`               | The four calls to the routes (`requestJson`), with a stand-in for tests                                                                                                            |
+| `ui/messages.ts`          | A sentence for every stable code (`IMPLEMENTER_ERROR_CODES`), every rule of the branch name and every refusal reason of a model; `messages.test.ts` fails for a missing one        |
+| `ui/cost-limit.ts`        | Dollars as typed to whole cents, refused above the operator's maximum before anything is sent                                                                                      |
+| `ui/branch-suggestion.ts` | `implementer/` and six random lowercase letters or digits, made in the browser (a prerendered name would be the same for everybody)                                                |
+| `ui/use-request.ts`       | Loads one thing from a route; an answer for another repository than the one shown is dropped                                                                                       |
+
+- **A repository without write permission** is listed, disabled, with the note "approve the new GitHub permission". If **no** repository has write
+  permission the form says so plainly (an owner of the GitHub account or organisation approves the new permission on GitHub, then reload) and
+  cannot be sent. Without a linked repository the page links to Connections; without a model it links to the LLM access settings.
+- **The branch name** is checked as the server checks it (`checkBranchName`, `validateStartInput`): on leaving the field and at the submit, with one
+  sentence per rule. `IMPLEMENTER_BRANCH_EXISTS` and `IMPLEMENTER_BRANCH_CONFLICT` mark the field and say that **a new branch name is needed**.
+- **A retried submit starts one task.** The client request id is made once per load of the form, at the first send, and every later send of
+  that form (after `503`, a lost answer or an edit) carries the same id; the server answers `200` with the first task's ids. The button is
+  disabled while the request is pending, and a second Enter is ignored. Any success (`201` or `200`) goes to `/w/<slug>/runs/<runId>`.
+- No text from GitHub or from a response is shown: every refusal is a fixed sentence for its code, and a code the page does not know gets the
+  generic sentence.
