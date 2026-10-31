@@ -90,7 +90,11 @@ never selected — it keeps waiting without an attempt being counted and without
 created. A runner advertises `opencode` only when it is the Dynamic runner and its startup self-check
 passed (a default runner never does), so a Dynamic job that no such runner claims is
 **cancelled** after `noCapableRunnerMs` (default 30 minutes, `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS`) with
-the stable code `no_capable_runner`. That is the one exception to "waiting forever": it is a bounded
+the stable code `no_capable_runner`, **unless a runner of the engine is busy** (#752): while a job of the same kind is `running`, or ended after a
+claim within that deadline by anything but the reaper (`lease_expired`, `timeout`, `command_removed` are no proof a runner worked), the job keeps
+waiting, up to the absolute limit `noCapableRunnerAbsoluteMs` (3 hours, `DEFAULT_NO_CAPABLE_RUNNER_ABSOLUTE_MS`; not a setting; an
+operator's `noCapableRunnerMs` above it wins). The pass runs after the lease and runtime passes of `expire`, so a crashed or hung runner's job
+is not `running` when it is looked at; the lookup is served by the partial index `jobs_ended_after_claim` and `jobs_status_run_after`. That is the one exception to "waiting forever": it is a bounded
 outcome, not a failed review, and no attempt is counted. This initial-claim deadline starts at the
 later of creation and `run_after`, so a scheduled delay does not consume the waiting budget. Jobs
 already claimed (`attempts > 0` after lease loss/release) follow the existing lease/attempt/backoff
@@ -136,7 +140,8 @@ What differs from a review, and why a consumer that assumes a pull request is ga
   (`status: "existing"`) and writes nothing; it is looked up before the session is created, and two racing requests find each other.
 - **Claim.** `REVIEW_KINDS_OF_ENGINE`: the engine `implementer` serves this kind and nothing else, and no other engine serves it. A
   runner without the engine never selects the job, so no attempt is counted and no credential made. It waits for such a runner at
-  most `noCapableRunnerMs`, then it is cancelled with `no_capable_runner`, as a Dynamic job is.
+  most `noCapableRunnerMs` (30 minutes) when no runner of the engine is working, and at most `noCapableRunnerAbsoluteMs` (3 hours) while one is busy
+  with another turn; then it is cancelled with `no_capable_runner`, as a Dynamic job is.
 - **Limits.** `maxAttempts` is 1 (`IMPLEMENTER_MAX_ATTEMPTS`): a lost lease or a released claim fails the turn (`lease_expired`, the
   released reason), it is never queued again, because a second run would meet the branch the first one pushed. The hard timeout is
   70 minutes (`implementerMaxRuntimeMs`, the Dispatcher's 60 plus 10), the other kinds keep 25.
