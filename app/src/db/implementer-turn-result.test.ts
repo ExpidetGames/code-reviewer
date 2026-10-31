@@ -4,23 +4,21 @@
 // A result without the block, or one that cannot be read, gives nothing, which `recordTurnResult` takes as "keep what is stored"
 // (the session still becomes idle).
 import { describe, expect, it } from "vitest";
-import type { JsonValue } from "../integrations/types.ts";
-import { turnResultOf } from "./turn-result.ts";
+import { turnResultOf } from "./implementer-turn-result.ts";
 
-const block = (overrides: Record<string, unknown> = {}): JsonValue =>
-  ({
-    ok: true,
-    implementer: {
-      baseCommit: "a".repeat(40),
-      headCommit: "b".repeat(40),
-      pushed: true,
-      commits: [],
-      filesChanged: [],
-      summary: "Added a health endpoint.",
-      opencode: { sessionId: "ses_1", version: "1.19.0" },
-      ...overrides,
-    },
-  }) as JsonValue;
+const block = (overrides: Record<string, unknown> = {}) => ({
+  ok: true,
+  implementer: {
+    baseCommit: "a".repeat(40),
+    headCommit: "b".repeat(40),
+    pushed: true,
+    commits: [],
+    filesChanged: [],
+    summary: "Added a health endpoint.",
+    opencode: { sessionId: "ses_1", version: "1.19.0" },
+    ...overrides,
+  },
+});
 
 const NOTHING = { headCommit: null, opencode: null, summary: null };
 
@@ -65,6 +63,6 @@ describe("the part of a result that belongs to the session", () => {
     ],
     ["an array", []],
   ] as const)("gives nothing for %s, and never throws", (_name, stored) => {
-    expect(turnResultOf(stored as JsonValue)).toEqual(NOTHING);
+    expect(turnResultOf(stored)).toEqual(NOTHING);
   });
 });

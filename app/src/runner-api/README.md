@@ -67,7 +67,7 @@ What happens to a block that is accepted:
   the commit subjects and the file paths. On the operator's key the model ids and the provider are taken out of the summary and the
   subjects too (`withoutManagedModel`); the paths are the repository's and stay.
 - The queue's `complete` (`runner-jobs-repository.ts`), in the transaction that ends the job, gives the session its result with
-  `recordTurnResult` (`implementer/turn-result.ts`): `head_commit` is the head the block says was **pushed** (never an unpushed one),
+  `recordTurnResult` (`db/implementer-turn-result.ts`): `head_commit` is the head the block says was **pushed** (never an unpushed one),
   plus the summary and the saved OpenCode session, and the session is `idle`. A failed turn keeps its block, so a turn that stopped
   at its cost limit after it pushed is a failed job with visible work. A failure without a block records nothing but the end (the
   session still becomes `idle`, its fields unchanged).

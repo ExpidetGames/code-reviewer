@@ -69,7 +69,7 @@ import { headNoticeKey } from "../refusal-notice-key.ts";
 import { claimOldestDueJob } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
-import { turnResultOf } from "../../implementer/turn-result.ts";
+import { turnResultOf } from "../implementer-turn-result.ts";
 import { createImplementerRepository } from "./implementer-repository.ts";
 import { idleSessionsOfEndedTurns } from "./implementer-sessions-sweep.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";

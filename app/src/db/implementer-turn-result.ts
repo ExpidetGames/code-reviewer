@@ -4,21 +4,18 @@
 // summary. Read from the result as it is stored, after the checks and the redaction, by the transaction that completes the job. A
 // result without the block, or one that cannot be read, gives nothing: `recordTurnResult` keeps what is stored for a `null` and
 // still sets the session idle. Never throws.
-import type { TurnResult } from "../db/repositories/implementer-repository.ts";
-import type { JsonValue } from "../integrations/types.ts";
+import type { TurnResult } from "./repositories/implementer-repository.ts";
 
 const NOTHING: TurnResult = { headCommit: null, opencode: null, summary: null };
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
-function recordOf(
-  value: JsonValue | undefined,
-): Record<string, JsonValue> | null {
+function recordOf(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value
+    ? (value as Record<string, unknown>)
     : null;
 }
 
-export function turnResultOf(result: JsonValue | null | undefined): TurnResult {
+export function turnResultOf(result: unknown): TurnResult {
   const block = recordOf(recordOf(result)?.implementer);
   if (block === null) return NOTHING;
   const head = block.headCommit;
