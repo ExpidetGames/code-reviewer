@@ -8,7 +8,9 @@ import { describe, expect, it } from "vitest";
 import type { JsonValue } from "../integrations/types.ts";
 import type { Job } from "../jobs/job-types.ts";
 import { getProductIdentity } from "../product-identity/current.ts";
+import { describeTurnErrorCode, errorCopy } from "./error-copy.ts";
 import {
+  cleanLog,
   githubBranchUrl,
   githubCommitUrl,
   toCustomerRunDetailView,
@@ -515,6 +517,7 @@ describe("the detail of an implementer run", () => {
         "head",
         "instruction",
         "pushedNote",
+        "reported",
         "summary",
       ].sort(),
     );
@@ -637,5 +640,291 @@ describe("the links of an implementer run", () => {
     expect(
       githubCommitUrl("https://github.com/acme/widgets", SHA_B.toUpperCase()),
     ).toBe(`https://github.com/acme/widgets/commit/${SHA_B.toUpperCase()}`);
+  });
+});
+
+// The review of #792: the cases a mutant of the implementer variant passed.
+const INVISIBLE = "\u200b\u200c\u200d\u200e\u200f\u061c\ufeff";
+const redactToken = (text: string) => text.replaceAll(GIT_TOKEN, "[redacted]");
+const detailOf = (
+  job: Job,
+  implementer: ImplementerDetailSource | null,
+  options: { redact?: (text: string) => string; managed?: boolean } = {},
+) =>
+  toRunDetailView(
+    PRODUCT,
+    job,
+    "acme/widgets",
+    NOW,
+    options.redact,
+    options.managed ?? false,
+    implementer,
+  );
+
+describe("whether a task reported its result", () => {
+  // #758-T02 (review of #792, 1)
+  it("tells a result without an implementer block from a block that is empty", () => {
+    const reportedEmpty = detailOf(
+      turn({
+        result: resultWith({
+          commits: [],
+          filesChanged: [],
+          summary: "",
+          headCommit: null,
+          pushed: false,
+        }),
+      }),
+      source(),
+    ).implementer;
+    const none = detailOf(
+      turn({ status: "failed", errorCode: "lease_lost", result: null }),
+      source(),
+    ).implementer;
+    const noBlock = detailOf(
+      turn({
+        status: "failed",
+        errorCode: "runner_error",
+        result: { ok: false, commentUrl: null, logTail: "" },
+      }),
+      source(),
+    ).implementer;
+    const garbage = detailOf(
+      turn({ result: { implementer: "nonsense" } }),
+      source(),
+    ).implementer;
+
+    expect(reportedEmpty?.reported).toBe(true);
+    expect(none?.reported).toBe(false);
+    expect(noBlock?.reported).toBe(false);
+    expect(garbage?.reported).toBe(false);
+  });
+});
+
+describe("the text of a task is stripped of invisible characters", () => {
+  // #758-T04 (review of #792, 5)
+  it("removes zero-width and direction marks from every field of the variant", () => {
+    const dirty = `a${INVISIBLE}b`;
+    const run = detailOf(
+      turn({
+        result: resultWith({
+          summary: `sum${INVISIBLE}mary`,
+          commits: [{ sha: SHA_B, subject: dirty }],
+          filesChanged: [{ path: `src/${dirty}.ts`, status: "added" }],
+        }),
+      }),
+      source({
+        branch: `feat/${dirty}`,
+        baseBranch: `base${INVISIBLE}`,
+        instruction: `do${INVISIBLE}it`,
+      }),
+    ).implementer;
+    const row = toRunRowView(PRODUCT, turn(), "acme/widgets", NOW, {
+      branch: `feat/${dirty}`,
+      repositoryUrl: "https://github.com/acme/widgets",
+    });
+
+    expect(run?.summary).toBe("summary");
+    expect(run?.commits.shown[0]?.subject).toBe("ab");
+    expect(run?.files.shown[0]?.path).toBe("src/ab.ts");
+    expect(run?.branch).toBe("feat/ab");
+    expect(run?.baseBranch).toBe("base");
+    expect(run?.instruction.preview).toBe("doit");
+    expect(row.implementer?.branch).toBe("feat/ab");
+  });
+
+  // #758-T09
+  it("leaves the cleaner of the logs and reviews as it was", () => {
+    expect(cleanLog(`a${INVISIBLE}b`)).toBe(`a${INVISIBLE}b`);
+  });
+});
+
+describe("the branch names of a task are text from outside", () => {
+  // #758-T04 (review of #792, 4, 7)
+  it("cleans, redacts and, on the operator's key, masks the branch and the base branch for display, and links the raw branch", () => {
+    const dirty = `x\u001b[31m${GIT_TOKEN}\u0000/anthropic-fix\u202e`;
+    const run = detailOf(turn(), source({ branch: dirty, baseBranch: dirty }), {
+      redact: redactToken,
+      managed: true,
+    }).implementer;
+
+    expect(run?.branch).toBe("x[redacted]/[provider]-fix");
+    expect(run?.baseBranch).toBe("x[redacted]/[provider]-fix");
+    expect(run?.pushedNote).toBeNull();
+    // The link is made from the raw name, encoded.
+    expect(run?.branchUrl).toContain("/tree/");
+  });
+
+  // #758-T04, mutant "branch not cleaned"
+  it("cleans the branch of a row and of a detail (control characters, escapes, bidi marks)", () => {
+    const dirty = "feat/\u001b[31mred\u0000\u202e";
+    const row = toRunRowView(PRODUCT, turn(), "acme/widgets", NOW, {
+      branch: dirty,
+      repositoryUrl: "https://github.com/acme/widgets",
+    });
+    const detail = detailOf(
+      turn(),
+      source({ branch: dirty, baseBranch: dirty }),
+    );
+
+    expect(row.implementer?.branch).toBe("feat/red");
+    expect(detail.implementer?.branch).toBe("feat/red");
+    expect(detail.implementer?.baseBranch).toBe("feat/red");
+  });
+
+  // #758-T04
+  it("redacts the branch of a row when the service hands the redaction in", () => {
+    const row = toRunRowView(
+      PRODUCT,
+      turn(),
+      "acme/widgets",
+      NOW,
+      {
+        branch: `b-${GIT_TOKEN}`,
+        repositoryUrl: "https://github.com/acme/widgets",
+      },
+      redactToken,
+    );
+
+    expect(row.implementer?.branch).toBe("b-[redacted]");
+  });
+
+  // #758-T04
+  it("names the displayed branch in the pushed-work sentence", () => {
+    const run = detailOf(
+      turn({
+        status: "failed",
+        errorCode: "time_limit_reached",
+        result: resultWith({}),
+      }),
+      source({ branch: `b-${GIT_TOKEN}` }),
+      { redact: redactToken },
+    ).implementer;
+
+    expect(run?.pushedNote).toBe("1 commit was pushed to b-[redacted].");
+  });
+});
+
+describe("secrets and providers in the text of a task", () => {
+  // #758-T04, mutant "no redaction on the instruction"
+  it("redacts known secrets from the instruction, the preview and the whole text", () => {
+    const instruction = `${"fix it. ".repeat(100)}use ${GIT_TOKEN}`;
+    const run = detailOf(turn(), source({ instruction }), {
+      redact: redactToken,
+    }).implementer;
+
+    expect(run?.instruction.full).not.toContain(GIT_TOKEN);
+    expect(run?.instruction.full).toContain("[redacted]");
+    const short = detailOf(
+      turn(),
+      source({ instruction: `use ${GIT_TOKEN}` }),
+      {
+        redact: redactToken,
+      },
+    ).implementer;
+    expect(short?.instruction.preview).toBe("use [redacted]");
+  });
+
+  // #758-T04, mutant "no managed-key provider mask"
+  it("names no provider in the summary, the subjects and the paths of a task on the operator's key, and keeps the names on the own key", () => {
+    const text = "Switched to Anthropic and openrouter";
+    const block = {
+      summary: text,
+      commits: [{ sha: SHA_B, subject: text }],
+      filesChanged: [{ path: "src/anthropic.ts", status: "added" }],
+    };
+
+    const managed = detailOf(turn({ result: resultWith(block) }), source(), {
+      managed: true,
+    }).implementer;
+    const own = detailOf(
+      turn({ result: resultWith(block) }),
+      source(),
+    ).implementer;
+
+    expect(JSON.stringify(managed)).not.toMatch(/anthropic|openrouter/i);
+    expect(managed?.summary).toBe("Switched to [provider] and [provider]");
+    expect(own?.summary).toBe(text);
+    expect(own?.files.shown[0]?.path).toBe("src/anthropic.ts");
+  });
+});
+
+describe("the sentences of a task are the ones that are shown", () => {
+  // #758-T03, mutant "task sentences never used"
+  it("uses the sentence for a task in the row and in the detail, not the one for a review", () => {
+    for (const code of [
+      "cost_limit_reached",
+      "time_limit_reached",
+      "branch_violation",
+      "push_rejected",
+      "dynamic_accounting_failed",
+    ]) {
+      const failed = turn({ status: "failed", errorCode: code });
+      const task = describeTurnErrorCode(PRODUCT, code).text;
+      const review = errorCopy(PRODUCT)[code];
+
+      expect(task, code).not.toBe(review);
+      expect(
+        toRunRowView(PRODUCT, failed, "acme/widgets", NOW).problem,
+        code,
+      ).toBe(task);
+      expect(detailOf(failed, source()).problem, code).toBe(task);
+    }
+  });
+
+  // #758-T03
+  it("does not take the stopped-early limit of a review for a task: one sentence for the limit of a task", () => {
+    const run = detailOf(
+      turn({
+        status: "failed",
+        errorCode: "cost_limit_reached",
+        result: resultWith(
+          {},
+          {
+            usage: {
+              model: "m",
+              totalTokens: 1,
+              aiCalls: 1,
+              costUsd: 0.1,
+              stoppedEarly: "project_cost_limit",
+            },
+          },
+        ),
+      }),
+      source(),
+    );
+
+    expect(run.problem).toBe(
+      describeTurnErrorCode(PRODUCT, "cost_limit_reached").text,
+    );
+  });
+});
+
+describe("the checkout reason is a Dynamic Review's", () => {
+  // #758-T09, mutant "errorReason shown for tasks"
+  it("shows no checkout reason for a failed task, and still shows it for a failed Dynamic Review", () => {
+    const result = {
+      ok: false,
+      commentUrl: null,
+      logTail: "",
+      errorReason: "ref_moved",
+    };
+
+    const task = detailOf(
+      turn({ status: "failed", errorCode: "runner_error", result }),
+      source(),
+    );
+    const dynamic = detailOf(
+      turn({
+        reviewKind: "dynamic",
+        prNumber: 7,
+        status: "failed",
+        errorCode: "checkout_incomplete",
+        result,
+      }),
+      null,
+    );
+
+    expect(task.errorReason).toBeNull();
+    expect(dynamic.errorReason).toMatchObject({ code: "ref_moved" });
   });
 });

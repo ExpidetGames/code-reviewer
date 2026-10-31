@@ -74,6 +74,7 @@ function task(
       url: `https://github.com/acme/widgets/commit/${SHA}`,
     },
     pushedNote: null,
+    reported: true,
     ...overrides,
   };
 }
@@ -365,6 +366,54 @@ describe("the detail page of an implementer run", () => {
     );
 
     expect(container.querySelector('[data-slot="run-detail"]')).not.toBeNull();
+  });
+
+  // #758-T02 (review of #792, 1)
+  it("says that the result was not reported, and points at the branch, instead of 'No commits were made' when the task has no block", () => {
+    const { container } = renderDetail(
+      detail({
+        status: "failed",
+        problem: "The worker no longer held this task.",
+        errorCode: "lease_lost",
+        implementer: task({
+          reported: false,
+          summary: null,
+          commits: { shown: [], more: 0 },
+          files: { count: 0, shown: [], more: 0 },
+          head: null,
+        }),
+      }),
+    );
+    const text = container.textContent;
+
+    expect(text).toContain("The result of this task was not reported");
+    expect(text).not.toContain("No commits were made.");
+    expect(text).not.toContain("No files changed.");
+    expect(text).not.toContain("The agent left no summary.");
+    const links = screen
+      .getAllByRole("link", { name: /implementer\/abc123/ })
+      .map((link) => link.getAttribute("href"));
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(links)).toEqual(
+      new Set(["https://github.com/acme/widgets/tree/implementer/abc123"]),
+    );
+  });
+
+  // #758-T02
+  it("still says 'No commits were made' when the agent reported a result with none", () => {
+    const { container } = renderDetail(
+      detail({
+        implementer: task({
+          summary: null,
+          commits: { shown: [], more: 0 },
+          files: { count: 0, shown: [], more: 0 },
+          head: null,
+        }),
+      }),
+    );
+
+    expect(container.textContent).toContain("No commits were made.");
+    expect(container.textContent).not.toContain("was not reported");
   });
 
   // #758-T09

@@ -184,6 +184,25 @@ function TaskResult({
   run: CustomerRunDetailView;
 }) {
   const settled = isSettled(run.status);
+  // A task that ended without the agent's report (a lost lease, a runner that died) may still have pushed work: an empty list
+  // would then say "none" where the truth is "not known". The branch is where to look.
+  if (settled && !task.reported)
+    return (
+      <Section title="Result not reported">
+        <p data-slot="run-not-reported" className="text-sm break-words">
+          The result of this task was not reported, so what the agent did is not
+          known here.
+          {task.branch === null ? null : (
+            <>
+              {" "}
+              Work it pushed is on the branch{" "}
+              <MaybeLink href={task.branchUrl}>{task.branch}</MaybeLink> on
+              GitHub.
+            </>
+          )}
+        </p>
+      </Section>
+    );
   return (
     <>
       <Section title="Summary of the agent">

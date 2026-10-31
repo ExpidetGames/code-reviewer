@@ -281,16 +281,24 @@ export const turnErrorCopy = (
   // The runner reports this code for every way the work could not be kept on its branch, among them a repository that could not
   // be committed or verified; whatever was pushed before the stop is still on the branch.
   branch_violation:
-    "The task was stopped because its work could not be kept safely on the branch it was given. Commits pushed before that stay on the branch and are listed below; nothing after that was saved.",
+    "The task was stopped because its work could not be kept safely on the branch it was given. Commits pushed before that stay on the branch; nothing after that was saved.",
   cost_limit_reached: `The task stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much. The limit is the one chosen for this task or the maximum cost per task set by ${product.name}, whichever is lower. Work pushed before the stop stays on the branch.`,
   // The same code serves the Diff Review, the Dynamic Review and a task. The usage could not be settled; the work may be done.
   dynamic_accounting_failed:
-    "The model usage of this task could not be accounted for, so the task was ended and its cost is not known. The work may be done and pushed: check the branch and the commits below.",
+    "The model usage of this task could not be accounted for, so the task was ended and its cost is not known. The work may be done and pushed: check the branch.",
   time_limit_reached:
-    "The task reached its time limit and was stopped. Work committed before then was pushed to the branch when possible; the commits that reached it are listed below, if any.",
+    "The task reached its time limit and was stopped. Work committed before then was pushed to the branch when possible, so check the branch for what reached it.",
   // GitHub refuses a push for the repository's rules and also answers a push it cannot take during an outage.
   push_rejected:
     "GitHub did not accept the push to the new branch: the repository refused it, or GitHub could not be reached. The work may not be saved there, so check the branch before you start the task again.",
+  // The table above says "Reviews" for a workspace that is paused or has used up its plan; a task is not a review.
+  workspace_suspended:
+    "Tasks are paused for this workspace, so this task did not start and no AI model was used. Ask whoever manages this workspace's plan.",
+  quota_exhausted:
+    "This workspace has used up what its plan allows for the current period, so this task did not start and no AI model was used. Tasks start again when the period renews or the limit is raised.",
+  // The code also covers an engine that stopped after the model was called, and then there is no summary.
+  agent_gave_up:
+    "The agent stopped without a result it could stand behind, or its engine stopped before it could report one. Read its summary, if there is one, then try again with a clearer or smaller task.",
   // The table above promises a new run on the next push or review request; a task is never run again by itself.
   no_capable_runner:
     "No worker that can run tasks picked up this task within the time limit, so it was cancelled. Start it again later.",

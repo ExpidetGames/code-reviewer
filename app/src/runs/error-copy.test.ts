@@ -391,7 +391,10 @@ describe("the sentences for the codes of a task", () => {
   it("promises no pull request, no review and no run on the next push", () => {
     for (const code of TURN_CODES) {
       const { text } = describeTurnErrorCode(PRODUCT, code);
-      expect(text, code).not.toMatch(/pull request|next push|review request/i);
+      // "Reviews" included: a task is not a review (review of #792).
+      expect(text.replaceAll(PRODUCT.name, ""), code).not.toMatch(
+        /pull request|next push|\breviews?\b/i,
+      );
     }
   });
 
@@ -462,6 +465,40 @@ describe("the sentences for the codes of a task", () => {
     expect(text).toMatch(/could not be reached|unavailable|outage/);
   });
 
+  // #758-T03 (review of #792, 3): the list row shows the sentence without the page's lists.
+  it("points at no list in the sentences of the pushed work: they are shown in the list row as well", () => {
+    for (const code of [
+      "branch_violation",
+      "time_limit_reached",
+      "dynamic_accounting_failed",
+      "cost_limit_reached",
+      "lease_lost",
+    ]) {
+      expect(describeTurnErrorCode(PRODUCT, code).text, code).not.toMatch(
+        /\b(below|above|listed)\b/i,
+      );
+    }
+  });
+
+  // #758-T10 (review of #792, 2)
+  it("words the pause and the used-up plan for a task", () => {
+    expect(describeTurnErrorCode(PRODUCT, "workspace_suspended").text).toMatch(
+      /^Tasks are paused for this workspace/,
+    );
+    const quota = describeTurnErrorCode(PRODUCT, "quota_exhausted").text;
+    expect(quota).toMatch(/Tasks start again when the period renews/);
+    expect(quota).not.toMatch(/Reviews/);
+  });
+
+  // #758-T10 (review of #792, 6)
+  it("says for agent_gave_up that the engine may have stopped, and that a summary may not exist", () => {
+    const { text } = describeTurnErrorCode(PRODUCT, "agent_gave_up");
+
+    expect(text).toMatch(/engine/);
+    expect(text).toMatch(/summary, if there is one|if there is a summary/);
+    expect(ERROR_COPY["agent_gave_up"]).toContain("Read its summary, then");
+  });
+
   // #758-T09
   it("changes no sentence of the table of the other kinds", () => {
     for (const code of [
@@ -471,6 +508,9 @@ describe("the sentences for the codes of a task", () => {
       "time_limit_reached",
       "push_rejected",
       "no_capable_runner",
+      "workspace_suspended",
+      "quota_exhausted",
+      "agent_gave_up",
     ]) {
       expect(describeErrorCode(PRODUCT, code).text).toBe(ERROR_COPY[code]);
     }

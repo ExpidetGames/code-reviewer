@@ -106,6 +106,11 @@ export type ImplementerDetailView = ImplementerRowView & {
   head: { shortSha: string; url: string | null } | null;
   /** For a task that did not succeed but pushed work: "N commits were pushed to <branch>."; null otherwise. */
   pushedNote: string | null;
+  /**
+   * The result carried the agent's report (commits, files, summary). False for a task that ended without one (a lost lease, a
+   * runner that died): then an empty list means "not known", not "none", and the page sends the reader to the branch.
+   */
+  reported: boolean;
 };
 
 /** What the repository knows of the turn of a job, for the row (`runs-repository.ts`). */
@@ -242,9 +247,19 @@ export function cleanLog(raw: string): string {
     .replace(UNSAFE_CHARACTERS, "");
 }
 
-/** One line: the cleaner of the log, then every run of white space (also line breaks) as one space. For a subject or a path. */
-function cleanLine(raw: string): string {
-  return cleanLog(raw).replace(/\s+/g, " ").trim();
+// Characters with no width or only a direction: zero-width space, joiners and marks (U+200B-U+200F), the Arabic letter mark,
+// word joiners and invisible operators (U+2060-U+2064), the Mongolian vowel separator and the byte order mark. `cleanLog` keeps
+// them (a review or a log may use them); the text of a task is shown beside names and links, where they would hide a difference.
+const INVISIBLE_CHARACTERS = /[\u200b-\u200f\u061c\u2060-\u2064\u180e\ufeff]/g;
+
+/** `cleanLog` and, for the text of a task, without the invisible characters. */
+function cleanTaskText(raw: string): string {
+  return cleanLog(raw).replace(INVISIBLE_CHARACTERS, "");
+}
+
+/** One line of the text of a task: `cleanTaskText`, then every run of white space as one space. */
+function cleanTaskLine(raw: string): string {
+  return cleanTaskText(raw).replace(/\s+/g, " ").trim();
 }
 
 /** The first `max` UTF-16 units of `text`: bounds the work of the cleaners on a text of any size. */
@@ -311,6 +326,8 @@ const MAX_SUBJECT_CHARS = 500;
 const MAX_PATH_CHARS = 300;
 
 type StoredImplementerResult = {
+  /** The result carries an `implementer` block at all: a result without one says nothing of the work, and is not "no work". */
+  reported: boolean;
   headCommit: string | null;
   pushed: boolean;
   commits: { sha: string; subject: string }[];
@@ -319,6 +336,7 @@ type StoredImplementerResult = {
 };
 
 const EMPTY_IMPLEMENTER_RESULT: StoredImplementerResult = {
+  reported: false,
   headCommit: null,
   pushed: false,
   commits: [],
@@ -373,6 +391,7 @@ function readStoredImplementer(
         });
     }
   return {
+    reported: true,
     headCommit:
       typeof block.headCommit === "string" && COMMIT_SHA.test(block.headCommit)
         ? block.headCommit
@@ -384,13 +403,17 @@ function readStoredImplementer(
   };
 }
 
+/**
+ * The branch of a task. The name is a text from the person who started it: for display it is cleaned and given to `display`
+ * (redaction, and on the operator's key the provider mask); the link is made from the raw name, encoded.
+ */
 function implementerRowView(
   source: ImplementerRowSource | null,
+  display: (text: string) => string,
 ): ImplementerRowView {
   if (source === null) return { branch: null, branchUrl: null };
   return {
-    // The branch name is a text from the person who started the task: cleaned like any text from outside.
-    branch: cleanLine(head(source.branch, 1000)),
+    branch: display(cleanTaskLine(head(source.branch, 1000))),
     branchUrl: githubBranchUrl(source.repositoryUrl, source.branch),
   };
 }
@@ -411,21 +434,25 @@ function implementerDetailView(
   onManagedKey: boolean,
 ): ImplementerDetailView {
   const stored = readStoredImplementer(job.result);
-  const row = implementerRowView(source);
+  // Text on the operator's key never names a provider (like the log and the review comment).
+  const display = (cleaned: string): string => {
+    const redacted = redact(cleaned);
+    return onManagedKey ? maskProvidersInText(redacted) : redacted;
+  };
+  const row = implementerRowView(source, display);
   const repositoryUrl = source?.repositoryUrl ?? "";
-  // Text of the agent on the operator's key never names a provider (like the log and the review comment).
-  const agentText = (text: string, max: number, line: boolean): string => {
-    const cleaned = redact(line ? cleanLine(text) : cleanLog(text));
-    return cutCharacters(
-      onManagedKey ? maskProvidersInText(cleaned) : cleaned,
+  const agentText = (text: string, max: number, line: boolean): string =>
+    cutCharacters(
+      display(line ? cleanTaskLine(text) : cleanTaskText(text)),
       max,
     );
-  };
   const instruction =
     source === null
       ? ""
       : cutCharacters(
-          redact(cleanLog(head(source.instruction, MAX_INSTRUCTION_CHARS * 4))),
+          redact(
+            cleanTaskText(head(source.instruction, MAX_INSTRUCTION_CHARS * 4)),
+          ),
           MAX_INSTRUCTION_CHARS,
         );
   const commits = stored.commits.map((commit): ImplementerCommitView => ({
@@ -456,8 +483,11 @@ function implementerDetailView(
     stored.pushed && (commits.length > 0 || pushedHead !== null);
   return {
     ...row,
+    reported: stored.reported,
     baseBranch:
-      source === null ? null : cleanLine(head(source.baseBranch, 1000)),
+      source === null
+        ? null
+        : display(cleanTaskLine(head(source.baseBranch, 1000))),
     instruction: {
       preview: cutCharacters(instruction, INSTRUCTION_PREVIEW_CHARS),
       full:
@@ -646,6 +676,8 @@ export function toRunRowView(
   now: Date,
   /** What the repository knows of the turn of a run of the Implementer (#758); ignored for every other kind. */
   implementer: ImplementerRowSource | null = null,
+  /** Takes known secrets out of the branch of a task before it is shown. */
+  redact: (text: string) => string = (text) => text,
 ): RunRowView {
   const startedAt = job.claimedAt;
   return {
@@ -670,7 +702,7 @@ export function toRunRowView(
     problem: problemOf(product, job),
     // Only a task has the key: the rows of every other kind are what they were.
     ...(job.reviewKind === "implementer"
-      ? { implementer: implementerRowView(implementer) }
+      ? { implementer: implementerRowView(implementer, redact) }
       : {}),
   };
 }

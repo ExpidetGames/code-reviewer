@@ -100,6 +100,7 @@ export function createRunsService(deps: {
               project,
               answeredAt,
               implementer ?? null,
+              deps.redact,
             ),
             prices,
           ),
