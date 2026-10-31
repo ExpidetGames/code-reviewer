@@ -16,7 +16,6 @@ import {
   runAfterResponse,
   stopEndedClaims,
 } from "../dispatch/shared.ts";
-import { getCapabilities } from "../capabilities/shared.ts";
 import { getWriteTokens } from "../runner-api/claimed-keys-shared.ts";
 import { deliverBalanceMails, recordWallClocks } from "../billing/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";

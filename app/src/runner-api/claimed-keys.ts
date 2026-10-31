@@ -30,8 +30,11 @@
 // one that could not be switched off stays, and is tried again (`write-token.ts`) until then. An app instance of the previous
 // release ignores the field.
 //
-// The value is never logged and never leaves this module except as the lists `keysOf`, `modelsOf` and `takeGitTokens`
-// return to the code that masks a result or ends a token. A row that cannot be read (another `APP_SECRET`, a changed row) is skipped: masking is best
+// Every change reads the row under `FOR UPDATE` and writes it back in the same transaction (#790), so two app instances
+// changing it at once take turns and neither drops the other's key, model, flag or token.
+//
+// The value is never logged and never leaves this module except as the lists `keysOf`, `modelsOf` and `gitTokensOf` return
+// to the code that masks a result or ends a token. A row that cannot be read (another `APP_SECRET`, a changed row) is skipped: masking is best
 // effort, and the shape of a credential is still masked (`redact.ts`).
 import type { Kysely } from "kysely";
 import { decryptSecret, encryptSecret } from "../crypto/secret-box.ts";
