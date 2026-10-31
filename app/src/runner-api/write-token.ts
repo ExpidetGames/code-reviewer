@@ -192,3 +192,27 @@ export function createWriteTokens(deps: {
     },
   };
 }
+
+/**
+ * What the queue's hook for ended claims does about write tokens (#790): after the response, switches off the tokens of the
+ * turns of the Implementer among the jobs whose claim ended, however it ended (a result, the reaper, a stop, the hard timeout).
+ * Nothing happens in a deployment without the capability, and nothing here throws or delays the response.
+ */
+export function endedClaimsReaction(deps: {
+  /** Whether this deployment has the Implementer. */
+  allowed: () => boolean;
+  /** Runs the work after the response (`runAfterResponse` on the server). */
+  schedule: (work: () => Promise<void>) => void;
+  tokens: () => Pick<WriteTokens, "revokeEnded">;
+  logger: RunnerApiLogger;
+}): (jobIds: readonly string[]) => void {
+  return (jobIds) => {
+    if (jobIds.length === 0) return;
+    try {
+      if (!deps.allowed()) return;
+      deps.schedule(() => deps.tokens().revokeEnded(jobIds));
+    } catch {
+      deps.logger.error("[runner-api] WRITE_TOKEN_REVOKE_FAILED");
+    }
+  };
+}

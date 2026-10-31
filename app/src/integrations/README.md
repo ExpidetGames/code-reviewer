@@ -251,7 +251,8 @@ How the interface is met:
   (`capabilities`, asked on every call, closed when absent) and a deployment without `implementer` is refused with
   `INTEGRATION_CAPABILITY_ABSENT` before any request, whatever the App was set to by hand; the manifest is a second wall.
   `revokeImplementerAccess(integration, token)` switches a token off (`DELETE /installation/token`); it is best effort,
-  never rejects and is not behind the capability, because a cleanup is never refused.
+  never rejects and is not behind the capability, because a cleanup is never refused. It answers whether the token is off
+  (`true`: switched off, or GitHub says it is not valid any more; `false`: unknown, so the caller keeps the token and tries again).
   `installationPermissions` reads `GET /app/installations/:id` (the permissions the installation holds, not the
   App) and answers `{ contentsWrite }` without minting a token, so a page can say "write access not granted"
   before a task is accepted.

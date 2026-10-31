@@ -17,6 +17,7 @@ import {
   stopEndedClaims,
 } from "../dispatch/shared.ts";
 import { getWriteTokens } from "../runner-api/claimed-keys-shared.ts";
+import { endedClaimsReaction } from "../runner-api/write-token.ts";
 import { deliverBalanceMails, recordWallClocks } from "../billing/shared.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { configuredNoCapableRunnerMs } from "../db/job-limits.ts";
@@ -65,19 +66,13 @@ export function getRunnerQueue(): RunnerQueue {
   return notifyingRunnerQueue(createRunnerQueueOfTheServer(), checkNotifier);
 }
 
-/**
- * #790: after the response, switches off the write tokens of the turns of the Implementer among the jobs whose claim ended. Nothing
- * happens in a deployment without the capability. Never throws.
- */
-function revokeTokensOfEndedClaims(jobIds: readonly string[]): void {
-  if (jobIds.length === 0) return;
-  try {
-    if (!getCapabilities().has("implementer")) return;
-    runAfterResponse(() => getWriteTokens().revokeEnded(jobIds));
-  } catch {
-    console.error("[runner-api] WRITE_TOKEN_REVOKE_FAILED");
-  }
-}
+/** #790: the write tokens of the turns of the Implementer among the jobs whose claim ended. */
+const revokeTokensOfEndedClaims = endedClaimsReaction({
+  allowed: () => getCapabilities().has("implementer"),
+  schedule: runAfterResponse,
+  tokens: getWriteTokens,
+  logger: console,
+});
 
 function createRunnerQueueOfTheServer(): RunnerQueue {
   const checkOfRefusal = notifyingRunnerQueue.onRefused(checkNotifier);
